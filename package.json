@@ -1,0 +1,22 @@
+{
+  "name": "recycle-erp",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream run dev",
+    "dev:backend": "pnpm --filter recycle-erp-backend dev",
+    "dev:frontend": "pnpm --filter recycle-erp-frontend dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "db:migrate": "pnpm --filter recycle-erp-backend db:migrate",
+    "db:seed": "pnpm --filter recycle-erp-backend db:seed",
+    "db:reset": "pnpm --filter recycle-erp-backend db:reset"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,362 @@
+/* Recycle Servers — design tokens + shared primitives lifted from the
+   prototype. The phone screens depend on these CSS variables and the small
+   set of utility classes (chip, avatar, input, seg, btn, etc). */
+
+:root {
+  /* Surfaces */
+  --bg: oklch(0.99 0.003 100);
+  --bg-soft: oklch(0.975 0.004 100);
+  --bg-elev: #ffffff;
+  --border: oklch(0.92 0.005 240);
+  --border-strong: oklch(0.86 0.006 240);
+
+  /* Text */
+  --fg: oklch(0.22 0.012 250);
+  --fg-muted: oklch(0.48 0.012 250);
+  --fg-subtle: oklch(0.62 0.012 250);
+
+  /* Accent (profit teal-green) */
+  --accent: oklch(0.62 0.13 165);
+  --accent-soft: oklch(0.95 0.04 165);
+  --accent-strong: oklch(0.52 0.14 165);
+  --accent-fg: #ffffff;
+
+  /* Status */
+  --pos: oklch(0.62 0.13 165);
+  --pos-soft: oklch(0.96 0.035 165);
+  --neg: oklch(0.62 0.16 22);
+  --neg-soft: oklch(0.96 0.04 22);
+  --warn: oklch(0.78 0.13 75);
+  --warn-soft: oklch(0.97 0.05 85);
+  --info: oklch(0.62 0.13 250);
+  --info-soft: oklch(0.96 0.035 250);
+
+  /* Sizing */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  --font-base: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: var(--font-base);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
+/* Phone shell locks overflow; desktop scrolls naturally. */
+body.phone-mode, body.phone-mode #root, body.phone-mode html { overflow: hidden; height: 100%; }
+
+button { font-family: inherit; cursor: pointer; }
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum'; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 13px; font-weight: 500;
+  transition: background 0.12s, border-color 0.12s, transform 0.05s;
+}
+.btn:hover { background: var(--bg-soft); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--fg); color: white; border-color: var(--fg); }
+.btn.accent  { background: var(--accent); color: white; border-color: var(--accent); }
+.btn.ghost   { background: transparent; border-color: transparent; }
+.btn.sm { padding: 5px 10px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== Forms ===== */
+.input, .select, .textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.input:focus, .select:focus, .textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.input.ai-filled, .select.ai-filled {
+  background: color-mix(in oklch, var(--accent-soft) 30%, white);
+  border-color: var(--accent);
+}
+.input.mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+
+/* ===== Segmented control ===== */
+.seg {
+  display: inline-flex;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg button {
+  border: none;
+  background: transparent;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px; font-weight: 500;
+  color: var(--fg-muted);
+}
+.seg button.active { background: var(--bg-elev); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+
+/* ===== Chips / pills ===== */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.chip.pos    { background: var(--pos-soft);    color: var(--accent-strong);     border-color: transparent; }
+.chip.neg    { background: var(--neg-soft);    color: var(--neg);               border-color: transparent; }
+.chip.warn   { background: var(--warn-soft);   color: oklch(0.45 0.13 75);      border-color: transparent; }
+.chip.info   { background: var(--info-soft);   color: oklch(0.45 0.13 250);     border-color: transparent; }
+.chip.muted  { background: var(--bg-soft);     color: var(--fg-muted);          border-color: var(--border); }
+.chip.accent { background: var(--accent-soft); color: var(--accent-strong);     border-color: transparent; }
+.chip.dot::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; display: inline-block;
+}
+
+/* ===== Avatars ===== */
+.avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+  flex-shrink: 0;
+}
+.avatar.lg { width: 40px; height: 40px; font-size: 14px; }
+.avatar.xl { width: 64px; height: 64px; font-size: 22px; }
+
+/* ===== Brand mark ===== */
+.brand-mark {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: url('/recycle-servers-icon.png') center / contain no-repeat;
+  display: grid; place-items: center;
+  /* Hide the "RS" text fallback so the icon shows alone. Inline width/height
+     overrides on individual usages still scale the box; the background scales
+     with it because of `contain`. */
+  font-size: 0;
+  color: transparent;
+  letter-spacing: 0;
+}
+
+/* ===== Leaderboard rank ===== */
+.lb-rank {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--bg-soft); color: var(--fg-muted);
+  font-size: 12px; font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+.lb-rank.gold   { background: oklch(0.92 0.10 90);  color: oklch(0.30 0.10 80); }
+.lb-rank.silver { background: oklch(0.93 0.01 250); color: oklch(0.40 0.01 250); }
+.lb-rank.bronze { background: oklch(0.90 0.07 50);  color: oklch(0.35 0.10 50); }
+
+/* ===== AI banner / scan animations ===== */
+.ai-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--accent-strong);
+}
+.ai-banner .pill-ai {
+  font-weight: 600; padding: 2px 7px; background: var(--accent); color: white;
+  border-radius: 5px; font-size: 10.5px; letter-spacing: 0.04em;
+}
+.ai-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.8); }
+  50%      { opacity: 1;   transform: scale(1.1); }
+}
+.scan-line {
+  position: absolute; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: scan 1.6s ease-in-out infinite;
+}
+@keyframes scan {
+  0%   { top: 0%;   opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* ===== Camera viewfinder + RAM stick illustration ===== */
+.cam-viewfinder {
+  background:
+    repeating-linear-gradient(45deg, oklch(0.22 0.01 250) 0 8px, oklch(0.20 0.01 250) 8px 16px);
+}
+.cam-corners {
+  border: 1.5px dashed rgba(255,255,255,0.5);
+  border-radius: 8px;
+}
+.ram-stick {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%) rotate(-3deg);
+  width: 78%; height: 32%;
+  background: linear-gradient(180deg, oklch(0.32 0.02 145), oklch(0.26 0.02 145));
+  border-radius: 6px;
+  border: 1px solid oklch(0.2 0.01 145);
+  display: flex; flex-direction: column;
+  padding: 8px 10px; gap: 4px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+}
+.ram-label {
+  background: oklch(0.95 0.01 100);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: oklch(0.25 0.01 250);
+  line-height: 1.3;
+  flex: 1;
+  display: flex; flex-direction: column; gap: 2px;
+  overflow: hidden;
+}
+.ram-pins {
+  height: 8px;
+  background: repeating-linear-gradient(90deg, oklch(0.78 0.04 80) 0 3px, oklch(0.55 0.04 80) 3px 5px);
+  border-radius: 0 0 4px 4px;
+  margin: 0 -4px -4px;
+}
+
+/* ===== Generic SVG icon sizing ===== */
+.icon { display: inline-block; vertical-align: -2px; flex-shrink: 0; }
+
+/* ===== Button size + shape variants ===== */
+.btn.lg { padding: 11px 18px; font-size: 14px; }
+.btn.icon { padding: 7px; }
+
+/* ===== Avatar sizes (md/sm used in tables and modal headers) ===== */
+.avatar.md { width: 32px; height: 32px; font-size: 12px; }
+.avatar.sm { width: 22px; height: 22px; font-size: 10px; }
+
+/* ===== Form field wrapper ===== */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field .label,
+.label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.label .req { color: var(--neg); }
+.help { font-size: 11.5px; color: var(--fg-subtle); }
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+.field-hint { font-size: 11.5px; color: var(--fg-subtle); }
+
+/* ===== Toggle switch ===== */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--border-strong, oklch(0.85 0.005 260));
+  border-radius: 999px;
+  transition: background 0.16s;
+}
+.toggle-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+  transition: transform 0.16s;
+}
+.toggle input:checked + .toggle-track { background: var(--accent); }
+.toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(14px); }
+.toggle input:disabled + .toggle-track { opacity: 0.45; cursor: not-allowed; }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  font-size: 13.5px;
+}
+
+/* ===== Permission lock chip ===== */
+.lock {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+/* ===== Photo placeholder (dashed tile) ===== */
+.photo-ph {
+  width: 100%; aspect-ratio: 4/3;
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(135deg,
+      var(--bg-soft) 0 8px,
+      oklch(0.96 0.005 100) 8px 16px);
+  border: 1px dashed var(--border-strong);
+  display: grid; place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+/* ===== Trend chart sizing ===== */
+.trend-svg { width: 100%; height: 220px; display: block; }
+
+/* ===== Mobile preview wrapper (camera in larger containers) ===== */
+.mobile-preview { width: 100%; max-width: 380px; margin: 0 auto; }
+
+/* ===== Drawer entrance animation (used by HistoryDrawer etc.) ===== */
+@keyframes drawer-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}

@@ -1,0 +1,276 @@
+import { useEffect, useState } from 'react';
+import { Icon } from './components/Icon';
+import { PhTabBar, type View } from './components/PhTabBar';
+import { PhCategorySheet } from './components/PhCategorySheet';
+import { PhLanguageSheet } from './components/PhLanguageSheet';
+import { PhNotificationsSheet } from './components/PhNotificationsSheet';
+
+import { Login } from './pages/Login';
+import { Dashboard } from './pages/Dashboard';
+import { Camera } from './pages/Camera';
+import { SubmitForm } from './pages/SubmitForm';
+import { OrderReview } from './pages/OrderReview';
+import { Orders } from './pages/Orders';
+import { Market } from './pages/Market';
+import { Inventory } from './pages/Inventory';
+import { Profile } from './pages/Profile';
+
+import { useAuth } from './lib/auth';
+import { useT, I18N } from './lib/i18n';
+import { api } from './lib/api';
+import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
+
+type CaptureState =
+  | { phase: 'idle' }
+  | { phase: 'category' }
+  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null }
+  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null }
+  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null };
+
+type Toast = { msg: string; kind: 'success' | 'error' };
+
+function Shell() {
+  const { user, loading, logout } = useAuth();
+  const { t } = useT();
+  const [view, setView] = useState<View>('dashboard');
+  // Lock body overflow on mobile so the phone shell behaves like a native screen.
+  useEffect(() => {
+    document.body.classList.add('phone-mode');
+    document.body.classList.remove('desktop');
+    return () => { document.body.classList.remove('phone-mode'); };
+  }, []);
+  const [capture, setCapture] = useState<CaptureState>({ phase: 'idle' });
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [langSheet, setLangSheet] = useState(false);
+  const [notifSheet, setNotifSheet] = useState(false);
+  const [notifs, setNotifs] = useState<Notification[]>([]);
+
+  // Load notifications when the user is signed in.
+  useEffect(() => {
+    if (!user) return;
+    api.get<{ items: Notification[] }>('/api/notifications')
+      .then(r => setNotifs(r.items))
+      .catch(console.error);
+  }, [user?.id]);
+
+  const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
+    setToast({ msg, kind });
+    setTimeout(() => setToast(null), 2600);
+  };
+
+  // ── Capture flow handlers ────────────────────────────────────────────────
+  const startSubmit = () => setCapture({ phase: 'category' });
+  const cancelCapture = () => setCapture({ phase: 'idle' });
+
+  const pickCategory = (cat: Category) => {
+    if (cat === 'RAM') {
+      setCapture({ phase: 'camera', category: cat, detected: null, lines: [] });
+    } else {
+      setCapture({ phase: 'form', category: cat, detected: null, lines: [] });
+    }
+  };
+
+  const onDetected = (s: ScanResponse) => {
+    setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);
+  };
+
+  const onSaveLine = (line: DraftLine) => {
+    setCapture(c => {
+      if (c.phase !== 'form') return c;
+      return {
+        phase: 'review',
+        category: c.category,
+        detected: null,
+        lines: [...c.lines, line],
+        editingId: c.editingId,
+      };
+    });
+  };
+
+  const addAnotherItem = () => {
+    setCapture(c => {
+      if (c.phase !== 'review') return c;
+      return c.category === 'RAM'
+        ? { ...c, phase: 'camera', detected: null }
+        : { ...c, phase: 'form', detected: null };
+    });
+  };
+
+  const removeLine = (idx: number) => {
+    setCapture(c => c.phase === 'review' ? { ...c, lines: c.lines.filter((_, i) => i !== idx) } : c);
+  };
+
+  const updateLine = (idx: number, patch: Partial<DraftLine>) => {
+    setCapture(c => c.phase === 'review' ? { ...c, lines: c.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) } : c);
+  };
+
+  const submitOrder = async (meta: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => {
+    if (capture.phase !== 'review') return;
+    try {
+      await api.post('/api/orders', {
+        category: capture.category,
+        warehouseId: meta.warehouseId,
+        payment: meta.payment,
+        notes: meta.notes,
+        totalCost: meta.totalCost,
+        lines: capture.lines.map(l => ({
+          category: l.category,
+          brand: l.brand,
+          capacity: l.capacity,
+          type: l.type,
+          classification: l.classification,
+          rank: l.rank,
+          speed: l.speed,
+          interface: l.interface,
+          formFactor: l.formFactor,
+          description: l.description,
+          partNumber: l.partNumber,
+          condition: l.condition ?? 'Pulled — Tested',
+          qty: l.qty,
+          unitCost: l.unitCost,
+          sellPrice: l.sellPrice ?? null,
+          scanImageId: l.scanImageId ?? null,
+          scanConfidence: l.scanConfidence ?? null,
+        })),
+      });
+      setCapture({ phase: 'idle' });
+      setView('history');
+      showToast(t('orderSubmitted'));
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
+    }
+  };
+
+  const startEdit = (o: Order) => {
+    setCapture({
+      phase: 'review',
+      category: o.category,
+      detected: null,
+      editingId: o.id,
+      lines: o.lines.map(l => ({
+        id: l.id,
+        category: l.category,
+        brand: l.brand,
+        capacity: l.capacity,
+        type: l.type,
+        classification: l.classification,
+        rank: l.rank,
+        speed: l.speed,
+        interface: l.interface,
+        formFactor: l.formFactor,
+        description: l.description,
+        partNumber: l.partNumber,
+        condition: l.condition,
+        qty: l.qty,
+        unitCost: l.unitCost,
+        sellPrice: l.sellPrice ?? null,
+        scanImageId: l.scanImageId,
+        scanConfidence: l.scanConfidence,
+        label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`.trim()
+              : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
+              : (l.description ?? 'Item'),
+      })),
+    });
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  if (loading) {
+    return <div className="phone-app" style={{ display: 'grid', placeItems: 'center', color: 'var(--fg-subtle)' }}>Loading…</div>;
+  }
+
+  if (!user) return <Login />;
+
+  // Full-screen camera/form/review intercept the normal tab UI
+  if (capture.phase === 'camera') {
+    return (
+      <Camera
+        category={capture.category}
+        onDetected={onDetected}
+        onClose={cancelCapture}
+      />
+    );
+  }
+  if (capture.phase === 'form') {
+    return (
+      <SubmitForm
+        category={capture.category}
+        detected={capture.detected}
+        lineCount={capture.lines.length}
+        onSaveLine={onSaveLine}
+        onCancel={cancelCapture}
+        onRescan={() => setCapture(c => c.phase === 'form' ? { ...c, phase: 'camera', detected: null } : c)}
+      />
+    );
+  }
+  if (capture.phase === 'review') {
+    return (
+      <OrderReview
+        category={capture.category}
+        lines={capture.lines}
+        editingId={capture.editingId}
+        onAddItem={addAnotherItem}
+        onRemoveLine={removeLine}
+        onUpdateLine={updateLine}
+        onSubmit={submitOrder}
+        onCancel={cancelCapture}
+      />
+    );
+  }
+
+  const unreadCount = notifs.filter(n => n.unread).length;
+
+  return (
+    <div className="phone-app">
+      {view === 'dashboard' && (
+        <Dashboard
+          goSubmit={startSubmit}
+          goHistory={() => setView('history')}
+          onOpenNotifications={() => setNotifSheet(true)}
+          unreadCount={unreadCount}
+        />
+      )}
+      {view === 'history' && <Orders onEdit={startEdit} />}
+      {view === 'market' && <Market />}
+      {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
+      {view === 'me' && <Profile onOpenLanguage={() => setLangSheet(true)} />}
+
+      {capture.phase === 'category' && (
+        <PhCategorySheet onPick={pickCategory} onClose={cancelCapture} />
+      )}
+
+      {notifSheet && (
+        <PhNotificationsSheet
+          items={notifs}
+          onClose={() => setNotifSheet(false)}
+          onMarkAllRead={async () => {
+            setNotifs(ns => ns.map(n => ({ ...n, unread: false })));
+            try { await api.post('/api/notifications/mark-read', {}); } catch {}
+          }}
+        />
+      )}
+
+      {langSheet && (
+        <PhLanguageSheet onClose={(picked) => {
+          setLangSheet(false);
+          if (picked) showToast(I18N[picked].saved);
+        }} />
+      )}
+
+      <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={user.role} />
+
+      {toast && (
+        <div className="ph-toast-wrap" style={{ position: 'absolute', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
+          <div className={'ph-toast ' + (toast.kind || '')}>
+            <Icon name="check2" size={14} /><span>{toast.msg}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// MobileApp is mounted by App.tsx when the viewport is phone-sized.
+// LangProvider is set up at the top of App.tsx so both shells share state.
+export function MobileApp() {
+  return <Shell />;
+}

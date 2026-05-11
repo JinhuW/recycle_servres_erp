@@ -1,0 +1,5 @@
+DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp
+JWT_SECRET=dev-secret-change-me-please
+STUB_OCR=true
+CF_ACCOUNT_ID=
+CF_IMAGES_TOKEN=

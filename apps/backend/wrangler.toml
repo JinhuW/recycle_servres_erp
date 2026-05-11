@@ -1,0 +1,31 @@
+name = "recycle-erp-backend"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# In production, replace direct DATABASE_URL with a Hyperdrive binding:
+#
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<hyperdrive-id-from-dashboard>"
+#
+# The Worker prefers env.HYPERDRIVE.connectionString when present.
+
+# Workers AI binding for label OCR. Set STUB_OCR=false in vars to use it.
+# [ai]
+# binding = "AI"
+
+[vars]
+STUB_OCR = "true"
+JWT_ISSUER = "recycle-erp"
+
+# Secrets (set via `wrangler secret put`):
+#   - JWT_SECRET
+#   - DATABASE_URL          (only if not using Hyperdrive)
+#   - CF_ACCOUNT_ID
+#   - CF_IMAGES_TOKEN
+#
+# For local dev, copy .dev.vars.example to .dev.vars and fill it in.
+
+[observability]
+enabled = true

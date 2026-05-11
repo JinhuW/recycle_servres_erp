@@ -1,0 +1,27 @@
+{
+  "name": "recycle-erp-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "db:migrate": "node ./scripts/migrate.mjs",
+    "db:seed": "node ./scripts/seed.mjs",
+    "db:reset": "node ./scripts/migrate.mjs --reset && node ./scripts/seed.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@recycle-erp/shared": "workspace:*",
+    "hono": "^4.6.14",
+    "postgres": "^3.4.5",
+    "bcryptjs": "^2.4.3",
+    "@tsndr/cloudflare-worker-jwt": "^3.1.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.95.0",
+    "dotenv": "^16.4.7"
+  }
+}
