@@ -176,6 +176,9 @@ orders.post('/', async (c) => {
   if (!body || !body.category || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'category and at least one line are required' }, 400);
   }
+  if (!body.lines.every(l => !l.category || l.category === body.category)) {
+    return c.json({ error: 'all lines must match order category' }, 400);
+  }
 
   // Generate a human-friendly id like SO-1289 — collision-resistant via the
   // sequence of existing IDs. Good enough for this scale.
@@ -191,7 +194,7 @@ orders.post('/', async (c) => {
       VALUES (
         ${newId}, ${u.id}, ${body.category},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
-        ${body.totalCost ?? null}, 'awaiting_payment'
+        ${body.totalCost ?? null}, 'draft'
       )
     `;
     for (let i = 0; i < body.lines.length; i++) {
@@ -206,7 +209,7 @@ orders.post('/', async (c) => {
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
           ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
-          ${l.unitCost}, ${l.sellPrice ?? null}, 'In Transit',
+          ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i}
         )
       `;
