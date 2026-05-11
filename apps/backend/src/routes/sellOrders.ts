@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { notify } from '../lib/notify';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -243,6 +244,26 @@ sellOrders.post('/:id/status', async (c) => {
                jsonb_build_object('field','status','to','Done','sellOrder',${id}::text)
         FROM sell_order_lines WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
       `;
+      // Tell each purchaser whose lines just closed that a commission is ready.
+      // DISTINCT because one purchaser may have supplied multiple lines on the
+      // same sell order — we only want one notification per submitter.
+      const submitters = await tx<{ user_id: string }[]>`
+        SELECT DISTINCT o.user_id
+        FROM sell_order_lines sol
+        JOIN order_lines l ON l.id = sol.inventory_id
+        JOIN orders o ON o.id = l.order_id
+        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL
+      `;
+      for (const s of submitters) {
+        await notify(tx, {
+          userId: s.user_id,
+          kind: 'payment_received',
+          tone: 'pos',
+          icon: 'cash',
+          title: `Sell order ${id} closed`,
+          body: 'Commission ready for review.',
+        });
+      }
     }
   });
   return c.json({ ok: true, status: body.to });

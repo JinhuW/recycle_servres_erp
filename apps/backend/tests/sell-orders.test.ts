@@ -109,6 +109,40 @@ describe('POST /api/sell-orders/:id/status', () => {
   });
 });
 
+describe('payment_received notification', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('notifies submitter when sell order is Done', async () => {
+    const { token: mTok } = await loginAs(ALEX);
+    const list = await api<{ items: { id: string; user_id: string; sell_price: number | null }[] }>(
+      'GET', '/api/inventory?status=Reviewing', { token: mTok });
+    const target = list.body.items.find(i => i.sell_price != null)!;
+    const submitterRow = (await api<{ items: { id: string; email: string }[] }>(
+      'GET', '/api/members', { token: mTok })).body.items.find(m => m.id === target.user_id);
+    const submitterEmail = submitterRow!.email;
+    const { token: subTok } = await loginAs(submitterEmail);
+
+    // Use firstCustomerId helper from earlier in the file
+    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mTok });
+    const customerId = customers.body.items[0].id;
+
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token: mTok,
+      body: { customerId, lines: [{
+        inventoryId: target.id, category: 'RAM', label: 'x', partNumber: 'pn',
+        qty: 1, unitPrice: target.sell_price as number,
+      }] },
+    });
+    const soId = create.body.id;
+    await api('POST', `/api/sell-orders/${soId}/status`, { token: mTok, body: { to: 'Shipped', note: 's' } });
+    await api('POST', `/api/sell-orders/${soId}/status`, { token: mTok, body: { to: 'Awaiting payment', note: 'a' } });
+    await api('POST', `/api/sell-orders/${soId}/status`, { token: mTok, body: { to: 'Done', note: 'paid' } });
+
+    const got = await api<{ items: { kind: string }[] }>('GET', '/api/notifications', { token: subTok });
+    expect(got.body.items.some(i => i.kind === 'payment_received')).toBe(true);
+  });
+});
+
 describe('sell-order qty clamp', () => {
   beforeEach(async () => { await resetDb(); });
 
