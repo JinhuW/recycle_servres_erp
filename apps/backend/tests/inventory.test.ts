@@ -80,3 +80,17 @@ describe('low-margin notification', () => {
     expect(after.body.items.some(i => i.kind === 'low_margin')).toBe(true);
   });
 });
+
+describe('audit log is append-only', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('raw UPDATE on inventory_events is rejected', async () => {
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    let err: Error | null = null;
+    try {
+      await sql`UPDATE inventory_events SET detail = '{}'::jsonb WHERE id IN (SELECT id FROM inventory_events LIMIT 1)`;
+    } catch (e) { err = e as Error; }
+    expect(err?.message).toMatch(/append-only/i);
+  });
+});
