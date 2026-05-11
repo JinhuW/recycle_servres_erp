@@ -9,7 +9,9 @@
     "db:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",
     "db:reset": "node ./scripts/migrate.mjs --reset && node ./scripts/seed.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@recycle-erp/shared": "workspace:*",
@@ -21,8 +23,11 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
     "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^25.6.2",
     "dotenv": "^16.4.7",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.2",
+    "vitest": "^4.1.5",
     "wrangler": "^3.95.0"
   }
 }
