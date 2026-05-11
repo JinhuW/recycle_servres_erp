@@ -97,3 +97,25 @@ describe('POST /api/orders/:id/advance', () => {
     expect(got.body.order.lifecycle).toBe('reviewing');
   });
 });
+
+describe('notifications on order advance', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('advancing to in_transit notifies managers', async () => {
+    const { token: pTok } = await loginAs(MARCUS);
+    const { token: mTok } = await loginAs(ALEX);
+    const before = await api<{ unreadCount: number }>('GET', '/api/notifications', { token: mTok });
+
+    const c = await api<{ id: string }>('POST', '/api/orders', {
+      token: pTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
+
+    const after = await api<{ unreadCount: number; items: { kind: string; title: string }[] }>(
+      'GET', '/api/notifications', { token: mTok });
+    expect(after.body.unreadCount).toBeGreaterThan(before.body.unreadCount);
+    expect(after.body.items.some(i => i.kind === 'order_submitted')).toBe(true);
+  });
+});

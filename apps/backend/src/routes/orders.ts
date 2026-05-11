@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { notifyManagers } from '../lib/notify';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -316,6 +317,18 @@ orders.post('/:id/advance', async (c) => {
                jsonb_build_object('field','status','from',status,'to',${newLineStatus}::text)
         FROM order_lines WHERE order_id = ${id} AND status IS DISTINCT FROM ${newLineStatus}
       `;
+    }
+    // PRD §10: managers want to see when a purchaser finalises an order.
+    // We fire this only on the first forward transition (Draft → In Transit)
+    // so they aren't spammed during later manager-driven moves.
+    if (nextStageId === 'in_transit') {
+      await notifyManagers(tx, {
+        kind: 'order_submitted',
+        tone: 'info',
+        icon: 'inventory',
+        title: `Order ${id} submitted`,
+        body: `${u.name} advanced ${id} to In Transit`,
+      });
     }
   });
 
