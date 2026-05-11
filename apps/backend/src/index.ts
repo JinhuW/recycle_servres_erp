@@ -20,6 +20,7 @@ import sellOrdersRoutes from './routes/sellOrders';
 import inventoryRoutes from './routes/inventory';
 import membersRoutes from './routes/members';
 import workflowRoutes from './routes/workflow';
+import categoriesRoutes from './routes/categories';
 import type { Env, User } from './types';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -58,6 +59,7 @@ app.use('/api/sell-orders/*', authMiddleware);
 app.use('/api/inventory/*', authMiddleware);
 app.use('/api/members/*', authMiddleware);
 app.use('/api/workflow/*', authMiddleware);
+app.use('/api/categories/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
@@ -71,6 +73,7 @@ app.route('/api/sell-orders', sellOrdersRoutes);
 app.route('/api/inventory', inventoryRoutes);
 app.route('/api/members', membersRoutes);
 app.route('/api/workflow', workflowRoutes);
+app.route('/api/categories', categoriesRoutes);
 
 app.onError((err, c) => {
   console.error('Unhandled', err);

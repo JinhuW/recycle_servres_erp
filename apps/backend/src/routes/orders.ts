@@ -180,6 +180,12 @@ orders.post('/', async (c) => {
     return c.json({ error: 'all lines must match order category' }, 400);
   }
 
+  const catRow = (await sql<{ enabled: boolean }[]>`
+    SELECT enabled FROM categories WHERE id = ${body.category} LIMIT 1
+  `)[0];
+  if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
+  if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
+
   // Generate a human-friendly id like SO-1289 — collision-resistant via the
   // sequence of existing IDs. Good enough for this scale.
   const maxRow = (await sql`
