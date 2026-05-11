@@ -49,3 +49,51 @@ describe('POST /api/orders defaults', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('POST /api/orders/:id/advance', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('purchaser can advance own Draft → in_transit', async () => {
+    const { token: pTok } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: pTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    const id = created.body.id;
+    const r = await api('POST', `/api/orders/${id}/advance`, { token: pTok });
+    expect(r.status).toBe(200);
+    const got = await api<{ order: { lifecycle: string; lines: { status: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token: pTok });
+    expect(got.body.order.lifecycle).toBe('in_transit');
+    expect(got.body.order.lines[0].status).toBe('In Transit');
+  });
+
+  it('purchaser cannot jump past in_transit', async () => {
+    const { token: pTok } = await loginAs(MARCUS);
+    const c = await api<{ id: string }>('POST', '/api/orders', {
+      token: pTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
+    const r = await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
+    expect(r.status).toBe(403);
+  });
+
+  it('manager can advance to any stage', async () => {
+    const { token: pTok } = await loginAs(MARCUS);
+    const { token: mTok } = await loginAs(ALEX);
+    const c = await api<{ id: string }>('POST', '/api/orders', {
+      token: pTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
+    const r = await api('POST', `/api/orders/${c.body.id}/advance`, {
+      token: mTok, body: { toStage: 'reviewing' } });
+    expect(r.status).toBe(200);
+    const got = await api<{ order: { lifecycle: string } }>('GET', `/api/orders/${c.body.id}`, { token: mTok });
+    expect(got.body.order.lifecycle).toBe('reviewing');
+  });
+});

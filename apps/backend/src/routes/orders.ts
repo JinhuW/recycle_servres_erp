@@ -260,4 +260,60 @@ orders.patch('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// Lifecycle ordering — must match workflow_stages.position.
+// Purchasers may only move Draft → In Transit (and not back).
+const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
+  draft: 'Draft',
+  in_transit: 'In Transit',
+  reviewing: 'Reviewing',
+  done: 'Done',
+};
+
+orders.post('/:id/advance', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
+
+  const cur = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
+  if (!cur) return c.json({ error: 'Not found' }, 404);
+  if (u.role !== 'manager' && cur.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+
+  const stages = await sql<{ id: string; position: number }[]>`
+    SELECT id, position FROM workflow_stages ORDER BY position`;
+  const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
+  let nextStageId: string;
+  if (body?.toStage) {
+    if (u.role !== 'manager') return c.json({ error: 'Only managers can jump stages' }, 403);
+    if (!stages.find(s => s.id === body.toStage)) return c.json({ error: 'Unknown stage' }, 400);
+    nextStageId = body.toStage;
+  } else {
+    if (curIdx < 0 || curIdx >= stages.length - 1) {
+      return c.json({ error: 'Already at the final stage' }, 409);
+    }
+    nextStageId = stages[curIdx + 1].id;
+  }
+  // Purchaser can only advance Draft → in_transit.
+  if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
+    return c.json({ error: 'Purchasers can only advance Draft to In Transit' }, 403);
+  }
+
+  const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
+  await sql.begin(async (tx) => {
+    await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
+    if (newLineStatus) {
+      await tx`UPDATE order_lines SET status = ${newLineStatus} WHERE order_id = ${id}`;
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT id, ${u.id}::uuid, 'status',
+               jsonb_build_object('field','status','from',status,'to',${newLineStatus}::text)
+        FROM order_lines WHERE order_id = ${id} AND status IS DISTINCT FROM ${newLineStatus}
+      `;
+    }
+  });
+
+  return c.json({ ok: true, lifecycle: nextStageId });
+});
+
 export default orders;
