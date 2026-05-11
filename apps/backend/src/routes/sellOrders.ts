@@ -52,7 +52,10 @@ sellOrders.get('/:id', async (c) => {
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
 
-  const lines = await sql`
+  const lines = await sql<{
+    id: string; category: string; label: string; sub_label: string | null; part_number: string | null;
+    qty: number; unit_price: number; condition: string | null; position: number; warehouse_short: string | null;
+  }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price, sol.condition, sol.position,
            w.short AS warehouse_short
@@ -61,7 +64,7 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
-  const subtotal = lines.reduce((a: number, l: { qty: number; unit_price: number }) => a + l.qty * l.unit_price, 0);
+  const subtotal = lines.reduce<number>((a, l) => a + l.qty * l.unit_price, 0);
   return c.json({
     order: {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
@@ -74,8 +77,8 @@ sellOrders.get('/:id', async (c) => {
         lineTotal: +(l.qty * l.unit_price).toFixed(2),
       })),
       subtotal: +subtotal.toFixed(2),
-      discount: +(subtotal * head.discount_pct).toFixed(2),
-      total:    +(subtotal * (1 - head.discount_pct)).toFixed(2),
+      discount: +(subtotal * Number(head.discount_pct)).toFixed(2),
+      total:    +(subtotal * (1 - Number(head.discount_pct))).toFixed(2),
     },
   });
 });

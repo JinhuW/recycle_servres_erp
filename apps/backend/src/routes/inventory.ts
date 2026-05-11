@@ -155,9 +155,11 @@ inventory.patch('/:id', async (c) => {
       const oldVal = before[beforeKey[f]];
       if (String(oldVal) === String(newVal)) continue;
       const kind = f === 'status' ? 'status' : f === 'sellPrice' ? 'priced' : 'edited';
+      const fromStr = oldVal == null ? null : String(oldVal);
+      const toStr   = newVal == null ? null : String(newVal);
       await tx`
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: oldVal, to: newVal })})
+        VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
       `;
     }
   });

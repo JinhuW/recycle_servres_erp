@@ -16,9 +16,14 @@ scan.post('/label', async (c) => {
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
 
-  const file = form.get('file');
+  // Workers' FormData.get() returns string | null in types, but at runtime
+  // returns File for file fields. Cast through unknown and runtime-check shape.
+  const fileRaw = form.get('file') as unknown;
+  if (!fileRaw || !(fileRaw instanceof File)) {
+    return c.json({ error: 'file is required' }, 400);
+  }
+  const file: File = fileRaw;
   const category = (form.get('category') as string | null) as LineCategory | null;
-  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
   if (!category || !['RAM', 'SSD', 'Other'].includes(category)) {
     return c.json({ error: 'category must be RAM | SSD | Other' }, 400);
   }
