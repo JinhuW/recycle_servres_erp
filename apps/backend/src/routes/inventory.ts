@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { notify } from '../lib/notify';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -204,7 +205,31 @@ inventory.patch('/:id', async (c) => {
     }
   });
 
-  return c.json({ ok: true });
+  // Margin guard rails (PRD §10): warn the manager — and drop a notification —
+  // when a sell price puts the line below cost or below the 15% margin floor.
+  // Computed against either the newly submitted unitCost or the row-as-loaded
+  // value, so a price-only edit still uses the correct cost basis.
+  const warnings: string[] = [];
+  if (body.sellPrice !== undefined) {
+    const cost = Number(body.unitCost ?? before.unit_cost);
+    const sp = body.sellPrice;
+    if (sp < cost) warnings.push('sub_cost_sell');
+    const margin = sp > 0 ? ((sp - cost) / sp) : 0;
+    if (margin < 0.15) {
+      warnings.push('low_margin');
+      await sql.begin(async (tx) => {
+        await notify(tx, {
+          userId: u.id,
+          kind: 'low_margin',
+          tone: 'warn',
+          icon: 'alert',
+          title: `Low margin on ${before.part_number ?? 'line'}`,
+          body: `Sell ${sp} vs cost ${cost} → ${(margin * 100).toFixed(1)}% margin`,
+        });
+      });
+    }
+  }
+  return c.json({ ok: true, warnings });
 });
 
 export default inventory;

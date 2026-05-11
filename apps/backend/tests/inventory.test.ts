@@ -60,3 +60,23 @@ describe('GET /api/inventory/aggregate/by-part', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('low-margin notification', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('fires when sell_price gives margin < 15%', async () => {
+    const { token } = await loginAs(ALEX);
+    const list = await api<{ items: { id: string; unit_cost: number }[] }>(
+      'GET', '/api/inventory?status=Reviewing', { token });
+    const target = list.body.items[0];
+    const newPrice = +(target.unit_cost * 1.05).toFixed(2);
+
+    const r = await api<{ warnings?: string[] }>('PATCH', `/api/inventory/${target.id}`, {
+      token, body: { sellPrice: newPrice },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.warnings ?? []).toContain('low_margin');
+    const after = await api<{ items: { kind: string }[] }>('GET', '/api/notifications', { token });
+    expect(after.body.items.some(i => i.kind === 'low_margin')).toBe(true);
+  });
+});
