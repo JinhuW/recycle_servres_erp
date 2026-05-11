@@ -92,6 +92,26 @@ inventory.get('/events/all', async (c) => {
   return c.json({ events: rows });
 });
 
+// Workspace-wide aggregate by part number (PRD §5.10) — powers QuickView.
+// Not scoped to purchaser-own-lines: any authenticated user gets the
+// workspace totals. Does NOT return cost fields.
+inventory.get('/aggregate/by-part', async (c) => {
+  const pn = c.req.query('partNumber');
+  if (!pn) return c.json({ error: 'partNumber is required' }, 400);
+  const sql = getDb(c.env);
+  const rows = (await sql<{ status: string; qty: number }[]>`
+    SELECT status, COALESCE(SUM(qty), 0)::int AS qty
+    FROM order_lines WHERE part_number = ${pn} GROUP BY status
+  `);
+  let inTransit = 0, inStock = 0;
+  for (const r of rows) {
+    if (r.status === 'In Transit') inTransit += r.qty;
+    else if (r.status === 'Done' || r.status === 'Reviewing') inStock += r.qty;
+  }
+  const lineCount = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM order_lines WHERE part_number = ${pn}`)[0].n;
+  return c.json({ partNumber: pn, inTransit, inStock, lines: lineCount });
+});
+
 // Single inventory line + its audit log.
 inventory.get('/:id', async (c) => {
   const u = c.var.user;

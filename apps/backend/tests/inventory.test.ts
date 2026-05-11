@@ -36,3 +36,27 @@ describe('GET /api/inventory — role-based field visibility', () => {
     for (const it of r.body.items) expect(it.user_id).toBe(user.id);
   });
 });
+
+describe('GET /api/inventory/aggregate/by-part', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('returns inTransit / inStock counts for a part number', async () => {
+    const { token } = await loginAs(ALEX);
+    // Find a part number that exists in seed
+    const list = await api<{ items: { part_number: string }[] }>('GET', '/api/inventory', { token });
+    const pn = list.body.items.find(i => i.part_number)?.part_number;
+    expect(pn).toBeTruthy();
+
+    const r = await api<{ partNumber: string; inTransit: number; inStock: number; lines: number }>(
+      'GET', `/api/inventory/aggregate/by-part?partNumber=${encodeURIComponent(pn!)}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.partNumber).toBe(pn);
+    expect(r.body.lines).toBeGreaterThanOrEqual(1);
+  });
+
+  it('400 when partNumber missing', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/inventory/aggregate/by-part', { token });
+    expect(r.status).toBe(400);
+  });
+});
