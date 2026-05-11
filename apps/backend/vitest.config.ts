@@ -5,7 +5,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     setupFiles: ['tests/helpers/setup.ts'],
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } }, // serialize — shared DB
+    fileParallelism: false, // serialize — all tests share one Postgres database
     testTimeout: 15_000,
     hookTimeout: 30_000,
   },
