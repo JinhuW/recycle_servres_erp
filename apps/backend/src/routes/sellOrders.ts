@@ -65,6 +65,17 @@ sellOrders.get('/:id', async (c) => {
     ORDER BY sol.position
   `;
   const subtotal = lines.reduce<number>((a, l) => a + l.qty * l.unit_price, 0);
+
+  // Per-status evidence (note + attachments) recorded at each transition.
+  // Keyed by status so the UI can show e.g. the shipping note next to the
+  // "Shipped" pill and the payment proof next to "Awaiting payment".
+  const metaRows = await sql<{ status: string; note: string | null; attachment_ids: string[]; recorded_at: string }[]>`
+    SELECT status, note, attachment_ids, recorded_at
+    FROM sell_order_status_meta WHERE sell_order_id = ${id}
+  `;
+  const statusMeta: Record<string, { note: string | null; attachmentIds: string[]; recordedAt: string }> = {};
+  for (const m of metaRows) statusMeta[m.status] = { note: m.note, attachmentIds: m.attachment_ids, recordedAt: m.recorded_at };
+
   return c.json({
     order: {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
@@ -79,6 +90,7 @@ sellOrders.get('/:id', async (c) => {
       subtotal: +subtotal.toFixed(2),
       discount: +(subtotal * Number(head.discount_pct)).toFixed(2),
       total:    +(subtotal * (1 - Number(head.discount_pct))).toFixed(2),
+      statusMeta,
     },
   });
 });
@@ -140,7 +152,7 @@ sellOrders.post('/', async (c) => {
     }
   });
 
-  return c.json({ ok: true, id: nextId });
+  return c.json({ ok: true, id: nextId }, 201);
 });
 
 sellOrders.patch('/:id', async (c) => {
@@ -161,6 +173,65 @@ sellOrders.patch('/:id', async (c) => {
     WHERE id = ${id}
   `;
   return c.json({ ok: true });
+});
+
+// Sell-order lifecycle. Each forward transition into Shipped/Awaiting/Done
+// must carry evidence (a note OR one or more attachment ids) — PRD §7.4.
+// Transitioning to Done also flips every underlying inventory line to Done
+// and writes an audit row per line, so the inventory page stays in sync.
+const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done']);
+const SELL_ORDER_FLOW = ['Draft', 'Shipped', 'Awaiting payment', 'Done'];
+
+sellOrders.post('/:id/status', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as
+    | { to: string; note?: string; attachmentIds?: string[] }
+    | null;
+  if (!body?.to) return c.json({ error: 'to is required' }, 400);
+  if (!SELL_ORDER_FLOW.includes(body.to)) return c.json({ error: `unknown status: ${body.to}` }, 400);
+
+  if (NEEDS_EVIDENCE.has(body.to)) {
+    const hasNote = typeof body.note === 'string' && body.note.trim().length > 0;
+    const hasFiles = Array.isArray(body.attachmentIds) && body.attachmentIds.length > 0;
+    if (!hasNote && !hasFiles) {
+      return c.json({ error: 'note or attachments required for this status' }, 400);
+    }
+  }
+
+  const sql = getDb(c.env);
+  const cur = (await sql<{ status: string }[]>`SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
+  if (!cur) return c.json({ error: 'Not found' }, 404);
+  if (cur.status === 'Done' && body.to !== 'Done') return c.json({ error: 'order is locked' }, 409);
+
+  await sql.begin(async (tx) => {
+    await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
+    if (NEEDS_EVIDENCE.has(body.to)) {
+      await tx`
+        INSERT INTO sell_order_status_meta (sell_order_id, status, note, attachment_ids, recorded_by)
+        VALUES (${id}, ${body.to}, ${body.note ?? null}, ${body.attachmentIds ?? []}, ${u.id})
+        ON CONFLICT (sell_order_id, status) DO UPDATE SET
+          note = EXCLUDED.note,
+          attachment_ids = EXCLUDED.attachment_ids,
+          recorded_at = NOW(),
+          recorded_by = EXCLUDED.recorded_by
+      `;
+    }
+    if (body.to === 'Done') {
+      await tx`
+        UPDATE order_lines SET status = 'Done'
+        WHERE id IN (SELECT inventory_id FROM sell_order_lines WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL)
+      `;
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT inventory_id, ${u.id}::uuid, 'status'::text,
+               jsonb_build_object('field','status','to','Done','sellOrder',${id}::text)
+        FROM sell_order_lines WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+      `;
+    }
+  });
+  return c.json({ ok: true, status: body.to });
 });
 
 export default sellOrders;
