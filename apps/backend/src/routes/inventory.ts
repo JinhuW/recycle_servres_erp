@@ -38,6 +38,19 @@ inventory.get('/', async (c) => {
     ORDER BY l.created_at DESC
     LIMIT 200
   `;
+  // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
+  // returning. Sell price is visible — it's not sensitive.
+  const STRIP_FOR_PURCHASER = ['unit_cost', 'profit', 'margin'] as const;
+  if (u.role !== 'manager') {
+    const filtered = (rows as Record<string, unknown>[]).map(r => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(r)) {
+        if (!(STRIP_FOR_PURCHASER as readonly string[]).includes(k)) out[k] = v;
+      }
+      return out;
+    });
+    return c.json({ items: filtered });
+  }
   return c.json({ items: rows });
 });
 
@@ -107,6 +120,13 @@ inventory.get('/:id', async (c) => {
     ORDER BY e.created_at DESC
   `;
 
+  if (u.role !== 'manager') {
+    const r = row as Record<string, unknown>;
+    delete r.unit_cost;
+    delete r.profit;
+    delete r.margin;
+    return c.json({ item: r, events });
+  }
   return c.json({ item: row, events });
 });
 
