@@ -123,6 +123,20 @@ sellOrders.post('/', async (c) => {
     return c.json({ error: 'customerId and at least one line required' }, 400);
   }
 
+  // Validate each line that references an inventory row: the source must
+  // still be in 'Reviewing' (sellable) and the requested qty must not exceed
+  // what's on the shelf. Lines without inventoryId (manual entries) skip
+  // this check.
+  for (const l of body.lines) {
+    if (!l.inventoryId) continue;
+    const inv = (await sql<{ qty: number; status: string }[]>`
+      SELECT qty, status FROM order_lines WHERE id = ${l.inventoryId} LIMIT 1
+    `)[0];
+    if (!inv) return c.json({ error: `inventory line ${l.inventoryId} not found` }, 400);
+    if (inv.status !== 'Reviewing') return c.json({ error: `inventory line not sellable (status=${inv.status})` }, 400);
+    if (l.qty > inv.qty) return c.json({ error: `qty ${l.qty} exceeds inventory available ${inv.qty}` }, 400);
+  }
+
   // Generate a new SL-NNNN id by reading the current max numeric suffix. This
   // is safe under low concurrency (single manager creating orders); a Postgres
   // sequence would be the rigorous fix.

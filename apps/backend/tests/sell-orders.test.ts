@@ -108,3 +108,22 @@ describe('POST /api/sell-orders/:id/status', () => {
     expect(r.status).toBe(403);
   });
 });
+
+describe('sell-order qty clamp', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('POST rejects qty > inventory line qty', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const r = await api('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [{
+        inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn',
+        qty: line.qty + 99, unitPrice: line.sell_price,
+      }]},
+    });
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(r.body)).toMatch(/qty/i);
+  });
+});
