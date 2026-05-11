@@ -59,6 +59,8 @@ dashboard.get('/', async (c) => {
     GROUP BY s.week_start ORDER BY s.week_start
   `;
 
+  // Leaderboard honors the same ?range= window as the rest of the dashboard.
+  // Purchasers see other purchasers' rank but not their financials (PRD §6.8).
   const leaderboardRaw = await sql<{
     id: string; name: string; initials: string; email: string; role: string;
     count: number; revenue: number; profit: number;
@@ -69,15 +71,18 @@ dashboard.get('/', async (c) => {
            COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
     FROM users u JOIN orders o ON o.user_id = u.id JOIN order_lines l ON l.order_id = o.id
     WHERE u.role = 'purchaser'
+      AND o.created_at >= NOW() - (${days} || ' days')::interval
     GROUP BY u.id, u.name, u.initials, u.email, u.role
     ORDER BY profit DESC
   `;
   const leaderboard = leaderboardRaw.map(row => {
-    const showCommission = isManager || row.id === u.id;
+    const showFinancials = isManager || row.id === u.id;
     return {
       id: row.id, name: row.name, initials: row.initials, email: row.email, role: row.role,
-      count: row.count, revenue: row.revenue, profit: row.profit,
-      commission: showCommission
+      count: row.count,
+      revenue: showFinancials ? row.revenue : null,
+      profit:  showFinancials ? row.profit  : null,
+      commission: showFinancials
         ? computeCommission({ profit: row.profit, revenue: row.revenue }, tiers).payable
         : null,
     };
@@ -94,14 +99,21 @@ dashboard.get('/', async (c) => {
   const byCat: Record<string, { count: number; revenue: number; profit: number }> = {};
   for (const r of byCatRows) byCat[r.category] = { count: r.count, revenue: r.revenue, profit: r.profit };
 
-  const recent = await sql`
+  const recentRows = await sql<Record<string, unknown>[]>`
     SELECT l.id, l.category, l.brand, l.capacity, l.type, l.interface, l.description,
-           l.qty, l.unit_cost::float, l.sell_price::float,
+           l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            o.created_at, o.id AS order_id,
            u.id AS user_id, u.name AS user_name, u.initials AS user_initials
     FROM order_lines l JOIN orders o ON o.id = l.order_id JOIN users u ON u.id = o.user_id
     WHERE ${scopeFrag} ORDER BY o.created_at DESC, l.position ASC LIMIT 4
   `;
+  // Match inventory's role-based cost-strip (PRD §6.8): purchasers don't see unit_cost.
+  const recent = isManager
+    ? recentRows
+    : recentRows.map(r => {
+        const { unit_cost: _ignored, ...rest } = r;
+        return rest;
+      });
 
   return c.json({
     role: u.role,
