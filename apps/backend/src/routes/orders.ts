@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { notifyManagers } from '../lib/notify';
+import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -33,7 +34,13 @@ orders.get('/', async (c) => {
 
   const category = c.req.query('category');                 // RAM/SSD/Other
   const status = c.req.query('status');                     // mapped to line status
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10) || 50, 200);
+  const limit = clampLimit(c.req.query('limit'), 50, 200);
+  const sortRaw = c.req.query('sort');
+  if (sortRaw && !parseSort('orders', sortRaw)) {
+    return c.json({ error: 'sort column not allowed' }, 400);
+  }
+  const sort = parseSort('orders', sortRaw) ?? { col: 'created_at', dir: 'desc' as const };
+  const cursor = decodeCursor(c.req.query('cursor'));
 
   // Build the query in pieces to keep dynamic filters tidy. Each fragment
   // either narrows the result set or evaluates to TRUE so the AND chain
@@ -44,6 +51,13 @@ orders.get('/', async (c) => {
   const statusFrag   = status
     ? sql`EXISTS (SELECT 1 FROM order_lines l2 WHERE l2.order_id = o.id AND l2.status = ${status})`
     : sql`TRUE`;
+
+  // keyset pagination: (created_at, id) lexicographic
+  const cursorFrag = cursor
+    ? (sort.dir === 'desc'
+        ? sql`AND (o.created_at, o.id) < (${cursor.ts}, ${cursor.id})`
+        : sql`AND (o.created_at, o.id) > (${cursor.ts}, ${cursor.id})`)
+    : sql`AND TRUE`;
 
   const rows = await sql`
     SELECT
@@ -60,14 +74,19 @@ orders.get('/', async (c) => {
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
-    ORDER BY o.created_at DESC
-    LIMIT ${limit}
+    ORDER BY o.${sql(sort.col)} ${sql.unsafe(sort.dir.toUpperCase())}, o.id ${sql.unsafe(sort.dir.toUpperCase())}
+    LIMIT ${limit + 1}
   `;
+  const hasMore = rows.length > limit;
+  const slice = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore
+    ? encodeCursor({ ts: (slice[slice.length - 1] as { created_at: string }).created_at, id: (slice[slice.length - 1] as { id: string }).id })
+    : null;
 
   return c.json({
-    orders: rows.map(r => ({
+    orders: slice.map(r => ({
       id: r.id,
       userId: r.user_id,
       userName: r.user_name,
@@ -85,6 +104,7 @@ orders.get('/', async (c) => {
       lineCount: r.line_count,
       status: (r.line_statuses?.length === 1 ? r.line_statuses[0] : 'Mixed') as string,
     })),
+    nextCursor,
   });
 });
 
