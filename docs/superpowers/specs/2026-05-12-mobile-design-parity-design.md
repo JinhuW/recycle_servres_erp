@@ -61,23 +61,50 @@ Now that line edit happens in the SubmitForm full-screen view (CC-3), AI rescan 
   - **Edit-line mode** (`editingLineIdx !== null`): rescan goes to camera with the existing line's category, returns to the SubmitForm with AI values merged (preserve `qty`, `unitCost`, `sellPrice`, and `condition` unless the scan supplied them).
 - No new CaptureState phase is needed — the existing `'camera'` phase carries `editingLineIdx` through.
 
-### CC-5. Deep-linkable order URLs (new requirement)
+### CC-5. Deep-linkable order URLs (new requirement, mobile + desktop)
 
-Orders today have a globally unique `id` from the backend (`OrderSummary.id` in `lib/types.ts`), but there's no way to navigate to a specific order by ID — the mobile app uses internal state with no router. The list view shows the ID in mono font but it's display-only.
+Orders have a globally unique `id` from the backend (`OrderSummary.id` in `lib/types.ts`), but neither surface exposes it as a URL today — both use internal state with no router. The mobile list shows the ID in mono font; desktop opens an edit page via `setEditingOrder(o)` callback. Both must become deep-linkable.
 
-The app currently has no routing library installed (`package.json` has neither `react-router-dom` nor `wouter`). To keep the parity pass small, **use hash-based routing** rather than introducing a new dependency:
+The app has no routing library installed (`package.json` has neither `react-router-dom` nor `wouter`). To keep the parity pass small, **use hash-based routing** rather than introducing a new dependency.
 
-- New `lib/route.ts` exposes `useRoute(): { path: string; params: Record<string, string> }` and `navigate(path: string)`. Backed by `window.location.hash` and `hashchange`. Recognized routes:
-  - `#/` → tab view (default).
-  - `#/orders` → tab view forced to `'history'`.
-  - `#/orders/:id` → opens the Orders page, scrolls the matching order into view, expands its accordion, and (if not completed) flips into edit mode via the existing `startEdit` path.
-- `MobileApp.tsx` consumes `useRoute()`. When the route is `#/orders/:id`:
-  - If the order exists in the loaded list, expand it.
-  - If not yet loaded, fetch `/api/orders/:id` (new endpoint or existing) and hydrate before expanding. If the endpoint doesn't exist, document as a follow-up; for now, just trigger a list refresh and look it up after.
-- Orders list rows: tapping the mono ID copies to clipboard with a toast `t('orderIdCopied')`; long-press / a tiny `link` icon adjacent to the ID opens a system share sheet via `navigator.share?.({ url, title })` falling back to clipboard copy.
-- Order ID is rendered the same way as today (mono, accent-strong tone); no visual change beyond the new copy/share affordance icon.
+#### Shared route library: `lib/route.ts`
 
-**Acceptance:** Loading the app at `https://app/#/orders/SO-1289` lands on the Orders page with that order expanded (and in edit mode for non-completed orders). Tapping the order ID copies the deep link to clipboard.
+Exposes:
+- `useRoute(): { path: string; params: Record<string, string> }` — re-renders on `hashchange`.
+- `navigate(path: string)` — sets `window.location.hash` (without page reload).
+- A small matcher: `match('/orders/:id', path)` → returns params or null.
+
+Recognized routes (initial set):
+- `#/` → default view for the surface.
+- `#/orders` → orders list.
+- `#/orders/:id` → open the specified order.
+
+Both `MobileApp.tsx` and `DesktopApp.tsx` subscribe to the route and react accordingly. `lib/api.ts` should also expose `getOrderById(id)` if it doesn't already, so a deep link works even before the list fetch resolves.
+
+#### Mobile (Orders.tsx / MobileApp.tsx)
+
+When the route matches `#/orders/:id`:
+- If the order exists in the loaded list, expand its accordion and scroll it into view.
+- If not yet loaded, fetch `/api/orders/:id` (or fall back to a list refresh + lookup) and hydrate before expanding.
+- For non-completed orders, additionally call `startEdit(order)` so the user lands in review.
+- The hash is set when the user taps a row's edit pencil — `navigate('/orders/' + id)` — so the URL stays in sync without breaking the existing back-button flow.
+
+Orders list rows get a tiny `link` icon button (16px) adjacent to the mono order ID in `.ph-order-head`. Tap → `navigator.clipboard.writeText(${location.origin}/#/orders/${order.id})` then toast `t('orderIdCopied')`. If `navigator.share` is available, prefer the system share sheet with the same URL.
+
+#### Desktop (DesktopOrders.tsx / DesktopEditOrder.tsx / DesktopApp.tsx)
+
+`DesktopApp.tsx:28` holds `view` and `editingOrder` state. Wire both to the route:
+- On route `#/orders/:id`: setEditingOrder to that order (fetching if needed). `view` is implicitly forced to `'history'` because `DesktopEditOrder` is rendered as a sibling alternative.
+- On route `#/orders` (no id): clear `editingOrder` and ensure `view === 'history'`.
+- When `setEditingOrder(o)` is called from the list: also `navigate('/orders/' + o.id)`.
+- When `DesktopEditOrder` closes / back: `navigate('/orders')`.
+
+`DesktopOrders.tsx` list rows: surface the same copy/share affordance as mobile next to the order ID — small `link` icon button, same clipboard + share behavior, same `t('orderIdCopied')` toast.
+
+**Acceptance:**
+- Loading mobile at `https://app/#/orders/SO-1289` lands on the Orders tab with that order expanded and in edit mode (when not completed). Tapping the link icon copies the deep link.
+- Loading desktop at the same URL renders `DesktopEditOrder` for that order. Closing it returns to the list and updates the hash to `#/orders`.
+- The URL stays in sync as you navigate via UI on either surface (browser back/forward also works because `hashchange` fires on history navigation).
 
 ### CC-6. Back button returns to order detail when adding another item (new requirement)
 
@@ -250,8 +277,9 @@ Add to `lib/i18n.tsx` for both `en` and `zh`:
 - New: `apps/frontend/src/components/PhCategoryFields.tsx`
 - New: `apps/frontend/src/components/PhAboutSheet.tsx`
 - New: `apps/frontend/src/lib/usePhScrolled.ts`
-- New: `apps/frontend/src/lib/route.ts` (hash-routing helpers — CC-5)
-- Edited: every page under `apps/frontend/src/pages/` except `desktop/*`, plus `MobileApp.tsx`, `lib/i18n.tsx`, `components/PhHeader.tsx` (no API change), `styles/phone.css`.
+- New: `apps/frontend/src/lib/route.ts` (hash-routing helpers — CC-5; shared by both surfaces)
+- Edited (mobile): every page under `apps/frontend/src/pages/` except `desktop/*`, plus `MobileApp.tsx`, `lib/i18n.tsx`, `components/PhHeader.tsx` (no API change), `styles/phone.css`.
+- Edited (desktop, scoped to CC-5 only — not a full desktop parity pass): `DesktopApp.tsx`, `pages/desktop/DesktopOrders.tsx`, `pages/desktop/DesktopEditOrder.tsx`.
 - `CaptureState` (MobileApp.tsx) gains:
   - a `'rescan'` phase plus an `editingLineIdx` field on `'rescan'` (CC-4).
   - a `returnTo: 'idle' | 'review'` discriminator on `'camera'` and `'form'` phases (CC-6).
@@ -269,8 +297,9 @@ This is a visual parity pass on an interactive React app. Verification:
 
 One commit per group, sign-off requested after each:
 
-1. **Cross-cutting** (CC-1..CC-5): css additions, scroll hook, i18n keys, category-fields component, capture-state extension.
+1. **Cross-cutting** (CC-1..CC-7): css additions, scroll hook, unified line-edit refactor, AI rescan plumbing, hash routing (mobile + desktop), back-button fix, i18n keys.
 2. **Login + Dashboard** (S1, S2).
-3. **Capture flow** (S3a-d, includes AI rescan).
-4. **Orders + Market + Inventory** (S4, S5, S6).
+3. **Capture flow** (S3a-d, includes the unified edit page and AI rescan).
+4. **Orders + Market + Inventory** (S4, S5, S6) — mobile deep-link UX lives here.
 5. **Profile + language + notifications sheets** (S7, S8, S9).
+6. **Desktop deep-link wiring** (CC-5 desktop half): `DesktopApp.tsx`, `DesktopOrders.tsx`, `DesktopEditOrder.tsx` only — link-icon copy/share affordance and route-sync. No other desktop changes.
