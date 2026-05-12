@@ -1,23 +1,33 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
+import { usePhScrolled } from '../lib/usePhScrolled';
+import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
 
 type Props = {
   onEdit: (o: Order) => void;
+  onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
 
-export function Orders({ onEdit }: Props) {
+export function Orders({ onEdit, onToast }: Props) {
   const { t } = useT();
   const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openLines, setOpenLines] = useState<Order | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolled = usePhScrolled(scrollRef);
+  const { path } = useRoute();
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const lastHandledRouteId = useRef<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -36,14 +46,62 @@ export function Orders({ onEdit }: Props) {
       .catch(console.error);
   }, [openId]);
 
+  // CC-5: when the URL matches /orders/:id, expand that row and (if
+  // editable) push to the review screen. Fires whenever route or the
+  // currently-loaded list changes. We track the last-handled id in a
+  // ref so that orders re-fetches (e.g. chip filter change) don't yank
+  // the user back into edit unexpectedly.
+  useEffect(() => {
+    const m = match('/orders/:id', path);
+    if (!m) {
+      lastHandledRouteId.current = null;
+      return;
+    }
+    if (lastHandledRouteId.current === m.id) return; // already handled this id
+    lastHandledRouteId.current = m.id;
+    setOpenId(m.id);
+    const node = rowRefs.current[m.id];
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    const summary = orders.find(o => o.id === m.id);
+    if (summary && !isCompleted(summary.status)) {
+      // Fetch the full order to pass to onEdit (it expects the lines).
+      api.get<{ order: Order }>(`/api/orders/${m.id}`).then(r => onEdit(r.order)).catch(() => {});
+    }
+    // Eslint: omitting onEdit on purpose — the parent provides a stable callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, orders]);
+
   return (
     <>
       <PhHeader
         title={t('ordersHeading')}
         sub={t('ordersSubmitted', { n: orders.length })}
-        trailing={<button className="ph-icon-btn"><Icon name="search" size={16} /></button>}
+        scrolled={scrolled}
+        trailing={
+          <button
+            className="ph-icon-btn"
+            onClick={() => setSearchOpen(o => !o)}
+            aria-label={t('searchOrders')}
+            style={{ color: searchOpen ? 'var(--accent-strong)' : undefined }}
+          >
+            <Icon name={searchOpen ? 'x' : 'search'} size={16} />
+          </button>
+        }
       />
-      <div className="ph-scroll">
+      <div className="ph-scroll" ref={scrollRef}>
+        {searchOpen && (
+          <div className="ph-field" style={{ marginTop: 6 }}>
+            <input
+              className="input"
+              autoFocus
+              placeholder={t('searchOrders')}
+              value={searchQ}
+              onChange={e => setSearchQ(e.target.value)}
+            />
+          </div>
+        )}
         <div className="ph-chip-scroller">
           {(['all', 'RAM', 'SSD', 'Other'] as const).map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
@@ -61,17 +119,26 @@ export function Orders({ onEdit }: Props) {
             </button>
           ))}
         </div>
-
         {orders.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {t('noOrdersMatch')}
           </div>
         )}
 
-        {orders.slice(0, 30).map(o => {
+        {(() => {
+          const q = searchQ.trim().toLowerCase();
+          const filtered = q
+            ? orders.filter(o =>
+                o.id.toLowerCase().includes(q) ||
+                (o.warehouse?.short ?? '').toLowerCase().includes(q) ||
+                (o.warehouse?.region ?? '').toLowerCase().includes(q) ||
+                o.userName.toLowerCase().includes(q)
+              )
+            : orders;
+          return filtered.slice(0, 30).map(o => {
           const isOpen = openId === o.id;
           return (
-            <div key={o.id} className="ph-order">
+            <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
                 <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
                   {o.category}
@@ -79,6 +146,28 @@ export function Orders({ onEdit }: Props) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{o.id}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const url = `${location.origin}${location.pathname}#/orders/${o.id}`;
+                        const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
+                        if (typeof share === 'function') {
+                          share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
+                            if (err.name !== 'AbortError') onToast?.(t('orderIdCopyFailed'), 'error');
+                          });
+                        } else if (navigator.clipboard?.writeText) {
+                          navigator.clipboard.writeText(url)
+                            .then(() => onToast?.(t('orderIdCopied')))
+                            .catch(() => onToast?.(t('orderIdCopyFailed'), 'error'));
+                        } else {
+                          onToast?.(t('orderIdCopyFailed'), 'error');
+                        }
+                      }}
+                      aria-label={t('shareOrder')}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--fg-subtle)', padding: 0, lineHeight: 0, cursor: 'pointer' }}
+                    >
+                      <Icon name="paperclip" size={12} />
+                    </button>
                     <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>· {o.lineCount} {o.lineCount === 1 ? t('item') : t('items')}</span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -122,7 +211,13 @@ export function Orders({ onEdit }: Props) {
                       style={{ flex: 1, justifyContent: 'center' }}
                       disabled={isCompleted(o.status)}
                       title={isCompleted(o.status) ? t('completedLocked') : t('editOrder')}
-                      onClick={(e) => { e.stopPropagation(); if (!isCompleted(o.status)) onEdit(openLines); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isCompleted(o.status)) {
+                          navigate('/orders/' + o.id);
+                          onEdit(openLines);
+                        }
+                      }}
                     >
                       <Icon name="edit" size={11} /> {t('edit')}
                     </button>
@@ -134,7 +229,8 @@ export function Orders({ onEdit }: Props) {
               )}
             </div>
           );
-        })}
+          });
+        })()}
       </div>
     </>
   );

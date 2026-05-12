@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { fmtUSD, fmtUSD0, relTime } from '../lib/format';
+import { usePhScrolled } from '../lib/usePhScrolled';
 import type { RefPrice } from '../lib/types';
 
 export function Market() {
@@ -12,6 +13,8 @@ export function Market() {
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<RefPrice[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -30,8 +33,8 @@ export function Market() {
 
   return (
     <>
-      <PhHeader title={t('marketTitle')} sub={t('marketSub', { n: items.length })} />
-      <div className="ph-scroll">
+      <PhHeader title={t('marketTitle')} sub={t('marketSub', { n: items.length })} scrolled={scrolled} />
+      <div className="ph-scroll" ref={scrollRef}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', background: 'var(--accent-soft)', border: '1px solid color-mix(in oklch, var(--accent) 25%, transparent)', borderRadius: 12, marginTop: 4, fontSize: 12, color: 'var(--accent-strong)' }}>
           <Icon name="zap" size={14} style={{ marginTop: 1, flexShrink: 0 }} />
           <div>{t('marketHint')}</div>

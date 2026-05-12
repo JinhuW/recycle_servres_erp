@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { fmtUSD0 } from '../lib/format';
 import { isCompleted, statusTone } from '../lib/status';
+import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Category } from '../lib/types';
 
 type InventoryItem = {
@@ -32,6 +33,8 @@ export function Inventory({ onNewEntry }: Props) {
   const { user } = useAuth();
   const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -57,18 +60,13 @@ export function Inventory({ onNewEntry }: Props) {
       <PhHeader
         title={t('inventoryTitle')}
         sub={isManager ? t('invAcrossTeams') : t('invItemsYou')}
+        scrolled={scrolled}
         trailing={<button className="ph-icon-btn" onClick={onNewEntry}><Icon name="plus" size={16} /></button>}
       />
-      <div className="ph-scroll">
+      <div className="ph-scroll" ref={scrollRef}>
         {!isManager && (
-          <div style={{
-            display: 'flex', alignItems: 'flex-start', gap: 8,
-            padding: '10px 12px',
-            background: 'var(--info-soft)',
-            border: '1px solid color-mix(in oklch, var(--info) 25%, transparent)',
-            borderRadius: 12, marginTop: 4, fontSize: 12,
-          }}>
-            <Icon name="lock" size={14} style={{ color: 'var(--info)', marginTop: 1, flexShrink: 0 }} />
+          <div className="ph-info-banner" style={{ marginTop: 4 }}>
+            <Icon name="lock" size={14} style={{ marginTop: 1, flexShrink: 0 }} />
             <div>{t('readonlyMgr')}</div>
           </div>
         )}

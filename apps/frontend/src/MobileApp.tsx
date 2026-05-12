@@ -18,6 +18,7 @@ import { Profile } from './pages/Profile';
 import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
 import { api } from './lib/api';
+import { navigate } from './lib/route';
 import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
 
 type ReturnTo = 'idle' | 'review';
@@ -62,7 +63,12 @@ function Shell() {
 
   // ── Capture flow handlers ────────────────────────────────────────────────
   const startSubmit = () => setCapture({ phase: 'category' });
-  const cancelCapture = () => setCapture({ phase: 'idle' });
+  const cancelCapture = () => {
+    setCapture({ phase: 'idle' });
+    if (window.location.hash.startsWith('#/orders/')) {
+      navigate('/orders');
+    }
+  };
 
   const pickCategory = (cat: Category) => {
     if (cat === 'RAM') {
@@ -171,6 +177,9 @@ function Shell() {
       });
       setCapture({ phase: 'idle' });
       setView('history');
+      if (window.location.hash.startsWith('#/orders/')) {
+        navigate('/orders');
+      }
       showToast(t('orderSubmitted'));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
@@ -270,7 +279,7 @@ function Shell() {
           unreadCount={unreadCount}
         />
       )}
-      {view === 'history' && <Orders onEdit={startEdit} />}
+      {view === 'history' && <Orders onEdit={startEdit} onToast={showToast} />}
       {view === 'market' && <Market />}
       {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
       {view === 'me' && <Profile onOpenLanguage={() => setLangSheet(true)} />}
