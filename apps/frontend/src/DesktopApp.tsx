@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Icon } from './components/Icon';
 import { Sidebar, type DesktopView } from './components/Sidebar';
 import { useAuth } from './lib/auth';
+import { useRoute, match, navigate } from './lib/route';
+import { api } from './lib/api';
 
 import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
 import { DesktopOrders } from './pages/desktop/DesktopOrders';
@@ -24,6 +26,27 @@ export function DesktopApp() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+
+  const { path } = useRoute();
+
+  // Sync editingOrder with the URL hash. Loading the app at
+  // `#/orders/<id>` opens that order's edit page; clearing the hash
+  // closes it.
+  useEffect(() => {
+    const m = match('/orders/:id', path);
+    if (!m) {
+      // If we're already on /orders (no id) and an editingOrder is open, close it.
+      if (path === '/orders' && editingOrder) setEditingOrder(null);
+      return;
+    }
+    if (editingOrder?.id === m.id) return; // already showing the right one
+    // Force the orders view, then load the order.
+    setView('history');
+    api.get<{ order: Order }>(`/api/orders/${m.id}`)
+      .then(r => setEditingOrder(r.order))
+      .catch(() => {/* ignore — order may have been deleted */});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path]);
 
   // Apply 'desktop' class to <html> so the desktop CSS overrides take effect
   // and undo the mobile shell's overflow lock.
@@ -62,10 +85,10 @@ export function DesktopApp() {
   const ordersOrEdit = editingOrder
     ? <DesktopEditOrder
         order={editingOrder}
-        onCancel={() => setEditingOrder(null)}
-        onSaved={(msg) => { setEditingOrder(null); showToast(msg); }}
+        onCancel={() => { navigate('/orders'); setEditingOrder(null); }}
+        onSaved={(msg) => { navigate('/orders'); setEditingOrder(null); showToast(msg); }}
       />
-    : <DesktopOrders onEdit={(o) => setEditingOrder(o)} />;
+    : <DesktopOrders onEdit={(o) => { navigate('/orders/' + o.id); setEditingOrder(o); }} onToast={(m) => showToast(m)} />;
 
   return (
     <div className="app">

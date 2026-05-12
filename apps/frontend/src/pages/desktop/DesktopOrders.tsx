@@ -27,9 +27,12 @@ const TONE_VAR: Record<string, string> = {
   pos:    'var(--pos)',
 };
 
-type Props = { onEdit: (o: Order) => void };
+type Props = {
+  onEdit: (o: Order) => void;
+  onToast?: (msg: string, kind?: 'success' | 'error') => void;
+};
 
-export function DesktopOrders({ onEdit }: Props) {
+export function DesktopOrders({ onEdit, onToast }: Props) {
   const { t } = useT();
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
@@ -281,7 +284,34 @@ export function DesktopOrders({ onEdit }: Props) {
                   <td>
                     <Icon name="chevronDown" size={13} style={{ transition: 'transform 0.15s', transform: openId === o.id ? 'rotate(180deg)' : 'none', color: 'var(--fg-subtle)' }} />
                   </td>
-                  <td className="mono" style={{ fontWeight: 600 }}>{o.id}</td>
+                  <td className="mono" style={{ fontWeight: 600 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {o.id}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const url = `${location.origin}${location.pathname}#/orders/${o.id}`;
+                          const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
+                          if (typeof share === 'function') {
+                            share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
+                              if (err.name !== 'AbortError') onToast?.(t('orderIdCopyFailed'), 'error');
+                            });
+                          } else if (navigator.clipboard?.writeText) {
+                            navigator.clipboard.writeText(url)
+                              .then(() => onToast?.(t('orderIdCopied')))
+                              .catch(() => onToast?.(t('orderIdCopyFailed'), 'error'));
+                          } else {
+                            onToast?.(t('orderIdCopyFailed'), 'error');
+                          }
+                        }}
+                        aria-label={t('shareOrder')}
+                        title={t('shareOrder')}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--fg-subtle)', padding: 0, marginLeft: 2, lineHeight: 0, cursor: 'pointer', verticalAlign: 'middle' }}
+                      >
+                        <Icon name="paperclip" size={12} />
+                      </button>
+                    </span>
+                  </td>
                   <td className="muted">{fmtDateShort(o.createdAt)}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
