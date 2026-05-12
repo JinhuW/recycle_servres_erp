@@ -10,12 +10,15 @@ const norm = (s: unknown) => (typeof s === 'string' ? s.trim() : '');
 
 // Optional-string field: undefined → leave column alone; null/'' → clear;
 // non-empty → trim and use.
-type FieldUpdate<T> = { set: true; value: T | null } | { set: false };
+type FieldUpdate<T> =
+  | { set: true; value: T | null }
+  | { set: true; invalid: string }
+  | { set: false };
 
 const optionalString = (raw: unknown): FieldUpdate<string> => {
   if (raw === undefined) return { set: false };
   if (raw === null) return { set: true, value: null };
-  if (typeof raw !== 'string') return { set: true, value: null };
+  if (typeof raw !== 'string') return { set: true, invalid: 'must be a string' };
   const t = raw.trim();
   return { set: true, value: t === '' ? null : t };
 };
@@ -24,7 +27,9 @@ const optionalInt = (raw: unknown): FieldUpdate<number> => {
   if (raw === undefined) return { set: false };
   if (raw === null || raw === '') return { set: true, value: null };
   const n = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(n) || !Number.isInteger(n)) return { set: true, value: NaN };
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    return { set: true, invalid: 'must be an integer' };
+  }
   return { set: true, value: n };
 };
 
@@ -51,20 +56,34 @@ function parseDetails(body: Record<string, unknown>): { input: DetailInput; erro
     sqft:         optionalInt(body.sqft),
   };
 
-  if (input.cutoffLocal?.set && input.cutoffLocal.value !== null
+  for (const [key, f] of Object.entries(input) as [string, FieldUpdate<unknown>][]) {
+    if (f && f.set && 'invalid' in f) {
+      return { input, error: `${key} ${f.invalid}` };
+    }
+  }
+
+  if (input.cutoffLocal?.set && 'value' in input.cutoffLocal
+      && input.cutoffLocal.value !== null
       && !CUTOFF_RE.test(input.cutoffLocal.value)) {
     return { input, error: 'cutoffLocal must be HH:MM (00:00 – 23:59)' };
   }
-  if (input.managerEmail?.set && input.managerEmail.value !== null
+  if (input.managerEmail?.set && 'value' in input.managerEmail
+      && input.managerEmail.value !== null
       && !input.managerEmail.value.includes('@')) {
     return { input, error: 'managerEmail must contain @' };
   }
-  if (input.sqft?.set && input.sqft.value !== null
-      && (Number.isNaN(input.sqft.value) || input.sqft.value < 0)) {
+  if (input.sqft?.set && 'value' in input.sqft
+      && input.sqft.value !== null && input.sqft.value < 0) {
     return { input, error: 'sqft must be a non-negative integer' };
   }
   return { input, error: null };
 }
+
+const val = <T,>(f?: FieldUpdate<T>): T | null => {
+  if (!f || !f.set) return null;
+  if ('invalid' in f) return null; // shouldn't happen after parseDetails validates
+  return f.value;
+};
 
 type WhRow = Record<string, unknown>;
 const toApi = (r: WhRow) => ({
@@ -107,8 +126,6 @@ warehouses.post('/', async (c) => {
 
   const { input, error } = parseDetails(body);
   if (error) return c.json({ error }, 400);
-
-  const val = (f?: FieldUpdate<string | number>) => (f?.set ? f.value : null);
 
   const sql = getDb(c.env);
   try {
@@ -157,7 +174,6 @@ warehouses.patch('/:id', async (c) => {
   if (error) return c.json({ error }, 400);
 
   const flag = (f?: FieldUpdate<string | number>) => (f?.set ? 1 : 0);
-  const val  = (f?: FieldUpdate<string | number>) => (f?.set ? f.value : null);
 
   const sql = getDb(c.env);
   const r = await sql`
