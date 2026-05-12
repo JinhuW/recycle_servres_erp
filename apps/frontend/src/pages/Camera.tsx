@@ -8,6 +8,7 @@ type Props = {
   category: Category;
   onDetected: (s: ScanResponse) => void;
   onClose: () => void;
+  onBack?: () => void;
 };
 
 // Phases:
@@ -17,7 +18,7 @@ type Props = {
 //   done      — got a result, showing the green pill briefly
 type Phase = 'framing' | 'capturing' | 'scanning' | 'done';
 
-export function Camera({ category, onDetected, onClose }: Props) {
+export function Camera({ category, onDetected, onClose, onBack: _onBack }: Props) {
   const { t } = useT();
   const [phase, setPhase] = useState<Phase>('framing');
   const [error, setError] = useState<string | null>(null);

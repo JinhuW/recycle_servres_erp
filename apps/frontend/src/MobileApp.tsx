@@ -20,11 +20,13 @@ import { useT, I18N } from './lib/i18n';
 import { api } from './lib/api';
 import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
 
+type ReturnTo = 'idle' | 'review';
+
 type CaptureState =
   | { phase: 'idle' }
   | { phase: 'category' }
-  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null }
-  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null }
+  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo }
+  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo }
   | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null };
 
 type Toast = { msg: string; kind: 'success' | 'error' };
@@ -64,9 +66,9 @@ function Shell() {
 
   const pickCategory = (cat: Category) => {
     if (cat === 'RAM') {
-      setCapture({ phase: 'camera', category: cat, detected: null, lines: [] });
+      setCapture({ phase: 'camera', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
     } else {
-      setCapture({ phase: 'form', category: cat, detected: null, lines: [] });
+      setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
     }
   };
 
@@ -77,11 +79,14 @@ function Shell() {
   const onSaveLine = (line: DraftLine) => {
     setCapture(c => {
       if (c.phase !== 'form') return c;
+      const lines = (c.editingLineIdx != null)
+        ? c.lines.map((l, i) => i === c.editingLineIdx ? line : l)
+        : [...c.lines, line];
       return {
         phase: 'review',
         category: c.category,
         detected: null,
-        lines: [...c.lines, line],
+        lines,
         editingId: c.editingId,
       };
     });
@@ -91,8 +96,43 @@ function Shell() {
     setCapture(c => {
       if (c.phase !== 'review') return c;
       return c.category === 'RAM'
-        ? { ...c, phase: 'camera', detected: null }
-        : { ...c, phase: 'form', detected: null };
+        ? { phase: 'camera', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review' }
+        : { phase: 'form',   category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review' };
+    });
+  };
+
+  const editLine = (idx: number) => {
+    setCapture(c => {
+      if (c.phase !== 'review') return c;
+      return {
+        phase: 'form',
+        category: c.category,
+        detected: null,
+        lines: c.lines,
+        editingId: c.editingId,
+        editingLineIdx: idx,
+        returnTo: 'review',
+      };
+    });
+  };
+
+  const goBack = () => {
+    setCapture(c => {
+      if (c.phase !== 'camera' && c.phase !== 'form') return c;
+      if (c.returnTo === 'review') {
+        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId };
+      }
+      return { phase: 'idle' };
+    });
+  };
+
+  const rescanRam = () => {
+    setCapture(c => {
+      if (c.phase !== 'form') return c;
+      return {
+        phase: 'camera', category: c.category, detected: null, lines: c.lines,
+        editingId: c.editingId, editingLineIdx: c.editingLineIdx ?? null, returnTo: c.returnTo,
+      };
     });
   };
 
@@ -187,18 +227,23 @@ function Shell() {
         category={capture.category}
         onDetected={onDetected}
         onClose={cancelCapture}
+        onBack={goBack}
       />
     );
   }
   if (capture.phase === 'form') {
+    const existing = capture.editingLineIdx != null ? capture.lines[capture.editingLineIdx] : undefined;
     return (
       <SubmitForm
         category={capture.category}
         detected={capture.detected}
         lineCount={capture.lines.length}
+        editingLineIdx={capture.editingLineIdx ?? null}
+        existingLine={existing}
         onSaveLine={onSaveLine}
         onCancel={cancelCapture}
-        onRescan={() => setCapture(c => c.phase === 'form' ? { ...c, phase: 'camera', detected: null } : c)}
+        onBack={goBack}
+        onRescan={rescanRam}
       />
     );
   }
@@ -209,6 +254,7 @@ function Shell() {
         lines={capture.lines}
         editingId={capture.editingId}
         onAddItem={addAnotherItem}
+        onEditLine={editLine}
         onRemoveLine={removeLine}
         onUpdateLine={updateLine}
         onSubmit={submitOrder}

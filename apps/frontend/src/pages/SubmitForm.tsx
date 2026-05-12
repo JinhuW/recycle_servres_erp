@@ -8,15 +8,18 @@ type Props = {
   category: Category;
   detected: ScanResponse | null;
   lineCount: number;
+  editingLineIdx?: number | null;
+  existingLine?: DraftLine;
   onSaveLine: (line: DraftLine) => void;
   onCancel: () => void;
+  onBack?: () => void;
   onRescan: () => void;
 };
 
 // Per-line form. The category-specific fields mirror the prototype's
 // PhSubmitForm; we use controlled inputs here so the values bubble back to
 // the order-review screen as a fully formed line.
-export function SubmitForm({ category, detected, lineCount, onSaveLine, onCancel, onRescan }: Props) {
+export function SubmitForm({ category, detected, lineCount, onSaveLine, onCancel, onRescan, onBack: _onBack, editingLineIdx: _editingLineIdx, existingLine: _existingLine }: Props) {
   const { t } = useT();
   const aiFilled = !!detected;
   const isFirst = lineCount === 0;

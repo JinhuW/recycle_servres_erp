@@ -11,15 +11,16 @@ type Props = {
   lines: DraftLine[];
   editingId?: string | null;
   onAddItem: () => void;
+  onEditLine?: (idx: number) => void;
   onRemoveLine: (idx: number) => void;
-  onUpdateLine: (idx: number, patch: Partial<DraftLine>) => void;
+  onUpdateLine?: (idx: number, patch: Partial<DraftLine>) => void;
   onSubmit: (payload: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => Promise<void>;
   onCancel: () => void;
 };
 
 export function OrderReview({
   category, lines, editingId,
-  onAddItem, onRemoveLine, onUpdateLine,
+  onAddItem, onRemoveLine, onUpdateLine, onEditLine: _onEditLine,
   onSubmit, onCancel,
 }: Props) {
   const { t } = useT();
@@ -94,11 +95,11 @@ export function OrderReview({
                         <div className="ph-field-row">
                           <div className="ph-field" style={{ marginTop: 0 }}>
                             <label>{t('brand')}</label>
-                            <input className="input" value={l.brand ?? ''} onChange={e => onUpdateLine(i, { brand: e.target.value })} placeholder="e.g. Samsung" />
+                            <input className="input" value={l.brand ?? ''} onChange={e => onUpdateLine?.(i, { brand: e.target.value })} placeholder="e.g. Samsung" />
                           </div>
                           <div className="ph-field" style={{ marginTop: 0 }}>
                             <label>{t('type')}</label>
-                            <select className="select" value={l.type ?? 'DDR4'} onChange={e => onUpdateLine(i, { type: e.target.value })}>
+                            <select className="select" value={l.type ?? 'DDR4'} onChange={e => onUpdateLine?.(i, { type: e.target.value })}>
                               <option>DDR3</option><option>DDR4</option><option>DDR5</option>
                             </select>
                           </div>
@@ -106,25 +107,25 @@ export function OrderReview({
                         <div className="ph-field-row">
                           <div className="ph-field">
                             <label>{t('capacity')}</label>
-                            <select className="select" value={l.capacity ?? '32GB'} onChange={e => onUpdateLine(i, { capacity: e.target.value })}>
+                            <select className="select" value={l.capacity ?? '32GB'} onChange={e => onUpdateLine?.(i, { capacity: e.target.value })}>
                               <option>4GB</option><option>8GB</option><option>16GB</option><option>32GB</option><option>64GB</option><option>128GB</option>
                             </select>
                           </div>
                           <div className="ph-field">
                             <label>{t('speedMhz')}</label>
-                            <input className="input" value={l.speed ?? ''} onChange={e => onUpdateLine(i, { speed: e.target.value })} />
+                            <input className="input" value={l.speed ?? ''} onChange={e => onUpdateLine?.(i, { speed: e.target.value })} />
                           </div>
                         </div>
                         <div className="ph-field-row">
                           <div className="ph-field">
                             <label>{t('klass')}</label>
-                            <select className="select" value={l.classification ?? 'RDIMM'} onChange={e => onUpdateLine(i, { classification: e.target.value })}>
+                            <select className="select" value={l.classification ?? 'RDIMM'} onChange={e => onUpdateLine?.(i, { classification: e.target.value })}>
                               <option>UDIMM</option><option>RDIMM</option><option>LRDIMM</option><option>SODIMM</option>
                             </select>
                           </div>
                           <div className="ph-field">
                             <label>{t('rank')}</label>
-                            <select className="select" value={l.rank ?? '2Rx4'} onChange={e => onUpdateLine(i, { rank: e.target.value })}>
+                            <select className="select" value={l.rank ?? '2Rx4'} onChange={e => onUpdateLine?.(i, { rank: e.target.value })}>
                               <option>1Rx4</option><option>1Rx8</option><option>2Rx4</option><option>2Rx8</option><option>4Rx4</option>
                             </select>
                           </div>
@@ -136,23 +137,23 @@ export function OrderReview({
                         <div className="ph-field-row">
                           <div className="ph-field" style={{ marginTop: 0 }}>
                             <label>{t('brand')}</label>
-                            <input className="input" value={l.brand ?? ''} onChange={e => onUpdateLine(i, { brand: e.target.value })} />
+                            <input className="input" value={l.brand ?? ''} onChange={e => onUpdateLine?.(i, { brand: e.target.value })} />
                           </div>
                           <div className="ph-field" style={{ marginTop: 0 }}>
                             <label>{t('capacity')}</label>
-                            <input className="input" value={l.capacity ?? ''} onChange={e => onUpdateLine(i, { capacity: e.target.value })} />
+                            <input className="input" value={l.capacity ?? ''} onChange={e => onUpdateLine?.(i, { capacity: e.target.value })} />
                           </div>
                         </div>
                         <div className="ph-field-row">
                           <div className="ph-field">
                             <label>{t('interfaceLbl')}</label>
-                            <select className="select" value={l.interface ?? 'NVMe'} onChange={e => onUpdateLine(i, { interface: e.target.value })}>
+                            <select className="select" value={l.interface ?? 'NVMe'} onChange={e => onUpdateLine?.(i, { interface: e.target.value })}>
                               <option>SATA</option><option>SAS</option><option>NVMe</option><option>U.2</option>
                             </select>
                           </div>
                           <div className="ph-field">
                             <label>{t('formFactor')}</label>
-                            <select className="select" value={l.formFactor ?? 'M.2 2280'} onChange={e => onUpdateLine(i, { formFactor: e.target.value })}>
+                            <select className="select" value={l.formFactor ?? 'M.2 2280'} onChange={e => onUpdateLine?.(i, { formFactor: e.target.value })}>
                               <option>2.5"</option><option>M.2 2280</option><option>M.2 22110</option><option>U.2</option><option>AIC</option>
                             </select>
                           </div>
@@ -162,23 +163,23 @@ export function OrderReview({
                     {category === 'Other' && (
                       <div className="ph-field" style={{ marginTop: 0 }}>
                         <label>{t('description')}</label>
-                        <input className="input" value={l.description ?? ''} onChange={e => onUpdateLine(i, { description: e.target.value })} placeholder="e.g. Intel Xeon Gold 6248" />
+                        <input className="input" value={l.description ?? ''} onChange={e => onUpdateLine?.(i, { description: e.target.value })} placeholder="e.g. Intel Xeon Gold 6248" />
                       </div>
                     )}
 
                     <div className="ph-field">
                       <label>{t('partNumber')}</label>
-                      <input className="input mono" value={l.partNumber ?? ''} onChange={e => onUpdateLine(i, { partNumber: e.target.value })} />
+                      <input className="input mono" value={l.partNumber ?? ''} onChange={e => onUpdateLine?.(i, { partNumber: e.target.value })} />
                     </div>
 
                     <div className="ph-field-row">
                       <div className="ph-field">
                         <label>{t('quantity')}</label>
-                        <input className="input" type="number" min={1} value={l.qty} onChange={e => onUpdateLine(i, { qty: parseInt(e.target.value, 10) || 0 })} />
+                        <input className="input" type="number" min={1} value={l.qty} onChange={e => onUpdateLine?.(i, { qty: parseInt(e.target.value, 10) || 0 })} />
                       </div>
                       <div className="ph-field">
                         <label>{t('condition')}</label>
-                        <select className="select" value={l.condition ?? 'Pulled — Tested'} onChange={e => onUpdateLine(i, { condition: e.target.value })}>
+                        <select className="select" value={l.condition ?? 'Pulled — Tested'} onChange={e => onUpdateLine?.(i, { condition: e.target.value })}>
                           <option>New</option><option>Pulled — Tested</option><option>Pulled — Untested</option><option>Used</option>
                         </select>
                       </div>
@@ -187,12 +188,12 @@ export function OrderReview({
                     <div className="ph-field-row">
                       <div className="ph-field">
                         <label>{t('unitCost')}</label>
-                        <input className="input mono" type="number" step="0.01" min={0} value={l.unitCost} onChange={e => onUpdateLine(i, { unitCost: parseFloat(e.target.value) || 0 })} />
+                        <input className="input mono" type="number" step="0.01" min={0} value={l.unitCost} onChange={e => onUpdateLine?.(i, { unitCost: parseFloat(e.target.value) || 0 })} />
                       </div>
                       <div className="ph-field">
                         <label>{t('sellPrice')}</label>
                         <input className="input mono" type="number" step="0.01" min={0} value={l.sellPrice ?? ''} placeholder="—"
-                               onChange={e => onUpdateLine(i, { sellPrice: parseFloat(e.target.value) || 0 })} />
+                               onChange={e => onUpdateLine?.(i, { sellPrice: parseFloat(e.target.value) || 0 })} />
                       </div>
                     </div>
                   </div>
