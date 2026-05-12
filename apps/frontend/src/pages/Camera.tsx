@@ -18,29 +18,38 @@ type Props = {
 //   done      — got a result, showing the green pill briefly
 type Phase = 'framing' | 'capturing' | 'scanning' | 'done';
 
-export function Camera({ category, onDetected, onClose, onBack: _onBack }: Props) {
+export function Camera({ category, onDetected, onClose, onBack }: Props) {
   const { t } = useT();
   const [phase, setPhase] = useState<Phase>('framing');
   const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<'off' | 'on'>('off');
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Try to start the back camera. If it fails (desktop, no permission), we
-  // fall back to a synthetic still that mimics the prototype's RAM-stick
-  // illustration — the OCR call still runs against the stub so the flow is
-  // demoable everywhere.
+  // Start (or restart) the camera with the current facingMode. Called once on
+  // mount and again whenever the user flips the camera.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) return;
+      // Stop any active stream before requesting a new one.
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
+          video: { facingMode: { ideal: facingMode } },
           audio: false,
         });
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
+        // Re-apply torch on the freshly attached track (does nothing if unsupported).
+        try {
+          const track = stream.getVideoTracks()[0];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          track?.applyConstraints({ advanced: [{ torch: flash === 'on' } as any] }).catch(() => {});
+        } catch { /* ignore */ }
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});
@@ -54,7 +63,16 @@ export function Camera({ category, onDetected, onClose, onBack: _onBack }: Props
       streamRef.current?.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     };
-  }, []);
+  }, [facingMode]);
+
+  // Apply the torch constraint when flash toggles. Most desktop browsers and
+  // some mobile front-cameras don't support torch — we swallow the rejection.
+  useEffect(() => {
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    if (!track || typeof track.applyConstraints !== 'function') return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    track.applyConstraints({ advanced: [{ torch: flash === 'on' } as any] }).catch(() => {});
+  }, [flash]);
 
   const captureFrame = async (): Promise<Blob | null> => {
     const v = videoRef.current;
@@ -110,13 +128,23 @@ export function Camera({ category, onDetected, onClose, onBack: _onBack }: Props
     <div className="phone-app">
     <div className="ph-cam-screen">
       <div className="ph-cam-top">
-        <button onClick={onClose} className="ph-cam-pill" style={{ background: 'rgba(255,255,255,0.12)' }}>
+        <button
+          onClick={onBack ?? onClose}
+          className="ph-cam-pill"
+          style={{ background: 'rgba(255,255,255,0.12)' }}
+          title={onBack ? t('signInBack') : t('cancel')}
+        >
           <Icon name="x" size={14} />
         </button>
         <span className="ph-cam-pill">
           <span className="ai-dot" /> {t('aiScan')} · {category}
         </span>
-        <button className="ph-cam-pill" style={{ background: 'rgba(255,255,255,0.12)', width: 36, padding: 0, height: 30, justifyContent: 'center' }}>
+        <button
+          className="ph-cam-pill"
+          style={{ background: flash === 'on' ? 'rgba(255,220,80,0.85)' : 'rgba(255,255,255,0.12)', width: 36, padding: 0, height: 30, justifyContent: 'center', color: flash === 'on' ? '#1a1300' : 'white' }}
+          onClick={() => setFlash(f => f === 'on' ? 'off' : 'on')}
+          title={t('cameraFlash')}
+        >
           <Icon name="flash" size={14} />
         </button>
       </div>
@@ -191,7 +219,7 @@ export function Camera({ category, onDetected, onClose, onBack: _onBack }: Props
       </div>
 
       <div className="ph-cam-bottom">
-        <button className="ph-cam-thumbsq" onClick={onUpload} title="Upload from library">
+        <button className="ph-cam-thumbsq" onClick={onUpload} title={t('cameraUpload')}>
           <Icon name="upload" size={16} />
         </button>
         <button
@@ -199,7 +227,11 @@ export function Camera({ category, onDetected, onClose, onBack: _onBack }: Props
           onClick={onShoot}
           disabled={phase !== 'framing'}
         />
-        <button className="ph-cam-thumbsq" title="Switch camera">
+        <button
+          className="ph-cam-thumbsq"
+          onClick={() => setFacingMode(m => m === 'environment' ? 'user' : 'environment')}
+          title={t('cameraSwitch')}
+        >
           <Icon name="rotate" size={16} />
         </button>
       </div>

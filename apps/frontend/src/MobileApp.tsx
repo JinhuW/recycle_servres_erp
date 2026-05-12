@@ -140,10 +140,6 @@ function Shell() {
     setCapture(c => c.phase === 'review' ? { ...c, lines: c.lines.filter((_, i) => i !== idx) } : c);
   };
 
-  const updateLine = (idx: number, patch: Partial<DraftLine>) => {
-    setCapture(c => c.phase === 'review' ? { ...c, lines: c.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) } : c);
-  };
-
   const submitOrder = async (meta: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => {
     if (capture.phase !== 'review') return;
     try {
@@ -256,7 +252,6 @@ function Shell() {
         onAddItem={addAnotherItem}
         onEditLine={editLine}
         onRemoveLine={removeLine}
-        onUpdateLine={updateLine}
         onSubmit={submitOrder}
         onCancel={cancelCapture}
       />
