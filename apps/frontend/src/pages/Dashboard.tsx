@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
+import { usePhScrolled } from '../lib/usePhScrolled';
 import { PhSparkline } from '../components/PhSparkline';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
@@ -24,6 +25,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
     api.get<DashboardData>('/api/dashboard').then(setData).catch(console.error);
   }, []);
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolled = usePhScrolled(scrollRef);
+
   if (!user) return null;
   const isManager = user.role === 'manager';
 
@@ -33,7 +37,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
 
   return (
     <>
-      <div className="ph-header">
+      <div className={'ph-header' + (scrolled ? ' scrolled' : '')}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div className="brand-mark" style={{ width: 32, height: 32, fontSize: 13 }}>RS</div>
           <div>
@@ -57,7 +61,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
         </button>
       </div>
 
-      <div className="ph-scroll">
+      <div className="ph-scroll" ref={scrollRef}>
         <div style={{ marginTop: 4 }}>
           <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.025em', margin: 0 }}>
             {isManager ? t('teamPerformance') : t('yourNumbers')}
@@ -75,7 +79,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           <div className="ph-kpi-label">{isManager ? t('grossProfit') : t('profitYouGenerated')}</div>
           <div className="ph-kpi-value" style={{ fontSize: 30, color: 'var(--accent-strong)' }}>{fmtUSD0(totals.profit)}</div>
           <div className="ph-kpi-trend" style={{ color: 'var(--pos)' }}>
-            <Icon name="arrowUp" size={11} /> 12.4% vs last 30d
+            <Icon name="arrowUp" size={11} /> {t('vsLast30', { pct: '—' })}
           </div>
           <PhSparkline data={data?.weeks ?? []} />
         </div>

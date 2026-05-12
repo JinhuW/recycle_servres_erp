@@ -242,8 +242,8 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 30 }}>
             <div className="brand-mark" style={{ width: 44, height: 44, fontSize: 18 }}>RS</div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>Recycle Servers</div>
-              <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>Inventory & Profit</div>
+              <div style={{ fontWeight: 600, fontSize: 16 }}>{t('appBrand')}</div>
+              <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('brandSub')}</div>
             </div>
           </div>
 
@@ -300,7 +300,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {accounts.length === 0 && (
-                  <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', padding: 14 }}>Loading demo accounts…</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', padding: 14 }}>{t('loadingAccounts')}</div>
                 )}
                 {accounts.map(u => (
                   <button key={u.id} className="ph-cat-card" disabled={submitting} onClick={() => loginAs(u)}>
@@ -308,18 +308,18 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{u.name}</div>
                       <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                        {u.role === 'manager' ? 'Manager · Full access' : 'Purchaser · Submit & view own'}
+                        {u.role === 'manager' ? t('managerFullAccess') : t('purchaserOwn')}
                       </div>
                     </div>
                     <span className="chip">
                       <Icon name={u.role === 'manager' ? 'shield' : 'user'} size={12} />
-                      {u.role === 'manager' ? 'Admin' : 'Purchaser'}
+                      {u.role === 'manager' ? t('role_admin') : t('role_purchaser')}
                     </span>
                   </button>
                 ))}
               </div>
               <button onClick={() => setPicking(false)} style={{ marginTop: 12, fontSize: 12, color: 'var(--fg-muted)', background: 'none', border: 'none', alignSelf: 'flex-start' }}>
-                <Icon name="chevronLeft" size={11} /> {t('back')}
+                <Icon name="chevronLeft" size={11} /> {t('signInBack')}
               </button>
             </>
           )}
