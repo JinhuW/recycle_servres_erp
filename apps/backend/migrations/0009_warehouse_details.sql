@@ -11,8 +11,8 @@ ALTER TABLE warehouses
   ADD COLUMN IF NOT EXISTS cutoff_local   TEXT,  -- 'HH:MM' in the warehouse's tz
   ADD COLUMN IF NOT EXISTS sqft           INTEGER;
 
--- Backfill the values that were hardcoded in the frontend, keyed by short code.
 -- Manager phone/email were not in the hardcoded data, so they stay NULL.
+-- ── Backfill ────────────────────────────────────────────────────────────────
 
 UPDATE warehouses SET
   address      = '2401 E. 8th St, Los Angeles, CA 90021',
@@ -20,7 +20,7 @@ UPDATE warehouses SET
   timezone     = 'America/Los_Angeles',
   cutoff_local = '15:00',
   sqft         = 14200
-WHERE short = 'LA1';
+WHERE id = 'WH-LA1';
 
 UPDATE warehouses SET
   address      = '6900 Ambassador Row, Dallas, TX 75247',
@@ -28,7 +28,7 @@ UPDATE warehouses SET
   timezone     = 'America/Chicago',
   cutoff_local = '14:00',
   sqft         = 9800
-WHERE short = 'DAL';
+WHERE id = 'WH-DAL';
 
 UPDATE warehouses SET
   address      = '180 Raymond Blvd, Newark, NJ 07102',
@@ -36,7 +36,7 @@ UPDATE warehouses SET
   timezone     = 'America/New_York',
   cutoff_local = '16:00',
   sqft         = 11600
-WHERE short = 'NJ2';
+WHERE id = 'WH-NJ2';
 
 UPDATE warehouses SET
   address      = 'Unit 12, Goodman Tsing Yi, Hong Kong',
@@ -44,7 +44,7 @@ UPDATE warehouses SET
   timezone     = 'Asia/Hong_Kong',
   cutoff_local = '17:00',
   sqft         = 8200
-WHERE short = 'HK';
+WHERE id = 'WH-HK';
 
 UPDATE warehouses SET
   address      = 'Schiphol Logistics Park, 1118 BE Amsterdam',
@@ -52,4 +52,4 @@ UPDATE warehouses SET
   timezone     = 'Europe/Amsterdam',
   cutoff_local = '16:00',
   sqft         = 7400
-WHERE short = 'AMS';
+WHERE id = 'WH-AMS';
