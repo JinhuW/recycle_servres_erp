@@ -10,9 +10,12 @@ type Stats = { count: number; profit: number; commission: number };
 
 type Props = {
   onOpenLanguage: () => void;
+  onOpenNotifications: () => void;
+  onOpenAbout: () => void;
+  onOpenSecurity: () => void;
 };
 
-export function Profile({ onOpenLanguage }: Props) {
+export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity }: Props) {
   const { t, lang } = useT();
   const { user, logout } = useAuth();
   const [stats, setStats] = useState<Stats>({ count: 0, profit: 0, commission: 0 });
@@ -25,8 +28,8 @@ export function Profile({ onOpenLanguage }: Props) {
 
   type Item = { id: string; icon: IconName; label: string; sub: string; trailing?: JSX.Element; onClick?: () => void };
   const items: Item[] = [
-    { id: 'notif', icon: 'bell', label: t('notifications'), sub: t('notificationsSub') },
-    { id: 'sec',   icon: 'lock', label: t('security'),      sub: t('securitySub') },
+    { id: 'notif', icon: 'bell', label: t('notifications'), sub: t('notificationsSub'), onClick: onOpenNotifications },
+    { id: 'sec',   icon: 'lock', label: t('security'),      sub: t('securitySub'),      onClick: onOpenSecurity },
     {
       id: 'lang',  icon: 'globe', label: t('language'),     sub: lang === 'zh' ? '简体中文' : 'English',
       trailing: (
@@ -36,7 +39,7 @@ export function Profile({ onOpenLanguage }: Props) {
       ),
       onClick: onOpenLanguage,
     },
-    { id: 'about', icon: 'info', label: t('about'),         sub: t('aboutSub') },
+    { id: 'about', icon: 'info', label: t('about'),         sub: t('aboutSub'),         onClick: onOpenAbout },
   ];
 
   return (

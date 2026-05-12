@@ -1,5 +1,6 @@
 import { Icon, type IconName } from './Icon';
 import type { Notification } from '../lib/types';
+import { useT } from '../lib/i18n';
 
 type Props = {
   items: Notification[];
@@ -35,6 +36,7 @@ function relTime(iso: string) {
 }
 
 export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
+  const { t } = useT();
   const unreadCount = items.filter(n => n.unread).length;
   return (
     <>
@@ -43,9 +45,9 @@ export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
         <div className="ph-sheet-grabber" />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 14px' }}>
           <div>
-            <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>Notifications</div>
+            <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('notifTitle')}</div>
             <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+              {unreadCount > 0 ? t('notifNUnread', { n: unreadCount }) : t('notifAllCaught')}
             </div>
           </div>
           {unreadCount > 0 && (
@@ -57,7 +59,7 @@ export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
                 fontFamily: 'inherit', padding: 4, cursor: 'pointer',
               }}
             >
-              Mark all read
+              {t('notifMarkAllRead')}
             </button>
           )}
         </div>
@@ -113,7 +115,7 @@ export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
           textAlign: 'center', fontSize: 11.5, color: 'var(--fg-subtle)',
           padding: '12px 0 4px', borderTop: '1px solid var(--border)', marginTop: 4,
         }}>
-          Manage alert types in Profile · Notifications
+          {t('notifManageHint')}
         </div>
       </div>
     </>

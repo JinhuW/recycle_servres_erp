@@ -4,6 +4,7 @@ import { PhTabBar, type View } from './components/PhTabBar';
 import { PhCategorySheet } from './components/PhCategorySheet';
 import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
+import { PhAboutSheet } from './components/PhAboutSheet';
 
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -46,6 +47,7 @@ function Shell() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
+  const [aboutSheet, setAboutSheet] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
 
   // Load notifications when the user is signed in.
@@ -282,7 +284,14 @@ function Shell() {
       {view === 'history' && <Orders onEdit={startEdit} onToast={showToast} />}
       {view === 'market' && <Market />}
       {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
-      {view === 'me' && <Profile onOpenLanguage={() => setLangSheet(true)} />}
+      {view === 'me' && (
+        <Profile
+          onOpenLanguage={() => setLangSheet(true)}
+          onOpenNotifications={() => setNotifSheet(true)}
+          onOpenAbout={() => setAboutSheet(true)}
+          onOpenSecurity={() => showToast(t('securityNoticeBody'))}
+        />
+      )}
 
       {capture.phase === 'category' && (
         <PhCategorySheet onPick={pickCategory} onClose={cancelCapture} />
@@ -298,6 +307,8 @@ function Shell() {
           }}
         />
       )}
+
+      {aboutSheet && <PhAboutSheet onClose={() => setAboutSheet(false)} />}
 
       {langSheet && (
         <PhLanguageSheet onClose={(picked) => {

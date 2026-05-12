@@ -5,12 +5,27 @@ import type { Lang } from '../lib/types';
 
 type Props = { onClose: (picked: Lang | null) => void };
 
+const LS_KEY = 'rs.langFollowSystem';
+
+function systemLang(): Lang {
+  if (typeof navigator === 'undefined') return 'en';
+  const n = (navigator.language || 'en').toLowerCase();
+  return n.startsWith('zh') ? 'zh' : 'en';
+}
+
 export function PhLanguageSheet({ onClose }: Props) {
   const { lang, setLang, t } = useT();
   const [draft, setDraft] = useState<Lang>(lang);
-  const [followSystem, setFollowSystem] = useState(false);
+  const [followSystem, setFollowSystem] = useState<boolean>(() => {
+    try { return localStorage.getItem(LS_KEY) === '1'; } catch { return false; }
+  });
 
-  const apply = () => { setLang(draft); onClose(draft); };
+  const apply = () => {
+    try { localStorage.setItem(LS_KEY, followSystem ? '1' : '0'); } catch { /* ignore */ }
+    const final: Lang = followSystem ? systemLang() : draft;
+    setLang(final);
+    onClose(final);
+  };
 
   const options: { id: Lang; title: string; sub: string; flag: JSX.Element }[] = [
     {
@@ -56,12 +71,12 @@ export function PhLanguageSheet({ onClose }: Props) {
           <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('langTitle')}</div>
           <button
             onClick={apply}
-            disabled={draft === lang}
+            disabled={!followSystem && draft === lang}
             style={{
               background: 'transparent', border: 'none',
-              color: draft === lang ? 'var(--fg-subtle)' : 'var(--accent-strong)',
+              color: (!followSystem && draft === lang) ? 'var(--fg-subtle)' : 'var(--accent-strong)',
               fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4,
-              cursor: draft === lang ? 'default' : 'pointer',
+              cursor: (!followSystem && draft === lang) ? 'default' : 'pointer',
             }}
           >
             {t('langDone')}
