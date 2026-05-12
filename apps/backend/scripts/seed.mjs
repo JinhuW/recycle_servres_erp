@@ -45,11 +45,46 @@ const USERS = [
 ];
 
 const WAREHOUSES = [
-  { id: 'WH-LA1', name: 'Los Angeles · LA1', short: 'LA1', region: 'US-West' },
-  { id: 'WH-DAL', name: 'Dallas · DAL',       short: 'DAL', region: 'US-Central' },
-  { id: 'WH-NJ2', name: 'Newark · NJ2',       short: 'NJ2', region: 'US-East' },
-  { id: 'WH-HK',  name: 'Hong Kong · HK',     short: 'HK',  region: 'APAC' },
-  { id: 'WH-AMS', name: 'Amsterdam · AMS',    short: 'AMS', region: 'EMEA' },
+  { id: 'WH-LA1', name: 'Los Angeles · LA1', short: 'LA1', region: 'US-West',
+    address: '2401 E. 8th St, Los Angeles, CA 90021',
+    manager: 'Operations · West',
+    manager_phone: null,
+    manager_email: null,
+    timezone: 'America/Los_Angeles',
+    cutoff_local: '15:00',
+    sqft: 14200 },
+  { id: 'WH-DAL', name: 'Dallas · DAL', short: 'DAL', region: 'US-Central',
+    address: '6900 Ambassador Row, Dallas, TX 75247',
+    manager: 'Operations · Central',
+    manager_phone: null,
+    manager_email: null,
+    timezone: 'America/Chicago',
+    cutoff_local: '14:00',
+    sqft: 9800 },
+  { id: 'WH-NJ2', name: 'Newark · NJ2', short: 'NJ2', region: 'US-East',
+    address: '180 Raymond Blvd, Newark, NJ 07102',
+    manager: 'Operations · East',
+    manager_phone: null,
+    manager_email: null,
+    timezone: 'America/New_York',
+    cutoff_local: '16:00',
+    sqft: 11600 },
+  { id: 'WH-HK', name: 'Hong Kong · HK', short: 'HK', region: 'APAC',
+    address: 'Unit 12, Goodman Tsing Yi, Hong Kong',
+    manager: 'APAC Hub',
+    manager_phone: null,
+    manager_email: null,
+    timezone: 'Asia/Hong_Kong',
+    cutoff_local: '17:00',
+    sqft: 8200 },
+  { id: 'WH-AMS', name: 'Amsterdam · AMS', short: 'AMS', region: 'EMEA',
+    address: 'Schiphol Logistics Park, 1118 BE Amsterdam',
+    manager: 'EMEA Hub',
+    manager_phone: null,
+    manager_email: null,
+    timezone: 'Europe/Amsterdam',
+    cutoff_local: '16:00',
+    sqft: 7400 },
 ];
 
 const RAM_BRANDS = ['Samsung', 'Hynix', 'Micron', 'Kingston', 'Crucial', 'Corsair'];
@@ -62,6 +97,11 @@ const SSD_BRANDS = ['Samsung','Intel','Micron','WD','Seagate','Kioxia'];
 const SSD_IFACE  = ['SATA','SAS','NVMe','U.2'];
 const SSD_FORM   = ['2.5"','M.2 2280','M.2 22110','U.2','AIC'];
 const SSD_CAP    = ['240GB','480GB','960GB','1.92TB','3.84TB','7.68TB'];
+const HDD_BRANDS = ['Seagate','WD','Toshiba','HGST'];
+const HDD_IFACE  = ['SATA','SAS'];
+const HDD_FORM   = ['2.5"','3.5"'];
+const HDD_CAP    = ['500GB','1TB','2TB','4TB','8TB','16TB'];
+const HDD_RPM    = [5400, 7200, 10000, 15000];
 const CONDITIONS = ['New','Pulled — Tested','Pulled — Untested','Used'];
 // Per-line statuses match the desktop bundle's data.jsx:
 //   Draft (purchaser is preparing) → In Transit → Reviewing → Done.
@@ -88,7 +128,7 @@ function buildSubmissions() {
   let id = 1000;
   for (let i = 0; i < 84; i++) {
     const user = USERS[randInt(1, 5)];
-    const cat = ['RAM','RAM','RAM','SSD','SSD','Other'][randInt(0,5)];
+    const cat = ['RAM','RAM','SSD','SSD','HDD','HDD','Other'][randInt(0,6)];
     const daysAgo = randInt(0, 60);
     const date = new Date(now.getTime() - daysAgo*86400000 - randInt(0,86400)*1000);
     const qty = randInt(1, 12);
@@ -111,8 +151,21 @@ function buildSubmissions() {
         partNumber: `${brand.slice(0,3).toUpperCase()}-${cap.replace('TB','000').replace('GB','')}-${randInt(100,999)}`,
         condition: pick(CONDITIONS),
         unitCost: +(randInt(25,480)+rand()).toFixed(2),
+        health: +(60 + rand()*40).toFixed(1),
       });
       row.sellPrice = +(row.unitCost * (1.22 + rand()*0.5)).toFixed(2);
+    } else if (cat === 'HDD') {
+      const brand = pick(HDD_BRANDS), cap = pick(HDD_CAP);
+      Object.assign(row, {
+        brand, capacity: cap,
+        interface: pick(HDD_IFACE), formFactor: pick(HDD_FORM),
+        rpm: pick(HDD_RPM),
+        partNumber: `${brand.slice(0,3).toUpperCase()}-${cap.replace('TB','000').replace('GB','')}-${randInt(100,999)}`,
+        condition: pick(CONDITIONS),
+        unitCost: +(randInt(15,320)+rand()).toFixed(2),
+        health: +(60 + rand()*40).toFixed(1),
+      });
+      row.sellPrice = +(row.unitCost * (1.20 + rand()*0.45)).toFixed(2);
     } else {
       const items = ['CPU — Xeon Gold 6248','PSU — 750W Platinum','NIC — Mellanox CX5','GPU Cooler','Heatsink — 2U','Riser Card 1x16'];
       Object.assign(row, {
@@ -177,6 +230,8 @@ function buildOrders(subs) {
           sell_price: l.sellPrice,
           status: l.status,
           position: idx,
+          health: l.health ?? null,
+          rpm: l.rpm ?? null,
         })),
       });
       i += size;
@@ -190,27 +245,27 @@ function buildRefPrices() {
   const out = [];
   let id = 5000;
   const ramSpec = [
-    { brand:'Samsung', type:'DDR4', cap:'32GB', cls:'RDIMM', speed:'3200', base:78 },
-    { brand:'Samsung', type:'DDR4', cap:'64GB', cls:'RDIMM', speed:'3200', base:142 },
-    { brand:'Samsung', type:'DDR5', cap:'32GB', cls:'RDIMM', speed:'4800', base:165 },
-    { brand:'Samsung', type:'DDR5', cap:'64GB', cls:'RDIMM', speed:'5600', base:285 },
-    { brand:'Hynix',   type:'DDR4', cap:'32GB', cls:'RDIMM', speed:'2933', base:72 },
-    { brand:'Hynix',   type:'DDR4', cap:'64GB', cls:'LRDIMM',speed:'2666', base:128 },
-    { brand:'Hynix',   type:'DDR5', cap:'32GB', cls:'RDIMM', speed:'4800', base:158 },
-    { brand:'Micron',  type:'DDR4', cap:'16GB', cls:'RDIMM', speed:'2666', base:38 },
-    { brand:'Micron',  type:'DDR4', cap:'32GB', cls:'RDIMM', speed:'3200', base:75 },
-    { brand:'Micron',  type:'DDR5', cap:'64GB', cls:'RDIMM', speed:'4800', base:270 },
-    { brand:'Kingston',type:'DDR4', cap:'16GB', cls:'UDIMM', speed:'3200', base:32 },
-    { brand:'Kingston',type:'DDR4', cap:'32GB', cls:'UDIMM', speed:'3200', base:68 },
-    { brand:'Samsung', type:'DDR3', cap:'8GB',  cls:'RDIMM', speed:'1866', base:12 },
-    { brand:'Hynix',   type:'DDR3', cap:'16GB', cls:'RDIMM', speed:'1600', base:18 },
+    { brand:'Samsung', type:'DDR4', cap:'32GB', cls:'RDIMM', rank:'2Rx4', speed:'3200', base:78 },
+    { brand:'Samsung', type:'DDR4', cap:'64GB', cls:'RDIMM', rank:'2Rx4', speed:'3200', base:142 },
+    { brand:'Samsung', type:'DDR5', cap:'32GB', cls:'RDIMM', rank:'2Rx8', speed:'4800', base:165 },
+    { brand:'Samsung', type:'DDR5', cap:'64GB', cls:'RDIMM', rank:'2Rx4', speed:'5600', base:285 },
+    { brand:'Hynix',   type:'DDR4', cap:'32GB', cls:'RDIMM', rank:'2Rx4', speed:'2933', base:72 },
+    { brand:'Hynix',   type:'DDR4', cap:'64GB', cls:'LRDIMM',rank:'4Rx4', speed:'2666', base:128 },
+    { brand:'Hynix',   type:'DDR5', cap:'32GB', cls:'RDIMM', rank:'2Rx8', speed:'4800', base:158 },
+    { brand:'Micron',  type:'DDR4', cap:'16GB', cls:'RDIMM', rank:'1Rx4', speed:'2666', base:38 },
+    { brand:'Micron',  type:'DDR4', cap:'32GB', cls:'RDIMM', rank:'2Rx8', speed:'3200', base:75 },
+    { brand:'Micron',  type:'DDR5', cap:'64GB', cls:'RDIMM', rank:'2Rx4', speed:'4800', base:270 },
+    { brand:'Kingston',type:'DDR4', cap:'16GB', cls:'UDIMM', rank:'1Rx8', speed:'3200', base:32 },
+    { brand:'Kingston',type:'DDR4', cap:'32GB', cls:'UDIMM', rank:'2Rx8', speed:'3200', base:68 },
+    { brand:'Samsung', type:'DDR3', cap:'8GB',  cls:'RDIMM', rank:'2Rx8', speed:'1866', base:12 },
+    { brand:'Hynix',   type:'DDR3', cap:'16GB', cls:'RDIMM', rank:'2Rx4', speed:'1600', base:18 },
   ];
   ramSpec.forEach(r => {
     const variance = 0.06 + rand()*0.04;
     const trend = (rand() - 0.45) * 0.18;
     out.push({
       id: 'RP-' + (id++), category: 'RAM',
-      brand: r.brand, type: r.type, capacity: r.cap, classification: r.cls, speed: r.speed,
+      brand: r.brand, type: r.type, capacity: r.cap, classification: r.cls, rank: r.rank, speed: r.speed,
       part_number: makePartNumber(r.brand, r.type, r.cap),
       label: `${r.brand} ${r.cap} ${r.type}`,
       sub_label: `${r.cls} · ${r.speed}MHz`,
@@ -257,6 +312,38 @@ function buildRefPrices() {
       source: pick(['Internal — last 30d','Broker quotes','Market index','Supplier list']),
       stock: randInt(0,60),
       demand: ['high','medium','medium','low'][randInt(0,3)],
+      updated_at: new Date(Date.now() - randInt(1,14)*86400000),
+    });
+  });
+
+  const hddSpec = [
+    { brand:'Seagate', cap:'2TB',  iface:'SATA', form:'3.5"', rpm:7200, base:35 },
+    { brand:'Seagate', cap:'4TB',  iface:'SAS',  form:'3.5"', rpm:7200, base:62 },
+    { brand:'Seagate', cap:'8TB',  iface:'SAS',  form:'3.5"', rpm:7200, base:128 },
+    { brand:'WD',      cap:'4TB',  iface:'SATA', form:'3.5"', rpm:5400, base:48 },
+    { brand:'WD',      cap:'8TB',  iface:'SATA', form:'3.5"', rpm:7200, base:115 },
+    { brand:'Toshiba', cap:'2TB',  iface:'SATA', form:'2.5"', rpm:7200, base:42 },
+    { brand:'HGST',    cap:'4TB',  iface:'SAS',  form:'3.5"', rpm:10000,base:78 },
+    { brand:'HGST',    cap:'16TB', iface:'SAS',  form:'3.5"', rpm:7200, base:285 },
+  ];
+  hddSpec.forEach(h => {
+    const variance = 0.08 + rand()*0.05;
+    const trend = (rand() - 0.5) * 0.12;
+    out.push({
+      id: 'RP-' + (id++), category: 'HDD',
+      brand: h.brand, capacity: h.cap, interface: h.iface, form_factor: h.form, rpm: h.rpm,
+      part_number: `${h.brand.slice(0,3).toUpperCase()}-${h.cap.replace('TB','000').replace('GB','')}-${randInt(100,999)}`,
+      label: `${h.brand} ${h.cap}`,
+      sub_label: `${h.iface} · ${h.form} · ${h.rpm}rpm`,
+      target: +h.base.toFixed(2),
+      low_price: +(h.base * (1 - variance)).toFixed(2),
+      high_price: +(h.base * (1 + variance)).toFixed(2),
+      avg_sell: +(h.base * (1.25 + rand()*0.3)).toFixed(2),
+      trend: +trend.toFixed(3),
+      samples: randInt(4,30),
+      source: pick(['Internal — last 30d','Broker quotes','Market index','Supplier list']),
+      stock: randInt(0,40),
+      demand: ['medium','medium','low','low'][randInt(0,3)],
       updated_at: new Date(Date.now() - randInt(1,14)*86400000),
     });
   });
@@ -344,9 +431,91 @@ try {
   console.log('· Seeding warehouses…');
   for (const w of WAREHOUSES) {
     await sql`
-      INSERT INTO warehouses (id, name, short, region)
-      VALUES (${w.id}, ${w.name}, ${w.short}, ${w.region})
-      ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, short=EXCLUDED.short, region=EXCLUDED.region
+      INSERT INTO warehouses (
+        id, name, short, region,
+        address, manager, manager_phone, manager_email,
+        timezone, cutoff_local, sqft
+      )
+      VALUES (
+        ${w.id}, ${w.name}, ${w.short}, ${w.region},
+        ${w.address}, ${w.manager}, ${w.manager_phone}, ${w.manager_email},
+        ${w.timezone}, ${w.cutoff_local}, ${w.sqft}
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name=EXCLUDED.name, short=EXCLUDED.short, region=EXCLUDED.region,
+        address=EXCLUDED.address, manager=EXCLUDED.manager,
+        manager_phone=EXCLUDED.manager_phone, manager_email=EXCLUDED.manager_email,
+        timezone=EXCLUDED.timezone, cutoff_local=EXCLUDED.cutoff_local, sqft=EXCLUDED.sqft
+    `;
+  }
+
+  console.log('· Seeding lookup tables…');
+  // Catalog dropdowns — same option lists the frontend constants used to
+  // hardcode in apps/frontend/src/lib/catalog.ts.
+  const CATALOG_GROUPS = {
+    RAM_BRAND:     RAM_BRANDS,
+    RAM_TYPE:      RAM_TYPES,
+    RAM_CLASS:     RAM_CLASS,
+    RAM_RANK:      RAM_RANK,
+    RAM_CAP:       RAM_CAP,
+    RAM_SPEED:     RAM_SPEED,
+    SSD_BRAND:     SSD_BRANDS,
+    SSD_INTERFACE: SSD_IFACE,
+    SSD_FORM:      SSD_FORM,
+    SSD_CAP:       SSD_CAP,
+    HDD_BRAND:     HDD_BRANDS,
+    HDD_INTERFACE: HDD_IFACE,
+    HDD_FORM:      HDD_FORM,
+    HDD_CAP:       HDD_CAP,
+    HDD_RPM:       HDD_RPM.map(String),
+    CONDITION:     CONDITIONS,
+  };
+  await sql`DELETE FROM catalog_options`;
+  for (const [group, values] of Object.entries(CATALOG_GROUPS)) {
+    for (let i = 0; i < values.length; i++) {
+      await sql`
+        INSERT INTO catalog_options ("group", value, position)
+        VALUES (${group}, ${values[i]}, ${i})
+      `;
+    }
+  }
+
+  const PAYMENT_TERMS = ['Prepay', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
+  await sql`DELETE FROM payment_terms`;
+  for (let i = 0; i < PAYMENT_TERMS.length; i++) {
+    await sql`
+      INSERT INTO payment_terms (label, position)
+      VALUES (${PAYMENT_TERMS[i]}, ${i})
+    `;
+  }
+
+  const PRICE_SOURCES = [
+    { id: 'internal-sales',   label: 'Internal sales (last 30d)' },
+    { id: 'broker-techsurplus', label: 'Broker quote — TechSurplus' },
+    { id: 'broker-servermonkey', label: 'Broker quote — ServerMonkey' },
+    { id: 'index-ramspot',    label: 'Market index — RAM-spot.io' },
+  ];
+  await sql`DELETE FROM price_sources`;
+  for (let i = 0; i < PRICE_SOURCES.length; i++) {
+    const s = PRICE_SOURCES[i];
+    await sql`
+      INSERT INTO price_sources (id, label, position)
+      VALUES (${s.id}, ${s.label}, ${i})
+    `;
+  }
+
+  const SELL_ORDER_STATUSES = [
+    { id: 'Draft',            short: 'Draft',        tone: 'muted', needsMeta: false },
+    { id: 'Shipped',          short: 'Shipped',      tone: 'info',  needsMeta: true  },
+    { id: 'Awaiting payment', short: 'Awaiting pay', tone: 'warn',  needsMeta: true  },
+    { id: 'Done',             short: 'Done',         tone: 'pos',   needsMeta: true  },
+  ];
+  await sql`DELETE FROM sell_order_statuses`;
+  for (let i = 0; i < SELL_ORDER_STATUSES.length; i++) {
+    const s = SELL_ORDER_STATUSES[i];
+    await sql`
+      INSERT INTO sell_order_statuses (id, label, short_label, tone, needs_meta, position)
+      VALUES (${s.id}, ${s.id}, ${s.short}, ${s.tone}, ${s.needsMeta}, ${i})
     `;
   }
 
@@ -355,15 +524,17 @@ try {
   for (const p of buildRefPrices()) {
     await sql`
       INSERT INTO ref_prices (
-        id, category, brand, capacity, type, classification, speed,
+        id, category, brand, capacity, type, classification, rank, speed,
         interface, form_factor, description, part_number,
         label, sub_label, target, low_price, high_price, avg_sell,
-        trend, samples, source, stock, demand, history, updated_at
+        trend, samples, source, stock, demand, history, updated_at,
+        rpm
       ) VALUES (
-        ${p.id}, ${p.category}, ${p.brand ?? null}, ${p.capacity ?? null}, ${p.type ?? null}, ${p.classification ?? null}, ${p.speed ?? null},
+        ${p.id}, ${p.category}, ${p.brand ?? null}, ${p.capacity ?? null}, ${p.type ?? null}, ${p.classification ?? null}, ${p.rank ?? null}, ${p.speed ?? null},
         ${p.interface ?? null}, ${p.form_factor ?? null}, ${p.description ?? null}, ${p.part_number},
         ${p.label}, ${p.sub_label}, ${p.target}, ${p.low_price}, ${p.high_price}, ${p.avg_sell},
-        ${p.trend}, ${p.samples}, ${p.source}, ${p.stock}, ${p.demand}, ${sql.json(p.history)}, ${p.updated_at}
+        ${p.trend}, ${p.samples}, ${p.source}, ${p.stock}, ${p.demand}, ${sql.json(p.history)}, ${p.updated_at},
+        ${p.rpm ?? null}
       )
     `;
   }
@@ -382,11 +553,11 @@ try {
         INSERT INTO order_lines (
           order_id, category, brand, capacity, type, classification, rank, speed,
           interface, form_factor, description, part_number, condition, qty,
-          unit_cost, sell_price, status, position
+          unit_cost, sell_price, status, position, health, rpm
         ) VALUES (
           ${o.id}, ${l.category}, ${l.brand}, ${l.capacity}, ${l.type}, ${l.classification}, ${l.rank_}, ${l.speed},
           ${l.interface}, ${l.form_factor}, ${l.description}, ${l.part_number}, ${l.condition}, ${l.qty},
-          ${l.unit_cost}, ${l.sell_price}, ${l.status}, ${l.position}
+          ${l.unit_cost}, ${l.sell_price}, ${l.status}, ${l.position}, ${l.health}, ${l.rpm}
         )
       `;
     }
@@ -469,9 +640,11 @@ try {
       const l = lines[i];
       const label = l.category === 'RAM' ? `${l.brand} ${l.capacity} ${l.type}`
                   : l.category === 'SSD' ? `${l.brand} ${l.capacity}`
+                  : l.category === 'HDD' ? `${l.brand} ${l.capacity}`
                   : l.description;
       const sub   = l.category === 'RAM' ? `${l.classification ?? ''} · ${l.speed ?? ''}MHz`
                   : l.category === 'SSD' ? `${l.interface ?? ''} · ${l.form_factor ?? ''}`
+                  : l.category === 'HDD' ? `${l.interface ?? ''} · ${l.form_factor ?? ''} · ${l.rpm ?? ''}rpm`
                   : l.part_number;
       await sql`
         INSERT INTO sell_order_lines (
