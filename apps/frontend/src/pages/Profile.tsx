@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { fmtUSD0 } from '../lib/format';
+import { usePhScrolled } from '../lib/usePhScrolled';
 
 type Stats = { count: number; profit: number; commission: number };
 
@@ -19,6 +20,8 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
   const { t, lang } = useT();
   const { user, logout } = useAuth();
   const [stats, setStats] = useState<Stats>({ count: 0, profit: 0, commission: 0 });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
     api.get<{ stats: Stats }>('/api/me').then(r => setStats(r.stats)).catch(console.error);
@@ -44,8 +47,8 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
 
   return (
     <>
-      <PhHeader title={t('profile')} />
-      <div className="ph-scroll">
+      <PhHeader title={t('profile')} scrolled={scrolled} />
+      <div className="ph-scroll" ref={scrollRef}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0 16px' }}>
           <div className="avatar xl">{user.initials}</div>
           <div style={{ fontSize: 18, fontWeight: 600, marginTop: 12 }}>{user.name}</div>

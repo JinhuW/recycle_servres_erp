@@ -186,7 +186,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       </div>
 
       <div className="ph-action-bar">
-        <button className="ph-btn ghost" onClick={onCancel}>{t('cancel')}</button>
+        <button className="ph-btn ghost" onClick={onBack ?? onCancel}>{t('cancel')}</button>
         <button className="ph-btn dark" onClick={save}>
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>

@@ -192,7 +192,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
 
               <div className="col" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {accounts.length === 0 && (
-                  <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', padding: 14 }}>Loading demo accounts…</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', padding: 14 }}>{t('loadingAccounts')}</div>
                 )}
                 {accounts.map(u => (
                   <button

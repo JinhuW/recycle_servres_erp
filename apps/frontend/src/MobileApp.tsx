@@ -19,7 +19,7 @@ import { Profile } from './pages/Profile';
 import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
 import { api } from './lib/api';
-import { navigate } from './lib/route';
+import { navigate, useRoute, match } from './lib/route';
 import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
 
 type ReturnTo = 'idle' | 'review';
@@ -57,6 +57,17 @@ function Shell() {
       .then(r => setNotifs(r.items))
       .catch(console.error);
   }, [user?.id]);
+
+  const { path } = useRoute();
+
+  // Deep-link entry point: if the URL says /orders[/:id], jump to the orders
+  // tab on mount or whenever the hash changes. The Orders page's own effect
+  // then handles row scroll/expand/edit.
+  useEffect(() => {
+    if (path === '/orders' || match('/orders/:id', path)) {
+      setView('history');
+    }
+  }, [path]);
 
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
     setToast({ msg, kind });
