@@ -2,7 +2,7 @@
 
 export type Role = 'manager' | 'purchaser';
 export type Lang = 'en' | 'zh';
-export type Category = 'RAM' | 'SSD' | 'Other';
+export type Category = 'RAM' | 'SSD' | 'HDD' | 'Other';
 
 export type User = {
   id: string;
@@ -12,6 +12,7 @@ export type User = {
   role: Role;
   team: string | null;
   language: Lang;
+  preferences?: Record<string, unknown>;
 };
 
 export type Warehouse = {
@@ -19,6 +20,13 @@ export type Warehouse = {
   name?: string;
   short: string;
   region: string;
+  address?: string | null;
+  manager?: string | null;
+  managerPhone?: string | null;
+  managerEmail?: string | null;
+  timezone?: string | null;
+  cutoffLocal?: string | null; // 'HH:MM' in the warehouse's timezone
+  sqft?: number | null;
 };
 
 export type OrderLine = {
@@ -42,6 +50,8 @@ export type OrderLine = {
   scanImageId: string | null;
   scanConfidence: number | null;
   position: number;
+  health: number | null;
+  rpm: number | null;
 };
 
 export type OrderSummary = {
@@ -84,6 +94,8 @@ export type DraftLine = {
   sellPrice?: number | null;
   scanImageId?: string | null;
   scanConfidence?: number | null;
+  health?: number | null;
+  rpm?: number | null;
   // UI label for cards
   label?: string;
 };
@@ -103,6 +115,7 @@ export type RefPrice = {
   capacity: string | null;
   type: string | null;
   classification: string | null;
+  rank: string | null;
   speed: string | null;
   interface: string | null;
   formFactor: string | null;
@@ -122,6 +135,8 @@ export type RefPrice = {
   history: number[];
   updated: string;
   maxBuy: number;
+  health: number | null;
+  rpm: number | null;
 };
 
 export type Notification = {
@@ -152,6 +167,8 @@ export type DashboardData = {
     type: string | null;
     interface: string | null;
     description: string | null;
+    rpm: number | null;
+    health: number | null;
     qty: number;
     unit_cost: number;
     sell_price: number | null;
