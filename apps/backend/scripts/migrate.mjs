@@ -35,15 +35,18 @@ const reset = process.argv.includes('--reset');
 try {
   if (reset) {
     console.log('· Dropping existing tables…');
+    // Drop everything in the public schema (dev-only). Older versions of this
+    // script hard-coded a fixed table list which silently went stale every time
+    // we added a migration — switch to discovering tables at runtime so reset
+    // stays correct as schema grows.
     await sql.unsafe(`
-      DROP TABLE IF EXISTS
-        sell_order_status_attachments, sell_order_status_meta,
-        sell_order_lines, sell_orders, customers,
-        inventory_events, workflow_stages,
-        catalog_options, price_sources, sell_order_statuses,
-        label_scans, notifications, ref_prices,
-        categories, commission_tiers, commission_settings, workspace_settings,
-        order_lines, orders, warehouses, users CASCADE;
+      DO $$
+      DECLARE r RECORD;
+      BEGIN
+        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+          EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+        END LOOP;
+      END $$;
     `);
   }
 

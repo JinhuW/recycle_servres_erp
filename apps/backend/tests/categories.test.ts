@@ -43,11 +43,7 @@ describe('/api/categories', () => {
   });
 });
 
-// SKIPPED (reconciliation): enforcing category-enabled on order create
-// (parallel commit a53ef60) is a shared-route change to orders.ts that is
-// out of reconciliation scope and would alter main's API contract. The
-// /api/categories route itself IS ported and exercised by the tests above.
-describe.skip('POST /api/orders — category must be enabled', () => {
+describe('POST /api/orders — category must be enabled', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('rejects disabled category', async () => {

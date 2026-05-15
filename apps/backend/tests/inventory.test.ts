@@ -37,9 +37,7 @@ describe('GET /api/inventory — role-based field visibility', () => {
   });
 });
 
-// SKIPPED (reconciliation): the aggregate-by-part endpoint (parallel commit
-// d895508) is a new shared-route addition not ported in this pass.
-describe.skip('GET /api/inventory/aggregate/by-part', () => {
+describe('GET /api/inventory/aggregate/by-part', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('returns inTransit / inStock counts for a part number', async () => {
@@ -63,9 +61,7 @@ describe.skip('GET /api/inventory/aggregate/by-part', () => {
   });
 });
 
-// SKIPPED (reconciliation): low_margin / sub_cost_sell warning + notification
-// (parallel commit 00c5967) is a shared-route behavior not ported in this pass.
-describe.skip('low-margin notification', () => {
+describe('low-margin notification', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('fires when sell_price gives margin < 15%', async () => {

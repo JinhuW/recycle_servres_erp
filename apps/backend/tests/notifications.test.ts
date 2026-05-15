@@ -9,10 +9,7 @@ import { loginAs, MARCUS } from './helpers/auth';
 describe('notifications mark-read', () => {
   beforeEach(async () => { await resetDb(); });
 
-  // SKIPPED (reconciliation): per-notification mark-read (parallel commit
-  // e4ec369) is not ported. Main exposes bulk POST /api/notifications/mark-read
-  // (which its frontend uses); per-id mark-read would be a new shared-route endpoint.
-  it.skip('mark-one moves a specific notification to read', async () => {
+  it('mark-one moves a specific notification to read', async () => {
     const { token } = await loginAs(MARCUS);
     const list = await api<{ items: { id: string; unread: boolean }[] }>('GET', '/api/notifications', { token });
     const target = list.body.items.find(i => i.unread);

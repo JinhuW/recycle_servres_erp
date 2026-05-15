@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
+import { notify } from '../lib/notify';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -202,7 +203,7 @@ sellOrders.post('/', async (c) => {
     }
   });
 
-  return c.json({ ok: true, id: nextId });
+  return c.json({ ok: true, id: nextId }, 201);
 });
 
 // Edit an existing sell order. Status / discount / notes are simple COALESCE
@@ -393,6 +394,92 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
   await deleteAttachment(c.env, row.storage_key).catch(e => console.error('r2 delete', e));
   await sql`DELETE FROM sell_order_status_attachments WHERE id = ${attachmentId}`;
   return c.json({ ok: true });
+});
+
+// Sell-order lifecycle. Each forward transition into Shipped/Awaiting/Done
+// must carry evidence (a note OR one or more attachment ids) — PRD §7.4.
+// Transitioning to Done also flips every underlying inventory line to Done
+// and writes an audit row per line, so the inventory page stays in sync.
+//
+// Evidence is persisted on main's split schema (migration 0003): the text
+// note lives on sell_order_status_meta (PK = sell_order_id+status, columns
+// note/set_at/set_by); file evidence lives in its own table and is uploaded
+// via the status-meta attachments endpoints above. `attachmentIds` here
+// (generic /api/attachments rows) only needs to satisfy the evidence gate.
+const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done']);
+const SELL_ORDER_FLOW = ['Draft', 'Shipped', 'Awaiting payment', 'Done'];
+
+sellOrders.post('/:id/status', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as
+    | { to: string; note?: string; attachmentIds?: string[] }
+    | null;
+  if (!body?.to) return c.json({ error: 'to is required' }, 400);
+  if (!SELL_ORDER_FLOW.includes(body.to)) return c.json({ error: `unknown status: ${body.to}` }, 400);
+
+  if (NEEDS_EVIDENCE.has(body.to)) {
+    const hasNote = typeof body.note === 'string' && body.note.trim().length > 0;
+    const hasFiles = Array.isArray(body.attachmentIds) && body.attachmentIds.length > 0;
+    if (!hasNote && !hasFiles) {
+      return c.json({ error: 'note or attachments required for this status' }, 400);
+    }
+  }
+
+  const sql = getDb(c.env);
+  const cur = (await sql<{ status: string }[]>`SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
+  if (!cur) return c.json({ error: 'Not found' }, 404);
+  if (cur.status === 'Done' && body.to !== 'Done') return c.json({ error: 'order is locked' }, 409);
+
+  await sql.begin(async (tx) => {
+    await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
+    if (NEEDS_EVIDENCE.has(body.to)) {
+      // Upsert the text note onto the split-schema meta row. PK is
+      // (sell_order_id, status); attachments are a separate table.
+      await tx`
+        INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_at, set_by)
+        VALUES (${id}, ${body.to}, ${body.note ?? null}, NOW(), ${u.id})
+        ON CONFLICT (sell_order_id, status) DO UPDATE SET
+          note   = EXCLUDED.note,
+          set_at = NOW(),
+          set_by = EXCLUDED.set_by
+      `;
+    }
+    if (body.to === 'Done') {
+      await tx`
+        UPDATE order_lines SET status = 'Done'
+        WHERE id IN (SELECT inventory_id FROM sell_order_lines WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL)
+      `;
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT inventory_id, ${u.id}::uuid, 'status'::text,
+               jsonb_build_object('field','status','to','Done','sellOrder',${id}::text)
+        FROM sell_order_lines WHERE sell_order_id = ${id} AND inventory_id IS NOT NULL
+      `;
+      // Tell each purchaser whose lines just closed that a commission is ready.
+      // DISTINCT because one purchaser may have supplied multiple lines on the
+      // same sell order — we only want one notification per submitter.
+      const submitters = await tx<{ user_id: string }[]>`
+        SELECT DISTINCT o.user_id
+        FROM sell_order_lines sol
+        JOIN order_lines l ON l.id = sol.inventory_id
+        JOIN orders o ON o.id = l.order_id
+        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL
+      `;
+      for (const s of submitters) {
+        await notify(tx, {
+          userId: s.user_id,
+          kind: 'payment_received',
+          tone: 'pos',
+          icon: 'cash',
+          title: `Sell order ${id} closed`,
+          body: 'Commission ready for review.',
+        });
+      }
+    }
+  });
+  return c.json({ ok: true, status: body.to });
 });
 
 export default sellOrders;

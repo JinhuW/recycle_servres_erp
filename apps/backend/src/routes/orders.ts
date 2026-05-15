@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { notifyManagers } from '../lib/notify';
+import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -34,7 +36,13 @@ orders.get('/', async (c) => {
 
   const category = c.req.query('category');                 // RAM/SSD/Other
   const status = c.req.query('status');                     // mapped to line status
-  const limit = Math.min(parseInt(c.req.query('limit') ?? '50', 10) || 50, 200);
+  const limit = clampLimit(c.req.query('limit'), 50, 200);
+  const sortRaw = c.req.query('sort');
+  if (sortRaw && !parseSort('orders', sortRaw)) {
+    return c.json({ error: 'sort column not allowed' }, 400);
+  }
+  const sort = parseSort('orders', sortRaw) ?? { col: 'created_at', dir: 'desc' as const };
+  const cursor = decodeCursor(c.req.query('cursor'));
 
   // Build the query in pieces to keep dynamic filters tidy. Each fragment
   // either narrows the result set or evaluates to TRUE so the AND chain
@@ -45,6 +53,13 @@ orders.get('/', async (c) => {
   const statusFrag   = status
     ? sql`EXISTS (SELECT 1 FROM order_lines l2 WHERE l2.order_id = o.id AND l2.status = ${status})`
     : sql`TRUE`;
+
+  // keyset pagination: (created_at, id) lexicographic
+  const cursorFrag = cursor
+    ? (sort.dir === 'desc'
+        ? sql`AND (o.created_at, o.id) < (${cursor.ts}, ${cursor.id})`
+        : sql`AND (o.created_at, o.id) > (${cursor.ts}, ${cursor.id})`)
+    : sql`AND TRUE`;
 
   const rows = await sql`
     SELECT
@@ -61,14 +76,19 @@ orders.get('/', async (c) => {
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
-    ORDER BY o.created_at DESC
-    LIMIT ${limit}
+    ORDER BY o.${sql(sort.col)} ${sql.unsafe(sort.dir.toUpperCase())}, o.id ${sql.unsafe(sort.dir.toUpperCase())}
+    LIMIT ${limit + 1}
   `;
+  const hasMore = rows.length > limit;
+  const slice = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore
+    ? encodeCursor({ ts: (slice[slice.length - 1] as { created_at: string }).created_at, id: (slice[slice.length - 1] as { id: string }).id })
+    : null;
 
   return c.json({
-    orders: rows.map(r => ({
+    orders: slice.map(r => ({
       id: r.id,
       userId: r.user_id,
       userName: r.user_name,
@@ -86,6 +106,7 @@ orders.get('/', async (c) => {
       lineCount: r.line_count,
       status: (r.line_statuses?.length === 1 ? r.line_statuses[0] : 'Mixed') as string,
     })),
+    nextCursor,
   });
 });
 
@@ -191,6 +212,13 @@ orders.post('/', async (c) => {
   if (!body.lines.every(l => !l.category || l.category === body.category)) {
     return c.json({ error: 'all lines must match the order category' }, 400);
   }
+
+  // Enforce the category exists and is enabled (prd-gaps categories table).
+  const catRow = (await sql<{ enabled: boolean }[]>`
+    SELECT enabled FROM categories WHERE id = ${body.category} LIMIT 1
+  `)[0];
+  if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
+  if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
 
   // Generate a human-friendly id like SO-1289 — collision-resistant via the
   // sequence of existing IDs. Good enough for this scale.
@@ -435,6 +463,74 @@ orders.delete('/:id', async (c) => {
 
   await sql`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
   return c.json({ ok: true });
+});
+
+// Lifecycle ordering — must match workflow_stages.position.
+// Purchasers may only move Draft → In Transit (and not back).
+const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
+  draft: 'Draft',
+  in_transit: 'In Transit',
+  reviewing: 'Reviewing',
+  done: 'Done',
+};
+
+orders.post('/:id/advance', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
+
+  const cur = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
+  if (!cur) return c.json({ error: 'Not found' }, 404);
+  if (u.role !== 'manager' && cur.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+
+  const stages = await sql<{ id: string; position: number }[]>`
+    SELECT id, position FROM workflow_stages ORDER BY position`;
+  const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
+  let nextStageId: string;
+  if (body?.toStage) {
+    if (u.role !== 'manager') return c.json({ error: 'Only managers can jump stages' }, 403);
+    if (!stages.find(s => s.id === body.toStage)) return c.json({ error: 'Unknown stage' }, 400);
+    nextStageId = body.toStage;
+  } else {
+    if (curIdx < 0 || curIdx >= stages.length - 1) {
+      return c.json({ error: 'Already at the final stage' }, 409);
+    }
+    nextStageId = stages[curIdx + 1].id;
+  }
+  // Purchaser can only advance Draft → in_transit.
+  if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
+    return c.json({ error: 'Purchasers can only advance Draft to In Transit' }, 403);
+  }
+
+  const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
+  await sql.begin(async (tx) => {
+    await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
+    if (newLineStatus) {
+      await tx`UPDATE order_lines SET status = ${newLineStatus} WHERE order_id = ${id}`;
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT id, ${u.id}::uuid, 'status',
+               jsonb_build_object('field','status','from',status,'to',${newLineStatus}::text)
+        FROM order_lines WHERE order_id = ${id} AND status IS DISTINCT FROM ${newLineStatus}
+      `;
+    }
+    // PRD §10: managers want to see when a purchaser finalises an order.
+    // We fire this only on the first forward transition (Draft → In Transit)
+    // so they aren't spammed during later manager-driven moves.
+    if (nextStageId === 'in_transit') {
+      await notifyManagers(tx, {
+        kind: 'order_submitted',
+        tone: 'info',
+        icon: 'inventory',
+        title: `Order ${id} submitted`,
+        body: `${u.name} advanced ${id} to In Transit`,
+      });
+    }
+  });
+
+  return c.json({ ok: true, lifecycle: nextStageId });
 });
 
 export default orders;

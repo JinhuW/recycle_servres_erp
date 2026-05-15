@@ -1,37 +1,49 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { computeCommission, type Tier } from '../lib/commission-calc';
 import type { Env, User } from '../types';
 
 const dashboard = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-// One round-trip dashboard payload: KPIs, an 8-week sparkline, leaderboard, and
-// recent activity. Manager sees team-wide; purchaser sees only their own.
+const RANGE_DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, 'ytd': 365 };
+
 dashboard.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const isManager = u.role === 'manager';
+  const range = c.req.query('range') ?? '30d';
+  const days = RANGE_DAYS[range] ?? 30;
 
-  // Manager sees all rows; purchaser is scoped to their own user_id. The
-  // fragment evaluates to TRUE for managers so it composes into AND chains
-  // without leaving stray syntax.
+  const tiers = await sql<Tier[]>`
+    SELECT id, label, floor_pct::float AS "floorPct", rate::float AS rate
+    FROM commission_tiers ORDER BY position
+  `;
+
   const scopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
 
-  // KPIs (last 30d window matches the prototype's "Last 30 days · …")
-  const kpis = (await sql`
-    SELECT
-      COUNT(DISTINCT o.id)::int                                AS count,
-      COALESCE(SUM(l.unit_cost * l.qty), 0)::float             AS cost,
-      COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
-      COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
-      COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty * 0.075), 0)::float AS commission
-    FROM orders o
-    JOIN order_lines l ON l.order_id = o.id
-    WHERE o.created_at >= NOW() - INTERVAL '30 days'
-      AND ${scopeFrag}
-  `)[0];
+  // Aggregate per line then collapse with computeCommission so KPIs honor tiers.
+  const lineRows = await sql<{ qty: number; unit_cost: number; sell_price: number | null }[]>`
+    SELECT l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price
+    FROM order_lines l JOIN orders o ON o.id = l.order_id
+    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
+  `;
+  let revenue = 0, cost = 0, profit = 0, commission = 0;
+  for (const r of lineRows) {
+    const sp = r.sell_price ?? r.unit_cost;
+    const rRev = sp * r.qty;
+    const rCost = r.unit_cost * r.qty;
+    const rProfit = rRev - rCost;
+    revenue += rRev; cost += rCost; profit += rProfit;
+    commission += computeCommission({ profit: rProfit, revenue: rRev }, tiers).payable;
+  }
+  commission = +commission.toFixed(2);
 
-  // Weekly sparkline — 8 buckets ending today.
-  const weeks = await sql`
+  const cnt = (await sql<{ n: number }[]>`
+    SELECT COUNT(DISTINCT o.id)::int AS n FROM orders o
+    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
+  `)[0].n;
+
+  const weeks = await sql<{ label: string; profit: number }[]>`
     WITH series AS (
       SELECT generate_series(
         date_trunc('week', NOW()) - INTERVAL '7 weeks',
@@ -39,33 +51,29 @@ dashboard.get('/', async (c) => {
         INTERVAL '1 week'
       ) AS week_start
     )
-    SELECT
-      to_char(s.week_start, 'IW')                            AS label,
-      COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
+    SELECT to_char(s.week_start,'IW') AS label,
+           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
     FROM series s
-    LEFT JOIN orders o ON o.created_at >= s.week_start
-                       AND o.created_at < s.week_start + INTERVAL '1 week'
-                       AND ${scopeFrag}
+    LEFT JOIN orders o ON o.created_at >= s.week_start AND o.created_at < s.week_start + INTERVAL '1 week' AND ${scopeFrag}
     LEFT JOIN order_lines l ON l.order_id = o.id
-    GROUP BY s.week_start
-    ORDER BY s.week_start
+    GROUP BY s.week_start ORDER BY s.week_start
   `;
 
   // Top contributors (purchasers only) — used by both roles, but only managers
-  // see the full list; purchasers see their rank.
+  // see the full list; purchasers see their rank. Honors the same ?range=
+  // window as the rest of the dashboard (PRD §6.8). Commission is computed
+  // per-row from profit/revenue via the tier model below (not selected here).
   const leaderboardRaw = await sql<{
     id: string; name: string; initials: string; email: string; role: string;
-    count: number; revenue: number; profit: number; commission: number;
+    count: number; revenue: number; profit: number;
   }[]>`
     SELECT u.id, u.name, u.initials, u.email, u.role,
            COUNT(DISTINCT o.id)::int AS count,
            COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty * 0.075), 0)::float AS commission
-    FROM users u
-    JOIN orders o ON o.user_id = u.id
-    JOIN order_lines l ON l.order_id = o.id
+           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
+    FROM users u JOIN orders o ON o.user_id = u.id JOIN order_lines l ON l.order_id = o.id
     WHERE u.role = 'purchaser'
+      AND o.created_at >= NOW() - (${days} || ' days')::interval
     GROUP BY u.id, u.name, u.initials, u.email, u.role
     ORDER BY profit DESC
   `;
@@ -77,26 +85,22 @@ dashboard.get('/', async (c) => {
       count: row.count,
       revenue: showFinancials ? row.revenue : null,
       profit: showFinancials ? row.profit : null,
-      commission: showFinancials ? row.commission : null,
+      commission: showFinancials
+        ? computeCommission({ profit: row.profit, revenue: row.revenue }, tiers).payable
+        : null,
     };
   });
 
-  // Per-category breakdown (RAM / SSD / Other) over the same 30d window.
-  const byCatRows = await sql`
-    SELECT l.category,
-           COUNT(*)::int                                                AS count,
+  const byCatRows = await sql<{ category: string; count: number; revenue: number; profit: number }[]>`
+    SELECT l.category, COUNT(*)::int AS count,
            COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
            COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
-    FROM order_lines l
-    JOIN orders o ON o.id = l.order_id
-    WHERE o.created_at >= NOW() - INTERVAL '30 days'
-      AND ${scopeFrag}
+    FROM order_lines l JOIN orders o ON o.id = l.order_id
+    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
     GROUP BY l.category
   `;
   const byCat: Record<string, { count: number; revenue: number; profit: number }> = {};
-  for (const r of byCatRows as unknown as { category: string; count: number; revenue: number; profit: number }[]) {
-    byCat[r.category] = { count: r.count, revenue: r.revenue, profit: r.profit };
-  }
+  for (const r of byCatRows) byCat[r.category] = { count: r.count, revenue: r.revenue, profit: r.profit };
 
   // Recent activity — latest 4 lines, with denormalized user info for the row.
   const recentRows = await sql<Record<string, unknown>[]>`
@@ -105,12 +109,8 @@ dashboard.get('/', async (c) => {
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            o.created_at, o.id AS order_id,
            u.id AS user_id, u.name AS user_name, u.initials AS user_initials
-    FROM order_lines l
-    JOIN orders o ON o.id = l.order_id
-    JOIN users u  ON u.id = o.user_id
-    ${isManager ? sql`` : sql`WHERE o.user_id = ${u.id}`}
-    ORDER BY o.created_at DESC, l.position ASC
-    LIMIT 4
+    FROM order_lines l JOIN orders o ON o.id = l.order_id JOIN users u ON u.id = o.user_id
+    WHERE ${scopeFrag} ORDER BY o.created_at DESC, l.position ASC LIMIT 4
   `;
   // Match inventory's role-based cost-strip (PRD §6.8): purchasers don't see unit_cost.
   const recent = isManager
@@ -119,11 +119,8 @@ dashboard.get('/', async (c) => {
 
   return c.json({
     role: u.role,
-    kpis,
-    weeks,
-    leaderboard,
-    byCat,
-    recent,
+    kpis: { count: cnt, cost, revenue, profit, commission },
+    weeks, leaderboard, byCat, recent,
   });
 });
 

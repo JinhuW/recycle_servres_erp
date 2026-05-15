@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { notify } from '../lib/notify';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -91,6 +92,26 @@ inventory.get('/events/all', async (c) => {
     LIMIT 200
   `;
   return c.json({ events: rows });
+});
+
+// Workspace-wide aggregate by part number (PRD §5.10) — powers QuickView.
+// Not scoped to purchaser-own-lines: any authenticated user gets the
+// workspace totals. Does NOT return cost fields.
+inventory.get('/aggregate/by-part', async (c) => {
+  const pn = c.req.query('partNumber');
+  if (!pn) return c.json({ error: 'partNumber is required' }, 400);
+  const sql = getDb(c.env);
+  const rows = (await sql<{ status: string; qty: number }[]>`
+    SELECT status, COALESCE(SUM(qty), 0)::int AS qty
+    FROM order_lines WHERE part_number = ${pn} GROUP BY status
+  `);
+  let inTransit = 0, inStock = 0;
+  for (const r of rows) {
+    if (r.status === 'In Transit') inTransit += r.qty;
+    else if (r.status === 'Done' || r.status === 'Reviewing') inStock += r.qty;
+  }
+  const lineCount = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM order_lines WHERE part_number = ${pn}`)[0].n;
+  return c.json({ partNumber: pn, inTransit, inStock, lines: lineCount });
 });
 
 // Single inventory line + its audit log.
@@ -223,14 +244,40 @@ inventory.patch('/:id', async (c) => {
       const oldVal = before[beforeKey[f]];
       if (String(oldVal) === String(newVal)) continue;
       const kind = f === 'status' ? 'status' : f === 'sellPrice' ? 'priced' : 'edited';
+      const fromStr = oldVal == null ? null : String(oldVal);
+      const toStr   = newVal == null ? null : String(newVal);
       await tx`
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: oldVal, to: newVal as string | number | boolean | null })})
+        VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
       `;
     }
   });
 
-  return c.json({ ok: true });
+  // Margin guard rails (PRD §10): warn the manager — and drop a notification —
+  // when a sell price puts the line below cost or below the 15% margin floor.
+  // Computed against either the newly submitted unitCost or the row-as-loaded
+  // value, so a price-only edit still uses the correct cost basis.
+  const warnings: string[] = [];
+  if (body.sellPrice !== undefined) {
+    const cost = Number(body.unitCost ?? before.unit_cost);
+    const sp = body.sellPrice;
+    if (sp < cost) warnings.push('sub_cost_sell');
+    const margin = sp > 0 ? ((sp - cost) / sp) : 0;
+    if (margin < 0.15) {
+      warnings.push('low_margin');
+      await sql.begin(async (tx) => {
+        await notify(tx, {
+          userId: u.id,
+          kind: 'low_margin',
+          tone: 'warn',
+          icon: 'alert',
+          title: `Low margin on ${before.part_number ?? 'line'}`,
+          body: `Sell ${sp} vs cost ${cost} → ${(margin * 100).toFixed(1)}% margin`,
+        });
+      });
+    }
+  }
+  return c.json({ ok: true, warnings });
 });
 
 // Bulk warehouse-to-warehouse transfer. Manager-only.

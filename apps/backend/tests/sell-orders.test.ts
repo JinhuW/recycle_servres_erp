@@ -39,13 +39,7 @@ async function createDraftSellOrder(token: string): Promise<string> {
   return r.body.id;
 }
 
-// SKIPPED (reconciliation): the parallel /:id/status transition contract
-// (parallel commit 784becf — note/attachment-required, Done-locks-inventory)
-// differs fundamentally from main's, which uses PATCH /:id + PUT
-// /:id/status-meta/:status. Reworking main's sell-order status handling is a
-// shared-route change out of reconciliation scope. (Main's POST /api/sell-orders
-// returns 200, not 201, hence the helper mismatch.)
-describe.skip('POST /api/sell-orders/:id/status', () => {
+describe('POST /api/sell-orders/:id/status', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('Shipped requires note OR attachments', async () => {
@@ -115,11 +109,7 @@ describe.skip('POST /api/sell-orders/:id/status', () => {
   });
 });
 
-// SKIPPED (reconciliation Step 5.5): submitter-notify on sell-order Done
-// (parallel commit b442f10) requires producer-side notify wiring in the
-// shared sellOrders route, deferred in this pass. (Also depends on the
-// unported /:id/status transition.)
-describe.skip('payment_received notification', () => {
+describe('payment_received notification', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('notifies submitter when sell order is Done', async () => {

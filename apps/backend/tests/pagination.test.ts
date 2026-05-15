@@ -3,11 +3,7 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 
-// SKIPPED (reconciliation Step 6.3): cursor pagination on /api/orders
-// (parallel commit 9099b6b) is deferred — wiring lib/pagination.ts into the
-// shared orders route would change main's response shape that the frontend
-// depends on. The lib + supporting indexes (0017) ARE ported.
-describe.skip('pagination on /api/orders', () => {
+describe('pagination on /api/orders', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('limit caps response size', async () => {

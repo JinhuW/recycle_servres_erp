@@ -7,11 +7,7 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
 const fixture = join(__dirname, 'fixtures', 'invoice.pdf');
 
-// SKIPPED (reconciliation Task 4): /api/attachments is intentionally NOT
-// ported. Main has a superior real implementation (r2.ts + the
-// sell_order_status_attachments flow); the parallel attachments route is a
-// metadata-only stub. See docs/superpowers/plans/2026-05-15-backend-line-reconciliation.md.
-describe.skip('POST /api/attachments', () => {
+describe('POST /api/attachments', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('manager can upload a PDF', async () => {

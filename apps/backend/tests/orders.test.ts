@@ -50,9 +50,7 @@ describe('POST /api/orders defaults', () => {
   });
 });
 
-// SKIPPED (reconciliation): POST /api/orders/:id/advance (parallel commit
-// 7aae9ef) is a new lifecycle-transition endpoint not ported in this pass.
-describe.skip('POST /api/orders/:id/advance', () => {
+describe('POST /api/orders/:id/advance', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('purchaser can advance own Draft → in_transit', async () => {
@@ -100,9 +98,7 @@ describe.skip('POST /api/orders/:id/advance', () => {
   });
 });
 
-// SKIPPED (reconciliation): depends on the unported advance endpoint and on
-// producer-side notify wiring (Step 5.5 deferral — would edit shared routes).
-describe.skip('notifications on order advance', () => {
+describe('notifications on order advance', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('advancing to in_transit notifies managers', async () => {
