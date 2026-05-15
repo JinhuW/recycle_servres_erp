@@ -68,15 +68,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   }, []);
 
   // Escape closes the drawer; if none open, closes the page.
+  // When the delete modal is open, Escape dismisses it (if not mid-delete)
+  // and does NOT fall through to the page-close / drawer-close logic.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (showDelete) {
+        if (!deleting) setShowDelete(false);
+        return;
+      }
       if (activeIdx !== null) setActiveIdx(null);
       else onCancel();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeIdx, onCancel]);
+  }, [activeIdx, onCancel, showDelete, deleting]);
 
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
@@ -583,7 +589,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
       {showDelete && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !deleting) setShowDelete(false); }}>
-          <div className="modal-shell" style={{ maxWidth: 460 }}>
+          <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
             <div className="modal-head">
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                 <div style={{
