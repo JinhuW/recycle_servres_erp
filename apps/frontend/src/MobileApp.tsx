@@ -83,11 +83,7 @@ function Shell() {
   };
 
   const pickCategory = (cat: Category) => {
-    if (cat === 'RAM') {
-      setCapture({ phase: 'camera', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
-    } else {
-      setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
-    }
+    setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
   };
 
   const onDetected = (s: ScanResponse) => {
@@ -113,9 +109,7 @@ function Shell() {
   const addAnotherItem = () => {
     setCapture(c => {
       if (c.phase !== 'review') return c;
-      return c.category === 'RAM'
-        ? { phase: 'camera', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review' }
-        : { phase: 'form',   category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review' };
+      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review' };
     });
   };
 

@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
+import { api } from '../lib/api';
+import { AI_CONFIDENCE_FLOOR } from '../lib/status';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 
 type Props = {
@@ -99,6 +101,46 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [line, setLine] = useState<DraftLine>(initial);
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => setLine(prev => ({ ...prev, [k]: v }));
 
+  const aiInputRef = useRef<HTMLInputElement | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+
+  const onAiPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAiBusy(true); setAiNote(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      fd.append('category', category);
+      const scan = await api.upload<ScanResponse>('/api/scan/label', fd);
+      setLine(prev => {
+        const next = { ...prev, scanImageId: scan.imageId ?? null, scanConfidence: scan.confidence ?? null, scanImageUrl: scan.deliveryUrl ?? null };
+        if ((scan.confidence ?? 0) >= AI_CONFIDENCE_FLOOR) {
+          const f = scan.extracted ?? {};
+          if (f.brand)          next.brand          = f.brand;
+          if (f.capacity)       next.capacity       = f.capacity;
+          if (f.type)           next.type           = f.type;
+          if (f.classification) next.classification = f.classification;
+          if (f.rank)           next.rank           = f.rank;
+          if (f.speed)          next.speed          = f.speed;
+          if (f.interface)      next.interface      = f.interface;
+          if (f.formFactor)     next.formFactor     = f.formFactor;
+          if (f.description)    next.description    = f.description;
+          if (f.partNumber)     next.partNumber     = f.partNumber;
+        } else {
+          setAiNote("Couldn't read the label confidently — please enter the details manually.");
+        }
+        return next;
+      });
+    } catch (err) {
+      setAiNote(err instanceof Error ? err.message : 'AI scan failed');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   const buildLabel = (): string => {
     if (line.category === 'RAM') return [line.brand, line.capacity, line.type].filter(Boolean).join(' ');
     if (line.category === 'SSD') return [line.brand, line.capacity, line.interface].filter(Boolean).join(' ');
@@ -141,6 +183,15 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         )}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
+        <input ref={aiInputRef} type="file" accept="image/*" capture="environment" hidden onChange={onAiPick} />
+        <button type="button" className="ph-btn dark" style={{ marginTop: 8 }} disabled={aiBusy} onClick={() => aiInputRef.current?.click()}>
+          <Icon name="camera" size={16} /> {aiBusy ? 'Scanning…' : 'AI capture'}
+        </button>
+        {aiNote && <div style={{ color: 'var(--fg-subtle)', fontSize: 12, marginTop: 6 }}>{aiNote}</div>}
+        {line.scanImageUrl && (
+          <img src={line.scanImageUrl} alt="Captured label"
+               style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--border)', margin: '8px 0' }} />
+        )}
         {aiFilled && (
           <div className="ph-ai-banner" style={{ borderRadius: 12, marginTop: 6 }}>
             <span className="pill-ai">AI</span>
