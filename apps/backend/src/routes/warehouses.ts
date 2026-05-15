@@ -95,6 +95,7 @@ const toApi = (r: WhRow) => ({
   timezone:     r.timezone     ?? null,
   cutoffLocal:  r.cutoff_local ?? null,
   sqft:         r.sqft         ?? null,
+  active:       (r.active ?? true) as boolean,
 });
 
 // ── routes ──────────────────────────────────────────────────────────────────
@@ -104,8 +105,9 @@ warehouses.get('/', async (c) => {
   const rows = await sql`
     SELECT id, name, short, region,
            address, manager, manager_phone, manager_email,
-           timezone, cutoff_local, sqft
+           timezone, cutoff_local, sqft, active
     FROM warehouses
+    WHERE active = TRUE
     ORDER BY region, short
   `;
   return c.json({ items: rows.map((r) => toApi(r as WhRow)) });
@@ -166,6 +168,8 @@ warehouses.patch('/:id', async (c) => {
   const name   = body.name   !== undefined ? norm(body.name)                : null;
   const short  = body.short  !== undefined ? norm(body.short).toUpperCase() : null;
   const region = body.region !== undefined ? norm(body.region)              : null;
+  // Soft-archive flag. Only a real boolean toggles it; absent/other → leave as-is.
+  const active = typeof body.active === 'boolean' ? body.active : null;
   if (name === '' || short === '' || region === '') {
     return c.json({ error: 'name, short, region cannot be empty' }, 400);
   }
@@ -187,11 +191,12 @@ warehouses.patch('/:id', async (c) => {
       manager_email  = CASE WHEN ${flag(input.managerEmail)}::int = 1 THEN ${val(input.managerEmail)} ELSE manager_email  END,
       timezone       = CASE WHEN ${flag(input.timezone)}::int     = 1 THEN ${val(input.timezone)}     ELSE timezone       END,
       cutoff_local   = CASE WHEN ${flag(input.cutoffLocal)}::int  = 1 THEN ${val(input.cutoffLocal)}  ELSE cutoff_local   END,
-      sqft           = CASE WHEN ${flag(input.sqft)}::int         = 1 THEN ${val(input.sqft)}         ELSE sqft           END
+      sqft           = CASE WHEN ${flag(input.sqft)}::int         = 1 THEN ${val(input.sqft)}         ELSE sqft           END,
+      active         = COALESCE(${active}, active)
     WHERE id = ${id}
     RETURNING id, name, short, region,
               address, manager, manager_phone, manager_email,
-              timezone, cutoff_local, sqft
+              timezone, cutoff_local, sqft, active
   `;
   if (r.length === 0) return c.json({ error: 'not found' }, 404);
   return c.json(toApi(r[0] as WhRow));

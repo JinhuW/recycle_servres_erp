@@ -27,6 +27,7 @@ export type Warehouse = {
   timezone?: string | null;
   cutoffLocal?: string | null; // 'HH:MM' in the warehouse's timezone
   sqft?: number | null;
+  active?: boolean; // false = archived: hidden from every UI surface (DB row kept)
 };
 
 export type OrderLine = {

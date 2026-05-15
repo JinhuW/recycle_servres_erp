@@ -1562,7 +1562,7 @@ function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
     .then(r => {
       setWhs(r.items.map(w => ({
         ...w,
-        active: true,
+        active: w.active ?? true,
         receiving: w.short !== 'HK',
       })));
     })
@@ -1572,6 +1572,22 @@ function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
 
   const updateRow = (id: string, patch: Partial<WarehouseRow>) =>
     setWhs(prev => prev.map(w => w.id === id ? { ...w, ...patch } : w));
+
+  // Persist the active flag. Archiving (active=false) removes the warehouse
+  // from every UI surface — GET /api/warehouses no longer returns it — so we
+  // reload and the card drops out of the list. There is no in-app un-archive
+  // by design; reactivation is a direct DB edit.
+  const setActive = async (id: string, active: boolean) => {
+    updateRow(id, { active }); // optimistic
+    try {
+      await api.patch(`/api/warehouses/${id}`, { active });
+      showToast?.(active ? 'Warehouse reactivated' : 'Warehouse archived');
+      reload();
+    } catch (e) {
+      showToast?.((e as { message?: string })?.message ?? 'Failed to update warehouse', 'error');
+      reload();
+    }
+  };
 
   return (
     <>
@@ -1666,7 +1682,7 @@ function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
               <div className="wh-card-foot">
                 <div className="toggle-row">
                   <span>Active</span>
-                  <Toggle checked={w.active} onChange={(v) => updateRow(w.id, { active: v })} />
+                  <Toggle checked={w.active} onChange={(v) => setActive(w.id, v)} />
                 </div>
                 <div className="toggle-row">
                   <span>Accepting receipts</span>
