@@ -27,7 +27,7 @@ type SellOrderSummary = {
   discountPct: number;
   notes: string | null;
   createdAt: string;
-  customer: { id: string; name: string; short: string; terms: string; region: string };
+  customer: { id: string; name: string; short: string; region: string };
   lineCount: number;
   qty: number;
   subtotal: number;
@@ -55,7 +55,7 @@ type SellOrderDetailType = {
   notes: string | null;
   createdAt: string;
   discountPct: number;
-  customer: { id: string; name: string; short: string; terms: string; region: string };
+  customer: { id: string; name: string; short: string; region: string };
   lines: SellOrderLine[];
   subtotal: number;
   discount: number;
@@ -189,7 +189,6 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
                 <th className="num">Lines</th>
                 <th className="num">Units</th>
                 <th className="num">Total</th>
-                <th>Terms</th>
                 <th>Status</th>
                 <th>{t('actions')}</th>
               </tr>
@@ -211,7 +210,6 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
                   <td className="num mono">{o.lineCount}</td>
                   <td className="num mono">{o.qty}</td>
                   <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total)}</td>
-                  <td><span className="chip">{o.customer.terms}</span></td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -237,7 +235,7 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+                  <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)' }}>
                     No orders match these filters.
                   </td>
                 </tr>
@@ -338,7 +336,7 @@ function SellOrderDetail({
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                  {fmtDate(order.createdAt)} · {order.customer.region} · {order.customer.terms}
+                  {fmtDate(order.createdAt)} · {order.customer.region}
                 </div>
               </>
             )}

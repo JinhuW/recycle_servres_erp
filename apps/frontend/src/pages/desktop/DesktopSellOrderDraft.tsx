@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtDate } from '../../lib/format';
-import { paymentTerms } from '../../lib/lookups';
 
 // Draft-sell-order modal: manager picks items off Inventory, the modal lets
 // them pick a customer, tweak qty / unit price per line, and save a Draft sell
@@ -28,7 +27,6 @@ type Customer = {
   name: string;
   short_name: string | null;
   region: string | null;
-  terms: string;
 };
 
 type Line = {
@@ -56,7 +54,6 @@ type Props = {
 export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<string>('');
-  const [terms, setTerms] = useState<string>('Net 30');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +83,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         setCustomers(r.items);
         if (r.items.length && !customerId) {
           setCustomerId(r.items[0].id);
-          setTerms(r.items[0].terms);
         }
       })
       .catch(() => {/* keep an empty list — Save will still validate */});
@@ -192,38 +188,23 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         {/* Body — two columns */}
         <div className="so-body">
           <div className="so-main">
-            {/* Customer + terms */}
+            {/* Customer */}
             <div className="so-section">
               <div className="so-section-head">
-                <Icon name="user" size={14} /> Customer &amp; terms
+                <Icon name="user" size={14} /> Customer
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-                <div>
-                  <label className="so-label">Customer</label>
-                  <CustomerPicker
-                    customers={customers}
-                    value={customerId}
-                    onChange={(id) => {
-                      setCustomerId(id);
-                      const c = customers.find(x => x.id === id);
-                      if (c) setTerms(c.terms);
-                    }}
-                    onCreated={(c) => {
-                      setCustomers((prev) => [...prev, c]);
-                      setTerms(c.terms);
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className="so-label">Payment terms</label>
-                  <select
-                    className="select"
-                    value={terms}
-                    onChange={e => setTerms(e.target.value)}
-                  >
-                    {paymentTerms.map(tt => <option key={tt}>{tt}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className="so-label">Customer</label>
+                <CustomerPicker
+                  customers={customers}
+                  value={customerId}
+                  onChange={(id) => {
+                    setCustomerId(id);
+                  }}
+                  onCreated={(c) => {
+                    setCustomers((prev) => [...prev, c]);
+                  }}
+                />
               </div>
             </div>
 
@@ -508,7 +489,7 @@ function CustomerPicker({
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{c.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-                    {c.terms} · {c.region ?? '—'}
+                    {c.region ?? '—'}
                   </div>
                 </div>
                 {c.id === value && <Icon name="check" size={13} style={{ color: 'var(--accent)' }} />}
