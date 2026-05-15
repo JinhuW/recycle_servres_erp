@@ -99,3 +99,28 @@ describe('Warehouse manager linked to a DB user (manager_user_id FK)', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('Warehouse API no longer exposes cutoffLocal / sqft', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('GET items omit cutoffLocal and sqft', async () => {
+    const { token } = await loginAs(ALEX);
+    const list = await api<{ items: Record<string, unknown>[] }>('GET', '/api/warehouses', { token });
+    expect(list.status).toBe(200);
+    const wh = list.body.items[0];
+    expect(wh).toBeDefined();
+    expect(wh).not.toHaveProperty('cutoffLocal');
+    expect(wh).not.toHaveProperty('sqft');
+  });
+
+  it('POST ignores cutoffLocal/sqft and the response omits them', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<Record<string, unknown>>('POST', '/api/warehouses', {
+      token,
+      body: { id: 'WH-NOSQ', name: 'NoSq', short: 'NOSQ', region: 'US-East', cutoffLocal: '15:00', sqft: 1234 },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body).not.toHaveProperty('cutoffLocal');
+    expect(created.body).not.toHaveProperty('sqft');
+  });
+});

@@ -26,8 +26,6 @@ export type Warehouse = {
   managerPhone?: string | null;   // derived: users.phone (read-only)
   managerEmail?: string | null;   // derived: users.email (read-only)
   timezone?: string | null;
-  cutoffLocal?: string | null; // 'HH:MM' in the warehouse's timezone
-  sqft?: number | null;
   active?: boolean; // false = archived: hidden from every UI surface (DB row kept)
 };
 

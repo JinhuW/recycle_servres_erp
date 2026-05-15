@@ -23,24 +23,10 @@ const optionalString = (raw: unknown): FieldUpdate<string> => {
   return { set: true, value: t === '' ? null : t };
 };
 
-const optionalInt = (raw: unknown): FieldUpdate<number> => {
-  if (raw === undefined) return { set: false };
-  if (raw === null || raw === '') return { set: true, value: null };
-  const n = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    return { set: true, invalid: 'must be an integer' };
-  }
-  return { set: true, value: n };
-};
-
-const CUTOFF_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-
 type DetailInput = {
   address?: FieldUpdate<string>;
   managerUserId?: FieldUpdate<string>;
   timezone?: FieldUpdate<string>;
-  cutoffLocal?: FieldUpdate<string>;
-  sqft?: FieldUpdate<number>;
 };
 
 function parseDetails(body: Record<string, unknown>): { input: DetailInput; error: string | null } {
@@ -48,8 +34,6 @@ function parseDetails(body: Record<string, unknown>): { input: DetailInput; erro
     address:       optionalString(body.address),
     managerUserId: optionalString(body.managerUserId),
     timezone:      optionalString(body.timezone),
-    cutoffLocal:   optionalString(body.cutoffLocal),
-    sqft:          optionalInt(body.sqft),
   };
 
   for (const [key, f] of Object.entries(input) as [string, FieldUpdate<unknown>][]) {
@@ -58,15 +42,6 @@ function parseDetails(body: Record<string, unknown>): { input: DetailInput; erro
     }
   }
 
-  if (input.cutoffLocal?.set && 'value' in input.cutoffLocal
-      && input.cutoffLocal.value !== null
-      && !CUTOFF_RE.test(input.cutoffLocal.value)) {
-    return { input, error: 'cutoffLocal must be HH:MM (00:00 – 23:59)' };
-  }
-  if (input.sqft?.set && 'value' in input.sqft
-      && input.sqft.value !== null && input.sqft.value < 0) {
-    return { input, error: 'sqft must be a non-negative integer' };
-  }
   return { input, error: null };
 }
 
@@ -102,8 +77,6 @@ const toApi = (r: WhRow) => ({
   managerPhone:  r.manager_phone   ?? null, // users.phone (derived)
   managerEmail:  r.manager_email   ?? null, // users.email (derived)
   timezone:      r.timezone        ?? null,
-  cutoffLocal:   r.cutoff_local    ?? null,
-  sqft:          r.sqft            ?? null,
   active:        (r.active ?? true) as boolean,
 });
 
@@ -114,7 +87,7 @@ async function fetchWarehouse(
 ): Promise<WhRow | null> {
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
-           w.timezone, w.cutoff_local, w.sqft, w.active, w.manager_user_id,
+           w.timezone, w.active, w.manager_user_id,
            mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
     FROM warehouses w
     LEFT JOIN users mu ON mu.id = w.manager_user_id
@@ -129,7 +102,7 @@ warehouses.get('/', async (c) => {
   const sql = getDb(c.env);
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
-           w.timezone, w.cutoff_local, w.sqft, w.active, w.manager_user_id,
+           w.timezone, w.active, w.manager_user_id,
            mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
     FROM warehouses w
     LEFT JOIN users mu ON mu.id = w.manager_user_id
@@ -163,12 +136,12 @@ warehouses.post('/', async (c) => {
     const ins = await sql`
       INSERT INTO warehouses (
         id, name, short, region,
-        address, manager_user_id, timezone, cutoff_local, sqft
+        address, manager_user_id, timezone
       )
       VALUES (
         ${id}, ${name}, ${short}, ${region},
         ${val(input.address)}, ${val(input.managerUserId)}::uuid,
-        ${val(input.timezone)}, ${val(input.cutoffLocal)}, ${val(input.sqft)}
+        ${val(input.timezone)}
       )
       RETURNING id
     `;
@@ -216,8 +189,6 @@ warehouses.patch('/:id', async (c) => {
       address         = CASE WHEN ${flag(input.address)}::int       = 1 THEN ${val(input.address)}             ELSE address         END,
       manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
       timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
-      cutoff_local    = CASE WHEN ${flag(input.cutoffLocal)}::int   = 1 THEN ${val(input.cutoffLocal)}         ELSE cutoff_local    END,
-      sqft            = CASE WHEN ${flag(input.sqft)}::int          = 1 THEN ${val(input.sqft)}                ELSE sqft            END,
       active          = COALESCE(${active}, active)
     WHERE id = ${id}
     RETURNING id
