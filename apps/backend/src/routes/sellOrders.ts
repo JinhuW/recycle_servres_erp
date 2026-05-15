@@ -54,7 +54,11 @@ sellOrders.get('/:id', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
-  const head = (await sql`
+  const head = (await sql<{
+    id: string; status: string; discount_pct: number; notes: string | null; created_at: string;
+    customer_id: string; customer_name: string; customer_short: string;
+    customer_terms: string; customer_region: string;
+  }[]>`
     SELECT so.id, so.status, so.discount_pct::float AS discount_pct, so.notes, so.created_at,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.terms AS customer_terms, c.region AS customer_region
     FROM sell_orders so JOIN customers c ON c.id = so.customer_id
@@ -62,7 +66,11 @@ sellOrders.get('/:id', async (c) => {
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
 
-  const lines = await sql`
+  const lines = await sql<{
+    id: string; category: string; label: string; sub_label: string | null;
+    part_number: string | null; qty: number; unit_price: number;
+    condition: string | null; position: number; warehouse_short: string | null;
+  }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price, sol.condition, sol.position,
            w.short AS warehouse_short
@@ -71,7 +79,7 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
-  const subtotal = lines.reduce((a: number, l: { qty: number; unit_price: number }) => a + l.qty * l.unit_price, 0);
+  const subtotal = lines.reduce((a, l) => a + l.qty * l.unit_price, 0);
 
   // Pull per-status evidence (notes + attachments). The frontend expects a
   // map keyed by status with both fields flattened together.
@@ -257,7 +265,7 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
 
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
-  const file = form.get('file');
+  const file = form.get('file') as File | null;
   if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
   // 10 MB matches the design's hint ("up to 10 MB each").
   if (file.size > 10 * 1024 * 1024) {

@@ -16,7 +16,10 @@ scan.post('/label', async (c) => {
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
 
-  const file = form.get('file');
+  // workers-types models FormData.get as string|null; a file field is a File
+  // at runtime. Cast to the object type so `instanceof` is valid, then keep
+  // the runtime check to reject string/missing values.
+  const file = form.get('file') as File | null;
   const category = (form.get('category') as string | null) as LineCategory | null;
   if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
   if (!category || !['RAM', 'SSD', 'HDD', 'Other'].includes(category)) {
