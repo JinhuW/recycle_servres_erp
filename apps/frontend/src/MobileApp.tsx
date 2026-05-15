@@ -124,6 +124,8 @@ function Shell() {
     health: l.health ?? null,
     rpm: l.rpm ?? null,
     status: 'In Transit' as const,
+    scanImageId: l.scanImageId ?? null,
+    scanConfidence: l.scanConfidence ?? null,
   });
 
   // A line is ready to persist once it has identity (brand or description for

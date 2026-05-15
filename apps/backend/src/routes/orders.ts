@@ -260,6 +260,8 @@ type LineFields = {
   condition?: string;
   health?: number | null;
   rpm?: number | null;
+  scanImageId?: string | null;
+  scanConfidence?: number | null;
 };
 type LinePatch = LineFields & { id: string };
 
@@ -347,7 +349,8 @@ orders.patch('/:id', async (c) => {
             INSERT INTO order_lines (
               order_id, category, brand, capacity, type, classification, rank, speed,
               interface, form_factor, description, part_number, condition, qty,
-              unit_cost, sell_price, status, position, health, rpm
+              unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
+              health, rpm
             ) VALUES (
               ${id}, ${l.category ?? (existing.category as string)},
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.type ?? null},
@@ -355,7 +358,8 @@ orders.patch('/:id', async (c) => {
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
               ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${l.sellPrice ?? null}, ${l.status ?? 'In Transit'},
-              ${pos++}, ${l.health ?? null}, ${l.rpm ?? null}
+              ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
+              ${l.health ?? null}, ${l.rpm ?? null}
             )
           `;
         }
