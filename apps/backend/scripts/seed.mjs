@@ -47,41 +47,26 @@ const USERS = [
 const WAREHOUSES = [
   { id: 'WH-LA1', name: 'Los Angeles · LA1', short: 'LA1', region: 'US-West',
     address: '2401 E. 8th St, Los Angeles, CA 90021',
-    manager: 'Operations · West',
-    manager_phone: null,
-    manager_email: null,
     timezone: 'America/Los_Angeles',
     cutoff_local: '15:00',
     sqft: 14200 },
   { id: 'WH-DAL', name: 'Dallas · DAL', short: 'DAL', region: 'US-Central',
     address: '6900 Ambassador Row, Dallas, TX 75247',
-    manager: 'Operations · Central',
-    manager_phone: null,
-    manager_email: null,
     timezone: 'America/Chicago',
     cutoff_local: '14:00',
     sqft: 9800 },
   { id: 'WH-NJ2', name: 'Newark · NJ2', short: 'NJ2', region: 'US-East',
     address: '180 Raymond Blvd, Newark, NJ 07102',
-    manager: 'Operations · East',
-    manager_phone: null,
-    manager_email: null,
     timezone: 'America/New_York',
     cutoff_local: '16:00',
     sqft: 11600 },
   { id: 'WH-HK', name: 'Hong Kong · HK', short: 'HK', region: 'APAC',
     address: 'Unit 12, Goodman Tsing Yi, Hong Kong',
-    manager: 'APAC Hub',
-    manager_phone: null,
-    manager_email: null,
     timezone: 'Asia/Hong_Kong',
     cutoff_local: '17:00',
     sqft: 8200 },
   { id: 'WH-AMS', name: 'Amsterdam · AMS', short: 'AMS', region: 'EMEA',
     address: 'Schiphol Logistics Park, 1118 BE Amsterdam',
-    manager: 'EMEA Hub',
-    manager_phone: null,
-    manager_email: null,
     timezone: 'Europe/Amsterdam',
     cutoff_local: '16:00',
     sqft: 7400 },
@@ -433,18 +418,15 @@ try {
     await sql`
       INSERT INTO warehouses (
         id, name, short, region,
-        address, manager, manager_phone, manager_email,
-        timezone, cutoff_local, sqft
+        address, timezone, cutoff_local, sqft
       )
       VALUES (
         ${w.id}, ${w.name}, ${w.short}, ${w.region},
-        ${w.address}, ${w.manager}, ${w.manager_phone}, ${w.manager_email},
-        ${w.timezone}, ${w.cutoff_local}, ${w.sqft}
+        ${w.address}, ${w.timezone}, ${w.cutoff_local}, ${w.sqft}
       )
       ON CONFLICT (id) DO UPDATE SET
         name=EXCLUDED.name, short=EXCLUDED.short, region=EXCLUDED.region,
-        address=EXCLUDED.address, manager=EXCLUDED.manager,
-        manager_phone=EXCLUDED.manager_phone, manager_email=EXCLUDED.manager_email,
+        address=EXCLUDED.address,
         timezone=EXCLUDED.timezone, cutoff_local=EXCLUDED.cutoff_local, sqft=EXCLUDED.sqft
     `;
   }
