@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
-import { api } from '../../lib/api';
+import { api, deleteOrder } from '../../lib/api';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
@@ -56,6 +56,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const [typedId, setTypedId] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = canEditOrder && order.status === 'Draft';
 
   useEffect(() => {
     api.get<{ items: Warehouse[] }>('/api/warehouses')
@@ -198,6 +202,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             {fmtDateShort(order.createdAt)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length} line{lines.length === 1 ? '' : 's'} · {t('editOrderSub')}
           </div>
         </div>
+        {canDelete && (
+          <button
+            className="btn"
+            style={{ color: 'var(--neg)', borderColor: 'var(--neg)', alignSelf: 'flex-start' }}
+            onClick={() => { setTypedId(''); setShowDelete(true); }}
+          >
+            <Icon name="trash" size={13} /> Delete order
+          </button>
+        )}
       </div>
 
       <div className={'card' + (!canEditOrder ? ' order-readonly' : '')}>
@@ -566,6 +579,74 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
         />
+      )}
+
+      {showDelete && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !deleting) setShowDelete(false); }}>
+          <div className="modal-shell" style={{ maxWidth: 460 }}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--neg-soft)', color: 'var(--neg)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="trash" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">Delete order {order.id}?</div>
+                  <div className="modal-sub">
+                    This permanently deletes the Draft and all its lines. Type the order ID to confirm.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-body">
+              <div className="field">
+                <label className="label">
+                  Type <span className="mono">{order.id}</span> to confirm
+                </label>
+                <input
+                  className="input mono"
+                  value={typedId}
+                  onChange={e => setTypedId(e.target.value)}
+                  placeholder={order.id}
+                  autoFocus
+                  disabled={deleting}
+                />
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button
+                className="btn"
+                onClick={() => setShowDelete(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn"
+                style={{
+                  background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)',
+                  opacity: deleting || typedId !== order.id ? 0.5 : 1,
+                }}
+                disabled={deleting || typedId !== order.id}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await deleteOrder(order.id);
+                    onCancel();
+                  } catch (e) {
+                    alert(e instanceof Error ? e.message : 'Delete failed');
+                    setDeleting(false);
+                  }
+                }}
+              >
+                {deleting ? '…' : 'Delete order'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
