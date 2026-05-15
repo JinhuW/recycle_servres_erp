@@ -44,18 +44,10 @@ export type SellOrderStatusInfo = {
 };
 export const sellOrderStatuses: SellOrderStatusInfo[] = [];
 
-export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Done';
-// Populated from workflow_stages.label (ordered by position). Stays in sync
-// with the lifecycle the manager can edit in Settings → Workflow.
-export const orderStatuses: OrderStatus[] = [];
-
 type LookupsResponse = {
   catalog: Record<string, string[]>;
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
-};
-type WorkflowResponse = {
-  stages: { id: string; label: string; position: number }[];
 };
 
 let loaded = false;
@@ -66,10 +58,7 @@ export function loadLookups(): Promise<void> {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const [data, workflow] = await Promise.all([
-        api.get<LookupsResponse>('/api/lookups'),
-        api.get<WorkflowResponse>('/api/workflow'),
-      ]);
+      const data = await api.get<LookupsResponse>('/api/lookups');
       // Mutate in place so any module that holds a reference sees the values.
       for (const [group, values] of Object.entries(data.catalog)) {
         const target = (catalog as Record<string, string[]>)[group];
@@ -77,10 +66,6 @@ export function loadLookups(): Promise<void> {
       }
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
-      orderStatuses.splice(
-        0, orderStatuses.length,
-        ...workflow.stages.map(s => s.label as OrderStatus),
-      );
       loaded = true;
     } finally {
       inflight = null;
@@ -98,5 +83,4 @@ export function resetLookups(): void {
   for (const arr of Object.values(catalog)) arr.length = 0;
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
-  orderStatuses.length = 0;
 }

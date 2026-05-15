@@ -1,5 +1,5 @@
 -- Desktop ERP additions: customers, sell orders, inventory audit log,
--- workflow stage configuration, member admin fields.
+-- member admin fields.
 
 -- ── Customers (sell-order counterparties) ───────────────────────────────────
 CREATE TABLE IF NOT EXISTS customers (
@@ -61,17 +61,6 @@ CREATE TABLE IF NOT EXISTS inventory_events (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS inventory_events_line_idx ON inventory_events(order_line_id, created_at DESC);
-
--- ── Workflow stage configuration (manager-editable in Settings) ─────────────
-CREATE TABLE IF NOT EXISTS workflow_stages (
-  id          TEXT PRIMARY KEY,         -- short slug
-  label       TEXT NOT NULL,
-  short       TEXT NOT NULL,
-  tone        TEXT NOT NULL DEFAULT 'muted',
-  icon        TEXT NOT NULL DEFAULT 'tag',
-  description TEXT,
-  position    INTEGER NOT NULL DEFAULT 0
-);
 
 -- ── Member admin fields (per chat6: managers can reset passwords/disable) ──
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
