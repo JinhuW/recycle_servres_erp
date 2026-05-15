@@ -93,13 +93,12 @@ export async function scanLabel(
   imageBytes: ArrayBuffer,
 ): Promise<ScanResult> {
   if (isStub(env)) {
-    const canned = STUB_BY_CATEGORY[category];
     // STUB_LOW_CONF=true simulates an unreadable label so the manual-entry
-    // path can be exercised without a real model.
+    // path can be exercised without a real model. Absent/false → normal stub.
     if ((env.STUB_LOW_CONF ?? 'false').toLowerCase() === 'true') {
       return { category, confidence: 0.3, fields: {}, provider: 'stub' };
     }
-    return { ...canned, provider: 'stub' };
+    return { ...STUB_BY_CATEGORY[category], provider: 'stub' };
   }
 
   // Workers AI llava vision call. We pass the raw image bytes (max ~4MB).
