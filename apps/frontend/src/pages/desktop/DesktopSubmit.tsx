@@ -268,6 +268,7 @@ function OrderForm({
   const aiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
 
   const onAiUpload = () => {
     if (aiBusy) return;
@@ -281,6 +282,7 @@ function OrderForm({
     if (!file) return;
     setAiBusy(true);
     setAiError(null);
+    setAiNotice(null);
     try {
       const form = new FormData();
       form.append('file', file, file.name);
@@ -288,7 +290,7 @@ function OrderForm({
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
       const newLine = lineFromScan(category, scan);
       if ((scan.confidence ?? 0) < AI_CONFIDENCE_FLOOR) {
-        setAiError("Couldn't read the label confidently — please enter the details manually.");
+        setAiNotice("Couldn't read the label confidently — please enter the details manually.");
       }
       setLines(ls => {
         const next = [...ls, newLine];
@@ -452,6 +454,22 @@ function OrderForm({
             <button
               className="btn icon sm"
               onClick={() => setAiError(null)}
+              title="Dismiss"
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        )}
+        {aiNotice && (
+          <div style={{
+            margin: '0 18px 12px', padding: '8px 12px',
+            fontSize: 12, color: 'var(--fg-subtle)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          }}>
+            <span>{aiNotice}</span>
+            <button
+              className="btn icon sm"
+              onClick={() => setAiNotice(null)}
               title="Dismiss"
             >
               <Icon name="x" size={12} />
