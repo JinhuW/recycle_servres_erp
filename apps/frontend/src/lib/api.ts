@@ -2,6 +2,8 @@
 // /api/* to the Worker on :8787 (see vite.config.ts), so paths stay relative
 // in dev and prod.
 
+import type { Category } from './types';
+
 const TOKEN_KEY = 'recycle_erp_token';
 
 export const auth = {
@@ -64,3 +66,17 @@ export const api = {
   delete: <T,>(path: string)              => request<T>('DELETE', path),
   upload: <T,>(path: string, form: FormData) => request<T>('POST', path, form, { isForm: true }),
 };
+
+export const createDraftOrder = (
+  category: Category,
+  meta?: { warehouseId?: string; payment?: 'company' | 'self'; notes?: string },
+) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
+
+// Promote a single draft line to a confirmed inventory product.
+export const confirmOrderLine = (orderId: string, lineId: string) =>
+  api.patch<{ ok: true }>(`/api/orders/${orderId}`, {
+    lines: [{ id: lineId, status: 'In Transit' }],
+  });
+
+export const deleteOrder = (orderId: string) =>
+  api.delete<{ ok: true }>(`/api/orders/${orderId}`);
