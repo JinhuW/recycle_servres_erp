@@ -327,6 +327,7 @@ function Shell() {
         sellPrice: l.sellPrice ?? null,
         scanImageId: l.scanImageId,
         scanConfidence: l.scanConfidence,
+        scanImageUrl: l.scanImageUrl,
         health: l.health,
         rpm: l.rpm,
         label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`.trim()

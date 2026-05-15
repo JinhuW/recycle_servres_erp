@@ -6,6 +6,7 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { AI_CONFIDENCE_FLOOR } from '../lib/status';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
+import { ImageLightbox } from '../components/ImageLightbox';
 
 type Props = {
   category: Category;
@@ -99,6 +100,16 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     : (detected ? aiDefaults(category, detected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
+  const [lightbox, setLightbox] = useState(false);
+  const [thumbBroken, setThumbBroken] = useState(false);
+
+  const scanUrl = existingLine?.scanImageUrl ?? null;
+  const showThumb =
+    isEditing &&
+    !!scanUrl &&
+    !scanUrl.startsWith('data:image/placeholder') &&
+    !thumbBroken;
+
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => setLine(prev => ({ ...prev, [k]: v }));
 
   const aiInputRef = useRef<HTMLInputElement | null>(null);
@@ -203,6 +214,40 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             <Icon name="sparkles" size={13} style={{ marginLeft: 'auto' }} />
           </div>
         )}
+        {showThumb && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              marginTop: 8,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setLightbox(true)}
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 12,
+                border: '1px solid var(--border)',
+                overflow: 'hidden',
+                padding: 0,
+                background: 'var(--bg-soft)',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <img
+                src={scanUrl!}
+                alt={t('aiPhotoLabel')}
+                onError={() => setThumbBroken(true)}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+            </button>
+            <span style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>{t('aiPhotoLabel')}</span>
+          </div>
+        )}
 
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} />
 
@@ -247,6 +292,9 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>
       </div>
+      {lightbox && scanUrl && (
+        <ImageLightbox url={scanUrl} alt={t('aiPhotoLabel')} onClose={() => setLightbox(false)} />
+      )}
     </div>
   );
 }
