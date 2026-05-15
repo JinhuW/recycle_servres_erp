@@ -235,6 +235,7 @@ function OrderForm({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Create a server-side draft order as soon as the form mounts so that
   // per-line confirms have an order to attach to.
@@ -320,12 +321,14 @@ function OrderForm({
     });
   };
 
-  const canSubmit = lines.every(l => {
+  const lineReady = (l: Line) => {
     const qty = Number(l.qty) || 0;
     const cost = Number(l.unitCost) || 0;
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
     return qty > 0 && cost >= 0 && hasIdentity;
-  });
+  };
+
+  const canSubmit = lines.every(lineReady);
 
   // Maps a local Line to the wire shape expected by PATCH /api/orders/:id addLines.
   const toWireLine = (l: Line) => ({
@@ -343,6 +346,8 @@ function OrderForm({
     condition: l.condition,
     qty: Number(l.qty) || 1,
     unitCost: Number(l.unitCost) || 0,
+    health: l.health ?? null,
+    rpm: l.rpm ?? null,
     status: 'In Transit' as const,
   });
 
@@ -354,6 +359,10 @@ function OrderForm({
     }
     const l = lines[idx];
     if (l._confirmed) return;
+    if (!lineReady(l)) {
+      setAiError('Fill in brand/description, quantity and unit cost before confirming this line.');
+      return;
+    }
     await api.patch('/api/orders/' + draftId, { addLines: [toWireLine(l)] });
     updateLine(idx, { _confirmed: true });
   };
@@ -375,7 +384,7 @@ function OrderForm({
             <div className="card-sub">An order contains multiple line items of the same category ({category}).</div>
           </div>
           <span className="chip mono">
-            {'SO-' + Math.floor(Math.random() * 9000 + 1000)} · Draft
+            {(draftId ?? 'Drafting…')} · Draft
           </span>
         </div>
 
@@ -618,13 +627,14 @@ function OrderForm({
             <button className="btn" onClick={onCancel}>Cancel</button>
             <button
               className="btn accent"
-              disabled={!canSubmit || !meta.warehouseId || !draftId}
+              disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
               onClick={async () => {
                 if (!draftId) { setAiError('No draft order — refresh and try again.'); return; }
                 const totalCost = meta.totalCostOverride != null
                   ? (Number(meta.totalCostOverride) || 0)
                   : totals.cost;
                 const unconfirmedLines = lines.filter(l => !l._confirmed);
+                setSubmitting(true);
                 try {
                   await api.patch('/api/orders/' + draftId, {
                     warehouseId: meta.warehouseId,
@@ -636,6 +646,8 @@ function OrderForm({
                   onDone({ msg: 'Order submitted — added to inventory', kind: 'success' });
                 } catch (e) {
                   setAiError(e instanceof Error ? e.message : 'Submit failed');
+                } finally {
+                  setSubmitting(false);
                 }
               }}
             >
