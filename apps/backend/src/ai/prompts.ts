@@ -3,7 +3,7 @@ import type { LineCategory } from '../types';
 
 export const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
   RAM: `You are reading a server RAM module label. Extract these fields and respond as compact JSON only:
-{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"… GB","type":"DDR3|DDR4|DDR5","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx16|1Rx8|1Rx4|2Rx16|2Rx8|2Rx4|4Rx8|4Rx4|8Rx4","speed":"MT/s number only","partNumber":"…"}
+{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"… GB","type":"DDR2|DDR3|DDR4|DDR5","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx16|1Rx8|1Rx4|2Rx16|2Rx8|2Rx4|4Rx8|4Rx4|8Rx4","speed":"MT/s number only","partNumber":"…"}
 TYPE — use the "PC" code printed on the label, never infer the type from speed alone:
   PC2-… = DDR2, PC3-…/PC3L-… = DDR3, PC4-… = DDR4, PC5-… = DDR5.
 CLASSIFICATION — from the module form factor: SODIMM = laptop, UDIMM = desktop, RDIMM/LRDIMM/ECC = server.
