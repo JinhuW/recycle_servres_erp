@@ -70,11 +70,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
   if (path === '/market') return 'market';
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
-  if (
-    path === '/sell-orders' ||
-    match('/sell-orders/:id', path) ||
-    match('/sell-orders/:id/edit', path)
-  ) return 'sellorders';
+  if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)) return 'sellorders';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }
