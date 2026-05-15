@@ -35,7 +35,13 @@ scan.post('/label', async (c) => {
   if (!uploaded) return c.json({ error: 'image upload failed' }, 502);
 
   const bytes = await file.arrayBuffer();
-  const result = await scanLabel(c.env, category, bytes);
+  let result;
+  try {
+    result = await scanLabel(c.env, category, bytes);
+  } catch (e) {
+    console.error('ocr error', e);
+    return c.json({ error: 'label OCR failed — retry the shot' }, 502);
+  }
 
   await sql`
     INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category, extracted, confidence, provider)

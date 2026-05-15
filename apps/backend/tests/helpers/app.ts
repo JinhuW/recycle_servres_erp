@@ -6,7 +6,6 @@ export const testEnv: Env = {
   DATABASE_URL: TEST_DATABASE_URL,
   JWT_SECRET: 'test-secret-' + Math.random().toString(36).slice(2),
   JWT_ISSUER: 'recycle-erp-test',
-  STUB_OCR: 'true',
 };
 
 export type ApiResult<T = unknown> = {
@@ -40,13 +39,17 @@ export async function api<T = unknown>(
 export async function multipart(
   path: string,
   fields: Record<string, string | Blob>,
-  opts: { token?: string } = {},
+  opts: { token?: string; env?: Partial<Env> } = {},
 ): Promise<ApiResult> {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
   const headers: Record<string, string> = {};
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-  const res = await app.fetch(new Request('http://test' + path, { method: 'POST', body: form, headers }), testEnv);
+  const env = opts.env ? { ...testEnv, ...opts.env } : testEnv;
+  const res = await app.fetch(
+    new Request('http://test' + path, { method: 'POST', body: form, headers }),
+    env,
+  );
   const text = await res.text();
   let body: unknown;
   try { body = text ? JSON.parse(text) : undefined; } catch { body = text; }
