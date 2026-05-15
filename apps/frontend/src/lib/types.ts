@@ -21,9 +21,10 @@ export type Warehouse = {
   short: string;
   region: string;
   address?: string | null;
-  manager?: string | null;
-  managerPhone?: string | null;
-  managerEmail?: string | null;
+  managerUserId?: string | null;  // FK → users.id (the managing user)
+  manager?: string | null;        // derived: users.name  (read-only)
+  managerPhone?: string | null;   // derived: users.phone (read-only)
+  managerEmail?: string | null;   // derived: users.email (read-only)
   timezone?: string | null;
   cutoffLocal?: string | null; // 'HH:MM' in the warehouse's timezone
   sqft?: number | null;

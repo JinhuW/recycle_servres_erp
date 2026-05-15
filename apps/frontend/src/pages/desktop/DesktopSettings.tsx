@@ -1731,7 +1731,7 @@ function WarehouseEditModal({
   const isNew = !warehouse;
   type Draft = {
     name: string; short: string; region: string;
-    address: string; manager: string; managerPhone: string; managerEmail: string;
+    address: string; managerUserId: string;
     timezone: string; cutoffLocal: string; sqft: string;
   };
   const [draft, setDraft] = useState<Draft>({
@@ -1739,13 +1739,19 @@ function WarehouseEditModal({
     short: warehouse?.short ?? '',
     region: warehouse?.region ?? '',
     address: warehouse?.address ?? '',
-    manager: warehouse?.manager ?? '',
-    managerPhone: warehouse?.managerPhone ?? '',
-    managerEmail: warehouse?.managerEmail ?? '',
+    managerUserId: warehouse?.managerUserId ?? '',
     timezone: warehouse?.timezone ?? '',
     cutoffLocal: warehouse?.cutoffLocal ?? '',
     sqft: warehouse?.sqft != null ? String(warehouse.sqft) : '',
   });
+  // Manager dropdown is sourced from the DB (users with role=manager).
+  const [managers, setManagers] = useState<Member[]>([]);
+  useEffect(() => {
+    api.get<{ items: Member[] }>('/api/members')
+      .then(r => setManagers(r.items.filter(m => m.role === 'manager' && m.active)))
+      .catch(() => { /* leave empty; field still renders */ });
+  }, []);
+  const selectedMgr = managers.find(m => m.id === draft.managerUserId) ?? null;
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1771,9 +1777,7 @@ function WarehouseEditModal({
         short: draft.short.trim(),
         region: draft.region.trim(),
         address: clean(draft.address),
-        manager: clean(draft.manager),
-        managerPhone: clean(draft.managerPhone),
-        managerEmail: clean(draft.managerEmail),
+        managerUserId: draft.managerUserId || null,
         timezone: clean(draft.timezone),
         cutoffLocal: clean(draft.cutoffLocal),
         sqft: sqftVal,
@@ -1846,32 +1850,33 @@ function WarehouseEditModal({
           <div className="field-row">
             <div className="field">
               <label className="label">Manager</label>
-              <input
+              <select
                 className="input"
-                value={draft.manager}
-                onChange={e => set('manager', e.target.value)}
-                placeholder="Team or person"
-              />
+                value={draft.managerUserId}
+                onChange={e => set('managerUserId', e.target.value)}
+              >
+                <option value="">— No manager —</option>
+                {managers.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+                {draft.managerUserId && !managers.some(m => m.id === draft.managerUserId) && (
+                  <option value={draft.managerUserId}>
+                    {warehouse?.manager ?? 'Current manager'}
+                  </option>
+                )}
+              </select>
             </div>
           </div>
+          {/* Contact details are derived from the selected manager's user
+              record — read-only, single source of truth in the DB. */}
           <div className="field-row">
             <div className="field">
               <label className="label">Manager phone</label>
-              <input
-                className="input"
-                type="tel"
-                value={draft.managerPhone}
-                onChange={e => set('managerPhone', e.target.value)}
-              />
+              <input className="input" value={selectedMgr?.phone ?? '—'} readOnly disabled />
             </div>
             <div className="field">
               <label className="label">Manager email</label>
-              <input
-                className="input"
-                type="email"
-                value={draft.managerEmail}
-                onChange={e => set('managerEmail', e.target.value)}
-              />
+              <input className="input" value={selectedMgr?.email ?? '—'} readOnly disabled />
             </div>
           </div>
           <div className="field-row">
