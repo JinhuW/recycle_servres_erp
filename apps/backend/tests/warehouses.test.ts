@@ -51,3 +51,51 @@ describe('Warehouse active/archive', () => {
     expect(list.body.items.map(w => w.id)).toContain('WH-HK');
   });
 });
+
+type WhMgr = {
+  id: string;
+  manager: string | null;
+  managerPhone: string | null;
+  managerEmail: string | null;
+  managerUserId: string | null;
+};
+
+describe('Warehouse manager linked to a DB user (manager_user_id FK)', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('PATCH managerUserId links a user; GET derives manager contact from that user', async () => {
+    const { token, user } = await loginAs(ALEX);
+
+    const patch = await api('PATCH', '/api/warehouses/WH-HK', {
+      token, body: { managerUserId: user.id },
+    });
+    expect(patch.status).toBe(200);
+
+    const list = await api<{ items: WhMgr[] }>('GET', '/api/warehouses', { token });
+    const hk = list.body.items.find(w => w.id === 'WH-HK');
+    expect(hk).toBeDefined();
+    expect(hk!.managerUserId).toBe(user.id);
+    expect(hk!.managerEmail).toBe(user.email);
+    expect(typeof hk!.manager).toBe('string');
+    expect((hk!.manager ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('POST accepts managerUserId and echoes derived manager fields', async () => {
+    const { token, user } = await loginAs(ALEX);
+    const r = await api<WhMgr>('POST', '/api/warehouses', {
+      token,
+      body: { id: 'WH-MGR', name: 'Mgr WH', short: 'MGR', region: 'US-East', managerUserId: user.id },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.managerUserId).toBe(user.id);
+    expect(r.body.managerEmail).toBe(user.email);
+  });
+
+  it('rejects an unknown managerUserId with 400', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/warehouses/WH-HK', {
+      token, body: { managerUserId: '00000000-0000-0000-0000-000000000000' },
+    });
+    expect(r.status).toBe(400);
+  });
+});

@@ -37,9 +37,7 @@ const CUTOFF_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 type DetailInput = {
   address?: FieldUpdate<string>;
-  manager?: FieldUpdate<string>;
-  managerPhone?: FieldUpdate<string>;
-  managerEmail?: FieldUpdate<string>;
+  managerUserId?: FieldUpdate<string>;
   timezone?: FieldUpdate<string>;
   cutoffLocal?: FieldUpdate<string>;
   sqft?: FieldUpdate<number>;
@@ -47,13 +45,11 @@ type DetailInput = {
 
 function parseDetails(body: Record<string, unknown>): { input: DetailInput; error: string | null } {
   const input: DetailInput = {
-    address:      optionalString(body.address),
-    manager:      optionalString(body.manager),
-    managerPhone: optionalString(body.managerPhone),
-    managerEmail: optionalString(body.managerEmail),
-    timezone:     optionalString(body.timezone),
-    cutoffLocal:  optionalString(body.cutoffLocal),
-    sqft:         optionalInt(body.sqft),
+    address:       optionalString(body.address),
+    managerUserId: optionalString(body.managerUserId),
+    timezone:      optionalString(body.timezone),
+    cutoffLocal:   optionalString(body.cutoffLocal),
+    sqft:          optionalInt(body.sqft),
   };
 
   for (const [key, f] of Object.entries(input) as [string, FieldUpdate<unknown>][]) {
@@ -66,11 +62,6 @@ function parseDetails(body: Record<string, unknown>): { input: DetailInput; erro
       && input.cutoffLocal.value !== null
       && !CUTOFF_RE.test(input.cutoffLocal.value)) {
     return { input, error: 'cutoffLocal must be HH:MM (00:00 – 23:59)' };
-  }
-  if (input.managerEmail?.set && 'value' in input.managerEmail
-      && input.managerEmail.value !== null
-      && !input.managerEmail.value.includes('@')) {
-    return { input, error: 'managerEmail must contain @' };
   }
   if (input.sqft?.set && 'value' in input.sqft
       && input.sqft.value !== null && input.sqft.value < 0) {
@@ -85,30 +76,65 @@ const val = <T,>(f?: FieldUpdate<T>): T | null => {
   return f.value;
 };
 
+// True when managerUserId was supplied with a non-null value that does not
+// match an existing user (covers unknown ids and malformed uuids). Lets us
+// 400 before mutating instead of surfacing a raw FK violation.
+async function managerUserMissing(
+  sql: ReturnType<typeof getDb>,
+  input: DetailInput,
+): Promise<boolean> {
+  const f = input.managerUserId;
+  if (!f || !f.set || 'invalid' in f || f.value === null) return false;
+  try {
+    const rows = await sql`SELECT 1 FROM users WHERE id = ${f.value}::uuid`;
+    return rows.length === 0;
+  } catch {
+    return true;
+  }
+}
+
 type WhRow = Record<string, unknown>;
 const toApi = (r: WhRow) => ({
   id: r.id, name: r.name, short: r.short, region: r.region,
-  address:      r.address      ?? null,
-  manager:      r.manager      ?? null,
-  managerPhone: r.manager_phone ?? null,
-  managerEmail: r.manager_email ?? null,
-  timezone:     r.timezone     ?? null,
-  cutoffLocal:  r.cutoff_local ?? null,
-  sqft:         r.sqft         ?? null,
-  active:       (r.active ?? true) as boolean,
+  address:       r.address         ?? null,
+  managerUserId: r.manager_user_id ?? null,
+  manager:       r.manager         ?? null, // users.name  of the linked manager
+  managerPhone:  r.manager_phone   ?? null, // users.phone (derived)
+  managerEmail:  r.manager_email   ?? null, // users.email (derived)
+  timezone:      r.timezone        ?? null,
+  cutoffLocal:   r.cutoff_local    ?? null,
+  sqft:          r.sqft            ?? null,
+  active:        (r.active ?? true) as boolean,
 });
+
+// Single source for the warehouse projection: manager name/phone/email are
+// derived from the linked users row, never stored on the warehouse.
+async function fetchWarehouse(
+  sql: ReturnType<typeof getDb>, id: string,
+): Promise<WhRow | null> {
+  const rows = await sql`
+    SELECT w.id, w.name, w.short, w.region, w.address,
+           w.timezone, w.cutoff_local, w.sqft, w.active, w.manager_user_id,
+           mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
+    FROM warehouses w
+    LEFT JOIN users mu ON mu.id = w.manager_user_id
+    WHERE w.id = ${id}
+  `;
+  return (rows[0] as WhRow) ?? null;
+}
 
 // ── routes ──────────────────────────────────────────────────────────────────
 
 warehouses.get('/', async (c) => {
   const sql = getDb(c.env);
   const rows = await sql`
-    SELECT id, name, short, region,
-           address, manager, manager_phone, manager_email,
-           timezone, cutoff_local, sqft, active
-    FROM warehouses
-    WHERE active = TRUE
-    ORDER BY region, short
+    SELECT w.id, w.name, w.short, w.region, w.address,
+           w.timezone, w.cutoff_local, w.sqft, w.active, w.manager_user_id,
+           mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
+    FROM warehouses w
+    LEFT JOIN users mu ON mu.id = w.manager_user_id
+    WHERE w.active = TRUE
+    ORDER BY w.region, w.short
   `;
   return c.json({ items: rows.map((r) => toApi(r as WhRow)) });
 });
@@ -130,25 +156,24 @@ warehouses.post('/', async (c) => {
   if (error) return c.json({ error }, 400);
 
   const sql = getDb(c.env);
+  if (await managerUserMissing(sql, input)) {
+    return c.json({ error: 'managerUserId must reference an existing user' }, 400);
+  }
   try {
-    const r = await sql`
+    const ins = await sql`
       INSERT INTO warehouses (
         id, name, short, region,
-        address, manager, manager_phone, manager_email,
-        timezone, cutoff_local, sqft
+        address, manager_user_id, timezone, cutoff_local, sqft
       )
       VALUES (
         ${id}, ${name}, ${short}, ${region},
-        ${val(input.address)},      ${val(input.manager)},
-        ${val(input.managerPhone)}, ${val(input.managerEmail)},
-        ${val(input.timezone)},     ${val(input.cutoffLocal)},
-        ${val(input.sqft)}
+        ${val(input.address)}, ${val(input.managerUserId)}::uuid,
+        ${val(input.timezone)}, ${val(input.cutoffLocal)}, ${val(input.sqft)}
       )
-      RETURNING id, name, short, region,
-                address, manager, manager_phone, manager_email,
-                timezone, cutoff_local, sqft
+      RETURNING id
     `;
-    return c.json(toApi(r[0] as WhRow), 201);
+    const row = await fetchWarehouse(sql, (ins[0] as { id: string }).id);
+    return c.json(toApi(row as WhRow), 201);
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
     if (/duplicate|unique/i.test(msg)) {
@@ -177,29 +202,29 @@ warehouses.patch('/:id', async (c) => {
   const { input, error } = parseDetails(body);
   if (error) return c.json({ error }, 400);
 
-  const flag = (f?: FieldUpdate<string | number>) => (f?.set ? 1 : 0);
-
   const sql = getDb(c.env);
+  if (await managerUserMissing(sql, input)) {
+    return c.json({ error: 'managerUserId must reference an existing user' }, 400);
+  }
+
+  const flag = (f?: FieldUpdate<string | number>) => (f?.set ? 1 : 0);
   const r = await sql`
     UPDATE warehouses SET
-      name           = COALESCE(${name},   name),
-      short          = COALESCE(${short},  short),
-      region         = COALESCE(${region}, region),
-      address        = CASE WHEN ${flag(input.address)}::int      = 1 THEN ${val(input.address)}      ELSE address        END,
-      manager        = CASE WHEN ${flag(input.manager)}::int      = 1 THEN ${val(input.manager)}      ELSE manager        END,
-      manager_phone  = CASE WHEN ${flag(input.managerPhone)}::int = 1 THEN ${val(input.managerPhone)} ELSE manager_phone  END,
-      manager_email  = CASE WHEN ${flag(input.managerEmail)}::int = 1 THEN ${val(input.managerEmail)} ELSE manager_email  END,
-      timezone       = CASE WHEN ${flag(input.timezone)}::int     = 1 THEN ${val(input.timezone)}     ELSE timezone       END,
-      cutoff_local   = CASE WHEN ${flag(input.cutoffLocal)}::int  = 1 THEN ${val(input.cutoffLocal)}  ELSE cutoff_local   END,
-      sqft           = CASE WHEN ${flag(input.sqft)}::int         = 1 THEN ${val(input.sqft)}         ELSE sqft           END,
-      active         = COALESCE(${active}, active)
+      name            = COALESCE(${name},   name),
+      short           = COALESCE(${short},  short),
+      region          = COALESCE(${region}, region),
+      address         = CASE WHEN ${flag(input.address)}::int       = 1 THEN ${val(input.address)}             ELSE address         END,
+      manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
+      timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
+      cutoff_local    = CASE WHEN ${flag(input.cutoffLocal)}::int   = 1 THEN ${val(input.cutoffLocal)}         ELSE cutoff_local    END,
+      sqft            = CASE WHEN ${flag(input.sqft)}::int          = 1 THEN ${val(input.sqft)}                ELSE sqft            END,
+      active          = COALESCE(${active}, active)
     WHERE id = ${id}
-    RETURNING id, name, short, region,
-              address, manager, manager_phone, manager_email,
-              timezone, cutoff_local, sqft, active
+    RETURNING id
   `;
   if (r.length === 0) return c.json({ error: 'not found' }, 404);
-  return c.json(toApi(r[0] as WhRow));
+  const row = await fetchWarehouse(sql, id);
+  return c.json(toApi(row as WhRow));
 });
 
 // DELETE /:id[?transferTo=<warehouseId>] — unchanged.
