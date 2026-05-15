@@ -537,23 +537,6 @@ try {
   }
   console.log(`  · ${orders.length} orders inserted`);
 
-  console.log('· Seeding workflow stages…');
-  await sql`DELETE FROM workflow_stages`;
-  // Matches DEFAULT_ORDER_LIFECYCLE in the desktop bundle's data.jsx (4 stages).
-  const stages = [
-    { id: 'draft',      label: 'Draft',      short: 'Draft',   tone: 'muted',  icon: 'edit',  desc: 'Purchaser is preparing the order — parts, photos, and costs being captured.' },
-    { id: 'in_transit', label: 'In transit', short: 'Transit', tone: 'info',   icon: 'truck', desc: 'Items in transit — receive and verify quantities at the warehouse.' },
-    { id: 'reviewing',  label: 'Reviewing',  short: 'Review',  tone: 'accent', icon: 'eye',   desc: 'Goods received — set the actual price and review before listing.' },
-    { id: 'done',       label: 'Done',       short: 'Done',    tone: 'pos',    icon: 'check', desc: 'Order closed — ledger settled.' },
-  ];
-  for (let i = 0; i < stages.length; i++) {
-    const s = stages[i];
-    await sql`
-      INSERT INTO workflow_stages (id, label, short, tone, icon, description, position)
-      VALUES (${s.id}, ${s.label}, ${s.short}, ${s.tone}, ${s.icon}, ${s.desc}, ${i})
-    `;
-  }
-
   console.log('· Seeding customers…');
   await sql`DELETE FROM customers`;
   const customers = [

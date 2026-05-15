@@ -1,13 +1,29 @@
-// Per-line status helpers. The list is sourced from workflow_stages at app
-// boot (see lib/lookups.ts); the tone map below stays in code because it's
-// presentation, not data.
+// Per-line status helpers. The order lifecycle is a fixed set — it's pinned by
+// the schema convention on order_lines.status / orders.lifecycle, so it lives
+// here as a static constant rather than a manager-editable table.
 //
 //   Draft (purchaser is preparing) → In Transit → Reviewing → Done.
 
-import { orderStatuses, type OrderStatus } from './lookups';
+export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Done';
 
-export const ORDER_STATUSES = orderStatuses;
-export type { OrderStatus };
+export const ORDER_STATUSES: OrderStatus[] = ['Draft', 'In Transit', 'Reviewing', 'Done'];
+
+// Canonical order lifecycle. `id` is the slug stored in orders.lifecycle;
+// `tone` keys map into DesktopOrders' TONE_VAR for the pipeline cards.
+export type WorkflowStage = {
+  id: string;
+  label: OrderStatus;
+  short: string;
+  tone: 'muted' | 'info' | 'accent' | 'pos';
+  icon: string;
+};
+
+export const WORKFLOW_STAGES: WorkflowStage[] = [
+  { id: 'draft',      label: 'Draft',      short: 'Draft',   tone: 'muted',  icon: 'edit' },
+  { id: 'in_transit', label: 'In Transit', short: 'Transit', tone: 'info',   icon: 'truck' },
+  { id: 'reviewing',  label: 'Reviewing',  short: 'Review',  tone: 'accent', icon: 'eye' },
+  { id: 'done',       label: 'Done',       short: 'Done',    tone: 'pos',    icon: 'check' },
+];
 
 const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
   'Draft':      'muted',

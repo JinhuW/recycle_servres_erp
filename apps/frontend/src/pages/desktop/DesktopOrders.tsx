@@ -6,19 +6,9 @@ import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
 import { api } from '../../lib/api';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
-import { statusTone, isCompleted } from '../../lib/status';
+import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
-
-type Stage = {
-  id: string;
-  label: string;
-  short: string;
-  tone: string;
-  icon: string;
-  description: string;
-  position: number;
-};
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
 // design's lifecycleTone helper.
@@ -120,7 +110,6 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const [search, setSearch] = useState('');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
-  const [stages, setStages] = useState<Stage[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openLines, setOpenLines] = useState<Order | null>(null);
 
@@ -155,11 +144,6 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
     return { col: 'date', dir: 'desc' };
   });
 
-  // Workflow stages — drives the manager-only pipeline cards at the top.
-  useEffect(() => {
-    if (!isManager) return;
-    api.get<{ stages: Stage[] }>('/api/workflow').then(r => setStages(r.stages)).catch(() => {/* keep empty */});
-  }, [isManager]);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -220,7 +204,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   // Aggregate count + revenue per workflow stage for the pipeline cards.
   const stageAgg = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
-    stages.forEach(s => { m[s.id] = { count: 0, revenue: 0 }; });
+    WORKFLOW_STAGES.forEach(s => { m[s.id] = { count: 0, revenue: 0 }; });
     visible.forEach(o => {
       const k = o.lifecycle || 'draft';
       if (!m[k]) m[k] = { count: 0, revenue: 0 };
@@ -228,7 +212,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       m[k].revenue += o.revenue;
     });
     return m;
-  }, [visible, stages]);
+  }, [visible]);
 
   // colSpan for the expanded row — covers chevron + every toggleable col + actions,
   // regardless of which are currently hidden via display:none.
@@ -245,7 +229,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       </div>
 
       {/* Manager-only workflow pipeline — click a card to filter the table by stage */}
-      {isManager && stages.length > 0 && (
+      {isManager && (
         <div className="card" style={{ padding: 0 }}>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -270,10 +254,10 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
           </div>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: `repeat(${stages.length}, 1fr)`,
+            gridTemplateColumns: `repeat(${WORKFLOW_STAGES.length}, 1fr)`,
             gap: 0, padding: '0 8px 12px',
           }}>
-            {stages.map((s, i) => {
+            {WORKFLOW_STAGES.map((s, i) => {
               const agg = stageAgg[s.id] ?? { count: 0, revenue: 0 };
               const active = stageFilter === s.id;
               return (
