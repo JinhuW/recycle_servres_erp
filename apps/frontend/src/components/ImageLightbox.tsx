@@ -32,7 +32,7 @@ export function ImageLightbox({ url, alt, onClose }: Props) {
       }}
     >
       <button
-        onClick={onClose}
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
         title="Close"
         style={{
           position: 'absolute',
