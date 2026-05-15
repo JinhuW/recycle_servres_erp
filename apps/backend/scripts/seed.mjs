@@ -87,12 +87,12 @@ const WAREHOUSES = [
     sqft: 7400 },
 ];
 
-const RAM_BRANDS = ['Samsung', 'Hynix', 'Micron', 'Kingston', 'Crucial', 'Corsair'];
+const RAM_BRANDS = ['Samsung', 'SK Hynix', 'Micron', 'Kingston', 'Other'];
 const RAM_TYPES  = ['DDR3', 'DDR4', 'DDR5'];
 const RAM_CLASS  = ['UDIMM', 'RDIMM', 'LRDIMM', 'SODIMM'];
-const RAM_RANK   = ['1Rx4', '1Rx8', '2Rx4', '2Rx8', '4Rx4'];
+const RAM_RANK   = ['1Rx16', '1Rx8', '1Rx4', '2Rx16', '2Rx8', '2Rx4', '4Rx8', '4Rx4', '8Rx4'];
 const RAM_CAP    = ['4GB','8GB','16GB','32GB','64GB','128GB'];
-const RAM_SPEED  = ['1600','2133','2400','2666','3200','4800','5600'];
+const RAM_SPEED  = ['800','1066','1333','1600','1866','2133','2400','2666','2933','3200','4000','4400','4800','5200','5600','6000','6400','6800','7200','7600','8000'];
 const SSD_BRANDS = ['Samsung','Intel','Micron','WD','Seagate','Kioxia'];
 const SSD_IFACE  = ['SATA','SAS','NVMe','U.2'];
 const SSD_FORM   = ['2.5"','M.2 2280','M.2 22110','U.2','AIC'];
