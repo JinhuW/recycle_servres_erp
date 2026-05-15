@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 
 /**
  * Tiny hash-based router. No external deps. The app's "URL" is the part after
- * `#`, e.g. `#/orders/SO-1289` → path `/orders/SO-1289`. Both mobile and
- * desktop shells subscribe to this and react to changes.
+ * `#`, e.g. `#/purchase-orders/SO-1289` → path `/purchase-orders/SO-1289`.
+ * Both mobile and desktop shells subscribe to this and react to changes.
  */
 
 function readPath(): string {
@@ -31,9 +31,9 @@ export function useRoute(): { path: string } {
 }
 
 /**
- * Returns the params object if `template` (e.g. `/orders/:id`) matches `path`,
- * or null otherwise. Trailing segments in `path` are not allowed unless the
- * template's last segment is a param.
+ * Returns the params object if `template` (e.g. `/purchase-orders/:id`)
+ * matches `path`, or null otherwise. Trailing segments in `path` are not
+ * allowed unless the template's last segment is a param.
  */
 export function match(template: string, path: string): Record<string, string> | null {
   const t = template.split('/').filter(Boolean);
@@ -49,4 +49,48 @@ export function match(template: string, path: string): Record<string, string> | 
     }
   }
   return params;
+}
+
+// Desktop view ids ↔ URL paths. Source of truth for the sidebar/router.
+export const DESKTOP_VIEW_TO_PATH = {
+  dashboard:  '/dashboard',
+  submit:     '/submit',
+  history:    '/purchase-orders',
+  market:     '/market',
+  inventory:  '/inventory',
+  sellorders: '/sell-orders',
+  settings:   '/settings',
+} as const;
+
+export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
+
+export function pathToDesktopView(path: string): DesktopViewId {
+  if (path === '/' || path === '/dashboard') return 'dashboard';
+  if (path === '/submit') return 'submit';
+  if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
+  if (path === '/market') return 'market';
+  if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
+  if (path === '/sell-orders') return 'sellorders';
+  if (path === '/settings') return 'settings';
+  return 'dashboard';
+}
+
+// Mobile view ids ↔ URL paths.
+export const MOBILE_VIEW_TO_PATH = {
+  dashboard: '/dashboard',
+  history:   '/purchase-orders',
+  market:    '/market',
+  inventory: '/inventory',
+  me:        '/profile',
+} as const;
+
+export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
+
+export function pathToMobileView(path: string): MobileViewId {
+  if (path === '/' || path === '/dashboard') return 'dashboard';
+  if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
+  if (path === '/market') return 'market';
+  if (path === '/inventory') return 'inventory';
+  if (path === '/profile') return 'me';
+  return 'dashboard';
 }

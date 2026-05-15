@@ -8,6 +8,7 @@ import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
+import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
 
 type Props = {
   onEdit: (o: Order) => void;
@@ -16,9 +17,10 @@ type Props = {
 
 export function Orders({ onEdit, onToast }: Props) {
   const { t } = useT();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
+  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openLines, setOpenLines] = useState<Order | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -35,7 +37,8 @@ export function Orders({ onEdit, onToast }: Props) {
     if (statusFilter !== 'all') params.set('status', statusFilter);
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
       .then(r => setOrders(r.orders))
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setLoadedOnce(true));
   }, [filter, statusFilter]);
 
   // When a row is expanded, fetch its lines lazily.
@@ -46,13 +49,13 @@ export function Orders({ onEdit, onToast }: Props) {
       .catch(console.error);
   }, [openId]);
 
-  // CC-5: when the URL matches /orders/:id, expand that row and (if
+  // CC-5: when the URL matches /purchase-orders/:id, expand that row and (if
   // editable) push to the review screen. Fires whenever route or the
   // currently-loaded list changes. We track the last-handled id in a
   // ref so that orders re-fetches (e.g. chip filter change) don't yank
   // the user back into edit unexpectedly.
   useEffect(() => {
-    const m = match('/orders/:id', path);
+    const m = match('/purchase-orders/:id', path);
     if (!m) {
       lastHandledRouteId.current = null;
       return;
@@ -103,7 +106,7 @@ export function Orders({ onEdit, onToast }: Props) {
           </div>
         )}
         <div className="ph-chip-scroller">
-          {(['all', 'RAM', 'SSD', 'Other'] as const).map(f => (
+          {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
               {f === 'all' ? t('filterAll') : f}
             </button>
@@ -119,13 +122,14 @@ export function Orders({ onEdit, onToast }: Props) {
             </button>
           ))}
         </div>
-        {orders.length === 0 && (
+        {!loadedOnce && <PhoneListSkeleton rows={5} variant="order" />}
+        {loadedOnce && orders.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {t('noOrdersMatch')}
           </div>
         )}
 
-        {(() => {
+        {loadedOnce && (() => {
           const q = searchQ.trim().toLowerCase();
           const filtered = q
             ? orders.filter(o =>
@@ -140,7 +144,7 @@ export function Orders({ onEdit, onToast }: Props) {
           return (
             <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
-                <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
+                <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
                   {o.category}
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -149,7 +153,7 @@ export function Orders({ onEdit, onToast }: Props) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        const url = `${location.origin}${location.pathname}#/orders/${o.id}`;
+                        const url = `${location.origin}${location.pathname}#/purchase-orders/${o.id}`;
                         const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
                         if (typeof share === 'function') {
                           share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
@@ -188,6 +192,7 @@ export function Orders({ onEdit, onToast }: Props) {
                         <div style={{ fontSize: 13, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`}
                           {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`}
+                          {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`}
                           {l.category === 'Other' && (l.description ?? '')}
                         </div>
                         <span className={'chip ' + statusTone(l.status) + ' dot'} style={{ fontSize: 10 }}>{l.status}</span>
@@ -214,7 +219,7 @@ export function Orders({ onEdit, onToast }: Props) {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!isCompleted(o.status)) {
-                          navigate('/orders/' + o.id);
+                          navigate('/purchase-orders/' + o.id);
                           onEdit(openLines);
                         }
                       }}
@@ -225,7 +230,11 @@ export function Orders({ onEdit, onToast }: Props) {
                 </div>
               )}
               {isOpen && (!openLines || openLines.id !== o.id) && (
-                <div className="ph-order-body" style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>Loading…</div>
+                <div className="ph-order-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Skeleton width="80%" height={13} />
+                  <Skeleton width="60%" height={11} />
+                  <Skeleton width="40%" height={11} />
+                </div>
               )}
             </div>
           );

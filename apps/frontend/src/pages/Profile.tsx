@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { fmtUSD0 } from '../lib/format';
 import { usePhScrolled } from '../lib/usePhScrolled';
+import { Skeleton } from '../components/Skeleton';
 
 type Stats = { count: number; profit: number; commission: number };
 
@@ -19,7 +20,7 @@ type Props = {
 export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity }: Props) {
   const { t, lang } = useT();
   const { user, logout } = useAuth();
-  const [stats, setStats] = useState<Stats>({ count: 0, profit: 0, commission: 0 });
+  const [stats, setStats] = useState<Stats | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
@@ -57,9 +58,20 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
 
         <div className="ph-section-h"><span>{t('lifetimeStats')}</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-          <div className="ph-kpi"><div className="ph-kpi-label">{t('orders')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{stats.count}</div></div>
-          <div className="ph-kpi"><div className="ph-kpi-label">{t('profit')}</div><div className="ph-kpi-value" style={{ fontSize: 18, color: 'var(--pos)' }}>{fmtUSD0(stats.profit)}</div></div>
-          <div className="ph-kpi"><div className="ph-kpi-label">{t('earned')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(stats.commission)}</div></div>
+          {!stats ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="ph-kpi" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Skeleton width={60} height={10} />
+                <Skeleton width={70} height={18} radius={5} />
+              </div>
+            ))
+          ) : (
+            <>
+              <div className="ph-kpi"><div className="ph-kpi-label">{t('orders')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{stats.count}</div></div>
+              <div className="ph-kpi"><div className="ph-kpi-label">{t('profit')}</div><div className="ph-kpi-value" style={{ fontSize: 18, color: 'var(--pos)' }}>{fmtUSD0(stats.profit)}</div></div>
+              <div className="ph-kpi"><div className="ph-kpi-label">{t('earned')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(stats.commission)}</div></div>
+            </>
+          )}
         </div>
 
         <div className="ph-section-h"><span>{t('settings')}</span></div>

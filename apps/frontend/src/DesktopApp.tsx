@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './components/Icon';
 import { Sidebar, type DesktopView } from './components/Sidebar';
+import { Topbar } from './components/Topbar';
+import { RolePreviewBanner } from './components/RolePreviewBanner';
+import { TweaksPanel } from './components/TweaksPanel';
 import { useAuth } from './lib/auth';
-import { useRoute, match, navigate } from './lib/route';
+import { useEffectiveUser } from './lib/tweaks';
+import {
+  useRoute, match, navigate,
+  DESKTOP_VIEW_TO_PATH, pathToDesktopView,
+} from './lib/route';
 import { api } from './lib/api';
 
 import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
@@ -15,36 +22,41 @@ import { DesktopSellOrders } from './pages/desktop/DesktopSellOrders';
 import { DesktopSettings } from './pages/desktop/DesktopSettings';
 import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
+import { FormSkeleton } from './components/Skeleton';
 
 import type { Order } from './lib/types';
 
 type Toast = { msg: string; kind: 'success' | 'error' };
 
 export function DesktopApp() {
-  const { user, loading } = useAuth();
-  const [view, setView] = useState<DesktopView>('dashboard');
+  const { loading } = useAuth();
+  const user = useEffectiveUser();
   const [toast, setToast] = useState<Toast | null>(null);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
 
   const { path } = useRoute();
+  const view: DesktopView = pathToDesktopView(path);
+  const setView = (v: DesktopView) => navigate(DESKTOP_VIEW_TO_PATH[v]);
+  // /inventory/:id opens the edit page; otherwise no item is being edited.
+  const editingItemId = match('/inventory/:id', path)?.id ?? null;
 
   // Sync editingOrder with the URL hash. Loading the app at
-  // `#/orders/<id>` opens that order's edit page; clearing the hash
+  // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
   // closes it.
   useEffect(() => {
-    const m = match('/orders/:id', path);
+    const m = match('/purchase-orders/:id', path);
     if (!m) {
-      // If we're already on /orders (no id) and an editingOrder is open, close it.
-      if (path === '/orders' && editingOrder) setEditingOrder(null);
+      // No id in URL → ensure no order is open.
+      if (editingOrder) setEditingOrder(null);
       return;
     }
     if (editingOrder?.id === m.id) return; // already showing the right one
-    // Force the orders view, then load the order.
-    setView('history');
+    setLoadingOrderId(m.id);
     api.get<{ order: Order }>(`/api/orders/${m.id}`)
       .then(r => setEditingOrder(r.order))
-      .catch(() => {/* ignore — order may have been deleted */});
+      .catch(() => {/* ignore — order may have been deleted */})
+      .finally(() => setLoadingOrderId(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
@@ -75,32 +87,40 @@ export function DesktopApp() {
   const inventoryOrEdit = editingItemId
     ? <DesktopInventoryEdit
         itemId={editingItemId}
-        onCancel={() => setEditingItemId(null)}
-        onSaved={() => { setEditingItemId(null); showToast('Saved'); }}
+        onCancel={() => navigate('/inventory')}
+        onSaved={() => { navigate('/inventory'); showToast('Saved'); }}
       />
-    : <DesktopInventory onEditItem={(id) => setEditingItemId(id)} showToast={showToast} />;
+    : <DesktopInventory onEditItem={(id) => navigate('/inventory/' + id)} showToast={showToast} />;
 
   // When the user opens an order's edit page we replace the orders list with
   // it. Cancel / save returns to the list.
   const ordersOrEdit = editingOrder
     ? <DesktopEditOrder
         order={editingOrder}
-        onCancel={() => { navigate('/orders'); setEditingOrder(null); }}
-        onSaved={(msg) => { navigate('/orders'); setEditingOrder(null); showToast(msg); }}
+        onCancel={() => { navigate('/purchase-orders'); setEditingOrder(null); }}
+        onSaved={(msg) => { navigate('/purchase-orders'); setEditingOrder(null); showToast(msg); }}
       />
-    : <DesktopOrders onEdit={(o) => { navigate('/orders/' + o.id); setEditingOrder(o); }} onToast={(m) => showToast(m)} />;
+    : loadingOrderId
+      ? <FormSkeleton fields={8} />
+      : <DesktopOrders onEdit={(o) => { navigate('/purchase-orders/' + o.id); setEditingOrder(o); }} onToast={(m) => showToast(m)} />;
 
   return (
     <div className="app">
       <Sidebar view={view2} setView={setView} />
       <main className="main">
-        <div className="page">
+        <Topbar />
+        <RolePreviewBanner />
+        <div className={'page'
+          + (view2 === 'history' && !editingOrder ? ' page-history' : '')
+          + (view2 === 'market' ? ' page-market' : '')
+          + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
+          + (view2 === 'dashboard' ? ' page-dashboard' : '')}>
           {view2 === 'dashboard'  && <DesktopDashboard />}
           {view2 === 'submit'     && (
             <DesktopSubmit
               onDone={(toast) => {
                 if (toast) showToast(toast.msg, toast.kind ?? 'success');
-                setView('history');
+                navigate('/purchase-orders');
               }}
             />
           )}
@@ -108,7 +128,7 @@ export function DesktopApp() {
           {view2 === 'market'     && <DesktopMarket />}
           {view2 === 'inventory'  && inventoryOrEdit}
           {view2 === 'sellorders' && (
-            <DesktopSellOrders onNewFromInventory={() => setView('inventory')} />
+            <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} />
           )}
           {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
         </div>
@@ -122,6 +142,8 @@ export function DesktopApp() {
           </div>
         </div>
       )}
+
+      <TweaksPanel />
     </div>
   );
 }

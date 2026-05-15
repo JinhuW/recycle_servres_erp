@@ -1,15 +1,22 @@
-// Category-specific option lists, lifted from design/data.jsx so the desktop
-// submit / inventory-edit forms render the same dropdown values as the
-// prototype. Keep this in sync with the backend's seed when adding new options.
+// Category-specific option lists. Sourced from the `catalog_options` table at
+// app boot (see lib/lookups.ts) — these named exports are live references to
+// arrays that get filled before the React tree renders.
 
-export const RAM_BRANDS   = ['Samsung', 'Hynix', 'Micron', 'Kingston', 'Crucial', 'Corsair'] as const;
-export const RAM_TYPES    = ['DDR3', 'DDR4', 'DDR5'] as const;
-export const RAM_CLASS    = ['UDIMM', 'RDIMM', 'LRDIMM', 'SODIMM'] as const;
-export const RAM_RANK     = ['1Rx4', '1Rx8', '2Rx4', '2Rx8', '4Rx4'] as const;
-export const RAM_CAP      = ['4GB', '8GB', '16GB', '32GB', '64GB', '128GB'] as const;
-export const RAM_SPEED    = ['1600', '2133', '2400', '2666', '3200', '4800', '5600'] as const;
-export const SSD_BRANDS   = ['Samsung', 'Intel', 'Micron', 'WD', 'Seagate', 'Kioxia'] as const;
-export const SSD_INTERFACE = ['SATA', 'SAS', 'NVMe', 'U.2'] as const;
-export const SSD_FORM     = ['2.5"', 'M.2 2280', 'M.2 22110', 'U.2', 'AIC'] as const;
-export const SSD_CAP      = ['240GB', '480GB', '960GB', '1.92TB', '3.84TB', '7.68TB'] as const;
-export const CONDITIONS   = ['New', 'Pulled — Tested', 'Pulled — Untested', 'Used'] as const;
+import { catalog } from './lookups';
+
+export const RAM_BRANDS    = catalog.RAM_BRAND;
+export const RAM_TYPES     = catalog.RAM_TYPE;
+export const RAM_CLASS     = catalog.RAM_CLASS;
+export const RAM_RANK      = catalog.RAM_RANK;
+export const RAM_CAP       = catalog.RAM_CAP;
+export const RAM_SPEED     = catalog.RAM_SPEED;
+export const SSD_BRANDS    = catalog.SSD_BRAND;
+export const SSD_INTERFACE = catalog.SSD_INTERFACE;
+export const SSD_FORM      = catalog.SSD_FORM;
+export const SSD_CAP       = catalog.SSD_CAP;
+export const HDD_BRANDS    = catalog.HDD_BRAND;
+export const HDD_INTERFACE = catalog.HDD_INTERFACE;
+export const HDD_FORM      = catalog.HDD_FORM;
+export const HDD_CAP       = catalog.HDD_CAP;
+export const HDD_RPM       = catalog.HDD_RPM;
+export const CONDITIONS    = catalog.CONDITION;

@@ -8,6 +8,7 @@ import { fmtUSD0 } from '../lib/format';
 import { isCompleted, statusTone } from '../lib/status';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Category } from '../lib/types';
+import { PhoneListSkeleton } from '../components/Skeleton';
 
 type InventoryItem = {
   id: string;
@@ -22,7 +23,11 @@ type InventoryItem = {
   unit_cost: number;
   sell_price: number | null;
   status: string;
+  health: number | null;
+  rpm: number | null;
 };
+
+const LOW_HEALTH_PCT = 50;
 
 type Props = {
   onNewEntry: () => void;
@@ -31,8 +36,9 @@ type Props = {
 export function Inventory({ onNewEntry }: Props) {
   const { t } = useT();
   const { user } = useAuth();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
+  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
@@ -41,7 +47,8 @@ export function Inventory({ onNewEntry }: Props) {
     if (filter !== 'all') params.set('category', filter);
     api.get<{ items: InventoryItem[] }>(`/api/inventory?${params}`)
       .then(r => setItems(r.items))
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setLoadedOnce(true));
   }, [filter]);
 
   const isManager = user?.role === 'manager';
@@ -83,28 +90,32 @@ export function Inventory({ onNewEntry }: Props) {
         </div>
 
         <div className="ph-chip-scroller">
-          {(['all', 'RAM', 'SSD', 'Other'] as const).map(f => (
+          {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
               {f === 'all' ? t('filterAllCats') : f}
             </button>
           ))}
         </div>
 
-        {items.slice(0, 30).map(r => {
+        {!loadedOnce && <PhoneListSkeleton rows={6} />}
+        {loadedOnce && items.slice(0, 30).map(r => {
           const label = r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
                       : r.category === 'SSD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
+                      : r.category === 'HDD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? '');
+          const lowHealth = r.health != null && r.health < LOW_HEALTH_PCT;
           return (
             <div key={r.id} className="ph-inv-card">
               <div className="ph-inv-thumb">
-                <Icon name={r.category === 'RAM' ? 'chip' : r.category === 'SSD' ? 'drive' : 'box'} size={18} />
+                <Icon name={r.category === 'RAM' ? 'chip' : (r.category === 'SSD' || r.category === 'HDD') ? 'drive' : 'box'} size={18} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {label}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>
-                  {r.part_number ?? '—'} · qty {r.qty}
+                <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>{r.part_number ?? '—'} · qty {r.qty}</span>
+                  {lowHealth && <span className="chip warn" style={{ fontSize: 10 }}>{r.health}%</span>}
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
@@ -117,7 +128,7 @@ export function Inventory({ onNewEntry }: Props) {
           );
         })}
 
-        {items.length === 0 && (
+        {loadedOnce && items.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {t('noOrdersMatch')}
           </div>

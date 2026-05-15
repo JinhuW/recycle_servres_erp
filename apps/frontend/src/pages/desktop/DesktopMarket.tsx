@@ -3,7 +3,9 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtUSD0, relTime } from '../../lib/format';
+import { priceSources } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
+import { TableSkeleton } from '../../components/Skeleton';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
 function Sparkline({
@@ -56,46 +58,19 @@ function DemandPill({ level }: { level: 'high' | 'medium' | 'low' }) {
   return <span className={'chip ' + m.cls} style={{ fontSize: 10.5 }}><Icon name={m.icon} size={10} /> {m.label}</span>;
 }
 
-// ─── KPI ─────────────────────────────────────────────────────────────────────
-function KPI({
-  icon, label, value, sub, tone,
-}: { icon: IconName; label: string; value: string | number; sub: string; tone?: 'pos' | 'neg' }) {
-  const color = tone === 'pos' ? 'var(--pos)' : tone === 'neg' ? 'var(--neg)' : 'var(--fg-muted)';
-  const bg    = tone === 'pos' ? 'var(--pos-soft)' : tone === 'neg' ? 'var(--neg-soft)' : 'var(--bg-soft)';
-  return (
-    <div className="card" style={{ padding: 16, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-      <div style={{ width: 36, height: 36, borderRadius: 9, background: bg, color, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-        <Icon name={icon} size={17} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-          {label}
-        </div>
-        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 4, lineHeight: 1.1, letterSpacing: '-0.02em' }}>{value}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 4 }}>{sub}</div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main ────────────────────────────────────────────────────────────────────
 const TARGET_MARGIN = 0.30;
-const PRICE_SOURCES = [
-  'Internal sales (last 30d)',
-  'Broker quote — TechSurplus',
-  'Broker quote — ServerMonkey',
-  'Market index — RAM-spot.io',
-];
 
 type Sort = 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples';
 
 export function DesktopMarket() {
   const { t } = useT();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
+  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('recent');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [items, setItems] = useState<RefPrice[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -104,7 +79,8 @@ export function DesktopMarket() {
       if (search.trim()) params.set('q', search.trim());
       api.get<{ items: RefPrice[] }>(`/api/market?${params}`)
         .then(r => setItems(r.items))
-        .catch(console.error);
+        .catch(console.error)
+        .finally(() => setLoadedOnce(true));
     }, 200);
     return () => clearTimeout(handle);
   }, [filter, search]);
@@ -127,12 +103,6 @@ export function DesktopMarket() {
     if (sort === 'samples')   arr.sort((a, b) => b.samples - a.samples);
     return arr;
   }, [allRows, sort]);
-
-  const kpis = useMemo(() => ({
-    tracked: allRows.length,
-    rising:  allRows.filter(r => r.trend > 0.02).length,
-    falling: allRows.filter(r => r.trend < -0.02).length,
-  }), [allRows]);
 
   return (
     <>
@@ -168,17 +138,11 @@ export function DesktopMarket() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-        <KPI icon="tag"        label="Tracked SKUs"        value={kpis.tracked} sub="Updated continuously" />
-        <KPI icon="trending"   label="Sell prices rising"  value={kpis.rising}  sub={t('moreRoom')}  tone="pos" />
-        <KPI icon="trendDown"  label="Sell prices falling" value={kpis.falling} sub={t('tighten')}   tone="neg" />
-      </div>
-
       <div className="card">
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div className="seg">
-              {(['all', 'RAM', 'SSD', 'Other'] as const).map(f => (
+              {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
                   {f === 'all' ? t('all') : f}
                 </button>
@@ -213,6 +177,9 @@ export function DesktopMarket() {
         </div>
 
         <div className="table-scroll">
+          {!loadedOnce ? (
+            <TableSkeleton rows={10} cols={7} />
+          ) : (
           <table className="table">
             <thead>
               <tr>
@@ -243,11 +210,17 @@ export function DesktopMarket() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <div style={{
                             width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                            background: r.category === 'RAM' ? 'var(--info-soft)' : r.category === 'SSD' ? 'var(--pos-soft)' : 'var(--warn-soft)',
-                            color: r.category === 'RAM' ? 'oklch(0.45 0.13 250)' : r.category === 'SSD' ? 'var(--accent-strong)' : 'oklch(0.45 0.13 75)',
+                            background: r.category === 'RAM' ? 'var(--info-soft)'
+                                      : r.category === 'SSD' ? 'var(--pos-soft)'
+                                      : r.category === 'HDD' ? 'oklch(0.96 0.04 295)'
+                                      : 'var(--warn-soft)',
+                            color: r.category === 'RAM' ? 'oklch(0.45 0.13 250)'
+                                 : r.category === 'SSD' ? 'var(--accent-strong)'
+                                 : r.category === 'HDD' ? 'oklch(0.45 0.16 295)'
+                                 : 'oklch(0.45 0.13 75)',
                             display: 'grid', placeItems: 'center',
                           }}>
-                            <Icon name={r.category === 'RAM' ? 'chip' : r.category === 'SSD' ? 'drive' : 'box'} size={15} />
+                            <Icon name={r.category === 'RAM' ? 'chip' : (r.category === 'SSD' || r.category === 'HDD') ? 'drive' : 'box'} size={15} />
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 500 }}>{r.label}</div>
@@ -316,6 +289,7 @@ export function DesktopMarket() {
               )}
             </tbody>
           </table>
+          )}
         </div>
 
         <div style={{
@@ -386,12 +360,12 @@ function DetailExpand({
           Price sources
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {PRICE_SOURCES.map((s, i) => {
-            const offset = (i - 1.5) * 0.04;
+          {priceSources.map((s, i) => {
+            const offset = (i - (priceSources.length - 1) / 2) * 0.04;
             const v = row.avgSell * (1 + offset);
             return (
-              <div key={s} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5 }}>
-                <span style={{ color: 'var(--fg-muted)' }}>{s}</span>
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5 }}>
+                <span style={{ color: 'var(--fg-muted)' }}>{s.label}</span>
                 <span className="mono" style={{ fontWeight: 500 }}>{fmtUSD(v)}</span>
               </div>
             );
@@ -402,7 +376,7 @@ function DetailExpand({
           <strong style={{ color: row.samples > 20 ? 'var(--pos)' : row.samples > 10 ? 'var(--warn)' : 'var(--neg)' }}>
             {row.samples > 20 ? 'High' : row.samples > 10 ? 'Medium' : 'Low'}
           </strong>{' '}
-          — based on {row.samples} data points across {PRICE_SOURCES.length} sources.
+          — based on {row.samples} data points across {priceSources.length} sources.
         </div>
       </div>
     </div>

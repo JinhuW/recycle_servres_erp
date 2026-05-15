@@ -94,6 +94,78 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
             </select>
           </div>
         </div>
+        <div className="ph-field-row">
+          <div className="ph-field">
+            <label>{t('partNumber')}</label>
+            <input className={inputCls + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          </div>
+          <div className="ph-field">
+            <label>{t('health')} (%)</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              className={inputCls}
+              value={value.health ?? ''}
+              onChange={e => onChange('health', e.target.value === '' ? null : Number(e.target.value))}
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (category === 'HDD') {
+    return (
+      <>
+        <div className="ph-field-row">
+          <div className="ph-field">
+            <label>{t('brand')}</label>
+            <input className={inputCls} value={value.brand ?? ''} onChange={e => onChange('brand', e.target.value)} />
+          </div>
+          <div className="ph-field">
+            <label>{t('capacity')}</label>
+            <input className={inputCls} value={value.capacity ?? ''} onChange={e => onChange('capacity', e.target.value)} />
+          </div>
+        </div>
+        <div className="ph-field-row">
+          <div className="ph-field">
+            <label>{t('interfaceLbl')}</label>
+            <select className={selectCls} value={value.interface ?? 'SAS'} onChange={e => onChange('interface', e.target.value)}>
+              <option>SATA</option><option>SAS</option>
+            </select>
+          </div>
+          <div className="ph-field">
+            <label>{t('formFactor')}</label>
+            <select className={selectCls} value={value.formFactor ?? '3.5"'} onChange={e => onChange('formFactor', e.target.value)}>
+              <option>2.5"</option><option>3.5"</option>
+            </select>
+          </div>
+        </div>
+        <div className="ph-field-row">
+          <div className="ph-field">
+            <label>{t('rpm')}</label>
+            <select className={selectCls} value={value.rpm ?? 7200} onChange={e => onChange('rpm', Number(e.target.value))}>
+              <option value={5400}>5400</option>
+              <option value={7200}>7200</option>
+              <option value={10000}>10000</option>
+              <option value={15000}>15000</option>
+            </select>
+          </div>
+          <div className="ph-field">
+            <label>{t('health')} (%)</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              className={inputCls}
+              value={value.health ?? ''}
+              onChange={e => onChange('health', e.target.value === '' ? null : Number(e.target.value))}
+            />
+          </div>
+        </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
           <input className={inputCls + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />

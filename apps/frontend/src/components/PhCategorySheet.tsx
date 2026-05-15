@@ -12,6 +12,7 @@ export function PhCategorySheet({ onPick, onClose }: Props) {
   const cats: { id: Category; label: string; icon: 'chip' | 'drive' | 'box'; sub: string; tag: string; cls: string }[] = [
     { id: 'RAM',   label: 'RAM',   icon: 'chip',  sub: t('catRamSub'),   tag: t('aiLabelCapture'), cls: '' },
     { id: 'SSD',   label: 'SSD',   icon: 'drive', sub: t('catSsdSub'),   tag: t('manualEntry'),    cls: 'ssd' },
+    { id: 'HDD',   label: 'HDD',   icon: 'drive', sub: t('hddSub'),      tag: t('manualEntry'),    cls: 'hdd' },
     { id: 'Other', label: 'Other', icon: 'box',   sub: t('catOtherSub'), tag: t('manualEntry'),    cls: 'other' },
   ];
   return (

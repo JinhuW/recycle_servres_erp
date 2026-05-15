@@ -1,7 +1,8 @@
 import { Icon, type IconName } from './Icon';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
-import type { Role, Lang } from '../lib/types';
+import { useEffectiveUser } from '../lib/tweaks';
+import type { Role } from '../lib/types';
 
 export type DesktopView =
   | 'dashboard' | 'submit' | 'history' | 'market'
@@ -17,46 +18,6 @@ const NAV: { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge
   { id: 'settings',   tKey: 'nav_settings',   icon: 'settings',   roles: ['manager'] },
 ];
 
-function LanguageToggle() {
-  const { lang, setLang, t } = useT();
-  const opts: { v: Lang; label: string }[] = [
-    { v: 'en', label: 'EN' },
-    { v: 'zh', label: '中' },
-  ];
-  return (
-    <div
-      role="group"
-      aria-label={t('languageLabel')}
-      style={{
-        display: 'inline-flex', alignItems: 'center',
-        background: 'var(--bg-soft)', border: '1px solid var(--border)',
-        borderRadius: 8, padding: 2, fontSize: 11.5, fontWeight: 600,
-      }}
-    >
-      {opts.map(o => {
-        const active = lang === o.v;
-        return (
-          <button
-            key={o.v}
-            onClick={() => setLang(o.v)}
-            aria-pressed={active}
-            title={o.v === 'en' ? 'English' : '简体中文'}
-            style={{
-              border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              padding: '4px 10px', borderRadius: 6, minWidth: 28,
-              background: active ? 'var(--bg-elev)' : 'transparent',
-              color: active ? 'var(--fg)' : 'var(--fg-subtle)',
-              boxShadow: active ? '0 1px 2px rgba(15,23,42,0.06)' : 'none',
-              fontSize: 11.5, fontWeight: 600,
-              letterSpacing: o.v === 'zh' ? 0 : '0.04em',
-            }}
-          >{o.label}</button>
-        );
-      })}
-    </div>
-  );
-}
-
 type Props = {
   view: DesktopView;
   setView: (v: DesktopView) => void;
@@ -64,7 +25,8 @@ type Props = {
 
 export function Sidebar({ view, setView }: Props) {
   const { t } = useT();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
+  const user = useEffectiveUser();
   if (!user) return null;
   return (
     <aside className="sidebar">
@@ -74,7 +36,6 @@ export function Sidebar({ view, setView }: Props) {
           <div className="brand-name">{t('appBrand')}</div>
           <div className="brand-sub">{t('brandSub')}</div>
         </div>
-        <LanguageToggle />
       </div>
 
       <div className="nav-section">{t('workspace')}</div>

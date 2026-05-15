@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, auth as tokenStore, ApiError } from './api';
+import { loadLookups, resetLookups } from './lookups';
 import type { User, Lang } from './types';
 
 type AuthState = {
@@ -16,14 +17,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // On mount: if we have a token, fetch the profile to validate it.
+  // On mount: if we have a token, validate it and load DB-backed lookup data
+  // (catalog dropdowns, statuses, payment terms, price sources) in parallel.
+  // Lookups are fetched here so every authenticated page can read them
+  // synchronously from lib/lookups.ts module state.
   useEffect(() => {
     if (!tokenStore.token) {
       setLoading(false);
       return;
     }
-    api.get<{ user: User }>('/api/me')
-      .then(r => setUser(r.user))
+    Promise.all([
+      api.get<{ user: User }>('/api/me').then(r => setUser(r.user)),
+      // Lookups are best-effort: a transient failure must not look like an
+      // auth failure or strand a valid user on the login screen. loadLookups()
+      // resets itself on failure, so it stays retry-able.
+      loadLookups().catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('Lookups failed to load; continuing.', e);
+      }),
+    ])
       .catch((e) => {
         if (e instanceof ApiError && e.status === 401) tokenStore.token = null;
       })
@@ -33,12 +45,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const r = await api.post<{ token: string; user: User }>('/api/auth/login', { email, password });
     tokenStore.token = r.token;
+    // A lookups failure must not abort an otherwise-successful login; it's
+    // best-effort and retry-able on the next call.
+    try { await loadLookups(); }
+    catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('Lookups failed to load after login; continuing.', e);
+    }
     setUser(r.user);
   };
 
   const logout = () => {
     tokenStore.token = null;
     setUser(null);
+    resetLookups();
   };
 
   const setLanguage = async (lang: Lang) => {

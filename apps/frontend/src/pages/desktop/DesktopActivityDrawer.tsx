@@ -3,6 +3,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
 import { statusTone } from '../../lib/status';
+import { ListSkeleton } from '../../components/Skeleton';
 
 // Workspace-wide inventory activity log, shown as a right-side drawer.
 // Ported from design/inventory.jsx#HistoryDrawer with the local SUBMISSIONS
@@ -15,21 +16,23 @@ type Event = {
   detail: Record<string, unknown>;
   created_at: string;
   line_id: string;
-  category: 'RAM' | 'SSD' | 'Other';
+  category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   brand: string | null; capacity: string | null; type: string | null;
   interface: string | null; description: string | null;
   part_number: string | null;
+  rpm?: number | null;
   actor_name: string | null;
   actor_initials: string | null;
 };
 
-type Filter = 'all' | 'created' | 'status' | 'edited' | 'priced';
+type Filter = 'all' | 'created' | 'status' | 'edited' | 'priced' | 'transferred';
 
 const ACTION_META: Record<string, { icon: IconName; label: string; dot: string }> = {
-  created: { icon: 'plus',  label: 'Created', dot: 'var(--pos)' },
-  status:  { icon: 'arrow', label: 'Status',  dot: 'var(--info)' },
-  edited:  { icon: 'edit',  label: 'Edit',    dot: 'var(--warn)' },
-  priced:  { icon: 'tag',   label: 'Priced',  dot: 'var(--accent)' },
+  created:     { icon: 'plus',  label: 'Created',     dot: 'var(--pos)' },
+  status:      { icon: 'arrow', label: 'Status',      dot: 'var(--info)' },
+  edited:      { icon: 'edit',  label: 'Edit',        dot: 'var(--warn)' },
+  priced:      { icon: 'tag',   label: 'Priced',      dot: 'var(--accent)' },
+  transferred: { icon: 'truck', label: 'Transferred', dot: 'var(--info)' },
 };
 
 export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
@@ -57,7 +60,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
 
   // Quick counts per action for the filter pills.
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: 0, created: 0, status: 0, edited: 0, priced: 0 };
+    const c: Record<string, number> = { all: 0, created: 0, status: 0, edited: 0, priced: 0, transferred: 0 };
     (events ?? []).forEach(e => {
       c.all++;
       c[e.kind] = (c[e.kind] ?? 0) + 1;
@@ -79,6 +82,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
   const itemLabel = (e: Event): string =>
       e.category === 'RAM' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.type ?? ''}`.trim()
     : e.category === 'SSD' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.interface ?? ''}`.trim()
+    : e.category === 'HDD' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.rpm ? e.rpm + 'rpm' : ''}`.trim()
     : (e.description ?? '—');
 
   return (
@@ -106,14 +110,10 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <Icon name="history" size={16} style={{ color: 'var(--fg-subtle)' }} />
               <span style={{ fontSize: 15, fontWeight: 600 }}>Inventory activity log</span>
-              <span style={{
-                fontSize: 10.5, padding: '2px 7px',
-                background: 'color-mix(in oklch, var(--info) 12%, transparent)',
-                color: 'var(--info)',
-                border: '1px solid color-mix(in oklch, var(--info) 35%, transparent)',
-                borderRadius: 999, fontWeight: 600,
+              <span className="chip info" style={{
+                fontSize: 10.5,
                 textTransform: 'uppercase', letterSpacing: '0.05em',
-                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontWeight: 600,
               }}>
                 <Icon name="lock" size={10} /> Immutable
               </span>
@@ -133,7 +133,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
           display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         }}>
           <div className="seg" style={{ flexShrink: 0 }}>
-            {(['all', 'created', 'status', 'edited', 'priced'] as Filter[]).map(f => (
+            {(['all', 'created', 'status', 'edited', 'priced', 'transferred'] as Filter[]).map(f => (
               <button
                 key={f}
                 className={filter === f ? 'active' : ''}
@@ -165,9 +165,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
 
         {/* Timeline */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 24px' }}>
-          {events === null && (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>Loading…</div>
-          )}
+          {events === null && <ListSkeleton rows={6} />}
           {events !== null && groups.length === 0 && (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
               <Icon name="history" size={28} style={{ opacity: 0.4, marginBottom: 8 }} />
@@ -211,7 +209,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
                         color: meta.dot,
                         flexShrink: 0, zIndex: 1,
                       }}>
-                        <Icon name={meta.icon} size={12} />
+                        <Icon name={meta.icon} size={12} stroke={2} />
                       </div>
                       <EventCard event={e} itemLabel={itemLabel(e)} />
                     </div>
@@ -227,7 +225,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
           fontSize: 11, color: 'var(--fg-subtle)',
           display: 'flex', alignItems: 'center', gap: 6,
         }}>
-          <Icon name="lock" size={11} />
+          <Icon name="shield" size={11} />
           Audit log is immutable — events cannot be edited or deleted.
         </div>
       </div>
@@ -241,15 +239,18 @@ function EventCard({ event, itemLabel }: { event: Event; itemLabel: string }) {
   const time = new Date(event.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
   const summary =
-      event.kind === 'created' ? 'Item created'
-    : event.kind === 'status'  ? 'Status changed'
-    : event.kind === 'priced'  ? 'Sell price updated'
-    : event.kind === 'edited'  ? `${String(d.field ?? 'Field')} updated`
+      event.kind === 'created'     ? 'Item created'
+    : event.kind === 'status'      ? 'Status changed'
+    : event.kind === 'priced'      ? 'Sell price updated'
+    : event.kind === 'transferred' ? 'Transferred'
+    : event.kind === 'edited'      ? `${String(d.field ?? 'Field')} updated`
     : event.kind;
 
   const field = String(d.field ?? '');
   const from  = d.from;
   const to    = d.to;
+  const transferQty  = typeof d.qty  === 'number' ? d.qty  : null;
+  const transferNote = typeof d.note === 'string' ? d.note : null;
 
   return (
     <div style={{
@@ -274,6 +275,17 @@ function EventCard({ event, itemLabel }: { event: Event; itemLabel: string }) {
               <span className="mono" style={{ color: 'var(--fg)', fontWeight: 500 }}>{String(to)}</span>
             </span>
           )}
+          {event.kind === 'transferred' && from != null && to != null && (
+            <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-subtle)' }}>
+              {transferQty != null && (
+                <span className="mono" style={{ color: 'var(--fg)', fontWeight: 500 }}>{transferQty} units</span>
+              )}
+              <span style={{ color: 'var(--border)' }}>·</span>
+              <span className="mono">{String(from)}</span>
+              <Icon name="arrow" size={10} style={{ color: 'var(--fg-subtle)' }} />
+              <span className="mono" style={{ color: 'var(--fg)', fontWeight: 500 }}>{String(to)}</span>
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontVariantNumeric: 'tabular-nums' }}>
           {time}
@@ -294,6 +306,12 @@ function EventCard({ event, itemLabel }: { event: Event; itemLabel: string }) {
         <span style={{ color: 'var(--border)' }}>·</span>
         <span className="mono" style={{ fontSize: 11 }}>{event.line_id.slice(0, 8)}</span>
         <span style={{ color: 'var(--fg-subtle)' }}>{itemLabel}</span>
+        {transferNote && (
+          <>
+            <span style={{ color: 'var(--border)' }}>·</span>
+            <span style={{ fontStyle: 'italic' }}>"{transferNote}"</span>
+          </>
+        )}
       </div>
     </div>
   );

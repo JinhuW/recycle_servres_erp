@@ -214,6 +214,7 @@
   flex-shrink: 0;
 }
 .ph-cat-icon.ssd { background: var(--info-soft); color: oklch(0.45 0.13 250); }
+.ph-cat-icon.hdd { background: oklch(0.96 0.04 295); color: oklch(0.45 0.16 295); }
 .ph-cat-icon.other { background: var(--warn-soft); color: oklch(0.45 0.13 75); }
 
 /* Camera full-bleed */
@@ -631,4 +632,43 @@
   }
   body.phone-mode, body.phone-mode html, body.phone-mode #root { display: block; }
   body.phone-mode #root { display: grid; place-items: center; height: 100vh; padding: 24px; }
+}
+
+/* ===== Loading skeleton presets (phone) ===== */
+.skeleton-phone-rows { display: flex; flex-direction: column; gap: 8px; }
+.skeleton-phone-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-elev);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.skeleton-phone-orders { display: flex; flex-direction: column; gap: 10px; }
+.skeleton-phone-order {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.skeleton-phone-order-head {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skeleton-phone-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.skeleton-phone-kpi {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
 }

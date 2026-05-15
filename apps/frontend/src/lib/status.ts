@@ -1,7 +1,13 @@
-// Per-line status helpers. Matches the desktop bundle's ORDER_STATUSES:
+// Per-line status helpers. The list is sourced from workflow_stages at app
+// boot (see lib/lookups.ts); the tone map below stays in code because it's
+// presentation, not data.
+//
 //   Draft (purchaser is preparing) → In Transit → Reviewing → Done.
 
-export const ORDER_STATUSES = ['Draft', 'In Transit', 'Reviewing', 'Done'] as const;
+import { orderStatuses, type OrderStatus } from './lookups';
+
+export const ORDER_STATUSES = orderStatuses;
+export type { OrderStatus };
 
 const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
   'Draft':      'muted',
@@ -17,6 +23,3 @@ export const isCompleted = (s: string) => s === 'Done';
 // A line can be added to a sell order once it's been reviewed (priced) or
 // completed. Draft / In Transit items aren't ready to sell yet.
 export const isSellable = (s: string) => s === 'Reviewing' || s === 'Done';
-
-// Workflow lifecycle (separate from per-line status) — fetched from
-// /api/workflow at runtime; kept in sync with the seed.

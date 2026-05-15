@@ -24,55 +24,57 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<'off' | 'on'>('off');
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  // Stream is state (not a ref) so acquiring it triggers a re-render and the
+  // <video> swaps in over the illustrated placeholder.
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Start (or restart) the camera with the current facingMode. Called once on
-  // mount and again whenever the user flips the camera.
+  // Acquire the camera stream whenever facingMode changes. We only set state
+  // here; attaching the stream to the <video> element happens in the effect
+  // below, after the element is mounted.
   useEffect(() => {
     let cancelled = false;
+    let acquired: MediaStream | null = null;
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) return;
-      // Stop any active stream before requesting a new one.
-      streamRef.current?.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const s = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: facingMode } },
           audio: false,
         });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
-        streamRef.current = stream;
-        // Re-apply torch on the freshly attached track (does nothing if unsupported).
-        try {
-          const track = stream.getVideoTracks()[0];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          track?.applyConstraints({ advanced: [{ torch: flash === 'on' } as any] }).catch(() => {});
-        } catch { /* ignore */ }
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
+        if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
+        acquired = s;
+        setStream(s);
       } catch {
         // Fine — we'll show the illustrated viewfinder instead.
       }
     })();
     return () => {
       cancelled = true;
-      streamRef.current?.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
+      acquired?.getTracks().forEach(t => t.stop());
+      setStream(null);
     };
   }, [facingMode]);
 
-  // Apply the torch constraint when flash toggles. Most desktop browsers and
-  // some mobile front-cameras don't support torch — we swallow the rejection.
+  // Attach the stream to the <video> element once both exist. The element is
+  // always mounted now, so videoRef.current is stable.
   useEffect(() => {
-    const track = streamRef.current?.getVideoTracks?.()[0];
+    const v = videoRef.current;
+    if (!v) return;
+    v.srcObject = stream;
+    if (stream) v.play().catch(() => {});
+  }, [stream]);
+
+  // Apply the torch constraint when flash toggles or the stream changes. Most
+  // desktop browsers and some mobile front-cameras don't support torch — we
+  // swallow the rejection.
+  useEffect(() => {
+    const track = stream?.getVideoTracks?.()[0];
     if (!track || typeof track.applyConstraints !== 'function') return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     track.applyConstraints({ advanced: [{ torch: flash === 'on' } as any] }).catch(() => {});
-  }, [flash]);
+  }, [flash, stream]);
 
   const captureFrame = async (): Promise<Blob | null> => {
     const v = videoRef.current;
@@ -122,7 +124,7 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     if (f) runScan(f, f.name);
   };
 
-  const liveCamera = !!streamRef.current;
+  const liveCamera = !!stream;
 
   return (
     <div className="phone-app">
@@ -150,15 +152,22 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
       </div>
 
       <div className="ph-cam-stage">
-        {liveCamera ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        ) : (
+        {/* Video is always mounted so its ref is stable when we attach
+            srcObject; the placeholder behind it only shows until the live
+            stream resolves (or stays visible if the camera is unavailable). */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%', objectFit: 'cover',
+            opacity: liveCamera ? 1 : 0,
+            transition: 'opacity 0.15s ease-out',
+          }}
+        />
+        {!liveCamera && (
           <>
             <div className="cam-viewfinder" style={{ position: 'absolute', inset: 0 }} />
             {category === 'RAM' && (
@@ -178,6 +187,15 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
                   <div style={{ fontWeight: 600 }}>SAMSUNG SSD</div>
                   <div>MZ1L21T9HCLS-00A07</div>
                   <div>1.92TB NVMe PCIe 4.0</div>
+                </div>
+              </div>
+            )}
+            {category === 'HDD' && (
+              <div className="ram-stick" style={{ width: '70%', height: '32%', borderRadius: 8 }}>
+                <div className="ram-label">
+                  <div style={{ fontWeight: 600 }}>SEAGATE HDD</div>
+                  <div>ST4000NM0023</div>
+                  <div>4TB SAS 7200rpm</div>
                 </div>
               </div>
             )}

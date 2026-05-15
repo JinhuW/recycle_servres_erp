@@ -19,7 +19,10 @@ import { Profile } from './pages/Profile';
 import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
 import { api } from './lib/api';
-import { navigate, useRoute, match } from './lib/route';
+import {
+  navigate, useRoute,
+  MOBILE_VIEW_TO_PATH, pathToMobileView,
+} from './lib/route';
 import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
 
 type ReturnTo = 'idle' | 'review';
@@ -36,7 +39,14 @@ type Toast = { msg: string; kind: 'success' | 'error' };
 function Shell() {
   const { user, loading, logout } = useAuth();
   const { t } = useT();
-  const [view, setView] = useState<View>('dashboard');
+  const { path } = useRoute();
+  const view: View = pathToMobileView(path);
+  // The 'submit' tab triggers the capture flow (onCenterPress) and has no
+  // URL of its own, so we ignore it here.
+  const setView = (v: View) => {
+    if (v === 'submit') return;
+    navigate(MOBILE_VIEW_TO_PATH[v]);
+  };
   // Lock body overflow on mobile so the phone shell behaves like a native screen.
   useEffect(() => {
     document.body.classList.add('phone-mode');
@@ -58,17 +68,6 @@ function Shell() {
       .catch(console.error);
   }, [user?.id]);
 
-  const { path } = useRoute();
-
-  // Deep-link entry point: if the URL says /orders[/:id], jump to the orders
-  // tab on mount or whenever the hash changes. The Orders page's own effect
-  // then handles row scroll/expand/edit.
-  useEffect(() => {
-    if (path === '/orders' || match('/orders/:id', path)) {
-      setView('history');
-    }
-  }, [path]);
-
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
     setToast({ msg, kind });
     setTimeout(() => setToast(null), 2600);
@@ -78,8 +77,8 @@ function Shell() {
   const startSubmit = () => setCapture({ phase: 'category' });
   const cancelCapture = () => {
     setCapture({ phase: 'idle' });
-    if (window.location.hash.startsWith('#/orders/')) {
-      navigate('/orders');
+    if (window.location.hash.startsWith('#/purchase-orders/')) {
+      navigate('/purchase-orders');
     }
   };
 
@@ -189,10 +188,9 @@ function Shell() {
         })),
       });
       setCapture({ phase: 'idle' });
+      // setView('history') navigates to /purchase-orders; if the user arrived
+      // via a /purchase-orders/:id deep link, this also clears the id.
       setView('history');
-      if (window.location.hash.startsWith('#/orders/')) {
-        navigate('/orders');
-      }
       showToast(t('orderSubmitted'));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
@@ -224,8 +222,11 @@ function Shell() {
         sellPrice: l.sellPrice ?? null,
         scanImageId: l.scanImageId,
         scanConfidence: l.scanConfidence,
+        health: l.health,
+        rpm: l.rpm,
         label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`.trim()
               : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
+              : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
               : (l.description ?? 'Item'),
       })),
     });

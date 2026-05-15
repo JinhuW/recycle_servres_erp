@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { fmtUSD } from '../../lib/format';
-import type { Category, Warehouse } from '../../lib/types';
+import type { Category, ScanResponse, Warehouse } from '../../lib/types';
 import {
   RAM_BRANDS, RAM_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
+  HDD_BRANDS, HDD_INTERFACE, HDD_FORM, HDD_CAP, HDD_RPM,
   CONDITIONS,
 } from '../../lib/catalog';
 
@@ -16,8 +17,8 @@ import {
 //   2. OrderForm — line-item table + right-side drawer for editing one line,
 //      plus a sticky bottom card with order meta + totals + submit action.
 //
-// Camera capture is intentionally omitted on desktop — purchasers should use
-// the phone app for AI label scans. Manual entry covers the rest.
+// RAM orders also get an "Auto-fill from image" upload button that hits the
+// same /api/scan/label endpoint as the mobile camera flow.
 
 type Props = {
   onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
@@ -44,10 +45,11 @@ export function DesktopSubmit({ onDone }: Props) {
           }}>
             {t('chooseItemType')}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
             {([
               { id: 'RAM',   icon: 'chip',  sub: t('ramSub'),   tag: t('aiLabelCapture') },
               { id: 'SSD',   icon: 'drive', sub: t('ssdSub'),   tag: t('manualEntry') },
+              { id: 'HDD',   icon: 'drive', sub: t('hddSub'),   tag: t('manualEntry') },
               { id: 'Other', icon: 'box',   sub: t('otherSub'), tag: t('manualEntry') },
             ] as const).map(c => (
               <button
@@ -130,7 +132,10 @@ export function DesktopSubmit({ onDone }: Props) {
 }
 
 // ─── OrderForm ───────────────────────────────────────────────────────────────
-type Line = {
+// Exported so DesktopEditOrder can reuse the same line-drawer pattern (table
+// row → right-side drawer with full per-category fields) without duplicating
+// the components.
+export type Line = {
   category: Category;
   brand?: string;
   capacity?: string;
@@ -146,7 +151,11 @@ type Line = {
   qty: number | string;
   unitCost: number | string;
   sellPrice?: number | string;
+  health?: number | null;
+  rpm?: number | null;
   totalCost?: string;            // user-typed override (string-typed to allow blank)
+  scanImageId?: string | null;
+  scanConfidence?: number | null;
 };
 
 type OrderMeta = {
@@ -178,13 +187,41 @@ type Payload = {
     qty: number;
     unitCost: number;
     sellPrice: number | null;
+    health: number | null;
+    rpm: number | null;
+    scanImageId: string | null;
+    scanConfidence: number | null;
   }>;
 };
 
-function blankLine(cat: Category): Line {
+export function blankLine(cat: Category): Line {
   return {
     category: cat, qty: 1, unitCost: '',
     condition: 'Pulled — Tested',
+  };
+}
+
+// Build a Line from an AI scan response — mirrors the mobile aiDefaults in
+// SubmitForm.tsx so both flows share the same field-mapping.
+function lineFromScan(category: Category, scan: ScanResponse): Line {
+  const f = scan.extracted ?? {};
+  return {
+    category,
+    brand: f.brand,
+    capacity: f.capacity,
+    type: f.type,
+    classification: f.classification,
+    rank: f.rank,
+    speed: f.speed,
+    interface: f.interface,
+    formFactor: f.formFactor,
+    description: f.description,
+    partNumber: f.partNumber ?? '',
+    qty: 1,
+    unitCost: '',
+    condition: 'Pulled — Tested',
+    scanImageId: scan.imageId ?? null,
+    scanConfidence: scan.confidence ?? null,
   };
 }
 
@@ -197,6 +234,7 @@ function OrderForm({
   onCancel: () => void;
   onSubmit: (payload: Payload) => void;
 }) {
+  const { t } = useT();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
     api.get<{ items: Warehouse[] }>('/api/warehouses')
@@ -212,6 +250,43 @@ function OrderForm({
     notes: '',
     totalCostOverride: null,
   });
+
+  // AI auto-fill (RAM only) — uploads a desktop image to /api/scan/label and
+  // appends a new line built from the extracted fields. Mirrors the mobile
+  // Camera/SubmitForm flow but bypasses the live camera.
+  const aiFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const onAiUpload = () => {
+    if (aiBusy) return;
+    setAiError(null);
+    aiFileInputRef.current?.click();
+  };
+
+  const onAiFileChosen: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('category', category);
+      const scan = await api.upload<ScanResponse>('/api/scan/label', form);
+      const newLine = lineFromScan(category, scan);
+      setLines(ls => {
+        const next = [...ls, newLine];
+        setActiveIdx(next.length - 1);
+        return next;
+      });
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'AI scan failed');
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   // Default the warehouse to the first one once they load.
   useEffect(() => {
@@ -282,6 +357,10 @@ function OrderForm({
         qty: Number(l.qty) || 0,
         unitCost: Number(l.unitCost) || 0,
         sellPrice: l.sellPrice == null || l.sellPrice === '' ? null : Number(l.sellPrice),
+        health: l.health ?? null,
+        rpm: l.rpm ?? null,
+        scanImageId: l.scanImageId ?? null,
+        scanConfidence: l.scanConfidence ?? null,
       })),
     };
   };
@@ -323,11 +402,48 @@ function OrderForm({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="chip mono">{totals.units} units · {fmtUSD(totals.cost)}</span>
-            <button className="btn" onClick={addLine}>
+            {category === 'RAM' && (
+              <button
+                className="btn"
+                onClick={onAiUpload}
+                disabled={aiBusy}
+                title={t('aiLabelCapture')}
+              >
+                <Icon name="sparkles" size={13} />{' '}
+                {aiBusy ? t('readingLabel') : t('aiLabelCapture')}
+              </button>
+            )}
+            <button className="btn" onClick={addLine} disabled={aiBusy}>
               <Icon name="plus" size={13} /> Add {category} line
             </button>
           </div>
         </div>
+        {category === 'RAM' && (
+          <input
+            ref={aiFileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={onAiFileChosen}
+          />
+        )}
+        {aiError && (
+          <div style={{
+            margin: '0 18px 12px', padding: '10px 12px',
+            background: 'rgba(220,40,40,0.08)', border: '1px solid rgba(220,40,40,0.25)',
+            borderRadius: 8, fontSize: 12, color: 'var(--neg, #b22)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          }}>
+            <span>{aiError}</span>
+            <button
+              className="btn icon sm"
+              onClick={() => setAiError(null)}
+              title="Dismiss"
+            >
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        )}
 
         <table className="table">
           <thead>
@@ -362,11 +478,13 @@ function OrderForm({
                         <div style={{ fontWeight: 500 }}>
                           {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`.trim()}
                           {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()}
+                          {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()}
                           {l.category === 'Other' && (l.description ?? '—')}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
                           {l.category === 'RAM' && [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')}
-                          {l.category === 'SSD' && [l.formFactor, l.condition].filter(Boolean).join(' · ')}
+                          {l.category === 'SSD' && [l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
+                          {l.category === 'HDD' && [l.interface, l.formFactor, l.condition, l.health != null && (l.health + '%')].filter(Boolean).join(' · ')}
                           {l.category === 'Other' && l.condition}
                         </div>
                       </div>
@@ -515,8 +633,12 @@ function OrderForm({
 }
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
-function LineDrawer({
-  line, idx, onChange, onClose, onRemove, canRemove,
+// When `editing` is true (e.g. used by DesktopEditOrder), the pricing grid
+// grows a 4th column for sell-price and a Revenue/Profit/Margin summary
+// appears underneath — matching design/dashboard.jsx#EditOrderPage which
+// passes `editing={true}` to the shared OrderForm.
+export function LineDrawer({
+  line, idx, onChange, onClose, onRemove, canRemove, editing = false,
 }: {
   line: Line;
   idx: number;
@@ -524,12 +646,18 @@ function LineDrawer({
   onClose: () => void;
   onRemove: () => void;
   canRemove: boolean;
+  editing?: boolean;
 }) {
   const cat = line.category;
   const set = (patch: Partial<Line>) => onChange(patch);
 
   const qty = Number(line.qty) || 0;
   const cost = Number(line.unitCost) || 0;
+  const sellPrice = line.sellPrice == null || line.sellPrice === '' ? 0 : Number(line.sellPrice);
+  const revenue = qty * sellPrice;
+  const profit = qty * (sellPrice - cost);
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  const lossy = sellPrice > 0 && sellPrice < cost;
 
   return (
     <div
@@ -566,14 +694,15 @@ function LineDrawer({
               display: 'grid', placeItems: 'center', color: 'var(--fg-subtle)',
               flexShrink: 0,
             }}>
-              <Icon name={cat === 'RAM' ? 'chip' : cat === 'SSD' ? 'drive' : 'box'} size={20} />
+              <Icon name={cat === 'RAM' ? 'chip' : (cat === 'SSD' || cat === 'HDD') ? 'drive' : 'box'} size={20} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : 'warn')}>{cat}</span>
+                <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
                 <span>
                   {cat === 'RAM' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.type ?? ''}`.trim()}
                   {cat === 'SSD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.interface ?? ''}`.trim()}
+                  {cat === 'HDD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.rpm ? line.rpm + 'rpm' : ''}`.trim()}
                   {cat === 'Other' && (line.description ?? 'Untitled item')}
                 </span>
               </div>
@@ -593,10 +722,12 @@ function LineDrawer({
           <div style={{ padding: 16, display: 'grid', gap: 14 }}>
             {cat === 'RAM' && <RamFields line={line} set={set} />}
             {cat === 'SSD' && <SsdFields line={line} set={set} />}
+            {cat === 'HDD' && <HddFields line={line} set={set} />}
             {cat === 'Other' && <OtherFields line={line} set={set} />}
 
             <div style={{
-              display: 'grid', gridTemplateColumns: '120px 1fr 1fr',
+              display: 'grid',
+              gridTemplateColumns: editing ? '90px 1fr 1fr 1fr' : '120px 1fr 1fr',
               gap: 14, alignItems: 'end',
               padding: 14, background: 'var(--bg-soft)', borderRadius: 10,
             }}>
@@ -637,7 +768,32 @@ function LineDrawer({
                   placeholder="0.00"
                 />
               </div>
+              {editing && (
+                <div className="field">
+                  <label className="label">Sell / unit</label>
+                  <input
+                    className="input mono"
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={line.sellPrice ?? ''}
+                    onChange={e => set({ sellPrice: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              )}
             </div>
+            {editing && (
+              <div style={{
+                display: 'flex', gap: 18, fontSize: 12, color: 'var(--fg-subtle)',
+                padding: '0 4px', flexWrap: 'wrap',
+              }}>
+                <span>Revenue <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(revenue)}</span></span>
+                <span>Profit <span className="mono" style={{ color: profit >= 0 ? 'var(--pos)' : 'var(--warn)', fontWeight: 600 }}>{fmtUSD(profit)}</span></span>
+                <span>Margin <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{margin.toFixed(1)}%</span></span>
+                {lossy && <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠ Sell price below unit cost</span>}
+              </div>
+            )}
           </div>
 
           <div style={{
@@ -740,6 +896,67 @@ function SsdFields({ line, set }: FieldsProps) {
       <div className="field">
         <label className="label">Form factor</label>
         <CatSelect value={line.formFactor} options={SSD_FORM} onChange={v => set({ formFactor: v })} />
+      </div>
+      <div className="field" style={{ gridColumn: 'span 2' }}>
+        <label className="label">Part number</label>
+        <input
+          className="input mono"
+          value={line.partNumber ?? ''}
+          onChange={e => set({ partNumber: e.target.value })}
+        />
+      </div>
+      <div className="field">
+        <label className="label">Health (%)</label>
+        <input
+          type="number" min={0} max={100} step={0.1}
+          className="input"
+          value={line.health ?? ''}
+          onChange={e => set({ health: e.target.value === '' ? null : Number(e.target.value) })}
+        />
+      </div>
+      <div className="field">
+        <label className="label">Condition <span className="req">*</span></label>
+        <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
+      </div>
+    </div>
+  );
+}
+
+function HddFields({ line, set }: FieldsProps) {
+  return (
+    <div className="grid-2">
+      <div className="field">
+        <label className="label">Brand <span className="req">*</span></label>
+        <CatSelect value={line.brand} options={HDD_BRANDS} onChange={v => set({ brand: v })} />
+      </div>
+      <div className="field">
+        <label className="label">Capacity <span className="req">*</span></label>
+        <CatSelect value={line.capacity} options={HDD_CAP} onChange={v => set({ capacity: v })} />
+      </div>
+      <div className="field">
+        <label className="label">Interface <span className="req">*</span></label>
+        <CatSelect value={line.interface} options={HDD_INTERFACE} onChange={v => set({ interface: v })} />
+      </div>
+      <div className="field">
+        <label className="label">Form factor</label>
+        <CatSelect value={line.formFactor} options={HDD_FORM} onChange={v => set({ formFactor: v })} />
+      </div>
+      <div className="field">
+        <label className="label">RPM <span className="req">*</span></label>
+        <CatSelect
+          value={line.rpm == null ? undefined : String(line.rpm)}
+          options={HDD_RPM}
+          onChange={v => set({ rpm: v === '' ? null : Number(v) })}
+        />
+      </div>
+      <div className="field">
+        <label className="label">Health (%)</label>
+        <input
+          type="number" min={0} max={100} step={0.1}
+          className="input"
+          value={line.health ?? ''}
+          onChange={e => set({ health: e.target.value === '' ? null : Number(e.target.value) })}
+        />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">Part number</label>

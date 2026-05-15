@@ -1,8 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import {
+  StatusChangeDialog, type MetaStatus, type StatusAttachment,
+} from '../../components/StatusChangeDialog';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
+import { sellOrderStatuses } from '../../lib/lookups';
+import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
+
+// Statuses that capture per-status evidence (text note + attachments). The
+// `needs_meta` flag lives on the sell_order_statuses row.
+const needsDialog = (s: string): s is MetaStatus =>
+  sellOrderStatuses.some(o => o.id === s && o.needsMeta);
+
+type StatusMetaEntry = {
+  note: string | null;
+  when: string | null;
+  attachments: StatusAttachment[];
+};
+type StatusMetaMap = Record<MetaStatus, StatusMetaEntry>;
 
 type SellOrderSummary = {
   id: string;
@@ -10,7 +27,7 @@ type SellOrderSummary = {
   discountPct: number;
   notes: string | null;
   createdAt: string;
-  customer: { id: string; name: string; short: string; terms: string };
+  customer: { id: string; name: string; short: string; terms: string; region: string };
   lineCount: number;
   qty: number;
   subtotal: number;
@@ -20,7 +37,7 @@ type SellOrderSummary = {
 
 type SellOrderLine = {
   id: string;
-  category: 'RAM' | 'SSD' | 'Other';
+  category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   label: string;
   sub: string | null;
   partNumber: string | null;
@@ -43,21 +60,13 @@ type SellOrderDetailType = {
   subtotal: number;
   discount: number;
   total: number;
+  statusMeta: StatusMetaMap;
 };
 
-const STATUSES = ['Draft', 'Shipped', 'Awaiting payment', 'Done'] as const;
-const TONE: Record<string, string> = {
-  'Draft': 'muted',
-  'Shipped': 'info',
-  'Awaiting payment': 'warn',
-  'Done': 'pos',
-};
-const SHORT: Record<string, string> = {
-  'Draft': 'Draft',
-  'Shipped': 'Shipped',
-  'Awaiting payment': 'Awaiting pay',
-  'Done': 'Done',
-};
+// Driven by sell_order_statuses; ids match sell_orders.status CHECK constraint.
+type SellStatusId = SellOrderSummary['status'];
+const toneFor  = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone  ?? 'muted';
+const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?? s;
 
 type SellOrdersProps = {
   onNewFromInventory?: () => void;
@@ -66,14 +75,18 @@ type SellOrdersProps = {
 export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) {
   const { t } = useT();
   const [orders, setOrders] = useState<SellOrderSummary[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'all' | typeof STATUSES[number]>('all');
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
   const [search, setSearch] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [open, setOpen] = useState<{ id: string; mode: 'view' | 'edit' } | null>(null);
 
   const reload = () => {
     const p = new URLSearchParams();
     if (statusFilter !== 'all') p.set('status', statusFilter);
-    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`).then(r => setOrders(r.items));
+    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
+      .then(r => setOrders(r.items))
+      .catch(console.error)
+      .finally(() => setLoadedOnce(true));
   };
   useEffect(reload, [statusFilter]);
 
@@ -87,17 +100,11 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
 
   const stats = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
-    for (const s of STATUSES) m[s] = { count: 0, revenue: 0 };
+    for (const o of sellOrderStatuses) m[o.id] = { count: 0, revenue: 0 };
     orders.forEach(o => { m[o.status].count++; m[o.status].revenue += o.total; });
     return m;
   }, [orders]);
 
-  const advance = async (id: string, current: typeof STATUSES[number]) => {
-    const idx = STATUSES.indexOf(current);
-    if (idx === -1 || idx >= STATUSES.length - 1) return;
-    await api.patch(`/api/sell-orders/${id}`, { status: STATUSES[idx + 1] });
-    reload();
-  };
 
   return (
     <>
@@ -118,7 +125,7 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
 
       {/* Status pipeline tiles — click to filter, matches design's so-stat */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-        {STATUSES.map(s => {
+        {sellOrderStatuses.map(({ id: s }) => {
           const active = statusFilter === s;
           return (
             <button
@@ -132,7 +139,7 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
               }}
             >
               <div className="so-stat-head">
-                <span className={'chip ' + TONE[s] + ' dot'} style={{ fontSize: 10.5 }}>{SHORT[s]}</span>
+                <span className={'chip ' + toneFor(s) + ' dot'} style={{ fontSize: 10.5 }}>{shortFor(s)}</span>
               </div>
               <div className="so-stat-num">{stats[s].count}</div>
               <div className="so-stat-sub">{fmtUSD0(stats[s].revenue)}</div>
@@ -151,7 +158,7 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
               onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
             >
               <option value="all">All statuses</option>
-              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              {sellOrderStatuses.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
           </div>
           <div style={{ position: 'relative' }}>
@@ -170,6 +177,9 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
         </div>
 
         <div className="table-scroll">
+          {!loadedOnce ? (
+            <TableSkeleton rows={8} cols={8} />
+          ) : (
           <table className="table">
             <thead>
               <tr>
@@ -190,31 +200,35 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
                   key={o.id}
                   className="row-hover"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => setOpenId(o.id)}
+                  onClick={() => setOpen({ id: o.id, mode: 'view' })}
                 >
                   <td className="mono" style={{ fontWeight: 600, fontSize: 11.5 }}>{o.id}</td>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{o.customer.short || o.customer.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{o.customer.name}</div>
+                    <div style={{ fontWeight: 500 }}>{o.customer.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{o.customer.region}</div>
                   </td>
                   <td className="muted">{fmtDateShort(o.createdAt)}</td>
                   <td className="num mono">{o.lineCount}</td>
                   <td className="num mono">{o.qty}</td>
                   <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total)}</td>
                   <td><span className="chip">{o.customer.terms}</span></td>
-                  <td><span className={'chip dot ' + TONE[o.status]}>{o.status}</span></td>
+                  <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn icon sm" title="View" onClick={() => setOpenId(o.id)}>
+                      <button
+                        className="btn icon sm"
+                        title="View"
+                        onClick={() => setOpen({ id: o.id, mode: 'view' })}
+                      >
                         <Icon name="eye" size={12} />
                       </button>
                       {o.status !== 'Done' && (
                         <button
                           className="btn icon sm"
-                          title="Advance status"
-                          onClick={() => advance(o.id, o.status)}
+                          title={`Edit ${o.status.toLowerCase()} order`}
+                          onClick={() => setOpen({ id: o.id, mode: 'edit' })}
                         >
-                          <Icon name="arrow" size={12} />
+                          <Icon name="edit" size={12} />
                         </button>
                       )}
                     </div>
@@ -230,33 +244,55 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
 
-      {openId && (
+      {open && (
         <SellOrderDetail
-          id={openId}
-          onClose={() => setOpenId(null)}
-          onAdvance={(o) => { advance(o.id, o.status); setOpenId(null); }}
+          id={open.id}
+          mode={open.mode}
+          onSwitchToEdit={() => setOpen({ id: open.id, mode: 'edit' })}
+          onClose={() => setOpen(null)}
+          onSaved={() => { reload(); setOpen(null); }}
         />
       )}
     </>
   );
 }
 
-// ─── Detail panel — read-only line items, totals, advance action ─────────────
+// ─── Detail / edit modal ─────────────────────────────────────────────────────
+// View mode is read-only; Edit mode lets the manager change status and
+// internal notes (the only mutable fields exposed in the UI). Line items are
+// always read-only — the backend doesn't yet expose a per-line edit endpoint.
 function SellOrderDetail({
-  id, onClose, onAdvance,
+  id, mode, onClose, onSaved, onSwitchToEdit,
 }: {
   id: string;
+  mode: 'view' | 'edit';
   onClose: () => void;
-  onAdvance: (o: SellOrderDetailType) => void;
+  onSaved: () => void;
+  onSwitchToEdit: () => void;
 }) {
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
+  const [draft, setDraft] = useState<{ status: SellOrderDetailType['status']; notes: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Per-status evidence — loaded from the order, mutated live by the dialog,
+  // and used to render paperclip badges on each step.
+  const [statusMeta, setStatusMeta] = useState<StatusMetaMap | null>(null);
+  // Pending transition into a meta-status. null = no dialog showing.
+  const [pending, setPending] = useState<MetaStatus | null>(null);
 
   useEffect(() => {
     api.get<{ order: SellOrderDetailType }>(`/api/sell-orders/${id}`)
-      .then(r => setOrder(r.order))
+      .then(r => {
+        setOrder(r.order);
+        setStatusMeta(r.order.statusMeta);
+        setDraft({
+          status: r.order.status,
+          notes: r.order.notes ?? '',
+        });
+      })
       .catch(console.error);
   }, [id]);
 
@@ -266,16 +302,39 @@ function SellOrderDetail({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const dirty = order && draft && (
+    draft.status !== order.status
+    || (draft.notes ?? '') !== (order.notes ?? '')
+  );
+
+  const save = async () => {
+    if (!order || !draft) return;
+    setSaving(true);
+    try {
+      await api.patch(`/api/sell-orders/${order.id}`, {
+        status: draft.status,
+        notes: draft.notes,
+      });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editable = mode === 'edit';
+
   return (
+    <>
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-shell" style={{ maxWidth: 760, width: 'calc(100vw - 80px)' }}>
+      <div className="modal-shell" style={{ maxWidth: editable ? 1100 : 760, width: 'calc(100vw - 80px)' }}>
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             {order && (
               <>
                 <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span className="mono">{order.id}</span>
-                  <span className={'chip dot ' + TONE[order.status]}>{order.status}</span>
+                  <span className={'chip dot ' + toneFor(order.status)}>{order.status}</span>
+                  {editable && <span className="chip accent" style={{ fontSize: 10 }}>Editing</span>}
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
@@ -283,14 +342,95 @@ function SellOrderDetail({
                 </div>
               </>
             )}
-            {!order && <div style={{ fontSize: 14, color: 'var(--fg-subtle)' }}>Loading…</div>}
+            {!order && (
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <div style={{ marginBottom: 6 }}>
+                <span className="skeleton" style={{ width: 90, height: 10, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+              </div>
+              <span className="skeleton" style={{ width: 220, height: 22, borderRadius: 6, display: 'inline-block', marginBottom: 6 }} aria-hidden />
+              <div>
+                <span className="skeleton" style={{ width: 180, height: 11, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+              </div>
+            </div>
+          )}
           </div>
           <button className="btn icon" onClick={onClose}><Icon name="x" size={16} /></button>
         </div>
 
         <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, maxHeight: '70vh' }}>
-          {order ? (
+          {!order ? (
+            <FormSkeleton fields={6} withHeader={false} />
+          ) : order && draft ? (
             <>
+              {editable && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
+                  }}>
+                    <Icon name="flag" size={12} /> Order status
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                      Manually advance as the deal progresses
+                    </span>
+                  </div>
+                  <div className="so-stepper">
+                    {sellOrderStatuses.map(({ id: s }, i) => {
+                      const currentIdx = sellOrderStatuses.findIndex(o => o.id === draft.status);
+                      const active = s === draft.status;
+                      const reached = currentIdx >= 0 && i <= currentIdx;
+                      const meta = needsDialog(s) ? statusMeta?.[s] : null;
+                      const hasMeta = !!meta && (!!meta.note || meta.attachments.length > 0);
+                      const dialog = needsDialog(s);
+                      return (
+                        <Fragment key={s}>
+                          <button
+                            type="button"
+                            className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')}
+                            onClick={() => {
+                              if (dialog && s !== draft.status) setPending(s);
+                              else setDraft({ ...draft, status: s });
+                            }}
+                            title={dialog
+                              ? `Advance to ${s} (add tracking note / attachments)`
+                              : `Set status to ${s}`}
+                          >
+                            <span className="so-step-dot">{i + 1}</span>
+                            <span className="so-step-label">
+                              {s}
+                              {hasMeta && (
+                                <span
+                                  title="Tracking info recorded"
+                                  style={{
+                                    marginLeft: 6, display: 'inline-flex',
+                                    alignItems: 'center', color: 'var(--accent-strong)',
+                                  }}
+                                >
+                                  <Icon name="paperclip" size={11} />
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                          {i < sellOrderStatuses.length - 1 && (
+                            <span className={'so-step-bar' + (i < currentIdx ? ' reached' : '')} />
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                  {draft.status !== order.status && (
+                    <div style={{
+                      marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                      background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+                      fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <Icon name="info" size={13} />
+                      Status will change from <strong>{order.status}</strong> to <strong>{draft.status}</strong> when you save.
+                    </div>
+                  )}
+                </div>
+              )}
+
               <table className="so-line-table">
                 <thead>
                   <tr>
@@ -316,31 +456,62 @@ function SellOrderDetail({
                   ))}
                 </tbody>
               </table>
+              {editable && (
+                <div className="help" style={{ marginTop: 8 }}>
+                  Line items are read-only until a per-line edit endpoint lands.
+                </div>
+              )}
 
               <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
                 <div className="so-row"><span>Subtotal</span><span className="mono">{fmtUSD(order.subtotal)}</span></div>
                 {order.discount > 0 && (
-                  <div className="so-row muted">
-                    <span>Discount ({(order.discountPct * 100).toFixed(0)}%)</span>
+                  <div className="so-row">
+                    <span>Discount{order.discountPct ? ` (${order.discountPct}%)` : ''}</span>
                     <span className="mono">−{fmtUSD(order.discount)}</span>
                   </div>
                 )}
-                <div className="so-row total"><span>Total</span><span className="mono">{fmtUSD(order.total)}</span></div>
+                <div className="so-row total">
+                  <span>Total</span>
+                  <span className="mono">{fmtUSD(order.total)}</span>
+                </div>
               </div>
+
+              {editable && (
+                <div className="field" style={{ marginTop: 20 }}>
+                  <label className="label">Internal notes</label>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={draft.notes}
+                    onChange={e => setDraft({ ...draft, notes: e.target.value })}
+                    placeholder="Tracking number, shipping carrier, payment reference…"
+                  />
+                </div>
+              )}
             </>
           ) : null}
         </div>
 
-        {order && (
+        {order && draft && (
           <div className="so-footer">
             <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-              {order.notes ? `Notes: ${order.notes}` : 'No internal notes'}
+              {!editable && (order.notes ? `Notes: ${order.notes}` : 'No internal notes')}
+              {editable && (dirty ? 'Unsaved changes' : 'No changes')}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onClose}>Close</button>
-              {order.status !== 'Done' && (
-                <button className="btn accent" onClick={() => onAdvance(order)}>
-                  <Icon name="arrow" size={14} /> Advance to {STATUSES[STATUSES.indexOf(order.status) + 1]}
+              <button className="btn" onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
+              {!editable && order.status !== 'Done' && (
+                <button className="btn accent" onClick={onSwitchToEdit}>
+                  <Icon name="edit" size={14} /> Edit order
+                </button>
+              )}
+              {editable && (
+                <button
+                  className="btn accent"
+                  onClick={save}
+                  disabled={!dirty || saving}
+                >
+                  <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save changes'}
                 </button>
               )}
             </div>
@@ -348,5 +519,24 @@ function SellOrderDetail({
         )}
       </div>
     </div>
+    {pending && order && draft && statusMeta && (
+      <StatusChangeDialog
+        orderId={order.id}
+        to={pending}
+        currentStatus={draft.status}
+        initialNote={statusMeta[pending].note ?? ''}
+        initialAttachments={statusMeta[pending].attachments}
+        onCancel={() => setPending(null)}
+        onConfirm={({ note, attachments }) => {
+          setStatusMeta(prev => prev && {
+            ...prev,
+            [pending]: { note, attachments, when: new Date().toISOString() },
+          });
+          setDraft({ ...draft, status: pending });
+          setPending(null);
+        }}
+      />
+    )}
+    </>
   );
 }

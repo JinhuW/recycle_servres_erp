@@ -15,7 +15,8 @@ export type IconName =
   | 'clock' | 'info' | 'alert' | 'flash' | 'hash'
   | 'settings' | 'bell' | 'tag' | 'trendDown' | 'minus'
   | 'book' | 'star' | 'zap' | 'globe' | 'mail' | 'grip'
-  | 'truck' | 'cash' | 'refresh';
+  | 'truck' | 'cash' | 'refresh'
+  | 'paperclip' | 'file' | 'image' | 'invoice';
 
 type Props = {
   name: IconName;
@@ -82,6 +83,10 @@ const PATHS: Record<IconName, JSX.Element> = {
   truck: <><path d="M2 17V6h11v11"/><path d="M13 9h5l3 4v4h-8"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></>,
   cash:  <><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v.01M18 14v.01"/></>,
   refresh: <><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v5h-5"/><path d="M3 20v-5h5"/></>,
+  paperclip: <><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></>,
+  file:  <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></>,
+  image: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 21"/></>,
+  invoice: <><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></>,
 };
 
 export function Icon({ name, size = 16, stroke = 1.75, className = '', style }: Props) {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtDate } from '../../lib/format';
+import { paymentTerms } from '../../lib/lookups';
 
 // Draft-sell-order modal: manager picks items off Inventory, the modal lets
 // them pick a customer, tweak qty / unit price per line, and save a Draft sell
@@ -10,7 +11,7 @@ import { fmtUSD, fmtDate } from '../../lib/format';
 
 export type DraftItem = {
   id: string;                            // backend inventory_id (order_lines.id)
-  category: 'RAM' | 'SSD' | 'Other';
+  category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   label: string;                         // pre-formatted, e.g. "Samsung 32GB DDR4"
   subLabel?: string | null;              // "RDIMM · 3200MHz" etc
   partNumber: string | null;
@@ -32,7 +33,7 @@ type Customer = {
 
 type Line = {
   inventoryId: string;
-  category: 'RAM' | 'SSD' | 'Other';
+  category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   label: string;
   subLabel: string | null;
   partNumber: string | null;
@@ -51,8 +52,6 @@ type Props = {
   onClose: () => void;
   onSaved: (id: string) => void;
 };
-
-const TERMS = ['Prepay', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 
 export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -143,7 +142,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
       const r = await api.post<{ ok: true; id: string }>('/api/sell-orders', {
         customerId,
         notes,
-        discountPct: 0,
         lines: lines.map(l => ({
           inventoryId: l.inventoryId,
           category:    l.category,
@@ -210,6 +208,10 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                       const c = customers.find(x => x.id === id);
                       if (c) setTerms(c.terms);
                     }}
+                    onCreated={(c) => {
+                      setCustomers((prev) => [...prev, c]);
+                      setTerms(c.terms);
+                    }}
                   />
                 </div>
                 <div>
@@ -219,7 +221,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                     value={terms}
                     onChange={e => setTerms(e.target.value)}
                   >
-                    {TERMS.map(tt => <option key={tt}>{tt}</option>)}
+                    {paymentTerms.map(tt => <option key={tt}>{tt}</option>)}
                   </select>
                 </div>
               </div>
@@ -395,16 +397,38 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
 
 // ─── Customer picker ─────────────────────────────────────────────────────────
 function CustomerPicker({
-  customers, value, onChange,
+  customers, value, onChange, onCreated,
 }: {
   customers: Customer[];
   value: string;
   onChange: (id: string) => void;
+  onCreated?: (c: Customer) => void;
 }) {
   const selected = customers.find(c => c.id === value);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [savingNew, setSavingNew] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  const createCustomer = async () => {
+    const name = newName.trim();
+    if (!name || savingNew) return;
+    setSavingNew(true);
+    try {
+      const r = await api.post<{ customer: Customer }>('/api/customers', { name });
+      onCreated?.(r.customer);
+      onChange(r.customer.id);
+      setCreating(false);
+      setNewName('');
+      setOpen(false);
+    } catch {
+      // leave the form open; user can retry
+    } finally {
+      setSavingNew(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -490,12 +514,43 @@ function CustomerPicker({
                 {c.id === value && <Icon name="check" size={13} style={{ color: 'var(--accent)' }} />}
               </button>
             ))}
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !creating && (
               <div style={{ padding: 16, fontSize: 12.5, color: 'var(--fg-subtle)', textAlign: 'center' }}>
                 No matches.
               </div>
             )}
           </div>
+          {creating ? (
+            <div style={{ padding: 10, borderTop: '1px solid var(--border)', background: 'var(--bg-soft)', display: 'flex', gap: 6 }}>
+              <input
+                autoFocus
+                className="input"
+                value={newName}
+                placeholder="New customer name"
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && createCustomer()}
+                style={{ height: 32, fontSize: 13 }}
+              />
+              <button type="button" className="btn sm" onClick={() => { setCreating(false); setNewName(''); }}>Cancel</button>
+              <button type="button" className="btn accent sm" disabled={!newName.trim() || savingNew} onClick={createCustomer}>
+                {savingNew ? '…' : 'Add'}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              style={{
+                width: '100%', textAlign: 'left', padding: '10px 12px',
+                border: 'none', background: 'var(--bg-soft)', cursor: 'pointer',
+                borderTop: '1px solid var(--border)', fontFamily: 'inherit',
+                color: 'var(--accent-strong)', display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 12.5, fontWeight: 500,
+              }}
+            >
+              <Icon name="plus" size={13} /> Add new customer
+            </button>
+          )}
         </div>
       )}
     </div>

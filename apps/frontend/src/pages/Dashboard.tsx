@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
 import type { DashboardData } from '../lib/types';
+import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
 type Props = {
   goSubmit: () => void;
@@ -71,6 +72,16 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           </div>
         </div>
 
+        {!data ? (
+          <div className="ph-kpi" style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Skeleton width={120} height={11} />
+            <Skeleton width={180} height={30} radius={6} />
+            <Skeleton width={120} height={10} />
+            <div style={{ height: 60 }}>
+              <Skeleton width="100%" height={60} radius={8} />
+            </div>
+          </div>
+        ) : (
         <div className="ph-kpi" style={{
           marginTop: 16,
           background: 'linear-gradient(150deg, var(--bg-elev), color-mix(in oklch, var(--accent-soft) 60%, white))',
@@ -83,7 +94,13 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           </div>
           <PhSparkline data={data?.weeks ?? []} />
         </div>
+        )}
 
+        {!data ? (
+          <div style={{ marginTop: 12 }}>
+            <PhoneKpiSkeleton tiles={2} />
+          </div>
+        ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
           <div className="ph-kpi">
             <div className="ph-kpi-label">{t('revenue')}</div>
@@ -94,6 +111,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             <div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(totals.commission)}</div>
           </div>
         </div>
+        )}
 
         <button
           onClick={goSubmit}
@@ -160,9 +178,11 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           <span>{t('recentActivity')}</span>
           <span className="more" onClick={goHistory} style={{ cursor: 'pointer' }}>{t('seeAll')}</span>
         </div>
+        {!data && <PhoneListSkeleton rows={4} />}
         {(data?.recent ?? []).map(r => {
           const label = r.category === 'RAM'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
                       : r.category === 'SSD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
+                      : r.category === 'HDD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? 'Item');
           const profit = ((r.sell_price ?? r.unit_cost) - r.unit_cost) * r.qty;
           return (

@@ -5,10 +5,12 @@ import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { fmtUSD0, relTime } from '../../lib/format';
 import type { Category, DashboardData } from '../../lib/types';
+import { DashboardSkeleton } from '../../components/Skeleton';
 
 const CAT_COLOR: Record<Category, string> = {
   RAM:   'var(--info)',
   SSD:   'var(--accent)',
+  HDD:   'oklch(0.55 0.18 295)',
   Other: 'var(--warn)',
 };
 
@@ -69,6 +71,10 @@ export function DesktopDashboard() {
         </div>
       </div>
 
+      {!data ? (
+        <DashboardSkeleton />
+      ) : (
+      <>
       <div className="kpi-grid">
         <div className="kpi">
           <div className="kpi-label">{t('totalRevenue')}</div>
@@ -134,7 +140,7 @@ export function DesktopDashboard() {
             </div>
           </div>
           <div className="seg" role="tablist" aria-label="Filter by item type">
-            {(['all', 'RAM', 'SSD', 'Other'] as const).map(c => (
+            {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(c => (
               <button
                 key={c}
                 className={lbCategory === c ? 'active' : ''}
@@ -146,7 +152,7 @@ export function DesktopDashboard() {
           </div>
         </div>
         <div className="card-body" style={{ padding: 0 }}>
-          <div className="table-scroll">
+          <div className="table-scroll lb-scroll">
             <table className="table">
               <thead>
                 <tr>
@@ -233,7 +239,9 @@ export function DesktopDashboard() {
                     ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
                     : r.category === 'SSD'
                       ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
-                      : (r.description ?? 'Item');
+                      : r.category === 'HDD'
+                        ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
+                        : (r.description ?? 'Item');
                   const profit = ((r.sell_price ?? r.unit_cost) - r.unit_cost) * r.qty;
                   return (
                     <tr key={r.id} className="row-hover">
@@ -255,6 +263,8 @@ export function DesktopDashboard() {
           </div>
         </div>
       </div>
+      </>
+      )}
     </>
   );
 }
@@ -328,7 +338,7 @@ function CategoryBreakdown({
   byCat: DashboardData['byCat'];
   totalRevenue: number;
 }) {
-  const cats: Category[] = ['RAM', 'SSD', 'Other'];
+  const cats: Category[] = ['RAM', 'SSD', 'HDD', 'Other'];
   return (
     <>
       {cats.map(cat => {

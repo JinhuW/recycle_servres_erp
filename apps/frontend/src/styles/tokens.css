@@ -35,6 +35,12 @@
   --radius: 10px;
   --radius-sm: 6px;
   --radius-lg: 14px;
+
+  /* Density defaults — overridden by [data-density="compact" | "comfortable"]. */
+  --pad-y: 14px;
+  --pad-x: 16px;
+  --row-h: 48px;
+  --gap: 16px;
   --font-base: 14px;
 }
 
@@ -113,7 +119,7 @@ button { font-family: inherit; cursor: pointer; }
 .seg button {
   border: none;
   background: transparent;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-radius: 6px;
   font-size: 12.5px; font-weight: 500;
   color: var(--fg-muted);
@@ -138,6 +144,7 @@ button { font-family: inherit; cursor: pointer; }
 .chip.info   { background: var(--info-soft);   color: oklch(0.45 0.13 250);     border-color: transparent; }
 .chip.muted  { background: var(--bg-soft);     color: var(--fg-muted);          border-color: var(--border); }
 .chip.accent { background: var(--accent-soft); color: var(--accent-strong);     border-color: transparent; }
+.chip.cool   { background: oklch(0.96 0.04 295); color: oklch(0.45 0.16 295);     border-color: transparent; }
 .chip.dot::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: currentColor; display: inline-block;
@@ -266,6 +273,13 @@ button { font-family: inherit; cursor: pointer; }
 /* ===== Button size + shape variants ===== */
 .btn.lg { padding: 11px 18px; font-size: 14px; }
 .btn.icon { padding: 7px; }
+.btn.icon-only {
+  padding: 0;
+  width: 32px; height: 32px;
+  display: inline-grid; place-items: center;
+  flex-shrink: 0;
+}
+.btn.icon-only.sm { width: 28px; height: 28px; }
 
 /* ===== Avatar sizes (md/sm used in tables and modal headers) ===== */
 .avatar.md { width: 32px; height: 32px; font-size: 12px; }
@@ -359,4 +373,28 @@ button { font-family: inherit; cursor: pointer; }
 @keyframes drawer-in {
   from { transform: translateX(20px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ===== Loading skeleton (shared base) =====
+   The shimmer sweeps a light highlight across a muted base. A wide
+   background-size lets the highlight travel across blocks of any width. */
+.skeleton {
+  display: inline-block;
+  background:
+    linear-gradient(
+      90deg,
+      var(--bg-soft) 0%,
+      color-mix(in oklch, var(--bg-soft) 60%, white) 50%,
+      var(--bg-soft) 100%
+    );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; background: var(--bg-soft); }
 }

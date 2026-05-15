@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
+import { usePreference } from '../../lib/preferences';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isSellable } from '../../lib/status';
 import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
+import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
 import { DesktopActivityDrawer } from './DesktopActivityDrawer';
+import { TableSkeleton } from '../../components/Skeleton';
 
 type InventoryRow = {
   id: string;
-  category: 'RAM' | 'SSD' | 'Other';
+  category: 'RAM' | 'SSD' | 'HDD' | 'Other';
   brand: string | null;
   capacity: string | null;
   type: string | null;
@@ -27,6 +31,8 @@ type InventoryRow = {
   unit_cost: number;
   sell_price: number | null;
   status: string;
+  health: number | null;
+  rpm: number | null;
   warehouse_id: string | null;
   warehouse_short: string | null;
   warehouse_region: string | null;
@@ -35,6 +41,8 @@ type InventoryRow = {
   created_at: string;
   order_id: string;
 };
+
+const LOW_HEALTH_PCT = 50;
 
 type Props = {
   onEditItem: (id: string) => void;
@@ -51,8 +59,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const isManager = user?.role === 'manager';
 
   const [items, setItems] = useState<InventoryRow[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [whs, setWhs] = useState<Warehouse[]>([]);
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
+  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -77,23 +86,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     () => ALL_COLS.filter(c => !c.managerOnly || isManager),
     [ALL_COLS, isManager],
   );
-  const COLS_KEY = isManager ? 'rs.inventory.cols.v1' : 'rs.inventory.cols.purchaser.v1';
-  const [visibleCols, setVisibleCols] = useState<Set<ColId>>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(COLS_KEY) || 'null');
-      if (Array.isArray(saved)) return new Set(saved as ColId[]);
-    } catch { /* ignore */ }
-    return new Set(ALL_COLS.filter(c => !c.managerOnly || isManager).map(c => c.id));
-  });
-  useEffect(() => {
-    try { localStorage.setItem(COLS_KEY, JSON.stringify([...visibleCols])); } catch { /* ignore */ }
-  }, [visibleCols, COLS_KEY]);
+  // Server-backed per-user column visibility. Manager vs purchaser have
+  // separate keys because managers can toggle cost/profit/margin columns
+  // that don't exist for purchasers.
+  const colsKey = isManager ? 'inventory.cols.manager' : 'inventory.cols.purchaser';
+  const defaultCols = useMemo(
+    () => ALL_COLS.filter(c => !c.managerOnly || isManager).map(c => c.id) as string[],
+    [ALL_COLS, isManager],
+  );
+  const [colsList, setColsList] = usePreference(colsKey, defaultCols);
+  const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
   const isVis = (id: ColId) => visibleCols.has(id);
-  const toggleCol = (id: ColId) => setVisibleCols(prev => {
-    const next = new Set(prev);
+  const toggleCol = (id: ColId) => {
+    const next = new Set(visibleCols);
     if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
+    setColsList([...next]);
+  };
   const [colsMenuOpen, setColsMenuOpen] = useState(false);
   const colsMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -117,7 +125,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     const handle = setTimeout(() => {
       api.get<{ items: InventoryRow[] }>(`/api/inventory?${params}`)
         .then(r => setItems(r.items))
-        .catch(console.error);
+        .catch(console.error)
+        .finally(() => setLoadedOnce(true));
     }, 200);
     return () => clearTimeout(handle);
   }, [filter, statusFilter, warehouseFilter, search]);
@@ -168,10 +177,12 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const itemLabel = (r: InventoryRow) =>
       r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
     : r.category === 'SSD' ? `${r.brand ?? ''} ${r.capacity ?? ''}`.trim()
+    : r.category === 'HDD' ? `${r.brand ?? ''} ${r.capacity ?? ''}`.trim()
     : (r.description ?? '');
   const itemSpec = (r: InventoryRow) =>
       r.category === 'RAM' ? [r.classification, r.rank, r.speed && `${r.speed}MHz`].filter(Boolean).join(' · ')
-    : r.category === 'SSD' ? [r.interface, r.form_factor].filter(Boolean).join(' · ')
+    : r.category === 'SSD' ? [r.interface, r.form_factor, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
+    : r.category === 'HDD' ? [r.interface, r.form_factor, r.rpm && `${r.rpm}rpm`, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
     : (r.condition ?? '');
 
   const qtyDotColor = (s: string) =>
@@ -189,7 +200,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // when the user clicks "Create sell order" so further selection changes on
   // the table don't mutate what's in the modal.
   const [draftItems, setDraftItems] = useState<DraftItem[] | null>(null);
+  const [transferItems, setTransferItems] = useState<TransferItem[] | null>(null);
   const [showActivity, setShowActivity] = useState(false);
+  const [quickView, setQuickView] = useState<InventoryRow | null>(null);
 
   const buildDraftItems = (rows: InventoryRow[]): DraftItem[] => rows.map(r => ({
     id: r.id,
@@ -205,9 +218,36 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     condition: r.condition,
   }));
 
+  const buildTransferItems = (rows: InventoryRow[]): TransferItem[] => rows.map(r => ({
+    id: r.id,
+    category: r.category,
+    label: itemLabel(r) || r.id.slice(0, 8),
+    subLabel: itemSpec(r) || null,
+    partNumber: r.part_number,
+    qty: r.qty,
+    warehouseId: r.warehouse_id,
+    warehouseShort: r.warehouse_short,
+  }));
+
   const openSellOrderDraft = () => {
     if (!selectedItems.length) return;
     setDraftItems(buildDraftItems(selectedItems));
+  };
+
+  const openTransferModal = () => {
+    if (!selectedItems.length) return;
+    setTransferItems(buildTransferItems(selectedItems));
+  };
+
+  const refetchInventory = () => {
+    const params = new URLSearchParams();
+    if (filter !== 'all') params.set('category', filter);
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
+    if (search.trim()) params.set('q', search.trim());
+    api.get<{ items: InventoryRow[] }>(`/api/inventory?${params}`)
+      .then(r => setItems(r.items))
+      .catch(console.error);
   };
 
   return (
@@ -224,7 +264,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           </h1>
           <div className="page-sub">
             {isManager
-              ? 'Pick items across warehouses to create a sell order. Select rows in Reviewing or Done status.'
+              ? 'Pick items across warehouses to create a sell order. Select rows in Ready or Selling status.'
               : 'Showing only items you submitted. Cost and margin are restricted by role.'}
           </div>
         </div>
@@ -240,6 +280,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           {!isManager && (
             <button className="btn" onClick={() => showToast?.('Use the phone app to capture new parts', 'success')}>
               <Icon name="plus" size={14} /> New entry
+            </button>
+          )}
+          {isManager && (
+            <button
+              className="btn"
+              disabled={selectedItems.length === 0}
+              onClick={openTransferModal}
+            >
+              <Icon name="truck" size={14} /> {t('transfer')}
+              {selectedItems.length > 0 && (
+                <span style={{
+                  marginLeft: 4, padding: '1px 7px',
+                  background: 'var(--bg-soft)', borderRadius: 999,
+                  fontSize: 11, fontWeight: 600,
+                }}>{selectedItems.length}</span>
+              )}
             </button>
           )}
           {isManager && (
@@ -307,7 +363,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div className="seg">
-              {(['all', 'RAM', 'SSD', 'Other'] as const).map(f => (
+              {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
                   {f === 'all' ? 'All categories' : f}
                 </button>
@@ -368,9 +424,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     }}>Columns</span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button className="btn sm ghost" style={{ fontSize: 11, padding: '2px 6px' }}
-                        onClick={() => setVisibleCols(new Set(TOGGLEABLE_COLS.map(c => c.id)))}>All</button>
+                        onClick={() => setColsList(TOGGLEABLE_COLS.map(c => c.id) as string[])}>All</button>
                       <button className="btn sm ghost" style={{ fontSize: 11, padding: '2px 6px' }}
-                        onClick={() => setVisibleCols(new Set())}>None</button>
+                        onClick={() => setColsList([])}>None</button>
                     </div>
                   </div>
                   <div style={{ maxHeight: 320, overflowY: 'auto', padding: 4 }}>
@@ -409,6 +465,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         </div>
 
         <div className="table-scroll">
+          {!loadedOnce ? (
+            <TableSkeleton rows={10} cols={8} withCheckbox={isManager} />
+          ) : (
           <table className="table">
             <thead>
               <tr>
@@ -472,13 +531,18 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     {isVis('date')     && <td className="muted">{fmtDateShort(r.created_at)}</td>}
                     {isVis('category') && (
                       <td>
-                        <span className={'chip ' + (r.category === 'RAM' ? 'info' : r.category === 'SSD' ? 'pos' : 'warn')}>
+                        <span className={'chip ' + (r.category === 'RAM' ? 'info' : r.category === 'SSD' ? 'pos' : r.category === 'HDD' ? 'cool' : 'warn')}>
                           {r.category}
                         </span>
                       </td>
                     )}
                     <td>
-                      <div style={{ fontWeight: 500 }}>{itemLabel(r)}</div>
+                      <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {itemLabel(r)}
+                        {r.health != null && r.health < LOW_HEALTH_PCT && (
+                          <span className="chip warn" style={{ fontSize: 10 }}>{r.health}%</span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(r)}</div>
                     </td>
                     {isVis('partNumber') && <td className="mono muted" style={{ fontSize: 11 }}>{r.part_number}</td>}
@@ -533,15 +597,29 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     )}
                     <td><span className={'chip dot ' + statusTone(r.status)}>{r.status}</span></td>
                     <td>
-                      <button className="btn sm" onClick={() => onEditItem(r.id)}>
-                        <Icon name="edit" size={12} /> {t('edit')}
-                      </button>
+                      <div style={{ display: 'inline-flex', gap: 4 }}>
+                        <button
+                          className="btn icon sm"
+                          title="Quick view"
+                          onClick={() => setQuickView(r)}
+                        >
+                          <Icon name="eye" size={12} />
+                        </button>
+                        <button
+                          className="btn icon sm"
+                          title={t('edit')}
+                          onClick={() => onEditItem(r.id)}
+                        >
+                          <Icon name="edit" size={12} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          )}
         </div>
 
         <div style={{
@@ -549,7 +627,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           fontSize: 12, color: 'var(--fg-subtle)',
         }}>
-          <div>Showing {items.length} {items.length === 1 ? 'entry' : 'entries'}</div>
+          <div>{loadedOnce ? `Showing ${items.length} ${items.length === 1 ? 'entry' : 'entries'}` : 'Loading inventory…'}</div>
           <div style={{ fontSize: 11 }}>Server cap 200 · refine filters to narrow further</div>
         </div>
       </div>
@@ -574,6 +652,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn ghost" onClick={clearSelection}>Clear</button>
+            <button className="btn" onClick={openTransferModal}>
+              <Icon name="truck" size={14} /> {t('transfer')}
+            </button>
             <button className="btn accent" onClick={openSellOrderDraft}>
               <Icon name="tag" size={14} /> Create sell order
             </button>
@@ -593,9 +674,220 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         />
       )}
 
+      {transferItems && (
+        <DesktopInventoryTransfer
+          items={transferItems}
+          warehouses={whs}
+          onClose={() => setTransferItems(null)}
+          onSaved={(n, destShort) => {
+            setTransferItems(null);
+            clearSelection();
+            refetchInventory();
+            showToast?.(t('transferredToast', { n, warehouse: destShort }), 'success');
+          }}
+        />
+      )}
+
       {showActivity && (
         <DesktopActivityDrawer onClose={() => setShowActivity(false)} />
       )}
+
+      {quickView && (
+        <InventoryQuickView
+          item={quickView}
+          peers={items.filter(p => p.part_number && p.part_number === quickView.part_number)}
+          onClose={() => setQuickView(null)}
+          onEdit={() => { onEditItem(quickView.id); setQuickView(null); }}
+        />
+      )}
     </>
+  );
+}
+
+// ─── Quick View modal ────────────────────────────────────────────────────────
+// Read-only popover summarising one inventory item + its peer items sharing
+// the same part_number. Mirrors design/inventory.jsx#QuickViewModal.
+function InventoryQuickView({
+  item, peers, onClose, onEdit,
+}: {
+  item: InventoryRow;
+  peers: InventoryRow[];
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const title =
+    item.category === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.type ?? ''}`.trim()
+    : item.category === 'SSD' ? `${item.brand ?? ''} ${item.capacity ?? ''}`.trim()
+    : item.category === 'HDD' ? `${item.brand ?? ''} ${item.capacity ?? ''}`.trim()
+    : (item.description ?? item.part_number ?? '—');
+  const sub =
+    item.category === 'RAM' ? [item.classification, item.speed && `${item.speed}MHz`, item.rank].filter(Boolean).join(' · ')
+    : item.category === 'SSD' ? [item.interface, item.form_factor, item.health != null && `${item.health}%`].filter(Boolean).join(' · ')
+    : item.category === 'HDD' ? [item.interface, item.form_factor, item.rpm && `${item.rpm}rpm`, item.health != null && `${item.health}%`].filter(Boolean).join(' · ')
+    : (item.part_number ?? '');
+
+  const agg = peers.reduce((acc, p) => {
+    if (p.status === 'In Transit') acc.inTransit += p.qty;
+    else if (p.status === 'Reviewing' || p.status === 'Done') acc.inStock += p.qty;
+    return acc;
+  }, { inTransit: 0, inStock: 0 });
+  const total = agg.inTransit + agg.inStock;
+  const transitPct = total > 0 ? (agg.inTransit / total) * 100 : 0;
+  const stockPct = total > 0 ? (agg.inStock / total) * 100 : 0;
+
+  const catIcon = item.category === 'RAM' ? 'chip' : (item.category === 'SSD' || item.category === 'HDD') ? 'drive' : 'box';
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.42)',
+        display: 'grid', placeItems: 'center', zIndex: 80, padding: 24,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--bg-elev)', border: '1px solid var(--border)',
+          borderRadius: 14, width: 'min(520px, 100%)',
+          boxShadow: '0 24px 60px rgba(15,23,42,0.18)',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 10,
+            background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+            display: 'grid', placeItems: 'center', flexShrink: 0,
+          }}>
+            <Icon name={catIcon} size={20} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+              <span className={'chip ' + (item.category === 'RAM' ? 'info' : item.category === 'SSD' ? 'pos' : item.category === 'HDD' ? 'cool' : 'warn')} style={{ fontSize: 10.5 }}>
+                {item.category}
+              </span>
+              <span className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{item.id}</span>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
+            <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{sub}</div>
+          </div>
+          <button className="btn icon sm" onClick={onClose} title="Close"><Icon name="x" size={12} /></button>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Qty breakdown */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+                This line
+              </div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 600 }}>
+                {item.qty}<span style={{ fontSize: 12, color: 'var(--fg-subtle)', marginLeft: 4 }}>units</span>
+              </div>
+            </div>
+            {total > 0 && (
+              <>
+                <div style={{
+                  display: 'flex', height: 7, borderRadius: 999, overflow: 'hidden',
+                  background: 'var(--bg-soft)', border: '1px solid var(--border)',
+                }}>
+                  {agg.inTransit > 0 && (
+                    <div style={{
+                      width: transitPct + '%',
+                      background: 'var(--info)',
+                      backgroundImage: 'repeating-linear-gradient(45deg, transparent 0 4px, color-mix(in oklch, var(--info) 70%, white) 4px 8px)',
+                    }} />
+                  )}
+                  {agg.inStock > 0 && (
+                    <div style={{ width: stockPct + '%', background: 'var(--pos)' }} />
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 11.5, flexWrap: 'wrap' }}>
+                  {agg.inTransit > 0 && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <Icon name="truck" size={11} style={{ color: 'var(--info)' }} />
+                      <span className="mono" style={{ fontWeight: 600, color: 'var(--info)' }}>{agg.inTransit}</span>
+                      <span style={{ color: 'var(--fg-subtle)' }}>in transit</span>
+                    </span>
+                  )}
+                  {agg.inStock > 0 && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <Icon name="warehouse" size={11} style={{ color: 'var(--pos)' }} />
+                      <span className="mono" style={{ fontWeight: 600, color: 'var(--pos)' }}>{agg.inStock}</span>
+                      <span style={{ color: 'var(--fg-subtle)' }}>in stock</span>
+                    </span>
+                  )}
+                  <span style={{ marginLeft: 'auto', color: 'var(--fg-subtle)' }}>across part number</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Key facts grid */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0,
+            border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+          }}>
+            <QVCell label="Warehouse" value={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <Icon name="warehouse" size={11} style={{ color: 'var(--fg-subtle)' }} />
+                {item.warehouse_short ?? '—'}
+              </span>
+            } />
+            <QVCell label="Condition" value={item.condition} borderLeft />
+            <QVCell label="Part number" value={<span className="mono" style={{ fontSize: 12 }}>{item.part_number ?? '—'}</span>} borderTop />
+            <QVCell label="Sell price" value={
+              <span className="mono" style={{ fontWeight: 600 }}>
+                {item.sell_price != null ? fmtUSD(item.sell_price) : '—'}
+              </span>
+            } borderLeft borderTop />
+          </div>
+
+          {/* Submitter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--fg-subtle)' }}>
+            <span className="avatar" style={{ width: 22, height: 22, fontSize: 10 }}>{item.user_initials}</span>
+            Submitted by <span style={{ color: 'var(--fg)', fontWeight: 500 }}>{item.user_name}</span> · {fmtDateShort(item.created_at)}
+          </div>
+        </div>
+
+        <div style={{
+          padding: '12px 20px', borderTop: '1px solid var(--border)',
+          background: 'var(--bg-soft)', display: 'flex', justifyContent: 'flex-end', gap: 8,
+        }}>
+          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn accent" onClick={onEdit}>
+            <Icon name="edit" size={13} /> Edit details
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QVCell({ label, value, borderLeft, borderTop }: {
+  label: string;
+  value: ReactNode;
+  borderLeft?: boolean;
+  borderTop?: boolean;
+}) {
+  return (
+    <div style={{
+      padding: '10px 14px',
+      borderLeft: borderLeft ? '1px solid var(--border)' : 'none',
+      borderTop:  borderTop  ? '1px solid var(--border)' : 'none',
+    }}>
+      <div style={{
+        fontSize: 10.5, color: 'var(--fg-subtle)',
+        textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
+      }}>{label}</div>
+      <div style={{ fontSize: 13, marginTop: 3 }}>{value}</div>
+    </div>
   );
 }

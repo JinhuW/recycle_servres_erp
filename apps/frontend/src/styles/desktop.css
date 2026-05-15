@@ -98,24 +98,141 @@ html.desktop, body.desktop, .desktop #root {
 .avatar-role { font-size: 11px; color: var(--fg-subtle); }
 
 /* ===== Main content =====
-   .main owns the only scroll region on the page (sidebar is fixed, body
-   doesn't scroll). The inner .page wrapper is centered with a consistent max
-   width so every page feels the same size. min-width: 0 prevents grid blowout. */
+   .main is a fixed-height flex column (topbar, role banner, then .page).
+   The inner .page wrapper owns the scroll region so per-page variants can
+   override it (e.g. page-history pins headers and scrolls only the table).
+   Centered with a max width so every page feels the same size.
+   min-width: 0 prevents grid blowout. */
 .main {
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   min-width: 0;
 }
 .main > .page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
   max-width: 1280px;
   margin: 0 auto;
-  padding: 28px 36px 80px;
+  padding: 10px 3px 24px;
   min-width: 0;
   box-sizing: border-box;
 }
-[data-density="compact"] .main > .page { padding: 18px 24px 60px; }
+[data-density="compact"] .main > .page { padding: 6px 3px 20px; }
+
+/* ===== Topbar =====
+   Workspace context label rendered above each page. Mirrors design's Topbar
+   (app.jsx:15-25). */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 8px 0;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.topbar-label {
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+[data-density="compact"] .topbar { padding: 8px 8px 0; }
+
+/* ===== Role-preview banner =====
+   Shown when a manager has the rolePreview tweak set to "as_purchaser". */
+.role-preview-banner {
+  max-width: 1280px;
+  margin: 12px auto 0;
+  padding: 8px 14px;
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: oklch(0.42 0.12 75);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===== Tweaks floating panel ===== */
+.tweaks-fab {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 90;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+}
+.tweaks-fab:hover { color: var(--fg); border-color: var(--fg-muted); }
+.tweaks-pop {
+  position: fixed;
+  bottom: 64px;
+  right: 18px;
+  z-index: 95;
+  width: 280px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tweaks-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.tweak-section { display: flex; flex-direction: column; gap: 6px; }
+.tweak-label {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ===== Sticky save bar =====
+   Anchored at the bottom of an edit page; visible while the draft is dirty.
+   Mirrors inventory-edit.jsx:769-786. */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  margin: 20px -8px 0;
+  padding: 12px 8px;
+  background: color-mix(in oklch, var(--bg-elev) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  z-index: 5;
+}
+[data-density="compact"] .save-bar { margin: 14px -8px 0; padding: 8px; }
+.save-bar-msg {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--fg-muted);
+}
+.save-bar-actions { display: flex; gap: 8px; }
 
 /* Page wrapper — every desktop view is rendered inside .page so vertical
    rhythm between sections (page-head, kpis, cards, tables) is uniform. */
@@ -127,6 +244,95 @@ html.desktop, body.desktop, .desktop #root {
 }
 .page > .page-head { margin-bottom: 0; }
 .page > .tabs { margin-bottom: 0; }
+
+/* Orders page variant — page-head, pipeline, KPIs and the orders card's
+   header stay put; only the inner .table-scroll scrolls. */
+.page.page-history {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-history > .orders-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page.page-history > .orders-card > .card-head {
+  flex-shrink: 0;
+}
+.page.page-history > .orders-card > .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page.page-history > .orders-card .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Dashboard page variant — scrollable, but the scrollbar is hidden so the
+   layout stays flush with the sidebar / topbar. */
+.page.page-dashboard {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 8px;
+  scrollbar-width: none;
+}
+.page.page-dashboard::-webkit-scrollbar { display: none; }
+
+/* Market page variant — page-head, how-to banner, KPIs and the table card's
+   filter row stay put; only the inner .table-scroll scrolls. */
+.page.page-market {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-market > .card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page.page-market > .card > .card-head {
+  flex-shrink: 0;
+}
+.page.page-market > .card > .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page.page-market > .card .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Inventory page variant — page-head, warehouse pills, banner and the table
+   card's filter row stay put; only the inner .table-scroll scrolls. The
+   footer row inside the card sits below the scroll area and stays pinned. */
+.page.page-inventory {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-inventory > .card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page.page-inventory > .card > .card-head {
+  flex-shrink: 0;
+}
+.page.page-inventory > .card > .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page.page-inventory > .card .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
 
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
@@ -171,6 +377,15 @@ html.desktop, body.desktop, .desktop #root {
 /* ===== Tables ===== */
 .table-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; }
 .table-scroll .table { min-width: 1080px; }
+
+/* Contributor leaderboard — cap height so long lists scroll inside the card
+   instead of stretching the dashboard. Header stays pinned while rows scroll. */
+.table-scroll.lb-scroll { max-height: 360px; overflow-y: auto; }
+.table-scroll.lb-scroll .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th {
   text-align: left;
@@ -349,7 +564,7 @@ html.desktop, body.desktop, .desktop #root {
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
-  .main { padding: 18px 16px 100px; }
+  .main { padding: 12px 12px 80px; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
@@ -1141,3 +1356,65 @@ html.desktop, body.desktop, .desktop #root {
   }
   .settings-nav-item .settings-nav-sub { display: none; }
 }
+
+/* ===== Loading skeleton presets (desktop) =====
+   Base .skeleton + shimmer keyframes live in tokens.css for shared access. */
+.skeleton-table { display: flex; flex-direction: column; }
+.skeleton-tr {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  height: var(--row-h);
+  border-bottom: 1px solid var(--border);
+}
+.skeleton-tr:last-child { border-bottom: none; }
+.skeleton-td { flex: 1; display: flex; align-items: center; min-width: 0; }
+
+.skeleton-form { display: flex; flex-direction: column; gap: 16px; }
+.skeleton-field { display: flex; flex-direction: column; gap: 6px; }
+
+.skeleton-dashboard { display: flex; flex-direction: column; gap: 20px; }
+.skeleton-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.skeleton-tile {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.skeleton-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+.skeleton-lb-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.skeleton-lb-row:first-of-type { border-top: none; }
+
+.skeleton-list { display: flex; flex-direction: column; }
+.skeleton-list-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.skeleton-list-row:last-child { border-bottom: none; }
+
+@media (max-width: 1100px) {
+  .skeleton-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .skeleton-grid  { grid-template-columns: 1fr; }
+}
+

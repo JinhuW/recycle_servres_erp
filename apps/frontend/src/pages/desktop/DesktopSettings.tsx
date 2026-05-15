@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
+import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { fmtUSD0 } from '../../lib/format';
-import type { Warehouse } from '../../lib/types';
+import type { Lang, Warehouse } from '../../lib/types';
+import { TableSkeleton } from '../../components/Skeleton';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Member = {
@@ -22,16 +24,72 @@ type Customer = {
   lifetime_revenue: number; order_count: number;
 };
 
-type Stage = { id: string; label: string; short: string; tone: string; icon: string; description: string; position: number };
+// ─── Shared primitives ────────────────────────────────────────────────────────
+function SettingsHeader({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
+  return (
+    <div className="settings-header">
+      <div>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em' }}>{title}</h2>
+        {sub && <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 3 }}>{sub}</div>}
+      </div>
+      {actions && <div style={{ display: 'flex', gap: 8 }}>{actions}</div>}
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <label className="toggle">
+      <input
+        type="checkbox"
+        checked={!!checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="toggle-track"><span className="toggle-thumb" /></span>
+    </label>
+  );
+}
+
+function StatTile({ label, value, sub, icon, tone }: {
+  label: string;
+  value: string | number;
+  sub: string;
+  icon: IconName;
+  tone?: 'pos' | 'warn' | 'muted';
+}) {
+  const toneColor =
+    tone === 'pos'   ? 'var(--pos)'
+    : tone === 'warn'  ? 'var(--warn)'
+    : tone === 'muted' ? 'var(--fg-subtle)'
+    : 'var(--accent-strong)';
+  return (
+    <div className="card" style={{ padding: 16, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 8, background: 'var(--accent-soft)',
+        color: toneColor, display: 'grid', placeItems: 'center', flexShrink: 0,
+      }}>
+        <Icon name={icon} size={16} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 2, fontVariantNumeric: 'tabular-nums', color: toneColor }}>{value}</div>
+        <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{sub}</div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'members' | 'customers' | 'warehouses' | 'workflow';
+type SectionId = 'members' | 'warehouses' | 'customers' | 'categories' | 'commission' | 'general';
 
 const SECTIONS: { id: SectionId; label: string; sub: string; icon: IconName }[] = [
-  { id: 'members',    label: 'Members',    sub: 'Roles & commissions',     icon: 'user' },
-  { id: 'customers',  label: 'Customers',  sub: 'Sell-side accounts',      icon: 'tag' },
-  { id: 'warehouses', label: 'Warehouses', sub: 'Stock locations',         icon: 'warehouse' },
-  { id: 'workflow',   label: 'Workflow',   sub: 'Order lifecycle stages',  icon: 'flag' },
+  { id: 'members',    label: 'Members',    sub: 'People & roles',     icon: 'user' },
+  { id: 'warehouses', label: 'Warehouses', sub: 'Locations',          icon: 'warehouse' },
+  { id: 'customers',  label: 'Customers',  sub: 'Buyers & accounts',  icon: 'shield' },
+  { id: 'categories', label: 'Categories', sub: 'Items & SKUs',       icon: 'box' },
+  { id: 'commission', label: 'Commission', sub: 'Payment types',      icon: 'dollar' },
+  { id: 'general',    label: 'General',    sub: 'Workspace',          icon: 'settings' },
 ];
 
 type ToastFn = ((msg: string, kind?: 'success' | 'error') => void) | undefined;
@@ -68,9 +126,292 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
 
         <div className="settings-body">
           {section === 'members'    && <MembersPanel    showToast={showToast} />}
-          {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
           {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
-          {section === 'workflow'   && <WorkflowPanel   showToast={showToast} />}
+          {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
+          {section === 'categories' && <CategoriesPanel />}
+          {section === 'commission' && <CommissionPanel showToast={showToast} />}
+          {section === 'general'    && <GeneralPanel />}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Language radio (used inside the General tab) ─────────────────────────────
+// Two-button design: ring + radio dot, native-language label, short sub, EN/ZH chip.
+// Reads/writes through the i18n context so the change applies app-wide.
+function SettingsLanguageRadio() {
+  const { lang, setLang } = useT();
+  const opts: { v: Lang; label: string; sub: string }[] = [
+    { v: 'en', label: 'English',   sub: 'US English' },
+    { v: 'zh', label: '简体中文', sub: 'Simplified Chinese' },
+  ];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
+      {opts.map(o => {
+        const active = lang === o.v;
+        return (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => setLang(o.v)}
+            aria-pressed={active}
+            style={{
+              textAlign: 'left', padding: '12px 14px', borderRadius: 10,
+              border: '1.5px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
+              background: active ? 'var(--accent-soft)' : 'var(--bg-elev)',
+              color: 'var(--fg)', cursor: 'pointer', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', gap: 12,
+              transition: 'border-color 0.12s, background 0.12s',
+            }}
+          >
+            <span style={{
+              width: 18, height: 18, borderRadius: '50%',
+              border: '2px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              {active && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />}
+            </span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{o.label}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{o.sub}</div>
+            </span>
+            <span className="mono" style={{
+              fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 4,
+              background: active ? 'var(--accent)' : 'var(--bg-soft)',
+              color: active ? 'white' : 'var(--fg-subtle)',
+              border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
+            }}>{o.v.toUpperCase()}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Categories ───────────────────────────────────────────────────────────────
+// Backend has no /api/categories. The list is hard-coded client-side so the
+// editor reads the same as the design. Toggling/changing margins is in-memory
+// only until the schema lands.
+type CategoryRow = {
+  id: string;
+  label: string;
+  icon: IconName;
+  enabled: boolean;
+  aiCapture: boolean;
+  requiresPN: boolean;
+  defaultMargin: number;
+};
+const DEFAULT_CATEGORIES: CategoryRow[] = [
+  { id: 'RAM',   label: 'RAM',   icon: 'chip',  enabled: true,  aiCapture: true,  requiresPN: true,  defaultMargin: 38 },
+  { id: 'SSD',   label: 'SSD',   icon: 'drive', enabled: true,  aiCapture: false, requiresPN: true,  defaultMargin: 28 },
+  { id: 'HDD',   label: 'HDD',   icon: 'drive', enabled: true,  aiCapture: true,  requiresPN: true,  defaultMargin: 22 },
+  { id: 'Other', label: 'Other', icon: 'box',   enabled: true,  aiCapture: false, requiresPN: false, defaultMargin: 22 },
+  { id: 'CPU',   label: 'CPU',   icon: 'chip',  enabled: false, aiCapture: false, requiresPN: true,  defaultMargin: 30 },
+  { id: 'GPU',   label: 'GPU',   icon: 'chip',  enabled: false, aiCapture: false, requiresPN: true,  defaultMargin: 35 },
+];
+
+function CategoriesPanel() {
+  const [cats, setCats] = useState<CategoryRow[]>(DEFAULT_CATEGORIES);
+  const upd = (id: string, patch: Partial<CategoryRow>) =>
+    setCats(p => p.map(c => c.id === id ? { ...c, ...patch } : c));
+
+  return (
+    <>
+      <SettingsHeader
+        title="Categories & SKUs"
+        sub="Item categories your team submits and sells. Toggle to make available in submissions."
+        actions={<button className="btn"><Icon name="plus" size={14} /> Add category</button>}
+      />
+
+      <div className="cat-list">
+        {cats.map(c => (
+          <div key={c.id} className={'cat-row card' + (c.enabled ? '' : ' disabled')}>
+            <div className="cat-row-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div className="cat-icon"><Icon name={c.icon} size={18} /></div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{c.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                    {c.enabled ? 'Available in submissions' : 'Hidden — not selectable'}
+                  </div>
+                </div>
+              </div>
+              <Toggle checked={c.enabled} onChange={(v) => upd(c.id, { enabled: v })} />
+            </div>
+
+            <div className="cat-row-body">
+              <div className="cat-opt">
+                <div>
+                  <div className="cat-opt-label">AI label capture</div>
+                  <div className="cat-opt-sub">Photograph the part — vision model reads brand, capacity, speed.</div>
+                </div>
+                <Toggle checked={c.aiCapture} onChange={(v) => upd(c.id, { aiCapture: v })} disabled={!c.enabled} />
+              </div>
+              <div className="cat-opt">
+                <div>
+                  <div className="cat-opt-label">Require part number</div>
+                  <div className="cat-opt-sub">Block submission until manufacturer PN is entered.</div>
+                </div>
+                <Toggle checked={c.requiresPN} onChange={(v) => upd(c.id, { requiresPN: v })} disabled={!c.enabled} />
+              </div>
+              <div className="cat-opt">
+                <div>
+                  <div className="cat-opt-label">Default margin target</div>
+                  <div className="cat-opt-sub">Applied as commission baseline when no override is set.</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    value={c.defaultMargin}
+                    onChange={(e) => upd(c.id, { defaultMargin: Number(e.target.value) })}
+                    disabled={!c.enabled}
+                    style={{
+                      width: 60, padding: '5px 8px', borderRadius: 6,
+                      border: '1px solid var(--border)', background: 'var(--bg-elev)',
+                      fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right',
+                    }}
+                  />
+                  <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ─── General ──────────────────────────────────────────────────────────────────
+// Workspace identity, locale (incl. language), and notification defaults. The
+// fields are local-state only — there is no /api/workspace yet. Language is the
+// one exception: it persists through the i18n context's setLang.
+function GeneralPanel() {
+  const [data, setData] = useState({
+    workspace: 'Recycle Servers',
+    domain: 'recycleservers.io',
+    currency: 'USD',
+    fiscalStart: 'January',
+    timezone: 'America/Los_Angeles',
+    fxAuto: true,
+    notify: { newOrder: true, weeklyDigest: true, lowMargin: true, capacityAlert: false },
+  });
+  type GeneralData = typeof data;
+  const upd = <K extends keyof GeneralData>(k: K, v: GeneralData[K]) =>
+    setData(d => ({ ...d, [k]: v }));
+  const updNotify = <K extends keyof GeneralData['notify']>(k: K, v: GeneralData['notify'][K]) =>
+    setData(d => ({ ...d, notify: { ...d.notify, [k]: v } }));
+
+  const NOTIF: { k: keyof GeneralData['notify']; title: string; sub: string }[] = [
+    { k: 'newOrder',      title: 'New order submitted',       sub: 'Notify managers when a purchaser submits a buy order.' },
+    { k: 'weeklyDigest',  title: 'Weekly performance digest', sub: 'Monday morning summary: profit, top contributors, capacity.' },
+    { k: 'lowMargin',     title: 'Low-margin alert',          sub: 'Flag any line item with realized margin under 15%.' },
+    { k: 'capacityAlert', title: 'Capacity alert',            sub: 'Warn when a warehouse exceeds 85% utilization.' },
+  ];
+
+  return (
+    <>
+      <div className="settings-header">
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em' }}>General</h2>
+          <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 3 }}>
+            Workspace identity, locale, and notification defaults.
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><div><div className="card-title">Workspace</div></div></div>
+        <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="field">
+            <label className="label">Workspace name</label>
+            <input className="input" value={data.workspace} onChange={e => upd('workspace', e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="label">Email domain</label>
+            <input className="input mono" value={data.domain} onChange={e => upd('domain', e.target.value)} />
+            <div className="help">Members must sign in with an address on this domain.</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">Locale &amp; finance</div>
+            <div className="card-sub">Includes the workspace display language — applies to every user.</div>
+          </div>
+        </div>
+        <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label className="label">Display language · 显示语言</label>
+            <SettingsLanguageRadio />
+          </div>
+          <div className="field">
+            <label className="label">Reporting currency</label>
+            <select className="select" value={data.currency} onChange={e => upd('currency', e.target.value)}>
+              <option>USD</option><option>EUR</option><option>GBP</option><option>HKD</option><option>SGD</option>
+            </select>
+          </div>
+          <div className="field">
+            <label className="label">Fiscal year start</label>
+            <select className="select" value={data.fiscalStart} onChange={e => upd('fiscalStart', e.target.value)}>
+              <option>January</option><option>April</option><option>July</option><option>October</option>
+            </select>
+          </div>
+          <div className="field">
+            <label className="label">Default timezone</label>
+            <select className="select mono" value={data.timezone} onChange={e => upd('timezone', e.target.value)}>
+              <option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/Amsterdam</option><option>Asia/Hong_Kong</option>
+            </select>
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div className="toggle-row">
+              <span>
+                <strong style={{ fontSize: 13 }}>Auto-update FX rates daily</strong>
+                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                  Pull from ECB at 06:00 UTC. Disable to set manual rates per currency.
+                </div>
+              </span>
+              <label className="toggle">
+                <input type="checkbox" checked={data.fxAuto} onChange={e => upd('fxAuto', e.target.checked)} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">Notifications</div>
+            <div className="card-sub">Workspace defaults — members can override on their profile.</div>
+          </div>
+        </div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column' }}>
+          {NOTIF.map((n, i) => (
+            <div
+              key={n.k}
+              className="toggle-row"
+              style={{ borderBottom: i < NOTIF.length - 1 ? '1px solid var(--border)' : 'none' }}
+            >
+              <span>
+                <strong style={{ fontSize: 13 }}>{n.title}</strong>
+                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{n.sub}</div>
+              </span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={data.notify[n.k]}
+                  onChange={e => updNotify(n.k, e.target.checked)}
+                />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
+          ))}
         </div>
       </div>
     </>
@@ -78,36 +419,130 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
 }
 
 // Mock pending invites — until the backend grows an `invites` table, we keep
-// these inline so the UI tells a complete story. Delete + remind are toasts.
-type PendingInvite = { id: string; email: string; role: 'manager' | 'purchaser'; sentAt: string };
+// these inline so the UI tells a complete story. Resend + revoke are toasts.
+type PendingInvite = { id: string; email: string; role: 'manager' | 'purchaser'; invitedBy: string; invitedAt: string };
 const PENDING_INVITES: PendingInvite[] = [
-  { id: 'iv-1', email: 'sam.lee@recycleservers.io', role: 'purchaser', sentAt: '2 days ago' },
-  { id: 'iv-2', email: 'amelia@recycleservers.io',  role: 'manager',   sentAt: '5 days ago' },
+  { id: 'iv-1', email: 'noah.kim@recycleservers.io', role: 'purchaser', invitedBy: 'Alex Chen', invitedAt: '2 days ago' },
 ];
+
+// Last-seen text mocked client-side (no backend column yet).
+function pickLastSeen(id: string): string {
+  const seed = [...id].reduce((s, c) => s + c.charCodeAt(0), 0);
+  const opts = ['Just now', '12 min ago', '1 hour ago', '2 hours ago', 'Yesterday', '3 days ago', '1 day ago'];
+  return opts[seed % opts.length];
+}
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 function MembersPanel({ showToast }: { showToast: ToastFn }) {
   const [members, setMembers] = useState<Member[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const { user: currentUser } = useAuth();
   const [editing, setEditing] = useState<Member | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [removing, setRemoving] = useState<Member | null>(null);
   const [pending, setPending] = useState<PendingInvite[]>(PENDING_INVITES);
-  const [showDangerConfirm, setShowDangerConfirm] = useState<null | 'transfer' | 'delete'>(null);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'manager' | 'purchaser'>('all');
+  const [showArchived, setShowArchived] = useState(false);
 
-  const reload = () => api.get<{ items: Member[] }>('/api/members').then(r => setMembers(r.items));
+  const reload = () => api.get<{ items: Member[] }>('/api/members')
+    .then(r => setMembers(r.items))
+    .catch(console.error)
+    .finally(() => setLoadedOnce(true));
   useEffect(() => { reload(); }, []);
+
+  const removeMember = async (m: Member) => {
+    try {
+      await api.delete(`/api/members/${m.id}`);
+      setRemoving(null);
+      reload();
+      showToast?.(`Removed ${m.name} from workspace`);
+    } catch (e) {
+      showToast?.(e instanceof Error ? e.message : 'Failed to remove member', 'error');
+    }
+  };
+
+  const visible = useMemo(
+    () => (showArchived ? members : members.filter(m => m.active)),
+    [members, showArchived],
+  );
+  const archivedCount = useMemo(() => members.filter(m => !m.active).length, [members]);
+
+  const filtered = useMemo(() => visible.filter(m => {
+    if (roleFilter !== 'all' && m.role !== roleFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!m.name.toLowerCase().includes(q) && !m.email.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }), [visible, roleFilter, search]);
+
+  const counts = {
+    all: visible.length,
+    manager: visible.filter(m => m.role === 'manager').length,
+    purchaser: visible.filter(m => m.role === 'purchaser').length,
+  };
 
   return (
     <>
-      {/* Pending invites — UI mock; backend invites table is a follow-up */}
+      <SettingsHeader
+        title="Members"
+        sub={`${members.length - archivedCount} active${archivedCount ? ` · ${archivedCount} archived` : ''} · ${pending.length} pending invite${pending.length === 1 ? '' : 's'}`}
+        actions={
+          <button className="btn accent" onClick={() => setInviting(true)}>
+            <Icon name="plus" size={14} /> Invite member
+          </button>
+        }
+      />
+
+      <div className="settings-row">
+        <div className="seg">
+          {([
+            { v: 'all', label: 'All', count: counts.all },
+            { v: 'manager', label: 'Managers', count: counts.manager },
+            { v: 'purchaser', label: 'Purchasers', count: counts.purchaser },
+          ] as const).map(o => (
+            <button key={o.v} className={roleFilter === o.v ? 'active' : ''} onClick={() => setRoleFilter(o.v)}>
+              {o.label} <span style={{ opacity: 0.55, marginLeft: 4 }}>{o.count}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label
+            className="archived-toggle"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontSize: 13, color: 'var(--fg-muted)', cursor: 'pointer', userSelect: 'none',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={e => setShowArchived(e.target.checked)}
+            />
+            Show archived
+            {archivedCount > 0 && (
+              <span style={{ opacity: 0.55, marginLeft: 2 }}>{archivedCount}</span>
+            )}
+          </label>
+          <div className="settings-search">
+            <Icon name="search" size={13} />
+            <input
+              type="text"
+              placeholder="Search name or email…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
       {pending.length > 0 && (
         <div className="card pending-card">
           <div className="card-head">
             <div>
-              <div className="card-title">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                  <Icon name="mail" size={14} /> Pending invites
-                </span>
-              </div>
-              <div className="card-sub">{pending.length} invitation{pending.length === 1 ? '' : 's'} awaiting acceptance.</div>
+              <div className="card-title">Pending invites</div>
+              <div className="card-sub">Resend or revoke if someone hasn't accepted.</div>
             </div>
           </div>
           <div className="invite-list">
@@ -115,25 +550,26 @@ function MembersPanel({ showToast }: { showToast: ToastFn }) {
               <div key={inv.id} className="invite-row">
                 <div className="invite-avatar muted"><Icon name="mail" size={14} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>{inv.email}</div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-                    {inv.role === 'manager' ? 'Manager' : 'Purchaser'} · invited {inv.sentAt}
+                  <div style={{ fontWeight: 500, fontSize: 13.5 }}>{inv.email}</div>
+                  <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                    {inv.role === 'manager' ? 'Manager' : 'Purchaser'} · invited by {inv.invitedBy}, {inv.invitedAt}
                   </div>
                 </div>
                 <button
                   className="btn sm ghost"
-                  onClick={() => showToast?.(`Reminder sent to ${inv.email}`)}
+                  onClick={() => showToast?.(`Resent invite to ${inv.email}`)}
                 >
-                  Remind
+                  Resend
                 </button>
                 <button
-                  className="btn sm"
+                  className="btn sm ghost"
+                  style={{ color: 'var(--neg)' }}
                   onClick={() => {
                     setPending(p => p.filter(x => x.id !== inv.id));
-                    showToast?.(`Invite to ${inv.email} revoked`);
+                    showToast?.(`Revoked invite for ${inv.email}`);
                   }}
                 >
-                  <Icon name="x" size={11} /> Revoke
+                  Revoke
                 </button>
               </div>
             ))}
@@ -141,123 +577,275 @@ function MembersPanel({ showToast }: { showToast: ToastFn }) {
         </div>
       )}
 
-    <div className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Members</div>
-          <div className="card-sub">{members.length} accounts in the workspace.</div>
-        </div>
-      </div>
-      <div className="table-scroll">
-        <table className="data-table">
+      <div className="card">
+        {!loadedOnce ? (
+          <TableSkeleton rows={5} cols={4} />
+        ) : (
+        <table className="data-table members-table">
           <thead>
             <tr>
               <th>Member</th>
               <th>Role</th>
-              <th>Team</th>
-              <th className="num">Orders</th>
-              <th className="num">Lifetime profit</th>
-              <th className="num">Commission</th>
-              <th>Status</th>
+              <th>Last active</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {members.map(m => (
-              <tr key={m.id}>
-                <td>
-                  <div className="member-cell">
-                    <div className="avatar md">{m.initials}</div>
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{m.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{m.email}</div>
+            {filtered.map(m => {
+              const isMe = m.email === currentUser?.email;
+              return (
+                <tr key={m.id} style={m.active ? undefined : { opacity: 0.55 }}>
+                  <td>
+                    <div className="member-cell">
+                      <div className="avatar md">{m.initials}</div>
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {m.name}
+                          {isMe && <span className="chip muted" style={{ fontSize: 10 }}>You</span>}
+                          {!m.active && <span className="chip muted" style={{ fontSize: 10 }}>Inactive</span>}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{m.email}</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td><span className={'chip ' + (m.role === 'manager' ? 'accent' : 'muted')}>{m.role}</span></td>
-                <td className="muted">{m.team ?? '—'}</td>
-                <td className="num mono">{m.order_count}</td>
-                <td className="num mono pos">{fmtUSD0(m.lifetime_profit)}</td>
-                <td className="num mono">{(m.commission_rate * 100).toFixed(1)}%</td>
-                <td><span className={'chip dot ' + (m.active ? 'pos' : 'muted')}>{m.active ? 'Active' : 'Disabled'}</span></td>
-                <td>
-                  <button className="btn sm" onClick={() => setEditing(m)}>
-                    <Icon name="edit" size={12} /> Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td>
+                    <span className={'chip ' + (m.role === 'manager' ? 'accent' : 'muted')}>
+                      {m.role === 'manager' ? 'Manager' : 'Purchaser'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{pickLastSeen(m.id)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', gap: 4 }}>
+                      <button
+                        className="btn icon sm ghost"
+                        title="Edit member"
+                        onClick={() => setEditing(m)}
+                      >
+                        <Icon name="edit" size={13} />
+                      </button>
+                      {!isMe && m.active && (
+                        <button
+                          className="btn icon sm ghost"
+                          title="Remove from workspace"
+                          onClick={() => setRemoving(m)}
+                          style={{ color: 'var(--neg)' }}
+                        >
+                          <Icon name="trash" size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-      </div>
-
-      {editing && (
-        <MemberEditModal
-          member={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); reload(); showToast?.('Member updated'); }}
-        />
-      )}
-    </div>
-
-    {/* Danger zone — destructive workspace actions, gated by a confirm dialog */}
-    <div className="card danger-card">
-      <div className="card-head">
-        <div>
-          <div className="card-title" style={{ color: 'var(--neg)' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-              <Icon name="alert" size={14} /> Danger zone
-            </span>
+        )}
+        {loadedOnce && filtered.length === 0 && (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+            No members match your filters.
           </div>
-          <div className="card-sub">Irreversible actions. Confirm carefully — these affect every workspace member.</div>
-        </div>
-      </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column' }}>
-        <div className="danger-row">
-          <div>
-            <div style={{ fontWeight: 500, fontSize: 13 }}>Transfer workspace ownership</div>
-            <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-              Hand off the manager role to another member. You will be demoted to purchaser.
-            </div>
-          </div>
-          <button className="btn" onClick={() => setShowDangerConfirm('transfer')}>
-            Transfer…
-          </button>
-        </div>
-        <div className="danger-row">
-          <div>
-            <div style={{ fontWeight: 500, fontSize: 13, color: 'var(--neg)' }}>Delete workspace</div>
-            <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-              Permanently delete this workspace, all orders, inventory, and audit logs. This cannot be undone.
-            </div>
-          </div>
-          <button
-            className="btn"
-            style={{ background: 'var(--neg-soft)', color: 'var(--neg)', borderColor: 'color-mix(in oklch, var(--neg) 30%, transparent)' }}
-            onClick={() => setShowDangerConfirm('delete')}
-          >
-            Delete workspace…
-          </button>
-        </div>
-      </div>
-    </div>
+        )}
 
-    {showDangerConfirm && (
-      <DangerConfirmDialog
-        kind={showDangerConfirm}
-        onCancel={() => setShowDangerConfirm(null)}
-        onConfirm={() => {
-          showToast?.(
-            showDangerConfirm === 'transfer'
-              ? 'Ownership transfer requires a backend endpoint — UI ready, follow-up.'
-              : 'Workspace delete requires a backend endpoint — UI ready, follow-up.',
-            'error',
-          );
-          setShowDangerConfirm(null);
-        }}
-      />
-    )}
+        {editing && (
+          <MemberEditModal
+            member={editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => { setEditing(null); reload(); showToast?.('Member updated'); }}
+          />
+        )}
+
+        {inviting && (
+          <InviteMemberModal
+            onClose={() => setInviting(false)}
+            onInvited={(name) => { setInviting(false); reload(); showToast?.(`${name} added to workspace`); }}
+            onError={(msg) => showToast?.(msg, 'error')}
+          />
+        )}
+
+        {removing && (
+          <ConfirmDialog
+            title={`Remove ${removing.name} from workspace?`}
+            message="They will lose access immediately. Their past orders and audit trail are preserved."
+            confirmLabel="Remove"
+            danger
+            onCancel={() => setRemoving(null)}
+            onConfirm={() => removeMember(removing)}
+          />
+        )}
+      </div>
     </>
+  );
+}
+
+function InviteMemberModal({
+  onClose, onInvited, onError,
+}: {
+  onClose: () => void;
+  onInvited: (name: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const [draft, setDraft] = useState({
+    name: '', email: '', role: 'purchaser' as 'manager' | 'purchaser',
+    team: '', title: '', phone: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [createdName, setCreatedName] = useState('');
+  const set = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) => setDraft(p => ({ ...p, [k]: v }));
+
+  const canSave = draft.name.trim() && /.+@.+\..+/.test(draft.email.trim()) && !saving;
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post<{ id: string; password: string }>('/api/members', {
+        name: draft.name.trim(),
+        email: draft.email.trim().toLowerCase(),
+        role: draft.role,
+        team: draft.team.trim() || undefined,
+        title: draft.title.trim() || undefined,
+        phone: draft.phone.trim() || undefined,
+      });
+      setTempPassword(res.password);
+      setCreatedName(draft.name.trim());
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Invite failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  if (tempPassword) {
+    return (
+      <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onInvited(createdName); }}>
+        <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+          <div className="modal-head">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: 'var(--pos-soft)', color: 'var(--pos)',
+                display: 'grid', placeItems: 'center', flexShrink: 0,
+              }}>
+                <Icon name="check" size={18} />
+              </div>
+              <div>
+                <div className="modal-title">{createdName} added</div>
+                <div className="modal-sub">Share this temporary password — they'll be prompted to change it on first sign-in.</div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-body">
+            <div className="field">
+              <label className="label">Temporary password</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="input mono" readOnly value={tempPassword} style={{ flex: 1 }} />
+                <button
+                  className="btn"
+                  onClick={() => { navigator.clipboard?.writeText(tempPassword); }}
+                  title="Copy to clipboard"
+                >
+                  <Icon name="paperclip" size={13} /> Copy
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="modal-foot">
+            <button className="btn primary" onClick={() => onInvited(createdName)}>Done</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal-shell" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="modal-title">Invite member</div>
+          <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Full name *</label>
+              <input
+                className="input"
+                value={draft.name}
+                onChange={e => set('name', e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label className="label">Email *</label>
+              <input
+                className="input"
+                type="email"
+                value={draft.email}
+                onChange={e => set('email', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label className="label">Title</label>
+              <input
+                className="input"
+                value={draft.title}
+                onChange={e => set('title', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label className="label">Team</label>
+              <input
+                className="input"
+                value={draft.team}
+                onChange={e => set('team', e.target.value)}
+              />
+            </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label className="label">Phone</label>
+              <input
+                className="input"
+                value={draft.phone}
+                onChange={e => set('phone', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="role-picker" style={{ marginTop: 12 }}>
+            {(['manager', 'purchaser'] as const).map(r => (
+              <label key={r} className={'role-card ' + (draft.role === r ? 'active' : '')}>
+                <input
+                  type="radio"
+                  name="invite-role"
+                  value={r}
+                  checked={draft.role === r}
+                  onChange={() => set('role', r)}
+                />
+                <div className="role-card-body">
+                  <div className="role-card-title">{r === 'manager' ? 'Manager' : 'Purchaser'}</div>
+                  <div className="role-card-desc">
+                    {r === 'manager'
+                      ? 'Full access — manages team, prices items, edits any order.'
+                      : 'Submits buy orders; sees own activity only. No cost/profit visibility.'}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={!canSave}>
+            {saving ? '…' : 'Send invite'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -353,7 +941,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
     try {
       await api.patch(`/api/members/${member.id}`, {
         name: draft.name, team: draft.team, phone: draft.phone, title: draft.title,
-        role: draft.role, commissionRate: draft.commission_rate, active: draft.active,
+        role: draft.role, active: draft.active,
         password: password || undefined,
       });
       onSaved();
@@ -442,19 +1030,6 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                   </label>
                 ))}
               </div>
-              <div className="field">
-                <label className="label">Commission rate</label>
-                <input
-                  className="input mono"
-                  type="number"
-                  step="0.005"
-                  min={0}
-                  max={1}
-                  value={Number(v('commission_rate'))}
-                  onChange={e => set('commission_rate', parseFloat(e.target.value) || 0)}
-                />
-                <div className="help">Decimal share of gross profit ({(Number(v('commission_rate')) * 100).toFixed(1)}%).</div>
-              </div>
             </>
           )}
 
@@ -518,65 +1093,220 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
+// Customer status (Active/Lead/On hold/Archived), Outstanding A/R, and last
+// order date aren't in the backend yet — derive Active vs Archived from the
+// `active` flag, and mock the rest deterministically per id.
+type CustomerStatus = 'Active' | 'Lead' | 'On hold' | 'Archived';
+const STATUS_CHIP: Record<CustomerStatus, 'pos' | 'info' | 'warn' | 'muted'> = {
+  Active: 'pos', Lead: 'info', 'On hold': 'warn', Archived: 'muted',
+};
+function deriveCustomerSeed(c: Customer) {
+  // Deterministic mock derived from id so the same customer always renders the same.
+  const n = [...c.id].reduce((s, ch) => s + ch.charCodeAt(0), 0);
+  const r = (k: number) => ((n * (k + 1)) % 1000) / 1000;
+  const status: CustomerStatus = !c.active
+    ? 'Archived'
+    : c.lifetime_revenue > 0
+      ? (['Active', 'Active', 'Active', 'On hold'] as const)[Math.floor(r(7) * 4)]
+      : 'Lead';
+  const outstanding = r(4) > 0.55 ? Math.round(r(5) * 18000) : 0;
+  const lastDays = Math.round(1 + r(3) * 60);
+  return { status, outstanding, lastDays };
+}
+
 function CustomersPanel({ showToast }: { showToast: ToastFn }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | CustomerStatus>('all');
+  const [archiving, setArchiving] = useState<Customer | null>(null);
 
-  const reload = () => api.get<{ items: Customer[] }>('/api/customers').then(r => setCustomers(r.items));
+  const reload = () => api.get<{ items: Customer[] }>('/api/customers')
+    .then(r => setCustomers(r.items))
+    .catch(console.error)
+    .finally(() => setLoadedOnce(true));
   useEffect(() => { reload(); }, []);
 
+  const archive = async (c: Customer) => {
+    try {
+      await api.patch(`/api/customers/${c.id}`, { active: !c.active });
+      setArchiving(null);
+      reload();
+      showToast?.(c.active ? `Archived ${c.name}` : `Restored ${c.name}`);
+    } catch (e) {
+      showToast?.(e instanceof Error ? e.message : 'Failed to update customer', 'error');
+    }
+  };
+
+  const enriched = useMemo(
+    () => customers.map(c => ({ ...c, ...deriveCustomerSeed(c) })),
+    [customers],
+  );
+
+  const filtered = useMemo(() => enriched.filter(c => {
+    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!c.name.toLowerCase().includes(q)
+        && !(c.contact ?? '').toLowerCase().includes(q)
+        && !(c.short_name ?? '').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }), [enriched, search, statusFilter]);
+
+  const counts = {
+    all: enriched.length,
+    Active: enriched.filter(c => c.status === 'Active').length,
+    Lead: enriched.filter(c => c.status === 'Lead').length,
+    'On hold': enriched.filter(c => c.status === 'On hold').length,
+  };
+  const totalLtv = enriched.reduce((s, c) => s + (c.lifetime_revenue || 0), 0);
+  const totalOutstanding = enriched.reduce((s, c) => s + (c.outstanding || 0), 0);
+
   return (
-    <div className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Customers</div>
-          <div className="card-sub">{customers.length} accounts.</div>
-        </div>
-        <button className="btn primary sm" onClick={() => setCreating(true)}>
-          <Icon name="plus" size={12} /> New customer
-        </button>
+    <>
+      <SettingsHeader
+        title="Customers"
+        sub={`${counts.Active} active · ${enriched.length} total · $${totalLtv.toLocaleString()} lifetime revenue`}
+        actions={
+          <button className="btn accent" onClick={() => setCreating(true)}>
+            <Icon name="plus" size={14} /> Add customer
+          </button>
+        }
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 'var(--gap)' }}>
+        <StatTile
+          label="Active accounts"
+          value={counts.Active}
+          sub={`${counts.Lead} leads · ${counts['On hold']} on hold`}
+          icon="user"
+        />
+        <StatTile
+          label="Lifetime revenue"
+          value={`$${(totalLtv / 1000).toFixed(0)}k`}
+          sub="All customers"
+          icon="dollar"
+          tone="pos"
+        />
+        <StatTile
+          label="Outstanding A/R"
+          value={`$${totalOutstanding.toLocaleString()}`}
+          sub={`${enriched.filter(c => c.outstanding > 0).length} accounts with balance`}
+          icon="cash"
+          tone={totalOutstanding > 20000 ? 'warn' : 'muted'}
+        />
       </div>
-      <div className="table-scroll">
-        <table className="data-table">
+
+      <div className="settings-row">
+        <div className="seg">
+          {([
+            { v: 'all',     label: 'All',     count: counts.all },
+            { v: 'Active',  label: 'Active',  count: counts.Active },
+            { v: 'Lead',    label: 'Leads',   count: counts.Lead },
+            { v: 'On hold', label: 'On hold', count: counts['On hold'] },
+          ] as const).map(o => (
+            <button key={o.v} className={statusFilter === o.v ? 'active' : ''} onClick={() => setStatusFilter(o.v)}>
+              {o.label} <span style={{ opacity: 0.55, marginLeft: 4 }}>{o.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="settings-search">
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search company or contact…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="card">
+        {!loadedOnce ? (
+          <TableSkeleton rows={6} cols={7} />
+        ) : (
+        <table className="data-table members-table">
           <thead>
             <tr>
               <th>Customer</th>
               <th>Region</th>
-              <th>Terms</th>
-              <th className="num">Lifetime revenue</th>
-              <th className="num">Orders</th>
-              <th>Tags</th>
               <th>Status</th>
+              <th>Terms</th>
+              <th style={{ textAlign: 'right' }}>Lifetime</th>
+              <th style={{ textAlign: 'right' }}>Outstanding</th>
+              <th>Last order</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {customers.map(c => (
-              <tr key={c.id}>
-                <td>
-                  <div style={{ fontWeight: 500 }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{c.contact ?? '—'}</div>
-                </td>
-                <td className="muted">{c.region ?? '—'}</td>
-                <td className="muted">{c.terms}</td>
-                <td className="num mono">{fmtUSD0(c.lifetime_revenue)}</td>
-                <td className="num mono">{c.order_count}</td>
-                <td>
-                  {(c.tags ?? []).map(tag => (
-                    <span key={tag} className="chip muted" style={{ marginRight: 4, fontSize: 10 }}>{tag}</span>
-                  ))}
-                </td>
-                <td><span className={'chip dot ' + (c.active ? 'pos' : 'muted')}>{c.active ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                  <button className="btn sm" onClick={() => setEditing(c)}>
-                    <Icon name="edit" size={12} /> Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filtered.map(c => {
+              const tags = c.tags ?? [];
+              const headlineTag =
+                tags.includes('VIP') ? { label: 'VIP', tone: 'pos' as const }
+                : tags.includes('At risk') ? { label: 'At risk', tone: 'warn' as const }
+                : tags.includes('New') ? { label: 'New', tone: 'info' as const }
+                : null;
+              return (
+                <tr key={c.id}>
+                  <td>
+                    <div className="member-cell">
+                      <div className="avatar md" style={{ background: 'var(--accent-soft)', color: 'var(--accent-strong)' }}>
+                        {(c.short_name ?? c.name).slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {c.name}
+                          {headlineTag && (
+                            <span className={'chip ' + headlineTag.tone} style={{ fontSize: 10 }}>{headlineTag.label}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{c.contact ?? '—'}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span className="chip muted">{c.region ?? '—'}</span></td>
+                  <td><span className={'chip ' + STATUS_CHIP[c.status]}>{c.status}</span></td>
+                  <td className="mono" style={{ fontSize: 13 }}>{c.terms}</td>
+                  <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD0(c.lifetime_revenue || 0)}</td>
+                  <td className="mono" style={{ textAlign: 'right' }}>
+                    {c.outstanding > 0
+                      ? <span style={{ color: 'var(--warn)', fontWeight: 600 }}>${c.outstanding.toLocaleString()}</span>
+                      : <span style={{ color: 'var(--fg-subtle)' }}>—</span>}
+                  </td>
+                  <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
+                    {c.order_count > 0
+                      ? `${c.lastDays}d ago · ${c.order_count} orders`
+                      : <span style={{ color: 'var(--fg-subtle)' }}>No orders</span>}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', gap: 4 }}>
+                      <button className="btn icon sm ghost" title="Edit" onClick={() => setEditing(c)}>
+                        <Icon name="edit" size={13} />
+                      </button>
+                      <button
+                        className="btn icon sm ghost"
+                        title={c.active ? 'Archive' : 'Restore'}
+                        style={{ color: c.active ? 'var(--neg)' : 'var(--fg-muted)' }}
+                        onClick={() => setArchiving(c)}
+                      >
+                        <Icon name={c.active ? 'trash' : 'refresh'} size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        )}
+        {loadedOnce && filtered.length === 0 && (
+          <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+            No customers match your filters.
+          </div>
+        )}
       </div>
 
       {(editing || creating) && (
@@ -586,6 +1316,72 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
           onSaved={() => { setEditing(null); setCreating(false); reload(); showToast?.('Customer saved'); }}
         />
       )}
+
+      {archiving && (
+        <ConfirmDialog
+          title={archiving.active ? `Archive ${archiving.name}?` : `Restore ${archiving.name}?`}
+          message={archiving.active
+            ? 'They will be hidden from new sell-order pickers but their history is preserved.'
+            : 'They will appear in the customer picker again.'}
+          confirmLabel={archiving.active ? 'Archive' : 'Restore'}
+          danger={archiving.active}
+          onCancel={() => setArchiving(null)}
+          onConfirm={() => archive(archiving)}
+        />
+      )}
+    </>
+  );
+}
+
+function ConfirmDialog({
+  title, message, confirmLabel, danger, onCancel, onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal-shell" style={{ maxWidth: 420 }}>
+        <div className="modal-head">
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 8,
+              background: danger ? 'var(--neg-soft)' : 'var(--accent-soft)',
+              color: danger ? 'var(--neg)' : 'var(--accent-strong)',
+              display: 'grid', placeItems: 'center', flexShrink: 0,
+            }}>
+              <Icon name={danger ? 'alert' : 'info'} size={18} />
+            </div>
+            <div>
+              <div className="modal-title">{title}</div>
+              <div className="modal-sub">{message}</div>
+            </div>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn" onClick={onCancel}>Cancel</button>
+          <button
+            className="btn"
+            style={danger
+              ? { background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)' }
+              : { background: 'var(--accent)', color: 'white', borderColor: 'var(--accent)' }}
+            onClick={onConfirm}
+            autoFocus
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -675,167 +1471,460 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer 
 }
 
 // ─── Warehouses ───────────────────────────────────────────────────────────────
-function WarehousesPanel({ showToast: _showToast }: { showToast: ToastFn }) {
-  const [whs, setWhs] = useState<Warehouse[]>([]);
-  useEffect(() => {
-    api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => setWhs(r.items));
-  }, []);
+type WarehouseRow = Warehouse & { active: boolean; receiving: boolean };
+
+// Short timezone abbreviation (e.g. "PT", "CET") derived via the host's Intl
+// data so we don't ship a static IANA → abbrev table. Falls back to '' on any
+// failure so the cutoff row still renders the raw HH:MM.
+function tzAbbrev(timeZone: string | null | undefined): string {
+  if (!timeZone) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone, timeZoneName: 'short',
+    }).formatToParts(new Date());
+    return parts.find(p => p.type === 'timeZoneName')?.value ?? '';
+  } catch {
+    return '';
+  }
+}
+
+const TIMEZONE_FALLBACK = [
+  'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York',
+  'Europe/Amsterdam', 'Europe/London', 'Asia/Hong_Kong', 'Asia/Tokyo',
+];
+
+function listTimezones(): string[] {
+  try {
+    const fn = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+    if (typeof fn === 'function') return fn('timeZone');
+  } catch { /* fall through */ }
+  return TIMEZONE_FALLBACK;
+}
+
+function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
+  const [whs, setWhs] = useState<WarehouseRow[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [modalWh, setModalWh] = useState<Warehouse | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const reload = () => api.get<{ items: Warehouse[] }>('/api/warehouses')
+    .then(r => {
+      setWhs(r.items.map(w => ({
+        ...w,
+        active: true,
+        receiving: w.short !== 'HK',
+      })));
+    })
+    .catch(console.error)
+    .finally(() => setLoadedOnce(true));
+  useEffect(() => { reload(); }, []);
+
+  const updateRow = (id: string, patch: Partial<WarehouseRow>) =>
+    setWhs(prev => prev.map(w => w.id === id ? { ...w, ...patch } : w));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
-      <div className="settings-header">
-        <div>
-          <div className="card-title" style={{ fontSize: 14 }}>Warehouses</div>
-          <div className="card-sub">{whs.length} stock locations. Editing is read-only for now.</div>
-        </div>
-      </div>
+    <>
+      <SettingsHeader
+        title="Warehouses"
+        actions={
+          <button className="btn accent" onClick={() => setCreating(true)}>
+            <Icon name="plus" size={14} /> Add warehouse
+          </button>
+        }
+      />
 
       <div className="wh-grid">
-        {whs.map(w => (
-          <div key={w.id} className="card wh-card">
+        {!loadedOnce && Array.from({ length: 3 }).map((_, i) => (
+          <div key={`sk-${i}`} className="card wh-card">
             <div className="wh-card-head">
               <div className="wh-card-id">
-                <div className="wh-icon"><Icon name="warehouse" size={16} /></div>
-                <div>
-                  <div className="wh-card-name">{w.name ?? w.short}</div>
-                  <div className="wh-card-region">{w.region}</div>
+                <span className="skeleton" style={{ width: 32, height: 32, borderRadius: 8, display: 'inline-block' }} aria-hidden />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span className="skeleton" style={{ width: '60%', height: 14, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+                  <span className="skeleton" style={{ width: '40%', height: 11, borderRadius: 4, display: 'inline-block' }} aria-hidden />
                 </div>
               </div>
-              <span className="chip muted" style={{ fontSize: 10.5 }}>
-                <span className="mono">{w.short}</span>
-              </span>
             </div>
-            <div className="wh-card-body">
-              <div className="wh-row">
-                <span className="wh-row-label">Short code</span>
-                <span className="wh-row-val mono">{w.short}</span>
-              </div>
-              <div className="wh-row">
-                <span className="wh-row-label">Region</span>
-                <span className="wh-row-val">{w.region}</span>
-              </div>
-              <div className="wh-row">
-                <span className="wh-row-label">ID</span>
-                <span className="wh-row-val mono" style={{ fontSize: 11 }}>{w.id}</span>
-              </div>
-            </div>
-            <div className="wh-card-foot">
-              <div className="toggle-row" title="Editing warehouses requires a PATCH /api/warehouses endpoint (not yet implemented).">
-                <span style={{ color: 'var(--fg-subtle)', fontSize: 12 }}>Read-only — wire up backend to enable</span>
-                <label className="toggle">
-                  <input type="checkbox" disabled />
-                  <span className="toggle-track"><span className="toggle-thumb" /></span>
-                </label>
-              </div>
+            <div className="wh-card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12 }}>
+              <span className="skeleton" style={{ width: '100%', height: 12, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+              <span className="skeleton" style={{ width: '85%', height: 12, borderRadius: 4, display: 'inline-block' }} aria-hidden />
+              <span className="skeleton" style={{ width: '70%', height: 12, borderRadius: 4, display: 'inline-block' }} aria-hidden />
             </div>
           </div>
         ))}
-
-        <button
-          type="button"
-          className="card wh-add"
-          onClick={() => _showToast?.('New warehouse — endpoint not yet implemented', 'success')}
-        >
-          <div className="wh-add-icon"><Icon name="plus" size={18} /></div>
-          <div className="wh-add-text">
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg)' }}>Add warehouse</div>
-            <div className="help">Requires POST /api/warehouses</div>
-          </div>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Workflow ─────────────────────────────────────────────────────────────────
-function WorkflowPanel({ showToast }: { showToast: ToastFn }) {
-  const [stages, setStages] = useState<Stage[]>([]);
-  const [draft, setDraft] = useState<Stage[] | null>(null);
-
-  useEffect(() => {
-    api.get<{ stages: Stage[] }>('/api/workflow').then(r => setStages(r.stages));
-  }, []);
-
-  const editing = draft ?? stages;
-  const setOne = (i: number, patch: Partial<Stage>) =>
-    setDraft(prev => (prev ?? stages).map((s, idx) => idx === i ? { ...s, ...patch } : s));
-
-  const save = async () => {
-    if (!draft) return;
-    await api.patch('/api/workflow', { stages: draft });
-    setStages(draft);
-    setDraft(null);
-    showToast?.('Workflow saved');
-  };
-
-  const TONE_HEX: Record<string, string> = {
-    muted:  'var(--fg-subtle)',
-    info:   'var(--info)',
-    warn:   'var(--warn)',
-    accent: 'var(--accent)',
-    pos:    'var(--pos)',
-  };
-
-  return (
-    <div className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Workflow stages</div>
-          <div className="card-sub">Edit the lifecycle stages an order moves through.</div>
-        </div>
-        {draft && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={() => setDraft(null)}>Discard</button>
-            <button className="btn primary" onClick={save}>Save</button>
-          </div>
-        )}
-      </div>
-      <div className="card-body" style={{ display: 'grid', gap: 8 }}>
-        {editing.map((s, i) => {
-          const dotStyle: CSSProperties = {
-            width: 10, height: 10, borderRadius: '50%',
-            background: TONE_HEX[s.tone] ?? 'var(--fg-subtle)',
-          };
+        {whs.map(w => {
+          const abbrev = tzAbbrev(w.timezone);
+          const cutoffDisplay = w.cutoffLocal
+            ? (abbrev ? `${w.cutoffLocal} ${abbrev}` : w.cutoffLocal)
+            : null;
           return (
-            <div
-              key={s.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '32px 1fr 1fr 120px 1.4fr',
-                gap: 10, alignItems: 'center',
-                padding: 12,
-                border: '1px solid var(--border)',
-                borderRadius: 10,
-                background: 'var(--bg-elev)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="lb-rank">{i + 1}</span>
-              </div>
-              <div className="field">
-                <label className="label">Label</label>
-                <input className="input" value={s.label} onChange={e => setOne(i, { label: e.target.value })} />
-              </div>
-              <div className="field">
-                <label className="label">Short</label>
-                <input className="input mono" value={s.short} onChange={e => setOne(i, { short: e.target.value })} />
-              </div>
-              <div className="field">
-                <label className="label">Tone</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={dotStyle} />
-                  <select className="select" value={s.tone} onChange={e => setOne(i, { tone: e.target.value })}>
-                    {['muted', 'info', 'warn', 'accent', 'pos'].map(x => <option key={x}>{x}</option>)}
-                  </select>
+            <div key={w.id} className={'card wh-card' + (w.active ? '' : ' archived')}>
+              <div className="wh-card-head">
+                <div className="wh-card-id">
+                  <div className="wh-icon"><Icon name="warehouse" size={16} /></div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="wh-card-name">{w.name ?? w.short}</div>
+                    <div className="wh-card-region">{w.region} · {w.short}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="btn icon sm ghost"
+                    onClick={() => setModalWh(w)}
+                    title="Open full editor"
+                    style={{ color: 'var(--fg-subtle)' }}
+                  >
+                    <Icon name="settings" size={13} />
+                  </button>
                 </div>
               </div>
-              <div className="field">
-                <label className="label">Description</label>
-                <input className="input" value={s.description} onChange={e => setOne(i, { description: e.target.value })} />
+
+              <div className="wh-card-body">
+                {w.address && (
+                  <div className="wh-row">
+                    <span className="wh-row-label">Address</span>
+                    <span className="wh-row-val">{w.address}</span>
+                  </div>
+                )}
+                {w.manager && (
+                  <div className="wh-row">
+                    <span className="wh-row-label">Manager</span>
+                    <span className="wh-row-val">{w.manager}</span>
+                  </div>
+                )}
+                {w.timezone && (
+                  <div className="wh-row">
+                    <span className="wh-row-label">Timezone</span>
+                    <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{w.timezone}</span>
+                  </div>
+                )}
+                {cutoffDisplay && (
+                  <div className="wh-row">
+                    <span className="wh-row-label">Receiving cutoff</span>
+                    <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{cutoffDisplay}</span>
+                  </div>
+                )}
+                {w.sqft != null && (
+                  <div className="wh-row">
+                    <span className="wh-row-label">Floor area</span>
+                    <span className="wh-row-val mono">{w.sqft.toLocaleString()} sq ft</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="wh-card-foot">
+                <div className="toggle-row">
+                  <span>Active</span>
+                  <Toggle checked={w.active} onChange={(v) => updateRow(w.id, { active: v })} />
+                </div>
+                <div className="toggle-row">
+                  <span>Accepting receipts</span>
+                  <Toggle
+                    checked={w.receiving}
+                    onChange={(v) => updateRow(w.id, { receiving: v })}
+                    disabled={!w.active}
+                  />
+                </div>
               </div>
             </div>
           );
         })}
+
+        <button type="button" className="card wh-add" onClick={() => setCreating(true)}>
+          <div className="wh-add-icon"><Icon name="plus" size={20} /></div>
+          <div className="wh-add-text">
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Add warehouse</div>
+            <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>New location for receiving inventory</div>
+          </div>
+        </button>
+      </div>
+
+      {(modalWh || creating) && (
+        <WarehouseEditModal
+          warehouse={modalWh}
+          others={whs.filter(w => w.id !== modalWh?.id)}
+          onClose={() => { setModalWh(null); setCreating(false); }}
+          onSaved={(msg) => { setModalWh(null); setCreating(false); reload(); showToast?.(msg); }}
+          onError={(msg) => showToast?.(msg, 'error')}
+        />
+      )}
+    </>
+  );
+}
+
+function WarehouseEditModal({
+  warehouse, others, onClose, onSaved, onError,
+}: {
+  warehouse: Warehouse | null;
+  others: Warehouse[];
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const isNew = !warehouse;
+  type Draft = {
+    name: string; short: string; region: string;
+    address: string; manager: string; managerPhone: string; managerEmail: string;
+    timezone: string; cutoffLocal: string; sqft: string;
+  };
+  const [draft, setDraft] = useState<Draft>({
+    name: warehouse?.name ?? '',
+    short: warehouse?.short ?? '',
+    region: warehouse?.region ?? '',
+    address: warehouse?.address ?? '',
+    manager: warehouse?.manager ?? '',
+    managerPhone: warehouse?.managerPhone ?? '',
+    managerEmail: warehouse?.managerEmail ?? '',
+    timezone: warehouse?.timezone ?? '',
+    cutoffLocal: warehouse?.cutoffLocal ?? '',
+    sqft: warehouse?.sqft != null ? String(warehouse.sqft) : '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [transferTo, setTransferTo] = useState<string>('');
+  const set = <K extends keyof Draft>(k: K, v: Draft[K]) =>
+    setDraft(prev => ({ ...prev, [k]: v }));
+
+  const timezones = useMemo(() => listTimezones(), []);
+
+  const canSave = draft.name.trim() && draft.short.trim() && draft.region.trim();
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const clean = (s: string) => {
+        const t = s.trim();
+        return t === '' ? null : t;
+      };
+      const sqftTrim = draft.sqft.trim();
+      const sqftVal = sqftTrim === '' ? null : Number(sqftTrim);
+      const body = {
+        name: draft.name.trim(),
+        short: draft.short.trim(),
+        region: draft.region.trim(),
+        address: clean(draft.address),
+        manager: clean(draft.manager),
+        managerPhone: clean(draft.managerPhone),
+        managerEmail: clean(draft.managerEmail),
+        timezone: clean(draft.timezone),
+        cutoffLocal: clean(draft.cutoffLocal),
+        sqft: sqftVal,
+      };
+      if (isNew) await api.post('/api/warehouses', body);
+      else       await api.patch(`/api/warehouses/${warehouse!.id}`, body);
+      onSaved(isNew ? 'Warehouse created' : 'Warehouse saved');
+    } catch (e) {
+      onError((e as { message?: string })?.message ?? 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!warehouse) return;
+    setDeleting(true);
+    try {
+      const qs = transferTo ? `?transferTo=${encodeURIComponent(transferTo)}` : '';
+      await api.delete(`/api/warehouses/${warehouse.id}${qs}`);
+      onSaved('Warehouse deleted');
+    } catch (e) {
+      onError((e as { message?: string })?.message ?? 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-shell" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="modal-title">{isNew ? 'New warehouse' : 'Edit warehouse'}</div>
+          <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Name</label>
+              <input className="input" value={draft.name} onChange={e => set('name', e.target.value)} />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Short code</label>
+              <input
+                className="input mono"
+                value={draft.short}
+                onChange={e => set('short', e.target.value.toUpperCase())}
+                placeholder="e.g. LA1"
+              />
+            </div>
+            <div className="field">
+              <label className="label">Region</label>
+              <input className="input" value={draft.region} onChange={e => set('region', e.target.value)} placeholder="e.g. US-West" />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Address</label>
+              <textarea
+                className="input"
+                rows={3}
+                value={draft.address}
+                onChange={e => set('address', e.target.value)}
+                placeholder="Street, city, postal code…"
+              />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Manager</label>
+              <input
+                className="input"
+                value={draft.manager}
+                onChange={e => set('manager', e.target.value)}
+                placeholder="Team or person"
+              />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Manager phone</label>
+              <input
+                className="input"
+                type="tel"
+                value={draft.managerPhone}
+                onChange={e => set('managerPhone', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label className="label">Manager email</label>
+              <input
+                className="input"
+                type="email"
+                value={draft.managerEmail}
+                onChange={e => set('managerEmail', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Timezone</label>
+              <select
+                className="input"
+                value={draft.timezone}
+                onChange={e => set('timezone', e.target.value)}
+              >
+                <option value="">(none)</option>
+                {timezones.map(tz => (
+                  <option key={tz} value={tz}>{tz}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">Receiving cutoff</label>
+              <input
+                className="input mono"
+                type="time"
+                value={draft.cutoffLocal}
+                onChange={e => set('cutoffLocal', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label className="label">Floor area (sq ft)</label>
+              <input
+                className="input mono"
+                type="number"
+                min={0}
+                step={100}
+                value={draft.sqft}
+                onChange={e => set('sqft', e.target.value)}
+              />
+            </div>
+          </div>
+          {!isNew && (
+            <div className="field-row">
+              <div className="field">
+                <label className="label">ID</label>
+                <input className="input mono" value={warehouse!.id} disabled />
+              </div>
+            </div>
+          )}
+          {!isNew && confirmingDelete && (
+            <div
+              style={{
+                marginTop: 12, padding: 12, borderRadius: 6,
+                border: '1px solid var(--neg)', background: 'var(--bg-elev)',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                Delete warehouse "{warehouse!.name ?? warehouse!.short}"?
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginBottom: 10 }}>
+                Existing orders and sell-orders referencing this warehouse will be moved to the warehouse you pick below. This cannot be undone.
+              </div>
+              <div className="field">
+                <label className="label">Move inventory to</label>
+                <select
+                  className="input"
+                  value={transferTo}
+                  onChange={(e) => setTransferTo(e.target.value)}
+                >
+                  <option value="">(none — clear warehouse from records)</option>
+                  {others.map(w => (
+                    <option key={w.id} value={w.id}>
+                      {w.name ?? w.short} · {w.region}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="modal-foot" style={{ justifyContent: 'space-between' }}>
+          <div>
+            {!isNew && !confirmingDelete && (
+              <button
+                className="btn"
+                onClick={() => setConfirmingDelete(true)}
+                disabled={deleting || saving}
+                style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
+              >
+                Delete
+              </button>
+            )}
+            {!isNew && confirmingDelete && (
+              <button
+                className="btn"
+                onClick={() => { setConfirmingDelete(false); setTransferTo(''); }}
+                disabled={deleting}
+              >
+                Back
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {confirmingDelete ? (
+              <button
+                className="btn primary"
+                onClick={remove}
+                disabled={deleting}
+                style={{ background: 'var(--neg)', borderColor: 'var(--neg)' }}
+              >
+                {deleting ? '…' : 'Confirm delete'}
+              </button>
+            ) : (
+              <>
+                <button className="btn" onClick={onClose}>Cancel</button>
+                <button className="btn primary" onClick={save} disabled={saving || deleting || !canSave}>
+                  {saving ? '…' : 'Save'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -873,3 +1962,71 @@ function PasswordMeter({ password }: { password: string }) {
     </div>
   );
 }
+
+// ─── Commission tab ──────────────────────────────────────────────────────────
+type CommissionKey = 'company' | 'self';
+type CommissionRule = { key: CommissionKey; paymentType: string; rate: number };
+
+function CommissionPanel({ showToast }: { showToast: ToastFn }) {
+  const [rules, setRules] = useState<CommissionRule[]>([
+    { key: 'company', paymentType: 'Company pay', rate: 50 },
+    { key: 'self',    paymentType: 'Self pay',    rate: 65 },
+  ]);
+
+  const upd = (key: CommissionKey, rate: number) =>
+    setRules(prev => prev.map(r => r.key === key ? { ...r, rate } : r));
+
+  return (
+    <>
+      <SettingsHeader
+        title="Commission rules"
+        sub="How profit-share is calculated when a sell order is paid. Company pay vs Self pay carry their own commission rates."
+        actions={<button className="btn accent" onClick={() => showToast?.('Commission rules saved', 'success')}><Icon name="check" size={13} /> Save</button>}
+      />
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">Commission by payment type</div>
+            <div className="card-sub">Rate is applied to the realized profit on the line, after shipping &amp; fees.</div>
+          </div>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Payment type</th>
+                <th>Commission rate</th>
+                <th>Example: $5,000 profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map(r => (
+                <tr key={r.key}>
+                  <td style={{ fontWeight: 500 }}>{r.paymentType}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={r.rate}
+                        onChange={(e) => upd(r.key, Number(e.target.value))}
+                        style={{ width: 56, padding: '4px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-elev)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontFamily: 'inherit' }}
+                      />
+                      <span style={{ fontSize: 13 }}>%</span>
+                    </span>
+                  </td>
+                  <td className="mono" style={{ color: 'var(--accent-strong)', fontWeight: 600 }}>
+                    ${(5000 * r.rate / 100).toFixed(0)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </>
+  );
+}
+

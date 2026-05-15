@@ -6,12 +6,14 @@ import { api } from '../lib/api';
 import { fmtUSD, fmtUSD0, relTime } from '../lib/format';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { RefPrice } from '../lib/types';
+import { PhoneListSkeleton } from '../components/Skeleton';
 
 export function Market() {
   const { t } = useT();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'Other'>('all');
+  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<RefPrice[]>([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
@@ -23,13 +25,11 @@ export function Market() {
       if (search.trim()) params.set('q', search.trim());
       api.get<{ items: RefPrice[] }>(`/api/market?${params}`)
         .then(r => setItems(r.items))
-        .catch(console.error);
+        .catch(console.error)
+        .finally(() => setLoadedOnce(true));
     }, 250);
     return () => clearTimeout(handle);
   }, [filter, search]);
-
-  const rising = items.filter(r => r.trend > 0.02).length;
-  const falling = items.filter(r => r.trend < -0.02).length;
 
   return (
     <>
@@ -40,26 +40,13 @@ export function Market() {
           <div>{t('marketHint')}</div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
-          <div className="ph-kpi">
-            <div className="ph-kpi-label">{t('risingPrices')}</div>
-            <div className="ph-kpi-value" style={{ fontSize: 20, color: 'var(--pos)' }}>{rising}</div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('moreRoom')}</div>
-          </div>
-          <div className="ph-kpi">
-            <div className="ph-kpi-label">{t('fallingPrices')}</div>
-            <div className="ph-kpi-value" style={{ fontSize: 20, color: 'var(--neg)' }}>{falling}</div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('tighten')}</div>
-          </div>
-        </div>
-
         <div style={{ position: 'relative', marginTop: 12 }}>
           <Icon name="search" size={13} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)' }} />
           <input className="input" placeholder={t('searchPart')} style={{ paddingLeft: 32, height: 38, fontSize: 13, width: '100%' }} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
         <div className="ph-chip-scroller">
-          {(['all', 'RAM', 'SSD', 'Other'] as const).map(f => (
+          {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
               {f === 'all' ? t('filterAll') : f}
             </button>
@@ -67,7 +54,8 @@ export function Market() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {items.slice(0, 30).map(r => {
+          {!loadedOnce && <PhoneListSkeleton rows={5} />}
+          {loadedOnce && items.slice(0, 30).map(r => {
             const open = openId === r.id;
             const trendUp = r.trend > 0.005;
             const trendDown = r.trend < -0.005;
@@ -77,10 +65,16 @@ export function Market() {
               <div key={r.id} className="ph-inv-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, cursor: 'pointer' }} onClick={() => setOpenId(open ? null : r.id)}>
                 <div style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div className="ph-inv-thumb" style={{
-                    background: r.category === 'RAM' ? 'var(--info-soft)' : r.category === 'SSD' ? 'var(--pos-soft)' : 'var(--warn-soft)',
-                    color: r.category === 'RAM' ? 'oklch(0.45 0.13 250)' : r.category === 'SSD' ? 'var(--accent-strong)' : 'oklch(0.45 0.13 75)',
+                    background: r.category === 'RAM' ? 'var(--info-soft)'
+                              : r.category === 'SSD' ? 'var(--pos-soft)'
+                              : r.category === 'HDD' ? 'oklch(0.96 0.04 295)'
+                              : 'var(--warn-soft)',
+                    color: r.category === 'RAM' ? 'oklch(0.45 0.13 250)'
+                         : r.category === 'SSD' ? 'var(--accent-strong)'
+                         : r.category === 'HDD' ? 'oklch(0.45 0.16 295)'
+                         : 'oklch(0.45 0.13 75)',
                   }}>
-                    <Icon name={r.category === 'RAM' ? 'chip' : r.category === 'SSD' ? 'drive' : 'box'} size={16} />
+                    <Icon name={r.category === 'RAM' ? 'chip' : (r.category === 'SSD' || r.category === 'HDD') ? 'drive' : 'box'} size={16} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>

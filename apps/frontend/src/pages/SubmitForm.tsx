@@ -102,6 +102,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const buildLabel = (): string => {
     if (line.category === 'RAM') return [line.brand, line.capacity, line.type].filter(Boolean).join(' ');
     if (line.category === 'SSD') return [line.brand, line.capacity, line.interface].filter(Boolean).join(' ');
+    if (line.category === 'HDD') return [line.brand, line.capacity, line.rpm ? line.rpm + 'rpm' : null].filter(Boolean).join(' ');
     return line.description ?? 'Item';
   };
 
@@ -112,10 +113,10 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   //   - First-item new order: "New RAM order" / sub = AI-review or fill-in
   //   - Nth-item new order:  "Add RAM item" / sub = "Item N · adding..."
   const title = isEditing
-    ? (category === 'RAM' ? t('editRamItem') : category === 'SSD' ? t('editSsdItem') : t('editOtherItem'))
+    ? (category === 'RAM' ? t('editRamItem') : category === 'SSD' ? t('editSsdItem') : category === 'HDD' ? t('editHddItem') : t('editOtherItem'))
     : isFirst
-      ? (category === 'RAM' ? t('newRamOrder') : category === 'SSD' ? t('newSsdOrder') : t('newOtherOrder'))
-      : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : t('addOtherItem'));
+      ? (category === 'RAM' ? t('newRamOrder') : category === 'SSD' ? t('newSsdOrder') : category === 'HDD' ? t('newHddOrder') : t('newOtherOrder'))
+      : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
 
   const sub = isEditing
     ? buildLabel()

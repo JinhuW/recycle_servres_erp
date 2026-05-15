@@ -7,6 +7,7 @@ export default defineConfig({
     host: '0.0.0.0',                  // bind on all interfaces, not just IPv6 loopback
     port: 5173,
     strictPort: true,                 // fail fast if 5173 is taken instead of silently picking 5174
+    allowedHosts: ['inventory.recycleservers.com'],
     proxy: {
       '/api': {
         target: process.env.VITE_API_BASE || 'http://localhost:8787',
