@@ -30,8 +30,6 @@ export const catalog = {
   CONDITION:     [] as string[],
 };
 
-export const paymentTerms: string[] = [];
-
 export type PriceSource = { id: string; label: string };
 export const priceSources: PriceSource[] = [];
 
@@ -53,7 +51,6 @@ export const orderStatuses: OrderStatus[] = [];
 
 type LookupsResponse = {
   catalog: Record<string, string[]>;
-  paymentTerms: string[];
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
 };
@@ -78,7 +75,6 @@ export function loadLookups(): Promise<void> {
         const target = (catalog as Record<string, string[]>)[group];
         if (target) target.splice(0, target.length, ...values);
       }
-      paymentTerms.splice(0, paymentTerms.length, ...data.paymentTerms);
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
       orderStatuses.splice(
@@ -100,7 +96,6 @@ export function resetLookups(): void {
   loaded = false;
   inflight = null;
   for (const arr of Object.values(catalog)) arr.length = 0;
-  paymentTerms.length = 0;
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
   orderStatuses.length = 0;

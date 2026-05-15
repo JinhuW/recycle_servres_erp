@@ -18,8 +18,10 @@ type Member = {
 };
 
 type Customer = {
-  id: string; name: string; short_name: string | null; contact: string | null;
-  region: string | null; terms: string; credit_limit: number | null;
+  id: string; name: string; short_name: string | null;
+  contact_name: string | null; contact_email: string | null; contact_phone: string | null;
+  address: string | null; country: string | null;
+  region: string | null;
   tags: string[]; notes: string | null; active: boolean;
   lifetime_revenue: number; order_count: number;
 };
@@ -1144,22 +1146,19 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-// Customer status (Active/Lead/On hold/Archived), Outstanding A/R, and last
-// order date aren't in the backend yet — derive Active vs Archived from the
-// `active` flag, and mock the rest deterministically per id.
-type CustomerStatus = 'Active' | 'Lead' | 'On hold' | 'Archived';
-const STATUS_CHIP: Record<CustomerStatus, 'pos' | 'info' | 'warn' | 'muted'> = {
-  Active: 'pos', Lead: 'info', 'On hold': 'warn', Archived: 'muted',
+// Customer status is real now (the `active` flag → Active/Archived). Outstanding
+// A/R and last order date aren't in the backend yet — those stay mocked
+// deterministically per id.
+type CustomerStatus = 'Active' | 'Archived';
+const STATUS_CHIP: Record<CustomerStatus, 'pos' | 'muted'> = {
+  Active: 'pos', Archived: 'muted',
 };
 function deriveCustomerSeed(c: Customer) {
-  // Deterministic mock derived from id so the same customer always renders the same.
+  // Status is real (the `active` flag); outstanding + last-order remain
+  // deterministic UI mocks derived from id until the backend tracks them.
   const n = [...c.id].reduce((s, ch) => s + ch.charCodeAt(0), 0);
   const r = (k: number) => ((n * (k + 1)) % 1000) / 1000;
-  const status: CustomerStatus = !c.active
-    ? 'Archived'
-    : c.lifetime_revenue > 0
-      ? (['Active', 'Active', 'Active', 'On hold'] as const)[Math.floor(r(7) * 4)]
-      : 'Lead';
+  const status: CustomerStatus = c.active ? 'Active' : 'Archived';
   const outstanding = r(4) > 0.55 ? Math.round(r(5) * 18000) : 0;
   const lastDays = Math.round(1 + r(3) * 60);
   return { status, outstanding, lastDays };
@@ -1171,7 +1170,7 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
   const [editing, setEditing] = useState<Customer | null>(null);
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | CustomerStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | CustomerStatus>('Active');
   const [archiving, setArchiving] = useState<Customer | null>(null);
 
   const reload = () => api.get<{ items: Customer[] }>('/api/customers')
@@ -1201,8 +1200,9 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
     if (search) {
       const q = search.toLowerCase();
       if (!c.name.toLowerCase().includes(q)
-        && !(c.contact ?? '').toLowerCase().includes(q)
-        && !(c.short_name ?? '').toLowerCase().includes(q)) return false;
+        && !(c.short_name ?? '').toLowerCase().includes(q)
+        && !(c.contact_name ?? '').toLowerCase().includes(q)
+        && !(c.contact_email ?? '').toLowerCase().includes(q)) return false;
     }
     return true;
   }), [enriched, search, statusFilter]);
@@ -1210,8 +1210,7 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
   const counts = {
     all: enriched.length,
     Active: enriched.filter(c => c.status === 'Active').length,
-    Lead: enriched.filter(c => c.status === 'Lead').length,
-    'On hold': enriched.filter(c => c.status === 'On hold').length,
+    Archived: enriched.filter(c => c.status === 'Archived').length,
   };
   const totalLtv = enriched.reduce((s, c) => s + (c.lifetime_revenue || 0), 0);
   const totalOutstanding = enriched.reduce((s, c) => s + (c.outstanding || 0), 0);
@@ -1232,7 +1231,7 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
         <StatTile
           label="Active accounts"
           value={counts.Active}
-          sub={`${counts.Lead} leads · ${counts['On hold']} on hold`}
+          sub={`${counts.Archived} archived · ${enriched.length} total`}
           icon="user"
         />
         <StatTile
@@ -1254,10 +1253,9 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
       <div className="settings-row">
         <div className="seg">
           {([
-            { v: 'all',     label: 'All',     count: counts.all },
-            { v: 'Active',  label: 'Active',  count: counts.Active },
-            { v: 'Lead',    label: 'Leads',   count: counts.Lead },
-            { v: 'On hold', label: 'On hold', count: counts['On hold'] },
+            { v: 'Active',   label: 'Active',   count: counts.Active },
+            { v: 'Archived', label: 'Archived', count: counts.Archived },
+            { v: 'all',      label: 'All',      count: counts.all },
           ] as const).map(o => (
             <button key={o.v} className={statusFilter === o.v ? 'active' : ''} onClick={() => setStatusFilter(o.v)}>
               {o.label} <span style={{ opacity: 0.55, marginLeft: 4 }}>{o.count}</span>
@@ -1285,7 +1283,6 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
               <th>Customer</th>
               <th>Region</th>
               <th>Status</th>
-              <th>Terms</th>
               <th style={{ textAlign: 'right' }}>Lifetime</th>
               <th style={{ textAlign: 'right' }}>Outstanding</th>
               <th>Last order</th>
@@ -1314,13 +1311,12 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
                             <span className={'chip ' + headlineTag.tone} style={{ fontSize: 10 }}>{headlineTag.label}</span>
                           )}
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{c.contact ?? '—'}</div>
+                        <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{c.contact_name ?? c.contact_email ?? '—'}</div>
                       </div>
                     </div>
                   </td>
                   <td><span className="chip muted">{c.region ?? '—'}</span></td>
                   <td><span className={'chip ' + STATUS_CHIP[c.status]}>{c.status}</span></td>
-                  <td className="mono" style={{ fontSize: 13 }}>{c.terms}</td>
                   <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD0(c.lifetime_revenue || 0)}</td>
                   <td className="mono" style={{ textAlign: 'right' }}>
                     {c.outstanding > 0
@@ -1439,7 +1435,7 @@ function ConfirmDialog({
 
 function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer | null; onClose: () => void; onSaved: () => void }) {
   const isNew = !customer;
-  const [draft, setDraft] = useState<Partial<Customer>>(customer ?? { terms: 'Net 30', active: true, tags: [] });
+  const [draft, setDraft] = useState<Partial<Customer>>(customer ?? { active: true, tags: [] });
   const [saving, setSaving] = useState(false);
   const set = <K extends keyof Customer>(k: K, value: Customer[K]) =>
     setDraft(prev => ({ ...prev, [k]: value }));
@@ -1448,8 +1444,10 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer 
     setSaving(true);
     try {
       const body = {
-        name: draft.name, shortName: draft.short_name, contact: draft.contact,
-        region: draft.region, terms: draft.terms, creditLimit: draft.credit_limit,
+        name: draft.name, shortName: draft.short_name,
+        contactName: draft.contact_name, contactEmail: draft.contact_email,
+        contactPhone: draft.contact_phone, address: draft.address,
+        country: draft.country, region: draft.region,
         tags: draft.tags, notes: draft.notes, active: draft.active,
       };
       if (isNew) await api.post('/api/customers', body);
@@ -1476,29 +1474,29 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer 
               <input className="input" value={String(draft.short_name ?? '')} onChange={e => set('short_name', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Contact</label>
-              <input className="input" value={String(draft.contact ?? '')} onChange={e => set('contact', e.target.value)} />
-            </div>
-            <div className="field">
               <label className="label">Region</label>
               <input className="input" value={String(draft.region ?? '')} onChange={e => set('region', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Terms</label>
-              <select className="select" value={String(draft.terms ?? 'Net 30')} onChange={e => set('terms', e.target.value)}>
-                <option>Prepay</option><option>Net 7</option><option>Net 15</option><option>Net 30</option><option>Net 60</option>
-              </select>
+              <label className="label">Country</label>
+              <input className="input" value={String(draft.country ?? '')} onChange={e => set('country', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Credit limit (USD)</label>
-              <input
-                className="input mono"
-                type="number"
-                min={0}
-                value={Number(draft.credit_limit ?? 0)}
-                onChange={e => set('credit_limit', parseFloat(e.target.value) || 0)}
-              />
+              <label className="label">Contact name</label>
+              <input className="input" value={String(draft.contact_name ?? '')} onChange={e => set('contact_name', e.target.value)} />
             </div>
+            <div className="field">
+              <label className="label">Contact email</label>
+              <input className="input" value={String(draft.contact_email ?? '')} onChange={e => set('contact_email', e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">Contact phone</label>
+              <input className="input" value={String(draft.contact_phone ?? '')} onChange={e => set('contact_phone', e.target.value)} />
+            </div>
+          </div>
+          <div className="field">
+            <label className="label">Address</label>
+            <textarea className="input" rows={2} value={String(draft.address ?? '')} onChange={e => set('address', e.target.value)} />
           </div>
           <div className="field">
             <label className="label">Notes</label>
