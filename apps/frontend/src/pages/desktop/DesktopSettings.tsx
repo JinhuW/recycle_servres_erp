@@ -191,9 +191,9 @@ function SettingsLanguageRadio() {
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
-// Backend has no /api/categories. The list is hard-coded client-side so the
-// editor reads the same as the design. Toggling/changing margins is in-memory
-// only until the schema lands.
+// Server-backed via /api/categories (migration 0013). The list, toggles, and
+// default margin persist; changes are optimistic and resync from the server
+// on failure.
 type CategoryRow = {
   id: string;
   label: string;
@@ -203,19 +203,30 @@ type CategoryRow = {
   requiresPN: boolean;
   defaultMargin: number;
 };
-const DEFAULT_CATEGORIES: CategoryRow[] = [
-  { id: 'RAM',   label: 'RAM',   icon: 'chip',  enabled: true,  aiCapture: true,  requiresPN: true,  defaultMargin: 38 },
-  { id: 'SSD',   label: 'SSD',   icon: 'drive', enabled: true,  aiCapture: false, requiresPN: true,  defaultMargin: 28 },
-  { id: 'HDD',   label: 'HDD',   icon: 'drive', enabled: true,  aiCapture: true,  requiresPN: true,  defaultMargin: 22 },
-  { id: 'Other', label: 'Other', icon: 'box',   enabled: true,  aiCapture: false, requiresPN: false, defaultMargin: 22 },
-  { id: 'CPU',   label: 'CPU',   icon: 'chip',  enabled: false, aiCapture: false, requiresPN: true,  defaultMargin: 30 },
-  { id: 'GPU',   label: 'GPU',   icon: 'chip',  enabled: false, aiCapture: false, requiresPN: true,  defaultMargin: 35 },
-];
+type CategoryApi = {
+  id: string; label: string; icon: string; enabled: boolean;
+  ai_capture: boolean; requires_pn: boolean; default_margin: number; position: number;
+};
 
 function CategoriesPanel() {
-  const [cats, setCats] = useState<CategoryRow[]>(DEFAULT_CATEGORIES);
+  const [cats, setCats] = useState<CategoryRow[]>([]);
+
+  const reload = () =>
+    api.get<{ items: CategoryApi[] }>('/api/categories')
+      .then(r => setCats(r.items.map(c => ({
+        id: c.id, label: c.label, icon: c.icon as IconName, enabled: c.enabled,
+        aiCapture: c.ai_capture, requiresPN: c.requires_pn, defaultMargin: c.default_margin,
+      }))))
+      .catch(() => { /* keep whatever is on screen */ });
+  useEffect(() => { reload(); }, []);
+
   const upd = (id: string, patch: Partial<CategoryRow>) =>
     setCats(p => p.map(c => c.id === id ? { ...c, ...patch } : c));
+
+  // Optimistic update already applied by the caller; persist and resync from
+  // the server if the write fails (e.g. a purchaser hitting the manager gate).
+  const persist = (id: string, body: Record<string, unknown>) =>
+    api.patch(`/api/categories/${id}`, body).catch(() => reload());
 
   return (
     <>
@@ -238,7 +249,7 @@ function CategoriesPanel() {
                   </div>
                 </div>
               </div>
-              <Toggle checked={c.enabled} onChange={(v) => upd(c.id, { enabled: v })} />
+              <Toggle checked={c.enabled} onChange={(v) => { upd(c.id, { enabled: v }); persist(c.id, { enabled: v }); }} />
             </div>
 
             <div className="cat-row-body">
@@ -247,14 +258,14 @@ function CategoriesPanel() {
                   <div className="cat-opt-label">AI label capture</div>
                   <div className="cat-opt-sub">Photograph the part — vision model reads brand, capacity, speed.</div>
                 </div>
-                <Toggle checked={c.aiCapture} onChange={(v) => upd(c.id, { aiCapture: v })} disabled={!c.enabled} />
+                <Toggle checked={c.aiCapture} onChange={(v) => { upd(c.id, { aiCapture: v }); persist(c.id, { aiCapture: v }); }} disabled={!c.enabled} />
               </div>
               <div className="cat-opt">
                 <div>
                   <div className="cat-opt-label">Require part number</div>
                   <div className="cat-opt-sub">Block submission until manufacturer PN is entered.</div>
                 </div>
-                <Toggle checked={c.requiresPN} onChange={(v) => upd(c.id, { requiresPN: v })} disabled={!c.enabled} />
+                <Toggle checked={c.requiresPN} onChange={(v) => { upd(c.id, { requiresPN: v }); persist(c.id, { requiresPn: v }); }} disabled={!c.enabled} />
               </div>
               <div className="cat-opt">
                 <div>
@@ -266,6 +277,7 @@ function CategoriesPanel() {
                     type="number"
                     value={c.defaultMargin}
                     onChange={(e) => upd(c.id, { defaultMargin: Number(e.target.value) })}
+                    onBlur={() => persist(c.id, { defaultMargin: c.defaultMargin })}
                     disabled={!c.enabled}
                     style={{
                       width: 60, padding: '5px 8px', borderRadius: 6,
@@ -285,9 +297,19 @@ function CategoriesPanel() {
 }
 
 // ─── General ──────────────────────────────────────────────────────────────────
-// Workspace identity, locale (incl. language), and notification defaults. The
-// fields are local-state only — there is no /api/workspace yet. Language is the
-// one exception: it persists through the i18n context's setLang.
+// Workspace identity, locale, and notification defaults — server-backed via
+// /api/workspace (migration 0016). Writes are optimistic; text fields persist
+// on blur, selects/toggles immediately. Language persists separately through
+// the i18n context's setLang.
+const WS_FIELD_KEY = {
+  workspace: 'workspace_name', domain: 'domain', currency: 'currency',
+  fiscalStart: 'fiscal_start', timezone: 'timezone', fxAuto: 'fx_auto',
+} as const;
+const WS_NOTIFY_KEY = {
+  newOrder: 'notify_new_order', weeklyDigest: 'notify_weekly_digest',
+  lowMargin: 'notify_low_margin', capacityAlert: 'notify_capacity',
+} as const;
+
 function GeneralPanel() {
   const [data, setData] = useState({
     workspace: 'Recycle Servers',
@@ -299,10 +321,39 @@ function GeneralPanel() {
     notify: { newOrder: true, weeklyDigest: true, lowMargin: true, capacityAlert: false },
   });
   type GeneralData = typeof data;
+
+  const reload = () =>
+    api.get<{ settings: Record<string, unknown> }>('/api/workspace')
+      .then(({ settings: s }) => setData(d => ({
+        workspace:   typeof s.workspace_name === 'string' ? s.workspace_name : d.workspace,
+        domain:      typeof s.domain         === 'string' ? s.domain         : d.domain,
+        currency:    typeof s.currency       === 'string' ? s.currency       : d.currency,
+        fiscalStart: typeof s.fiscal_start   === 'string' ? s.fiscal_start   : d.fiscalStart,
+        timezone:    typeof s.timezone       === 'string' ? s.timezone       : d.timezone,
+        fxAuto:      typeof s.fx_auto        === 'boolean' ? s.fx_auto        : d.fxAuto,
+        notify: {
+          newOrder:      typeof s.notify_new_order      === 'boolean' ? s.notify_new_order      : d.notify.newOrder,
+          weeklyDigest:  typeof s.notify_weekly_digest  === 'boolean' ? s.notify_weekly_digest  : d.notify.weeklyDigest,
+          lowMargin:     typeof s.notify_low_margin     === 'boolean' ? s.notify_low_margin     : d.notify.lowMargin,
+          capacityAlert: typeof s.notify_capacity       === 'boolean' ? s.notify_capacity       : d.notify.capacityAlert,
+        },
+      })))
+      .catch(() => { /* keep current values */ });
+  useEffect(() => { reload(); }, []);
+
+  const persist = (body: Record<string, unknown>) =>
+    api.patch('/api/workspace', body).catch(() => reload());
+
   const upd = <K extends keyof GeneralData>(k: K, v: GeneralData[K]) =>
     setData(d => ({ ...d, [k]: v }));
-  const updNotify = <K extends keyof GeneralData['notify']>(k: K, v: GeneralData['notify'][K]) =>
+  // Persist a top-level field by its server key (used for selects/toggles and
+  // text-field onBlur).
+  const save = <K extends keyof typeof WS_FIELD_KEY>(k: K, v: GeneralData[K]) =>
+    persist({ [WS_FIELD_KEY[k]]: v });
+  const updNotify = <K extends keyof GeneralData['notify']>(k: K, v: GeneralData['notify'][K]) => {
     setData(d => ({ ...d, notify: { ...d.notify, [k]: v } }));
+    persist({ [WS_NOTIFY_KEY[k]]: v });
+  };
 
   const NOTIF: { k: keyof GeneralData['notify']; title: string; sub: string }[] = [
     { k: 'newOrder',      title: 'New order submitted',       sub: 'Notify managers when a purchaser submits a buy order.' },
@@ -327,11 +378,11 @@ function GeneralPanel() {
         <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div className="field">
             <label className="label">Workspace name</label>
-            <input className="input" value={data.workspace} onChange={e => upd('workspace', e.target.value)} />
+            <input className="input" value={data.workspace} onChange={e => upd('workspace', e.target.value)} onBlur={() => save('workspace', data.workspace)} />
           </div>
           <div className="field">
             <label className="label">Email domain</label>
-            <input className="input mono" value={data.domain} onChange={e => upd('domain', e.target.value)} />
+            <input className="input mono" value={data.domain} onChange={e => upd('domain', e.target.value)} onBlur={() => save('domain', data.domain)} />
             <div className="help">Members must sign in with an address on this domain.</div>
           </div>
         </div>
@@ -351,19 +402,19 @@ function GeneralPanel() {
           </div>
           <div className="field">
             <label className="label">Reporting currency</label>
-            <select className="select" value={data.currency} onChange={e => upd('currency', e.target.value)}>
+            <select className="select" value={data.currency} onChange={e => { upd('currency', e.target.value); save('currency', e.target.value); }}>
               <option>USD</option><option>EUR</option><option>GBP</option><option>HKD</option><option>SGD</option>
             </select>
           </div>
           <div className="field">
             <label className="label">Fiscal year start</label>
-            <select className="select" value={data.fiscalStart} onChange={e => upd('fiscalStart', e.target.value)}>
+            <select className="select" value={data.fiscalStart} onChange={e => { upd('fiscalStart', e.target.value); save('fiscalStart', e.target.value); }}>
               <option>January</option><option>April</option><option>July</option><option>October</option>
             </select>
           </div>
           <div className="field">
             <label className="label">Default timezone</label>
-            <select className="select mono" value={data.timezone} onChange={e => upd('timezone', e.target.value)}>
+            <select className="select mono" value={data.timezone} onChange={e => { upd('timezone', e.target.value); save('timezone', e.target.value); }}>
               <option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/Amsterdam</option><option>Asia/Hong_Kong</option>
             </select>
           </div>
@@ -376,7 +427,7 @@ function GeneralPanel() {
                 </div>
               </span>
               <label className="toggle">
-                <input type="checkbox" checked={data.fxAuto} onChange={e => upd('fxAuto', e.target.checked)} />
+                <input type="checkbox" checked={data.fxAuto} onChange={e => { upd('fxAuto', e.target.checked); save('fxAuto', e.target.checked); }} />
                 <span className="toggle-track"><span className="toggle-thumb" /></span>
               </label>
             </div>
