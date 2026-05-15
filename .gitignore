@@ -6,6 +6,10 @@ build/
 .cache/
 .vite/
 
+# Local agent worktrees / TS build cache (not source)
+.claude/
+*.tsbuildinfo
+
 # Env files
 .env
 .env.local

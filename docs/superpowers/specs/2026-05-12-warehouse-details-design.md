@@ -44,7 +44,7 @@ a fixed, stable field set.
 
 ## Schema change
 
-New migration `apps/backend/migrations/0007_warehouse_details.sql`:
+New migration `apps/backend/migrations/0009_warehouse_details.sql`:
 
 ```sql
 ALTER TABLE warehouses

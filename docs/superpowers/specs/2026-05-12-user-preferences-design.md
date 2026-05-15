@@ -32,7 +32,7 @@ Consequences:
 
 Single JSONB column on `users`, holding a flat namespaced key-value map.
 
-Migration `0007_user_preferences.sql`:
+Migration `0008_user_preferences.sql`:
 
 ```sql
 ALTER TABLE users
@@ -94,26 +94,18 @@ New module `apps/frontend/src/lib/preferences.tsx`:
 
 ### Testing
 
-Backend (`apps/backend/src/routes/me.test.ts` — new file):
+Automated tests are deferred — the repo currently has no test framework on `main`. Setting one up is tracked as separate future work. For this feature, verification is manual:
 
-- PATCH merges a partial set of keys without disturbing others.
-- PATCH rejects an unknown key with 400.
-- PATCH rejects an invalid value (e.g., `tweaks.density: "tiny"`) with 400.
-- PATCH that includes `language` also updates the `users.language` column.
-- PATCH with `key: null` removes the key.
-
-Frontend (`apps/frontend/src/lib/preferences.test.tsx` — new file):
-
-- `usePreference` returns the schema default before auth resolves.
-- Updates flush in a debounced batch (one network call for N rapid changes).
-- Failed PATCH rolls state back to the prior server value.
-- One-time legacy-key migration runs once and clears the old key.
-
-Smoke (manual or Playwright if available): toggle a column in DesktopInventory → reload → toggle persists. Toggle in a private window for the same user → toggle persists.
+- `pnpm typecheck` passes (both apps).
+- Browser smoke: log in as a purchaser, toggle a column in Inventory → reload → choice persists. Log out / log in elsewhere → choice persists.
+- Browser smoke: log in as a manager, toggle role-preview to "as purchaser" → reload → still previewing. Toggle back → reload → off.
+- Browser smoke: toggle a column in Orders → reload → choice persists.
+- Network tab: rapid toggles result in a single PATCH, not one per toggle (debounce works).
+- Manual API check: `curl PATCH /api/me/preferences` with an unknown key → 400.
 
 ## Rollout
 
-1. SQL migration (`0007_user_preferences.sql`).
+1. SQL migration (`0008_user_preferences.sql`).
 2. Backend: `PATCH /api/me/preferences` route + allowlist + validator. `GET /api/me` includes `preferences`.
 3. Frontend: `preferences.tsx` module + `PreferencesProvider` mounted under `AuthProvider`.
 4. Refactor `TweaksProvider` to delegate; verify no call-site changes needed.
