@@ -108,7 +108,7 @@ const CONDITIONS = ['New','Pulled — Tested','Pulled — Untested','Used'];
 const STATUSES   = ['Draft','In Transit','In Transit','Reviewing','Reviewing','Reviewing','Done','Done'];
 
 function makePartNumber(brand, type, cap) {
-  const codes = { Samsung:'M393A', Hynix:'HMA', Micron:'MTA', Kingston:'KSM', Crucial:'CT', Corsair:'CMK' };
+  const codes = { Samsung:'M393A', 'SK Hynix':'HMA', Micron:'MTA', Kingston:'KSM' };
   const code = codes[brand] || 'XXX';
   return `${code}${randInt(1000,9999)}${type.replace('DDR','D')}-${cap.replace('GB','')}`;
 }
