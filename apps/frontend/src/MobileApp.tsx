@@ -232,6 +232,48 @@ function Shell() {
 
   const submitOrder = async (meta: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => {
     if (capture.phase !== 'review') return;
+
+    // Edit-existing-order path (pre-draft flow): restore pre-227fd45 behavior.
+    if (capture.editingId) {
+      try {
+        await api.post('/api/orders', {
+          category: capture.category,
+          warehouseId: meta.warehouseId,
+          payment: meta.payment,
+          notes: meta.notes,
+          totalCost: meta.totalCost,
+          lines: capture.lines.map(l => ({
+            category: l.category,
+            brand: l.brand,
+            capacity: l.capacity,
+            type: l.type,
+            classification: l.classification,
+            rank: l.rank,
+            speed: l.speed,
+            interface: l.interface,
+            formFactor: l.formFactor,
+            description: l.description,
+            partNumber: l.partNumber,
+            condition: l.condition ?? 'Pulled — Tested',
+            qty: l.qty,
+            unitCost: l.unitCost,
+            sellPrice: l.sellPrice ?? null,
+            scanImageId: l.scanImageId ?? null,
+            scanConfidence: l.scanConfidence ?? null,
+          })),
+        });
+        setCapture({ phase: 'idle' });
+        // setView('history') navigates to /purchase-orders; if the user arrived
+        // via a /purchase-orders/:id deep link, this also clears the id.
+        setView('history');
+        showToast(t('orderSubmitted'));
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
+      }
+      return;
+    }
+
+    // New-order draft-finalize path (227fd45 behavior).
     const draftId = capture.draftId;
     if (!draftId) {
       showToast('No draft order — please cancel and retry.', 'error');
