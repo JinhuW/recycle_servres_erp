@@ -49,6 +49,7 @@ export type OrderLine = {
   status: string;
   scanImageId: string | null;
   scanConfidence: number | null;
+  scanImageUrl: string | null;
   position: number;
   health: number | null;
   rpm: number | null;
