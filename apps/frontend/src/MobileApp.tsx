@@ -18,7 +18,7 @@ import { Profile } from './pages/Profile';
 
 import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
-import { api } from './lib/api';
+import { api, createDraftOrder, deleteOrder } from './lib/api';
 import {
   navigate, useRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView,
@@ -30,9 +30,9 @@ type ReturnTo = 'idle' | 'review';
 type CaptureState =
   | { phase: 'idle' }
   | { phase: 'category' }
-  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo }
-  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo }
-  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null };
+  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
+  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
+  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; draftId?: string };
 
 type Toast = { msg: string; kind: 'success' | 'error' };
 
@@ -76,6 +76,18 @@ function Shell() {
   // ── Capture flow handlers ────────────────────────────────────────────────
   const startSubmit = () => setCapture({ phase: 'category' });
   const cancelCapture = () => {
+    // Best-effort delete an abandoned empty draft (nothing confirmed = no real
+    // inventory rows were written). Safe: backend 409s if lifecycle != 'draft'.
+    if (
+      capture.phase === 'camera' ||
+      capture.phase === 'form' ||
+      capture.phase === 'review'
+    ) {
+      const { draftId, lines } = capture;
+      if (draftId && !lines.some(l => l._confirmed)) {
+        deleteOrder(draftId).catch(() => {/* best-effort */});
+      }
+    }
     setCapture({ phase: 'idle' });
     if (window.location.hash.startsWith('#/purchase-orders/')) {
       navigate('/purchase-orders');
@@ -84,32 +96,96 @@ function Shell() {
 
   const pickCategory = (cat: Category) => {
     setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
+    createDraftOrder(cat)
+      .then(r => setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id }))
+      .catch(() => showToast('Could not start a draft order — retry.', 'error'));
   };
 
   const onDetected = (s: ScanResponse) => {
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);
   };
 
+  // Maps a DraftLine to the wire shape for PATCH /api/orders/:id addLines.
+  const toWireLine = (l: DraftLine) => ({
+    category: l.category,
+    brand: l.brand ?? null,
+    capacity: l.capacity ?? null,
+    type: l.type ?? null,
+    classification: l.classification ?? null,
+    rank: l.rank ?? null,
+    speed: l.speed ?? null,
+    interface: l.interface ?? null,
+    formFactor: l.formFactor ?? null,
+    description: l.description ?? null,
+    partNumber: l.partNumber ?? null,
+    condition: l.condition ?? 'Pulled — Tested',
+    qty: Number(l.qty) || 1,
+    unitCost: Number(l.unitCost) || 0,
+    health: l.health ?? null,
+    rpm: l.rpm ?? null,
+    status: 'In Transit' as const,
+  });
+
+  // A line is ready to persist once it has identity (brand or description for
+  // Other), a positive qty, and a non-negative unit cost.
+  const lineReady = (l: DraftLine) => {
+    const qty = Number(l.qty) || 0;
+    const cost = Number(l.unitCost);
+    const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
+    return qty > 0 && cost >= 0 && hasIdentity;
+  };
+
   const onSaveLine = (line: DraftLine) => {
-    setCapture(c => {
-      if (c.phase !== 'form') return c;
-      const lines = (c.editingLineIdx != null)
-        ? c.lines.map((l, i) => i === c.editingLineIdx ? line : l)
-        : [...c.lines, line];
-      return {
-        phase: 'review',
-        category: c.category,
-        detected: null,
-        lines,
-        editingId: c.editingId,
-      };
+    // Capture current state synchronously so we can read draftId and compute
+    // the new lines array before the async PATCH.
+    if (capture.phase !== 'form') return;
+    const { draftId, editingLineIdx, category, editingId } = capture;
+
+    // Build the updated lines array.
+    const newLines = (editingLineIdx != null)
+      ? capture.lines.map((l, i) => i === editingLineIdx ? line : l)
+      : [...capture.lines, line];
+
+    // Index of the newly saved line in the newLines array.
+    const savedIdx = editingLineIdx != null ? editingLineIdx : newLines.length - 1;
+
+    // Move to review immediately (optimistic UI).
+    setCapture({
+      phase: 'review',
+      category,
+      detected: null,
+      lines: newLines,
+      editingId,
+      draftId,
     });
+
+    // If the line was already confirmed (re-edit), skip re-persisting.
+    if (line._confirmed) return;
+
+    // Only persist valid lines; silently skip invalid ones (they stay locally
+    // unconfirmed and will be sent on final submit).
+    if (!lineReady(line) || !draftId) return;
+
+    api.patch('/api/orders/' + draftId, { addLines: [toWireLine(line)] })
+      .then(() => {
+        setCapture(c => {
+          if (c.phase !== 'review') return c;
+          const updated = c.lines.map((l, i) =>
+            i === savedIdx ? { ...l, _confirmed: true } : l,
+          );
+          return { ...c, lines: updated };
+        });
+      })
+      .catch(() => {
+        // Keep the line locally unconfirmed; it will be sent on final submit.
+        showToast('Line saved locally — could not sync to server.', 'error');
+      });
   };
 
   const addAnotherItem = () => {
     setCapture(c => {
       if (c.phase !== 'review') return c;
-      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review' };
+      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review', draftId: c.draftId };
     });
   };
 
@@ -124,6 +200,7 @@ function Shell() {
         editingId: c.editingId,
         editingLineIdx: idx,
         returnTo: 'review',
+        draftId: c.draftId,
       };
     });
   };
@@ -132,7 +209,7 @@ function Shell() {
     setCapture(c => {
       if (c.phase !== 'camera' && c.phase !== 'form') return c;
       if (c.returnTo === 'review') {
-        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId };
+        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, draftId: c.draftId };
       }
       return { phase: 'idle' };
     });
@@ -144,6 +221,7 @@ function Shell() {
       return {
         phase: 'camera', category: c.category, detected: null, lines: c.lines,
         editingId: c.editingId, editingLineIdx: c.editingLineIdx ?? null, returnTo: c.returnTo,
+        draftId: c.draftId,
       };
     });
   };
@@ -154,32 +232,21 @@ function Shell() {
 
   const submitOrder = async (meta: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => {
     if (capture.phase !== 'review') return;
+    const draftId = capture.draftId;
+    if (!draftId) {
+      showToast('No draft order — please cancel and retry.', 'error');
+      return;
+    }
+    // Only send lines that haven't been confirmed already (confirmed ones were
+    // written to the DB when the user saved each line — avoid double-insert).
+    const unconfirmedLines = capture.lines.filter(l => !l._confirmed);
     try {
-      await api.post('/api/orders', {
-        category: capture.category,
+      await api.patch('/api/orders/' + draftId, {
         warehouseId: meta.warehouseId,
         payment: meta.payment,
-        notes: meta.notes,
+        notes: meta.notes || null,
         totalCost: meta.totalCost,
-        lines: capture.lines.map(l => ({
-          category: l.category,
-          brand: l.brand,
-          capacity: l.capacity,
-          type: l.type,
-          classification: l.classification,
-          rank: l.rank,
-          speed: l.speed,
-          interface: l.interface,
-          formFactor: l.formFactor,
-          description: l.description,
-          partNumber: l.partNumber,
-          condition: l.condition ?? 'Pulled — Tested',
-          qty: l.qty,
-          unitCost: l.unitCost,
-          sellPrice: l.sellPrice ?? null,
-          scanImageId: l.scanImageId ?? null,
-          scanConfidence: l.scanConfidence ?? null,
-        })),
+        ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
       });
       setCapture({ phase: 'idle' });
       // setView('history') navigates to /purchase-orders; if the user arrived

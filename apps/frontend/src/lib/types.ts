@@ -100,6 +100,9 @@ export type DraftLine = {
   rpm?: number | null;
   // UI label for cards
   label?: string;
+  // Set to true once this line has been persisted to the server-side draft;
+  // prevents double-insert on final submit.
+  _confirmed?: boolean;
 };
 
 export type ScanResponse = {
