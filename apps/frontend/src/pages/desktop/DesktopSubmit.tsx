@@ -349,6 +349,8 @@ function OrderForm({
     health: l.health ?? null,
     rpm: l.rpm ?? null,
     status: 'In Transit' as const,
+    scanImageId: l.scanImageId ?? null,
+    scanConfidence: l.scanConfidence ?? null,
   });
 
   // Confirms a single line by PATCHing it into the draft order as a product.

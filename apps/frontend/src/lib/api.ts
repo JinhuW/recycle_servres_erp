@@ -72,11 +72,5 @@ export const createDraftOrder = (
   meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
 ) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
 
-// Confirm one draft line: advances its status Draft → In Transit so it becomes a tracked inventory item.
-export const confirmOrderLine = (orderId: string, lineId: string) =>
-  api.patch<{ ok: true }>(`/api/orders/${orderId}`, {
-    lines: [{ id: lineId, status: 'In Transit' }],
-  });
-
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);
