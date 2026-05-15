@@ -37,5 +37,15 @@ describe('stubScan', () => {
     expect(r.confidence).toBe(0.3);
     expect(r.fields).toEqual({});
     expect(r.provider).toBe('stub');
+    expect(r.category).toBe('SSD');
   });
+  it.each(['RAM', 'SSD', 'HDD', 'Other'] as const)(
+    'returns correct category and provider for %s',
+    (cat) => {
+      const r = stubScan({} as Env, cat);
+      expect(r.category).toBe(cat);
+      expect(r.provider).toBe('stub');
+      expect(r.confidence).toBeGreaterThan(0.6);
+    },
+  );
 });
