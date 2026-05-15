@@ -6,6 +6,7 @@ export type Env = {
   JWT_SECRET: string;
   JWT_ISSUER?: string;
   STUB_OCR?: string;
+  STUB_LOW_CONF?: string;
   CF_ACCOUNT_ID?: string;
   CF_IMAGES_TOKEN?: string;
   AI?: {

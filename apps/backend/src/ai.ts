@@ -15,6 +15,10 @@ export type ScanResult = {
   provider: 'stub' | 'workers-ai';
 };
 
+// Below this overall confidence we do NOT autofill the form — the user
+// enters the line manually. Keep in sync with the frontend gate.
+export const CONFIDENCE_FLOOR = 0.6;
+
 const STUB_BY_CATEGORY: Record<LineCategory, Omit<ScanResult, 'provider'>> = {
   RAM: {
     category: 'RAM',
@@ -70,8 +74,8 @@ function isStub(env: Env): boolean {
 
 const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
   RAM: `You are reading a server RAM module label. Extract these fields and respond as compact JSON only:
-{"brand":"…","capacity":"… GB","type":"DDR3|DDR4|DDR5","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx4|1Rx8|2Rx4|2Rx8|4Rx4","speed":"MHz number","partNumber":"…"}
-If a field is not visible, omit it. No prose.`,
+{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"… GB","type":"DDR3|DDR4|DDR5","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx16|1Rx8|1Rx4|2Rx16|2Rx8|2Rx4|4Rx8|4Rx4|8Rx4","speed":"MT/s number only","partNumber":"…"}
+Only include a field if you can read it clearly on the label. Omit any field you are unsure about — do NOT guess. No prose.`,
   SSD: `You are reading an enterprise SSD label. Respond as compact JSON only:
 {"brand":"…","capacity":"… GB or TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|M.2 2280|M.2 22110|U.2|AIC","partNumber":"…"}
 Omit unknown fields. No prose.`,
@@ -89,7 +93,13 @@ export async function scanLabel(
   imageBytes: ArrayBuffer,
 ): Promise<ScanResult> {
   if (isStub(env)) {
-    return { ...STUB_BY_CATEGORY[category], provider: 'stub' };
+    const canned = STUB_BY_CATEGORY[category];
+    // STUB_LOW_CONF=true simulates an unreadable label so the manual-entry
+    // path can be exercised without a real model.
+    if ((env.STUB_LOW_CONF ?? 'false').toLowerCase() === 'true') {
+      return { category, confidence: 0.3, fields: {}, provider: 'stub' };
+    }
+    return { ...canned, provider: 'stub' };
   }
 
   // Workers AI llava vision call. We pass the raw image bytes (max ~4MB).
