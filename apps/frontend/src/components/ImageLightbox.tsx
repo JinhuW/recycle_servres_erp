@@ -20,7 +20,7 @@ export function ImageLightbox({ url, alt, onClose }: Props) {
 
   return (
     <div
-      onClick={onClose}
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
       style={{
         position: 'fixed',
         inset: 0,

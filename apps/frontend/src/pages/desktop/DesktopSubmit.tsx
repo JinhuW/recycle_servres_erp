@@ -702,6 +702,7 @@ export function LineDrawer({
   const [thumbBroken, setThumbBroken] = useState(false);
   const scanUrl = line.scanImageUrl ?? null;
   const showThumb =
+    editing &&
     !!scanUrl &&
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
@@ -795,7 +796,7 @@ export function LineDrawer({
           </div>
 
           <div style={{ padding: 16, display: 'grid', gap: 14 }}>
-            {line.scanImageUrl && (
+            {!editing && line.scanImageUrl && (
               <img
                 src={line.scanImageUrl}
                 alt="Captured label"
