@@ -5,6 +5,7 @@ import {
 } from '../../components/StatusChangeDialog';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { useRoute, navigate, match } from '../../lib/route';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
@@ -107,15 +108,22 @@ const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?
 
 type SellOrdersProps = {
   onNewFromInventory?: () => void;
+  onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
 
-export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) {
+export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersProps = {}) {
   const { t } = useT();
   const [orders, setOrders] = useState<SellOrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
   const [search, setSearch] = useState('');
-  const [open, setOpen] = useState<{ id: string; mode: 'view' | 'edit' } | null>(null);
+  const { path } = useRoute();
+  const editMatch = match('/sell-orders/:id/edit', path);
+  const viewMatch = match('/sell-orders/:id', path);
+  const open: { id: string; mode: 'view' | 'edit' } | null =
+    editMatch ? { id: editMatch.id, mode: 'edit' }
+    : viewMatch ? { id: viewMatch.id, mode: 'view' }
+    : null;
 
   const reload = () => {
     const p = new URLSearchParams();
@@ -236,9 +244,36 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
                   key={o.id}
                   className="row-hover"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => setOpen({ id: o.id, mode: 'view' })}
+                  onClick={() => navigate('/sell-orders/' + o.id)}
                 >
-                  <td className="mono" style={{ fontWeight: 600, fontSize: 11.5 }}>{o.id}</td>
+                  <td className="mono" style={{ fontWeight: 600, fontSize: 11.5 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {o.id}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const url = `${location.origin}${location.pathname}#/sell-orders/${o.id}`;
+                          const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
+                          if (typeof share === 'function') {
+                            share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
+                              if (err.name !== 'AbortError') onToast?.(t('orderIdCopyFailed'), 'error');
+                            });
+                          } else if (navigator.clipboard?.writeText) {
+                            navigator.clipboard.writeText(url)
+                              .then(() => onToast?.(t('orderIdCopied')))
+                              .catch(() => onToast?.(t('orderIdCopyFailed'), 'error'));
+                          } else {
+                            onToast?.(t('orderIdCopyFailed'), 'error');
+                          }
+                        }}
+                        aria-label={t('shareOrder')}
+                        title={t('shareOrder')}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--fg-subtle)', padding: 0, marginLeft: 2, lineHeight: 0, cursor: 'pointer', verticalAlign: 'middle' }}
+                      >
+                        <Icon name="paperclip" size={12} />
+                      </button>
+                    </span>
+                  </td>
                   <td>
                     <div style={{ fontWeight: 500 }}>{o.customer.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{o.customer.region}</div>
@@ -253,7 +288,7 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
                       <button
                         className="btn icon sm"
                         title="View"
-                        onClick={() => setOpen({ id: o.id, mode: 'view' })}
+                        onClick={() => navigate('/sell-orders/' + o.id)}
                       >
                         <Icon name="eye" size={12} />
                       </button>
@@ -261,7 +296,7 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
                         <button
                           className="btn icon sm"
                           title={`Edit ${o.status.toLowerCase()} order`}
-                          onClick={() => setOpen({ id: o.id, mode: 'edit' })}
+                          onClick={() => navigate('/sell-orders/' + o.id + '/edit')}
                         >
                           <Icon name="edit" size={12} />
                         </button>
@@ -287,9 +322,9 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
         <SellOrderDetail
           id={open.id}
           mode={open.mode}
-          onSwitchToEdit={() => setOpen({ id: open.id, mode: 'edit' })}
-          onClose={() => setOpen(null)}
-          onSaved={() => { reload(); setOpen(null); }}
+          onSwitchToEdit={() => navigate('/sell-orders/' + open.id + '/edit')}
+          onClose={() => navigate('/sell-orders')}
+          onSaved={() => { reload(); navigate('/sell-orders'); }}
         />
       )}
     </>

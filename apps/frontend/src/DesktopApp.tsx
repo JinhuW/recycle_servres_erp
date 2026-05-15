@@ -128,7 +128,7 @@ export function DesktopApp() {
           {view2 === 'market'     && <DesktopMarket />}
           {view2 === 'inventory'  && inventoryOrEdit}
           {view2 === 'sellorders' && (
-            <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} />
+            <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
           )}
           {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
         </div>
