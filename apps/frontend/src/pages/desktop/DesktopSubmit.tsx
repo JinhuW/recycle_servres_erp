@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
-import { api } from '../../lib/api';
+import { api, createDraftOrder } from '../../lib/api';
 import { fmtUSD } from '../../lib/format';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
 import { AI_CONFIDENCE_FLOOR } from '../../lib/status';
@@ -119,14 +119,7 @@ export function DesktopSubmit({ onDone }: Props) {
         key={cat}
         category={cat}
         onCancel={() => setCat(null)}
-        onSubmit={async (payload) => {
-          try {
-            await api.post('/api/orders', payload);
-            onDone({ msg: 'Order submitted — added to inventory', kind: 'success' });
-          } catch (e) {
-            onDone({ msg: e instanceof Error ? e.message : 'Submit failed', kind: 'error' });
-          }
-        }}
+        onDone={onDone}
       />
     </>
   );
@@ -158,6 +151,7 @@ export type Line = {
   scanImageId?: string | null;
   scanConfidence?: number | null;
   scanImageUrl?: string | null;
+  _confirmed?: boolean;
 };
 
 type OrderMeta = {
@@ -167,34 +161,6 @@ type OrderMeta = {
   totalCostOverride: string | null;
 };
 
-type Payload = {
-  category: Category;
-  warehouseId: string;
-  payment: 'company' | 'self';
-  notes: string;
-  totalCost: number;
-  lines: Array<{
-    category: Category;
-    brand: string | null;
-    capacity: string | null;
-    type: string | null;
-    classification: string | null;
-    rank: string | null;
-    speed: string | null;
-    interface: string | null;
-    formFactor: string | null;
-    description: string | null;
-    partNumber: string | null;
-    condition: string;
-    qty: number;
-    unitCost: number;
-    sellPrice: number | null;
-    health: number | null;
-    rpm: number | null;
-    scanImageId: string | null;
-    scanConfidence: number | null;
-  }>;
-};
 
 export function blankLine(cat: Category): Line {
   return {
@@ -239,11 +205,11 @@ function lineFromScan(category: Category, scan: ScanResponse): Line {
 function OrderForm({
   category,
   onCancel,
-  onSubmit,
+  onDone,
 }: {
   category: Category;
   onCancel: () => void;
-  onSubmit: (payload: Payload) => void;
+  onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
 }) {
   const { t } = useT();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -269,6 +235,20 @@ function OrderForm({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+
+  // Create a server-side draft order as soon as the form mounts so that
+  // per-line confirms have an order to attach to.
+  const [draftId, setDraftId] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    createDraftOrder(category)
+      .then(r => { if (alive) setDraftId(r.id); })
+      .catch(() => {
+        if (alive) setAiError('Could not start a draft order — retry.');
+      });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
 
   const onAiUpload = () => {
     if (aiBusy) return;
@@ -347,38 +327,35 @@ function OrderForm({
     return qty > 0 && cost >= 0 && hasIdentity;
   });
 
-  const buildPayload = (): Payload => {
-    const totalCost = meta.totalCostOverride != null
-      ? (Number(meta.totalCostOverride) || 0)
-      : totals.cost;
-    return {
-      category,
-      warehouseId: meta.warehouseId,
-      payment: meta.payment === 'Company' ? 'company' : 'self',
-      notes: meta.notes,
-      totalCost,
-      lines: lines.map(l => ({
-        category: l.category,
-        brand: l.brand ?? null,
-        capacity: l.capacity ?? null,
-        type: l.type ?? null,
-        classification: l.classification ?? null,
-        rank: l.rank ?? null,
-        speed: l.speed ?? null,
-        interface: l.interface ?? null,
-        formFactor: l.formFactor ?? null,
-        description: l.description ?? null,
-        partNumber: l.partNumber ?? null,
-        condition: l.condition,
-        qty: Number(l.qty) || 0,
-        unitCost: Number(l.unitCost) || 0,
-        sellPrice: l.sellPrice == null || l.sellPrice === '' ? null : Number(l.sellPrice),
-        health: l.health ?? null,
-        rpm: l.rpm ?? null,
-        scanImageId: l.scanImageId ?? null,
-        scanConfidence: l.scanConfidence ?? null,
-      })),
-    };
+  // Maps a local Line to the wire shape expected by PATCH /api/orders/:id addLines.
+  const toWireLine = (l: Line) => ({
+    category: l.category,
+    brand: l.brand ?? null,
+    capacity: l.capacity ?? null,
+    type: l.type ?? null,
+    classification: l.classification ?? null,
+    rank: l.rank ?? null,
+    speed: l.speed ?? null,
+    interface: l.interface ?? null,
+    formFactor: l.formFactor ?? null,
+    description: l.description ?? null,
+    partNumber: l.partNumber ?? null,
+    condition: l.condition,
+    qty: Number(l.qty) || 1,
+    unitCost: Number(l.unitCost) || 0,
+    status: 'In Transit' as const,
+  });
+
+  // Confirms a single line by PATCHing it into the draft order as a product.
+  const handleConfirmLine = async (idx: number): Promise<void> => {
+    if (!draftId) {
+      setAiError('Could not start a draft order — retry.');
+      return;
+    }
+    const l = lines[idx];
+    if (l._confirmed) return;
+    await api.patch('/api/orders/' + draftId, { addLines: [toWireLine(l)] });
+    updateLine(idx, { _confirmed: true });
   };
 
   // Escape closes the drawer.
@@ -641,8 +618,26 @@ function OrderForm({
             <button className="btn" onClick={onCancel}>Cancel</button>
             <button
               className="btn accent"
-              disabled={!canSubmit || !meta.warehouseId}
-              onClick={() => onSubmit(buildPayload())}
+              disabled={!canSubmit || !meta.warehouseId || !draftId}
+              onClick={async () => {
+                if (!draftId) { setAiError('No draft order — refresh and try again.'); return; }
+                const totalCost = meta.totalCostOverride != null
+                  ? (Number(meta.totalCostOverride) || 0)
+                  : totals.cost;
+                const unconfirmedLines = lines.filter(l => !l._confirmed);
+                try {
+                  await api.patch('/api/orders/' + draftId, {
+                    warehouseId: meta.warehouseId,
+                    payment: meta.payment === 'Company' ? 'company' : 'self',
+                    notes: meta.notes || null,
+                    totalCost,
+                    ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
+                  });
+                  onDone({ msg: 'Order submitted — added to inventory', kind: 'success' });
+                } catch (e) {
+                  setAiError(e instanceof Error ? e.message : 'Submit failed');
+                }
+              }}
             >
               Submit order <Icon name="check" size={14} />
             </button>
@@ -658,6 +653,8 @@ function OrderForm({
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
+          onConfirmLine={() => handleConfirmLine(activeIdx)}
+          onConfirmError={setAiError}
         />
       )}
     </>
@@ -671,6 +668,7 @@ function OrderForm({
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
+  onConfirmLine, onConfirmError,
 }: {
   line: Line;
   idx: number;
@@ -679,7 +677,10 @@ export function LineDrawer({
   onRemove: () => void;
   canRemove: boolean;
   editing?: boolean;
+  onConfirmLine?: () => Promise<void>;
+  onConfirmError?: (msg: string) => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const cat = line.category;
   const set = (patch: Partial<Line>) => onChange(patch);
 
@@ -848,10 +849,31 @@ export function LineDrawer({
             >
               <Icon name="trash" size={13} /> Remove line
             </button>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {line._confirmed && (
+                <span className="chip pos" style={{ fontSize: 11 }}>
+                  <Icon name="check" size={10} /> Confirmed
+                </span>
+              )}
               <button className="btn" onClick={onClose}>Cancel</button>
-              <button className="btn accent" onClick={onClose}>
-                <Icon name="check" size={13} /> Confirm line
+              <button
+                className="btn accent"
+                disabled={confirming || line._confirmed}
+                onClick={async () => {
+                  if (line._confirmed) { onClose(); return; }
+                  if (!onConfirmLine) { onClose(); return; }
+                  setConfirming(true);
+                  try {
+                    await onConfirmLine();
+                    onClose();
+                  } catch (e) {
+                    onConfirmError?.(e instanceof Error ? e.message : 'Failed to confirm line');
+                  } finally {
+                    setConfirming(false);
+                  }
+                }}
+              >
+                <Icon name="check" size={13} /> {confirming ? 'Confirming…' : 'Confirm line'}
               </button>
             </div>
           </div>
