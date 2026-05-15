@@ -2,7 +2,7 @@
 // /api/* to the Worker on :8787 (see vite.config.ts), so paths stay relative
 // in dev and prod.
 
-import type { Category } from './types';
+import type { Category, OrderSummary } from './types';
 
 const TOKEN_KEY = 'recycle_erp_token';
 
@@ -69,10 +69,10 @@ export const api = {
 
 export const createDraftOrder = (
   category: Category,
-  meta?: { warehouseId?: string; payment?: 'company' | 'self'; notes?: string },
+  meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
 ) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
 
-// Promote a single draft line to a confirmed inventory product.
+// Confirm one draft line: advances its status Draft → In Transit so it becomes a tracked inventory item.
 export const confirmOrderLine = (orderId: string, lineId: string) =>
   api.patch<{ ok: true }>(`/api/orders/${orderId}`, {
     lines: [{ id: lineId, status: 'In Transit' }],
