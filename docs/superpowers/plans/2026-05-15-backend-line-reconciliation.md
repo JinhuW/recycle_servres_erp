@@ -36,7 +36,12 @@ These cover the *behavioral* deltas of parallel commits `64b885d`, `8a28d42`, `8
 - **Task 6:** Done — `0017_indexes_pagination.sql` created; pagination wiring deferred (rationale below).
 - **Task 7:** Harness ported (`vitest.config.ts`, `tests/**` incl. binary fixture, `package.json` scripts + `vitest`/`tsx`/`@types/node` devDeps). `tsconfig` only compiles `src/**` so specs don't affect typecheck. **BLOCKED:** spec adaptation (7.3) + the green-run gate (7.5) require a Postgres `TEST_DATABASE_URL` and `pnpm install`; none available in this environment.
 - **Task 8 (optional UI un-stub):** Not started.
-- **Task 9 (push):** **NOT done and will not be done** until Task 7.5 passes (per the plan's own gate).
+- **Task 7 (DONE):** Harness ported; suite GREEN against a local Postgres test DB — **27 passed, 21 skipped, 0 failed**. Skips are all parallel-only features, each annotated in-spec with a reason + this plan reference. Passing tests validate Phase 0 (PRD §6.8, lifecycle, mixed-category, sell-order qty clamp), Task 2 (audit-lock), Task 5 (categories/commission/workspace). Migrations verified idempotent (clean apply ×2). `0015` hardened to a seed-if-empty pattern after discovering a stale `commission_tiers` from the parallel worktree (the exact divergent-history hazard this reconciliation targets).
+- **Task 8 (optional UI un-stub):** NOT done — deferred. Backend `/api/categories` + `/api/workspace` are live and ready; un-stubbing `DesktopSettings.tsx` is a visible UX change best done with user review. Safe to do anytime.
+- **Task 9 (DONE except 9.5):** Committed (3 commits: backend, frontend, docs/root) and **pushed to origin/main** (`c120ad8..9496a6a`). 9.1 (migrate.mjs reset list) and 9.2 (gitignore `.claude/`, `*.tsbuildinfo`; `.dev.vars` already ignored) done.
+- **Task 9.5 (retire branch): NOT done — needs user decision.** `worktree-backend-impl-prd-gaps` is the only source of the deferred features listed in the skips. Deleting it would lose that work. Recommend KEEPING it until the deferred items are either ported or explicitly abandoned.
+
+### Note: 3 concurrent docs-only commits (`8edef9f`, `c3636cd`, `96bf46b` — RAM-line/AI-scan plans) appeared on `main` from external activity during this session; not authored here. They are benign and were included in the push.
 
 **Blocker for the user:** provide a Postgres dev DB (`DATABASE_URL`) and test DB (`TEST_DATABASE_URL` in `apps/backend/.dev.vars`), run `pnpm install`, then: apply migrations, adapt the 16 specs to main's route shapes iteratively against the running suite (`pnpm --filter ./apps/backend test`), and only then proceed to Task 8/9.
 
