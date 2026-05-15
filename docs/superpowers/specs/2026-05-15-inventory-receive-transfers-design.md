@@ -54,8 +54,12 @@ Rejected:
 ### Backend (`apps/backend/src/routes/inventory.ts`)
 
 1. **`GET /api/inventory/transfers`** — manager-only (`u.role !== 'manager'`
-   → 403). Returns `In Transit` lines joined to their most recent
-   `kind = 'transferred'` `inventory_events` row, exposing: line id, item
+   → 403). Returns `In Transit` lines **inner-joined** to their most recent
+   `kind = 'transferred'` `inventory_events` row. The inner join is
+   load-bearing: `In Transit` is also the *default* status for
+   freshly-submitted purchases (migration `0001`), and those must NOT
+   appear here — only lines that are in transit *because of a transfer*
+   (i.e. have a `transferred` event) qualify. Exposes: line id, item
    identity fields (category, brand, capacity, type, description,
    part_number, etc.), qty, `from` (from the event `detail.from`) →
    `to` (the line's effective warehouse =
@@ -68,7 +72,10 @@ Rejected:
    (non-empty array of string line ids; validate shape like `/transfer`
    does). Load the lines; if any is missing or `status !== 'In Transit'`,
    return 400 and abort the whole batch (all-or-nothing, single
-   `sql.begin` transaction, same style as `/transfer`). For each line:
+   `sql.begin` transaction, same style as `/transfer`). A line with no
+   prior `transferred` event is not specifically rejected — the
+   `In Transit` status check is the guard, and the Transfers page only
+   ever offers genuinely-transferred lines for selection. For each line:
    set `status = 'Done'`, and insert one `inventory_events` row with
    `kind = 'received'` and `detail = { at: <effective warehouse>, ... }`.
    Response: `{ ok: true, ids: string[] }`.
