@@ -1,9 +1,19 @@
-// Manager-only members admin: list, invite, edit profile + reset password,
-// toggle active. Lifted from the chat6 requirement.
+// Manager-only members admin. Persistence + business logic lives in
+// `services/members.ts`; this file owns the HTTP shape only.
 
 import { Hono } from 'hono';
 import { getDb } from '../db';
-import { hashPassword } from '../auth';
+import {
+  listMembers,
+  createMember,
+  updateMember,
+  deactivateMember,
+  getMemberStatus,
+  countOtherActiveManagers,
+  type MemberRole,
+  type CreateMemberInput,
+  type UpdateMemberInput,
+} from '../services/members';
 import type { Env, User } from '../types';
 
 const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -14,64 +24,60 @@ members.use('*', async (c, next) => {
 });
 
 members.get('/', async (c) => {
+  const includeInactive = c.req.query('includeInactive') === 'true';
   const sql = getDb(c.env);
-  const rows = await sql`
-    SELECT u.id, u.email, u.name, u.initials, u.role, u.team, u.phone, u.title,
-           u.active, u.commission_rate::float AS commission_rate, u.created_at,
-           COUNT(DISTINCT o.id)::int AS order_count,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS lifetime_profit
-    FROM users u
-    LEFT JOIN orders o ON o.user_id = u.id
-    LEFT JOIN order_lines l ON l.order_id = o.id
-    GROUP BY u.id
-    ORDER BY u.role DESC, u.name
-  `;
-  return c.json({ items: rows });
+  const items = await listMembers(sql, { includeInactive });
+  return c.json({ items });
 });
 
 members.post('/', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
-    | { email: string; name: string; role: 'manager' | 'purchaser'; team?: string; phone?: string; title?: string; password?: string }
+    | Partial<CreateMemberInput>
     | null;
   if (!body?.email || !body?.name || !body?.role) {
     return c.json({ error: 'email, name, role required' }, 400);
   }
-  const initials = body.name.split(/\s+/).map(s => s[0]?.toUpperCase() ?? '').join('').slice(0, 2) || 'NA';
-  const password = body.password || 'demo';
-  const hash = await hashPassword(password);
   const sql = getDb(c.env);
-  const r = await sql`
-    INSERT INTO users (email, name, initials, role, team, phone, title, password_hash)
-    VALUES (${body.email.toLowerCase()}, ${body.name}, ${initials}, ${body.role},
-            ${body.team ?? null}, ${body.phone ?? null}, ${body.title ?? null}, ${hash})
-    RETURNING id
-  `;
-  return c.json({ id: r[0].id, password }, 201);
+  const r = await createMember(sql, {
+    email: body.email,
+    name: body.name,
+    role: body.role as MemberRole,
+    team: body.team,
+    phone: body.phone,
+    title: body.title,
+    password: body.password,
+  });
+  return c.json(r, 201);
 });
 
 members.patch('/:id', async (c) => {
   const id = c.req.param('id');
-  const body = (await c.req.json().catch(() => null)) as
-    | { name?: string; team?: string; phone?: string; title?: string; role?: string; commissionRate?: number; active?: boolean; password?: string }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as UpdateMemberInput | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   const sql = getDb(c.env);
+  await updateMember(sql, id, body);
+  return c.json({ ok: true });
+});
 
-  await sql`
-    UPDATE users SET
-      name            = COALESCE(${body.name ?? null}, name),
-      team            = COALESCE(${body.team ?? null}, team),
-      phone           = COALESCE(${body.phone ?? null}, phone),
-      title           = COALESCE(${body.title ?? null}, title),
-      role            = COALESCE(${body.role ?? null}, role),
-      commission_rate = COALESCE(${body.commissionRate ?? null}, commission_rate),
-      active          = COALESCE(${body.active ?? null}, active)
-    WHERE id = ${id}
-  `;
-  if (body.password) {
-    const hash = await hashPassword(body.password);
-    await sql`UPDATE users SET password_hash = ${hash} WHERE id = ${id}`;
+// Soft delete: deactivate the account so they can't sign in and disappear
+// from the member picker, while keeping their order/audit history intact
+// (orders.user_id is ON DELETE CASCADE, so a hard delete would wipe history).
+members.delete('/:id', async (c) => {
+  const id = c.req.param('id');
+  if (id === c.var.user.id) {
+    return c.json({ error: "You can't remove yourself" }, 400);
   }
+  const sql = getDb(c.env);
+  const target = await getMemberStatus(sql, id);
+  if (!target) return c.json({ error: 'Member not found' }, 404);
+  if (target.role === 'manager' && target.active) {
+    const others = await countOtherActiveManagers(sql, id);
+    if (others === 0) {
+      return c.json({ error: "Can't remove the last active manager" }, 400);
+    }
+  }
+  const updated = await deactivateMember(sql, id);
+  if (!updated) return c.json({ error: 'Member not found' }, 404);
   return c.json({ ok: true });
 });
 

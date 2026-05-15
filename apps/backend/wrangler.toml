@@ -15,9 +15,17 @@ compatibility_flags = ["nodejs_compat"]
 # [ai]
 # binding = "AI"
 
+# R2 bucket for sell-order status attachments (packing slips, invoices,
+# proof of payment). Create the bucket + a public dev/prod URL, then
+# uncomment and set R2_ATTACHMENTS_PUBLIC_URL below.
+# [[r2_buckets]]
+# binding = "R2_ATTACHMENTS"
+# bucket_name = "recycle-erp-attachments"
+
 [vars]
 STUB_OCR = "true"
 JWT_ISSUER = "recycle-erp"
+# R2_ATTACHMENTS_PUBLIC_URL = "https://<your-r2-public-url>"
 
 # Secrets (set via `wrangler secret put`):
 #   - JWT_SECRET

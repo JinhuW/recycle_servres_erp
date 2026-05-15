@@ -11,6 +11,17 @@ export type Env = {
   AI?: {
     run(model: string, input: Record<string, unknown>): Promise<unknown>;
   };
+  // R2 bucket for sell-order status attachments (proof of shipment, invoices,
+  // proof of payment). Optional — when absent, uploadAttachment returns a stub.
+  R2_ATTACHMENTS?: {
+    put(
+      key: string,
+      value: ArrayBuffer | ReadableStream,
+      options?: { httpMetadata?: { contentType?: string } },
+    ): Promise<unknown>;
+    delete(key: string): Promise<void>;
+  };
+  R2_ATTACHMENTS_PUBLIC_URL?: string;
 };
 
 export type Role = 'manager' | 'purchaser';
@@ -23,9 +34,10 @@ export type User = {
   role: Role;
   team: string | null;
   language: 'en' | 'zh';
+  preferences: Record<string, unknown>;
 };
 
-export type LineCategory = 'RAM' | 'SSD' | 'Other';
+export type LineCategory = 'RAM' | 'SSD' | 'HDD' | 'Other';
 
 export type OrderLine = {
   id: string;
@@ -49,6 +61,8 @@ export type OrderLine = {
   scanImageId: string | null;
   scanConfidence: number | null;
   position: number;
+  health: number | null;
+  rpm: number | null;
 };
 
 export type Order = {

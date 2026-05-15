@@ -15,6 +15,12 @@ export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 10);
 }
 
+export function generateTempPassword(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
+}
+
 export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
   return bcrypt.compare(plain, hash);
 }
@@ -60,7 +66,8 @@ export const authMiddleware: MiddlewareHandler<{
 
   const sql = getDb(c.env);
   const rows = await sql<User[]>`
-    SELECT id, email, name, initials, role, team, language
+    SELECT id, email, name, initials, role, team, language,
+           COALESCE(preferences, '{}'::jsonb) AS preferences
     FROM users
     WHERE id = ${payload.sub}
     LIMIT 1

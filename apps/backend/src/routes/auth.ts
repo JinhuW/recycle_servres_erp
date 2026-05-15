@@ -15,9 +15,15 @@ auth.post('/login', async (c) => {
 
   const sql = getDb(c.env);
   const rows = await sql<
-    { id: string; email: string; name: string; initials: string; role: string; team: string | null; language: string; password_hash: string }[]
+    {
+      id: string; email: string; name: string; initials: string;
+      role: string; team: string | null; language: string;
+      preferences: Record<string, unknown>; password_hash: string;
+    }[]
   >`
-    SELECT id, email, name, initials, role, team, language, password_hash
+    SELECT id, email, name, initials, role, team, language,
+           COALESCE(preferences, '{}'::jsonb) AS preferences,
+           password_hash
     FROM users
     WHERE email = ${body.email.toLowerCase().trim()}
     LIMIT 1
@@ -34,6 +40,7 @@ auth.post('/login', async (c) => {
     user: {
       id: u.id, email: u.email, name: u.name, initials: u.initials,
       role: u.role, team: u.team, language: u.language,
+      preferences: u.preferences ?? {},
     },
   });
 });

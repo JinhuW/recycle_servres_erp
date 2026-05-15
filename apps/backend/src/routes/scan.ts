@@ -19,8 +19,8 @@ scan.post('/label', async (c) => {
   const file = form.get('file');
   const category = (form.get('category') as string | null) as LineCategory | null;
   if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
-  if (!category || !['RAM', 'SSD', 'Other'].includes(category)) {
-    return c.json({ error: 'category must be RAM | SSD | Other' }, 400);
+  if (!category || !['RAM', 'SSD', 'HDD', 'Other'].includes(category)) {
+    return c.json({ error: 'category must be RAM | SSD | HDD | Other' }, 400);
   }
 
   // Upload first, then OCR. If upload fails the user retries with the same

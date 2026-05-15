@@ -40,6 +40,18 @@ const STUB_BY_CATEGORY: Record<LineCategory, Omit<ScanResult, 'provider'>> = {
       partNumber: 'MZ1L21T9HCLS-00A07',
     },
   },
+  HDD: {
+    category: 'HDD',
+    confidence: 0.89,
+    fields: {
+      brand: 'Seagate',
+      capacity: '4TB',
+      interface: 'SAS',
+      formFactor: '3.5"',
+      rpm: '7200',
+      partNumber: 'ST4000NM0023',
+    },
+  },
   Other: {
     category: 'Other',
     confidence: 0.88,
@@ -62,6 +74,9 @@ const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
 If a field is not visible, omit it. No prose.`,
   SSD: `You are reading an enterprise SSD label. Respond as compact JSON only:
 {"brand":"…","capacity":"… GB or TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|M.2 2280|M.2 22110|U.2|AIC","partNumber":"…"}
+Omit unknown fields. No prose.`,
+  HDD: `You are reading an enterprise HDD label. Respond as compact JSON only:
+{"brand":"…","capacity":"… TB","interface":"SATA|SAS","formFactor":"2.5\\"|3.5\\"","rpm":"5400|7200|10000|15000","partNumber":"…"}
 Omit unknown fields. No prose.`,
   Other: `You are reading a server-component label (CPU, NIC, PSU, GPU, etc). Respond as compact JSON only:
 {"description":"human-readable name","partNumber":"…"}

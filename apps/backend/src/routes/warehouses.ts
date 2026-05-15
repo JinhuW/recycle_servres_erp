@@ -214,7 +214,8 @@ warehouses.delete('/:id', async (c) => {
 
   let deleted = 0;
   await sql.begin(async (tx) => {
-    await tx`UPDATE orders          SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
+    await tx`UPDATE orders           SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
+    await tx`UPDATE order_lines      SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
     await tx`UPDATE sell_order_lines SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
     const r = await tx`DELETE FROM warehouses WHERE id = ${id} RETURNING id`;
     deleted = r.length;

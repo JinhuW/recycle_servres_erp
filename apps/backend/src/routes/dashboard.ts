@@ -53,7 +53,10 @@ dashboard.get('/', async (c) => {
 
   // Top contributors (purchasers only) — used by both roles, but only managers
   // see the full list; purchasers see their rank.
-  const leaderboard = await sql`
+  const leaderboardRaw = await sql<{
+    id: string; name: string; initials: string; email: string; role: string;
+    count: number; revenue: number; profit: number; commission: number;
+  }[]>`
     SELECT u.id, u.name, u.initials, u.email, u.role,
            COUNT(DISTINCT o.id)::int AS count,
            COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
@@ -66,6 +69,17 @@ dashboard.get('/', async (c) => {
     GROUP BY u.id, u.name, u.initials, u.email, u.role
     ORDER BY profit DESC
   `;
+  // A purchaser sees everyone's rank but only their own financials (PRD §6.8).
+  const leaderboard = leaderboardRaw.map(row => {
+    const showFinancials = isManager || row.id === u.id;
+    return {
+      id: row.id, name: row.name, initials: row.initials, email: row.email, role: row.role,
+      count: row.count,
+      revenue: showFinancials ? row.revenue : null,
+      profit: showFinancials ? row.profit : null,
+      commission: showFinancials ? row.commission : null,
+    };
+  });
 
   // Per-category breakdown (RAM / SSD / Other) over the same 30d window.
   const byCatRows = await sql`
@@ -85,9 +99,10 @@ dashboard.get('/', async (c) => {
   }
 
   // Recent activity — latest 4 lines, with denormalized user info for the row.
-  const recent = await sql`
+  const recentRows = await sql<Record<string, unknown>[]>`
     SELECT l.id, l.category, l.brand, l.capacity, l.type, l.interface, l.description,
-           l.qty, l.unit_cost::float, l.sell_price::float,
+           l.rpm, l.health::float AS health,
+           l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            o.created_at, o.id AS order_id,
            u.id AS user_id, u.name AS user_name, u.initials AS user_initials
     FROM order_lines l
@@ -97,6 +112,10 @@ dashboard.get('/', async (c) => {
     ORDER BY o.created_at DESC, l.position ASC
     LIMIT 4
   `;
+  // Match inventory's role-based cost-strip (PRD §6.8): purchasers don't see unit_cost.
+  const recent = isManager
+    ? recentRows
+    : recentRows.map(({ unit_cost: _uc, ...rest }) => rest);
 
   return c.json({
     role: u.role,

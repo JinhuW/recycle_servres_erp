@@ -22,6 +22,8 @@ type LineInput = {
   sellPrice?: number | null;
   scanImageId?: string | null;
   scanConfidence?: number | null;
+  health?: number | null;
+  rpm?: number | null;
 };
 
 // ── List orders for the signed-in purchaser (or all, if manager).
@@ -112,11 +114,15 @@ orders.get('/:id', async (c) => {
     SELECT id, category, brand, capacity, type, classification, rank, speed,
            interface, form_factor, description, part_number, condition, qty,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price,
-           status, scan_image_id, scan_confidence, position
+           status, scan_image_id, scan_confidence, position,
+           health::float AS health, rpm
     FROM order_lines
     WHERE order_id = ${id}
     ORDER BY position ASC
   `;
+
+  const lineStatuses = Array.from(new Set(lines.map(l => l.status as string)));
+  const status = lineStatuses.length === 1 ? lineStatuses[0] : 'Mixed';
 
   return c.json({
     order: {
@@ -128,6 +134,7 @@ orders.get('/:id', async (c) => {
       payment: order.payment,
       notes: order.notes,
       lifecycle: order.lifecycle,
+      status,
       createdAt: order.created_at,
       totalCost: order.total_cost,
       warehouse: order.warehouse_id
@@ -154,6 +161,8 @@ orders.get('/:id', async (c) => {
         scanImageId: l.scan_image_id,
         scanConfidence: l.scan_confidence,
         position: l.position,
+        health: l.health,
+        rpm: l.rpm,
       })),
     },
   });
@@ -176,6 +185,12 @@ orders.post('/', async (c) => {
   if (!body || !body.category || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'category and at least one line are required' }, 400);
   }
+  // An order is single-category: every line must match the order category
+  // (a line may omit its category and inherit the order's). Completes the
+  // intent of the lifecycle-default fix (parallel commit 64b885d).
+  if (!body.lines.every(l => !l.category || l.category === body.category)) {
+    return c.json({ error: 'all lines must match the order category' }, 400);
+  }
 
   // Generate a human-friendly id like SO-1289 — collision-resistant via the
   // sequence of existing IDs. Good enough for this scale.
@@ -191,7 +206,7 @@ orders.post('/', async (c) => {
       VALUES (
         ${newId}, ${u.id}, ${body.category},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
-        ${body.totalCost ?? null}, 'awaiting_payment'
+        ${body.totalCost ?? null}, 'draft'
       )
     `;
     for (let i = 0; i < body.lines.length; i++) {
@@ -200,14 +215,16 @@ orders.post('/', async (c) => {
         INSERT INTO order_lines (
           order_id, category, brand, capacity, type, classification, rank, speed,
           interface, form_factor, description, part_number, condition, qty,
-          unit_cost, sell_price, status, scan_image_id, scan_confidence, position
+          unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
+          health, rpm
         ) VALUES (
           ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
           ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
-          ${l.unitCost}, ${l.sellPrice ?? null}, 'In Transit',
-          ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i}
+          ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
+          ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
+          ${l.health ?? null}, ${l.rpm ?? null}
         )
       `;
     }
@@ -216,43 +233,141 @@ orders.post('/', async (c) => {
   return c.json({ id: newId }, 201);
 });
 
-// ── Edit (manager) — update line statuses + sell prices + total cost.
+// ── Edit — update order meta + line item details. The order owner
+// (purchaser) or a manager may PATCH; the desktop edit page gates by
+// status on the client side (Draft is purchaser-editable; later stages are
+// manager-only).
+//
+// Line shape on the wire:
+//   lines:          updates for existing lines (each carries `id`)
+//   addLines:       new line rows to INSERT (no `id`)
+//   removeLineIds:  ids to DELETE (will 409 if referenced by sell_order_lines)
+type LineFields = {
+  status?: string;
+  sellPrice?: number | null;
+  qty?: number;
+  unitCost?: number;
+  brand?: string | null;
+  capacity?: string | null;
+  type?: string | null;
+  classification?: string | null;
+  rank?: string | null;
+  speed?: string | null;
+  interface?: string | null;
+  formFactor?: string | null;
+  description?: string | null;
+  partNumber?: string | null;
+  condition?: string;
+  health?: number | null;
+  rpm?: number | null;
+};
+type LinePatch = LineFields & { id: string };
+
 orders.patch('/:id', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
   const body = (await c.req.json().catch(() => null)) as
-    | { lines?: { id: string; status?: string; sellPrice?: number; qty?: number; unitCost?: number }[]; totalCost?: number; notes?: string }
+    | {
+        lines?: LinePatch[];
+        addLines?: (LineFields & { category?: string })[];
+        removeLineIds?: string[];
+        totalCost?: number | null;
+        notes?: string | null;
+        warehouseId?: string | null;
+        payment?: 'company' | 'self';
+      }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
 
-  const existing = (await sql`SELECT user_id FROM orders WHERE id = ${id} LIMIT 1`)[0];
+  const existing = (await sql`SELECT user_id, category FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
-  await sql.begin(async (tx) => {
-    if (body.totalCost !== undefined || body.notes !== undefined) {
-      await tx`
-        UPDATE orders SET
-          total_cost = COALESCE(${body.totalCost ?? null}, total_cost),
-          notes      = COALESCE(${body.notes ?? null}, notes)
-        WHERE id = ${id}
-      `;
-    }
-    if (Array.isArray(body.lines)) {
-      for (const l of body.lines) {
+  try {
+    await sql.begin(async (tx) => {
+      const touchesOrder =
+        body.totalCost !== undefined ||
+        body.notes !== undefined ||
+        body.warehouseId !== undefined ||
+        body.payment !== undefined;
+      if (touchesOrder) {
+        // Nullable fields use a CASE WHEN sentinel so the client can clear
+        // them by sending `null`; bare COALESCE would treat null as "no
+        // change" and silently keep the old value. `payment` is a non-null
+        // enum, so COALESCE is correct for it.
+        const setTotalCost = body.totalCost   !== undefined ? 1 : 0;
+        const setNotes     = body.notes       !== undefined ? 1 : 0;
+        const setWarehouse = body.warehouseId !== undefined ? 1 : 0;
         await tx`
-          UPDATE order_lines SET
-            status     = COALESCE(${l.status ?? null}, status),
-            sell_price = COALESCE(${l.sellPrice ?? null}, sell_price),
-            qty        = COALESCE(${l.qty ?? null}, qty),
-            unit_cost  = COALESCE(${l.unitCost ?? null}, unit_cost)
-          WHERE id = ${l.id} AND order_id = ${id}
+          UPDATE orders SET
+            total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${body.totalCost ?? null}   ELSE total_cost   END,
+            notes        = CASE WHEN ${setNotes}::int     = 1 THEN ${body.notes ?? null}       ELSE notes        END,
+            warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
+            payment      = COALESCE(${body.payment ?? null}, payment)
+          WHERE id = ${id}
         `;
       }
+      if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
+        await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
+      }
+      if (Array.isArray(body.lines)) {
+        for (const l of body.lines) {
+          await tx`
+            UPDATE order_lines SET
+              status         = COALESCE(${l.status ?? null}, status),
+              sell_price     = COALESCE(${l.sellPrice ?? null}, sell_price),
+              qty            = COALESCE(${l.qty ?? null}, qty),
+              unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
+              brand          = COALESCE(${l.brand ?? null}, brand),
+              capacity       = COALESCE(${l.capacity ?? null}, capacity),
+              type           = COALESCE(${l.type ?? null}, type),
+              classification = COALESCE(${l.classification ?? null}, classification),
+              rank           = COALESCE(${l.rank ?? null}, rank),
+              speed          = COALESCE(${l.speed ?? null}, speed),
+              interface      = COALESCE(${l.interface ?? null}, interface),
+              form_factor    = COALESCE(${l.formFactor ?? null}, form_factor),
+              description    = COALESCE(${l.description ?? null}, description),
+              part_number    = COALESCE(${l.partNumber ?? null}, part_number),
+              condition      = COALESCE(${l.condition ?? null}, condition),
+              health         = COALESCE(${l.health ?? null}, health),
+              rpm            = COALESCE(${l.rpm ?? null}, rpm)
+            WHERE id = ${l.id} AND order_id = ${id}
+          `;
+        }
+      }
+      if (Array.isArray(body.addLines) && body.addLines.length) {
+        // New lines default to the order's category. Position appends after
+        // current max so they sort to the end.
+        const posRow = (await tx`SELECT COALESCE(MAX(position), -1) AS p FROM order_lines WHERE order_id = ${id}`)[0] as { p: number };
+        let pos = posRow.p + 1;
+        for (const l of body.addLines) {
+          await tx`
+            INSERT INTO order_lines (
+              order_id, category, brand, capacity, type, classification, rank, speed,
+              interface, form_factor, description, part_number, condition, qty,
+              unit_cost, sell_price, status, position, health, rpm
+            ) VALUES (
+              ${id}, ${l.category ?? (existing.category as string)},
+              ${l.brand ?? null}, ${l.capacity ?? null}, ${l.type ?? null},
+              ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
+              ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
+              ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${l.unitCost ?? 0}, ${l.sellPrice ?? null}, ${l.status ?? 'In Transit'},
+              ${pos++}, ${l.health ?? null}, ${l.rpm ?? null}
+            )
+          `;
+        }
+      }
+    });
+  } catch (e) {
+    const msg = (e as { message?: string })?.message ?? '';
+    if (/foreign key|violates|referenced/i.test(msg)) {
+      return c.json({ error: 'A line you tried to remove is referenced by a sell-order and cannot be deleted' }, 409);
     }
-  });
+    throw e;
+  }
 
   return c.json({ ok: true });
 });

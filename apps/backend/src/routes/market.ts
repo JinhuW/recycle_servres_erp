@@ -12,11 +12,12 @@ market.get('/', async (c) => {
   const search = c.req.query('q')?.toLowerCase().trim();
 
   const rows = await sql`
-    SELECT id, category, brand, capacity, type, classification, speed,
+    SELECT id, category, brand, capacity, type, classification, rank, speed,
            interface, form_factor, description, part_number, label, sub_label,
            target::float AS target, low_price::float AS low_price,
            high_price::float AS high_price, avg_sell::float AS avg_sell,
-           trend, samples, source, stock, demand, history, updated_at
+           trend, samples, source, stock, demand, history, updated_at,
+           health::float AS health, rpm
     FROM ref_prices
     WHERE (${category ?? null}::text IS NULL OR category = ${category ?? null})
       AND (
@@ -37,6 +38,7 @@ market.get('/', async (c) => {
       capacity: r.capacity,
       type: r.type,
       classification: r.classification,
+      rank: r.rank,
       speed: r.speed,
       interface: r.interface,
       formFactor: r.form_factor,
@@ -56,6 +58,8 @@ market.get('/', async (c) => {
       history: r.history,
       updated: r.updated_at,
       maxBuy: +(r.avg_sell * (1 - TARGET_MARGIN)).toFixed(2),
+      health: r.health,
+      rpm: r.rpm,
     })),
   });
 });
