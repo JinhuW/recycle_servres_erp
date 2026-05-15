@@ -11,9 +11,9 @@ compatibility_flags = ["nodejs_compat"]
 #
 # The Worker prefers env.HYPERDRIVE.connectionString when present.
 
-# Workers AI binding for label OCR. Set STUB_OCR=false in vars to use it.
-# [ai]
-# binding = "AI"
+# Workers AI binding for label OCR (used when no OPENROUTER_API_KEY is set).
+[ai]
+binding = "AI"
 
 # R2 bucket for sell-order status attachments (packing slips, invoices,
 # proof of payment). Create the bucket + a public dev/prod URL, then
@@ -23,13 +23,13 @@ compatibility_flags = ["nodejs_compat"]
 # bucket_name = "recycle-erp-attachments"
 
 [vars]
-STUB_OCR = "true"
 JWT_ISSUER = "recycle-erp"
 # R2_ATTACHMENTS_PUBLIC_URL = "https://<your-r2-public-url>"
 
 # Secrets (set via `wrangler secret put`):
 #   - JWT_SECRET
 #   - DATABASE_URL          (only if not using Hyperdrive)
+#   - OPENROUTER_API_KEY    (label OCR; default provider)
 #   - CF_ACCOUNT_ID
 #   - CF_IMAGES_TOKEN
 #

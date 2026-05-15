@@ -84,9 +84,10 @@ Backend (`backend/.dev.vars`, see `.dev.vars.example`):
 ```
 DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp
 JWT_SECRET=dev-secret-change-me
-CF_ACCOUNT_ID=                  # leave blank in dev to use stub Image storage
+OPENROUTER_API_KEY=                # label OCR — default provider when set
+# OPENROUTER_OCR_MODEL=google/gemini-2.0-flash-001   # or anthropic/claude-sonnet-4.5, openai/gpt-4o
+CF_ACCOUNT_ID=                     # leave blank in dev to use stub Image storage
 CF_IMAGES_TOKEN=
-STUB_OCR=true                   # set to false to call Workers AI
 ```
 
 Frontend (`frontend/.env.local`):
@@ -102,6 +103,7 @@ VITE_API_BASE=http://localhost:8787
   it instead of `DATABASE_URL`.
 - Provision Cloudflare Images and create an API token with `Images:Edit`
   permissions; set `CF_ACCOUNT_ID` and `CF_IMAGES_TOKEN` as Worker secrets.
-- Bind Workers AI (`[ai] binding = "AI"`) to enable real OCR; set
-  `STUB_OCR=false`.
+- OCR provider is chosen by credentials: `OPENROUTER_API_KEY` set → OpenRouter
+  (default); else a Workers AI `[ai]` binding → Llama 3.2 vision; else the
+  deterministic stub. No feature flag needed.
 - Frontend deploys as static assets — Cloudflare Pages, Vercel, or any CDN.
