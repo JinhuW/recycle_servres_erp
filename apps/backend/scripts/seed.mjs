@@ -42,6 +42,11 @@ const USERS = [
   { id: 'u4', name: 'Diego Ramos',   initials: 'DR', role: 'purchaser', email: 'diego@recycleservers.io',  team: 'SG Ops' },
   { id: 'u5', name: 'Yuki Tanaka',   initials: 'YT', role: 'purchaser', email: 'yuki@recycleservers.io',   team: 'SG Ops' },
   { id: 'u6', name: 'Lina Park',     initials: 'LP', role: 'purchaser', email: 'lina@recycleservers.io',   team: 'HK Ops' },
+  // Persisted "manually created" users — kept here so `db:reset` restores them
+  // instead of wiping them (see migrate.mjs --reset dropping the users table).
+  { id: 'u7', name: 'Sofia Reyes',   initials: 'SR', role: 'manager',   email: 'sofia@recycleservers.io',  team: 'SG Ops' },
+  { id: 'u8', name: 'Omar Haddad',   initials: 'OH', role: 'purchaser', email: 'omar@recycleservers.io',   team: 'HK Ops' },
+  { id: 'u9', name: 'Ingrid Berg',   initials: 'IB', role: 'purchaser', email: 'ingrid@recycleservers.io', team: 'SG Ops' },
 ];
 
 const WAREHOUSES = [

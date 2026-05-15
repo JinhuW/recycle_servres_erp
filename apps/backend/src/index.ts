@@ -7,6 +7,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 import { authMiddleware } from './auth';
+import { dbScope } from './db';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
@@ -38,6 +39,10 @@ app.use(
     credentials: true,
   }),
 );
+// Bind one pooled Postgres client per request and close it when the request
+// ends — prevents the connection-pool leak that exhausts Postgres and takes
+// the whole service down under load.
+app.use('*', (c, next) => dbScope(c, next));
 
 app.get('/', (c) =>
   c.json({
