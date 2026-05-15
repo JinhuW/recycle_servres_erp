@@ -132,14 +132,17 @@ orders.get('/:id', async (c) => {
   if (u.role !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const lines = await sql`
-    SELECT id, category, brand, capacity, type, classification, rank, speed,
-           interface, form_factor, description, part_number, condition, qty,
-           unit_cost::float AS unit_cost, sell_price::float AS sell_price,
-           status, scan_image_id, scan_confidence, position,
-           health::float AS health, rpm
-    FROM order_lines
-    WHERE order_id = ${id}
-    ORDER BY position ASC
+    SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.type, ol.classification,
+           ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description,
+           ol.part_number, ol.condition, ol.qty,
+           ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
+           ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
+           ol.health::float AS health, ol.rpm,
+           ls.delivery_url AS scan_image_url
+    FROM order_lines ol
+    LEFT JOIN label_scans ls ON ls.cf_image_id = ol.scan_image_id
+    WHERE ol.order_id = ${id}
+    ORDER BY ol.position ASC
   `;
 
   const lineStatuses = Array.from(new Set(lines.map(l => l.status as string)));
@@ -181,6 +184,7 @@ orders.get('/:id', async (c) => {
         status: l.status,
         scanImageId: l.scan_image_id,
         scanConfidence: l.scan_confidence,
+        scanImageUrl: l.scan_image_url ?? null,
         position: l.position,
         health: l.health,
         rpm: l.rpm,
