@@ -4,6 +4,7 @@ import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { fmtUSD } from '../../lib/format';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
+import { AI_CONFIDENCE_FLOOR } from '../../lib/status';
 import {
   RAM_BRANDS, RAM_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -156,6 +157,7 @@ export type Line = {
   totalCost?: string;            // user-typed override (string-typed to allow blank)
   scanImageId?: string | null;
   scanConfidence?: number | null;
+  scanImageUrl?: string | null;
 };
 
 type OrderMeta = {
@@ -198,30 +200,39 @@ export function blankLine(cat: Category): Line {
   return {
     category: cat, qty: 1, unitCost: '',
     condition: 'Pulled — Tested',
+    scanImageUrl: null,
   };
 }
 
 // Build a Line from an AI scan response — mirrors the mobile aiDefaults in
 // SubmitForm.tsx so both flows share the same field-mapping.
+// Below AI_CONFIDENCE_FLOOR the extracted fields are discarded so the user
+// fills in the details manually; the scan refs and image URL are always kept.
 function lineFromScan(category: Category, scan: ScanResponse): Line {
-  const f = scan.extracted ?? {};
-  return {
-    category,
-    brand: f.brand,
-    capacity: f.capacity,
-    type: f.type,
-    classification: f.classification,
-    rank: f.rank,
-    speed: f.speed,
-    interface: f.interface,
-    formFactor: f.formFactor,
-    description: f.description,
-    partNumber: f.partNumber ?? '',
-    qty: 1,
-    unitCost: '',
-    condition: 'Pulled — Tested',
+  const base: Line = {
+    ...blankLine(category),
     scanImageId: scan.imageId ?? null,
     scanConfidence: scan.confidence ?? null,
+    scanImageUrl: scan.deliveryUrl ?? null,
+  };
+
+  if ((scan.confidence ?? 0) < AI_CONFIDENCE_FLOOR) {
+    return base;
+  }
+
+  const f = scan.extracted ?? {};
+  return {
+    ...base,
+    ...(f.brand        ? { brand: f.brand }               : {}),
+    ...(f.capacity     ? { capacity: f.capacity }         : {}),
+    ...(f.type         ? { type: f.type }                 : {}),
+    ...(f.classification ? { classification: f.classification } : {}),
+    ...(f.rank         ? { rank: f.rank }                 : {}),
+    ...(f.speed        ? { speed: f.speed }               : {}),
+    ...(f.interface    ? { interface: f.interface }       : {}),
+    ...(f.formFactor   ? { formFactor: f.formFactor }     : {}),
+    ...(f.description  ? { description: f.description }   : {}),
+    ...(f.partNumber   ? { partNumber: f.partNumber }     : {}),
   };
 }
 
@@ -276,6 +287,9 @@ function OrderForm({
       form.append('category', category);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
       const newLine = lineFromScan(category, scan);
+      if ((scan.confidence ?? 0) < AI_CONFIDENCE_FLOOR) {
+        setAiError("Couldn't read the label confidently — please enter the details manually.");
+      }
       setLines(ls => {
         const next = [...ls, newLine];
         setActiveIdx(next.length - 1);
@@ -720,6 +734,13 @@ export function LineDrawer({
           </div>
 
           <div style={{ padding: 16, display: 'grid', gap: 14 }}>
+            {line.scanImageUrl && (
+              <img
+                src={line.scanImageUrl}
+                alt="Captured label"
+                style={{ maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)', marginBottom: 12 }}
+              />
+            )}
             {cat === 'RAM' && <RamFields line={line} set={set} />}
             {cat === 'SSD' && <SsdFields line={line} set={set} />}
             {cat === 'HDD' && <HddFields line={line} set={set} />}

@@ -23,3 +23,6 @@ export const isCompleted = (s: string) => s === 'Done';
 // A line can be added to a sell order once it's been reviewed (priced) or
 // completed. Draft / In Transit items aren't ready to sell yet.
 export const isSellable = (s: string) => s === 'Reviewing' || s === 'Done';
+
+// Keep in sync with backend ai.ts CONFIDENCE_FLOOR.
+export const AI_CONFIDENCE_FLOOR = 0.6;
