@@ -1146,9 +1146,9 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-// Customer status (Active/Lead/On hold/Archived), Outstanding A/R, and last
-// order date aren't in the backend yet — derive Active vs Archived from the
-// `active` flag, and mock the rest deterministically per id.
+// Customer status is real now (the `active` flag → Active/Archived). Outstanding
+// A/R and last order date aren't in the backend yet — those stay mocked
+// deterministically per id.
 type CustomerStatus = 'Active' | 'Archived';
 const STATUS_CHIP: Record<CustomerStatus, 'pos' | 'muted'> = {
   Active: 'pos', Archived: 'muted',
