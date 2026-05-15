@@ -4,6 +4,8 @@
 
 import { catalog } from './lookups';
 
+export { categories, categoryFilterOptions, type CategoryInfo } from './lookups';
+
 export const RAM_BRANDS    = catalog.RAM_BRAND;
 export const RAM_TYPES     = catalog.RAM_TYPE;
 export const RAM_CLASS     = catalog.RAM_CLASS;

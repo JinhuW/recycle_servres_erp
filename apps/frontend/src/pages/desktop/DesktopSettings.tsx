@@ -4,7 +4,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
-import { fmtUSD0 } from '../../lib/format';
+import { fmtUSD0, relTime } from '../../lib/format';
 import type { Lang, Warehouse } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 
@@ -15,6 +15,7 @@ type Member = {
   team: string | null; phone: string | null; title: string | null;
   active: boolean; commission_rate: number;
   order_count: number; lifetime_profit: number;
+  created_at: string; last_seen_at: string | null;
 };
 
 type Customer = {
@@ -24,6 +25,7 @@ type Customer = {
   region: string | null;
   tags: string[]; notes: string | null; active: boolean;
   lifetime_revenue: number; order_count: number;
+  outstanding: number; last_order: string | null;
 };
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -471,18 +473,15 @@ function GeneralPanel() {
   );
 }
 
-// Mock pending invites — until the backend grows an `invites` table, we keep
-// these inline so the UI tells a complete story. Resend + revoke are toasts.
-type PendingInvite = { id: string; email: string; role: 'manager' | 'purchaser'; invitedBy: string; invitedAt: string };
-const PENDING_INVITES: PendingInvite[] = [
-  { id: 'iv-1', email: 'noah.kim@recycleservers.io', role: 'purchaser', invitedBy: 'Alex Chen', invitedAt: '2 days ago' },
-];
+// "Pending invites" are real members who were added but have never signed in
+// (last_seen_at is null). No separate invites table / acceptance flow exists —
+// inviting creates the member immediately — so this is the accurate
+// interpretation. Revoke removes the member; Resend has no email backend yet.
 
-// Last-seen text mocked client-side (no backend column yet).
-function pickLastSeen(id: string): string {
-  const seed = [...id].reduce((s, c) => s + c.charCodeAt(0), 0);
-  const opts = ['Just now', '12 min ago', '1 hour ago', '2 hours ago', 'Yesterday', '3 days ago', '1 day ago'];
-  return opts[seed % opts.length];
+// Real "last active" text from users.last_seen_at (stamped on login). A member
+// who has never signed in shows "Never" — see pendingInvites().
+function lastSeenLabel(m: Member): string {
+  return m.last_seen_at ? relTime(m.last_seen_at) : 'Never';
 }
 
 // ─── Members ──────────────────────────────────────────────────────────────────
@@ -493,7 +492,10 @@ function MembersPanel({ showToast }: { showToast: ToastFn }) {
   const [editing, setEditing] = useState<Member | null>(null);
   const [inviting, setInviting] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null);
-  const [pending, setPending] = useState<PendingInvite[]>(PENDING_INVITES);
+  const pending = useMemo(
+    () => members.filter(m => m.active && !m.last_seen_at),
+    [members],
+  );
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'manager' | 'purchaser'>('all');
   const [showArchived, setShowArchived] = useState(false);
@@ -605,7 +607,7 @@ function MembersPanel({ showToast }: { showToast: ToastFn }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 500, fontSize: 13.5 }}>{inv.email}</div>
                   <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                    {inv.role === 'manager' ? 'Manager' : 'Purchaser'} · invited by {inv.invitedBy}, {inv.invitedAt}
+                    {inv.role === 'manager' ? 'Manager' : 'Purchaser'} · added {relTime(inv.created_at)} · not yet signed in
                   </div>
                 </div>
                 <button
@@ -617,10 +619,7 @@ function MembersPanel({ showToast }: { showToast: ToastFn }) {
                 <button
                   className="btn sm ghost"
                   style={{ color: 'var(--neg)' }}
-                  onClick={() => {
-                    setPending(p => p.filter(x => x.id !== inv.id));
-                    showToast?.(`Revoked invite for ${inv.email}`);
-                  }}
+                  onClick={() => removeMember(inv)}
                 >
                   Revoke
                 </button>
@@ -666,7 +665,7 @@ function MembersPanel({ showToast }: { showToast: ToastFn }) {
                       {m.role === 'manager' ? 'Manager' : 'Purchaser'}
                     </span>
                   </td>
-                  <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{pickLastSeen(m.id)}</td>
+                  <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{lastSeenLabel(m)}</td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'inline-flex', gap: 4 }}>
                       <button
@@ -1147,21 +1146,18 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 // Customer status is real now (the `active` flag → Active/Archived). Outstanding
-// A/R and last order date aren't in the backend yet — those stay mocked
-// deterministically per id.
 type CustomerStatus = 'Active' | 'Archived';
 const STATUS_CHIP: Record<CustomerStatus, 'pos' | 'muted'> = {
   Active: 'pos', Archived: 'muted',
 };
+// All real now: status from the `active` flag, outstanding A/R and last-order
+// date from the customers endpoint (sell-order rollups).
 function deriveCustomerSeed(c: Customer) {
-  // Status is real (the `active` flag); outstanding + last-order remain
-  // deterministic UI mocks derived from id until the backend tracks them.
-  const n = [...c.id].reduce((s, ch) => s + ch.charCodeAt(0), 0);
-  const r = (k: number) => ((n * (k + 1)) % 1000) / 1000;
   const status: CustomerStatus = c.active ? 'Active' : 'Archived';
-  const outstanding = r(4) > 0.55 ? Math.round(r(5) * 18000) : 0;
-  const lastDays = Math.round(1 + r(3) * 60);
-  return { status, outstanding, lastDays };
+  const lastDays = c.last_order
+    ? Math.max(0, Math.round((Date.now() - new Date(c.last_order).getTime()) / 86_400_000))
+    : null;
+  return { status, lastDays };
 }
 
 function CustomersPanel({ showToast }: { showToast: ToastFn }) {
@@ -1325,7 +1321,7 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                     {c.order_count > 0
-                      ? `${c.lastDays}d ago · ${c.order_count} orders`
+                      ? `${c.lastDays != null ? `${c.lastDays}d ago · ` : ''}${c.order_count} orders`
                       : <span style={{ color: 'var(--fg-subtle)' }}>No orders</span>}
                   </td>
                   <td style={{ textAlign: 'right' }}>
@@ -1978,21 +1974,45 @@ function PasswordMeter({ password }: { password: string }) {
 type CommissionKey = 'company' | 'self';
 type CommissionRule = { key: CommissionKey; paymentType: string; rate: number };
 
+// Defaults only used until /api/commission/settings responds; the two payment
+// types themselves are fixed by design — only the rates are configurable.
+const COMMISSION_RULE_DEFAULTS: CommissionRule[] = [
+  { key: 'company', paymentType: 'Company pay', rate: 50 },
+  { key: 'self',    paymentType: 'Self pay',    rate: 65 },
+];
+
 function CommissionPanel({ showToast }: { showToast: ToastFn }) {
-  const [rules, setRules] = useState<CommissionRule[]>([
-    { key: 'company', paymentType: 'Company pay', rate: 50 },
-    { key: 'self',    paymentType: 'Self pay',    rate: 65 },
-  ]);
+  const [rules, setRules] = useState<CommissionRule[]>(COMMISSION_RULE_DEFAULTS);
+
+  const reload = () =>
+    api.get<{ settings: Record<string, unknown> }>('/api/commission/settings')
+      .then(({ settings: s }) => setRules(prev => prev.map(r => {
+        const v = s[`rate_${r.key}`];
+        return typeof v === 'number' ? { ...r, rate: v } : r;
+      })))
+      .catch(() => { /* keep current values */ });
+  useEffect(() => { reload(); }, []);
 
   const upd = (key: CommissionKey, rate: number) =>
     setRules(prev => prev.map(r => r.key === key ? { ...r, rate } : r));
+
+  const save = async () => {
+    const body = Object.fromEntries(rules.map(r => [`rate_${r.key}`, r.rate]));
+    try {
+      await api.put('/api/commission/settings', body);
+      showToast?.('Commission rules saved', 'success');
+    } catch {
+      showToast?.('Could not save commission rules', 'error');
+      reload();
+    }
+  };
 
   return (
     <>
       <SettingsHeader
         title="Commission rules"
         sub="How profit-share is calculated when a sell order is paid. Company pay vs Self pay carry their own commission rates."
-        actions={<button className="btn accent" onClick={() => showToast?.('Commission rules saved', 'success')}><Icon name="check" size={13} /> Save</button>}
+        actions={<button className="btn accent" onClick={save}><Icon name="check" size={13} /> Save</button>}
       />
 
       <div className="card">

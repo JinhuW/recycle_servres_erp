@@ -41,6 +41,24 @@ describe('/api/categories', () => {
     expect(r.status).toBe(201);
     expect(r.body.id).toBe('NIC');
   });
+
+  it('POST without defaultMargin uses the workspace_settings fallback', async () => {
+    const { token } = await loginAs(ALEX);
+    // Change the workspace-level fallback away from the seeded 30.
+    const patched = await api('PATCH', '/api/workspace', {
+      token, body: { category_default_margin: 42 },
+    });
+    expect(patched.status).toBe(200);
+
+    const created = await api('POST', '/api/categories', {
+      token, body: { id: 'NIC', label: 'NIC' },
+    });
+    expect(created.status).toBe(201);
+
+    const got = await api<{ items: { id: string; default_margin: number }[] }>(
+      'GET', '/api/categories', { token });
+    expect(got.body.items.find(i => i.id === 'NIC')?.default_margin).toBe(42);
+  });
 });
 
 describe('POST /api/orders — category must be enabled', () => {

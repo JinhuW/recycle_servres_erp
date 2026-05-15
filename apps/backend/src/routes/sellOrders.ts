@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
+import { getUploadLimits } from '../lib/settings';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -342,9 +343,10 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
   const file = form.get('file') as File | null;
   if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
-  // 10 MB matches the design's hint ("up to 10 MB each").
-  if (file.size > 10 * 1024 * 1024) {
-    return c.json({ error: 'file too large (max 10 MB)' }, 413);
+  // Size cap is workspace-configurable (workspace_settings.upload_max_bytes).
+  const { maxBytes } = await getUploadLimits(sql);
+  if (file.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
   const uploaded = await uploadAttachment(c.env, file, `sell-orders/${id}/${status}`)

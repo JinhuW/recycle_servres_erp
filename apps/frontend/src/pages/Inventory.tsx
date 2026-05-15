@@ -5,6 +5,8 @@ import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { fmtUSD0 } from '../lib/format';
+import { categoryFilterOptions } from '../lib/lookups';
+import { wsNumber } from '../lib/workspace';
 import { isCompleted, statusTone } from '../lib/status';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Category } from '../lib/types';
@@ -27,8 +29,6 @@ type InventoryItem = {
   rpm: number | null;
 };
 
-const LOW_HEALTH_PCT = 50;
-
 type Props = {
   onNewEntry: () => void;
 };
@@ -36,7 +36,7 @@ type Props = {
 export function Inventory({ onNewEntry }: Props) {
   const { t } = useT();
   const { user } = useAuth();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
+  const [filter, setFilter] = useState<string>('all');
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -90,7 +90,7 @@ export function Inventory({ onNewEntry }: Props) {
         </div>
 
         <div className="ph-chip-scroller">
-          {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
+          {categoryFilterOptions().map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
               {f === 'all' ? t('filterAllCats') : f}
             </button>
@@ -103,7 +103,7 @@ export function Inventory({ onNewEntry }: Props) {
                       : r.category === 'SSD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? '');
-          const lowHealth = r.health != null && r.health < LOW_HEALTH_PCT;
+          const lowHealth = r.health != null && r.health < wsNumber('low_health_pct', 50);
           return (
             <div key={r.id} className="ph-inv-card">
               <div className="ph-inv-thumb">

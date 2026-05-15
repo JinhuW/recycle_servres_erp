@@ -75,3 +75,16 @@ describe('GET /api/commission/preview', () => {
     expect(r.body.payable).toBe(300); // 5000 * 6%
   });
 });
+
+describe('GET /api/commission/settings — payment-type rates', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('seeds DB-backed Company/Self pay rates (50 / 65)', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ settings: Record<string, unknown> }>(
+      'GET', '/api/commission/settings', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.settings.rate_company).toBe(50);
+    expect(r.body.settings.rate_self).toBe(65);
+  });
+});

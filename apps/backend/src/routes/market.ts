@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { getWorkspaceSetting } from '../lib/settings';
 import type { Env, User } from '../types';
 
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -29,8 +30,9 @@ market.get('/', async (c) => {
     LIMIT 100
   `;
 
-  const TARGET_MARGIN = 0.30;
+  const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
   return c.json({
+    targetMargin: TARGET_MARGIN,
     items: rows.map(r => ({
       id: r.id,
       category: r.category,

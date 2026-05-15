@@ -4,13 +4,14 @@ import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { fmtUSD, fmtUSD0, relTime } from '../lib/format';
+import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { RefPrice } from '../lib/types';
 import { PhoneListSkeleton } from '../components/Skeleton';
 
 export function Market() {
   const { t } = useT();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
+  const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<RefPrice[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -46,7 +47,7 @@ export function Market() {
         </div>
 
         <div className="ph-chip-scroller">
-          {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
+          {categoryFilterOptions().map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
               {f === 'all' ? t('filterAll') : f}
             </button>

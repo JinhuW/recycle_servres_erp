@@ -7,6 +7,7 @@ import { usePreference } from '../../lib/preferences';
 import { api } from '../../lib/api';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
+import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 
@@ -20,10 +21,11 @@ const TONE_VAR: Record<string, string> = {
   pos:    'var(--pos)',
 };
 
-// Commission isn't stored on the order — derive it from profit using a flat
-// 5% rate, matching design/dashboard.jsx (`o.profit * (o.commissionRate || 0.05)`).
-const COMMISSION_RATE = 0.05;
-const commissionFor = (o: OrderSummary) => +(o.profit * COMMISSION_RATE).toFixed(2);
+// Commission isn't stored on the order — derive it from profit using the
+// order owner's DB-backed rate (users.commission_rate, surfaced by
+// GET /api/orders as `commissionRate`). Falls back to 0.05 only if a row
+// somehow lacks the field.
+const commissionFor = (o: OrderSummary) => +(o.profit * (o.commissionRate || 0.05)).toFixed(2);
 
 // Toggleable columns (matches design's TOGGLEABLE_COLS). Order chevron,
 // Submitter, and Actions are always shown — the rest can be hidden.
@@ -105,7 +107,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
 
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
+  const [filter, setFilter] = useState<string>('all');
   const [stageFilter, setStageFilter] = useState<'all' | string>('all');
   const [search, setSearch] = useState('');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
@@ -319,7 +321,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div className="card-title">{t('allOrders')}</div>
             <div className="seg">
-              {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
+              {categoryFilterOptions().map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
                   {f === 'all' ? t('all') : f}
                 </button>

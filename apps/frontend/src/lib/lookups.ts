@@ -44,10 +44,31 @@ export type SellOrderStatusInfo = {
 };
 export const sellOrderStatuses: SellOrderStatusInfo[] = [];
 
+// ── Order/inventory categories (RAM/SSD/HDD/… ) ─────────────────────────────
+// Backed by the `categories` table; replaces the list the UI used to hardcode
+// as ['RAM','SSD','HDD','Other'] in ~7 places. Disabled categories are kept so
+// settings screens can still show/toggle them; `categoryFilterOptions()` is
+// the enabled-only list (plus 'all') used by list/filter chips.
+export type CategoryInfo = {
+  id: string;
+  label: string;
+  icon: string;
+  enabled: boolean;
+  defaultMargin: number;
+  position: number;
+};
+export const categories: CategoryInfo[] = [];
+
+/** Filter-chip options: 'all' followed by the enabled category ids in order. */
+export function categoryFilterOptions(): string[] {
+  return ['all', ...categories.filter(c => c.enabled).map(c => c.id)];
+}
+
 type LookupsResponse = {
   catalog: Record<string, string[]>;
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
+  categories: CategoryInfo[];
 };
 
 let loaded = false;
@@ -66,6 +87,7 @@ export function loadLookups(): Promise<void> {
       }
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
+      categories.splice(0, categories.length, ...data.categories);
       loaded = true;
     } finally {
       inflight = null;
@@ -83,4 +105,5 @@ export function resetLookups(): void {
   for (const arr of Object.values(catalog)) arr.length = 0;
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
+  categories.length = 0;
 }

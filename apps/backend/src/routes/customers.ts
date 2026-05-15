@@ -13,6 +13,8 @@ customers.get('/', async (c) => {
            c.contact_phone, c.address, c.country, c.region,
            c.tags, c.notes, c.active, c.created_at,
            COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS lifetime_revenue,
+           COALESCE(SUM(sol.qty * sol.unit_price)
+                    FILTER (WHERE so.status <> 'Done'), 0)::float AS outstanding,
            COUNT(DISTINCT so.id)::int AS order_count,
            MAX(so.created_at)         AS last_order
     FROM customers c

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { notify } from '../lib/notify';
+import { getWorkspaceSetting } from '../lib/settings';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -263,7 +264,8 @@ inventory.patch('/:id', async (c) => {
     const sp = body.sellPrice;
     if (sp < cost) warnings.push('sub_cost_sell');
     const margin = sp > 0 ? ((sp - cost) / sp) : 0;
-    if (margin < 0.15) {
+    const floor = await getWorkspaceSetting(sql, 'low_margin_floor', 0.15);
+    if (margin < floor) {
       warnings.push('low_margin');
       await sql.begin(async (tx) => {
         await notify(tx, {

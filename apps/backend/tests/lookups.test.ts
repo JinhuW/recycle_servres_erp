@@ -14,4 +14,15 @@ describe('GET /api/lookups', () => {
     expect(r.body.sellOrderStatuses).toBeInstanceOf(Array);
     expect(r.body).not.toHaveProperty('paymentTerms');
   });
+
+  it('returns DB-backed categories with id/label/enabled', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/lookups', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.categories).toBeInstanceOf(Array);
+    const ram = r.body.categories.find((x: { id: string }) => x.id === 'RAM');
+    expect(ram).toMatchObject({ id: 'RAM', label: 'RAM', enabled: true });
+    // disabled categories (e.g. CPU) are still returned so the UI can show them
+    expect(r.body.categories.some((x: { id: string }) => x.id === 'CPU')).toBe(true);
+  });
 });

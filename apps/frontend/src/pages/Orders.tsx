@@ -5,6 +5,7 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
+import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
@@ -17,7 +18,7 @@ type Props = {
 
 export function Orders({ onEdit, onToast }: Props) {
   const { t } = useT();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
+  const [filter, setFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -106,7 +107,7 @@ export function Orders({ onEdit, onToast }: Props) {
           </div>
         )}
         <div className="ph-chip-scroller">
-          {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
+          {categoryFilterOptions().map(f => (
             <button key={f} className={'ph-chip-btn ' + (filter === f ? 'active' : '')} onClick={() => setFilter(f)}>
               {f === 'all' ? t('filterAll') : f}
             </button>

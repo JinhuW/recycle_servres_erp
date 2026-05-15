@@ -66,6 +66,7 @@ orders.get('/', async (c) => {
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
       o.total_cost::float AS total_cost,
       u.name AS user_name, u.initials AS user_initials,
+      u.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
       COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float         AS revenue,
@@ -77,7 +78,7 @@ orders.get('/', async (c) => {
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
+    GROUP BY o.id, u.name, u.initials, u.commission_rate, w.id, w.short, w.region
     ORDER BY o.${sql(sort.col)} ${sql.unsafe(sort.dir.toUpperCase())}, o.id ${sql.unsafe(sort.dir.toUpperCase())}
     LIMIT ${limit + 1}
   `;
@@ -93,6 +94,7 @@ orders.get('/', async (c) => {
       userId: r.user_id,
       userName: r.user_name,
       userInitials: r.user_initials,
+      commissionRate: r.commission_rate,
       category: r.category,
       payment: r.payment,
       notes: r.notes,

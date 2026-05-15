@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, auth as tokenStore, ApiError } from './api';
 import { loadLookups, resetLookups } from './lookups';
+import { loadWorkspaceSettings, resetWorkspaceSettings } from './workspace';
 import type { User, Lang } from './types';
 
 type AuthState = {
@@ -35,6 +36,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line no-console
         console.warn('Lookups failed to load; continuing.', e);
       }),
+      loadWorkspaceSettings().catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('Workspace settings failed to load; continuing.', e);
+      }),
     ])
       .catch((e) => {
         if (e instanceof ApiError && e.status === 401) tokenStore.token = null;
@@ -52,6 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // eslint-disable-next-line no-console
       console.warn('Lookups failed to load after login; continuing.', e);
     }
+    try { await loadWorkspaceSettings(); }
+    catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('Workspace settings failed to load after login; continuing.', e);
+    }
     setUser(r.user);
   };
 
@@ -59,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStore.token = null;
     setUser(null);
     resetLookups();
+    resetWorkspaceSettings();
   };
 
   const setLanguage = async (lang: Lang) => {

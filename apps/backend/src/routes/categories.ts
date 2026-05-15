@@ -22,12 +22,21 @@ categories.post('/', async (c) => {
     | null;
   if (!body?.id || !body?.label) return c.json({ error: 'id and label required' }, 400);
   const sql = getDb(c.env);
+  // Fallback margin is workspace-configurable (workspace_settings); fall back
+  // to 30 only if the key is missing.
+  let fallbackMargin = 30;
+  if (body.defaultMargin == null) {
+    const row = (await sql<{ value: unknown }[]>`
+      SELECT value FROM workspace_settings WHERE key = 'category_default_margin'
+    `)[0];
+    if (typeof row?.value === 'number') fallbackMargin = row.value;
+  }
   try {
     await sql`
       INSERT INTO categories (id, label, icon, enabled, ai_capture, requires_pn, default_margin, position)
       VALUES (${body.id}, ${body.label}, ${body.icon ?? 'box'},
               ${body.enabled ?? true}, ${body.aiCapture ?? false}, ${body.requiresPn ?? false},
-              ${body.defaultMargin ?? 30}, ${body.position ?? 99})
+              ${body.defaultMargin ?? fallbackMargin}, ${body.position ?? 99})
     `;
   } catch (e) {
     if (/duplicate/i.test((e as { message?: string }).message ?? '')) {

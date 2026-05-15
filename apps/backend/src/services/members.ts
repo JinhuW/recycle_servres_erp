@@ -19,6 +19,7 @@ export interface MemberSummary {
   active: boolean;
   commission_rate: number;
   created_at: Date;
+  last_seen_at: Date | null;
   order_count: number;
   lifetime_profit: number;
 }
@@ -66,6 +67,7 @@ export async function listMembers(
   const rows = await sql`
     SELECT u.id, u.email, u.name, u.initials, u.role, u.team, u.phone, u.title,
            u.active, u.commission_rate::float AS commission_rate, u.created_at,
+           u.last_seen_at,
            COUNT(DISTINCT o.id)::int AS order_count,
            COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS lifetime_profit
     FROM users u

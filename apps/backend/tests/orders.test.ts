@@ -119,3 +119,21 @@ describe('notifications on order advance', () => {
     expect(after.body.items.some(i => i.kind === 'order_submitted')).toBe(true);
   });
 });
+
+describe('GET /api/orders — commission rate', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('returns each order owner\'s DB commission rate (default 0.075)', async () => {
+    const { token } = await loginAs(MARCUS);
+    await api('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 2, unitCost: 10, condition: 'New' }] },
+    });
+    const r = await api<{ orders: { commissionRate: number }[] }>(
+      'GET', '/api/orders', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.orders.length).toBeGreaterThan(0);
+    for (const o of r.body.orders) expect(o.commissionRate).toBe(0.075);
+  });
+});

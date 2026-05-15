@@ -49,4 +49,17 @@ describe('customers route — structured contact/address', () => {
     const row = after.body.items.find(c => c.id === target)!;
     expect(row.contact_phone).toBe('+1-555-9999');
   });
+
+  it('returns real outstanding A/R (0 for a customer with no sell orders)', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/customers', {
+      token, body: { name: 'No-Orders Inc' },
+    });
+    const list = await api<{ items: Array<{ id: string; outstanding: number; last_order: string | null }> }>(
+      'GET', '/api/customers', { token });
+    const row = list.body.items.find(c => c.id === created.body.id)!;
+    expect(typeof row.outstanding).toBe('number');
+    expect(row.outstanding).toBe(0);
+    expect(row.last_order).toBeNull();
+  });
 });

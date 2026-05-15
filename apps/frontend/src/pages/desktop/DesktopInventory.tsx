@@ -7,6 +7,8 @@ import { usePreference } from '../../lib/preferences';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isSellable } from '../../lib/status';
+import { categoryFilterOptions } from '../../lib/lookups';
+import { wsNumber } from '../../lib/workspace';
 import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
@@ -42,8 +44,6 @@ type InventoryRow = {
   order_id: string;
 };
 
-const LOW_HEALTH_PCT = 50;
-
 type Props = {
   onEditItem: (id: string) => void;
   showToast?: (msg: string, kind?: 'success' | 'error') => void;
@@ -61,7 +61,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [items, setItems] = useState<InventoryRow[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [whs, setWhs] = useState<Warehouse[]>([]);
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
+  const [filter, setFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -363,7 +363,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div className="seg">
-              {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
+              {categoryFilterOptions().map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
                   {f === 'all' ? 'All categories' : f}
                 </button>
@@ -539,7 +539,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     <td>
                       <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                         {itemLabel(r)}
-                        {r.health != null && r.health < LOW_HEALTH_PCT && (
+                        {r.health != null && r.health < wsNumber('low_health_pct', 50) && (
                           <span className="chip warn" style={{ fontSize: 10 }}>{r.health}%</span>
                         )}
                       </div>

@@ -1,11 +1,9 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { getUploadLimits } from '../lib/settings';
 import type { Env, User } from '../types';
 
 const attachments = new Hono<{ Bindings: Env; Variables: { user: User } }>();
-
-const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED_MIME = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']);
 
 attachments.post('/', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -16,13 +14,14 @@ attachments.post('/', async (c) => {
     return c.json({ error: 'file required' }, 400);
   }
   const f = fileRaw as File;
-  if (f.size > MAX_BYTES) return c.json({ error: 'file exceeds 10MB' }, 413);
-  if (f.type && !ALLOWED_MIME.has(f.type)) return c.json({ error: `mime ${f.type} not allowed` }, 415);
+  const sql = getDb(c.env);
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  if (f.size > maxBytes) return c.json({ error: `file exceeds ${maxBytes} bytes` }, 413);
+  if (f.type && !allowedMime.has(f.type)) return c.json({ error: `mime ${f.type} not allowed` }, 415);
 
   // v1: store metadata only — actual R2 upload deferred.
   const storageId = 'local/' + crypto.randomUUID();
   const url = `internal://${storageId}`;
-  const sql = getDb(c.env);
   const r = await sql<{ id: string }[]>`
     INSERT INTO attachments (storage_id, url, name, size, mime_type, uploaded_by)
     VALUES (${storageId}, ${url}, ${f.name ?? 'upload'}, ${f.size}, ${f.type || 'application/octet-stream'}, ${c.var.user.id})

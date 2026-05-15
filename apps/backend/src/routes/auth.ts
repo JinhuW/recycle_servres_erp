@@ -34,6 +34,8 @@ auth.post('/login', async (c) => {
   const ok = await verifyPassword(body.password, u.password_hash);
   if (!ok) return c.json({ error: 'Invalid credentials' }, 401);
 
+  await sql`UPDATE users SET last_seen_at = NOW() WHERE id = ${u.id}`;
+
   const token = await signToken(c.env, { id: u.id, email: u.email, role: u.role });
   return c.json({
     token,

@@ -4,6 +4,7 @@ import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
 import { fmtUSD0, relTime } from '../../lib/format';
+import { categoryFilterOptions } from '../../lib/lookups';
 import type { Category, DashboardData } from '../../lib/types';
 import { DashboardSkeleton } from '../../components/Skeleton';
 
@@ -20,7 +21,7 @@ export function DesktopDashboard() {
   const { t } = useT();
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
-  const [lbCategory, setLbCategory] = useState<'all' | Category>('all');
+  const [lbCategory, setLbCategory] = useState<string>('all');
   // The dashboard endpoint doesn't yet accept a range parameter — the seg
   // selector is wired so the UI matches the design, with a placeholder query
   // string ready for when the backend grows the filter.
@@ -140,7 +141,7 @@ export function DesktopDashboard() {
             </div>
           </div>
           <div className="seg" role="tablist" aria-label="Filter by item type">
-            {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(c => (
+            {categoryFilterOptions().map(c => (
               <button
                 key={c}
                 className={lbCategory === c ? 'active' : ''}

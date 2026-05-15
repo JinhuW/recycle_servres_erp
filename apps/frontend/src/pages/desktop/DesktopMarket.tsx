@@ -3,7 +3,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtUSD0, relTime } from '../../lib/format';
-import { priceSources } from '../../lib/lookups';
+import { priceSources, categoryFilterOptions } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 
@@ -59,17 +59,19 @@ function DemandPill({ level }: { level: 'high' | 'medium' | 'low' }) {
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
-const TARGET_MARGIN = 0.30;
+// Fallback only — the live value comes from /api/market (workspace_settings).
+const TARGET_MARGIN_FALLBACK = 0.30;
 
 type Sort = 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples';
 
 export function DesktopMarket() {
   const { t } = useT();
-  const [filter, setFilter] = useState<'all' | 'RAM' | 'SSD' | 'HDD' | 'Other'>('all');
+  const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('recent');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [items, setItems] = useState<RefPrice[]>([]);
+  const [targetMargin, setTargetMargin] = useState(TARGET_MARGIN_FALLBACK);
   const [loadedOnce, setLoadedOnce] = useState(false);
 
   useEffect(() => {
@@ -77,8 +79,11 @@ export function DesktopMarket() {
       const params = new URLSearchParams();
       if (filter !== 'all') params.set('category', filter);
       if (search.trim()) params.set('q', search.trim());
-      api.get<{ items: RefPrice[] }>(`/api/market?${params}`)
-        .then(r => setItems(r.items))
+      api.get<{ items: RefPrice[]; targetMargin?: number }>(`/api/market?${params}`)
+        .then(r => {
+          setItems(r.items);
+          if (typeof r.targetMargin === 'number') setTargetMargin(r.targetMargin);
+        })
         .catch(console.error)
         .finally(() => setLoadedOnce(true));
     }, 200);
@@ -89,9 +94,9 @@ export function DesktopMarket() {
   const allRows = useMemo(
     () => items.map(p => ({
       ...p,
-      maxBuy: p.maxBuy || +(p.avgSell * (1 - TARGET_MARGIN)).toFixed(2),
+      maxBuy: p.maxBuy || +(p.avgSell * (1 - targetMargin)).toFixed(2),
     })),
-    [items],
+    [items, targetMargin],
   );
 
   const rows = useMemo(() => {
@@ -142,7 +147,7 @@ export function DesktopMarket() {
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div className="seg">
-              {(['all', 'RAM', 'SSD', 'HDD', 'Other'] as const).map(f => (
+              {categoryFilterOptions().map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
                   {f === 'all' ? t('all') : f}
                 </button>
@@ -273,7 +278,7 @@ export function DesktopMarket() {
                     {isOpen && (
                       <tr style={{ background: 'var(--bg-soft)' }}>
                         <td colSpan={8} style={{ padding: 18 }}>
-                          <DetailExpand row={r} sellHistory={sellHistory} />
+                          <DetailExpand row={r} sellHistory={sellHistory} targetMargin={targetMargin} />
                         </td>
                       </tr>
                     )}
@@ -300,7 +305,7 @@ export function DesktopMarket() {
           <div>Showing {Math.min(40, rows.length)} of {rows.length} tracked SKUs</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="info" size={11} />
-            Max buy = avg sell × (1 − {(TARGET_MARGIN * 100).toFixed(0)}% target margin)
+            Max buy = avg sell × (1 − {(targetMargin * 100).toFixed(0)}% target margin)
           </div>
         </div>
       </div>
@@ -310,8 +315,8 @@ export function DesktopMarket() {
 
 // ─── Expanded row ────────────────────────────────────────────────────────────
 function DetailExpand({
-  row, sellHistory,
-}: { row: RefPrice & { maxBuy: number }; sellHistory: number[] }) {
+  row, sellHistory, targetMargin,
+}: { row: RefPrice & { maxBuy: number }; sellHistory: number[]; targetMargin: number }) {
   const buyHistory = row.history;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 18 }}>
@@ -343,7 +348,7 @@ function DetailExpand({
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <GuideRow label="Avg sell price"        value={fmtUSD(row.avgSell)} tone="pos" emphasis />
-          <GuideRow label="Recommended max buy"   value={fmtUSD(row.maxBuy)}  tone="accent" emphasis sub="30% margin floor" />
+          <GuideRow label="Recommended max buy"   value={fmtUSD(row.maxBuy)}  tone="accent" emphasis sub={`${(targetMargin * 100).toFixed(0)}% margin floor`} />
           <GuideRow label="Last paid (this team)" value={fmtUSD(row.target)}  sub={row.target <= row.maxBuy ? 'within target' : 'above ceiling — push back'} />
           <GuideRow label="Range seen"            value={`${fmtUSD0(row.low)} — ${fmtUSD0(row.high)}`} sub="Recent broker quotes" />
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
