@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { parseModelJson, PROMPT_BY_CATEGORY } from '../src/ai/prompts';
 import { stubScan } from '../src/ai/stub';
 import { openRouterScan } from '../src/ai/openrouter';
+import { pickProvider } from '../src/ai/index';
 import type { Env } from '../src/types';
 
 describe('parseModelJson', () => {
@@ -89,5 +90,22 @@ describe('openRouterScan', () => {
   it('throws when content is unparseable', async () => {
     mockFetch(200, { choices: [{ message: { content: 'no json at all' } }] });
     await expect(openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img)).rejects.toThrow(/parse/);
+  });
+});
+
+describe('pickProvider', () => {
+  it('stub when no key and no AI binding', () => {
+    expect(pickProvider({} as Env)).toBe('stub');
+  });
+  it('workers-ai when AI bound and no OpenRouter key', () => {
+    expect(pickProvider({ AI: { run: async () => ({}) } } as unknown as Env)).toBe('workers-ai');
+  });
+  it('openrouter when key present', () => {
+    expect(pickProvider({ OPENROUTER_API_KEY: 'k' } as Env)).toBe('openrouter');
+  });
+  it('openrouter wins over a Workers AI binding', () => {
+    expect(
+      pickProvider({ OPENROUTER_API_KEY: 'k', AI: { run: async () => ({}) } } as unknown as Env),
+    ).toBe('openrouter');
   });
 });

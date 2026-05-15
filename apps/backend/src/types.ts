@@ -5,8 +5,9 @@ export type Env = {
   HYPERDRIVE?: { connectionString: string };
   JWT_SECRET: string;
   JWT_ISSUER?: string;
-  STUB_OCR?: string;
   STUB_LOW_CONF?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_OCR_MODEL?: string;
   CF_ACCOUNT_ID?: string;
   CF_IMAGES_TOKEN?: string;
   AI?: {
