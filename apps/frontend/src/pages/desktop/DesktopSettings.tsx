@@ -1522,21 +1522,6 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer 
 // ─── Warehouses ───────────────────────────────────────────────────────────────
 type WarehouseRow = Warehouse & { active: boolean; receiving: boolean };
 
-// Short timezone abbreviation (e.g. "PT", "CET") derived via the host's Intl
-// data so we don't ship a static IANA → abbrev table. Falls back to '' on any
-// failure so the cutoff row still renders the raw HH:MM.
-function tzAbbrev(timeZone: string | null | undefined): string {
-  if (!timeZone) return '';
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone, timeZoneName: 'short',
-    }).formatToParts(new Date());
-    return parts.find(p => p.type === 'timeZoneName')?.value ?? '';
-  } catch {
-    return '';
-  }
-}
-
 const TIMEZONE_FALLBACK = [
   'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York',
   'Europe/Amsterdam', 'Europe/London', 'Asia/Hong_Kong', 'Asia/Tokyo',
@@ -1618,10 +1603,6 @@ function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
           </div>
         ))}
         {whs.map(w => {
-          const abbrev = tzAbbrev(w.timezone);
-          const cutoffDisplay = w.cutoffLocal
-            ? (abbrev ? `${w.cutoffLocal} ${abbrev}` : w.cutoffLocal)
-            : null;
           return (
             <div key={w.id} className={'card wh-card' + (w.active ? '' : ' archived')}>
               <div className="wh-card-head">
@@ -1661,18 +1642,6 @@ function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
                   <div className="wh-row">
                     <span className="wh-row-label">Timezone</span>
                     <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{w.timezone}</span>
-                  </div>
-                )}
-                {cutoffDisplay && (
-                  <div className="wh-row">
-                    <span className="wh-row-label">Receiving cutoff</span>
-                    <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{cutoffDisplay}</span>
-                  </div>
-                )}
-                {w.sqft != null && (
-                  <div className="wh-row">
-                    <span className="wh-row-label">Floor area</span>
-                    <span className="wh-row-val mono">{w.sqft.toLocaleString()} sq ft</span>
                   </div>
                 )}
               </div>
@@ -1729,21 +1698,25 @@ function WarehouseEditModal({
   const isNew = !warehouse;
   type Draft = {
     name: string; short: string; region: string;
-    address: string; manager: string; managerPhone: string; managerEmail: string;
-    timezone: string; cutoffLocal: string; sqft: string;
+    address: string; managerUserId: string;
+    timezone: string;
   };
   const [draft, setDraft] = useState<Draft>({
     name: warehouse?.name ?? '',
     short: warehouse?.short ?? '',
     region: warehouse?.region ?? '',
     address: warehouse?.address ?? '',
-    manager: warehouse?.manager ?? '',
-    managerPhone: warehouse?.managerPhone ?? '',
-    managerEmail: warehouse?.managerEmail ?? '',
+    managerUserId: warehouse?.managerUserId ?? '',
     timezone: warehouse?.timezone ?? '',
-    cutoffLocal: warehouse?.cutoffLocal ?? '',
-    sqft: warehouse?.sqft != null ? String(warehouse.sqft) : '',
   });
+  // Manager dropdown is sourced from the DB (users with role=manager).
+  const [managers, setManagers] = useState<Member[]>([]);
+  useEffect(() => {
+    api.get<{ items: Member[] }>('/api/members')
+      .then(r => setManagers(r.items.filter(m => m.role === 'manager' && m.active)))
+      .catch(() => { /* leave empty; field still renders */ });
+  }, []);
+  const selectedMgr = managers.find(m => m.id === draft.managerUserId) ?? null;
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1762,19 +1735,13 @@ function WarehouseEditModal({
         const t = s.trim();
         return t === '' ? null : t;
       };
-      const sqftTrim = draft.sqft.trim();
-      const sqftVal = sqftTrim === '' ? null : Number(sqftTrim);
       const body = {
         name: draft.name.trim(),
         short: draft.short.trim(),
         region: draft.region.trim(),
         address: clean(draft.address),
-        manager: clean(draft.manager),
-        managerPhone: clean(draft.managerPhone),
-        managerEmail: clean(draft.managerEmail),
+        managerUserId: draft.managerUserId || null,
         timezone: clean(draft.timezone),
-        cutoffLocal: clean(draft.cutoffLocal),
-        sqft: sqftVal,
       };
       if (isNew) await api.post('/api/warehouses', body);
       else       await api.patch(`/api/warehouses/${warehouse!.id}`, body);
@@ -1844,32 +1811,33 @@ function WarehouseEditModal({
           <div className="field-row">
             <div className="field">
               <label className="label">Manager</label>
-              <input
+              <select
                 className="input"
-                value={draft.manager}
-                onChange={e => set('manager', e.target.value)}
-                placeholder="Team or person"
-              />
+                value={draft.managerUserId}
+                onChange={e => set('managerUserId', e.target.value)}
+              >
+                <option value="">— No manager —</option>
+                {managers.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+                {draft.managerUserId && !managers.some(m => m.id === draft.managerUserId) && (
+                  <option value={draft.managerUserId}>
+                    {warehouse?.manager ?? 'Current manager'}
+                  </option>
+                )}
+              </select>
             </div>
           </div>
+          {/* Contact details are derived from the selected manager's user
+              record — read-only, single source of truth in the DB. */}
           <div className="field-row">
             <div className="field">
               <label className="label">Manager phone</label>
-              <input
-                className="input"
-                type="tel"
-                value={draft.managerPhone}
-                onChange={e => set('managerPhone', e.target.value)}
-              />
+              <input className="input" value={selectedMgr?.phone ?? '—'} readOnly disabled />
             </div>
             <div className="field">
               <label className="label">Manager email</label>
-              <input
-                className="input"
-                type="email"
-                value={draft.managerEmail}
-                onChange={e => set('managerEmail', e.target.value)}
-              />
+              <input className="input" value={selectedMgr?.email ?? '—'} readOnly disabled />
             </div>
           </div>
           <div className="field-row">
@@ -1885,28 +1853,6 @@ function WarehouseEditModal({
                   <option key={tz} value={tz}>{tz}</option>
                 ))}
               </select>
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">Receiving cutoff</label>
-              <input
-                className="input mono"
-                type="time"
-                value={draft.cutoffLocal}
-                onChange={e => set('cutoffLocal', e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label className="label">Floor area (sq ft)</label>
-              <input
-                className="input mono"
-                type="number"
-                min={0}
-                step={100}
-                value={draft.sqft}
-                onChange={e => set('sqft', e.target.value)}
-              />
             </div>
           </div>
           {!isNew && (

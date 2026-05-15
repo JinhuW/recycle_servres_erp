@@ -47,29 +47,19 @@ const USERS = [
 const WAREHOUSES = [
   { id: 'WH-LA1', name: 'Los Angeles · LA1', short: 'LA1', region: 'US-West',
     address: '2401 E. 8th St, Los Angeles, CA 90021',
-    timezone: 'America/Los_Angeles',
-    cutoff_local: '15:00',
-    sqft: 14200 },
+    timezone: 'America/Los_Angeles' },
   { id: 'WH-DAL', name: 'Dallas · DAL', short: 'DAL', region: 'US-Central',
     address: '6900 Ambassador Row, Dallas, TX 75247',
-    timezone: 'America/Chicago',
-    cutoff_local: '14:00',
-    sqft: 9800 },
+    timezone: 'America/Chicago' },
   { id: 'WH-NJ2', name: 'Newark · NJ2', short: 'NJ2', region: 'US-East',
     address: '180 Raymond Blvd, Newark, NJ 07102',
-    timezone: 'America/New_York',
-    cutoff_local: '16:00',
-    sqft: 11600 },
+    timezone: 'America/New_York' },
   { id: 'WH-HK', name: 'Hong Kong · HK', short: 'HK', region: 'APAC',
     address: 'Unit 12, Goodman Tsing Yi, Hong Kong',
-    timezone: 'Asia/Hong_Kong',
-    cutoff_local: '17:00',
-    sqft: 8200 },
+    timezone: 'Asia/Hong_Kong' },
   { id: 'WH-AMS', name: 'Amsterdam · AMS', short: 'AMS', region: 'EMEA',
     address: 'Schiphol Logistics Park, 1118 BE Amsterdam',
-    timezone: 'Europe/Amsterdam',
-    cutoff_local: '16:00',
-    sqft: 7400 },
+    timezone: 'Europe/Amsterdam' },
 ];
 
 const RAM_BRANDS = ['Samsung', 'SK Hynix', 'Micron', 'Kingston', 'Other'];
@@ -418,16 +408,15 @@ try {
     await sql`
       INSERT INTO warehouses (
         id, name, short, region,
-        address, timezone, cutoff_local, sqft
+        address, timezone
       )
       VALUES (
         ${w.id}, ${w.name}, ${w.short}, ${w.region},
-        ${w.address}, ${w.timezone}, ${w.cutoff_local}, ${w.sqft}
+        ${w.address}, ${w.timezone}
       )
       ON CONFLICT (id) DO UPDATE SET
         name=EXCLUDED.name, short=EXCLUDED.short, region=EXCLUDED.region,
-        address=EXCLUDED.address,
-        timezone=EXCLUDED.timezone, cutoff_local=EXCLUDED.cutoff_local, sqft=EXCLUDED.sqft
+        address=EXCLUDED.address, timezone=EXCLUDED.timezone
     `;
   }
 
