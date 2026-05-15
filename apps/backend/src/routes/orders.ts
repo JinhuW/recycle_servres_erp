@@ -372,4 +372,34 @@ orders.patch('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// ── Create an empty Draft order so the submit screen can autosave lines as
+// the purchaser builds them (nothing is lost if they leave mid-entry).
+orders.post('/draft', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as
+    | { category: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
+    | null;
+  if (!body || !body.category) {
+    return c.json({ error: 'category is required' }, 400);
+  }
+
+  const maxRow = (await sql`
+    SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288) AS max
+    FROM orders WHERE id LIKE 'SO-%' AND id ~ '^SO-[0-9]+$'
+  `)[0] as { max: number };
+  const newId = 'SO-' + (maxRow.max + 1);
+
+  await sql`
+    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
+    VALUES (
+      ${newId}, ${u.id}, ${body.category},
+      ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+      ${null}, 'draft'
+    )
+  `;
+
+  return c.json({ id: newId }, 201);
+});
+
 export default orders;
