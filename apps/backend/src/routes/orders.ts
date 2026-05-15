@@ -465,7 +465,9 @@ orders.delete('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// Lifecycle ordering — must match workflow_stages.position.
+// Canonical lifecycle ordering. The workflow_stages table was removed; this
+// map's key order (draft → in_transit → reviewing → done) is the source of
+// truth, matching the frontend's WORKFLOW_STAGES.
 // Purchasers may only move Draft → In Transit (and not back).
 const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
   draft: 'Draft',
@@ -485,8 +487,8 @@ orders.post('/:id/advance', async (c) => {
   if (!cur) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && cur.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
-  const stages = await sql<{ id: string; position: number }[]>`
-    SELECT id, position FROM workflow_stages ORDER BY position`;
+  const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE)
+    .map((id, position) => ({ id, position }));
   const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
   let nextStageId: string;
   if (body?.toStage) {
