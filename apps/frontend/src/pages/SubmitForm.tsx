@@ -183,14 +183,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         )}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
-        <input ref={aiInputRef} type="file" accept="image/*" capture="environment" hidden onChange={onAiPick} />
-        <button type="button" className="ph-btn dark" style={{ marginTop: 8 }} disabled={aiBusy} onClick={() => aiInputRef.current?.click()}>
-          <Icon name="camera" size={16} /> {aiBusy ? 'Scanning…' : 'AI capture'}
-        </button>
-        {aiNote && <div style={{ color: 'var(--fg-subtle)', fontSize: 12, marginTop: 6 }}>{aiNote}</div>}
-        {line.scanImageUrl && (
-          <img src={line.scanImageUrl} alt="Captured label"
-               style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--border)', margin: '8px 0' }} />
+        {category === 'RAM' && (
+          <>
+            <input ref={aiInputRef} type="file" accept="image/*" capture="environment" hidden onChange={onAiPick} />
+            <button type="button" className="ph-btn dark" style={{ marginTop: 8 }} disabled={aiBusy} onClick={() => aiInputRef.current?.click()}>
+              <Icon name="camera" size={16} /> {aiBusy ? 'Scanning…' : 'AI capture'}
+            </button>
+            {aiNote && <div style={{ color: 'var(--fg-subtle)', fontSize: 12, marginTop: 6 }}>{aiNote}</div>}
+            {line.scanImageUrl && (
+              <img src={line.scanImageUrl} alt="Captured label"
+                   style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--border)', margin: '8px 0' }} />
+            )}
+          </>
         )}
         {aiFilled && (
           <div className="ph-ai-banner" style={{ borderRadius: 12, marginTop: 6 }}>
