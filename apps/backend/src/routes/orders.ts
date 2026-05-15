@@ -402,4 +402,36 @@ orders.post('/draft', async (c) => {
   return c.json({ id: newId }, 201);
 });
 
+// ── Delete a Draft order. Guarded: only the owner/manager, only while still
+// a Draft, and never if a line has already been sold.
+orders.delete('/:id', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const existing = (await sql`
+    SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1
+  `)[0] as { user_id: string; lifecycle: string } | undefined;
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  if (u.role !== 'manager' && existing.user_id !== u.id) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+  if (existing.lifecycle !== 'draft') {
+    return c.json({ error: 'Only Draft orders can be deleted' }, 403);
+  }
+
+  const sold = (await sql`
+    SELECT 1 FROM sell_order_lines sol
+    JOIN order_lines ol ON ol.id = sol.inventory_id
+    WHERE ol.order_id = ${id} LIMIT 1
+  `)[0];
+  if (sold) {
+    return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
+  }
+
+  await sql`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
+  return c.json({ ok: true });
+});
+
 export default orders;
+
