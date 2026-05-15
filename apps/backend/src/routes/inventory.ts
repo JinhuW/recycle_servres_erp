@@ -498,4 +498,58 @@ inventory.post('/transfer', async (c) => {
   return c.json({ ok: true, lines: result });
 });
 
+// Bulk receive. Manager-only. Flips In Transit lines to Done and writes a
+// 'received' audit event per line. All-or-nothing: one bad line aborts the
+// whole batch (mirrors /transfer). The In Transit check is the only guard —
+// the Transfers page only ever offers genuinely-transferred lines.
+inventory.post('/receive', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+
+  const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
+  if (!body) return c.json({ error: 'invalid body' }, 400);
+  if (!Array.isArray(body.ids) || body.ids.length === 0) {
+    return c.json({ error: 'ids must be a non-empty array' }, 400);
+  }
+  const ids: string[] = [];
+  for (const raw of body.ids) {
+    if (typeof raw !== 'string' || !raw) {
+      return c.json({ error: 'each id must be a non-empty string' }, 400);
+    }
+    ids.push(raw);
+  }
+
+  const sql = getDb(c.env);
+  const rows = (await sql`
+    SELECT l.id, l.status, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+    FROM order_lines l JOIN orders o ON o.id = l.order_id
+    WHERE l.id = ANY(${ids}::uuid[])
+  `) as unknown as { id: string; status: string; wh: string | null }[];
+
+  if (rows.length !== ids.length) {
+    return c.json({ error: 'one or more lines not found' }, 404);
+  }
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const id of ids) {
+    const r = byId.get(id);
+    if (!r) return c.json({ error: `line ${id} not found` }, 404);
+    if (r.status !== 'In Transit') {
+      return c.json({ error: `line ${id} is ${r.status}; only In Transit can be received` }, 400);
+    }
+  }
+
+  await sql.begin(async (tx) => {
+    for (const id of ids) {
+      const r = byId.get(id)!;
+      await tx`UPDATE order_lines SET status = 'Done' WHERE id = ${id}`;
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        VALUES (${id}, ${u.id}, 'received', ${tx.json({ at: r.wh ?? '' })})
+      `;
+    }
+  });
+
+  return c.json({ ok: true, ids });
+});
+
 export default inventory;

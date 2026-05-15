@@ -55,3 +55,56 @@ describe('GET /api/inventory/transfers', () => {
     expect(r.body.items.some((i) => i.id === purchaseInTransit!.id)).toBe(false);
   });
 });
+
+describe('POST /api/inventory/receive', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('403 for non-manager', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('POST', '/api/inventory/receive', { token, body: { ids: ['x'] } });
+    expect(r.status).toBe(403);
+  });
+
+  it('400 when ids is empty', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/inventory/receive', { token, body: { ids: [] } });
+    expect(r.status).toBe(400);
+  });
+
+  it('moves an in-transit line to Done and removes it from /transfers', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const recv = await api<{ ok: true; ids: string[] }>(
+      'POST', '/api/inventory/receive', { token, body: { ids: [moved.id] } },
+    );
+    expect(recv.status).toBe(200);
+    expect(recv.body.ids).toEqual([moved.id]);
+
+    const after = await api<{ items: { id: string }[] }>(
+      'GET', '/api/inventory/transfers', { token },
+    );
+    expect(after.body.items.some((i) => i.id === moved.id)).toBe(false);
+
+    const inv = await api<{ items: { id: string; status: string }[] }>(
+      'GET', '/api/inventory', { token },
+    );
+    expect(inv.body.items.find((i) => i.id === moved.id)!.status).toBe('Done');
+  });
+
+  it('rejects the whole batch if any line is not In Transit', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
+    const notInTransit = inv.body.items.find(
+      (i) => i.status === 'Done' || i.status === 'Reviewing',
+    )!;
+    const r = await api('POST', '/api/inventory/receive', {
+      token, body: { ids: [moved.id, notInTransit.id] },
+    });
+    expect(r.status).toBe(400);
+    const after = await api<{ items: { id: string }[] }>(
+      'GET', '/api/inventory/transfers', { token },
+    );
+    expect(after.body.items.some((i) => i.id === moved.id)).toBe(true);
+  });
+});
