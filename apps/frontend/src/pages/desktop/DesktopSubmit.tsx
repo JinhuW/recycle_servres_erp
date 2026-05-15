@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { useT } from '../../lib/i18n';
 import { api, createDraftOrder } from '../../lib/api';
 import { fmtUSD } from '../../lib/format';
@@ -697,6 +698,13 @@ export function LineDrawer({
   const [confirming, setConfirming] = useState(false);
   const cat = line.category;
   const set = (patch: Partial<Line>) => onChange(patch);
+  const [lightbox, setLightbox] = useState(false);
+  const [thumbBroken, setThumbBroken] = useState(false);
+  const scanUrl = line.scanImageUrl ?? null;
+  const showThumb =
+    !!scanUrl &&
+    !scanUrl.startsWith('data:image/placeholder') &&
+    !thumbBroken;
 
   const qty = Number(line.qty) || 0;
   const cost = Number(line.unitCost) || 0;
@@ -743,6 +751,26 @@ export function LineDrawer({
             }}>
               <Icon name={cat === 'RAM' ? 'chip' : (cat === 'SSD' || cat === 'HDD') ? 'drive' : 'box'} size={20} />
             </div>
+            {showThumb && (
+              <button
+                type="button"
+                onClick={() => setLightbox(true)}
+                title="View AI photo"
+                style={{
+                  width: 56, height: 56, borderRadius: 8,
+                  border: '1px solid var(--border)', overflow: 'hidden',
+                  padding: 0, background: 'var(--bg-elev)',
+                  cursor: 'pointer', flexShrink: 0,
+                }}
+              >
+                <img
+                  src={scanUrl!}
+                  alt="AI photo"
+                  onError={() => setThumbBroken(true)}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              </button>
+            )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
@@ -893,6 +921,9 @@ export function LineDrawer({
           </div>
         </div>
       </div>
+      {lightbox && scanUrl && (
+        <ImageLightbox url={scanUrl} alt="AI photo" onClose={() => setLightbox(false)} />
+      )}
     </div>
   );
 }

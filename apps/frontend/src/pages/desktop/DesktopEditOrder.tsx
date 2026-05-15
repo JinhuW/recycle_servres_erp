@@ -678,6 +678,8 @@ function orderLineToEditLine(l: OrderLine): EditLine {
     qty:            l.qty,
     unitCost:       l.unitCost,
     sellPrice:      l.sellPrice ?? undefined,
+    scanImageId:    l.scanImageId ?? undefined,
+    scanImageUrl:   l.scanImageUrl ?? undefined,
     health:         l.health,
     rpm:            l.rpm,
   };
