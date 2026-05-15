@@ -12,18 +12,12 @@ const lookups = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 lookups.get('/', async (c) => {
   const sql = getDb(c.env);
 
-  const [catalogRows, termsRows, sourceRows, statusRows] = await Promise.all([
+  const [catalogRows, sourceRows, statusRows] = await Promise.all([
     sql`
       SELECT "group", value
       FROM catalog_options
       WHERE active = TRUE
       ORDER BY "group", position, value
-    `,
-    sql`
-      SELECT label
-      FROM payment_terms
-      WHERE active = TRUE
-      ORDER BY position, label
     `,
     sql`
       SELECT id, label
@@ -45,7 +39,6 @@ lookups.get('/', async (c) => {
 
   return c.json({
     catalog,
-    paymentTerms: termsRows.map(r => r.label as string),
     priceSources: sourceRows.map(r => ({ id: r.id as string, label: r.label as string })),
     sellOrderStatuses: statusRows.map(r => ({
       id: r.id as string,
