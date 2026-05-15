@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
+import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 
 // Statuses that capture per-status evidence (text note + attachments). The
 // `needs_meta` flag lives on the sell_order_statuses row.
@@ -47,7 +48,43 @@ type SellOrderLine = {
   warehouse: string | null;
   lineTotal: number;
   position: number;
+  inventoryId: string | null;
+  warehouseId: string | null;
+  maxQty: number;
 };
+
+// Editable line shape used by the edit modal (mirrors the new-order builder).
+type EditLine = {
+  inventoryId: string | null;
+  category: SellOrderLine['category'];
+  label: string;
+  subLabel: string | null;
+  partNumber: string | null;
+  qty: number;
+  maxQty: number;
+  unitPrice: number;
+  warehouseId: string | null;
+  warehouse: string | null;
+  condition: string | null;
+};
+
+const toEditLine = (l: SellOrderLine): EditLine => ({
+  inventoryId: l.inventoryId,
+  category:    l.category,
+  label:       l.label,
+  subLabel:    l.sub,
+  partNumber:  l.partNumber,
+  qty:         l.qty,
+  maxQty:      l.maxQty,
+  unitPrice:   l.unitPrice,
+  warehouseId: l.warehouseId,
+  warehouse:   l.warehouse,
+  condition:   l.condition,
+});
+
+// Stable signature for change detection — order matters (position = index).
+const linesSig = (ls: EditLine[]) =>
+  JSON.stringify(ls.map(l => [l.inventoryId, l.qty, l.unitPrice, l.label, l.partNumber, l.warehouseId, l.condition]));
 
 type SellOrderDetailType = {
   id: string;
@@ -260,9 +297,9 @@ export function DesktopSellOrders({ onNewFromInventory }: SellOrdersProps = {}) 
 }
 
 // ─── Detail / edit modal ─────────────────────────────────────────────────────
-// View mode is read-only; Edit mode lets the manager change status and
-// internal notes (the only mutable fields exposed in the UI). Line items are
-// always read-only — the backend doesn't yet expose a per-line edit endpoint.
+// View mode is read-only. Edit mode is the full builder (same as a new sell
+// order): re-pick the customer, edit line qty / unit price, drop lines, plus
+// advance the status and edit internal notes. Saved via PATCH /sell-orders/:id.
 function SellOrderDetail({
   id, mode, onClose, onSaved, onSwitchToEdit,
 }: {
@@ -273,7 +310,13 @@ function SellOrderDetail({
   onSwitchToEdit: () => void;
 }) {
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
-  const [draft, setDraft] = useState<{ status: SellOrderDetailType['status']; notes: string } | null>(null);
+  const [draft, setDraft] = useState<{
+    status: SellOrderDetailType['status'];
+    notes: string;
+    customerId: string;
+    lines: EditLine[];
+  } | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
   // Per-status evidence — loaded from the order, mutated live by the dialog,
   // and used to render paperclip badges on each step.
@@ -289,10 +332,20 @@ function SellOrderDetail({
         setDraft({
           status: r.order.status,
           notes: r.order.notes ?? '',
+          customerId: r.order.customer.id,
+          lines: r.order.lines.map(toEditLine),
         });
       })
       .catch(console.error);
   }, [id]);
+
+  // Customer list — only needed when editing (re-pick customer).
+  useEffect(() => {
+    if (mode !== 'edit') return;
+    api.get<{ items: Customer[] }>('/api/customers')
+      .then(r => setCustomers(r.items))
+      .catch(() => {/* picker still shows the current customer */});
+  }, [mode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -300,18 +353,56 @@ function SellOrderDetail({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
+  const linesChanged = !!order && !!draft
+    && linesSig(draft.lines) !== linesSig(order.lines.map(toEditLine));
   const dirty = order && draft && (
     draft.status !== order.status
     || (draft.notes ?? '') !== (order.notes ?? '')
+    || customerChanged
+    || linesChanged
   );
+
+  const editTotals = useMemo(() => {
+    if (!draft || !order) return null;
+    const subtotal = draft.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0);
+    const discount = subtotal * order.discountPct;
+    return {
+      subtotal: +subtotal.toFixed(2),
+      discount: +discount.toFixed(2),
+      total: +(subtotal - discount).toFixed(2),
+    };
+  }, [draft, order]);
+
+  const setLine = (idx: number, patch: Partial<EditLine>) =>
+    setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
+  const removeLine = (idx: number) =>
+    setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
 
   const save = async () => {
     if (!order || !draft) return;
+    if (draft.lines.length === 0) return;
     setSaving(true);
     try {
       await api.patch(`/api/sell-orders/${order.id}`, {
         status: draft.status,
         notes: draft.notes,
+        // Only send structural edits when they actually changed — keeps a
+        // plain status/notes save from churning line ids on the backend.
+        ...(customerChanged ? { customerId: draft.customerId } : {}),
+        ...(linesChanged ? {
+          lines: draft.lines.map(l => ({
+            inventoryId: l.inventoryId,
+            category:    l.category,
+            label:       l.label,
+            subLabel:    l.subLabel,
+            partNumber:  l.partNumber,
+            qty:         l.qty,
+            unitPrice:   l.unitPrice,
+            warehouseId: l.warehouseId,
+            condition:   l.condition,
+          })),
+        } : {}),
       });
       onSaved();
     } finally {
@@ -429,6 +520,29 @@ function SellOrderDetail({
                 </div>
               )}
 
+              {editable && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
+                  }}>
+                    <Icon name="user" size={12} /> Customer
+                  </div>
+                  <div style={{ maxWidth: 360 }}>
+                    <CustomerPicker
+                      customers={customers.length ? customers : [{
+                        id: order.customer.id, name: order.customer.name,
+                        short_name: order.customer.short, region: order.customer.region,
+                      }]}
+                      value={draft.customerId}
+                      onChange={id => setDraft({ ...draft, customerId: id })}
+                      onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <table className="so-line-table">
                 <thead>
                   <tr>
@@ -437,10 +551,11 @@ function SellOrderDetail({
                     <th className="num">Qty</th>
                     <th className="num">Unit</th>
                     <th className="num">Total</th>
+                    {editable && <th style={{ width: 36 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {order.lines.map(l => (
+                  {!editable && order.lines.map(l => (
                     <tr key={l.id}>
                       <td>
                         <div style={{ fontWeight: 500 }}>{l.label}</div>
@@ -452,25 +567,67 @@ function SellOrderDetail({
                       <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.lineTotal)}</td>
                     </tr>
                   ))}
+                  {editable && draft.lines.map((l, idx) => (
+                    <tr key={l.inventoryId ?? idx}>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{l.label}</div>
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
+                      </td>
+                      <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
+                      <td className="num">
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                          <input
+                            className="so-mini-input"
+                            type="number"
+                            min={1}
+                            max={l.maxQty}
+                            value={l.qty}
+                            onChange={e => setLine(idx, {
+                              qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
+                            })}
+                            style={{ width: 64 }}
+                          />
+                          <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
+                            / {l.maxQty}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="num">
+                        <input
+                          className="so-mini-input"
+                          type="number"
+                          step="0.01"
+                          value={l.unitPrice}
+                          onChange={e => setLine(idx, { unitPrice: Number(e.target.value) || 0 })}
+                          style={{ width: 90 }}
+                        />
+                      </td>
+                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.qty * l.unitPrice)}</td>
+                      <td>
+                        <button
+                          className="btn icon sm"
+                          title="Remove line"
+                          disabled={draft.lines.length === 1}
+                          onClick={() => removeLine(idx)}
+                        >
+                          <Icon name="x" size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               {editable && (
                 <div className="help" style={{ marginTop: 8 }}>
-                  Line items are read-only until a per-line edit endpoint lands.
+                  Editing replaces the order's line set. Inventory-backed quantities are capped at what's on the shelf.
                 </div>
               )}
 
               <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
-                <div className="so-row"><span>Subtotal</span><span className="mono">{fmtUSD(order.subtotal)}</span></div>
-                {order.discount > 0 && (
-                  <div className="so-row">
-                    <span>Discount{order.discountPct ? ` (${order.discountPct}%)` : ''}</span>
-                    <span className="mono">−{fmtUSD(order.discount)}</span>
-                  </div>
-                )}
+                <div className="so-row"><span>Subtotal</span><span className="mono">{fmtUSD(editable && editTotals ? editTotals.subtotal : order.subtotal)}</span></div>
                 <div className="so-row total">
                   <span>Total</span>
-                  <span className="mono">{fmtUSD(order.total)}</span>
+                  <span className="mono">{fmtUSD(editable && editTotals ? editTotals.total : order.total)}</span>
                 </div>
               </div>
 

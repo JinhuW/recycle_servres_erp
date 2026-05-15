@@ -22,7 +22,7 @@ export type DraftItem = {
   condition: string;
 };
 
-type Customer = {
+export type Customer = {
   id: string;
   name: string;
   short_name: string | null;
@@ -377,7 +377,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
 }
 
 // ─── Customer picker ─────────────────────────────────────────────────────────
-function CustomerPicker({
+export function CustomerPicker({
   customers, value, onChange, onCreated,
 }: {
   customers: Customer[];

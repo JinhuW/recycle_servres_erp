@@ -143,6 +143,97 @@ describe('payment_received notification', () => {
   });
 });
 
+describe('PATCH /api/sell-orders/:id — editing customer + lines', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function makeOrder(token: string) {
+    const line = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const r = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{
+          inventoryId: line.id, category: 'RAM', label: 'Sample', partNumber: 'PN-1',
+          qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+        }],
+      },
+    });
+    expect(r.status).toBe(201);
+    return { id: r.body.id, line };
+  }
+
+  it('replaces lines and updates notes in one PATCH', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, line } = await makeOrder(token);
+    const newPrice = +(line.sell_price + 5).toFixed(2);
+
+    const r = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: {
+        notes: 'edited note',
+        lines: [{
+          inventoryId: line.id, category: 'RAM', label: 'Edited label', partNumber: 'PN-2',
+          qty: 1, unitPrice: newPrice, warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+        }],
+      },
+    });
+    expect(r.status).toBe(200);
+
+    const got = await api<{ order: {
+      notes: string;
+      lines: { label: string; unitPrice: number }[];
+    } }>('GET', `/api/sell-orders/${id}`, { token });
+    expect(got.body.order.notes).toBe('edited note');
+    expect(got.body.order.lines).toHaveLength(1);
+    expect(got.body.order.lines[0].label).toBe('Edited label');
+    expect(got.body.order.lines[0].unitPrice).toBe(newPrice);
+  });
+
+  it('updates the customer', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id } = await makeOrder(token);
+    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
+    const target = customers.body.items[customers.body.items.length - 1].id;
+
+    const r = await api('PATCH', `/api/sell-orders/${id}`, { token, body: { customerId: target } });
+    expect(r.status).toBe(200);
+
+    const got = await api<{ order: { customer: { id: string } } }>(
+      'GET', `/api/sell-orders/${id}`, { token });
+    expect(got.body.order.customer.id).toBe(target);
+  });
+
+  it('rejects qty exceeding inventory on edit', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, line } = await makeOrder(token);
+    const r = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: { lines: [{
+        inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn',
+        qty: line.qty + 99, unitPrice: line.sell_price,
+      }] },
+    });
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(r.body)).toMatch(/qty/i);
+  });
+
+  it('rejects line/customer edits on a Done order', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, line } = await makeOrder(token);
+    await api('PATCH', `/api/sell-orders/${id}`, { token, body: { status: 'Done' } });
+
+    const r = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: { lines: [{
+        inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn',
+        qty: 1, unitPrice: line.sell_price,
+      }] },
+    });
+    expect(r.status).toBe(409);
+  });
+});
+
 describe('sell-order qty clamp', () => {
   beforeEach(async () => { await resetDb(); });
 
