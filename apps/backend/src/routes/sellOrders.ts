@@ -24,7 +24,7 @@ sellOrders.get('/', async (c) => {
   const rows = await sql`
     SELECT
       so.id, so.status, so.discount_pct::float AS discount_pct, so.notes, so.created_at,
-      c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.terms AS customer_terms,
+      c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       COUNT(sol.id)::int                                AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
       COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS subtotal
@@ -39,7 +39,7 @@ sellOrders.get('/', async (c) => {
     items: rows.map(r => ({
       id: r.id, status: r.status,
       discountPct: r.discount_pct, notes: r.notes, createdAt: r.created_at,
-      customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short, terms: r.customer_terms },
+      customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
       lineCount: r.line_count, qty: r.qty,
       subtotal: r.subtotal,
       discount: +(r.subtotal * r.discount_pct).toFixed(2),
@@ -57,10 +57,10 @@ sellOrders.get('/:id', async (c) => {
   const head = (await sql<{
     id: string; status: string; discount_pct: number; notes: string | null; created_at: string;
     customer_id: string; customer_name: string; customer_short: string;
-    customer_terms: string; customer_region: string;
+    customer_region: string;
   }[]>`
     SELECT so.id, so.status, so.discount_pct::float AS discount_pct, so.notes, so.created_at,
-           c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.terms AS customer_terms, c.region AS customer_region
+           c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
     FROM sell_orders so JOIN customers c ON c.id = so.customer_id
     WHERE so.id = ${id} LIMIT 1
   `)[0];
@@ -70,12 +70,17 @@ sellOrders.get('/:id', async (c) => {
     id: string; category: string; label: string; sub_label: string | null;
     part_number: string | null; qty: number; unit_price: number;
     condition: string | null; position: number; warehouse_short: string | null;
+    inventory_id: string | null; warehouse_id: string | null;
+    inventory_qty: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
            sol.qty, sol.unit_price::float AS unit_price, sol.condition, sol.position,
-           w.short AS warehouse_short
+           sol.inventory_id, sol.warehouse_id,
+           w.short AS warehouse_short,
+           ol.qty AS inventory_qty
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
+    LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
@@ -110,11 +115,13 @@ sellOrders.get('/:id', async (c) => {
     order: {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
       discountPct: head.discount_pct,
-      customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, terms: head.customer_terms, region: head.customer_region },
+      customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
       lines: lines.map(l => ({
         id: l.id, category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
         qty: l.qty, unitPrice: l.unit_price, condition: l.condition, position: l.position,
         warehouse: l.warehouse_short,
+        inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
+        maxQty: l.inventory_qty ?? l.qty,
         lineTotal: +(l.qty * l.unit_price).toFixed(2),
       })),
       subtotal: +subtotal.toFixed(2),
@@ -198,23 +205,90 @@ sellOrders.post('/', async (c) => {
   return c.json({ ok: true, id: nextId });
 });
 
+// Edit an existing sell order. Status / discount / notes are simple COALESCE
+// updates. Optionally the manager can also re-pick the customer and rewrite the
+// whole line set (same builder UI as a new order) — those edits replace
+// sell_order_lines wholesale and are blocked once the order is Done.
+type LineIn = {
+  inventoryId?: string;
+  category: string;
+  label: string;
+  subLabel?: string | null;
+  partNumber?: string | null;
+  qty: number;
+  unitPrice: number;
+  warehouseId?: string | null;
+  condition?: string | null;
+};
+
 sellOrders.patch('/:id', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
-    | { status?: string; discountPct?: number; notes?: string }
+    | { status?: string; discountPct?: number; notes?: string;
+        customerId?: string; lines?: LineIn[] }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   const sql = getDb(c.env);
-  await sql`
-    UPDATE sell_orders SET
-      status       = COALESCE(${body.status ?? null}, status),
-      discount_pct = COALESCE(${body.discountPct ?? null}, discount_pct),
-      notes        = COALESCE(${body.notes ?? null}, notes),
-      updated_at   = NOW()
-    WHERE id = ${id}
-  `;
+
+  const editsStructure = body.customerId !== undefined || body.lines !== undefined;
+
+  const current = (await sql<{ status: string }[]>`
+    SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1
+  `)[0];
+  if (!current) return c.json({ error: 'Not found' }, 404);
+
+  // Customer / line edits are locked once the deal closes — a Done order's
+  // line set is the historical record of what was sold.
+  if (editsStructure && current.status === 'Done') {
+    return c.json({ error: 'cannot edit lines or customer of a Done order' }, 409);
+  }
+
+  if (body.lines !== undefined) {
+    if (!Array.isArray(body.lines) || body.lines.length === 0) {
+      return c.json({ error: 'at least one line required' }, 400);
+    }
+    // Same sellability check as POST: inventory-backed lines must still be in
+    // 'Reviewing' and within the available qty. Manual lines skip the check.
+    for (const l of body.lines) {
+      if (!l.inventoryId) continue;
+      const inv = (await sql<{ qty: number; status: string }[]>`
+        SELECT qty, status FROM order_lines WHERE id = ${l.inventoryId} LIMIT 1
+      `)[0];
+      if (!inv) return c.json({ error: `inventory line ${l.inventoryId} not found` }, 400);
+      if (inv.status !== 'Reviewing') return c.json({ error: `inventory line not sellable (status=${inv.status})` }, 400);
+      if (l.qty > inv.qty) return c.json({ error: `qty ${l.qty} exceeds inventory available ${inv.qty}` }, 400);
+    }
+  }
+
+  await sql.begin(async (tx) => {
+    await tx`
+      UPDATE sell_orders SET
+        status       = COALESCE(${body.status ?? null}, status),
+        discount_pct = COALESCE(${body.discountPct ?? null}, discount_pct),
+        notes        = COALESCE(${body.notes ?? null}, notes),
+        customer_id  = COALESCE(${body.customerId ?? null}, customer_id),
+        updated_at   = NOW()
+      WHERE id = ${id}
+    `;
+    if (body.lines !== undefined) {
+      await tx`DELETE FROM sell_order_lines WHERE sell_order_id = ${id}`;
+      for (let i = 0; i < body.lines.length; i++) {
+        const l = body.lines[i];
+        await tx`
+          INSERT INTO sell_order_lines
+            (sell_order_id, inventory_id, category, label, sub_label, part_number,
+             qty, unit_price, warehouse_id, condition, position)
+          VALUES
+            (${id}, ${l.inventoryId ?? null}, ${l.category}, ${l.label},
+             ${l.subLabel ?? null}, ${l.partNumber ?? null},
+             ${l.qty}, ${l.unitPrice},
+             ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i})
+        `;
+      }
+    }
+  });
   return c.json({ ok: true });
 });
 
