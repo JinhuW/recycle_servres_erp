@@ -480,15 +480,6 @@ try {
     }
   }
 
-  const PAYMENT_TERMS = ['Prepay', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
-  await sql`DELETE FROM payment_terms`;
-  for (let i = 0; i < PAYMENT_TERMS.length; i++) {
-    await sql`
-      INSERT INTO payment_terms (label, position)
-      VALUES (${PAYMENT_TERMS[i]}, ${i})
-    `;
-  }
-
   const PRICE_SOURCES = [
     { id: 'internal-sales',   label: 'Internal sales (last 30d)' },
     { id: 'broker-techsurplus', label: 'Broker quote — TechSurplus' },
@@ -584,18 +575,18 @@ try {
   console.log('· Seeding customers…');
   await sql`DELETE FROM customers`;
   const customers = [
-    { name:'NorthBridge Data Centers', short:'NorthBridge',  contact:'ops@northbridge.io',     terms:'Net 30',  region:'US-East',    creditLimit: 200000, tags:['hyperscaler','priority'] },
-    { name:'Helios Cloud Pte Ltd',     short:'Helios Cloud', contact:'procurement@helios.sg',  terms:'Net 15',  region:'APAC',       creditLimit: 120000, tags:['cloud'] },
-    { name:'Verge Reseller Group',     short:'Verge',        contact:'buy@vergegroup.com',     terms:'Prepay',  region:'US-West',    creditLimit:  60000, tags:['reseller'] },
-    { name:'Atlas Hosting GmbH',       short:'Atlas',        contact:'einkauf@atlas-hosting.de', terms:'Net 30',region:'EMEA',       creditLimit:  90000, tags:['hosting'] },
-    { name:'Quantra Recyclers',        short:'Quantra',      contact:'deals@quantra.io',       terms:'Net 7',   region:'US-Central', creditLimit:  40000, tags:['recycler'] },
-    { name:'Lumen Refurb Co.',         short:'Lumen',        contact:'orders@lumenrefurb.com', terms:'Net 30',  region:'US-East',    creditLimit:  75000, tags:['refurb'] },
+    { name:'NorthBridge Data Centers', short:'NorthBridge',  contactName:'Dana Ortiz',   contactEmail:'ops@northbridge.io',       contactPhone:'+1-212-555-0147', address:'48 Hudson Yards, Floor 12\nNew York, NY 10001', country:'United States', region:'US-East',    tags:['hyperscaler','priority'] },
+    { name:'Helios Cloud Pte Ltd',     short:'Helios Cloud', contactName:'Wei Lim',      contactEmail:'procurement@helios.sg',     contactPhone:'+65-6555-0192',   address:'1 Raffles Place, #20-01\nSingapore 048616',        country:'Singapore',     region:'APAC',       tags:['cloud'] },
+    { name:'Verge Reseller Group',     short:'Verge',        contactName:'Maria Gomez',  contactEmail:'buy@vergegroup.com',        contactPhone:'+1-415-555-0173', address:'500 Howard St, Suite 300\nSan Francisco, CA 94105', country:'United States', region:'US-West',    tags:['reseller'] },
+    { name:'Atlas Hosting GmbH',       short:'Atlas',        contactName:'Jonas Brandt', contactEmail:'einkauf@atlas-hosting.de',  contactPhone:'+49-30-5550-0188', address:'Friedrichstraße 68\n10117 Berlin',                  country:'Germany',       region:'EMEA',       tags:['hosting'] },
+    { name:'Quantra Recyclers',        short:'Quantra',      contactName:'Priya Nair',   contactEmail:'deals@quantra.io',          contactPhone:'+1-312-555-0156', address:'233 S Wacker Dr, Floor 44\nChicago, IL 60606',      country:'United States', region:'US-Central', tags:['recycler'] },
+    { name:'Lumen Refurb Co.',         short:'Lumen',        contactName:'Sam Patel',    contactEmail:'orders@lumenrefurb.com',    contactPhone:'+1-617-555-0121', address:'1 Boston Pl, Suite 2600\nBoston, MA 02108',        country:'United States', region:'US-East',    tags:['refurb'] },
   ];
   const customerRows = [];
   for (const c of customers) {
     const r = await sql`
-      INSERT INTO customers (name, short_name, contact, region, terms, credit_limit, tags)
-      VALUES (${c.name}, ${c.short}, ${c.contact}, ${c.region}, ${c.terms}, ${c.creditLimit}, ${c.tags})
+      INSERT INTO customers (name, short_name, contact_name, contact_email, contact_phone, address, country, region, tags)
+      VALUES (${c.name}, ${c.short}, ${c.contactName}, ${c.contactEmail}, ${c.contactPhone}, ${c.address}, ${c.country}, ${c.region}, ${c.tags})
       RETURNING id
     `;
     customerRows.push({ ...c, id: r[0].id });

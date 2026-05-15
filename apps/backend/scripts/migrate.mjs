@@ -40,7 +40,7 @@ try {
         sell_order_status_attachments, sell_order_status_meta,
         sell_order_lines, sell_orders, customers,
         inventory_events, workflow_stages,
-        catalog_options, payment_terms, price_sources, sell_order_statuses,
+        catalog_options, price_sources, sell_order_statuses,
         label_scans, notifications, ref_prices,
         categories, commission_tiers, commission_settings, workspace_settings,
         order_lines, orders, warehouses, users CASCADE;
