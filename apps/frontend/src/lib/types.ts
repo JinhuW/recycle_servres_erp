@@ -94,6 +94,7 @@ export type DraftLine = {
   sellPrice?: number | null;
   scanImageId?: string | null;
   scanConfidence?: number | null;
+  scanImageUrl?: string | null;
   health?: number | null;
   rpm?: number | null;
   // UI label for cards
