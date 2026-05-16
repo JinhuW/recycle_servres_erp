@@ -21,7 +21,7 @@ order lands in the warehouse pipeline. Built as two services:
 
 ```bash
 # 1. Boot Postgres locally
-docker compose up -d
+docker compose up -d postgres
 
 # 2. Run migrations + seed
 cd backend
@@ -29,7 +29,7 @@ npm install
 npm run db:migrate
 npm run db:seed
 
-# 3. Start the Worker on :8787
+# 3. Start the backend on :8787
 npm run dev
 
 # 4. In a second terminal, start the SPA on :5173
