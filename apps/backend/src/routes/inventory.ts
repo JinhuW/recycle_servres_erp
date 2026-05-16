@@ -116,9 +116,10 @@ inventory.get('/aggregate/by-part', async (c) => {
 });
 
 // Transfer orders. Manager-only. ?status=pending|received|all (default
-// pending). Each order carries its currently-linked lines (In Transit while
-// Pending, Done while Received), enriched with each line's prior 'from'
-// warehouse from its latest 'transferred' event.
+// pending). Each order carries every line currently linked to it (no line-
+// status filter; lines are In Transit under a Pending order and Done under a
+// Received one as a natural consequence of receive/reopen), enriched with
+// each line's prior 'from' warehouse from its latest 'transferred' event.
 inventory.get('/transfer-orders', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);

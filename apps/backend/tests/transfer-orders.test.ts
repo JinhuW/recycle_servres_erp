@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX } from './helpers/auth';
+import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
 type InvRow = { id: string; status: string; warehouse_id: string | null; qty: number };
 const WAREHOUSES = ['WH-LA1', 'WH-DAL', 'WH-NJ2', 'WH-HK', 'WH-AMS'];
@@ -96,8 +96,6 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     expect(ord.from_warehouse_id).toBeNull();
   });
 });
-
-import { MARCUS } from './helpers/auth';
 
 describe('GET /api/inventory/transfer-orders', () => {
   beforeEach(async () => { await resetDb(); });
