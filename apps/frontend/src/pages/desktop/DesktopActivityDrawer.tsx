@@ -288,6 +288,12 @@ function EventCard({ event, itemLabel }: { event: Event; itemLabel: string }) {
               <span className="mono" style={{ color: 'var(--fg)', fontWeight: 500 }}>{String(to)}</span>
             </span>
           )}
+          {event.kind === 'received' && d.at != null && (
+            <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-subtle)' }}>
+              <span>at</span>
+              <span className="mono" style={{ color: 'var(--fg)', fontWeight: 500 }}>{String(d.at)}</span>
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontVariantNumeric: 'tabular-nums' }}>
           {time}

@@ -519,18 +519,21 @@ inventory.post('/receive', async (c) => {
     ids.push(raw);
   }
 
+  // Dedupe — duplicate ids would make the row-count check below spuriously 404.
+  const uniqueIds = [...new Set(ids)];
+
   const sql = getDb(c.env);
   const rows = (await sql`
     SELECT l.id, l.status, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
     FROM order_lines l JOIN orders o ON o.id = l.order_id
-    WHERE l.id = ANY(${ids}::uuid[])
+    WHERE l.id = ANY(${uniqueIds}::uuid[])
   `) as unknown as { id: string; status: string; wh: string | null }[];
 
-  if (rows.length !== ids.length) {
+  if (rows.length !== uniqueIds.length) {
     return c.json({ error: 'one or more lines not found' }, 404);
   }
   const byId = new Map(rows.map((r) => [r.id, r]));
-  for (const id of ids) {
+  for (const id of uniqueIds) {
     const r = byId.get(id);
     if (!r) return c.json({ error: `line ${id} not found` }, 404);
     if (r.status !== 'In Transit') {
@@ -539,7 +542,7 @@ inventory.post('/receive', async (c) => {
   }
 
   await sql.begin(async (tx) => {
-    for (const id of ids) {
+    for (const id of uniqueIds) {
       const r = byId.get(id)!;
       await tx`UPDATE order_lines SET status = 'Done' WHERE id = ${id}`;
       await tx`
@@ -549,7 +552,7 @@ inventory.post('/receive', async (c) => {
     }
   });
 
-  return c.json({ ok: true, ids });
+  return c.json({ ok: true, ids: uniqueIds });
 });
 
 export default inventory;
