@@ -180,7 +180,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
         </div>
         {!data && <PhoneListSkeleton rows={4} />}
         {(data?.recent ?? []).map(r => {
-          const label = r.category === 'RAM'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
+          const label = r.category === 'RAM'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
                       : r.category === 'SSD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? 'Item');

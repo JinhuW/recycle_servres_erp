@@ -564,7 +564,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                             <tbody>
                               {openLines.lines.map((l, i) => {
                                 const name =
-                                  l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`.trim()
+                                  l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
                                   : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
                                   : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
                                   : (l.description ?? '');
