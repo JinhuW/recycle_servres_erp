@@ -10,6 +10,10 @@ import { usePhScrolled } from '../lib/usePhScrolled';
 import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
 import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
+import { ImageLightbox } from '../components/ImageLightbox';
+
+const realScan = (u?: string | null): u is string =>
+  !!u && !u.startsWith('data:image/placeholder');
 
 type Props = {
   onEdit: (o: Order) => void;
@@ -26,6 +30,7 @@ export function Orders({ onEdit, onToast }: Props) {
   const [openLines, setOpenLines] = useState<Order | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
   const { path } = useRoute();
@@ -188,7 +193,26 @@ export function Orders({ onEdit, onToast }: Props) {
               {isOpen && openLines && openLines.id === o.id && (
                 <div className="ph-order-body">
                   {openLines.lines.map(l => (
-                    <div key={l.id} className="ph-line">
+                    <div key={l.id} className="ph-line" style={{ display: 'flex', gap: 10 }}>
+                      {realScan(l.scanImageUrl) && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
+                          title={t('aiPhotoLabel')}
+                          style={{
+                            width: 52, height: 52, borderRadius: 10, flexShrink: 0,
+                            border: '1px solid var(--border)', overflow: 'hidden',
+                            padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                          }}
+                        >
+                          <img
+                            src={l.scanImageUrl}
+                            alt={t('aiPhotoLabel')}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                          />
+                        </button>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                         <div style={{ fontSize: 13, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.type ?? ''}`}
@@ -208,6 +232,7 @@ export function Orders({ onEdit, onToast }: Props) {
                             +{fmtUSD0((l.sellPrice - l.unitCost) * l.qty)}
                           </span>
                         )}
+                      </div>
                       </div>
                     </div>
                   ))}
@@ -242,6 +267,9 @@ export function Orders({ onEdit, onToast }: Props) {
           });
         })()}
       </div>
+      {lightboxUrl && (
+        <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
+      )}
     </>
   );
 }

@@ -109,9 +109,10 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
 
-  const scanUrl = existingLine?.scanImageUrl ?? null;
+  // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
+  // line's stored image. Stub/dev placeholders are not real images.
+  const scanUrl = detected?.deliveryUrl ?? existingLine?.scanImageUrl ?? null;
   const showThumb =
-    isEditing &&
     !!scanUrl &&
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
@@ -160,10 +161,6 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         )}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
-        {category === 'RAM' && line.scanImageUrl && (
-          <img src={line.scanImageUrl} alt="Captured label"
-               style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--border)', margin: '8px 0' }} />
-        )}
         {aiFilled && (
           <div className="ph-ai-banner" style={{ borderRadius: 12, marginTop: 6 }}>
             <span className="pill-ai">AI</span>

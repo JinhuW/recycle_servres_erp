@@ -7,6 +7,10 @@ import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
 import { LineDrawer, blankLine, type Line } from './DesktopSubmit';
+import { ImageLightbox } from '../../components/ImageLightbox';
+
+const realScan = (u?: string | null): u is string =>
+  !!u && !u.startsWith('data:image/placeholder');
 
 type Props = {
   order: Order;
@@ -54,6 +58,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showDelete, setShowDelete] = useState(false);
@@ -288,16 +293,38 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   >
                     <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
                     <td>
-                      {filled ? (
-                        <>
-                          <div style={{ fontWeight: 500 }}>{itemLabel(l)}</div>
-                          <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(l)}</div>
-                        </>
-                      ) : (
-                        <span className="muted" style={{ fontStyle: 'italic' }}>
-                          {isActive ? 'Editing — fill in below' : 'Not filled in'}
-                        </span>
-                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {realScan(l.scanImageUrl) && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
+                            title={t('aiPhotoLabel')}
+                            style={{
+                              width: 40, height: 40, borderRadius: 8, flexShrink: 0,
+                              border: '1px solid var(--border)', overflow: 'hidden',
+                              padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                            }}
+                          >
+                            <img
+                              src={l.scanImageUrl}
+                              alt={t('aiPhotoLabel')}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                            />
+                          </button>
+                        )}
+                        <div style={{ minWidth: 0 }}>
+                          {filled ? (
+                            <>
+                              <div style={{ fontWeight: 500 }}>{itemLabel(l)}</div>
+                              <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(l)}</div>
+                            </>
+                          ) : (
+                            <span className="muted" style={{ fontStyle: 'italic' }}>
+                              {isActive ? 'Editing — fill in below' : 'Not filled in'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="mono muted" style={{ fontSize: 11 }}>{l.partNumber || '—'}</td>
                     <td className="num mono">{qty}</td>
@@ -653,6 +680,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {lightboxUrl && (
+        <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
       )}
     </>
   );
