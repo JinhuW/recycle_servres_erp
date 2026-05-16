@@ -202,6 +202,12 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
     expect(r.status).toBe(403);
   });
 
+  it('404 for unknown order', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/inventory/transfer-orders/TO-999999/reopen', { token });
+    expect(r.status).toBe(404);
+  });
+
   it('400 when the order is not Received', async () => {
     const { token } = await loginAs(ALEX);
     const moved = await transferOne(token); // still Pending
@@ -259,6 +265,28 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
     expect(so).toBeDefined(); // seed has sell orders
     await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
              VALUES (${so!.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
+    const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
+    expect(r.status).toBe(409);
+    const ord = (await db`SELECT status FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as
+      { status: string };
+    expect(ord.status).toBe('Received'); // unchanged — no writes
+  });
+
+  it('409 (no writes) when every line was re-transferred away', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    // Re-transfer the (now Done) line into a NEW order — this overwrites its
+    // transfer_order_id, so the original order has zero lines left.
+    // Use the full current qty so it's a full move (not a partial clone).
+    const db = getTestDb();
+    const ln = (await db`SELECT qty FROM order_lines WHERE id = ${moved.id}`)[0] as { qty: number };
+    const to2 = WAREHOUSES.find((w) => w !== moved.to)!;
+    const r2 = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to2, lines: [{ id: moved.id, qty: ln.qty }] } },
+    );
+    expect(r2.status).toBe(200);
     const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
     expect(r.status).toBe(409);
     const ord = (await db`SELECT status FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as

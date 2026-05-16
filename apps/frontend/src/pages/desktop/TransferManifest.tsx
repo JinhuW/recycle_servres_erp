@@ -35,6 +35,7 @@ export function TransferManifest({ order, onClose, onReady }: Props) {
     <div className="transfer-manifest">
       <h1 style={{ marginBottom: 4 }}>{t('transfersManifestTitle')}</h1>
       <div style={{ fontFamily: 'monospace', fontSize: 18, marginBottom: 12 }}>{order.id}</div>
+      {/* Metadata labels are intentionally not i18n'd — internal print artifact. */}
       <table style={{ width: '100%', marginBottom: 16, fontSize: 13 }}>
         <tbody>
           <tr><td><strong>From</strong></td><td>{from}</td>
@@ -64,7 +65,7 @@ export function TransferManifest({ order, onClose, onReady }: Props) {
         </tbody>
       </table>
       <div style={{ marginTop: 16, fontSize: 13 }}>
-        <strong>{t('transfersItems', { n: order.item_count })}</strong> · {order.unit_count} units
+        <strong>{t('transfersItems', { n: order.item_count })}</strong> · {t('units', { n: order.unit_count })}
       </div>
     </div>
   );

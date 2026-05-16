@@ -156,6 +156,8 @@ inventory.get('/transfer-orders', async (c) => {
            fw.short AS from_short,
            te.created_at AS transferred_at
     FROM order_lines l
+    -- INNER lateral: safe because /transfer always writes a 'transferred'
+    -- event in the same tx that sets transfer_order_id (invariant).
     JOIN LATERAL (
       SELECT e.detail, e.created_at
       FROM inventory_events e
