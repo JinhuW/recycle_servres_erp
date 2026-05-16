@@ -9,6 +9,7 @@ type TransferRow = {
   brand: string | null;
   capacity: string | null;
   type: string | null;
+  generation: string | null;
   description: string | null;
   part_number: string | null;
   qty: number;
@@ -26,7 +27,7 @@ type Props = {
 };
 
 function rowLabel(r: TransferRow): string {
-  return [r.brand, r.capacity, r.type, r.part_number]
+  return [r.brand, r.capacity, r.generation, r.part_number]
     .filter(Boolean)
     .join(' ') || r.description || r.category;
 }

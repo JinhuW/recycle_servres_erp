@@ -123,7 +123,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => setLine(prev => ({ ...prev, [k]: v }));
 
   const buildLabel = (): string => {
-    if (line.category === 'RAM') return [line.brand, line.capacity, line.type].filter(Boolean).join(' ');
+    if (line.category === 'RAM') return [line.brand, line.capacity, line.generation].filter(Boolean).join(' ');
     if (line.category === 'SSD') return [line.brand, line.capacity, line.interface].filter(Boolean).join(' ');
     if (line.category === 'HDD') return [line.brand, line.capacity, line.rpm ? line.rpm + 'rpm' : null].filter(Boolean).join(' ');
     return line.description ?? 'Item';

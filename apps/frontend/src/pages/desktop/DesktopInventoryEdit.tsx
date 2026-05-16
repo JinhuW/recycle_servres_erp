@@ -10,7 +10,7 @@ import { FormSkeleton } from '../../components/Skeleton';
 type DetailRow = {
   id: string;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
-  brand: string | null; capacity: string | null; type: string | null;
+  brand: string | null; capacity: string | null; type: string | null; generation: string | null;
   classification: string | null; rank: string | null; speed: string | null;
   interface: string | null; form_factor: string | null; description: string | null;
   part_number: string | null; condition: string;
@@ -192,7 +192,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const lossy   = sellPrice > 0 && sellPrice < unitCost;
 
   const cat = item.category;
-  const itemTitle = cat === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.type ?? ''}`.trim()
+  const itemTitle = cat === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.generation ?? ''}`.trim()
                   : cat === 'SSD' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.interface ?? ''}`.trim()
                   : cat === 'HDD' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.rpm ? item.rpm + 'rpm' : ''}`.trim()
                   : (item.description ?? 'Inventory item');

@@ -17,7 +17,7 @@ type Event = {
   created_at: string;
   line_id: string;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
-  brand: string | null; capacity: string | null; type: string | null;
+  brand: string | null; capacity: string | null; type: string | null; generation: string | null;
   interface: string | null; description: string | null;
   part_number: string | null;
   rpm?: number | null;
@@ -81,7 +81,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
   }, [events]);
 
   const itemLabel = (e: Event): string =>
-      e.category === 'RAM' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.type ?? ''}`.trim()
+      e.category === 'RAM' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.generation ?? ''}`.trim()
     : e.category === 'SSD' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.interface ?? ''}`.trim()
     : e.category === 'HDD' ? `${e.brand ?? ''} ${e.capacity ?? ''} ${e.rpm ? e.rpm + 'rpm' : ''}`.trim()
     : (e.description ?? '—');

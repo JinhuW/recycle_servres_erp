@@ -237,7 +237,7 @@ export function DesktopDashboard() {
               <tbody>
                 {(data?.recent ?? []).map(r => {
                   const label = r.category === 'RAM'
-                    ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
+                    ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
                     : r.category === 'SSD'
                       ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD'
