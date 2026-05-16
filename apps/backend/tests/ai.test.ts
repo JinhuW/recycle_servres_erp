@@ -92,6 +92,16 @@ describe('openRouterScan', () => {
     mockFetch(200, { choices: [{ message: { content: 'no json at all' } }] });
     await expect(openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img)).rejects.toThrow(/parse/);
   });
+
+  it('retries once when first reply is unparseable, then parses', async () => {
+    const calls: string[] = ['not json', '{"brand":"Crucial"}'];
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: calls.shift()! } }] }), { status: 200 }),
+    ));
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.fields.brand).toBe('Crucial');
+    expect(calls.length).toBe(0);
+  });
 });
 
 describe('pickProvider', () => {
