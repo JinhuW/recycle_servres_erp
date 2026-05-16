@@ -8,7 +8,7 @@ describe('migration 0028 — transfer_orders schema', () => {
     const db = getTestDb();
     const t = await db`
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'transfer_orders' ORDER BY column_name
+      WHERE table_name = 'transfer_orders' AND table_schema = 'public' ORDER BY column_name
     `;
     const cols = t.map((r: { column_name: string }) => r.column_name);
     expect(cols).toEqual(expect.arrayContaining([
@@ -17,7 +17,7 @@ describe('migration 0028 — transfer_orders schema', () => {
     ]));
     const ol = await db`
       SELECT 1 AS ok FROM information_schema.columns
-      WHERE table_name = 'order_lines' AND column_name = 'transfer_order_id'
+      WHERE table_name = 'order_lines' AND column_name = 'transfer_order_id' AND table_schema = 'public'
     `;
     expect(ol.length).toBe(1);
   });
