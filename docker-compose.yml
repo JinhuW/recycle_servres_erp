@@ -17,5 +17,33 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: recycle_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - apps/backend/.env
+    environment:
+      DATABASE_URL: postgres://recycle:recycle@postgres:5432/recycle_erp
+      PORT: "8787"
+    expose:
+      - "8787"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: recycle_web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
 volumes:
   recycle_pgdata:
