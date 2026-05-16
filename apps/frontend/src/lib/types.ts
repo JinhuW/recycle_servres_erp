@@ -34,6 +34,7 @@ export type OrderLine = {
   category: Category;
   brand: string | null;
   capacity: string | null;
+  generation: string | null;
   type: string | null;
   classification: string | null;
   rank: string | null;
@@ -119,6 +120,7 @@ export type RefPrice = {
   category: Category;
   brand: string | null;
   capacity: string | null;
+  generation: string | null;
   type: string | null;
   classification: string | null;
   rank: string | null;
@@ -170,6 +172,7 @@ export type DashboardData = {
     category: Category;
     brand: string | null;
     capacity: string | null;
+    generation: string | null;
     type: string | null;
     interface: string | null;
     description: string | null;
