@@ -25,7 +25,7 @@ type Event = {
   actor_initials: string | null;
 };
 
-type Filter = 'all' | 'created' | 'status' | 'edited' | 'priced' | 'transferred' | 'received';
+type Filter = 'all' | 'created' | 'status' | 'edited' | 'priced' | 'transferred' | 'received' | 'reopened';
 
 const ACTION_META: Record<string, { icon: IconName; label: string; dot: string }> = {
   created:     { icon: 'plus',  label: 'Created',     dot: 'var(--pos)' },
@@ -34,6 +34,7 @@ const ACTION_META: Record<string, { icon: IconName; label: string; dot: string }
   priced:      { icon: 'tag',   label: 'Priced',      dot: 'var(--accent)' },
   transferred: { icon: 'truck', label: 'Transferred', dot: 'var(--info)' },
   received:    { icon: 'check', label: 'Received',    dot: 'var(--pos)' },
+  reopened:    { icon: 'refresh', label: 'Re-opened',  dot: 'var(--warn)' },
 };
 
 export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
@@ -61,7 +62,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
 
   // Quick counts per action for the filter pills.
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: 0, created: 0, status: 0, edited: 0, priced: 0, transferred: 0, received: 0 };
+    const c: Record<string, number> = { all: 0, created: 0, status: 0, edited: 0, priced: 0, transferred: 0, received: 0, reopened: 0 };
     (events ?? []).forEach(e => {
       c.all++;
       c[e.kind] = (c[e.kind] ?? 0) + 1;
@@ -134,7 +135,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
           display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         }}>
           <div className="seg" style={{ flexShrink: 0 }}>
-            {(['all', 'created', 'status', 'edited', 'priced', 'transferred', 'received'] as Filter[]).map(f => (
+            {(['all', 'created', 'status', 'edited', 'priced', 'transferred', 'received', 'reopened'] as Filter[]).map(f => (
               <button
                 key={f}
                 className={filter === f ? 'active' : ''}
@@ -245,6 +246,7 @@ function EventCard({ event, itemLabel }: { event: Event; itemLabel: string }) {
     : event.kind === 'priced'      ? 'Sell price updated'
     : event.kind === 'transferred' ? 'Transferred'
     : event.kind === 'received'    ? 'Received'
+    : event.kind === 'reopened'    ? 'Re-opened'
     : event.kind === 'edited'      ? `${String(d.field ?? 'Field')} updated`
     : event.kind;
 
