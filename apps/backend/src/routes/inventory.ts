@@ -624,6 +624,7 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
              (SELECT COUNT(*)::int FROM sell_order_lines sl WHERE sl.inventory_id = l.id) AS sell_count
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
+      FOR UPDATE OF l
     `) as unknown as Array<{ id: string; status: string; sell_count: number }>;
 
     if (lines.length === 0) {

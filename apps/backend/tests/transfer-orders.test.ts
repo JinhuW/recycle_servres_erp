@@ -222,7 +222,6 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
       LIMIT 1
     `)[0] as { id: string; status: string; warehouse_id: string; qty: number } | undefined;
     expect(clean).toBeDefined(); // seed has unsold lines
-    const WAREHOUSES = ['WH-LA1', 'WH-DAL', 'WH-NJ2', 'WH-HK', 'WH-AMS'];
     const to = WAREHOUSES.find((w) => w !== clean!.warehouse_id)!;
     const tr = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
