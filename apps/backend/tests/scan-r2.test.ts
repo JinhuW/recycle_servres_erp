@@ -1,24 +1,37 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { multipart, api } from './helpers/app';
-import { loginAs, MARCUS } from './helpers/auth';
-import type { Env } from '../src/types';
-import * as r2module from '../src/r2';
 
 // Verifies the R2-configured path end-to-end: /api/scan/label stores the image
 // in R2 (via the S3 API) and the public URL flows label_scans → order-line
 // JOIN → scanImageUrl (the exact value the mobile/desktop PO previews +
 // lightbox render).
 //
+// Integration test: exercises the REAL src/routes/scan.ts → REAL src/r2.ts.
+// ONLY the external @aws-sdk/client-s3 boundary is mocked.
+//
 // isolate:false safety: a hoisted vi.mock for @aws-sdk/client-s3 cannot
 // intercept the S3Client already bound into src/r2.ts when other test files
-// (e.g. sell-orders.test.ts) import the app before this file runs.  Instead
-// we spy on the r2 module's exported functions, whose namespace bindings
-// Vitest's module runner DOES propagate to callers regardless of import order.
-// The spy implementations call send with the same Put/Delete command shapes
-// that r2.ts would produce, so all existing sent() assertions remain intact.
+// (e.g. sell-orders.test.ts) import the app before this file runs.  Instead,
+// beforeEach calls vi.resetModules() to clear the module cache, registers the
+// mock via vi.doMock (not hoisted), then dynamically imports a fresh copy of
+// helpers/app (and helpers/auth) so the full
+//   app → scan route → r2.ts → (mocked) @aws-sdk/client-s3
+// chain binds to the mock — the same technique as r2.test.ts, applied at the
+// app-graph level.  src/r2.ts and src/routes/* are never spied on or replaced.
+
+// DB helpers use only postgres + Node built-ins — no app-graph dependency.
+// Safe as static imports; resetModules does not affect them.
+const MARCUS = 'marcus@recycleservers.io';
 
 let send: ReturnType<typeof vi.fn>;
+
+// Dynamically-imported helpers (refreshed each beforeEach after doMock).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let multipart: (...args: any[]) => Promise<any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let api: (...args: any[]) => Promise<any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let loginAs: (...args: any[]) => Promise<any>;
 
 type SentCommand = { __type: 'Put' | 'Delete'; input: { Key: string } };
 function sent(): SentCommand[] {
@@ -30,7 +43,7 @@ function jpeg(): File {
 }
 
 const PUBLIC_BASE = 'https://cdn.example.com';
-const S3_ENV: Partial<Env> = {
+const S3_ENV = {
   R2_S3_ENDPOINT: 'https://acct.r2.cloudflarestorage.com',
   R2_ACCESS_KEY_ID: 'AK',
   R2_SECRET_ACCESS_KEY: 'SK',
@@ -40,44 +53,37 @@ const S3_ENV: Partial<Env> = {
 
 beforeEach(async () => {
   await resetDb();
-  send = vi.fn(async () => ({}));
+  send = vi.fn();
+  send.mockResolvedValue({});
 
-  // Spy on uploadAttachment: honour the stub path (no R2 env vars) and
-  // simulate the R2 path by calling send with the same Put-command shape
-  // that r2.ts produces, so sent().filter(c => c.__type === 'Put') works.
-  vi.spyOn(r2module, 'uploadAttachment').mockImplementation(async (env: Env, file: File, prefix: string) => {
-    if (
-      !env.R2_S3_ENDPOINT ||
-      !env.R2_ACCESS_KEY_ID ||
-      !env.R2_SECRET_ACCESS_KEY ||
-      !env.R2_BUCKET ||
-      !env.R2_ATTACHMENTS_PUBLIC_URL
-    ) {
-      return {
-        storageKey: 'stub-' + crypto.randomUUID(),
-        deliveryUrl: 'data:image/placeholder;name=' + encodeURIComponent(file.name),
-        provider: 'stub' as const,
-      };
-    }
-    const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_');
-    const storageKey = prefix + '/' + crypto.randomUUID() + '-' + safeName;
-    await send({ __type: 'Put', input: { Bucket: env.R2_BUCKET, Key: storageKey, ContentType: file.type } });
-    return {
-      storageKey,
-      deliveryUrl: env.R2_ATTACHMENTS_PUBLIC_URL.replace(/\/$/, '') + '/' + storageKey,
-      provider: 'r2' as const,
-    };
-  });
+  // Reset the module registry so a fresh import of src/index (via helpers/app)
+  // will re-resolve @aws-sdk/client-s3 from the doMock registry below, not
+  // from a previously-cached real binding.
+  vi.resetModules();
 
-  // Spy on deleteAttachment: skip stub keys, call send with a Delete-command
-  // shape so sent().filter(c => c.__type === 'Delete') and Key assertions work.
-  vi.spyOn(r2module, 'deleteAttachment').mockImplementation(async (env: Env, storageKey: string) => {
-    if (storageKey.startsWith('stub-')) return;
-    await send({ __type: 'Delete', input: { Bucket: env.R2_BUCKET, Key: storageKey } });
-  });
+  // Register the mock BEFORE any dynamic import that transitively requires
+  // @aws-sdk/client-s3.  function-expression constructors are required —
+  // Vitest 4.1.5 will not invoke arrow-fn vi.fn mocks via `new`.
+  vi.doMock('@aws-sdk/client-s3', () => ({
+    S3Client: function () { return { send }; },
+    PutObjectCommand: function (input: unknown) { return { __type: 'Put', input }; },
+    DeleteObjectCommand: function (input: unknown) { return { __type: 'Delete', input }; },
+  }));
+
+  // Dynamically import helpers/app and helpers/auth AFTER doMock so they pull
+  // in a fresh src/index → src/routes/scan → src/r2 → (mocked) @aws-sdk chain.
+  // helpers/auth imports helpers/app, so both share the same fresh testEnv
+  // (same JWT_SECRET) — login tokens issued by one are accepted by the other.
+  const appModule = await import('./helpers/app');
+  const authModule = await import('./helpers/auth');
+  multipart = appModule.multipart;
+  api = appModule.api;
+  loginAs = authModule.loginAs;
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.doUnmock('@aws-sdk/client-s3');
+});
 
 describe('R2-configured environment: scan image reaches PO lines', () => {
   it('stores in R2 and resolves a real public URL on the order line', async () => {
@@ -109,7 +115,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     expect(rows[0].delivery_url).toBe(sb.deliveryUrl);
 
     // Order line referencing the scan resolves scanImageUrl via the JOIN.
-    const created = await api<{ id: string }>('POST', '/api/orders', {
+    const created = await api('POST', '/api/orders', {
       token,
       body: {
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
@@ -122,7 +128,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     });
     expect(created.status).toBe(201);
 
-    const got = await api<{ order: { lines: { scanImageId: string; scanImageUrl: string | null }[] } }>(
+    const got = await api(
       'GET', '/api/orders/' + created.body.id, { token },
     );
     expect(got.status).toBe(200);
@@ -140,7 +146,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     const env = S3_ENV;
     const scanRes = await multipart('/api/scan/label', { file: jpeg(), category: 'RAM' }, { token, env });
     const key = (scanRes.body as { imageId: string }).imageId;
-    const created = await api<{ id: string }>('POST', '/api/orders', {
+    const created = await api('POST', '/api/orders', {
       token,
       body: {
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
@@ -150,7 +156,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
         }],
       },
     });
-    const got = await api<{ order: { lines: { id: string }[] } }>(
+    const got = await api(
       'GET', '/api/orders/' + created.body.id, { token },
     );
     return { env, key, orderId: created.body.id, lineId: got.body.order.lines[0].id };
