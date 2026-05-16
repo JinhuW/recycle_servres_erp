@@ -107,18 +107,10 @@ describe('openRouterScan', () => {
 });
 
 describe('pickProvider', () => {
-  it('stub when no key and no AI binding', () => {
+  it('stub when no OpenRouter key', () => {
     expect(pickProvider({} as Env)).toBe('stub');
-  });
-  it('workers-ai when AI bound and no OpenRouter key', () => {
-    expect(pickProvider({ AI: { run: async () => ({}) } } as unknown as Env)).toBe('workers-ai');
   });
   it('openrouter when key present', () => {
     expect(pickProvider({ OPENROUTER_API_KEY: 'k' } as Env)).toBe('openrouter');
-  });
-  it('openrouter wins over a Workers AI binding', () => {
-    expect(
-      pickProvider({ OPENROUTER_API_KEY: 'k', AI: { run: async () => ({}) } } as unknown as Env),
-    ).toBe('openrouter');
   });
 });
