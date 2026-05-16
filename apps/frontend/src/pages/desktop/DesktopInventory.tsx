@@ -264,7 +264,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           </h1>
           <div className="page-sub">
             {isManager
-              ? 'Pick items across warehouses to create a sell order. Select rows in Ready or Selling status.'
+              ? 'Pick items across warehouses to create a sell order. Select rows in Reviewing or Done status.'
               : 'Showing only items you submitted. Cost and margin are restricted by role.'}
           </div>
         </div>
