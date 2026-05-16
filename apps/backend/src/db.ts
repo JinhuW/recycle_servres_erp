@@ -29,7 +29,7 @@ function createClient(env: Env): Sql {
     max: 5,
     idle_timeout: 20,
     connect_timeout: 10,
-    prepare: false, // Hyperdrive doesn't support prepared statements
+    prepare: false, // disable prepared statements (safe with poolers; no perf need here)
   });
 }
 
