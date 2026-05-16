@@ -7,7 +7,7 @@ import { fmtUSD } from '../../lib/format';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
 import { AI_CONFIDENCE_FLOOR } from '../../lib/status';
 import {
-  RAM_BRANDS, RAM_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
+  RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
   HDD_BRANDS, HDD_INTERFACE, HDD_FORM, HDD_CAP, HDD_RPM,
   CONDITIONS,
@@ -134,6 +134,7 @@ export type Line = {
   category: Category;
   brand?: string;
   capacity?: string;
+  generation?: string;
   type?: string;
   classification?: string;
   rank?: string;
@@ -192,6 +193,7 @@ function lineFromScan(category: Category, scan: ScanResponse): Line {
     ...base,
     ...(f.brand        ? { brand: f.brand }               : {}),
     ...(f.capacity     ? { capacity: f.capacity }         : {}),
+    ...(f.generation   ? { generation: f.generation }     : {}),
     ...(f.type         ? { type: f.type }                 : {}),
     ...(f.classification ? { classification: f.classification } : {}),
     ...(f.rank         ? { rank: f.rank }                 : {}),
@@ -337,6 +339,7 @@ function OrderForm({
     brand: l.brand ?? null,
     capacity: l.capacity ?? null,
     type: l.type ?? null,
+    generation: l.generation ?? null,
     classification: l.classification ?? null,
     rank: l.rank ?? null,
     speed: l.speed ?? null,
@@ -953,8 +956,12 @@ function RamFields({ line, set }: FieldsProps) {
         <CatSelect value={line.capacity} options={RAM_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
-        <label className="label">Type <span className="req">*</span></label>
-        <CatSelect value={line.type} options={RAM_TYPES} onChange={v => set({ type: v })} />
+        <label className="label">Generation</label>
+        <CatSelect value={line.generation} options={RAM_GENERATIONS} onChange={v => set({ generation: v })} />
+      </div>
+      <div className="field">
+        <label className="label">Device Type</label>
+        <CatSelect value={line.type} options={RAM_DEVICE_TYPES} onChange={v => set({ type: v })} />
       </div>
       <div className="field">
         <label className="label">Classification</label>
