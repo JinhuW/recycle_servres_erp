@@ -4,10 +4,10 @@ Mobile companion app for the Recycle Servers inventory ERP. Field purchasers
 scan part labels with their phone, the AI fills out the spec sheet, and the
 order lands in the warehouse pipeline. Built as two services:
 
-- **`backend/`** — Cloudflare Worker + Hono + Postgres (via Hyperdrive in prod,
-  direct connection in dev). Cloudflare Images for label-scan storage.
-  Cloudflare Workers AI vision for OCR, with a deterministic stub fallback so
-  the demo works without an account.
+- **`backend/`** — Node + Hono + Postgres. Runs as a Docker container; Cloudflare
+  R2 (via its S3-compatible API) stores label-scan images and sell-order
+  attachments. OpenRouter vision does label OCR, with a deterministic stub
+  fallback so dev/tests run offline.
 - **`frontend/`** — Vite + React + TypeScript PWA. Two shells share auth +
   i18n + API client and switch on viewport width:
     - **Mobile (< 720px)**: 8 phone screens — Login, Role picker, Dashboard,
@@ -45,65 +45,60 @@ in dev).
 ## Architecture
 
 ```
-┌─────────────────┐         ┌──────────────────────┐
-│  React PWA      │  HTTPS  │  Cloudflare Worker   │
-│  (Vite, mobile) │ ──────► │  (Hono router)       │
-│                 │         │                      │
-│  - Capture flow │         │  ┌────────────────┐  │
-│  - Orders/Mkt   │         │  │ /api/auth      │  │
-│  - i18n EN/ZH   │         │  │ /api/orders    │  │
-└────────┬────────┘         │  │ /api/scan      │  │
-         │ multipart upload │  │ /api/market    │  │
-         └─────────────────►│  └────────────────┘  │
-                            │           │          │
-                            │           ▼          │
-                            │  ┌────────────────┐  │
-                            │  │ Cloudflare     │  │
-                            │  │ Images (label  │  │
-                            │  │ photos)        │  │
-                            │  └────────────────┘  │
-                            │           │          │
-                            │           ▼          │
-                            │  ┌────────────────┐  │
-                            │  │ Workers AI     │  │
-                            │  │ (vision OCR)   │  │
-                            │  └────────────────┘  │
-                            │           │          │
-                            └───────────┼──────────┘
-                                        ▼
-                              ┌──────────────────┐
-                              │  Postgres        │
-                              │  (via Hyperdrive)│
-                              └──────────────────┘
+┌─────────────────┐  HTTPS  ┌──────────────────────┐
+│  React SPA      │ ──────▶ │  Caddy (web)         │
+│  (served by     │         │   / → static SPA     │
+│   Caddy)        │         │   /api → backend     │
+└─────────────────┘         └──────────┬───────────┘
+                                        │
+                             ┌──────────▼───────────┐
+                             │  backend (Node/Hono) │
+                             │  Postgres · R2 (S3)  │
+                             │  OpenRouter OCR      │
+                             └──────────────────────┘
 ```
 
 ## Environment variables
 
-Backend (`backend/.dev.vars`, see `.dev.vars.example`):
+Backend (`apps/backend/.env`):
 
 ```
 DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp
 JWT_SECRET=dev-secret-change-me
-OPENROUTER_API_KEY=                # label OCR — default provider when set
+OPENROUTER_API_KEY=                # label OCR — required in prod, stub used when absent
 # OPENROUTER_OCR_MODEL=google/gemini-2.0-flash-001   # or anthropic/claude-sonnet-4.5, openai/gpt-4o
-CF_ACCOUNT_ID=                     # leave blank in dev to use stub Image storage
-CF_IMAGES_TOKEN=
+R2_S3_ENDPOINT=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET=recycle-erp-attachments
+R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com
 ```
 
 Frontend (`frontend/.env.local`):
 
 ```
-VITE_API_BASE=http://localhost:8787
+VITE_API_BASE=http://localhost:8080/api
 ```
 
-## Deployment notes
+## Deployment
 
-- Provision a Hyperdrive binding pointing at your Postgres (Neon/Supabase/RDS).
-  Add the binding as `HYPERDRIVE` in `wrangler.toml` and the Worker auto-uses
-  it instead of `DATABASE_URL`.
-- Provision Cloudflare Images and create an API token with `Images:Edit`
-  permissions; set `CF_ACCOUNT_ID` and `CF_IMAGES_TOKEN` as Worker secrets.
-- OCR provider is chosen by credentials: `OPENROUTER_API_KEY` set → OpenRouter
-  (default); else a Workers AI `[ai]` binding → Llama 3.2 vision; else the
-  deterministic stub. No feature flag needed.
-- Frontend deploys as static assets — Cloudflare Pages, Vercel, or any CDN.
+Single-host Docker Compose:
+
+1. Create `apps/backend/.env` with `JWT_SECRET`, `OPENROUTER_API_KEY`, and the
+   R2 S3 settings (`R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+   `R2_BUCKET=recycle-erp-attachments`,
+   `R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com`). Generate the
+   R2 credentials in the Cloudflare dashboard → R2 → Manage API Tokens.
+2. `docker compose up -d --build`
+3. The app is served at `http://<host>:8080` (put it behind your TLS-terminating
+   edge/reverse proxy). The backend runs DB migrations on startup; on first
+   deploy, seed demo/reference data once with
+   `docker compose exec backend node scripts/seed.mjs`.
+
+Local dev (only Postgres in Docker):
+
+```bash
+docker compose up -d postgres
+pnpm --filter recycle-erp-backend dev
+pnpm --filter recycle-erp-frontend dev
+```
