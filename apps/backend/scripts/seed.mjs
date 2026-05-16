@@ -492,7 +492,15 @@ try {
   }
 
   console.log('· Seeding orders + lines…');
-  await sql`DELETE FROM order_lines`;
+  // Delete children before parents to satisfy FK constraints on re-seed.
+  // inventory_events is append-only (trigger blocks DELETE), so briefly
+  // disable its delete-lock for the seed reset only.
+  await sql`ALTER TABLE inventory_events DISABLE TRIGGER inventory_events_no_delete`;
+  await sql`DELETE FROM inventory_events`;   // → order_lines
+  await sql`ALTER TABLE inventory_events ENABLE TRIGGER inventory_events_no_delete`;
+  await sql`DELETE FROM sell_order_lines`;   // → sell_orders, order_lines (inventory_id)
+  await sql`DELETE FROM sell_orders`;        // → customers
+  await sql`DELETE FROM order_lines`;        // → orders (cascade to inventory_events now empty)
   await sql`DELETE FROM orders`;
   const orders = buildOrders(buildSubmissions());
   for (const o of orders) {
@@ -537,8 +545,6 @@ try {
   }
 
   console.log('· Seeding sell orders + lines…');
-  await sql`DELETE FROM sell_order_lines`;
-  await sql`DELETE FROM sell_orders`;
   // Pull sellable inventory lines (Selling/Sold) and group into 6 example sell orders.
   const sellable = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.type, l.interface, l.form_factor,
@@ -594,7 +600,6 @@ try {
   }
 
   console.log('· Seeding inventory audit events…');
-  await sql`DELETE FROM inventory_events`;
   const allLines = await sql`
     SELECT l.id, o.user_id, o.created_at, l.status
     FROM order_lines l JOIN orders o ON o.id = l.order_id
