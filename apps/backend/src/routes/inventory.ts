@@ -28,7 +28,7 @@ inventory.get('/', async (c) => {
     : sql`TRUE`;
 
   const rows = await sql`
-    SELECT l.id, l.category, l.brand, l.capacity, l.type, l.classification, l.rank, l.speed,
+    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
            l.interface, l.form_factor, l.description, l.part_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.position,
@@ -81,7 +81,7 @@ inventory.get('/events/all', async (c) => {
   const rows = await sql`
     SELECT
       e.id, e.kind, e.detail, e.created_at,
-      l.id AS line_id, l.category, l.brand, l.capacity, l.type,
+      l.id AS line_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.interface, l.description, l.part_number, l.rpm,
       act.name AS actor_name, act.initials AS actor_initials
     FROM inventory_events e
@@ -124,7 +124,7 @@ inventory.get('/transfers', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const rows = await sql`
-    SELECT l.id, l.category, l.brand, l.capacity, l.type, l.classification,
+    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
            l.rank, l.speed, l.interface, l.form_factor, l.description,
            l.part_number, l.condition, l.qty,
            l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
@@ -382,6 +382,7 @@ inventory.post('/transfer', async (c) => {
     category: string;
     brand: string | null;
     capacity: string | null;
+    generation: string | null;
     type: string | null;
     classification: string | null;
     rank: string | null;
@@ -405,7 +406,7 @@ inventory.post('/transfer', async (c) => {
 
   const ids = reqLines.map((r) => r.id);
   const sources = (await sql`
-    SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.type, l.classification,
+    SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
            l.rank, l.speed, l.interface, l.form_factor, l.description, l.part_number,
            l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
            l.health, l.rpm, l.scan_image_id, l.scan_confidence,
@@ -464,14 +465,14 @@ inventory.post('/transfer', async (c) => {
         `;
         const inserted = (await tx`
           INSERT INTO order_lines (
-            order_id, category, brand, capacity, type, classification, rank, speed,
+            order_id, category, brand, capacity, generation, type, classification, rank, speed,
             interface, form_factor, description, part_number, condition,
             qty, unit_cost, sell_price, status,
             scan_image_id, scan_confidence, position,
             health, rpm, warehouse_id
           )
           VALUES (
-            ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.type},
+            ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.generation}, ${s.type},
             ${s.classification}, ${s.rank}, ${s.speed}, ${s.interface},
             ${s.form_factor}, ${s.description}, ${s.part_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
