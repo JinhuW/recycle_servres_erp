@@ -24,15 +24,16 @@ import {
   MOBILE_VIEW_TO_PATH, pathToMobileView,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
+import { buildOrderSubmit } from './lib/orderSubmit';
 
 type ReturnTo = 'idle' | 'review';
 
 type CaptureState =
   | { phase: 'idle' }
   | { phase: 'category' }
-  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
-  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
-  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; draftId?: string };
+  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
+  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
+  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; draftId?: string };
 
 type Toast = { msg: string; kind: 'success' | 'error' };
 
@@ -141,7 +142,7 @@ function Shell() {
     // Capture current state synchronously so we can read draftId and compute
     // the new lines array before the async PATCH.
     if (capture.phase !== 'form') return;
-    const { draftId, editingLineIdx, category, editingId } = capture;
+    const { draftId, editingLineIdx, category, editingId, originalLineIds } = capture;
 
     // Build the updated lines array.
     const newLines = (editingLineIdx != null)
@@ -158,6 +159,7 @@ function Shell() {
       detected: null,
       lines: newLines,
       editingId,
+      originalLineIds,
       draftId,
     });
 
@@ -187,7 +189,7 @@ function Shell() {
   const addAnotherItem = () => {
     setCapture(c => {
       if (c.phase !== 'review') return c;
-      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, editingLineIdx: null, returnTo: 'review', draftId: c.draftId };
+      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, editingLineIdx: null, returnTo: 'review', draftId: c.draftId };
     });
   };
 
@@ -200,6 +202,7 @@ function Shell() {
         detected: null,
         lines: c.lines,
         editingId: c.editingId,
+        originalLineIds: c.originalLineIds,
         editingLineIdx: idx,
         returnTo: 'review',
         draftId: c.draftId,
@@ -211,7 +214,7 @@ function Shell() {
     setCapture(c => {
       if (c.phase !== 'camera' && c.phase !== 'form') return c;
       if (c.returnTo === 'review') {
-        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, draftId: c.draftId };
+        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, draftId: c.draftId };
       }
       return { phase: 'idle' };
     });
@@ -222,7 +225,7 @@ function Shell() {
       if (c.phase !== 'form') return c;
       return {
         phase: 'camera', category: c.category, detected: null, lines: c.lines,
-        editingId: c.editingId, editingLineIdx: c.editingLineIdx ?? null, returnTo: c.returnTo,
+        editingId: c.editingId, originalLineIds: c.originalLineIds, editingLineIdx: c.editingLineIdx ?? null, returnTo: c.returnTo,
         draftId: c.draftId,
       };
     });
@@ -235,63 +238,24 @@ function Shell() {
   const submitOrder = async (meta: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => {
     if (capture.phase !== 'review') return;
 
-    // Edit-existing-order path (pre-draft flow): restore pre-227fd45 behavior.
-    if (capture.editingId) {
-      try {
-        await api.post('/api/orders', {
-          category: capture.category,
-          warehouseId: meta.warehouseId,
-          payment: meta.payment,
-          notes: meta.notes,
-          totalCost: meta.totalCost,
-          lines: capture.lines.map(l => ({
-            category: l.category,
-            brand: l.brand,
-            capacity: l.capacity,
-            type: l.type,
-            classification: l.classification,
-            rank: l.rank,
-            speed: l.speed,
-            interface: l.interface,
-            formFactor: l.formFactor,
-            description: l.description,
-            partNumber: l.partNumber,
-            condition: l.condition ?? 'Pulled — Tested',
-            qty: l.qty,
-            unitCost: l.unitCost,
-            sellPrice: l.sellPrice ?? null,
-            scanImageId: l.scanImageId ?? null,
-            scanConfidence: l.scanConfidence ?? null,
-          })),
-        });
-        setCapture({ phase: 'idle' });
-        // setView('history') navigates to /purchase-orders; if the user arrived
-        // via a /purchase-orders/:id deep link, this also clears the id.
-        setView('history');
-        showToast(t('orderSubmitted'));
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
-      }
+    // Editing an existing order PATCHes that order; finalizing a new draft
+    // PATCHes the draft. Submitting from review never creates a new order.
+    const req = buildOrderSubmit(
+      {
+        editingId: capture.editingId,
+        draftId: capture.draftId,
+        category: capture.category,
+        lines: capture.lines,
+        originalLineIds: capture.originalLineIds,
+      },
+      meta,
+    );
+    if (req.kind === 'error') {
+      showToast(req.message, 'error');
       return;
     }
-
-    // New-order draft-finalize path (227fd45 behavior).
-    const draftId = capture.draftId;
-    if (!draftId) {
-      showToast('No draft order — please cancel and retry.', 'error');
-      return;
-    }
-    // Only send lines that haven't been confirmed already (confirmed ones were
-    // written to the DB when the user saved each line — avoid double-insert).
-    const unconfirmedLines = capture.lines.filter(l => !l._confirmed);
     try {
-      await api.patch('/api/orders/' + draftId, {
-        warehouseId: meta.warehouseId,
-        payment: meta.payment,
-        notes: meta.notes || null,
-        totalCost: meta.totalCost,
-        ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
-      });
+      await api.patch(req.url, req.body);
       setCapture({ phase: 'idle' });
       // setView('history') navigates to /purchase-orders; if the user arrived
       // via a /purchase-orders/:id deep link, this also clears the id.
@@ -308,6 +272,7 @@ function Shell() {
       category: o.category,
       detected: null,
       editingId: o.id,
+      originalLineIds: o.lines.map(l => l.id),
       lines: o.lines.map(l => ({
         id: l.id,
         category: l.category,
