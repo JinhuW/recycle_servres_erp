@@ -1,14 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const send = vi.fn();
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn(function () { return { send }; }),
-  PutObjectCommand: vi.fn(function (input) { return { __type: 'Put', input }; }),
-  DeleteObjectCommand: vi.fn(function (input) { return { __type: 'Delete', input }; }),
-}));
-
-import { uploadAttachment, deleteAttachment } from '../src/r2';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Env } from '../src/types';
+
+// Under isolate:false, multiple test files share one module registry.  Any
+// file that imports the app (e.g. sell-orders.test.ts) pulls in src/r2.ts and
+// binds the real @aws-sdk/client-s3 S3Client before this file can mock it via
+// a hoisted vi.mock, making the mock invisible to r2.ts.
+//
+// Fix: skip hoisted vi.mock entirely.  Instead, beforeEach calls
+// vi.resetModules() to clear the module cache, registers the mock via
+// vi.doMock (not hoisted), then dynamically imports a fresh r2.ts that
+// resolves S3Client from the mock.  afterEach unmocks so later files are
+// unaffected.
+
+let send: ReturnType<typeof vi.fn>;
+let uploadAttachment: typeof import('../src/r2').uploadAttachment;
+let deleteAttachment: typeof import('../src/r2').deleteAttachment;
 
 const s3Env: Env = {
   JWT_SECRET: 'x',
@@ -23,9 +29,25 @@ function jpeg(): File {
   return new File([new Uint8Array([0xff, 0xd8])], 'My Label.jpg', { type: 'image/jpeg' });
 }
 
-describe('r2 via S3 API', () => {
-  beforeEach(() => { send.mockReset(); send.mockResolvedValue({}); });
+beforeEach(async () => {
+  send = vi.fn();
+  send.mockResolvedValue({});
+  vi.resetModules();
+  vi.doMock('@aws-sdk/client-s3', () => ({
+    S3Client: function () { return { send }; },
+    PutObjectCommand: function (input: unknown) { return { __type: 'Put', input }; },
+    DeleteObjectCommand: function (input: unknown) { return { __type: 'Delete', input }; },
+  }));
+  const r2 = await import('../src/r2');
+  uploadAttachment = r2.uploadAttachment;
+  deleteAttachment = r2.deleteAttachment;
+});
 
+afterEach(() => {
+  vi.doUnmock('@aws-sdk/client-s3');
+});
+
+describe('r2 via S3 API', () => {
   it('uploads to S3 and returns a real public URL', async () => {
     const r = await uploadAttachment(s3Env, jpeg(), 'label-scans');
     expect(r.provider).toBe('r2');

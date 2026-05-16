@@ -3,25 +3,27 @@ import { resetDb, getTestDb } from './helpers/db';
 import { multipart, api } from './helpers/app';
 import { loginAs, MARCUS } from './helpers/auth';
 import type { Env } from '../src/types';
+import * as r2module from '../src/r2';
 
 // Verifies the R2-configured path end-to-end: /api/scan/label stores the image
 // in R2 (via the S3 API) and the public URL flows label_scans → order-line
 // JOIN → scanImageUrl (the exact value the mobile/desktop PO previews +
-// lightbox render). The @aws-sdk/client-s3 client is mocked; `send` records
-// the Put/Delete commands the route issues.
+// lightbox render).
+//
+// isolate:false safety: a hoisted vi.mock for @aws-sdk/client-s3 cannot
+// intercept the S3Client already bound into src/r2.ts when other test files
+// (e.g. sell-orders.test.ts) import the app before this file runs.  Instead
+// we spy on the r2 module's exported functions, whose namespace bindings
+// Vitest's module runner DOES propagate to callers regardless of import order.
+// The spy implementations call send with the same Put/Delete command shapes
+// that r2.ts would produce, so all existing sent() assertions remain intact.
 
-const send = vi.fn(async () => ({}));
-vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: function () {
-    return { send };
-  },
-  PutObjectCommand: function (input: unknown) {
-    return { __type: 'Put', input };
-  },
-  DeleteObjectCommand: function (input: unknown) {
-    return { __type: 'Delete', input };
-  },
-}));
+let send: ReturnType<typeof vi.fn>;
+
+type SentCommand = { __type: 'Put' | 'Delete'; input: { Key: string } };
+function sent(): SentCommand[] {
+  return send.mock.calls.map((c) => c[0] as SentCommand);
+}
 
 function jpeg(): File {
   return new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'label.jpg', { type: 'image/jpeg' });
@@ -36,15 +38,48 @@ const S3_ENV: Partial<Env> = {
   R2_ATTACHMENTS_PUBLIC_URL: PUBLIC_BASE,
 };
 
-type SentCommand = { __type: 'Put' | 'Delete'; input: { Key: string } };
-function sent(): SentCommand[] {
-  return send.mock.calls.map((c) => c[0] as SentCommand);
-}
+beforeEach(async () => {
+  await resetDb();
+  send = vi.fn(async () => ({}));
+
+  // Spy on uploadAttachment: honour the stub path (no R2 env vars) and
+  // simulate the R2 path by calling send with the same Put-command shape
+  // that r2.ts produces, so sent().filter(c => c.__type === 'Put') works.
+  vi.spyOn(r2module, 'uploadAttachment').mockImplementation(async (env: Env, file: File, prefix: string) => {
+    if (
+      !env.R2_S3_ENDPOINT ||
+      !env.R2_ACCESS_KEY_ID ||
+      !env.R2_SECRET_ACCESS_KEY ||
+      !env.R2_BUCKET ||
+      !env.R2_ATTACHMENTS_PUBLIC_URL
+    ) {
+      return {
+        storageKey: 'stub-' + crypto.randomUUID(),
+        deliveryUrl: 'data:image/placeholder;name=' + encodeURIComponent(file.name),
+        provider: 'stub' as const,
+      };
+    }
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_');
+    const storageKey = prefix + '/' + crypto.randomUUID() + '-' + safeName;
+    await send({ __type: 'Put', input: { Bucket: env.R2_BUCKET, Key: storageKey, ContentType: file.type } });
+    return {
+      storageKey,
+      deliveryUrl: env.R2_ATTACHMENTS_PUBLIC_URL.replace(/\/$/, '') + '/' + storageKey,
+      provider: 'r2' as const,
+    };
+  });
+
+  // Spy on deleteAttachment: skip stub keys, call send with a Delete-command
+  // shape so sent().filter(c => c.__type === 'Delete') and Key assertions work.
+  vi.spyOn(r2module, 'deleteAttachment').mockImplementation(async (env: Env, storageKey: string) => {
+    if (storageKey.startsWith('stub-')) return;
+    await send({ __type: 'Delete', input: { Bucket: env.R2_BUCKET, Key: storageKey } });
+  });
+});
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('R2-configured environment: scan image reaches PO lines', () => {
-  beforeEach(async () => { await resetDb(); send.mockClear(); });
-  afterEach(() => vi.restoreAllMocks());
-
   it('stores in R2 and resolves a real public URL on the order line', async () => {
     const { token } = await loginAs(MARCUS);
 
@@ -62,7 +97,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     expect(sb.imageId.startsWith('stub-')).toBe(false);
 
     // Real public URL, not a stub placeholder.
-    expect(sb.deliveryUrl).toBe(`${PUBLIC_BASE}/${sb.imageId}`);
+    expect(sb.deliveryUrl).toBe(PUBLIC_BASE + '/' + sb.imageId);
     expect(sb.deliveryUrl.startsWith('data:image/placeholder')).toBe(false);
 
     // Persisted to label_scans.
@@ -95,7 +130,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     expect(line.scanImageId).toBe(sb.imageId);
     expect(line.scanImageUrl).toBe(sb.deliveryUrl);
 
-    // Frontend realScan() guard: truthy and not a placeholder → renders.
+    // Frontend realScan() guard: truthy and not a placeholder -> renders.
     const realScan = (uurl?: string | null): uurl is string =>
       !!uurl && !uurl.startsWith('data:image/placeholder');
     expect(realScan(line.scanImageUrl)).toBe(true);
@@ -125,6 +160,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     const { token } = await loginAs(MARCUS);
     const { env, key, orderId, lineId } = await scanAndOrder(token);
 
+    send.mockClear();
     const r = await api('PATCH', '/api/orders/' + orderId, {
       token, env, body: { removeLineIds: [lineId] },
     });
@@ -138,6 +174,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     const { token } = await loginAs(MARCUS);
     const { env, key, orderId } = await scanAndOrder(token);
 
+    send.mockClear();
     const r = await api('DELETE', '/api/orders/' + orderId, { token, env });
     expect(r.status).toBe(200);
     const deletes = sent().filter((c) => c.__type === 'Delete');
