@@ -14,20 +14,20 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@hono/node-server": "^1.13.7",
     "@recycle-erp/shared": "workspace:*",
     "@tsndr/cloudflare-worker-jwt": "^3.1.4",
     "bcryptjs": "^2.4.3",
     "hono": "^4.6.14",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^25.6.2",
     "dotenv": "^16.4.7",
-    "tsx": "^4.21.0",
     "typescript": "^5.7.2",
-    "vitest": "^4.1.5",
-    "wrangler": "^4.90.0"
+    "vitest": "^4.1.5"
   }
 }
