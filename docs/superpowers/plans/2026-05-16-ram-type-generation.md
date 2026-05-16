@@ -706,6 +706,7 @@ In each location the RAM label is built as `[brand, capacity, type]` / `${brand}
 - `DesktopSubmit.tsx:500,779` — `${l.type ?? ''}` / `${line.type ?? ''}` → `${l.generation ?? ''}` / `${line.generation ?? ''}`
 - `DesktopInventoryEdit.tsx:195` — `${item.type ?? ''}` → `${item.generation ?? ''}` (also add `generation` to its row type at line ~13)
 - **(plan-gap fix, found during T13)** `Inventory.tsx:103` — `${r.type ?? ''}` → `${r.generation ?? ''}`; `DesktopInventory.tsx:179` (`itemLabel`) and `:726` (QuickView title) — `${r.type ?? ''}`/`${item.type ?? ''}` → `${...generation ?? ''}`. (`generation` was added to `InventoryRow`/`InventoryItem` by T13 commit fbf5e32, so only the label expressions remain.) These two files were omitted from the original T12 list; their RAM labels must also use `generation`.
+- **(2nd plan-gap fix, found during T13 review — repo-wide sweep)** `Dashboard.tsx:183`, `Orders.tsx:218`, `DesktopOrders.tsx:567` — RAM short-label `${...type ?? ''}` → `${...generation ?? ''}`. Add `generation: string | null;` to any LOCAL row type these use if not already covered by a shared type. The authoritative completion check for T12 is: `grep -rn "category === 'RAM'" apps/frontend/src` shows **no** RAM short-label (brand+capacity+DDR token) still referencing `.type`.
 
 - [ ] **Step 2: Typecheck**
 
