@@ -19,6 +19,7 @@ import { DesktopInventory } from './pages/desktop/DesktopInventory';
 import { DesktopInventoryEdit } from './pages/desktop/DesktopInventoryEdit';
 import { DesktopMarket } from './pages/desktop/DesktopMarket';
 import { DesktopSellOrders } from './pages/desktop/DesktopSellOrders';
+import { DesktopTransfers } from './pages/desktop/DesktopTransfers';
 import { DesktopSettings } from './pages/desktop/DesktopSettings';
 import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
@@ -79,7 +80,7 @@ export function DesktopApp() {
   if (!user) return <Login variant="desktop" />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'settings')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'transfers' || view === 'settings')
     ? 'dashboard'
     : view;
 
@@ -130,6 +131,7 @@ export function DesktopApp() {
           {view2 === 'sellorders' && (
             <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
           )}
+          {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
           {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
         </div>
       </main>
