@@ -27,6 +27,7 @@ const blankDefaults = (category: Category): DraftLine => ({
   brand: null,
   capacity: null,
   type: null,
+  generation: null,
   classification: null,
   rank: null,
   speed: null,
@@ -48,6 +49,7 @@ const aiPatch = (scan: ScanResponse): Partial<DraftLine> => {
   if (f.brand)          out.brand          = f.brand as string;
   if (f.capacity)       out.capacity       = f.capacity as string;
   if (f.type)           out.type           = f.type as string;
+  if (f.generation)     out.generation     = f.generation as string;
   if (f.classification) out.classification = f.classification as string;
   if (f.rank)           out.rank           = f.rank as string;
   if (f.speed)          out.speed          = f.speed as string;
@@ -67,6 +69,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
     brand:          (f.brand as string)          ?? null,
     capacity:       (f.capacity as string)       ?? null,
     type:           (f.type as string)           ?? null,
+    generation:     (f.generation as string)     ?? null,
     classification: (f.classification as string) ?? null,
     rank:           (f.rank as string)           ?? null,
     speed:          (f.speed as string)          ?? null,
