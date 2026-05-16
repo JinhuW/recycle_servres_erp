@@ -596,4 +596,65 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
   return c.json({ ok: true, id });
 });
 
+// Re-open a received transfer order. Manager-only. Reverts the lines that
+// CURRENTLY point to the order (a line re-transferred elsewhere had its
+// transfer_order_id overwritten and is intentionally not chased). Guard:
+// every such line must still be Done and not committed to a sell order.
+inventory.post('/transfer-orders/:id/reopen', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  type Outcome = { code: 404 | 400 | 409; msg: string } | { code: 200 };
+  let outcome: Outcome = { code: 200 };
+
+  await sql.begin(async (tx) => {
+    const ord = (await tx`
+      SELECT id, status FROM transfer_orders WHERE id = ${id} FOR UPDATE
+    `)[0] as { id: string; status: string } | undefined;
+    if (!ord) { outcome = { code: 404, msg: `transfer order ${id} not found` }; return; }
+    if (ord.status !== 'Received') {
+      outcome = { code: 400, msg: `transfer order ${id} is ${ord.status}; only Received can be re-opened` };
+      return;
+    }
+
+    const lines = (await tx`
+      SELECT l.id, l.status,
+             (SELECT COUNT(*)::int FROM sell_order_lines sl WHERE sl.inventory_id = l.id) AS sell_count
+      FROM order_lines l
+      WHERE l.transfer_order_id = ${id}
+    `) as unknown as Array<{ id: string; status: string; sell_count: number }>;
+
+    if (lines.length === 0) {
+      outcome = { code: 409, msg: `transfer order ${id} has no lines to re-open` };
+      return;
+    }
+    const bad = lines.filter((l) => l.status !== 'Done' || l.sell_count > 0);
+    if (bad.length > 0) {
+      outcome = { code: 409, msg: `cannot re-open: line(s) ${bad.map((l) => l.id).join(', ')} have moved on since receipt` };
+      return;
+    }
+
+    for (const l of lines) {
+      await tx`UPDATE order_lines SET status = 'In Transit' WHERE id = ${l.id}`;
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        VALUES (${l.id}, ${u.id}, 'reopened', ${tx.json({ transfer_order_id: id })})
+      `;
+    }
+    await tx`
+      UPDATE transfer_orders
+         SET status = 'Pending', received_at = NULL, received_by = NULL
+       WHERE id = ${id}
+    `;
+  });
+
+  if (outcome.code !== 200) {
+    const err = outcome as { code: 404 | 400 | 409; msg: string };
+    return c.json({ error: err.msg }, err.code);
+  }
+  return c.json({ ok: true, id });
+});
+
 export default inventory;

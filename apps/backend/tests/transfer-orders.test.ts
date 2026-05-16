@@ -192,3 +192,78 @@ describe('POST /api/inventory/transfer-orders/:id/receive', () => {
     expect(again.status).toBe(400);
   });
 });
+
+describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('403 for non-manager', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('POST', '/api/inventory/transfer-orders/TO-forbidden-test/reopen', { token });
+    expect(r.status).toBe(403);
+  });
+
+  it('400 when the order is not Received', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token); // still Pending
+    const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
+    expect(r.status).toBe(400);
+  });
+
+  it('reverts a clean received order back to Pending / In Transit', async () => {
+    const { token } = await loginAs(ALEX);
+    // Pick a line NOT committed to any sell order so the reopen guard passes.
+    const db = getTestDb();
+    const clean = (await db`
+      SELECT l.id, l.status, COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id, l.qty
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done')
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+      LIMIT 1
+    `)[0] as { id: string; status: string; warehouse_id: string; qty: number } | undefined;
+    expect(clean).toBeDefined(); // seed has unsold lines
+    const WAREHOUSES = ['WH-LA1', 'WH-DAL', 'WH-NJ2', 'WH-HK', 'WH-AMS'];
+    const to = WAREHOUSES.find((w) => w !== clean!.warehouse_id)!;
+    const tr = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [{ id: clean!.id, qty: clean!.qty }] } },
+    );
+    expect(tr.status).toBe(200);
+    const orderId = tr.body.transferOrderId;
+    await api('POST', `/api/inventory/transfer-orders/${orderId}/receive`, { token });
+    const r = await api<{ ok: true; id: string }>(
+      'POST', `/api/inventory/transfer-orders/${orderId}/reopen`, { token },
+    );
+    expect(r.status).toBe(200);
+    const ord = (await db`SELECT status, received_at FROM transfer_orders WHERE id = ${orderId}`)[0] as
+      { status: string; received_at: string | null };
+    expect(ord.status).toBe('Pending');
+    expect(ord.received_at).toBeNull();
+    const ln = (await db`SELECT status FROM order_lines WHERE id = ${clean!.id}`)[0] as { status: string };
+    expect(ln.status).toBe('In Transit');
+    const ev = (await db`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${clean!.id} AND kind = 'reopened' ORDER BY created_at DESC LIMIT 1
+    `)[0] as { detail: Record<string, unknown> };
+    expect(ev.detail.transfer_order_id).toBe(orderId);
+  });
+
+  it('409 (no writes) when a line is committed to a sell order', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    // Reuse a seeded sell order (avoids fabricating sell_orders + its FKs);
+    // just add a sell_order_lines row pointing at our received line.
+    const db = getTestDb();
+    const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as
+      { id: string } | undefined;
+    expect(so).toBeDefined(); // seed has sell orders
+    await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
+             VALUES (${so!.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
+    const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
+    expect(r.status).toBe(409);
+    const ord = (await db`SELECT status FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as
+      { status: string };
+    expect(ord.status).toBe('Received'); // unchanged — no writes
+  });
+});
