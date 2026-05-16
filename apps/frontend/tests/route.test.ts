@@ -33,3 +33,9 @@ describe('pathToDesktopView — unchanged behaviour', () => {
     expect(pathToDesktopView('/nope')).toBe('dashboard');
   });
 });
+
+describe('pathToDesktopView — transfers', () => {
+  it('resolves the transfers path', () => {
+    expect(pathToDesktopView('/transfers')).toBe('transfers');
+  });
+});
