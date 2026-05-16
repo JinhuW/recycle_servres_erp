@@ -1,4 +1,4 @@
-// Recycle Servers ERP — Cloudflare Worker entrypoint.
+// Recycle Servers ERP — Hono backend entrypoint (served by src/server.ts on Node).
 // Routes are mounted under /api/*. CORS is open in dev so the Vite SPA on
 // :5173 can call us; in prod tighten the allowlist.
 
