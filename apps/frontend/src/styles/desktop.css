@@ -1418,3 +1418,18 @@ html.desktop, body.desktop, .desktop #root {
   .skeleton-grid  { grid-template-columns: 1fr; }
 }
 
+/* ── Transfer manifest print scope ──────────────────────────────────────── */
+.transfer-manifest { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  .transfer-manifest, .transfer-manifest * { visibility: visible; }
+  .transfer-manifest {
+    display: block;
+    position: absolute;
+    inset: 0;
+    padding: 24px;
+    background: #fff;
+    color: #000;
+  }
+}
+
