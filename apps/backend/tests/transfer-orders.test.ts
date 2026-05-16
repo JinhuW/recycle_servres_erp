@@ -96,3 +96,44 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     expect(ord.from_warehouse_id).toBeNull();
   });
 });
+
+import { MARCUS } from './helpers/auth';
+
+describe('GET /api/inventory/transfer-orders', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('403 for non-manager', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('GET', '/api/inventory/transfer-orders', { token });
+    expect(r.status).toBe(403);
+  });
+
+  it('default lists Pending orders with their lines + from/to enrichment', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const r = await api<{ orders: Array<{
+      id: string; status: string; to_warehouse_id: string; from_warehouse_id: string | null;
+      item_count: number; unit_count: number;
+      lines: Array<{ id: string; from_wh: string | null; qty: number }>;
+    }> }>('GET', '/api/inventory/transfer-orders', { token });
+    expect(r.status).toBe(200);
+    const ord = r.body.orders.find((o) => o.id === moved.orderId);
+    expect(ord).toBeDefined();
+    expect(ord!.status).toBe('Pending');
+    expect(ord!.to_warehouse_id).toBe(moved.to);
+    expect(ord!.item_count).toBe(1);
+    expect(ord!.unit_count).toBeGreaterThanOrEqual(1);
+    const line = ord!.lines.find((l) => l.id === moved.id);
+    expect(line).toBeDefined();
+    expect(line!.from_wh).toBe(moved.from);
+  });
+
+  it('status=all includes the order; default (pending) does too while Pending', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const all = await api<{ orders: Array<{ id: string }> }>(
+      'GET', '/api/inventory/transfer-orders?status=all', { token },
+    );
+    expect(all.body.orders.some((o) => o.id === moved.orderId)).toBe(true);
+  });
+});

@@ -115,44 +115,67 @@ inventory.get('/aggregate/by-part', async (c) => {
   return c.json({ partNumber: pn, inTransit, inStock, lines: lineCount });
 });
 
-// In-transit inventory awaiting receipt. Manager-only. Only lines that are
-// in transit *because of a transfer* appear here — the LATERAL inner join to
-// the latest 'transferred' event excludes purchase-origin In Transit lines
-// (whose default status is also 'In Transit' per migration 0001).
-inventory.get('/transfers', async (c) => {
+// Transfer orders. Manager-only. ?status=pending|received|all (default
+// pending). Each order carries its currently-linked lines (In Transit while
+// Pending, Done while Received), enriched with each line's prior 'from'
+// warehouse from its latest 'transferred' event.
+inventory.get('/transfer-orders', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
-  const rows = await sql`
-    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
-           l.rank, l.speed, l.interface, l.form_factor, l.description,
-           l.part_number, l.condition, l.qty,
-           l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
-           l.status,
-           COALESCE(l.warehouse_id, o.warehouse_id) AS to_wh,
-           w.short  AS to_short,
+
+  const sp = (c.req.query('status') ?? 'pending').toLowerCase();
+  const statusFrag =
+    sp === 'received' ? sql`t.status = 'Received'`
+    : sp === 'all'    ? sql`TRUE`
+    :                   sql`t.status = 'Pending'`;
+
+  const orders = (await sql`
+    SELECT t.id, t.from_warehouse_id, t.to_warehouse_id, t.note, t.status,
+           t.created_at, t.received_at,
+           fw.short AS from_short, tw.short AS to_short,
+           cu.name  AS created_by_name,
+           (SELECT COUNT(*)::int FROM order_lines ol WHERE ol.transfer_order_id = t.id)             AS item_count,
+           (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.transfer_order_id = t.id) AS unit_count
+    FROM transfer_orders t
+    LEFT JOIN warehouses fw ON fw.id = t.from_warehouse_id
+    LEFT JOIN warehouses tw ON tw.id = t.to_warehouse_id
+    LEFT JOIN users cu      ON cu.id = t.created_by
+    WHERE ${statusFrag}
+    ORDER BY t.created_at DESC
+    LIMIT 200
+  `) as unknown as Array<Record<string, unknown> & { id: string }>;
+
+  const orderIds = orders.map((o) => o.id);
+  type LineRow = Record<string, unknown> & { transfer_order_id: string };
+  const lines = orderIds.length === 0 ? [] : (await sql`
+    SELECT l.id, l.transfer_order_id, l.category, l.brand, l.capacity, l.generation,
+           l.type, l.description, l.part_number, l.qty, l.position, l.status,
            te.detail->>'from' AS from_wh,
            fw.short AS from_short,
-           te.created_at AS transferred_at,
-           te.detail->>'note' AS note,
-           act.name AS actor_name, act.initials AS actor_initials
+           te.created_at AS transferred_at
     FROM order_lines l
-    JOIN orders o ON o.id = l.order_id
     JOIN LATERAL (
-      SELECT e.detail, e.created_at, e.actor_id
+      SELECT e.detail, e.created_at
       FROM inventory_events e
       WHERE e.order_line_id = l.id AND e.kind = 'transferred'
       ORDER BY e.created_at DESC
       LIMIT 1
     ) te ON TRUE
-    LEFT JOIN warehouses w  ON w.id  = COALESCE(l.warehouse_id, o.warehouse_id)
     LEFT JOIN warehouses fw ON fw.id = te.detail->>'from'
-    LEFT JOIN users act ON act.id = te.actor_id
-    WHERE l.status = 'In Transit'
-    ORDER BY te.created_at DESC
-    LIMIT 200
-  `;
-  return c.json({ items: rows });
+    WHERE l.transfer_order_id = ANY(${orderIds}::text[])
+    ORDER BY l.position
+  `) as unknown as LineRow[];
+
+  const byOrder = new Map<string, LineRow[]>();
+  for (const ln of lines) {
+    const b = byOrder.get(ln.transfer_order_id);
+    if (b) b.push(ln);
+    else byOrder.set(ln.transfer_order_id, [ln]);
+  }
+  return c.json({
+    orders: orders.map((o) => ({ ...o, lines: byOrder.get(o.id) ?? [] })),
+  });
 });
 
 // Single inventory line + its audit log.
