@@ -27,14 +27,27 @@
 
 - [ ] **Step 1: Write the migration**
 
+**IMPORTANT — runner reality:** `scripts/migrate.mjs` has **no `schema_migrations` table**; it re-executes *every* `.sql` file on every invocation. That's why migrations 0001–0026 are all written idempotently. 0027 MUST therefore be idempotent too — guard the non-idempotent `RENAME COLUMN` so a re-run is a clean no-op. This guard matches the established repo pattern; it does not change intended semantics.
+
 ```sql
 -- The RAM `type` column historically stored the DDR generation
 -- (DDR3/DDR4/DDR5). Rename it to `generation` and introduce a fresh `type`
 -- column that stores the device class (Desktop / Server / Laptop). Backfill
--- the new `type` for existing RAM rows from the DIMM form factor. Idempotent
--- where Postgres allows.
+-- the new `type` for existing RAM rows from the DIMM form factor.
+-- Fully idempotent: the runner re-applies every migration on each run.
 
-ALTER TABLE order_lines RENAME COLUMN type TO generation;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'order_lines' AND column_name = 'generation')
+     AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'order_lines' AND column_name = 'type') THEN
+    ALTER TABLE order_lines RENAME COLUMN type TO generation;
+  END IF;
+END $$;
+
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS type TEXT;
 
 UPDATE order_lines
@@ -47,15 +60,17 @@ END
 WHERE category = 'RAM' AND type IS NULL;
 ```
 
+Re-run safety: once `generation` exists the `DO` block skips the rename; `ADD COLUMN IF NOT EXISTS` skips; the backfill's `type IS NULL` predicate makes it a no-op after the first pass.
+
 - [ ] **Step 2: Run the migration**
 
 Run: `npm --prefix apps/backend run db:migrate`
-Expected: applies `0027_ram_type_generation.sql` with no error.
+Expected: applies with no error.
 
-- [ ] **Step 3: Verify schema**
+- [ ] **Step 3: Verify idempotency**
 
-Run: `npm --prefix apps/backend run db:migrate` (second run is a no-op)
-Expected: no error, `0027` reported as already applied.
+Run: `npm --prefix apps/backend run db:migrate` (second consecutive run)
+Expected: no error — 0027 re-executes harmlessly (guarded rename skipped).
 
 - [ ] **Step 4: Commit**
 
