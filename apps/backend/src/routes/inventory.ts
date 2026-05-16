@@ -546,61 +546,43 @@ inventory.post('/transfer', async (c) => {
   return c.json({ ok: true, transferOrderId, lines: result });
 });
 
-// Bulk receive. Manager-only. Flips In Transit lines to Done and writes a
-// 'received' audit event per line. All-or-nothing: one bad line aborts the
-// whole batch (mirrors /transfer). The In Transit check is the only guard —
-// the Transfers page only ever offers genuinely-transferred lines.
-inventory.post('/receive', async (c) => {
+// Receive a whole transfer order. Manager-only. Every still-In-Transit line
+// under the order → Done + a 'received' event; order → Received.
+inventory.post('/transfer-orders/:id/receive', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-
-  const body = (await c.req.json().catch(() => null)) as { ids?: unknown } | null;
-  if (!body) return c.json({ error: 'invalid body' }, 400);
-  if (!Array.isArray(body.ids) || body.ids.length === 0) {
-    return c.json({ error: 'ids must be a non-empty array' }, 400);
-  }
-  const ids: string[] = [];
-  for (const raw of body.ids) {
-    if (typeof raw !== 'string' || !raw) {
-      return c.json({ error: 'each id must be a non-empty string' }, 400);
-    }
-    ids.push(raw);
-  }
-
-  // Dedupe — duplicate ids would make the row-count check below spuriously 404.
-  const uniqueIds = [...new Set(ids)];
-
+  const id = c.req.param('id');
   const sql = getDb(c.env);
-  const rows = (await sql`
-    SELECT l.id, l.status, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
-    FROM order_lines l JOIN orders o ON o.id = l.order_id
-    WHERE l.id = ANY(${uniqueIds}::uuid[])
-  `) as unknown as { id: string; status: string; wh: string | null }[];
 
-  if (rows.length !== uniqueIds.length) {
-    return c.json({ error: 'one or more lines not found' }, 404);
-  }
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  for (const id of uniqueIds) {
-    const r = byId.get(id);
-    if (!r) return c.json({ error: `line ${id} not found` }, 404);
-    if (r.status !== 'In Transit') {
-      return c.json({ error: `line ${id} is ${r.status}; only In Transit can be received` }, 400);
-    }
+  const ord = (await sql`
+    SELECT id, status, to_warehouse_id FROM transfer_orders WHERE id = ${id} LIMIT 1
+  `)[0] as { id: string; status: string; to_warehouse_id: string } | undefined;
+  if (!ord) return c.json({ error: `transfer order ${id} not found` }, 404);
+  if (ord.status !== 'Pending') {
+    return c.json({ error: `transfer order ${id} is ${ord.status}; only Pending can be received` }, 400);
   }
 
   await sql.begin(async (tx) => {
-    for (const id of uniqueIds) {
-      const r = byId.get(id)!;
-      await tx`UPDATE order_lines SET status = 'Done' WHERE id = ${id}`;
+    const lines = (await tx`
+      SELECT id FROM order_lines
+      WHERE transfer_order_id = ${id} AND status = 'In Transit'
+    `) as unknown as Array<{ id: string }>;
+    for (const ln of lines) {
+      await tx`UPDATE order_lines SET status = 'Done' WHERE id = ${ln.id}`;
       await tx`
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        VALUES (${id}, ${u.id}, 'received', ${tx.json({ at: r.wh ?? '' })})
+        VALUES (${ln.id}, ${u.id}, 'received',
+                ${tx.json({ at: ord.to_warehouse_id, transfer_order_id: id })})
       `;
     }
+    await tx`
+      UPDATE transfer_orders
+         SET status = 'Received', received_at = NOW(), received_by = ${u.id}
+       WHERE id = ${id}
+    `;
   });
 
-  return c.json({ ok: true, ids: uniqueIds });
+  return c.json({ ok: true, id });
 });
 
 export default inventory;

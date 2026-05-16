@@ -135,3 +135,59 @@ describe('GET /api/inventory/transfer-orders', () => {
     expect(all.body.orders.some((o) => o.id === moved.orderId)).toBe(true);
   });
 });
+
+describe('POST /api/inventory/transfer-orders/:id/receive', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('403 for non-manager', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('POST', '/api/inventory/transfer-orders/TO-1/receive', { token });
+    expect(r.status).toBe(403);
+  });
+
+  it('404 for unknown order', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/inventory/transfer-orders/TO-999999/receive', { token });
+    expect(r.status).toBe(404);
+  });
+
+  it('receives the whole order: lines Done, order Received', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const r = await api<{ ok: true; id: string }>(
+      'POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token },
+    );
+    expect(r.status).toBe(200);
+
+    const db = getTestDb();
+    const ord = (await db`SELECT status, received_at FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as
+      { status: string; received_at: string | null };
+    expect(ord.status).toBe('Received');
+    expect(ord.received_at).not.toBeNull();
+    const ln = (await db`SELECT status FROM order_lines WHERE id = ${moved.id}`)[0] as { status: string };
+    expect(ln.status).toBe('Done');
+    const ev = (await db`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${moved.id} AND kind = 'received' ORDER BY created_at DESC LIMIT 1
+    `)[0] as { detail: Record<string, unknown> };
+    expect(ev.detail.transfer_order_id).toBe(moved.orderId);
+    expect(ev.detail.at).toBe(moved.to);
+
+    const pend = await api<{ orders: Array<{ id: string }> }>(
+      'GET', '/api/inventory/transfer-orders', { token },
+    );
+    expect(pend.body.orders.some((o) => o.id === moved.orderId)).toBe(false);
+    const recv = await api<{ orders: Array<{ id: string }> }>(
+      'GET', '/api/inventory/transfer-orders?status=received', { token },
+    );
+    expect(recv.body.orders.some((o) => o.id === moved.orderId)).toBe(true);
+  });
+
+  it('400 when the order is already Received', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    const again = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    expect(again.status).toBe(400);
+  });
+});
