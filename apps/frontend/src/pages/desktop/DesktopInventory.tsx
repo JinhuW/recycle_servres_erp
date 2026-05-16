@@ -176,7 +176,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
 
   // ── Render helpers ──────────────────────────────────────────────────────────
   const itemLabel = (r: InventoryRow) =>
-      r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.type ?? ''}`.trim()
+      r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
     : r.category === 'SSD' ? `${r.brand ?? ''} ${r.capacity ?? ''}`.trim()
     : r.category === 'HDD' ? `${r.brand ?? ''} ${r.capacity ?? ''}`.trim()
     : (r.description ?? '');
@@ -723,7 +723,7 @@ function InventoryQuickView({
   }, [onClose]);
 
   const title =
-    item.category === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.type ?? ''}`.trim()
+    item.category === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.generation ?? ''}`.trim()
     : item.category === 'SSD' ? `${item.brand ?? ''} ${item.capacity ?? ''}`.trim()
     : item.category === 'HDD' ? `${item.brand ?? ''} ${item.capacity ?? ''}`.trim()
     : (item.description ?? item.part_number ?? '—');
