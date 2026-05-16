@@ -1,10 +1,8 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
-import { api } from '../lib/api';
-import { AI_CONFIDENCE_FLOOR } from '../lib/status';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -17,7 +15,11 @@ type Props = {
   onSaveLine: (line: DraftLine) => void;
   onCancel: () => void;
   onBack?: () => void;
-  onRescan: () => void;
+  // Re-open the Camera page (take or upload a label photo). The current draft
+  // is handed back so the new scan merges into it instead of rebuilding it.
+  onRescan: (draft: DraftLine) => void;
+  // In-progress draft carried across a rescan trip through the Camera page.
+  rescanDraft?: DraftLine | null;
 };
 
 const blankDefaults = (category: Category): DraftLine => ({
@@ -81,7 +83,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft }: Props) {
   const { t } = useT();
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
@@ -95,8 +97,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   //   - New line + AI scan → fields from the scan, scalars left at sensible
   //     blanks.
   //   - New line, manual → all blank.
-  const initial: DraftLine = isEditing && existingLine
-    ? (detected ? { ...existingLine, ...aiPatch(detected) } : existingLine)
+  // When returning from a rescan, merge the new scan into the draft the user
+  // was editing (rescanDraft) — even for a brand-new, unsaved line — so typed
+  // values survive the trip through the Camera page.
+  const mergeBase = rescanDraft ?? (isEditing ? existingLine : undefined);
+  const initial: DraftLine = mergeBase
+    ? (detected ? { ...mergeBase, ...aiPatch(detected) } : mergeBase)
     : (detected ? aiDefaults(category, detected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
@@ -111,46 +117,6 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !thumbBroken;
 
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => setLine(prev => ({ ...prev, [k]: v }));
-
-  const aiInputRef = useRef<HTMLInputElement | null>(null);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiNote, setAiNote] = useState<string | null>(null);
-
-  const onAiPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setAiBusy(true); setAiNote(null);
-    try {
-      const fd = new FormData();
-      fd.append('file', file, file.name);
-      fd.append('category', category);
-      const scan = await api.upload<ScanResponse>('/api/scan/label', fd);
-      setLine(prev => {
-        const next = { ...prev, scanImageId: scan.imageId ?? null, scanConfidence: scan.confidence ?? null, scanImageUrl: scan.deliveryUrl ?? null };
-        if ((scan.confidence ?? 0) >= AI_CONFIDENCE_FLOOR) {
-          const f = scan.extracted ?? {};
-          if (f.brand)          next.brand          = f.brand;
-          if (f.capacity)       next.capacity       = f.capacity;
-          if (f.type)           next.type           = f.type;
-          if (f.classification) next.classification = f.classification;
-          if (f.rank)           next.rank           = f.rank;
-          if (f.speed)          next.speed          = f.speed;
-          if (f.interface)      next.interface      = f.interface;
-          if (f.formFactor)     next.formFactor     = f.formFactor;
-          if (f.description)    next.description    = f.description;
-          if (f.partNumber)     next.partNumber     = f.partNumber;
-        } else {
-          setAiNote("Couldn't read the label confidently — please enter the details manually.");
-        }
-        return next;
-      });
-    } catch (err) {
-      setAiNote(err instanceof Error ? err.message : 'AI scan failed');
-    } finally {
-      setAiBusy(false);
-    }
-  };
 
   const buildLabel = (): string => {
     if (line.category === 'RAM') return [line.brand, line.capacity, line.type].filter(Boolean).join(' ');
@@ -188,24 +154,15 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </button>
         }
         trailing={category === 'RAM' && (
-          <button className="ph-icon-btn" onClick={onRescan} title={t('rescanWithAi')}>
+          <button className="ph-icon-btn" onClick={() => onRescan(line)} title={t('rescanWithAi')}>
             <Icon name="camera" size={16} />
           </button>
         )}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
-        {category === 'RAM' && (
-          <>
-            <input ref={aiInputRef} type="file" accept="image/*" capture="environment" hidden onChange={onAiPick} />
-            <button type="button" className="ph-btn dark" style={{ marginTop: 8 }} disabled={aiBusy} onClick={() => aiInputRef.current?.click()}>
-              <Icon name="camera" size={16} /> {aiBusy ? 'Scanning…' : 'AI capture'}
-            </button>
-            {aiNote && <div style={{ color: 'var(--fg-subtle)', fontSize: 12, marginTop: 6 }}>{aiNote}</div>}
-            {line.scanImageUrl && (
-              <img src={line.scanImageUrl} alt="Captured label"
-                   style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--border)', margin: '8px 0' }} />
-            )}
-          </>
+        {category === 'RAM' && line.scanImageUrl && (
+          <img src={line.scanImageUrl} alt="Captured label"
+               style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--border)', margin: '8px 0' }} />
         )}
         {aiFilled && (
           <div className="ph-ai-banner" style={{ borderRadius: 12, marginTop: 6 }}>

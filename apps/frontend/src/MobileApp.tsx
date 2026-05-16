@@ -31,8 +31,8 @@ type ReturnTo = 'idle' | 'review';
 type CaptureState =
   | { phase: 'idle' }
   | { phase: 'category' }
-  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
-  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string }
+  | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
+  | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; draftId?: string };
 
 type Toast = { msg: string; kind: 'success' | 'error' };
@@ -220,13 +220,16 @@ function Shell() {
     });
   };
 
-  const rescanRam = () => {
+  // Re-open the Camera page from the RAM form. The in-progress draft is
+  // carried through so the new scan merges into it (auto-fill semantics)
+  // rather than rebuilding the line from scratch.
+  const rescanRam = (draft: DraftLine) => {
     setCapture(c => {
       if (c.phase !== 'form') return c;
       return {
         phase: 'camera', category: c.category, detected: null, lines: c.lines,
-        editingId: c.editingId, originalLineIds: c.originalLineIds, editingLineIdx: c.editingLineIdx ?? null, returnTo: c.returnTo,
-        draftId: c.draftId,
+        editingId: c.editingId, originalLineIds: c.originalLineIds, editingLineIdx: c.editingLineIdx ?? null,
+        returnTo: c.returnTo, draftId: c.draftId, rescanDraft: draft,
       };
     });
   };
@@ -334,6 +337,7 @@ function Shell() {
         onCancel={cancelCapture}
         onBack={goBack}
         onRescan={rescanRam}
+        rescanDraft={capture.rescanDraft ?? null}
       />
     );
   }

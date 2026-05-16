@@ -11,6 +11,14 @@ type Props = {
   onBack?: () => void;
 };
 
+const blobToDataUrl = (b: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(b);
+  });
+
 // Phases:
 //   framing   — viewfinder open, waiting for shutter tap
 //   capturing — starting the live camera (or simulated capture)
@@ -27,6 +35,9 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
   // Stream is state (not a ref) so acquiring it triggers a re-render and the
   // <video> swaps in over the illustrated placeholder.
   const [stream, setStream] = useState<MediaStream | null>(null);
+  // Data: URL of the just-captured/uploaded photo, frozen over the viewfinder
+  // while we scan so the user sees the shot they took (not the live feed).
+  const [captured, setCaptured] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -107,13 +118,18 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     } catch (e) {
       setPhase('framing');
       setError(e instanceof Error ? e.message : 'Scan failed');
+      setCaptured(null);
     }
   };
 
   const onShoot = async () => {
     setPhase('capturing');
+    // Real frame only when the live camera produced pixels; otherwise
+    // captureFrame returns a tiny placeholder we don't want to preview.
+    const live = !!videoRef.current?.videoWidth;
     const blob = await captureFrame();
     if (!blob) { setPhase('framing'); setError('Camera unavailable'); return; }
+    setCaptured(live ? await blobToDataUrl(blob) : null);
     await runScan(blob);
   };
 
@@ -121,7 +137,9 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
   const onFileChosen: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
-    if (f) runScan(f, f.name);
+    if (!f) return;
+    setCaptured(await blobToDataUrl(f));
+    runScan(f, f.name);
   };
 
   const liveCamera = !!stream;
@@ -167,7 +185,17 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
             transition: 'opacity 0.15s ease-out',
           }}
         />
-        {!liveCamera && (
+        {captured && (
+          <img
+            src={captured}
+            alt="Captured label"
+            style={{
+              position: 'absolute', inset: 0,
+              width: '100%', height: '100%', objectFit: 'cover',
+            }}
+          />
+        )}
+        {!liveCamera && !captured && (
           <>
             <div className="cam-viewfinder" style={{ position: 'absolute', inset: 0 }} />
             {category === 'RAM' && (
@@ -258,7 +286,6 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         style={{ display: 'none' }}
         onChange={onFileChosen}
       />
