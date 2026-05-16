@@ -11,21 +11,9 @@ import 'dotenv/config';
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, '..', 'migrations');
 
-// Read .dev.vars too (Wrangler-style file with KEY=VALUE lines)
-function loadDevVars() {
-  try {
-    const raw = readFileSync(join(here, '..', '.dev.vars'), 'utf8');
-    for (const line of raw.split(/\r?\n/)) {
-      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
-    }
-  } catch (_) { /* fine if missing */ }
-}
-loadDevVars();
-
 const url = process.env.DATABASE_URL;
 if (!url) {
-  console.error('DATABASE_URL is not set. Add it to backend/.dev.vars');
+  console.error('DATABASE_URL is not set. Add it to apps/backend/.env');
   process.exit(1);
 }
 

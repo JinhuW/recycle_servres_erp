@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8787 --local",
-    "deploy": "wrangler deploy",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
     "db:migrate": "node ./scripts/migrate.mjs",
     "db:seed": "node ./scripts/seed.mjs",
     "db:reset": "node ./scripts/migrate.mjs --reset && node ./scripts/seed.mjs",

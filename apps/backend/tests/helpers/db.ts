@@ -9,12 +9,13 @@ const backendRoot = join(here, '..', '..');
 const migrationsDir = join(backendRoot, 'migrations');
 const seedScript = join(backendRoot, 'scripts', 'seed.mjs');
 
-// Load TEST_DATABASE_URL from .dev.vars if not in env already (vitest runs
-// outside of wrangler, so process.env isn't auto-populated).
+// Load TEST_DATABASE_URL from apps/backend/.env if not already in the
+// environment (vitest runs as a plain Node process, so process.env isn't
+// auto-populated).
 function loadDevVars(): void {
   if (process.env.TEST_DATABASE_URL) return;
   try {
-    const raw = readFileSync(join(backendRoot, '.dev.vars'), 'utf8');
+    const raw = readFileSync(join(backendRoot, '.env'), 'utf8');
     for (const line of raw.split(/\r?\n/)) {
       const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
       if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
@@ -25,7 +26,7 @@ loadDevVars();
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL!;
 if (!TEST_DATABASE_URL) {
-  throw new Error('TEST_DATABASE_URL not set — add it to apps/backend/.dev.vars');
+  throw new Error('TEST_DATABASE_URL not set — add it to apps/backend/.env');
 }
 
 let sql: postgres.Sql | null = null;

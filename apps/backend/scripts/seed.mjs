@@ -4,26 +4,11 @@
 
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import 'dotenv/config';
-
-const here = dirname(fileURLToPath(import.meta.url));
-function loadDevVars() {
-  try {
-    const raw = readFileSync(join(here, '..', '.dev.vars'), 'utf8');
-    for (const line of raw.split(/\r?\n/)) {
-      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
-    }
-  } catch (_) {}
-}
-loadDevVars();
 
 const url = process.env.DATABASE_URL;
 if (!url) {
-  console.error('DATABASE_URL is not set.');
+  console.error('DATABASE_URL is not set. Add it to apps/backend/.env');
   process.exit(1);
 }
 const sql = postgres(url, { onnotice: () => {} });
