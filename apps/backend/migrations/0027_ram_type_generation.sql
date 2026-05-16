@@ -8,16 +8,20 @@ DO $$
 BEGIN
   IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'order_lines' AND column_name = 'generation')
+        WHERE table_schema = 'public' AND table_name = 'order_lines'
+          AND column_name = 'generation')
      AND EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'order_lines' AND column_name = 'type') THEN
+        WHERE table_schema = 'public' AND table_name = 'order_lines'
+          AND column_name = 'type') THEN
     ALTER TABLE order_lines RENAME COLUMN type TO generation;
   END IF;
 END $$;
 
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS type TEXT;
 
+-- RAM rows whose classification is NULL or outside the four DIMM values keep
+-- type = NULL by design (the CASE has no ELSE); type is nullable.
 UPDATE order_lines
 SET type = CASE classification
   WHEN 'SODIMM' THEN 'Laptop'
