@@ -1,0 +1,13 @@
+:80 {
+	encode gzip
+	# API → backend container.
+	handle /api/* {
+		reverse_proxy backend:8787
+	}
+	# SPA static assets with history-API fallback.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
