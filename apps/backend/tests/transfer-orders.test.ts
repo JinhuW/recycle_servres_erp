@@ -141,7 +141,7 @@ describe('POST /api/inventory/transfer-orders/:id/receive', () => {
 
   it('403 for non-manager', async () => {
     const { token } = await loginAs(MARCUS);
-    const r = await api('POST', '/api/inventory/transfer-orders/TO-1/receive', { token });
+    const r = await api('POST', '/api/inventory/transfer-orders/TO-forbidden-test/receive', { token });
     expect(r.status).toBe(403);
   });
 
@@ -160,10 +160,11 @@ describe('POST /api/inventory/transfer-orders/:id/receive', () => {
     expect(r.status).toBe(200);
 
     const db = getTestDb();
-    const ord = (await db`SELECT status, received_at FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as
-      { status: string; received_at: string | null };
+    const ord = (await db`SELECT status, received_at, received_by FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as
+      { status: string; received_at: string | null; received_by: string | null };
     expect(ord.status).toBe('Received');
     expect(ord.received_at).not.toBeNull();
+    expect(ord.received_by).not.toBeNull();
     const ln = (await db`SELECT status FROM order_lines WHERE id = ${moved.id}`)[0] as { status: string };
     expect(ln.status).toBe('Done');
     const ev = (await db`

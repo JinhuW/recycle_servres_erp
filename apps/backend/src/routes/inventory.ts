@@ -546,23 +546,30 @@ inventory.post('/transfer', async (c) => {
   return c.json({ ok: true, transferOrderId, lines: result });
 });
 
-// Receive a whole transfer order. Manager-only. Every still-In-Transit line
-// under the order → Done + a 'received' event; order → Received.
+// Receive a whole transfer order. Manager-only. Validates the order is
+// Pending (row-locked inside the tx), flips every still-In-Transit line under
+// it to Done with a 'received' event, and marks the order Received.
 inventory.post('/transfer-orders/:id/receive', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
-  const ord = (await sql`
-    SELECT id, status, to_warehouse_id FROM transfer_orders WHERE id = ${id} LIMIT 1
-  `)[0] as { id: string; status: string; to_warehouse_id: string } | undefined;
-  if (!ord) return c.json({ error: `transfer order ${id} not found` }, 404);
-  if (ord.status !== 'Pending') {
-    return c.json({ error: `transfer order ${id} is ${ord.status}; only Pending can be received` }, 400);
-  }
+  // Lock the order row inside the tx and re-check status there — prevents two
+  // concurrent receives from both passing the guard and double-writing events.
+  type Outcome = { code: 404 | 400; msg: string } | { code: 200 };
+  let outcome: Outcome = { code: 200 };
 
   await sql.begin(async (tx) => {
+    const ord = (await tx`
+      SELECT id, status, to_warehouse_id FROM transfer_orders
+      WHERE id = ${id} FOR UPDATE
+    `)[0] as { id: string; status: string; to_warehouse_id: string } | undefined;
+    if (!ord) { outcome = { code: 404, msg: `transfer order ${id} not found` }; return; }
+    if (ord.status !== 'Pending') {
+      outcome = { code: 400, msg: `transfer order ${id} is ${ord.status}; only Pending can be received` };
+      return;
+    }
     const lines = (await tx`
       SELECT id FROM order_lines
       WHERE transfer_order_id = ${id} AND status = 'In Transit'
@@ -582,6 +589,10 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
     `;
   });
 
+  if (outcome.code !== 200) {
+    const err = outcome as { code: 404 | 400; msg: string };
+    return c.json({ error: err.msg }, err.code);
+  }
   return c.json({ ok: true, id });
 });
 
