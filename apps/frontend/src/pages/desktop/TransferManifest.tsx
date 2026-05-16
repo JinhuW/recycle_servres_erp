@@ -30,7 +30,6 @@ export function TransferManifest({ order, onClose, onReady }: Props) {
 
   const to = order.to_short ?? order.to_warehouse_id;
   const from = order.from_short ?? order.from_warehouse_id ?? t('transfersMixed');
-  const units = order.lines.reduce((s, l) => s + l.qty, 0);
 
   return (
     <div className="transfer-manifest">
@@ -65,7 +64,7 @@ export function TransferManifest({ order, onClose, onReady }: Props) {
         </tbody>
       </table>
       <div style={{ marginTop: 16, fontSize: 13 }}>
-        <strong>{t('transfersItems', { n: order.item_count })}</strong> · {units} units
+        <strong>{t('transfersItems', { n: order.item_count })}</strong> · {order.unit_count} units
       </div>
     </div>
   );

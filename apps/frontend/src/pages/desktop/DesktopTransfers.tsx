@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Icon } from '../../components/Icon';
@@ -48,6 +48,10 @@ export function lineLabel(l: TransferLine): string {
     .join(' ') || l.description || l.category;
 }
 
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 function downloadOrderCsv(order: TransferOrder): void {
   const head = ['Item', 'Qty', 'From', 'To', 'Transferred'];
   const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
@@ -80,13 +84,17 @@ export function DesktopTransfers({ onToast }: Props = {}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [printing, setPrinting] = useState<TransferOrder | null>(null);
 
-  const load = (f: StatusFilter) => {
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+
+  const load = useCallback((f: StatusFilter) => {
     api
       .get<{ orders: TransferOrder[] }>(`/api/inventory/transfer-orders?status=${f}`)
       .then((r) => setOrders(r.orders))
-      .catch((e) => onToast?.(String(e), 'error'));
-  };
-  useEffect(() => load(filter), [filter]); // eslint-disable-line react-hooks/exhaustive-deps
+      .catch((e) => onToast?.(errMsg(e), 'error'));
+  }, [onToast]);
+
+  useEffect(() => { load(filter); }, [filter, load]);
 
   const act = async (order: TransferOrder, kind: 'receive' | 'reopen') => {
     setBusy(order.id);
@@ -95,9 +103,9 @@ export function DesktopTransfers({ onToast }: Props = {}) {
         `/api/inventory/transfer-orders/${order.id}/${kind}`, {},
       );
       onToast?.(t(kind === 'receive' ? 'transfersReceived' : 'transfersReopened', { id: order.id }));
-      load(filter);
+      load(filterRef.current);
     } catch (e) {
-      onToast?.(t('transfersActionError') + ': ' + String(e), 'error');
+      onToast?.(t('transfersActionError') + ': ' + errMsg(e), 'error');
     } finally {
       setBusy(null);
     }
@@ -105,6 +113,8 @@ export function DesktopTransfers({ onToast }: Props = {}) {
 
   const fromLabel = (o: TransferOrder) =>
     o.from_warehouse_id ? (o.from_short ?? o.from_warehouse_id) : t('transfersMixed');
+
+  const closeManifest = useCallback(() => setPrinting(null), []);
 
   return (
     <>
@@ -201,7 +211,7 @@ export function DesktopTransfers({ onToast }: Props = {}) {
       {printing && (
         <TransferManifest
           order={printing}
-          onClose={() => setPrinting(null)}
+          onClose={closeManifest}
           onReady={printManifest}
         />
       )}

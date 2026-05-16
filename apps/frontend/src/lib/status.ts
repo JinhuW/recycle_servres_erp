@@ -31,6 +31,8 @@ const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
   'Reviewing':  'warn',
   'Done':       'pos',
   'Mixed':      'muted',
+  'Pending':    'warn',
+  'Received':   'pos',
 };
 
 export const statusTone = (s: string) => TONE[s] ?? 'info';
