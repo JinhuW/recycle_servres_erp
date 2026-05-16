@@ -441,13 +441,16 @@ inventory.post('/transfer', async (c) => {
   const result: ResultLine[] = [];
 
   // Single common source if every line shares one effective warehouse,
-  // else NULL (mixed-source transfer order).
-  const sourceSet = new Set(reqLines.map((r) => byId.get(r.id)!.effective_wh ?? ''));
-  const fromWarehouse = sourceSet.size === 1 ? [...sourceSet][0]! || null : null;
+  // else NULL (mixed-source transfer order). effective_wh may be null.
+  const sourceSet = new Set(reqLines.map((r) => byId.get(r.id)!.effective_wh ?? null));
+  const fromWarehouse = sourceSet.size === 1 ? ([...sourceSet][0] ?? null) : null;
 
   let transferOrderId = '';
 
   await sql.begin(async (tx) => {
+    // Human-friendly id like TO-1001 — sequence of existing IDs. Same
+    // best-effort scheme as SO-<n> in orders.ts; good enough for this scale
+    // (concurrent transfers are rare; a PK clash would just 500 the retry).
     const maxRow = (await tx`
       SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1000) AS max
       FROM transfer_orders WHERE id LIKE 'TO-%' AND id ~ '^TO-[0-9]+$'
@@ -478,6 +481,8 @@ inventory.post('/transfer', async (c) => {
         result.push({ sourceId: r.id, destId: r.id, qty: r.qty });
       } else {
         // Partial — decrement source, clone the rest at destination.
+        // Source line stays put (not moved) — intentionally NOT stamped with
+        // transfer_order_id; only the moved clone belongs to this order.
         await tx`
           UPDATE order_lines SET qty = qty - ${r.qty} WHERE id = ${r.id}
         `;

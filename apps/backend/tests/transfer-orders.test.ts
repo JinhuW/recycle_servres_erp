@@ -81,7 +81,7 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     );
     const a = sellable[0]!;
     const b = sellable.find((i) => i.warehouse_id !== a.warehouse_id);
-    if (!b) { expect(true).toBe(true); return; }
+    if (!b) return; // seed lacked two distinct-source sellable lines — nothing to assert
     const to = WAREHOUSES.find((w) => w !== a.warehouse_id && w !== b.warehouse_id)!;
     const r = await api<{ ok: true; transferOrderId: string }>(
       'POST', '/api/inventory/transfer',
