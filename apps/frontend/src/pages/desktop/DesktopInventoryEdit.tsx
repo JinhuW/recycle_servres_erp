@@ -403,6 +403,7 @@ function DetailsPanel({
             <div className="grid-2">
               <Row label="Brand"          value={item.brand} />
               <Row label="Capacity"       value={item.capacity} />
+              <Row label="Generation"      value={item.generation} />
               <Row label="Type"           value={item.type} />
               <Row label="Classification" value={item.classification} />
               <Row label="Rank"           value={item.rank} />

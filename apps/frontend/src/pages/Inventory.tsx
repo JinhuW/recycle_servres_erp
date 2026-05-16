@@ -17,6 +17,7 @@ type InventoryItem = {
   category: Category;
   brand: string | null;
   capacity: string | null;
+  generation: string | null;
   type: string | null;
   interface: string | null;
   description: string | null;
