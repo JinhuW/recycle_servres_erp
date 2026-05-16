@@ -440,7 +440,24 @@ inventory.post('/transfer', async (c) => {
   type ResultLine = { sourceId: string; destId: string; qty: number };
   const result: ResultLine[] = [];
 
+  // Single common source if every line shares one effective warehouse,
+  // else NULL (mixed-source transfer order).
+  const sourceSet = new Set(reqLines.map((r) => byId.get(r.id)!.effective_wh ?? ''));
+  const fromWarehouse = sourceSet.size === 1 ? [...sourceSet][0]! || null : null;
+
+  let transferOrderId = '';
+
   await sql.begin(async (tx) => {
+    const maxRow = (await tx`
+      SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1000) AS max
+      FROM transfer_orders WHERE id LIKE 'TO-%' AND id ~ '^TO-[0-9]+$'
+    `)[0] as { max: number };
+    transferOrderId = 'TO-' + (maxRow.max + 1);
+    await tx`
+      INSERT INTO transfer_orders (id, from_warehouse_id, to_warehouse_id, note, created_by, status)
+      VALUES (${transferOrderId}, ${fromWarehouse}, ${toWarehouseId}, ${note}, ${u.id}, 'Pending')
+    `;
+
     for (const r of reqLines) {
       const s = byId.get(r.id)!;
       const fromWh = s.effective_wh ?? '';
@@ -449,13 +466,14 @@ inventory.post('/transfer', async (c) => {
         // Full move — flip the override on the existing line.
         await tx`
           UPDATE order_lines
-             SET warehouse_id = ${toWarehouseId}, status = 'In Transit'
+             SET warehouse_id = ${toWarehouseId}, status = 'In Transit',
+                 transfer_order_id = ${transferOrderId}
            WHERE id = ${r.id}
         `;
         await tx`
           INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
           VALUES (${r.id}, ${u.id}, 'transferred',
-                  ${tx.json({ from: fromWh, to: toWarehouseId, qty: r.qty, ...(note ? { note } : {}) })})
+                  ${tx.json({ from: fromWh, to: toWarehouseId, qty: r.qty, transfer_order_id: transferOrderId, ...(note ? { note } : {}) })})
         `;
         result.push({ sourceId: r.id, destId: r.id, qty: r.qty });
       } else {
@@ -469,7 +487,7 @@ inventory.post('/transfer', async (c) => {
             interface, form_factor, description, part_number, condition,
             qty, unit_cost, sell_price, status,
             scan_image_id, scan_confidence, position,
-            health, rpm, warehouse_id
+            health, rpm, warehouse_id, transfer_order_id
           )
           VALUES (
             ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.generation}, ${s.type},
@@ -477,12 +495,12 @@ inventory.post('/transfer', async (c) => {
             ${s.form_factor}, ${s.description}, ${s.part_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
             ${s.scan_image_id}, ${s.scan_confidence}, ${s.position},
-            ${s.health}, ${s.rpm}, ${toWarehouseId}
+            ${s.health}, ${s.rpm}, ${toWarehouseId}, ${transferOrderId}
           )
           RETURNING id
         `) as unknown as Array<{ id: string }>;
         const destId = inserted[0].id;
-        const detail = { from: fromWh, to: toWarehouseId, qty: r.qty, ...(note ? { note } : {}) };
+        const detail = { from: fromWh, to: toWarehouseId, qty: r.qty, transfer_order_id: transferOrderId, ...(note ? { note } : {}) };
         await tx`
           INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
           VALUES (${r.id}, ${u.id}, 'transferred', ${tx.json({ ...detail, peer_line_id: destId })})
@@ -496,7 +514,7 @@ inventory.post('/transfer', async (c) => {
     }
   });
 
-  return c.json({ ok: true, lines: result });
+  return c.json({ ok: true, transferOrderId, lines: result });
 });
 
 // Bulk receive. Manager-only. Flips In Transit lines to Done and writes a
