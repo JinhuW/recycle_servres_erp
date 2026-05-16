@@ -27,8 +27,8 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
             <input className={inputCls} value={value.brand ?? ''} onChange={e => onChange('brand', e.target.value)} />
           </div>
           <div className="ph-field">
-            <label>{t('type')}</label>
-            <select className={selectCls} value={value.type ?? 'DDR4'} onChange={e => onChange('type', e.target.value)}>
+            <label>{t('generation')}</label>
+            <select className={selectCls} value={value.generation ?? 'DDR4'} onChange={e => onChange('generation', e.target.value)}>
               <option>DDR3</option><option>DDR4</option><option>DDR5</option>
             </select>
           </div>
@@ -58,6 +58,12 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
               <option>1Rx4</option><option>1Rx8</option><option>2Rx4</option><option>2Rx8</option><option>4Rx4</option>
             </select>
           </div>
+        </div>
+        <div className="ph-field">
+          <label>{t('type')}</label>
+          <select className={selectCls} value={value.type ?? 'Server'} onChange={e => onChange('type', e.target.value)}>
+            <option>Desktop</option><option>Server</option><option>Laptop</option>
+          </select>
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>

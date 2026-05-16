@@ -83,6 +83,7 @@ export type DraftLine = {
   category: Category;
   brand?: string | null;
   capacity?: string | null;
+  generation?: string | null;
   type?: string | null;
   classification?: string | null;
   rank?: string | null;
