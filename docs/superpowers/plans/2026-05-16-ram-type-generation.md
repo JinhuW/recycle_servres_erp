@@ -483,14 +483,10 @@ git commit -m "test(ai): stub RAM has generation + device type"
 - Modify: `apps/frontend/src/lib/catalog.ts:10`
 - Modify: `apps/frontend/src/lib/i18n.tsx:99,373`
 
-- [ ] **Step 1: Add `generation` to all three line shapes**
+- [ ] **Step 1: Add `generation` to every RAM-bearing line shape**
 
-Run: `grep -n "type: string | null;" apps/frontend/src/lib/types.ts`
-For each of the three RAM-bearing shapes (lines ~37, 122, 173) add directly above the `type:` line:
-
-```ts
-  generation: string | null;
-```
+Run: `grep -n "type: string | null;\|type?: string | null;" apps/frontend/src/lib/types.ts`
+There are **four** RAM-bearing shapes, not three: `OrderLine` (~37), `RefPrice` (~123), `DashboardData.recent` (~175) use `type: string | null;`, and **`DraftLine` (~86) uses `type?: string | null;`** (the original grep for `type: string | null;` misses it). For each, add directly above its `type` line a matching declaration — `generation: string | null;` for the required ones, `generation?: string | null;` for `DraftLine` to mirror its optional `type?`.
 
 - [ ] **Step 2: catalog.ts — name the generation list, add device types**
 
