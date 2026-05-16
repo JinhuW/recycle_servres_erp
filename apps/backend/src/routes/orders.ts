@@ -11,6 +11,7 @@ type LineInput = {
   brand?: string | null;
   capacity?: string | null;
   type?: string | null;
+  generation?: string | null;
   classification?: string | null;
   rank?: string | null;
   speed?: string | null;
@@ -134,7 +135,7 @@ orders.get('/:id', async (c) => {
   if (u.role !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const lines = await sql`
-    SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.type, ol.classification,
+    SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
            ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description,
            ol.part_number, ol.condition, ol.qty,
            ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
@@ -171,6 +172,7 @@ orders.get('/:id', async (c) => {
         category: l.category,
         brand: l.brand,
         capacity: l.capacity,
+        generation: l.generation,
         type: l.type,
         classification: l.classification,
         rank: l.rank,
@@ -247,12 +249,12 @@ orders.post('/', async (c) => {
       const l = body.lines[i];
       await tx`
         INSERT INTO order_lines (
-          order_id, category, brand, capacity, type, classification, rank, speed,
+          order_id, category, brand, capacity, generation, type, classification, rank, speed,
           interface, form_factor, description, part_number, condition, qty,
           unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
           health, rpm
         ) VALUES (
-          ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.type ?? null},
+          ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
           ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
@@ -284,6 +286,7 @@ type LineFields = {
   brand?: string | null;
   capacity?: string | null;
   type?: string | null;
+  generation?: string | null;
   classification?: string | null;
   rank?: string | null;
   speed?: string | null;
@@ -359,6 +362,7 @@ orders.patch('/:id', async (c) => {
               brand          = COALESCE(${l.brand ?? null}, brand),
               capacity       = COALESCE(${l.capacity ?? null}, capacity),
               type           = COALESCE(${l.type ?? null}, type),
+              generation     = COALESCE(${l.generation ?? null}, generation),
               classification = COALESCE(${l.classification ?? null}, classification),
               rank           = COALESCE(${l.rank ?? null}, rank),
               speed          = COALESCE(${l.speed ?? null}, speed),
@@ -381,13 +385,13 @@ orders.patch('/:id', async (c) => {
         for (const l of body.addLines) {
           await tx`
             INSERT INTO order_lines (
-              order_id, category, brand, capacity, type, classification, rank, speed,
+              order_id, category, brand, capacity, generation, type, classification, rank, speed,
               interface, form_factor, description, part_number, condition, qty,
               unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
               health, rpm
             ) VALUES (
               ${id}, ${l.category ?? (existing.category as string)},
-              ${l.brand ?? null}, ${l.capacity ?? null}, ${l.type ?? null},
+              ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
               ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
