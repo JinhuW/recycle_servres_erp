@@ -9,7 +9,8 @@ export const STUB_BY_CATEGORY: Record<LineCategory, Omit<ScanResult, 'provider'>
     fields: {
       brand: 'Samsung',
       capacity: '32GB',
-      type: 'DDR4',
+      generation: 'DDR4',
+      type: 'Server',
       classification: 'RDIMM',
       rank: '2Rx4',
       speed: '3200',

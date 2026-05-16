@@ -34,6 +34,8 @@ describe('stubScan', () => {
     expect(r.provider).toBe('stub');
     expect(r.confidence).toBe(0.94);
     expect(r.fields.brand).toBe('Samsung');
+    expect(r.fields.generation).toBe('DDR4');
+    expect(r.fields.type).toBe('Server');
   });
   it('STUB_LOW_CONF=true → low confidence, empty fields', () => {
     const r = stubScan({ STUB_LOW_CONF: 'true' } as Env, 'SSD');
