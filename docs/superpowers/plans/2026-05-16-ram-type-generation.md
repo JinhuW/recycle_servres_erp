@@ -705,6 +705,7 @@ In each location the RAM label is built as `[brand, capacity, type]` / `${brand}
 - `DesktopEditOrder.tsx:171` — `${l.type ?? ''}` → `${l.generation ?? ''}`
 - `DesktopSubmit.tsx:500,779` — `${l.type ?? ''}` / `${line.type ?? ''}` → `${l.generation ?? ''}` / `${line.generation ?? ''}`
 - `DesktopInventoryEdit.tsx:195` — `${item.type ?? ''}` → `${item.generation ?? ''}` (also add `generation` to its row type at line ~13)
+- **(plan-gap fix, found during T13)** `Inventory.tsx:103` — `${r.type ?? ''}` → `${r.generation ?? ''}`; `DesktopInventory.tsx:179` (`itemLabel`) and `:726` (QuickView title) — `${r.type ?? ''}`/`${item.type ?? ''}` → `${...generation ?? ''}`. (`generation` was added to `InventoryRow`/`InventoryItem` by T13 commit fbf5e32, so only the label expressions remain.) These two files were omitted from the original T12 list; their RAM labels must also use `generation`.
 
 - [ ] **Step 2: Typecheck**
 
