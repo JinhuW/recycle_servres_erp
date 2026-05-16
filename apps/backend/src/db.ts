@@ -1,5 +1,5 @@
-// Postgres client. Uses Hyperdrive's connection string when bound, otherwise
-// falls back to DATABASE_URL — same code path either way.
+// Postgres client. Connection string comes from DATABASE_URL. One pooled
+// client per request, torn down when the request ends.
 //
 // IMPORTANT: in Cloudflare Workers, I/O objects (sockets, streams) are scoped
 // to the request that created them — caching a pg client at module scope
@@ -23,7 +23,7 @@ type Sql = ReturnType<typeof postgres>;
 const requestDb = new AsyncLocalStorage<Sql>();
 
 function createClient(env: Env): Sql {
-  const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
+  const url = env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not configured');
   return postgres(url, {
     max: 5,
