@@ -2,12 +2,13 @@
 import type { LineCategory } from '../types';
 
 export const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
-  RAM: `You are reading a server RAM module label. Extract these fields and respond as compact JSON only:
-{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"… GB","type":"DDR2|DDR3|DDR4|DDR5","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx16|1Rx8|1Rx4|2Rx16|2Rx8|2Rx4|4Rx8|4Rx4|8Rx4","speed":"MT/s number only","partNumber":"…"}
-TYPE — use the "PC" code printed on the label, never infer the type from speed alone:
+  RAM: `You are reading a server/desktop/laptop RAM module label. Respond with a single minified JSON object and nothing else — no markdown, no code fences, no prose:
+{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"… GB","generation":"DDR2|DDR3|DDR4|DDR5","type":"Desktop|Server|Laptop","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx16|1Rx8|1Rx4|2Rx16|2Rx8|2Rx4|4Rx8|4Rx4|8Rx4","speed":"MT/s number only","partNumber":"…"}
+GENERATION — use the "PC" code printed on the label, never infer from speed alone:
   PC2-… = DDR2, PC3-…/PC3L-… = DDR3, PC4-… = DDR4, PC5-… = DDR5.
-CLASSIFICATION — from the module form factor: SODIMM = laptop, UDIMM = desktop, RDIMM/LRDIMM/ECC = server.
-Only include a field if you can read it clearly on the label. Omit any field you are unsure about — do NOT guess. No prose.`,
+CLASSIFICATION — the module form factor: SODIMM, UDIMM, RDIMM, or LRDIMM.
+TYPE — derive from the form factor: SODIMM = Laptop, UDIMM = Desktop, RDIMM/LRDIMM/ECC = Server. Always emit type when classification is readable.
+Only include a field if you can read or derive it confidently. Omit any field you are unsure about — do NOT guess.`,
   SSD: `You are reading an enterprise SSD label. Respond as compact JSON only:
 {"brand":"…","capacity":"… GB or TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|M.2 2280|M.2 22110|U.2|AIC","partNumber":"…"}
 Omit unknown fields. No prose.`,

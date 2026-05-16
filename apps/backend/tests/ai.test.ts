@@ -23,7 +23,8 @@ describe('parseModelJson', () => {
 describe('PROMPT_BY_CATEGORY', () => {
   it('RAM prompt encodes the PC-code rule', () => {
     expect(PROMPT_BY_CATEGORY.RAM).toContain('PC4');
-    expect(PROMPT_BY_CATEGORY.RAM).toContain('SODIMM = laptop');
+    expect(PROMPT_BY_CATEGORY.RAM).toContain('"generation"');
+    expect(PROMPT_BY_CATEGORY.RAM).toContain('Desktop|Server|Laptop');
   });
 });
 
