@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { deleteAttachment } from '../r2';
 import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import type { Env, LineCategory, User } from '../types';
@@ -324,6 +325,10 @@ orders.patch('/:id', async (c) => {
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
+  // R2 keys of label scans whose lines get removed — deleted after the tx
+  // commits (R2 isn't transactional; never delete on a rolled-back change).
+  const removedScanKeys: string[] = [];
+
   try {
     await sql.begin(async (tx) => {
       const touchesOrder =
@@ -349,6 +354,12 @@ orders.patch('/:id', async (c) => {
         `;
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
+        const doomed = await tx`
+          SELECT scan_image_id FROM order_lines
+          WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
+            AND scan_image_id IS NOT NULL
+        ` as { scan_image_id: string }[];
+        for (const r of doomed) removedScanKeys.push(r.scan_image_id);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
       }
       if (Array.isArray(body.lines)) {
@@ -411,6 +422,12 @@ orders.patch('/:id', async (c) => {
     throw e;
   }
 
+  // Best-effort R2 cleanup after a successful commit (stub/CF-era keys are
+  // no-ops in deleteAttachment; a missing object delete is idempotent).
+  for (const key of removedScanKeys) {
+    await deleteAttachment(c.env, key).catch(e => console.error('r2 delete (line removed)', e));
+  }
+
   return c.json({ ok: true });
 });
 
@@ -471,7 +488,18 @@ orders.delete('/:id', async (c) => {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
   }
 
+  const scanned = await sql`
+    SELECT scan_image_id FROM order_lines
+    WHERE order_id = ${id} AND scan_image_id IS NOT NULL
+  ` as { scan_image_id: string }[];
+
   await sql`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
+
+  // Best-effort: drop the label-scan images from R2 too.
+  for (const r of scanned) {
+    await deleteAttachment(c.env, r.scan_image_id).catch(e => console.error('r2 delete (order deleted)', e));
+  }
+
   return c.json({ ok: true });
 });
 

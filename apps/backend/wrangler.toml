@@ -16,22 +16,25 @@ compatibility_flags = ["nodejs_compat"]
 binding = "AI"
 
 # R2 bucket for sell-order status attachments (packing slips, invoices,
-# proof of payment). Create the bucket + a public dev/prod URL, then
-# uncomment and set R2_ATTACHMENTS_PUBLIC_URL below.
-# [[r2_buckets]]
-# binding = "R2_ATTACHMENTS"
-# bucket_name = "recycle-erp-attachments"
+# proof of payment) AND camera label-scan images (stored under the
+# label-scans/ prefix). Create the bucket + a public dev/prod URL, then
+# uncomment and set R2_ATTACHMENTS_PUBLIC_URL below. Without it, uploads
+# fall back to a stub and label-scan previews are hidden by the frontend.
+[[r2_buckets]]
+binding = "R2_ATTACHMENTS"
+bucket_name = "recycle-erp-attachments"
 
 [vars]
 JWT_ISSUER = "recycle-erp"
-# R2_ATTACHMENTS_PUBLIC_URL = "https://<your-r2-public-url>"
+R2_ATTACHMENTS_PUBLIC_URL = "https://static.recycleservers.com"
 
 # Secrets (set via `wrangler secret put`):
 #   - JWT_SECRET
 #   - DATABASE_URL          (only if not using Hyperdrive)
 #   - OPENROUTER_API_KEY    (label OCR; default provider)
-#   - CF_ACCOUNT_ID
-#   - CF_IMAGES_TOKEN
+#
+# Label-scan images now use R2 (above), not Cloudflare Images — no
+# CF_ACCOUNT_ID / CF_IMAGES_TOKEN secrets are required.
 #
 # For local dev, copy .dev.vars.example to .dev.vars and fill it in.
 

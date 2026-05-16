@@ -17,7 +17,7 @@ export type ApiResult<T = unknown> = {
 export async function api<T = unknown>(
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   path: string,
-  opts: { token?: string; body?: unknown; headers?: Record<string, string> } = {},
+  opts: { token?: string; body?: unknown; headers?: Record<string, string>; env?: Partial<Env> } = {},
 ): Promise<ApiResult<T>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -28,7 +28,8 @@ export async function api<T = unknown>(
   const init: RequestInit = { method, headers };
   if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
 
-  const res = await app.fetch(new Request('http://test' + path, init), testEnv);
+  const env = opts.env ? { ...testEnv, ...opts.env } : testEnv;
+  const res = await app.fetch(new Request('http://test' + path, init), env);
   const text = await res.text();
   let body: T;
   try { body = text ? JSON.parse(text) : (undefined as T); }
