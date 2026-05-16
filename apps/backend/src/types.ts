@@ -1,28 +1,20 @@
-// Worker bindings + shared API types.
+// App configuration, built from process.env (see src/env.ts). Passed to the
+// Hono app as `Bindings` so existing `c.env` / getDb(c.env) call sites work
+// unchanged.
 
 export type Env = {
   DATABASE_URL?: string;
-  HYPERDRIVE?: { connectionString: string };
   JWT_SECRET: string;
   JWT_ISSUER?: string;
   STUB_LOW_CONF?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
-  CF_ACCOUNT_ID?: string;
-  CF_IMAGES_TOKEN?: string;
-  AI?: {
-    run(model: string, input: Record<string, unknown>): Promise<unknown>;
-  };
-  // R2 bucket for sell-order status attachments (proof of shipment, invoices,
-  // proof of payment). Optional — when absent, uploadAttachment returns a stub.
-  R2_ATTACHMENTS?: {
-    put(
-      key: string,
-      value: ArrayBuffer | ReadableStream,
-      options?: { httpMetadata?: { contentType?: string } },
-    ): Promise<unknown>;
-    delete(key: string): Promise<void>;
-  };
+  // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
+  // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
+  R2_S3_ENDPOINT?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  R2_BUCKET?: string;
   R2_ATTACHMENTS_PUBLIC_URL?: string;
 };
 
