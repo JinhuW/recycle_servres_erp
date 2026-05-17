@@ -79,6 +79,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // The status section is foldable so the pinned action card stays compact —
   // collapsed by default once it's settled (not when the user is mid-change).
   const [statusOpen, setStatusOpen] = useState(false);
+  // Same fold treatment for the warehouse/payment/cost meta block.
+  const [metaOpen, setMetaOpen] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -504,6 +506,34 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         </div>
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+          <button
+            type="button"
+            onClick={() => setMetaOpen(o => !o)}
+            aria-expanded={metaOpen}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+              marginBottom: metaOpen ? 10 : 0,
+            }}
+          >
+            <Icon name="warehouse" size={12} /> {t('orderDetails')}
+            {!metaOpen && (
+              <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: 'var(--fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {(warehouses.find(w => w.id === warehouseId)?.name
+                  ?? warehouses.find(w => w.id === warehouseId)?.short
+                  ?? order.warehouse?.short ?? '—')}
+                {' · '}{payment === 'company' ? 'Company' : 'Self-paid'}
+                {' · '}{fmtUSD(totalCostOverride ? (parsedTotalCost ?? 0) : totals.cost)}
+              </span>
+            )}
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+              <Icon name={metaOpen ? 'chevronUp' : 'chevronDown'} size={13} />
+            </span>
+          </button>
+          {metaOpen && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>
@@ -605,6 +635,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               />
             </div>
           </div>
+          )}
         </div>
 
         <div style={{
