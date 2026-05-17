@@ -35,6 +35,7 @@ const toAddLine = (l: DraftLine) => ({
   category: l.category,
   brand: l.brand ?? null,
   capacity: l.capacity ?? null,
+  generation: l.generation ?? null,
   type: l.type ?? null,
   classification: l.classification ?? null,
   rank: l.rank ?? null,

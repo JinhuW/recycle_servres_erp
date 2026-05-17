@@ -62,3 +62,23 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
     expect(r.kind).toBe('error');
   });
 });
+
+describe('buildOrderSubmit — line fields are not dropped', () => {
+  it('carries RAM generation on added lines (purchaser-filled product info must persist)', () => {
+    const r = buildOrderSubmit(
+      { draftId: 'SO-9', category: 'RAM', lines: [line({ generation: 'DDR4' })] },
+      meta,
+    );
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect((r.body.addLines as Array<Record<string, unknown>>)[0]).toMatchObject({ generation: 'DDR4' });
+  });
+
+  it('carries RAM generation on updated lines', () => {
+    const r = buildOrderSubmit(
+      { editingId: 'SO-1', category: 'RAM', lines: [line({ id: 'l1', generation: 'DDR5' })], originalLineIds: ['l1'] },
+      meta,
+    );
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect((r.body.lines as Array<Record<string, unknown>>)[0]).toMatchObject({ generation: 'DDR5' });
+  });
+});
