@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
@@ -76,11 +76,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  // The status section is foldable so the pinned action card stays compact —
-  // collapsed by default once it's settled (not when the user is mid-change).
-  const [statusOpen, setStatusOpen] = useState(false);
-  // Same fold treatment for the warehouse/payment/cost meta block.
-  const [metaOpen, setMetaOpen] = useState(false);
+  // The status/meta sections are foldable so the pinned action card stays
+  // compact when the items table is long. They start EXPANDED; a one-shot
+  // post-mount measurement collapses them only if the table actually
+  // overflows. Measuring while expanded means the table is in its most
+  // space-constrained state, so "fits" stays true after — no fold/unfold loop.
+  const [statusOpen, setStatusOpen] = useState(true);
+  const [metaOpen, setMetaOpen] = useState(true);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = tableScrollRef.current;
+    if (el && el.scrollHeight - el.clientHeight > 1) {
+      setStatusOpen(false);
+      setMetaOpen(false);
+    }
+    // Run once on mount: an explicit user toggle afterwards must stick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -274,7 +286,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             )}
           </div>
         </div>
-        <div className="table-scroll">
+        <div className="table-scroll" ref={tableScrollRef}>
           <table className="table">
             <thead>
               <tr>
