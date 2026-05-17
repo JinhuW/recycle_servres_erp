@@ -30,12 +30,7 @@ describe('GET /api/dashboard', () => {
     }
   });
 
-  it('purchaser KPI commission equals their aggregate (tier-correct, not per-line sum)', async () => {
-    // A purchaser's whole-dashboard scope is exactly their own orders, so the
-    // KPI commission must equal the commission shown for them on the
-    // leaderboard — both are computeCommission() on the same aggregate
-    // profit/revenue. Summing commission per order line lands lines in higher
-    // tiers individually and inflates the KPI, breaking this invariant.
+  it('KPI commission = sum of profit x per-order rate, matching the leaderboard', async () => {
     const { token, user } = await loginAs(MARCUS);
     const r = await api<{
       kpis: { commission: number };
@@ -44,8 +39,20 @@ describe('GET /api/dashboard', () => {
     expect(r.status).toBe(200);
     const mine = r.body.leaderboard.find(x => x.id === user.id);
     expect(mine?.commission).not.toBeNull();
-    expect(mine!.commission as number).toBeGreaterThan(0);
+    // A purchaser's whole-dashboard scope is exactly their own orders, so the
+    // KPI commission must equal their leaderboard commission.
     expect(r.body.kpis.commission).toBeCloseTo(mine!.commission as number, 2);
+  });
+
+  it('an order with a NULL commission_rate contributes $0', async () => {
+    const { getTestDb } = await import('./helpers/db');
+    const db = getTestDb();
+    await db`UPDATE orders SET commission_rate = NULL`;
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ kpis: { commission: number } }>(
+      'GET', '/api/dashboard?range=90d', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.kpis.commission).toBe(0);
   });
 
   it('range honored: 7d returns less than 90d', async () => {

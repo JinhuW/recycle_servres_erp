@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
-import { computeCommission, type Tier } from '../lib/commission-calc';
 import type { Env, User } from '../types';
 
 const dashboard = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -13,11 +12,6 @@ dashboard.get('/', async (c) => {
   const isManager = u.role === 'manager';
   const range = c.req.query('range') ?? '30d';
   const days = RANGE_DAYS[range] ?? 30;
-
-  const tiers = await sql<Tier[]>`
-    SELECT id, label, floor_pct::float AS "floorPct", rate::float AS rate
-    FROM commission_tiers ORDER BY position
-  `;
 
   const scopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
 
@@ -34,19 +28,19 @@ dashboard.get('/', async (c) => {
   }
   const profit = revenue - cost;
 
-  // Commission honors the tier table per person on their *aggregate*
-  // profit/revenue — never per line (that lands each line in a higher tier
-  // and inflates the total). Summing per-user keeps the KPI consistent with
-  // the leaderboard; for a purchaser's own scope it's a single row.
-  const perUser = await sql<{ revenue: number; profit: number }[]>`
-    SELECT COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
-    FROM order_lines l JOIN orders o ON o.id = l.order_id
+  // Commission is the per-order rate the manager set, applied to that order's
+  // profit, summed over the scope. NULL rate = $0.
+  const perOrder = await sql<{ profit: number; commission_rate: number | null }[]>`
+    SELECT
+      COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
+      o.commission_rate::float AS commission_rate
+    FROM orders o
+    LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
-    GROUP BY o.user_id
+    GROUP BY o.id, o.commission_rate
   `;
   let commission = 0;
-  for (const p of perUser) commission += computeCommission({ profit: p.profit, revenue: p.revenue }, tiers).payable;
+  for (const r of perOrder) commission += r.profit * (r.commission_rate ?? 0);
   commission = +commission.toFixed(2);
 
   const cnt = (await sql<{ n: number }[]>`
@@ -76,15 +70,23 @@ dashboard.get('/', async (c) => {
   // per-row from profit/revenue via the tier model below (not selected here).
   const leaderboardRaw = await sql<{
     id: string; name: string; initials: string; email: string; role: string;
-    count: number; revenue: number; profit: number;
+    count: number; revenue: number; profit: number; commission: number;
   }[]>`
+    WITH per_order AS (
+      SELECT o.id, o.user_id, o.commission_rate::float AS rate,
+             COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
+             COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
+      FROM orders o JOIN order_lines l ON l.order_id = o.id
+      WHERE o.created_at >= NOW() - (${days} || ' days')::interval
+      GROUP BY o.id, o.user_id, o.commission_rate
+    )
     SELECT u.id, u.name, u.initials, u.email, u.role,
-           COUNT(DISTINCT o.id)::int AS count,
-           COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
-    FROM users u JOIN orders o ON o.user_id = u.id JOIN order_lines l ON l.order_id = o.id
+           COUNT(DISTINCT po.id)::int AS count,
+           COALESCE(SUM(po.revenue), 0)::float AS revenue,
+           COALESCE(SUM(po.profit), 0)::float AS profit,
+           COALESCE(SUM(po.profit * COALESCE(po.rate, 0)), 0)::float AS commission
+    FROM users u JOIN per_order po ON po.user_id = u.id
     WHERE u.role = 'purchaser'
-      AND o.created_at >= NOW() - (${days} || ' days')::interval
     GROUP BY u.id, u.name, u.initials, u.email, u.role
     ORDER BY profit DESC
   `;
@@ -96,9 +98,7 @@ dashboard.get('/', async (c) => {
       count: row.count,
       revenue: showFinancials ? row.revenue : null,
       profit: showFinancials ? row.profit : null,
-      commission: showFinancials
-        ? computeCommission({ profit: row.profit, revenue: row.revenue }, tiers).payable
-        : null,
+      commission: showFinancials ? +row.commission.toFixed(2) : null,
     };
   });
 
