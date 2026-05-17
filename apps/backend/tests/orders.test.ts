@@ -166,6 +166,22 @@ describe('GET /api/orders — per-order commission rate', () => {
     r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
     expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBeNull();
   });
+
+  it('clamps a negative rate to 0 and rejects non-finite input', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const id = (await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token: mgr })).body.orders[0].id;
+
+    await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: -0.5 } });
+    let r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
+    expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBe(0);
+
+    const bad = await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: 'abc' } });
+    expect(bad.status).toBe(400);
+
+    // The bad request must NOT have changed the stored value (still 0).
+    r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
+    expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBe(0);
+  });
 });
 
 describe('concurrent order creation gets unique ids', () => {

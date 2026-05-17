@@ -324,6 +324,13 @@ orders.patch('/:id', async (c) => {
   if (body.commissionRate !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can set the commission rate' }, 403);
   }
+  if (
+    body.commissionRate !== undefined &&
+    body.commissionRate !== null &&
+    !Number.isFinite(Number(body.commissionRate))
+  ) {
+    return c.json({ error: 'commissionRate must be a number or null' }, 400);
+  }
   const clampedRate =
     body.commissionRate === undefined ? undefined
     : body.commissionRate === null ? null
