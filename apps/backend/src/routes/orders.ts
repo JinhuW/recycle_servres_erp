@@ -69,7 +69,7 @@ orders.get('/', async (c) => {
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
       o.total_cost::float AS total_cost,
       u.name AS user_name, u.initials AS user_initials,
-      u.commission_rate::float AS commission_rate,
+      o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
       COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float         AS revenue,
@@ -81,7 +81,7 @@ orders.get('/', async (c) => {
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, u.commission_rate, w.id, w.short, w.region
+    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
     ORDER BY o.${sql(sort.col)} ${sql.unsafe(sort.dir.toUpperCase())}, o.id ${sql.unsafe(sort.dir.toUpperCase())}
     LIMIT ${limit + 1}
   `;
@@ -313,6 +313,7 @@ orders.patch('/:id', async (c) => {
         notes?: string | null;
         warehouseId?: string | null;
         payment?: 'company' | 'self';
+        commissionRate?: number | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
@@ -320,6 +321,13 @@ orders.patch('/:id', async (c) => {
   const existing = (await sql`SELECT user_id, category FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  if (body.commissionRate !== undefined && u.role !== 'manager') {
+    return c.json({ error: 'Only managers can set the commission rate' }, 403);
+  }
+  const clampedRate =
+    body.commissionRate === undefined ? undefined
+    : body.commissionRate === null ? null
+    : Math.min(1, Math.max(0, Number(body.commissionRate)));
 
   // R2 keys of label scans whose lines get removed — deleted after the tx
   // commits (R2 isn't transactional; never delete on a rolled-back change).
@@ -331,7 +339,8 @@ orders.patch('/:id', async (c) => {
         body.totalCost !== undefined ||
         body.notes !== undefined ||
         body.warehouseId !== undefined ||
-        body.payment !== undefined;
+        body.payment !== undefined ||
+        body.commissionRate !== undefined;
       if (touchesOrder) {
         // Nullable fields use a CASE WHEN sentinel so the client can clear
         // them by sending `null`; bare COALESCE would treat null as "no
@@ -340,11 +349,13 @@ orders.patch('/:id', async (c) => {
         const setTotalCost = body.totalCost   !== undefined ? 1 : 0;
         const setNotes     = body.notes       !== undefined ? 1 : 0;
         const setWarehouse = body.warehouseId !== undefined ? 1 : 0;
+        const setCommission = body.commissionRate !== undefined ? 1 : 0;
         await tx`
           UPDATE orders SET
             total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${body.totalCost ?? null}   ELSE total_cost   END,
             notes        = CASE WHEN ${setNotes}::int     = 1 THEN ${body.notes ?? null}       ELSE notes        END,
             warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
+            commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${clampedRate ?? null} ELSE commission_rate END,
             payment      = COALESCE(${body.payment ?? null}, payment)
           WHERE id = ${id}
         `;

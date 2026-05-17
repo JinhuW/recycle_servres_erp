@@ -120,21 +120,51 @@ describe('notifications on order advance', () => {
   });
 });
 
-describe('GET /api/orders — commission rate', () => {
+describe('GET /api/orders — per-order commission rate', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('returns each order owner\'s DB commission rate (default 0.075)', async () => {
-    const { token } = await loginAs(MARCUS);
-    await api('POST', '/api/orders', {
-      token,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
-        lines: [{ category: 'RAM', qty: 2, unitCost: 10, condition: 'New' }] },
-    });
-    const r = await api<{ orders: { commissionRate: number }[] }>(
+  it('returns the order\'s own commission_rate (null when unset)', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ orders: { id: string; commissionRate: number | null }[] }>(
       'GET', '/api/orders', { token });
     expect(r.status).toBe(200);
     expect(r.body.orders.length).toBeGreaterThan(0);
-    for (const o of r.body.orders) expect(o.commissionRate).toBe(0.075);
+    // seed: drafts are null, others 0.075
+    expect(r.body.orders.some(o => o.commissionRate === 0.075)).toBe(true);
+  });
+
+  it('manager can PATCH commissionRate; purchaser is forbidden', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const list = await api<{ orders: { id: string; userId: string }[] }>(
+      'GET', '/api/orders', { token: mgr });
+    const target = list.body.orders[0];
+
+    const ok = await api('PATCH', `/api/orders/${target.id}`,
+      { token: mgr, body: { commissionRate: 0.1 } });
+    expect(ok.status).toBe(200);
+
+    const after = await api<{ orders: { id: string; commissionRate: number | null }[] }>(
+      'GET', '/api/orders', { token: mgr });
+    expect(after.body.orders.find(o => o.id === target.id)!.commissionRate).toBeCloseTo(0.1, 4);
+
+    // A purchaser editing their own order's rate is rejected.
+    const { token: pur, user: pu } = await loginAs(MARCUS);
+    const mine = (await api<{ orders: { id: string; userId: string }[] }>(
+      'GET', '/api/orders', { token: pur })).body.orders.find(o => o.userId === pu.id)!;
+    const denied = await api('PATCH', `/api/orders/${mine.id}`,
+      { token: pur, body: { commissionRate: 0.2 } });
+    expect(denied.status).toBe(403);
+  });
+
+  it('clamps out-of-range rate and allows null to unset', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const id = (await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token: mgr })).body.orders[0].id;
+    await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: 5 } });
+    let r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
+    expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBe(1);
+    await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: null } });
+    r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
+    expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBeNull();
   });
 });
 
