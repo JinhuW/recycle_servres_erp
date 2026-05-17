@@ -285,7 +285,6 @@ html.desktop, body.desktop, .desktop #root {
   flex-direction: column;
 }
 .page.page-order-edit > .oe-items-card > .card-head,
-.page.page-order-edit > .oe-items-card > .oe-items-bar,
 .page.page-order-edit > .oe-items-card > .oe-items-foot {
   flex-shrink: 0;
 }

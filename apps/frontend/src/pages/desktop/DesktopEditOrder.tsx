@@ -262,31 +262,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             <div className="card-title">{t('orderDetails')}</div>
             <div className="card-sub">An order contains multiple line items of the same category ({order.category}).</div>
           </div>
-          <span className="chip mono">{order.id} · Editing</span>
-        </div>
-        <div className="oe-items-bar" style={{
-          borderTop: '1px solid var(--border)', padding: '14px 18px 6px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, flexWrap: 'wrap',
-        }}>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>
-              Items in this order <span style={{ fontWeight: 500, color: 'var(--fg-subtle)', marginLeft: 4 }}>({lines.length})</span>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {canEditOrder
-                ? `Click a row to edit. Use "Add ${order.category} line" to add another item.`
-                : `${totals.qty} unit${totals.qty === 1 ? '' : 's'} · ${fmtUSD(totals.cost)}`}
-            </div>
-          </div>
-          {canEditOrder && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="chip mono">{totals.qty} units · {fmtUSD(totals.cost)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span className="chip mono">{totals.qty} units · {fmtUSD(totals.cost)}</span>
+            {canEditOrder && (
               <button className="btn" onClick={addLine}>
                 <Icon name="plus" size={13} /> Add {order.category} line
               </button>
-            </div>
-          )}
+            )}
+            <span className="chip mono">{order.id} · Editing</span>
+          </div>
         </div>
         <div className="table-scroll">
           <table className="table">
