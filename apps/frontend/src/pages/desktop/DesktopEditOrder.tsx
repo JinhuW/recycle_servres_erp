@@ -266,12 +266,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span className="chip mono">{totals.qty} units · {fmtUSD(totals.cost)}</span>
+            <span className="chip mono">{order.id} · Editing</span>
             {canEditOrder && (
-              <button className="btn" onClick={addLine}>
+              <button className="btn accent" style={{ marginLeft: 'auto' }} onClick={addLine}>
                 <Icon name="plus" size={13} /> Add {order.category} line
               </button>
             )}
-            <span className="chip mono">{order.id} · Editing</span>
           </div>
         </div>
         <div className="table-scroll">
