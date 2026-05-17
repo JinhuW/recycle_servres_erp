@@ -509,8 +509,9 @@ try {
   const orders = buildOrders(buildSubmissions());
   for (const o of orders) {
     await sql`
-      INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, created_at)
-      VALUES (${o.id}, ${protoToUuid[o.user_id]}, ${o.category}, ${o.warehouse_id}, ${o.payment}, ${o.notes}, ${o.total_cost}, ${o.lifecycle}, ${o.created_at})
+      INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, created_at, commission_rate)
+      VALUES (${o.id}, ${protoToUuid[o.user_id]}, ${o.category}, ${o.warehouse_id}, ${o.payment}, ${o.notes}, ${o.total_cost}, ${o.lifecycle}, ${o.created_at},
+              ${o.lifecycle === 'draft' ? null : 0.075})
     `;
     for (const l of o.lines) {
       await sql`

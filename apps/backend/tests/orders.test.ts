@@ -152,3 +152,17 @@ describe('concurrent order creation gets unique ids', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe('orders.commission_rate column', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('exists and is nullable, seeded non-null on at least one order', async () => {
+    const { getTestDb } = await import('./helpers/db');
+    const db = getTestDb();
+    const rows = await db<{ commission_rate: number | null }[]>`
+      SELECT commission_rate FROM orders
+    `;
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some(r => r.commission_rate !== null)).toBe(true);
+  });
+});
