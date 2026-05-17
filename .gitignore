@@ -30,3 +30,14 @@ pnpm-debug.log*
 !.vscode/extensions.json
 !.vscode/settings.json
 *.swp
+
+# Terraform
+infra/terraform/**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.auto.tfvars
+**/*.secret.tfvars
+.terraform.lock.hcl
