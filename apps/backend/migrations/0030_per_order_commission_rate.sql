@@ -5,3 +5,8 @@
 -- them). Idempotent: the runner re-applies every migration each run.
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(5,4);
+
+-- Old commission model fully removed (all code is migrated off it). Idempotent.
+DROP TABLE IF EXISTS commission_tiers CASCADE;
+DROP TABLE IF EXISTS commission_settings CASCADE;
+ALTER TABLE users DROP COLUMN IF EXISTS commission_rate;
