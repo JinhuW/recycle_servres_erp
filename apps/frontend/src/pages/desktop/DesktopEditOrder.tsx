@@ -128,9 +128,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
+  // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
+  // must NOT be treated as a change — mirrors the totalCost field's guard.
+  const parsedCommission =
+    commissionPct.trim() === '' ? null : Number(commissionPct);
+  const commissionValid =
+    parsedCommission === null || Number.isFinite(parsedCommission);
+  const commissionRateValue =
+    parsedCommission === null ? null : parsedCommission / 100;
   const commissionDirty =
-    (commissionPct === '' ? null : Number(commissionPct) / 100)
-      !== (order.commissionRate ?? null);
+    commissionValid && commissionRateValue !== (order.commissionRate ?? null);
   const parsedTotalCost = totalCostInput.trim() === '' ? null : Number(totalCostInput);
   const totalCostDirty =
     totalCostOverride &&
@@ -158,9 +165,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
-        commissionRate: commissionDirty
-          ? (commissionPct === '' ? null : Number(commissionPct) / 100)
-          : undefined,
+        commissionRate: commissionDirty ? commissionRateValue : undefined,
         totalCost:     totalCostDirty ? parsedTotalCost        : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
