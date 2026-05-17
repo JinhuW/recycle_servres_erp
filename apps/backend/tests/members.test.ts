@@ -47,3 +47,16 @@ describe('deactivated members cannot authenticate', () => {
     expect(me.status).toBe(401);
   });
 });
+
+describe('members payload has no commission_rate', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('GET /api/members items omit commission_rate', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ items: Record<string, unknown>[] }>(
+      'GET', '/api/members?includeInactive=true', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.items.length).toBeGreaterThan(0);
+    for (const m of r.body.items) expect('commission_rate' in m).toBe(false);
+  });
+});

@@ -17,7 +17,6 @@ export interface MemberSummary {
   phone: string | null;
   title: string | null;
   active: boolean;
-  commission_rate: number;
   created_at: Date;
   last_seen_at: Date | null;
   order_count: number;
@@ -44,7 +43,6 @@ export interface UpdateMemberInput {
   phone?: string;
   title?: string;
   role?: MemberRole;
-  commissionRate?: number;
   active?: boolean;
   password?: string;
 }
@@ -66,7 +64,7 @@ export async function listMembers(
   const activeFilter = opts.includeInactive ? sql`TRUE` : sql`u.active = TRUE`;
   const rows = await sql`
     SELECT u.id, u.email, u.name, u.initials, u.role, u.team, u.phone, u.title,
-           u.active, u.commission_rate::float AS commission_rate, u.created_at,
+           u.active, u.created_at,
            u.last_seen_at,
            COUNT(DISTINCT o.id)::int AS order_count,
            COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS lifetime_profit
@@ -114,7 +112,6 @@ export async function updateMember(
       phone           = COALESCE(${input.phone ?? null},           phone),
       title           = COALESCE(${input.title ?? null},           title),
       role            = COALESCE(${input.role ?? null},            role),
-      commission_rate = COALESCE(${input.commissionRate ?? null},  commission_rate),
       active          = COALESCE(${input.active ?? null},          active)
     WHERE id = ${id}
   `;
