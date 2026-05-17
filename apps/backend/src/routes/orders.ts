@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import { deleteAttachment } from '../r2';
 import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
+import { nextHumanId } from '../lib/id-seq';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -229,13 +230,8 @@ orders.post('/', async (c) => {
   if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
   if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
 
-  // Generate a human-friendly id like SO-1289 — collision-resistant via the
-  // sequence of existing IDs. Good enough for this scale.
-  const maxRow = (await sql`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288) AS max
-    FROM orders WHERE id LIKE 'SO-%' AND id ~ '^SO-[0-9]+$'
-  `)[0] as { max: number };
-  const newId = 'SO-' + (maxRow.max + 1);
+  // Human-friendly id like SO-1289, allocated atomically (see id-seq.ts).
+  const newId = await nextHumanId(sql, 'SO', 'SO');
 
   await sql.begin(async (tx) => {
     await tx`
@@ -443,11 +439,7 @@ orders.post('/draft', async (c) => {
     return c.json({ error: 'category is required' }, 400);
   }
 
-  const maxRow = (await sql`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288) AS max
-    FROM orders WHERE id LIKE 'SO-%' AND id ~ '^SO-[0-9]+$'
-  `)[0] as { max: number };
-  const newId = 'SO-' + (maxRow.max + 1);
+  const newId = await nextHumanId(sql, 'SO', 'SO');
 
   await sql`
     INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)

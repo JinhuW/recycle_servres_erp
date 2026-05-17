@@ -137,3 +137,18 @@ describe('GET /api/orders — commission rate', () => {
     for (const o of r.body.orders) expect(o.commissionRate).toBe(0.075);
   });
 });
+
+describe('concurrent order creation gets unique ids', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('20 simultaneous draft creates all succeed with distinct ids', async () => {
+    const { token } = await loginAs(MARCUS);
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        api<{ id: string }>('POST', '/api/orders/draft', { token, body: { category: 'RAM' } })),
+    );
+    for (const r of results) expect(r.status).toBe(201);
+    const ids = results.map(r => r.body.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

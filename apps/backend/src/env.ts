@@ -17,5 +17,6 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     R2_SECRET_ACCESS_KEY: src.R2_SECRET_ACCESS_KEY,
     R2_BUCKET: src.R2_BUCKET,
     R2_ATTACHMENTS_PUBLIC_URL: src.R2_ATTACHMENTS_PUBLIC_URL,
+    CORS_ALLOWED_ORIGINS: src.CORS_ALLOWED_ORIGINS,
   };
 }

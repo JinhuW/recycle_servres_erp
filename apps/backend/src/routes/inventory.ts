@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
+import { nextHumanId } from '../lib/id-seq';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -474,14 +475,9 @@ inventory.post('/transfer', async (c) => {
   let transferOrderId = '';
 
   await sql.begin(async (tx) => {
-    // Human-friendly id like TO-1001 — sequence of existing IDs. Same
-    // best-effort scheme as SO-<n> in orders.ts; good enough for this scale
-    // (concurrent transfers are rare; a PK clash would just 500 the retry).
-    const maxRow = (await tx`
-      SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1000) AS max
-      FROM transfer_orders WHERE id LIKE 'TO-%' AND id ~ '^TO-[0-9]+$'
-    `)[0] as { max: number };
-    transferOrderId = 'TO-' + (maxRow.max + 1);
+    // Human-friendly id like TO-1001, allocated atomically (see id-seq.ts).
+    // Stays inside this transaction via the tx handle.
+    transferOrderId = await nextHumanId(tx, 'TO', 'TO');
     await tx`
       INSERT INTO transfer_orders (id, from_warehouse_id, to_warehouse_id, note, created_by, status)
       VALUES (${transferOrderId}, ${fromWarehouse}, ${toWarehouseId}, ${note}, ${u.id}, 'Pending')

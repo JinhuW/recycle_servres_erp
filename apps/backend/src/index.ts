@@ -1,6 +1,6 @@
 // Recycle Servers ERP — Hono backend entrypoint (served by src/server.ts on Node).
 // Routes are mounted under /api/*. CORS is open in dev so the Vite SPA on
-// :5173 can call us; in prod tighten the allowlist.
+// :5173 can call us; set CORS_ALLOWED_ORIGINS in prod to lock it down.
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -33,7 +33,16 @@ app.use('*', logger());
 app.use(
   '*',
   cors({
-    origin: (origin) => origin ?? '*',
+    // With credentials:true, reflecting an arbitrary origin lets any site
+    // make credentialed calls. In production set CORS_ALLOWED_ORIGINS to the
+    // real frontend origin(s); only those are then echoed back. Unset keeps
+    // the permissive dev behavior (Vite SPA on a shifting localhost port).
+    origin: (origin, c) => {
+      const configured = (c.env as Env).CORS_ALLOWED_ORIGINS ?? '';
+      const allow = configured.split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (allow.length === 0) return origin ?? '*';
+      return allow.includes(origin) ? origin : null;
+    },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

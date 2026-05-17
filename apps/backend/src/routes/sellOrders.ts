@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
+import { nextHumanId } from '../lib/id-seq';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -183,14 +184,8 @@ sellOrders.post('/', async (c) => {
     if (l.qty > inv.qty) return c.json({ error: `qty ${l.qty} exceeds inventory available ${inv.qty}` }, 400);
   }
 
-  // Generate a new SL-NNNN id by reading the current max numeric suffix. This
-  // is safe under low concurrency (single manager creating orders); a Postgres
-  // sequence would be the rigorous fix.
-  const maxRow = (await sql`
-    SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int), 4000) AS max_id
-    FROM sell_orders
-  `)[0] as { max_id: number };
-  const nextId = 'SL-' + (Number(maxRow.max_id) + 1);
+  // Human-friendly id like SL-4001, allocated atomically (see id-seq.ts).
+  const nextId = await nextHumanId(sql, 'SL', 'SL');
 
   await sql.begin(async (tx) => {
     await tx`

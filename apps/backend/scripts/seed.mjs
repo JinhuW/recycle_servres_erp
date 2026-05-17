@@ -630,6 +630,21 @@ try {
     }
   }
 
+  // Migration 0029 seeds id_counters from the (empty) tables, so after
+  // inserting rows with explicit ids we must advance the counters past them —
+  // otherwise the next created order/sell-order would collide with seed data.
+  console.log('· Syncing id_counters…');
+  await sql`
+    INSERT INTO id_counters (name, value) VALUES
+      ('SO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288)
+                FROM orders WHERE id ~ '^SO-[0-9]+$')),
+      ('SL', (SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int), 4000)
+                FROM sell_orders)),
+      ('TO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1000)
+                FROM transfer_orders WHERE id ~ '^TO-[0-9]+$'))
+    ON CONFLICT (name) DO UPDATE SET value = GREATEST(id_counters.value, EXCLUDED.value)
+  `;
+
   console.log('✓ seed complete');
   console.log('  Demo logins (password "demo"):');
   USERS.forEach(u => console.log(`    ${u.email.padEnd(35)} → ${u.role}`));

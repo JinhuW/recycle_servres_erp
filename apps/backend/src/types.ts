@@ -16,6 +16,10 @@ export type Env = {
   R2_SECRET_ACCESS_KEY?: string;
   R2_BUCKET?: string;
   R2_ATTACHMENTS_PUBLIC_URL?: string;
+  // Comma-separated list of origins allowed to make credentialed CORS
+  // requests. Unset = permissive (reflect any origin) for local dev; set it
+  // in production to the real frontend origin(s).
+  CORS_ALLOWED_ORIGINS?: string;
 };
 
 export type Role = 'manager' | 'purchaser';
