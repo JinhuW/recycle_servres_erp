@@ -113,6 +113,7 @@ export function DesktopApp() {
         <RolePreviewBanner />
         <div className={'page'
           + (view2 === 'history' && !editingOrder ? ' page-history' : '')
+          + (view2 === 'history' && editingOrder ? ' page-order-edit' : '')
           + (view2 === 'market' ? ' page-market' : '')
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'dashboard' ? ' page-dashboard' : '')}>

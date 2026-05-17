@@ -76,6 +76,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  // The status section is foldable so the pinned action card stays compact —
+  // collapsed by default once it's settled (not when the user is mid-change).
+  const [statusOpen, setStatusOpen] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -253,7 +256,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         )}
       </div>
 
-      <div className={'card' + (!canEditOrder ? ' order-readonly' : '')}>
+      <div className={'card oe-items-card' + (!canEditOrder ? ' order-readonly' : '')}>
         <div className="card-head">
           <div>
             <div className="card-title">{t('orderDetails')}</div>
@@ -261,7 +264,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <span className="chip mono">{order.id} · Editing</span>
         </div>
-        <div style={{
+        <div className="oe-items-bar" style={{
           borderTop: '1px solid var(--border)', padding: '14px 18px 6px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 12, flexWrap: 'wrap',
@@ -389,7 +392,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </tbody>
           </table>
         </div>
-        <div style={{
+        <div className="oe-items-foot" style={{
           padding: '12px 18px', borderTop: '1px solid var(--border)',
           display: 'flex', justifyContent: 'flex-end', gap: 24,
           fontSize: 13, background: 'var(--bg-soft)',
@@ -406,18 +409,33 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         </div>
       </div>
 
-      <div className="card" style={{ position: 'sticky', bottom: 16, zIndex: 5, boxShadow: '0 12px 24px rgba(15,23,42,0.06)' }}>
+      <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10,
-          }}>
+          <button
+            type="button"
+            onClick={() => setStatusOpen(o => !o)}
+            aria-expanded={statusOpen}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+              marginBottom: statusOpen ? 10 : 0,
+            }}
+          >
             <Icon name="flag" size={12} /> {t('orderStatus')}
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-              {t('advanceAsProgresses')}
+            {!statusOpen && (
+              <span className={'chip dot ' + statusTone(status)} style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
+                {status}
+              </span>
+            )}
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {statusOpen && t('advanceAsProgresses')}
+              <Icon name={statusOpen ? 'chevronUp' : 'chevronDown'} size={13} />
             </span>
-          </div>
+          </button>
+          {statusOpen && (<>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
               const active = s === status;
@@ -498,6 +516,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               Status will change from <strong>{effectiveStatus}</strong> to <strong>{status}</strong> when you save — this hands the order off to the manager.
             </div>
           )}
+          </>)}
         </div>
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
