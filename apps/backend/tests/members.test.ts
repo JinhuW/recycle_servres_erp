@@ -59,4 +59,20 @@ describe('members payload has no commission_rate', () => {
     expect(r.body.items.length).toBeGreaterThan(0);
     for (const m of r.body.items) expect('commission_rate' in m).toBe(false);
   });
+
+  it('PATCH ignores a stray commissionRate without error', async () => {
+    const { token } = await loginAs(ALEX);
+    const list = await api<{ items: { id: string; role: string }[] }>(
+      'GET', '/api/members?includeInactive=true', { token });
+    const target = list.body.items.find(m => m.role === 'purchaser')!;
+
+    const r = await api('PATCH', `/api/members/${target.id}`,
+      { token, body: { commissionRate: 0.9 } });
+    expect(r.status).toBe(200);
+
+    const after = await api<{ items: Record<string, unknown>[] }>(
+      'GET', '/api/members?includeInactive=true', { token });
+    const m = after.body.items.find((x) => (x as { id: string }).id === target.id)!;
+    expect('commission_rate' in m).toBe(false);
+  });
 });
