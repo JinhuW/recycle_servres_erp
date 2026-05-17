@@ -12,6 +12,19 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 const realScan = (u?: string | null): u is string =>
   !!u && !u.startsWith('data:image/placeholder');
 
+// `order.status` is derived from the SET of line statuses and collapses to
+// 'Mixed' when a (still-open) order's lines disagree — e.g. a draft whose
+// lines were autosaved as 'In Transit'. Gating edit-access on that ambiguous
+// string locked purchasers out of their own draft. `lifecycle` is the
+// authoritative stage (see orders.ts), so derive the canonical status from it
+// and only fall back to the derived string for unknown lifecycles.
+const LIFECYCLE_STATUS: Record<string, string> = {
+  draft: 'Draft',
+  in_transit: 'In Transit',
+  reviewing: 'Reviewing',
+  done: 'Done',
+};
+
 type Props = {
   order: Order;
   onCancel: () => void;
@@ -37,17 +50,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const { t } = useT();
   const { user } = useAuth();
   const isPurchaser = user?.role !== 'manager';
-  const orderLocked = isCompleted(order.status);
+  // Edit-gating keys off the authoritative lifecycle, not the 'Mixed'-prone
+  // derived status, so an owner is never locked out of their own draft.
+  const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
+  const orderLocked = isCompleted(effectiveStatus);
   const purchaserCanEdit =
-    !isPurchaser || order.status === 'Draft' || order.status === 'In Transit';
+    !isPurchaser || effectiveStatus === 'Draft' || effectiveStatus === 'In Transit';
   const canEditOrder = purchaserCanEdit && !orderLocked;
   const allowedStatuses = isPurchaser
-    ? order.status === 'Draft'      ? ['Draft', 'In Transit']
-    : order.status === 'In Transit' ? ['In Transit', 'Reviewing']
-    :                                 [order.status]
+    ? effectiveStatus === 'Draft'      ? ['Draft', 'In Transit']
+    : effectiveStatus === 'In Transit' ? ['In Transit', 'Reviewing']
+    :                                    [effectiveStatus]
     : ORDER_STATUSES.slice();
 
-  const [status, setStatus] = useState(order.status);
+  const [status, setStatus] = useState(effectiveStatus);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
@@ -66,7 +82,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const canDelete = canEditOrder && order.status === 'Draft';
+  const canDelete = canEditOrder && effectiveStatus === 'Draft';
 
   useEffect(() => {
     api.get<{ items: Warehouse[] }>('/api/warehouses')
@@ -123,7 +139,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     return { qty, cost, revenue, profit };
   }, [lines]);
 
-  const statusDirty = status !== order.status;
+  const statusDirty = status !== effectiveStatus;
   const linesDirty = lines.some(l => l._dirty) || lines.length !== order.lines.length;
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
@@ -442,7 +458,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               This order is being reviewed by the manager — pricing happens during review. You can view but not edit.
             </div>
           )}
-          {isPurchaser && purchaserCanEdit && order.status === 'Draft' && (
+          {isPurchaser && purchaserCanEdit && effectiveStatus === 'Draft' && (
             <div style={{
               marginTop: 10, padding: '8px 12px', borderRadius: 8,
               background: 'var(--accent-soft)', color: 'var(--accent-strong)',
@@ -452,7 +468,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               Advance to <strong>In Transit</strong> when you've shipped the order. You can keep editing line items until it moves to Reviewing.
             </div>
           )}
-          {isPurchaser && purchaserCanEdit && order.status === 'In Transit' && (
+          {isPurchaser && purchaserCanEdit && effectiveStatus === 'In Transit' && (
             <div style={{
               marginTop: 10, padding: '8px 12px', borderRadius: 8,
               background: 'var(--accent-soft)', color: 'var(--accent-strong)',
@@ -469,7 +485,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="info" size={13} />
-              Status will change from <strong>{order.status}</strong> to <strong>{status}</strong> when you save.
+              Status will change from <strong>{effectiveStatus}</strong> to <strong>{status}</strong> when you save.
             </div>
           )}
           {statusDirty && isPurchaser && (
@@ -479,13 +495,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="info" size={13} />
-              Status will change from <strong>{order.status}</strong> to <strong>{status}</strong> when you save — this hands the order off to the manager.
+              Status will change from <strong>{effectiveStatus}</strong> to <strong>{status}</strong> when you save — this hands the order off to the manager.
             </div>
           )}
         </div>
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>
               <div style={{ position: 'relative' }}>
