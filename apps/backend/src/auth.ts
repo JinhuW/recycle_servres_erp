@@ -69,7 +69,7 @@ export const authMiddleware: MiddlewareHandler<{
     SELECT id, email, name, initials, role, team, language,
            COALESCE(preferences, '{}'::jsonb) AS preferences
     FROM users
-    WHERE id = ${payload.sub}
+    WHERE id = ${payload.sub} AND active = TRUE
     LIMIT 1
   `;
   if (rows.length === 0) return c.json({ error: 'User not found' }, 401);

@@ -72,6 +72,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetWorkspaceSettings();
   };
 
+  // api.ts fires `auth:unauthorized` when any call gets a 401 mid-session
+  // (expired/revoked token). Drop to the login screen instead of leaving the
+  // user staring at stale data while every request silently fails.
+  useEffect(() => {
+    const onUnauthorized = () => logout();
+    window.addEventListener('auth:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized);
+    // logout only touches stable setters/module resets; safe to bind once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const setLanguage = async (lang: Lang) => {
     if (!user) return;
     setUser({ ...user, language: lang });

@@ -23,9 +23,9 @@ const TONE_VAR: Record<string, string> = {
 
 // Commission isn't stored on the order — derive it from profit using the
 // order owner's DB-backed rate (users.commission_rate, surfaced by
-// GET /api/orders as `commissionRate`). Falls back to 0.05 only if a row
-// somehow lacks the field.
-const commissionFor = (o: OrderSummary) => +(o.profit * (o.commissionRate || 0.05)).toFixed(2);
+// GET /api/orders as `commissionRate`). Falls back to 0.05 only if the field
+// is absent — `??` not `||` so a legitimate 0% rate stays 0, not 5%.
+const commissionFor = (o: OrderSummary) => +(o.profit * (o.commissionRate ?? 0.05)).toFixed(2);
 
 // Toggleable columns (matches design's TOGGLEABLE_COLS). Order chevron,
 // Submitter, and Actions are always shown — the rest can be hidden.

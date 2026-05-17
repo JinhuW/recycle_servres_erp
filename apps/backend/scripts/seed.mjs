@@ -55,6 +55,10 @@ const WAREHOUSES = [
 const RAM_BRANDS = ['Samsung', 'SK Hynix', 'Micron', 'Kingston', 'Other'];
 const RAM_TYPES  = ['DDR3', 'DDR4', 'DDR5'];
 const RAM_CLASS  = ['UDIMM', 'RDIMM', 'LRDIMM', 'SODIMM'];
+// Migration 0027 renamed the old RAM `type` (DDR generation) to `generation`
+// and repurposed `type` as the device class, backfilled from the DIMM form
+// factor. Mirror that mapping so a freshly seeded DB matches the schema.
+const DIMM_DEVICE_CLASS = { SODIMM: 'Laptop', UDIMM: 'Desktop', RDIMM: 'Server', LRDIMM: 'Server' };
 const RAM_RANK   = ['1Rx16', '1Rx8', '1Rx4', '2Rx16', '2Rx8', '2Rx4', '4Rx8', '4Rx4', '8Rx4'];
 const RAM_CAP    = ['4GB','8GB','16GB','32GB','64GB','128GB'];
 const RAM_SPEED  = ['800','1066','1333','1600','1866','2133','2400','2666','2933','3200','4000','4400','4800','5200','5600','6000','6400','6800','7200','7600','8000'];
@@ -511,11 +515,14 @@ try {
     for (const l of o.lines) {
       await sql`
         INSERT INTO order_lines (
-          order_id, category, brand, capacity, type, classification, rank, speed,
+          order_id, category, brand, capacity, generation, type, classification, rank, speed,
           interface, form_factor, description, part_number, condition, qty,
           unit_cost, sell_price, status, position, health, rpm
         ) VALUES (
-          ${o.id}, ${l.category}, ${l.brand}, ${l.capacity}, ${l.type}, ${l.classification}, ${l.rank_}, ${l.speed},
+          ${o.id}, ${l.category}, ${l.brand}, ${l.capacity},
+          ${l.type ?? null},
+          ${l.category === 'RAM' ? (DIMM_DEVICE_CLASS[l.classification] ?? null) : null},
+          ${l.classification}, ${l.rank_}, ${l.speed},
           ${l.interface}, ${l.form_factor}, ${l.description}, ${l.part_number}, ${l.condition}, ${l.qty},
           ${l.unit_cost}, ${l.sell_price}, ${l.status}, ${l.position}, ${l.health}, ${l.rpm}
         )

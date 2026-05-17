@@ -252,3 +252,32 @@ describe('sell-order qty clamp', () => {
     expect(JSON.stringify(r.body)).toMatch(/qty/i);
   });
 });
+
+describe('sell-order discount clamp', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('clamps an out-of-range discountPct so the total never goes negative', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        discountPct: 5, // bad input: discountPct is a 0..1 fraction
+        lines: [{
+          inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn',
+          qty: 1, unitPrice: 100, warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+        }],
+      },
+    });
+    expect(create.status).toBe(201);
+
+    const detail = await api<{ order: { discountPct: number; total: number } }>(
+      'GET', `/api/sell-orders/${create.body.id}`, { token });
+    expect(detail.status).toBe(200);
+    expect(detail.body.order.discountPct).toBeLessThanOrEqual(1);
+    expect(detail.body.order.discountPct).toBeGreaterThanOrEqual(0);
+    expect(detail.body.order.total).toBeGreaterThanOrEqual(0);
+  });
+});

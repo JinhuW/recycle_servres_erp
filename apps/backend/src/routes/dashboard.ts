@@ -21,21 +21,32 @@ dashboard.get('/', async (c) => {
 
   const scopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
 
-  // Aggregate per line then collapse with computeCommission so KPIs honor tiers.
   const lineRows = await sql<{ qty: number; unit_cost: number; sell_price: number | null }[]>`
     SELECT l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price
     FROM order_lines l JOIN orders o ON o.id = l.order_id
     WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
   `;
-  let revenue = 0, cost = 0, profit = 0, commission = 0;
+  let revenue = 0, cost = 0;
   for (const r of lineRows) {
     const sp = r.sell_price ?? r.unit_cost;
-    const rRev = sp * r.qty;
-    const rCost = r.unit_cost * r.qty;
-    const rProfit = rRev - rCost;
-    revenue += rRev; cost += rCost; profit += rProfit;
-    commission += computeCommission({ profit: rProfit, revenue: rRev }, tiers).payable;
+    revenue += sp * r.qty;
+    cost += r.unit_cost * r.qty;
   }
+  const profit = revenue - cost;
+
+  // Commission honors the tier table per person on their *aggregate*
+  // profit/revenue — never per line (that lands each line in a higher tier
+  // and inflates the total). Summing per-user keeps the KPI consistent with
+  // the leaderboard; for a purchaser's own scope it's a single row.
+  const perUser = await sql<{ revenue: number; profit: number }[]>`
+    SELECT COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
+           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
+    FROM order_lines l JOIN orders o ON o.id = l.order_id
+    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
+    GROUP BY o.user_id
+  `;
+  let commission = 0;
+  for (const p of perUser) commission += computeCommission({ profit: p.profit, revenue: p.revenue }, tiers).payable;
   commission = +commission.toFixed(2);
 
   const cnt = (await sql<{ n: number }[]>`

@@ -7,6 +7,14 @@ import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
+// discount_pct is a 0..1 fraction (the FE multiplies subtotal by it directly).
+// Clamp on write so malformed input can't produce a negative or runaway total.
+// Returns null for "not provided" so PATCH's COALESCE keeps the existing value.
+function clampDiscountPct(v: number | undefined): number | null {
+  if (v == null || Number.isNaN(v)) return null;
+  return Math.min(1, Math.max(0, v));
+}
+
 // Statuses that capture per-status evidence (text note + attachments). The set
 // lives in sell_order_statuses.needs_meta — fetched on demand so adding a new
 // status with evidence requirements is a DB-only change.
@@ -187,7 +195,7 @@ sellOrders.post('/', async (c) => {
   await sql.begin(async (tx) => {
     await tx`
       INSERT INTO sell_orders (id, customer_id, status, discount_pct, notes, created_by)
-      VALUES (${nextId}, ${body.customerId}, 'Draft', ${body.discountPct ?? 0}, ${body.notes ?? null}, ${u.id})
+      VALUES (${nextId}, ${body.customerId}, 'Draft', ${clampDiscountPct(body.discountPct) ?? 0}, ${body.notes ?? null}, ${u.id})
     `;
     for (let i = 0; i < body.lines.length; i++) {
       const l = body.lines[i];
@@ -268,7 +276,7 @@ sellOrders.patch('/:id', async (c) => {
     await tx`
       UPDATE sell_orders SET
         status       = COALESCE(${body.status ?? null}, status),
-        discount_pct = COALESCE(${body.discountPct ?? null}, discount_pct),
+        discount_pct = COALESCE(${clampDiscountPct(body.discountPct)}, discount_pct),
         notes        = COALESCE(${body.notes ?? null}, notes),
         customer_id  = COALESCE(${body.customerId ?? null}, customer_id),
         updated_at   = NOW()

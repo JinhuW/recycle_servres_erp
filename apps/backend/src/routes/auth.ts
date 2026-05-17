@@ -25,7 +25,7 @@ auth.post('/login', async (c) => {
            COALESCE(preferences, '{}'::jsonb) AS preferences,
            password_hash
     FROM users
-    WHERE email = ${body.email.toLowerCase().trim()}
+    WHERE email = ${body.email.toLowerCase().trim()} AND active = TRUE
     LIMIT 1
   `;
   const u = rows[0];

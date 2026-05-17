@@ -49,6 +49,16 @@ async function request<T>(
     const msg = (json && typeof json === 'object' && 'error' in json && typeof json.error === 'string')
       ? json.error
       : `HTTP ${res.status}`;
+    // A 401 on any call other than the login attempt itself means the token
+    // expired or was revoked mid-session. Clear it and signal the app so the
+    // AuthProvider drops to the login screen instead of every component
+    // silently swallowing the error and showing stale/empty data.
+    if (res.status === 401 && !path.includes('/api/auth/login')) {
+      auth.token = null;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth:unauthorized'));
+      }
+    }
     throw new ApiError(res.status, msg);
   }
   return json as T;
