@@ -29,7 +29,8 @@ dashboard.get('/', async (c) => {
   const profit = revenue - cost;
 
   // Commission is the per-order rate the manager set, applied to that order's
-  // profit, summed over the scope. NULL rate = $0.
+  // profit, summed over the scope. NULL rate = $0. LEFT JOIN keeps line-less
+  // orders (profit 0) so this stays equal to the leaderboard's inner-JOIN CTE.
   const perOrder = await sql<{ profit: number; commission_rate: number | null }[]>`
     SELECT
       COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
@@ -66,8 +67,9 @@ dashboard.get('/', async (c) => {
 
   // Top contributors (purchasers only) — used by both roles, but only managers
   // see the full list; purchasers see their rank. Honors the same ?range=
-  // window as the rest of the dashboard (PRD §6.8). Commission is computed
-  // per-row from profit/revenue via the tier model below (not selected here).
+  // window as the rest of the dashboard (PRD §6.8). Commission is
+  // SUM(order profit × the order's commission_rate), selected in the per_order
+  // CTE below; a NULL rate counts as 0.
   const leaderboardRaw = await sql<{
     id: string; name: string; initials: string; email: string; role: string;
     count: number; revenue: number; profit: number; commission: number;

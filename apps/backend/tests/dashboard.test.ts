@@ -39,6 +39,7 @@ describe('GET /api/dashboard', () => {
     expect(r.status).toBe(200);
     const mine = r.body.leaderboard.find(x => x.id === user.id);
     expect(mine?.commission).not.toBeNull();
+    expect(mine!.commission as number).toBeGreaterThan(0); // non-vacuous: seed gives non-draft orders a rate
     // A purchaser's whole-dashboard scope is exactly their own orders, so the
     // KPI commission must equal their leaderboard commission.
     expect(r.body.kpis.commission).toBeCloseTo(mine!.commission as number, 2);
