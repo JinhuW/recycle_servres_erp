@@ -52,6 +52,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
+  const [commissionPct, setCommissionPct] = useState<string>(
+    order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '');
   const [totalCostInput, setTotalCostInput] = useState<string>(
     order.totalCost != null ? order.totalCost.toFixed(2) : '',
   );
@@ -126,13 +128,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
+  const commissionDirty =
+    (commissionPct === '' ? null : Number(commissionPct) / 100)
+      !== (order.commissionRate ?? null);
   const parsedTotalCost = totalCostInput.trim() === '' ? null : Number(totalCostInput);
   const totalCostDirty =
     totalCostOverride &&
     !Number.isNaN(parsedTotalCost as number) &&
     (parsedTotalCost ?? null) !== (order.totalCost ?? null);
   const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty;
+    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty || commissionDirty;
 
   const canSave = dirty && !saving && !orderLocked && lines.every(l => {
     const qty = Number(l.qty) || 0;
@@ -153,6 +158,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
+        commissionRate: commissionDirty
+          ? (commissionPct === '' ? null : Number(commissionPct) / 100)
+          : undefined,
         totalCost:     totalCostDirty ? parsedTotalCost        : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
@@ -515,6 +523,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   disabled={!canEditOrder}
                 >Self-paid</button>
               </div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="label">Commission rate (%)</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={100}
+                step="0.1"
+                disabled={isPurchaser}
+                value={commissionPct}
+                placeholder={isPurchaser ? '—' : 'Set rate'}
+                onChange={e => setCommissionPct(e.target.value)}
+              />
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>

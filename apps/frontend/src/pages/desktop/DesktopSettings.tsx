@@ -13,7 +13,7 @@ type Member = {
   id: string; email: string; name: string; initials: string;
   role: 'manager' | 'purchaser';
   team: string | null; phone: string | null; title: string | null;
-  active: boolean; commission_rate: number;
+  active: boolean;
   order_count: number; lifetime_profit: number;
   created_at: string; last_seen_at: string | null;
 };
@@ -85,14 +85,13 @@ function StatTile({ label, value, sub, icon, tone }: {
 }
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'members' | 'warehouses' | 'customers' | 'categories' | 'commission' | 'general';
+type SectionId = 'members' | 'warehouses' | 'customers' | 'categories' | 'general';
 
 const SECTIONS: { id: SectionId; label: string; sub: string; icon: IconName }[] = [
   { id: 'members',    label: 'Members',    sub: 'People & roles',     icon: 'user' },
   { id: 'warehouses', label: 'Warehouses', sub: 'Locations',          icon: 'warehouse' },
   { id: 'customers',  label: 'Customers',  sub: 'Buyers & accounts',  icon: 'shield' },
   { id: 'categories', label: 'Categories', sub: 'Items & SKUs',       icon: 'box' },
-  { id: 'commission', label: 'Commission', sub: 'Payment types',      icon: 'dollar' },
   { id: 'general',    label: 'General',    sub: 'Workspace',          icon: 'settings' },
 ];
 
@@ -133,7 +132,6 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
           {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
           {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
           {section === 'categories' && <CategoriesPanel />}
-          {section === 'commission' && <CommissionPanel showToast={showToast} />}
           {section === 'general'    && <GeneralPanel />}
         </div>
       </div>
@@ -274,7 +272,7 @@ function CategoriesPanel() {
               <div className="cat-opt">
                 <div>
                   <div className="cat-opt-label">Default margin target</div>
-                  <div className="cat-opt-sub">Applied as commission baseline when no override is set.</div>
+                  <div className="cat-opt-sub">Target gross margin used as the default for this category.</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input
@@ -1967,97 +1965,6 @@ function PasswordMeter({ password }: { password: string }) {
       </div>
       <span className="pw-meter-label" style={{ color }}>{label}</span>
     </div>
-  );
-}
-
-// ─── Commission tab ──────────────────────────────────────────────────────────
-type CommissionKey = 'company' | 'self';
-type CommissionRule = { key: CommissionKey; paymentType: string; rate: number };
-
-// Defaults only used until /api/commission/settings responds; the two payment
-// types themselves are fixed by design — only the rates are configurable.
-const COMMISSION_RULE_DEFAULTS: CommissionRule[] = [
-  { key: 'company', paymentType: 'Company pay', rate: 50 },
-  { key: 'self',    paymentType: 'Self pay',    rate: 65 },
-];
-
-function CommissionPanel({ showToast }: { showToast: ToastFn }) {
-  const [rules, setRules] = useState<CommissionRule[]>(COMMISSION_RULE_DEFAULTS);
-
-  const reload = () =>
-    api.get<{ settings: Record<string, unknown> }>('/api/commission/settings')
-      .then(({ settings: s }) => setRules(prev => prev.map(r => {
-        const v = s[`rate_${r.key}`];
-        return typeof v === 'number' ? { ...r, rate: v } : r;
-      })))
-      .catch(() => { /* keep current values */ });
-  useEffect(() => { reload(); }, []);
-
-  const upd = (key: CommissionKey, rate: number) =>
-    setRules(prev => prev.map(r => r.key === key ? { ...r, rate } : r));
-
-  const save = async () => {
-    const body = Object.fromEntries(rules.map(r => [`rate_${r.key}`, r.rate]));
-    try {
-      await api.put('/api/commission/settings', body);
-      showToast?.('Commission rules saved', 'success');
-    } catch {
-      showToast?.('Could not save commission rules', 'error');
-      reload();
-    }
-  };
-
-  return (
-    <>
-      <SettingsHeader
-        title="Commission rules"
-        sub="How profit-share is calculated when a sell order is paid. Company pay vs Self pay carry their own commission rates."
-        actions={<button className="btn accent" onClick={save}><Icon name="check" size={13} /> Save</button>}
-      />
-
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <div className="card-title">Commission by payment type</div>
-            <div className="card-sub">Rate is applied to the realized profit on the line, after shipping &amp; fees.</div>
-          </div>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Payment type</th>
-                <th>Commission rate</th>
-                <th>Example: $5,000 profit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map(r => (
-                <tr key={r.key}>
-                  <td style={{ fontWeight: 500 }}>{r.paymentType}</td>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <input
-                        type="number"
-                        step="0.5"
-                        value={r.rate}
-                        onChange={(e) => upd(r.key, Number(e.target.value))}
-                        style={{ width: 56, padding: '4px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-elev)', fontSize: 13, fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontFamily: 'inherit' }}
-                      />
-                      <span style={{ fontSize: 13 }}>%</span>
-                    </span>
-                  </td>
-                  <td className="mono" style={{ color: 'var(--accent-strong)', fontWeight: 600 }}>
-                    ${(5000 * r.rate / 100).toFixed(0)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </>
   );
 }
 

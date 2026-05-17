@@ -61,7 +61,7 @@ export type OrderSummary = {
   userId: string;
   userName: string;
   userInitials: string;
-  commissionRate: number;
+  commissionRate: number | null;
   category: Category;
   payment: 'company' | 'self';
   notes: string | null;
