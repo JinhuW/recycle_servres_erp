@@ -182,6 +182,24 @@ describe('GET /api/orders — per-order commission rate', () => {
     r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
     expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBe(0);
   });
+
+  it('GET /api/orders/:id returns the order commissionRate (so the PO editor can show it)', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const id = (await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token: mgr })).body.orders[0].id;
+
+    const set = await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: 0.2 } });
+    expect(set.status).toBe(200);
+
+    const detail = await api<{ order: { id: string; commissionRate: number | null } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(detail.status).toBe(200);
+    expect(detail.body.order.commissionRate).toBeCloseTo(0.2, 4);
+
+    await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: null } });
+    const cleared = await api<{ order: { commissionRate: number | null } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(cleared.body.order.commissionRate).toBeNull();
+  });
 });
 
 describe('concurrent order creation gets unique ids', () => {

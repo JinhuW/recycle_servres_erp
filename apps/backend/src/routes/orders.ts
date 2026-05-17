@@ -124,6 +124,7 @@ orders.get('/:id', async (c) => {
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
            o.total_cost::float AS total_cost,
+           o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region
     FROM orders o
@@ -166,6 +167,7 @@ orders.get('/:id', async (c) => {
       status,
       createdAt: order.created_at,
       totalCost: order.total_cost,
+      commissionRate: order.commission_rate,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
         : null,
