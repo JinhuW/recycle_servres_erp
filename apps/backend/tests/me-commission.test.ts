@@ -14,4 +14,16 @@ describe('GET /api/me — lifetime commission uses per-order rate', () => {
     expect(r.status).toBe(200);
     expect(r.body.stats.commission).toBe(0);
   });
+
+  it('equals lifetime profit x a uniform per-order rate', async () => {
+    const db = getTestDb();
+    await db`UPDATE orders SET commission_rate = 0.10`;
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ stats: { profit: number; commission: number } }>(
+      'GET', '/api/me', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.stats.profit).toBeGreaterThan(0);
+    // Every order now has rate 0.10, so lifetime commission = profit * 0.10.
+    expect(r.body.stats.commission).toBeCloseTo(r.body.stats.profit * 0.10, 2);
+  });
 });
