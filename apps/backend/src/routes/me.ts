@@ -13,7 +13,7 @@ me.get('/', async (c) => {
     SELECT
       COUNT(*)::int                           AS count,
       COALESCE(SUM((sell_price - unit_cost) * qty), 0)::float AS profit,
-      COALESCE(SUM((sell_price - unit_cost) * qty * 0.075), 0)::float AS commission
+      COALESCE(SUM((sell_price - unit_cost) * qty * COALESCE(o.commission_rate, 0)), 0)::float AS commission
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     WHERE o.user_id = ${u.id} AND l.sell_price IS NOT NULL
