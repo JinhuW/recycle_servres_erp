@@ -1,6 +1,6 @@
 // Tiny fetch wrapper with bearer-token auth. The Vite dev proxy forwards
-// /api/* to the Worker on :8787 (see vite.config.ts), so paths stay relative
-// in dev and prod.
+// /api/* to the backend on :8787 (see vite.config.ts); in prod Caddy proxies
+// /api/* to the backend. Either way paths stay relative.
 
 import type { Category, OrderSummary } from './types';
 

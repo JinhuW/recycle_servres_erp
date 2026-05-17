@@ -74,11 +74,17 @@ R2_BUCKET=recycle-erp-attachments
 R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com
 ```
 
-Frontend (`frontend/.env.local`):
+Frontend (`apps/frontend/.env.local`) — optional; only needed to point the
+Vite dev server's `/api` proxy somewhere other than the default:
 
 ```
-VITE_API_BASE=http://localhost:8080/api
+# Backend origin the dev proxy forwards /api/* to. Default if unset:
+VITE_API_BASE=http://localhost:8787
 ```
+
+The SPA always calls relative `/api/*` paths; in dev they are proxied to
+`VITE_API_BASE` (see `apps/frontend/vite.config.ts`), and in production Caddy
+proxies them to the backend (no client base URL is baked in).
 
 ## Deployment
 

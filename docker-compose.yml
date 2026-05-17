@@ -31,8 +31,11 @@ services:
     environment:
       DATABASE_URL: postgres://recycle:recycle@postgres:5432/recycle_erp
       PORT: "8787"
-    expose:
-      - "8787"
+    # Published to the host so the Vite dev server (:5173) and other host
+    # clients can reach the API at localhost:8787, matching the pre-Docker
+    # contract. The web/Caddy container still reaches it as backend:8787.
+    ports:
+      - "8787:8787"
 
   web:
     build:
