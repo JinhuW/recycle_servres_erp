@@ -71,7 +71,11 @@ R2_S3_ENDPOINT=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET=recycle-erp-attachments
-R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com
+# Base URL the bucket is publicly served under. MUST match how the R2 custom
+# domain actually serves objects: include the /<bucket> path segment if it
+# serves at /<bucket>/<key> (as static.recycleservers.com does), or use the
+# bare domain if it serves at the bucket root.
+R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com/recycle-erp-attachments
 ```
 
 Frontend (`apps/frontend/.env.local`) — optional; only needed to point the
@@ -93,8 +97,12 @@ Single-host Docker Compose:
 1. Create `apps/backend/.env` with `JWT_SECRET`, `OPENROUTER_API_KEY`, and the
    R2 S3 settings (`R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
    `R2_BUCKET=recycle-erp-attachments`,
-   `R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com`). Generate the
-   R2 credentials in the Cloudflare dashboard → R2 → Manage API Tokens.
+   `R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com/recycle-erp-attachments`).
+   Set `R2_ATTACHMENTS_PUBLIC_URL` to exactly the base under which the bucket is
+   publicly served — include the `/<bucket>` segment if the R2 custom domain
+   serves objects at `/<bucket>/<key>` (as `static.recycleservers.com` does),
+   or use the bare domain if it serves at the bucket root. Generate the R2
+   credentials in the Cloudflare dashboard → R2 → Manage API Tokens.
 2. `docker compose up -d --build`
 3. The app is served at `http://<host>:8080` (put it behind your TLS-terminating
    edge/reverse proxy). The backend runs DB migrations on startup; on first

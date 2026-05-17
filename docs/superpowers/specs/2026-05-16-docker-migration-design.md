@@ -60,9 +60,12 @@ static file serving for the SPA.
 - Rewrite `src/r2.ts` to use `@aws-sdk/client-s3` pointed at R2's S3 endpoint
   (`https://<account>.r2.cloudflarestorage.com`). `put`/`delete` become
   `PutObjectCommand` / `DeleteObjectCommand`.
-- Bucket (`recycle-erp-attachments`) and public URL
-  (`https://static.recycleservers.com`) unchanged → existing stored files keep
-  working, zero data migration.
+- Bucket (`recycle-erp-attachments`) and public URL unchanged → existing stored
+  files keep working, zero data migration. `R2_ATTACHMENTS_PUBLIC_URL` must be
+  the exact base the R2 custom domain serves objects under — for
+  `static.recycleservers.com` that is
+  `https://static.recycleservers.com/recycle-erp-attachments` (objects are
+  served at `/<bucket>/<key>`), not the bare domain.
 - Preserve the existing stub fallback (returns `data:` URLs when storage is
   unconfigured) so tests stay offline.
 - **Prerequisite (user-provided):** an R2 API token (Access Key ID + Secret)
