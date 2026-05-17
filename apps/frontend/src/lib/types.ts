@@ -113,7 +113,7 @@ export type ScanResponse = {
   deliveryUrl: string;
   extracted: Record<string, string>;
   confidence: number;
-  provider: 'stub' | 'workers-ai' | 'cloudflare';
+  provider: 'stub' | 'openrouter';
 };
 
 export type RefPrice = {
