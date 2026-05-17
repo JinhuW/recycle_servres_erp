@@ -23,7 +23,6 @@ import membersRoutes from './routes/members';
 import lookupsRoutes from './routes/lookups';
 import categoriesRoutes from './routes/categories';
 import attachmentsRoutes from './routes/attachments';
-import commissionRoutes from './routes/commission';
 import workspaceRoutes from './routes/workspace';
 import type { Env, User } from './types';
 
@@ -78,7 +77,6 @@ app.use('/api/members/*', authMiddleware);
 app.use('/api/lookups/*', authMiddleware);
 app.use('/api/categories/*', authMiddleware);
 app.use('/api/attachments/*', authMiddleware);
-app.use('/api/commission/*', authMiddleware);
 app.use('/api/workspace/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
@@ -95,7 +93,6 @@ app.route('/api/members', membersRoutes);
 app.route('/api/lookups', lookupsRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/attachments', attachmentsRoutes);
-app.route('/api/commission', commissionRoutes);
 app.route('/api/workspace', workspaceRoutes);
 
 app.onError((err, c) => {
