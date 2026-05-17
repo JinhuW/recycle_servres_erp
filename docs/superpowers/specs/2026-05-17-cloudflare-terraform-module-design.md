@@ -67,8 +67,13 @@ infra/terraform/
   expiration rule, gated by `var.lifecycle_expire_days` (default `0` =
   disabled, so attachments are never silently deleted).
 - **Custom domain** — `cloudflare_r2_custom_domain` binding the bucket to
-  `var.custom_domain` (`static.recycleservers.com`), plus a proxied CNAME
-  `cloudflare_dns_record` in `var.cloudflare_zone_id`.
+  `var.custom_domain` (`static.recycleservers.com`) in `var.cloudflare_zone_id`.
+  **Correction to brainstorming:** no separate `cloudflare_dns_record`. When
+  the custom domain's zone is on the same Cloudflare account (it is —
+  `recycleservers.com` is a Cloudflare zone), `cloudflare_r2_custom_domain`
+  automatically creates and manages the proxied CNAME. A separate DNS-record
+  resource for the same hostname causes a "record already exists" conflict.
+  A manual record is only needed for external (non-Cloudflare) DNS.
 - **R2 API token** — `cloudflare_api_token` scoped to Object Read & Write on
   this account's R2. Its secret value lands in Terraform state (unavoidable
   for a managed token) — mitigated by the private state bucket and treating
@@ -78,12 +83,14 @@ infra/terraform/
 
 **Inputs** (non-secret values in `prod.tfvars`, committed):
 
-- `cloudflare_account_id`
-- `cloudflare_zone_id`
+- `cloudflare_account_id` — `cf0e09b533b74d32407f6fe1b558165b`
+- `cloudflare_zone_id` — `dd2a6dc1b973dc1f98b1cb009edae6d1` (`recycleservers.com`)
 - `bucket_name` (default `recycle-erp-attachments`)
-- `bucket_location` (e.g. `WNAM`)
+- `bucket_location` — `enam` (US East / Eastern North America; v5 uses
+  lowercase region codes)
 - `custom_domain` (`static.recycleservers.com`)
-- `cors_allowed_origins` (list of strings)
+- `cors_allowed_origins` (list of strings; default
+  `["https://inventory.recycleservers.com"]` — GET/HEAD only)
 - `lifecycle_expire_days` (number, default `0` = disabled)
 
 The Cloudflare API token Terraform itself authenticates with is supplied via
@@ -117,6 +124,21 @@ These map directly onto the backend's `R2_*` env vars
   `*.auto.tfvars`, and `**/*.secret.tfvars` to `.gitignore`. The state
   bucket is private with no custom domain. `prod.tfvars` holds only
   non-secret account/zone IDs and is committed.
+
+## Public URL behavior change (migration note)
+
+A native R2 custom domain serves objects at the **domain root**:
+`https://static.recycleservers.com/<key>`. The current hand-built setup
+serves at `https://static.recycleservers.com/recycle-erp-attachments/<key>`.
+After cut-over the backend env must change:
+
+```
+R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com   # drop /recycle-erp-attachments
+```
+
+This is consistent with the fresh-start decision (old objects are gone
+anyway). The module's `public_url` output is `https://<custom_domain>` with
+no path segment. The runbook calls this out explicitly.
 
 ## Validation
 
