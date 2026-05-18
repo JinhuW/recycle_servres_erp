@@ -314,8 +314,7 @@ inventory.get('/products', async (c) => {
 
     for (const l of lots) {
       qty += l.qty;
-      // Draft & In Transit are both "incoming, not yet on the shelf".
-      if (l.status === 'In Transit' || l.status === 'Draft') inTransit += l.qty;
+      if (l.status === 'In Transit') inTransit += l.qty;
       else if (l.status === 'Done') inStock += l.qty;
       else if (l.status === 'Reviewing') reviewing += l.qty;
       costMin = Math.min(costMin, l.unit_cost);

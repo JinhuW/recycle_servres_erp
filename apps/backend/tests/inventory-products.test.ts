@@ -67,7 +67,22 @@ describe('GET /api/inventory/products', () => {
 
   it('aggregates qty by status', async () => {
     const { token } = await loginAs(ALEX);
-    await po(token, { brand: 'STATX', partNumber: 'STAT-1', qty: 5 });
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        lines: [{
+          category: 'RAM', brand: 'STATX', capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200',
+          partNumber: 'STAT-1', condition: 'Pulled — Tested', qty: 5, unitCost: 80,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+    // New PO lines are 'Draft'; advance Draft → In Transit (no body = next stage).
+    const adv = await api('POST', `/api/orders/${created.body.id}/advance`, { token, body: {} });
+    expect(adv.status).toBe(200);
+
     const r = await products(token, 'stat-1');
     const g = r.body.products[0];
     expect(g.qty_in_transit).toBe(5);
