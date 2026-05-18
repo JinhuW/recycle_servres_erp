@@ -5,10 +5,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: recycle
-      POSTGRES_PASSWORD: recycle
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       POSTGRES_DB: recycle_erp
-    ports:
-      - "5432:5432"
+    # No host port: backend reaches Postgres as `postgres:5432` over the
+    # compose network. Not publishing 5432 keeps the DB off the host.
     volumes:
       - recycle_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,6 +16,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    # The official postgres entrypoint runs as root, fixes ownership/perms on
+    # the data dir, then steps down to the `postgres` user. cap_drop: ALL
+    # removes the caps that needs (chown/chmod + setuid/setgid), so the
+    # container crash-loops with "Operation not permitted". Add back exactly
+    # the entrypoint's required caps — nothing more.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - FSETID
+      - SETGID
+      - SETUID
+    mem_limit: 512m
 
   backend:
     build:
@@ -29,13 +46,18 @@ services:
     env_file:
       - apps/backend/.env
     environment:
-      DATABASE_URL: postgres://recycle:recycle@postgres:5432/recycle_erp
+      DATABASE_URL: postgres://recycle:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/recycle_erp
       PORT: "8787"
     # Published to the host so the Vite dev server (:5173) and other host
     # clients can reach the API at localhost:8787, matching the pre-Docker
     # contract. The web/Caddy container still reaches it as backend:8787.
     ports:
       - "8787:8787"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    mem_limit: 512m
 
   web:
     build:
@@ -47,6 +69,17 @@ services:
       - backend
     ports:
       - "8080:80"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    # The Caddy binary ships with a cap_net_bind_service file capability so it
+    # can bind :80 as non-root. With cap_drop: ALL + no-new-privileges the
+    # kernel refuses to exec a file whose file caps aren't in the bounding set
+    # ("exec ... operation not permitted"). Add the one cap it needs.
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 256m
 
 volumes:
   recycle_pgdata:
