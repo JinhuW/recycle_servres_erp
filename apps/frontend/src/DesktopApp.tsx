@@ -19,6 +19,7 @@ import { DesktopInventory } from './pages/desktop/DesktopInventory';
 import { DesktopInventoryEdit } from './pages/desktop/DesktopInventoryEdit';
 import { DesktopMarket } from './pages/desktop/DesktopMarket';
 import { DesktopSellOrders } from './pages/desktop/DesktopSellOrders';
+import { DesktopVendorBids } from './pages/desktop/DesktopVendorBids';
 import { DesktopTransfers } from './pages/desktop/DesktopTransfers';
 import { DesktopSettings } from './pages/desktop/DesktopSettings';
 import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
@@ -53,11 +54,13 @@ export function DesktopApp() {
       return;
     }
     if (editingOrder?.id === m.id) return; // already showing the right one
+    let alive = true;
     setLoadingOrderId(m.id);
     api.get<{ order: Order }>(`/api/orders/${m.id}`)
-      .then(r => setEditingOrder(r.order))
+      .then(r => { if (alive) setEditingOrder(r.order); })
       .catch(() => {/* ignore — order may have been deleted */})
-      .finally(() => setLoadingOrderId(null));
+      .finally(() => { if (alive) setLoadingOrderId(null); });
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
@@ -80,7 +83,7 @@ export function DesktopApp() {
   if (!user) return <Login variant="desktop" />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'transfers' || view === 'settings')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')
     ? 'dashboard'
     : view;
 
@@ -131,6 +134,12 @@ export function DesktopApp() {
           {view2 === 'inventory'  && inventoryOrEdit}
           {view2 === 'sellorders' && (
             <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
+          )}
+          {view2 === 'vendorbids' && (
+            <DesktopVendorBids
+              onToast={showToast}
+              onOpenSellOrder={(id) => navigate('/sell-orders/' + id + '/edit')}
+            />
           )}
           {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
           {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
