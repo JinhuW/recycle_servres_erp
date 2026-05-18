@@ -148,4 +148,36 @@ vendorPublic.post('/:token/bids', async (c) => {
   return c.json({ bidId: result.bidId }, 201);
 });
 
+vendorPublic.get('/:token/bids', async (c) => {
+  const sql = getDb(c.env);
+  const link = await loadLink(sql, c.req.param('token'));
+  if (!link) return c.json({ error: 'Not found' }, 404);
+
+  const bids = await sql<{ id: string; contact_name: string; note: string | null;
+    status: string; created_at: string }[]>`
+    SELECT id, contact_name, note, status, created_at
+    FROM vendor_bids WHERE vendor_link_id = ${link.id}
+    ORDER BY created_at DESC
+  `;
+  const lines = await sql<{ bid_id: string; label: string; offered_qty: number;
+    offered_unit_price: number; line_status: string;
+    accepted_qty: number | null; accepted_unit_price: number | null }[]>`
+    SELECT bid_id, label, offered_qty, offered_unit_price::float AS offered_unit_price,
+           line_status, accepted_qty, accepted_unit_price::float AS accepted_unit_price
+    FROM vendor_bid_lines
+    WHERE bid_id IN (SELECT id FROM vendor_bids WHERE vendor_link_id = ${link.id})
+    ORDER BY position
+  `;
+  return c.json({
+    bids: bids.map(b => ({
+      id: b.id, contactName: b.contact_name, note: b.note,
+      status: b.status, createdAt: b.created_at,
+      lines: lines.filter(l => l.bid_id === b.id).map(l => ({
+        label: l.label, offeredQty: l.offered_qty, offeredUnitPrice: l.offered_unit_price,
+        status: l.line_status, acceptedQty: l.accepted_qty, acceptedUnitPrice: l.accepted_unit_price,
+      })),
+    })),
+  });
+});
+
 export default vendorPublic;

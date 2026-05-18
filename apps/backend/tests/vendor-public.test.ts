@@ -154,7 +154,25 @@ describe('vendor public — me & catalog', () => {
     });
     // Large note must be accepted (bounded server-side), not rejected or 500.
     expect(r.status).toBe(201);
-    // TODO(Task 4): assert note persisted/truncated once GET /bids exists
+    const list = await api<{ bids: Array<{ note: string | null }> }>(
+      'GET', `/api/public/vendor/${token}/bids`);
+    expect(list.status).toBe(200);
+    expect(list.body.bids.length).toBe(1);
+    expect((list.body.bids[0].note ?? '').length).toBeLessThanOrEqual(2000);
+  });
+
+  it('lists this link\'s submitted bids', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    await api('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+    });
+    const r = await api<{ bids: Array<{ status: string; lines: unknown[] }> }>(
+      'GET', `/api/public/vendor/${token}/bids`);
+    expect(r.status).toBe(200);
+    expect(r.body.bids.length).toBe(1);
+    expect(r.body.bids[0].status).toBe('new');
+    expect(r.body.bids[0].lines.length).toBe(1);
   });
 
   it('rejects qty over availability with 409', async () => {
