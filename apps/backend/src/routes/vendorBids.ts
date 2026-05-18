@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { nextHumanId } from '../lib/id-seq';
 import type { Env, User } from '../types';
 
 const vendorBids = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -110,6 +111,61 @@ vendorBids.post('/:id/decide', async (c) => {
     await tx`UPDATE vendor_bids SET status=${next} WHERE id=${id}`;
   });
   return c.json({ ok: true });
+});
+
+vendorBids.post('/:id/promote', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+
+  type Outcome = { code: 201; sellId: string } | { code: 400; msg: string };
+  let outcome: Outcome = { code: 400, msg: 'no accepted lines to promote' };
+  const sellId = await nextHumanId(sql, 'SL', 'SL');
+
+  await sql.begin(async (tx) => {
+    const head = (await tx<{ customer_id: string }[]>`
+      SELECT customer_id FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
+    if (!head) { outcome = { code: 400, msg: 'bid not found' }; return; }
+    const lines = await tx<{ id: string; inventory_id: string | null; category: string;
+      label: string; sub_label: string | null; part_number: string | null;
+      accepted_qty: number; accepted_unit_price: number }[]>`
+      SELECT id, inventory_id, category, label, sub_label, part_number,
+             accepted_qty, accepted_unit_price::float AS accepted_unit_price
+      FROM vendor_bid_lines
+      WHERE bid_id=${id} AND line_status='accepted'
+        AND sell_order_id IS NULL AND accepted_qty > 0
+      ORDER BY position FOR UPDATE
+    `;
+    if (lines.length === 0) { outcome = { code: 400, msg: 'no accepted lines to promote' }; return; }
+    await tx`
+      INSERT INTO sell_orders (id, customer_id, status, discount_pct, notes, created_by)
+      VALUES (${sellId}, ${head.customer_id}, 'Draft', 0,
+              ${'From vendor bid ' + id}, ${u.id})
+    `;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      await tx`
+        INSERT INTO sell_order_lines
+          (sell_order_id, inventory_id, category, label, sub_label, part_number,
+           qty, unit_price, warehouse_id, condition, position)
+        VALUES
+          (${sellId}, ${l.inventory_id}, ${l.category}, ${l.label}, ${l.sub_label},
+           ${l.part_number}, ${l.accepted_qty}, ${l.accepted_unit_price},
+           NULL, NULL, ${i})
+      `;
+      await tx`UPDATE vendor_bid_lines SET sell_order_id=${sellId} WHERE id=${l.id}`;
+    }
+    outcome = { code: 201, sellId };
+  });
+
+  // `outcome` is set inside the sql.begin closure; TS control-flow narrowing
+  // can't see those assignments and pins it to the initializer type, so cast
+  // back to the declared union before branching (same `as` pattern as
+  // vendorPublic.ts / sellOrders.ts's post-tx outcome handling).
+  const result = outcome as Outcome;
+  if (result.code !== 201) return c.json({ error: result.msg }, 400);
+  return c.json({ sellOrderId: result.sellId }, 201);
 });
 
 export default vendorBids;

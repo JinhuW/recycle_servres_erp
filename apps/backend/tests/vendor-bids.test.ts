@@ -134,4 +134,23 @@ describe('vendor-bids manager route', () => {
     });
     expect(decide.status).toBe(403);
   });
+
+  it('promote creates one Draft sell order and is idempotent', async () => {
+    const { mgr, bidId } = await setup();
+    const detail = await api<{ bid: { lines: Array<{ id: string }> } }>(
+      'GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    const lineId = detail.body.bid.lines[0].id;
+    await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [{ lineId, decision: 'accepted', acceptedQty: 1, acceptedUnitPrice: 4 }] },
+    });
+    const p1 = await api<{ sellOrderId: string }>('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
+    expect(p1.status).toBe(201);
+    expect(p1.body.sellOrderId).toMatch(/^SL-\d+$/);
+    const so = await api<{ order: { lines: unknown[] } }>(
+      'GET', `/api/sell-orders/${p1.body.sellOrderId}`, { token: mgr });
+    expect(so.status).toBe(200);
+    expect(so.body.order.lines.length).toBe(1);
+    const p2 = await api('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
+    expect(p2.status).toBe(400);
+  });
 });
