@@ -121,37 +121,38 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [colsMenuOpen]);
 
-  // Data fetch (debounced on search/filters)
-  useEffect(() => {
+  // Shared query string for the flat list and the grouped product fetch, so
+  // the two views always filter identically (was duplicated in both effects).
+  const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
+    return params.toString();
+  }, [filter, statusFilter, warehouseFilter, search]);
+
+  // Data fetch (debounced on search/filters)
+  useEffect(() => {
     const handle = setTimeout(() => {
-      api.get<{ items: InventoryRow[] }>(`/api/inventory?${params}`)
+      api.get<{ items: InventoryRow[] }>(`/api/inventory?${filterQuery}`)
         .then(r => setItems(r.items))
         .catch(console.error)
         .finally(() => setLoadedOnce(true));
     }, 200);
     return () => clearTimeout(handle);
-  }, [filter, statusFilter, warehouseFilter, search]);
+  }, [filterQuery]);
 
   useEffect(() => {
     if (view !== 'grouped') return;
     let alive = true;
-    const params = new URLSearchParams();
-    if (filter !== 'all') params.set('category', filter);
-    if (statusFilter !== 'all') params.set('status', statusFilter);
-    if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
-    if (search.trim()) params.set('q', search.trim());
     const h = setTimeout(() => {
-      api.get<{ products: ProductGroup[] }>(`/api/inventory/products?${params}`)
+      api.get<{ products: ProductGroup[] }>(`/api/inventory/products?${filterQuery}`)
         .then(r => { if (alive) { setProducts(r.products); setProductsLoaded(true); } })
         .catch(() => { if (alive) { setProducts([]); setProductsLoaded(true); } });
     }, 200);
     return () => { alive = false; clearTimeout(h); };
-  }, [view, filter, statusFilter, warehouseFilter, search]);
+  }, [view, filterQuery]);
 
   useEffect(() => {
     api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => setWhs(r.items));
@@ -560,7 +561,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     });
                   }}
                   onQuickView={(lotId) => {
-                    const row = items.find(i => i.id === lotId);
+                    const row = items.find(i => i.id === lotId) ?? groupedRowsById.get(lotId);
                     if (row) setQuickView(row); else onEditItem(lotId);
                   }}
                   onEditLot={(lotId) => onEditItem(lotId)}
