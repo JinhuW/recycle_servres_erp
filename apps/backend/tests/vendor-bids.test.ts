@@ -153,4 +153,37 @@ describe('vendor-bids manager route', () => {
     const p2 = await api('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
     expect(p2.status).toBe(400);
   });
+
+  it('promote includes only accepted lines, excludes declined', async () => {
+    const { mgr, bidId, lineCount } = await setupMulti();
+    // seed has <2 in-stock lines; skip
+    if (lineCount < 2) return;
+    const detail = await api<{ bid: { lines: Array<{ id: string }> } }>(
+      'GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    const line0 = detail.body.bid.lines[0].id;
+    const line1 = detail.body.bid.lines[1].id;
+    const dec = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr,
+      body: {
+        lines: [
+          { lineId: line0, decision: 'accepted', acceptedQty: 1, acceptedUnitPrice: 3 },
+          { lineId: line1, decision: 'declined' },
+        ],
+      },
+    });
+    expect(dec.status).toBe(200);
+    const p = await api<{ sellOrderId: string }>('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
+    expect(p.status).toBe(201);
+    expect(p.body.sellOrderId).toMatch(/^SL-\d+$/);
+    const so = await api<{ order: { lines: unknown[] } }>(
+      'GET', `/api/sell-orders/${p.body.sellOrderId}`, { token: mgr });
+    expect(so.status).toBe(200);
+    expect(so.body.order.lines.length).toBe(1);
+  });
+
+  it('promote is forbidden for non-managers', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const r = await api('POST', '/api/vendor-bids/VB-1/promote', { token: pur });
+    expect(r.status).toBe(403);
+  });
 });
