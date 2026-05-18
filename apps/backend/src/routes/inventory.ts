@@ -226,6 +226,147 @@ inventory.get('/transfer-orders', async (c) => {
   });
 });
 
+// Product-grouped inventory (PRD §5.10 follow-up). Same scoping/filters/cost-
+// stripping as the flat list, but collapses lines that share a canonical part
+// number into one product row, with each PO/lot embedded. Lines with no part
+// number are NOT grouped — each is its own singleton (key `line:<id>`).
+//
+// Grouping is done in JS over the scoped line set (ordered newest-first).
+// RAW_CAP bounds memory; GROUP_CAP bounds the response — matches the flat
+// list's 200-row intent applied to groups instead of lines.
+inventory.get('/products', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const isManager = u.role === 'manager';
+  const category = c.req.query('category');
+  const status = c.req.query('status');
+  const search = c.req.query('q')?.toLowerCase().trim();
+  const warehouse = c.req.query('warehouse');
+
+  const RAW_CAP = 2000;
+  const GROUP_CAP = 200;
+
+  const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+  const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
+  const statusFrag   = status ? sql`l.status = ${status}` : sql`TRUE`;
+  const whFrag       = warehouse ? sql`COALESCE(l.warehouse_id, o.warehouse_id) = ${warehouse}` : sql`TRUE`;
+  const searchFrag   = search
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
+    : sql`TRUE`;
+
+  const canonCol = canonPartCol(sql, sql`l.part_number`);
+
+  type Row = {
+    id: string; order_id: string; user_id: string;
+    category: string; brand: string | null; capacity: string | null;
+    generation: string | null; type: string | null; classification: string | null;
+    rank: string | null; speed: string | null; interface: string | null;
+    form_factor: string | null; description: string | null;
+    part_number: string | null; canon: string; rpm: number | null;
+    condition: string; qty: number; unit_cost: number; sell_price: number | null;
+    status: string; health: number | null; created_at: string;
+    warehouse_id: string | null; warehouse_short: string | null;
+    user_name: string; user_initials: string;
+  };
+
+  const rows = (await sql`
+    SELECT l.id, l.order_id, o.user_id,
+           l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
+           l.rank, l.speed, l.interface, l.form_factor, l.description,
+           l.part_number, ${canonCol} AS canon, l.rpm,
+           l.condition, l.qty, l.unit_cost::float AS unit_cost,
+           l.sell_price::float AS sell_price, l.status, l.health::float AS health,
+           l.created_at,
+           COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
+           w.short AS warehouse_short,
+           u.name AS user_name, u.initials AS user_initials
+    FROM order_lines l
+    JOIN orders o ON o.id = l.order_id
+    JOIN users  u ON u.id = o.user_id
+    LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag}
+    ORDER BY l.created_at DESC
+    LIMIT ${RAW_CAP}
+  `) as unknown as Row[];
+
+  const groups = new Map<string, Row[]>();
+  const order: string[] = [];
+  for (const r of rows) {
+    const key = r.canon && r.canon.length > 0 ? r.canon : `line:${r.id}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(r);
+    else { groups.set(key, [r]); order.push(key); }
+  }
+
+  const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','rpm'] as const;
+
+  const products = order.slice(0, GROUP_CAP).map((key) => {
+    const lots = groups.get(key)!;
+    const head = lots[0];
+    const isSingleton = !(head.canon && head.canon.length > 0);
+
+    let qty = 0, inTransit = 0, inStock = 0, reviewing = 0;
+    let costMin = Infinity, costMax = -Infinity, costWeighted = 0;
+    const whs = new Set<string>();
+    const submitters = new Set<string>();
+    let mixed = false;
+    let repPn: string | null = null;
+
+    for (const l of lots) {
+      qty += l.qty;
+      // Draft & In Transit are both "incoming, not yet on the shelf".
+      if (l.status === 'In Transit' || l.status === 'Draft') inTransit += l.qty;
+      else if (l.status === 'Done') inStock += l.qty;
+      else if (l.status === 'Reviewing') reviewing += l.qty;
+      costMin = Math.min(costMin, l.unit_cost);
+      costMax = Math.max(costMax, l.unit_cost);
+      costWeighted += l.unit_cost * l.qty;
+      if (l.warehouse_short) whs.add(l.warehouse_short);
+      if (l.user_name) submitters.add(l.user_name);
+      if (repPn === null && l.part_number) repPn = l.part_number;
+      for (const k of SPEC_KEYS) {
+        if (String((l as Record<string, unknown>)[k] ?? '') !== String((head as Record<string, unknown>)[k] ?? '')) mixed = true;
+      }
+    }
+
+    const base = {
+      key,
+      part_number: repPn,
+      category: head.category, brand: head.brand, capacity: head.capacity,
+      generation: head.generation, type: head.type, classification: head.classification,
+      rank: head.rank, speed: head.speed, interface: head.interface,
+      form_factor: head.form_factor, description: head.description, rpm: head.rpm,
+      mixed_spec: isSingleton ? false : mixed,
+      qty,
+      qty_in_transit: inTransit, qty_in_stock: inStock, qty_reviewing: reviewing,
+      lot_count: lots.length,
+      po_count: new Set(lots.map((l) => l.order_id)).size,
+      sell_price: head.sell_price,
+      warehouses: [...whs],
+      created_at: head.created_at,
+      submitters: [...submitters],
+      lines: lots.map((l) => ({
+        id: l.id, order_id: l.order_id, created_at: l.created_at,
+        user_name: l.user_name, user_initials: l.user_initials,
+        sell_price: l.sell_price, condition: l.condition, health: l.health,
+        warehouse_id: l.warehouse_id, warehouse_short: l.warehouse_short,
+        qty: l.qty, status: l.status,
+        ...(isManager ? { unit_cost: l.unit_cost } : {}),
+      })),
+    };
+
+    if (!isManager) return base;
+    return {
+      ...base,
+      unit_cost_min: costMin === Infinity ? 0 : costMin,
+      unit_cost_max: costMax === -Infinity ? 0 : costMax,
+      unit_cost_avg: qty > 0 ? costWeighted / qty : 0,
+    };
+  });
+
+  return c.json({ products });
+});
+
 // Single inventory line + its audit log.
 inventory.get('/:id', async (c) => {
   const u = c.var.user;
