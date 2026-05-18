@@ -17,6 +17,35 @@ async function setup() {
   return { mgr, cust, link, bidId: bid, invId: line.id, invQty: line.qty };
 }
 
+// Submits a TWO-line bid when >=2 in-stock Done lines exist; gracefully
+// falls back to a single-line bid otherwise. Mirrors setup() above.
+async function setupMulti() {
+  const { token: mgr } = await loginAs(ALEX);
+  const cust = (await api<{ id: string }>('POST', '/api/customers', {
+    token: mgr, body: { name: 'Vendor Co' } })).body.id;
+  const link = (await api<{ token: string }>('POST', `/api/customers/${cust}/vendor-link`, { token: mgr })).body.token;
+  const inv = await api<{ items: Array<{ id: string; qty: number }> }>(
+    'GET', '/api/inventory?status=Done', { token: mgr });
+  const stocked = inv.body.items.filter(i => i.qty > 0);
+  const picked = stocked.slice(0, 2);
+  const bid = (await api<{ bidId: string }>('POST', `/api/public/vendor/${link}/bids`, {
+    body: { contactName: 'Lin', lines: picked.map(p => ({ inventoryId: p.id, qty: 1, unitPrice: 5 })) },
+  })).body.bidId;
+  return { mgr, cust, link, bidId: bid, lineCount: picked.length };
+}
+
+type DetailResp = {
+  bid: {
+    status: string;
+    lines: Array<{
+      line_status: string;
+      accepted_qty: number | null;
+      accepted_unit_price: number | null;
+      id: string;
+    }>;
+  };
+};
+
 describe('vendor-bids manager route', () => {
   beforeAll(async () => { await resetDb(); });
 
@@ -47,5 +76,62 @@ describe('vendor-bids manager route', () => {
       'GET', `/api/vendor-bids/${bidId}`, { token: mgr });
     expect(after.body.bid.status).toBe('decided');
     expect(after.body.bid.lines[0].accepted_qty).toBeLessThanOrEqual(after.body.bid.lines[0].available);
+  });
+
+  it('declining a line clears accepted fields', async () => {
+    const { mgr, bidId } = await setup();
+    const detail = await api<DetailResp>('GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    const lineId = detail.body.bid.lines[0].id;
+    const dec = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [{ lineId, decision: 'declined' }] },
+    });
+    expect(dec.status).toBe(200);
+    const after = await api<DetailResp>('GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    expect(after.body.bid.lines[0].line_status).toBe('declined');
+    expect(after.body.bid.lines[0].accepted_qty).toBe(null);
+    expect(after.body.bid.lines[0].accepted_unit_price).toBe(null);
+  });
+
+  it('a partially decided bid is partly_decided', async () => {
+    const { mgr, bidId, lineCount } = await setupMulti();
+    // The seed may only have one in-stock Done line; setupMulti() then
+    // degrades to a single-line bid and a partial decision is impossible.
+    if (lineCount < 2) return;
+    const detail = await api<DetailResp>('GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    const firstLine = detail.body.bid.lines[0].id;
+    const dec = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [{ lineId: firstLine, decision: 'accepted' }] },
+    });
+    expect(dec.status).toBe(200);
+    const after = await api<DetailResp>('GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    expect(after.body.bid.status).toBe('partly_decided');
+  });
+
+  it('GET /:id 404s for an unknown bid', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const r = await api('GET', '/api/vendor-bids/VB-does-not-exist', { token: mgr });
+    expect(r.status).toBe(404);
+  });
+
+  it('decide 400s when lines missing/empty', async () => {
+    const { mgr, bidId } = await setup();
+    const noLines = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: {},
+    });
+    expect(noLines.status).toBe(400);
+    const emptyLines = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [] },
+    });
+    expect(emptyLines.status).toBe(400);
+  });
+
+  it('non-manager is forbidden on detail and decide too', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const detail = await api('GET', '/api/vendor-bids/VB-1', { token: pur });
+    expect(detail.status).toBe(403);
+    const decide = await api('POST', '/api/vendor-bids/VB-1/decide', {
+      token: pur, body: { lines: [{ lineId: 'x', decision: 'declined' }] },
+    });
+    expect(decide.status).toBe(403);
   });
 });

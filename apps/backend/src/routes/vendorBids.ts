@@ -74,6 +74,7 @@ vendorBids.post('/:id/decide', async (c) => {
         FROM vendor_bid_lines WHERE id = ${d.lineId} AND bid_id = ${id} FOR UPDATE
       `)[0];
       if (!ln) continue;
+      if (d.decision !== 'accepted' && d.decision !== 'declined') continue;
       if (d.decision === 'declined') {
         await tx`
           UPDATE vendor_bid_lines
@@ -89,8 +90,9 @@ vendorBids.post('/:id/decide', async (c) => {
       `)[0].qty;
       const wantQty = Number.isInteger(d.acceptedQty) ? (d.acceptedQty as number) : ln.offered_qty;
       const qty = Math.max(0, Math.min(wantQty, avail));
-      const price = Number.isFinite(d.acceptedUnitPrice)
-        ? (d.acceptedUnitPrice as number) : ln.offered_unit_price;
+      const ap = d.acceptedUnitPrice;
+      const price = (typeof ap === 'number' && Number.isFinite(ap) && ap >= 0 && ap <= 1e9)
+        ? ap : ln.offered_unit_price;
       await tx`
         UPDATE vendor_bid_lines
         SET line_status='accepted', accepted_qty=${qty}, accepted_unit_price=${price},
