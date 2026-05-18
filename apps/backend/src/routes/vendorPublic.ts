@@ -74,6 +74,7 @@ vendorPublic.post('/:token/bids', async (c) => {
     | null;
   const contactName = (body?.contactName ?? '').trim();
   const lines = Array.isArray(body?.lines) ? body!.lines : [];
+  const note = (body?.note ?? '').slice(0, 2000) || null;
   if (!contactName || contactName.length > 120) {
     return c.json({ error: 'contactName required (<=120 chars)' }, 400);
   }
@@ -82,7 +83,7 @@ vendorPublic.post('/:token/bids', async (c) => {
   }
   for (const l of lines) {
     if (!l.inventoryId || !Number.isInteger(l.qty) || l.qty <= 0 ||
-        !Number.isFinite(l.unitPrice) || l.unitPrice < 0) {
+        !Number.isFinite(l.unitPrice) || l.unitPrice < 0 || l.unitPrice > 1e9) {
       return c.json({ error: 'each line needs inventoryId, qty>0, unitPrice>=0' }, 400);
     }
   }
@@ -116,7 +117,7 @@ vendorPublic.post('/:token/bids', async (c) => {
 
     await tx`
       INSERT INTO vendor_bids (id, vendor_link_id, customer_id, contact_name, note)
-      VALUES (${bidId}, ${link.id}, ${link.customer_id}, ${contactName}, ${body?.note ?? null})
+      VALUES (${bidId}, ${link.id}, ${link.customer_id}, ${contactName}, ${note})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i]; const s = snap[l.inventoryId];
@@ -143,8 +144,8 @@ vendorPublic.post('/:token/bids', async (c) => {
   // sellOrders.ts's post-tx outcome handling).
   const result = outcome as Outcome;
   if (result.code === 409) return c.json({ error: 'Some items are no longer available', unavailable: result.bad }, 409);
-  if (result.code !== 201) return c.json({ error: (result as { msg: string }).msg }, 400);
-  return c.json({ bidId: (result as { bidId: string }).bidId }, 201);
+  if (result.code !== 201) return c.json({ error: result.msg }, 400);
+  return c.json({ bidId: result.bidId }, 201);
 });
 
 export default vendorPublic;

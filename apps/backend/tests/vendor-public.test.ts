@@ -108,6 +108,53 @@ describe('vendor public — me & catalog', () => {
     });
     expect(r.status).toBe(201);
     expect(r.body.bidId).toMatch(/^VB-\d+$/);
+
+    const notes = await api<{ items: Array<{ kind: string }> }>(
+      'GET', '/api/notifications', { token: mgr });
+    expect(notes.status).toBe(200);
+    expect(notes.body.items.some(n => n.kind === 'vendor_bid')).toBe(true);
+  });
+
+  it('409 returns the unavailable inventory ids', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    const r = await api<{ unavailable: string[] }>('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: line.qty + 999, unitPrice: 5 }] },
+    });
+    expect(r.status).toBe(409);
+    expect(Array.isArray(r.body.unavailable)).toBe(true);
+    expect(r.body.unavailable).toContain(line.id);
+  });
+
+  it('submits a multi-line bid', async () => {
+    const { token, mgr } = await seedLink();
+    const inv = await api<{ items: Array<{ id: string; qty: number }> }>(
+      'GET', '/api/inventory?status=Done', { token: mgr });
+    const avail = inv.body.items.filter(i => i.qty > 0).slice(0, 2);
+    expect(avail.length).toBeGreaterThan(0);
+    const r = await api<{ bidId: string }>('POST', `/api/public/vendor/${token}/bids`, {
+      body: {
+        contactName: 'Lin',
+        lines: avail.map(i => ({ inventoryId: i.id, qty: 1, unitPrice: 7 })),
+      },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.bidId).toMatch(/^VB-\d+$/);
+  });
+
+  it('note round-trips and is bounded', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    const r = await api<{ bidId: string }>('POST', `/api/public/vendor/${token}/bids`, {
+      body: {
+        contactName: 'Lin',
+        note: 'x'.repeat(5000),
+        lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }],
+      },
+    });
+    // Large note must be accepted (bounded server-side), not rejected or 500.
+    expect(r.status).toBe(201);
+    // TODO(Task 4): assert note persisted/truncated once GET /bids exists
   });
 
   it('rejects qty over availability with 409', async () => {
