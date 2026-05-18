@@ -83,6 +83,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     readingLabel: 'Reading label…',
     gotIt: 'Got it',
     extractedConf: 'Extracted with {pct}% confidence',
+    lowConfVerify: 'Low confidence ({pct}%) — please verify every field below before saving.',
     aiPhotoLabel: 'AI photo',
     newRamOrder: 'New RAM order',
     newSsdOrder: 'New SSD order',
@@ -341,6 +342,16 @@ export const I18N: Record<Lang, Record<string, string>> = {
     transferring: 'Transferring…',
     transferredToast: 'Transferred {n} line(s) to {warehouse}',
     activityTransferred: 'Transferred {qty} units · {from} → {to}',
+
+    // ── Vendor bidding portal ──
+    vendorBrowse: 'Browse', vendorMyOffers: 'My offers',
+    vendorAvailable: '{n} available', vendorAddOffer: '+ Add offer',
+    vendorYourOffer: 'Your offer / unit', vendorQty: 'Qty',
+    vendorReview: 'Review & submit', vendorTotalOffered: 'Total offered',
+    vendorContactName: 'Your name', vendorNote: 'Note (optional)',
+    vendorSubmit: 'Submit offer', vendorSubmitted: 'Offer submitted',
+    vendorNonBinding: 'Offers are non-binding — we review and reply.',
+    vendorPending: 'Pending', vendorAccepted: 'Accepted', vendorDeclined: 'Declined',
   },
   zh: {
     tabHome: '首页', tabOrders: '订单', tabCapture: '扫描', tabMarket: '市场',
@@ -372,6 +383,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     aboutSub: '版本 2026.4.2', signOut: '退出登录',
     aiScan: 'AI 扫描', alignLabel: '请将标签对准框内', readingLabel: '正在识别标签…',
     gotIt: '识别成功', extractedConf: '识别置信度 {pct}%',
+    lowConfVerify: '置信度偏低（{pct}%）——保存前请逐项核对下方所有字段。',
     aiPhotoLabel: 'AI 照片',
     newRamOrder: '新建 RAM 订单', newSsdOrder: '新建 SSD 订单', newHddOrder: '新建 HDD 订单', newOtherOrder: '新建其他订单',
     aiReview: 'AI 已识别 — 请核对并调整', fillIn: '第 1 项 — 请填写详情',
@@ -514,6 +526,16 @@ export const I18N: Record<Lang, Record<string, string>> = {
     transferring: '正在调拨…',
     transferredToast: '已调拨 {n} 条到 {warehouse}',
     activityTransferred: '已调拨 {qty} 个 · {from} → {to}',
+
+    // ── Vendor bidding portal ──
+    vendorBrowse: '浏览', vendorMyOffers: '我的报价',
+    vendorAvailable: '现货 {n}', vendorAddOffer: '+ 添加报价',
+    vendorYourOffer: '您的单价', vendorQty: '数量',
+    vendorReview: '确认并提交', vendorTotalOffered: '报价合计',
+    vendorContactName: '您的姓名', vendorNote: '备注（可选）',
+    vendorSubmit: '提交报价', vendorSubmitted: '报价已提交',
+    vendorNonBinding: '报价为非约束性，我们审核后回复。',
+    vendorPending: '待处理', vendorAccepted: '已接受', vendorDeclined: '已拒绝',
   },
 };
 

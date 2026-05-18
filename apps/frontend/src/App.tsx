@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { LangProvider } from './lib/i18n';
 import { MobileApp } from './MobileApp';
 import { DesktopApp } from './DesktopApp';
+import { VendorApp } from './VendorApp';
+import { vendorTokenFromPath } from './lib/vendor';
 
 import './styles/desktop.css';
 
@@ -20,6 +22,11 @@ function useIsPhone() {
 
 export default function App() {
   const isPhone = useIsPhone();
+  const vendorToken = typeof window !== 'undefined'
+    ? vendorTokenFromPath(window.location.pathname) : null;
+  if (vendorToken) {
+    return <LangProvider><VendorApp token={vendorToken} /></LangProvider>;
+  }
   return (
     <LangProvider>
       {isPhone ? <MobileApp /> : <DesktopApp />}
