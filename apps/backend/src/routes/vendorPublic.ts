@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import type { Env } from '../types';
+import { nextHumanId } from '../lib/id-seq';
+import { notifyManagers } from '../lib/notify';
 
 const vendorPublic = new Hono<{ Bindings: Env }>();
 
@@ -58,6 +60,91 @@ vendorPublic.get('/:token/catalog', async (c) => {
     g.items.push(r);
   }
   return c.json({ groups });
+});
+
+type BidLineIn = { inventoryId: string; qty: number; unitPrice: number };
+
+vendorPublic.post('/:token/bids', async (c) => {
+  const sql = getDb(c.env);
+  const link = await loadLink(sql, c.req.param('token'));
+  if (!link) return c.json({ error: 'Not found' }, 404);
+
+  const body = (await c.req.json().catch(() => null)) as
+    | { contactName?: string; note?: string; lines?: BidLineIn[] }
+    | null;
+  const contactName = (body?.contactName ?? '').trim();
+  const lines = Array.isArray(body?.lines) ? body!.lines : [];
+  if (!contactName || contactName.length > 120) {
+    return c.json({ error: 'contactName required (<=120 chars)' }, 400);
+  }
+  if (lines.length < 1 || lines.length > 100) {
+    return c.json({ error: 'lines must have 1..100 entries' }, 400);
+  }
+  for (const l of lines) {
+    if (!l.inventoryId || !Number.isInteger(l.qty) || l.qty <= 0 ||
+        !Number.isFinite(l.unitPrice) || l.unitPrice < 0) {
+      return c.json({ error: 'each line needs inventoryId, qty>0, unitPrice>=0' }, 400);
+    }
+  }
+
+  type Outcome =
+    | { code: 201; bidId: string }
+    | { code: 409; bad: string[] }
+    | { code: 400; msg: string };
+  let outcome: Outcome = { code: 400, msg: 'unknown' };
+
+  const bidId = await nextHumanId(sql, 'VB', 'VB');
+
+  await sql.begin(async (tx) => {
+    const bad: string[] = [];
+    const snap: Record<string, { category: string; label: string; sub: string | null; pn: string | null }> = {};
+    for (const l of lines) {
+      const row = (await tx<{ category: string; brand: string | null; capacity: string | null;
+        type: string | null; part_number: string | null; qty: number; status: string }[]>`
+        SELECT category, brand, capacity, type, part_number, qty, status
+        FROM order_lines WHERE id = ${l.inventoryId} FOR UPDATE
+      `)[0];
+      if (!row || row.status !== 'Done' || row.qty < l.qty) { bad.push(l.inventoryId); continue; }
+      snap[l.inventoryId] = {
+        category: row.category,
+        label: [row.brand, row.capacity, row.type].filter(Boolean).join(' ') || row.category,
+        sub: row.part_number,
+        pn: row.part_number,
+      };
+    }
+    if (bad.length) { outcome = { code: 409, bad }; return; } // roll back
+
+    await tx`
+      INSERT INTO vendor_bids (id, vendor_link_id, customer_id, contact_name, note)
+      VALUES (${bidId}, ${link.id}, ${link.customer_id}, ${contactName}, ${body?.note ?? null})
+    `;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i]; const s = snap[l.inventoryId];
+      await tx`
+        INSERT INTO vendor_bid_lines
+          (bid_id, inventory_id, category, label, sub_label, part_number,
+           offered_qty, offered_unit_price, position)
+        VALUES
+          (${bidId}, ${l.inventoryId}, ${s.category}, ${s.label}, ${s.sub},
+           ${s.pn}, ${l.qty}, ${l.unitPrice}, ${i})
+      `;
+    }
+    await notifyManagers(tx, {
+      kind: 'vendor_bid', tone: 'info', icon: 'tag',
+      title: 'New vendor offer',
+      body: `${lines.length} item(s) from ${contactName}`,
+    });
+    outcome = { code: 201, bidId };
+  });
+
+  // `outcome` is set inside the sql.begin closure; TS control-flow narrowing
+  // can't see those assignments and pins it to the initializer type, so cast
+  // back to the declared union before branching (same `as` pattern as
+  // sellOrders.ts's post-tx outcome handling).
+  const result = outcome as Outcome;
+  if (result.code === 409) return c.json({ error: 'Some items are no longer available', unavailable: result.bad }, 409);
+  if (result.code !== 201) return c.json({ error: (result as { msg: string }).msg }, 400);
+  return c.json({ bidId: (result as { bidId: string }).bidId }, 201);
 });
 
 export default vendorPublic;

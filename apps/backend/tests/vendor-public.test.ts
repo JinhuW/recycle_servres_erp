@@ -92,4 +92,38 @@ describe('vendor public — me & catalog', () => {
       expect(it).not.toHaveProperty('user_id');
     }
   });
+
+  async function anInStockLine(mgr: string): Promise<{ id: string; qty: number }> {
+    const inv = await api<{ items: Array<{ id: string; qty: number; status: string }> }>(
+      'GET', '/api/inventory?status=Done', { token: mgr });
+    const row = inv.body.items.find(i => i.qty > 0)!;
+    return { id: row.id, qty: row.qty };
+  }
+
+  it('submits a bid and notifies managers', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    const r = await api<{ bidId: string }>('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.bidId).toMatch(/^VB-\d+$/);
+  });
+
+  it('rejects qty over availability with 409', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    const r = await api('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: line.qty + 999, unitPrice: 5 }] },
+    });
+    expect(r.status).toBe(409);
+  });
+
+  it('rejects malformed body with 400', async () => {
+    const { token } = await seedLink();
+    const r = await api('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: '', lines: [] },
+    });
+    expect(r.status).toBe(400);
+  });
 });
