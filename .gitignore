@@ -41,3 +41,9 @@ crash.*.log
 *.auto.tfvars
 **/*.secret.tfvars
 .terraform.lock.hcl
+
+# Superpowers brainstorm/visual-companion artifacts
+.superpowers/
+
+# Local-only compose override (host-published Postgres for the test loop)
+docker-compose.override.yml
