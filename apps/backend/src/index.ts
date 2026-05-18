@@ -7,7 +7,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 import { authMiddleware } from './auth';
-import { dbScope } from './db';
+import { dbScope, getDb } from './db';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
@@ -24,6 +24,7 @@ import lookupsRoutes from './routes/lookups';
 import categoriesRoutes from './routes/categories';
 import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
+import vendorPublicRoutes from './routes/vendorPublic';
 import type { Env, User } from './types';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -34,13 +35,21 @@ app.use(
   cors({
     // With credentials:true, reflecting an arbitrary origin lets any site
     // make credentialed calls. In production set CORS_ALLOWED_ORIGINS to the
-    // real frontend origin(s); only those are then echoed back. Unset keeps
-    // the permissive dev behavior (Vite SPA on a shifting localhost port).
+    // real frontend origin(s); only those are then echoed back. When unset we
+    // FAIL CLOSED — only loopback origins (the Vite SPA on a shifting
+    // localhost port) are permitted, never an arbitrary remote site.
     origin: (origin, c) => {
       const configured = (c.env as Env).CORS_ALLOWED_ORIGINS ?? '';
       const allow = configured.split(',').map((s: string) => s.trim()).filter(Boolean);
-      if (allow.length === 0) return origin ?? '*';
-      return allow.includes(origin) ? origin : null;
+      if (allow.length > 0) return allow.includes(origin) ? origin : null;
+      if (!origin) return null;
+      try {
+        const host = new URL(origin).hostname;
+        if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+          return origin;
+        }
+      } catch { /* malformed Origin header — deny */ }
+      return null;
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
@@ -59,8 +68,23 @@ app.get('/', (c) =>
   }),
 );
 
+// Liveness/readiness probe for the edge proxy (Traefik) and Docker. Returns
+// 200 only when the API can actually reach Postgres — unlike the SPA's
+// catch-all, which 200s every path even when the backend is dead and so
+// hides outages from the load balancer. Unauthenticated by design.
+app.get('/api/health', async (c) => {
+  try {
+    await getDb(c.env)`SELECT 1`;
+    return c.json({ status: 'ok' });
+  } catch (e) {
+    console.error('health check failed', e);
+    return c.json({ status: 'error', error: 'database unreachable' }, 503);
+  }
+});
+
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
+app.route('/api/public/vendor', vendorPublicRoutes);
 
 // ── Authed ──────────────────────────────────────────────────────────────────
 app.use('/api/me/*', authMiddleware);
