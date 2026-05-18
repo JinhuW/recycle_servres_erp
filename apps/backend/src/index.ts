@@ -25,6 +25,7 @@ import categoriesRoutes from './routes/categories';
 import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import vendorPublicRoutes from './routes/vendorPublic';
+import vendorBidsRoutes from './routes/vendorBids';
 import type { Env, User } from './types';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -102,6 +103,7 @@ app.use('/api/lookups/*', authMiddleware);
 app.use('/api/categories/*', authMiddleware);
 app.use('/api/attachments/*', authMiddleware);
 app.use('/api/workspace/*', authMiddleware);
+app.use('/api/vendor-bids/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
@@ -118,6 +120,7 @@ app.route('/api/lookups', lookupsRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/attachments', attachmentsRoutes);
 app.route('/api/workspace', workspaceRoutes);
+app.route('/api/vendor-bids', vendorBidsRoutes);
 
 app.onError((err, c) => {
   console.error('Unhandled', err);
