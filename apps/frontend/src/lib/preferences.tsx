@@ -29,6 +29,7 @@ export type PrefMap = {
   'tweaks.rolePreview': 'actual' | 'as_purchaser';
   'inventory.cols.manager': string[];
   'inventory.cols.purchaser': string[];
+  'inventory.view': 'grouped' | 'flat';
   'orders.cols': string[];
 };
 
