@@ -4,7 +4,9 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD0, relTime } from '../../lib/format';
+import { shareOrCopy } from '../../lib/shareOrCopy';
 import type { Lang, Warehouse } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 
@@ -766,11 +768,7 @@ function InviteMemberModal({
     }
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   if (tempPassword) {
     return (
@@ -911,11 +909,7 @@ function DangerConfirmDialog({
   const [phrase, setPhrase] = useState('');
   const matches = phrase.trim() === PHRASE;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+  useEscapeKey(onCancel);
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
@@ -1353,6 +1347,7 @@ function CustomersPanel({ showToast }: { showToast: ToastFn }) {
       {(editing || creating) && (
         <CustomerEditModal
           customer={editing}
+          showToast={showToast}
           onClose={() => { setEditing(null); setCreating(false); }}
           onSaved={() => { setEditing(null); setCreating(false); reload(); showToast?.('Customer saved'); }}
         />
@@ -1384,11 +1379,7 @@ function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+  useEscapeKey(onCancel);
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
@@ -1427,7 +1418,90 @@ function ConfirmDialog({
   );
 }
 
-function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer | null; onClose: () => void; onSaved: () => void }) {
+type VendorLink = {
+  id: string; token: string; active: boolean;
+  expires_at: string | null; label: string | null;
+  created_at: string; last_seen_at: string | null; bidCount: number;
+};
+
+function VendorLinkPanel({ customerId, showToast }: { customerId: string; showToast: ToastFn }) {
+  const { t } = useT();
+  const [link, setLink] = useState<VendorLink | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => api.get<{ link: VendorLink | null }>(`/api/customers/${customerId}/vendor-link`)
+    .then(r => setLink(r.link))
+    .catch(console.error)
+    .finally(() => setLoaded(true));
+  useEffect(() => { reload(); }, [customerId]);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/api/customers/${customerId}/vendor-link`, {});
+      await reload();
+    } catch (e) {
+      showToast?.(e instanceof Error ? e.message : 'Failed to generate vendor link', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const revoke = async () => {
+    if (!link) return;
+    setBusy(true);
+    try {
+      await api.patch(`/api/customers/vendor-link/${link.id}`, { active: false });
+      await reload();
+    } catch (e) {
+      showToast?.(e instanceof Error ? e.message : 'Failed to revoke vendor link', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const url = link ? `${location.origin}/v/${link.token}` : '';
+
+  return (
+    <div className="field">
+      <label className="label">{t('vendorLink')}</label>
+      {!loaded ? (
+        <div style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>…</div>
+      ) : !link || !link.active ? (
+        <button className="btn" disabled={busy} onClick={generate}>
+          <Icon name="globe" size={13} /> {t('vendorLinkGenerate')}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="input mono" readOnly value={url} style={{ flex: 1 }} />
+            <button
+              className="btn"
+              title={t('vendorLinkCopy')}
+              onClick={() => shareOrCopy({
+                url,
+                title: t('vendorLink'),
+                copiedMsg: t('vendorLinkCopied'),
+                failedMsg: t('orderIdCopyFailed'),
+                onToast: showToast,
+              })}
+            >
+              <Icon name="paperclip" size={13} /> {t('vendorLinkCopy')}
+            </button>
+            <button className="btn" disabled={busy} style={{ color: 'var(--neg)' }} onClick={revoke}>
+              {t('vendorLinkRevoke')}
+            </button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: 'var(--fg-muted)' }}>
+            <span className="chip pos">Active</span>
+            <span>Created {relTime(link.created_at)}</span>
+            <span>Last seen {link.last_seen_at ? relTime(link.last_seen_at) : '—'}</span>
+            <span>{link.bidCount} bids</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer: Customer | null; showToast: ToastFn; onClose: () => void; onSaved: () => void }) {
   const isNew = !customer;
   const [draft, setDraft] = useState<Partial<Customer>>(customer ?? { active: true, tags: [] });
   const [saving, setSaving] = useState(false);
@@ -1496,6 +1570,7 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer 
             <label className="label">Notes</label>
             <textarea className="input" rows={3} value={String(draft.notes ?? '')} onChange={e => set('notes', e.target.value)} />
           </div>
+          {!isNew && <VendorLinkPanel customerId={customer!.id} showToast={showToast} />}
           <div className="toggle-row">
             <span>Active</span>
             <label className="toggle">
