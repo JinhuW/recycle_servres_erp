@@ -267,14 +267,31 @@ function VendorBidDetail({
   const setLine = (lineId: string, patch: Partial<DraftLine>) =>
     setDraft(d => ({ ...d, [lineId]: { ...d[lineId]!, ...patch } }));
 
-  // Lines that are accepted and not yet promoted (sell_order_id null) — the
-  // exact set the backend will consume on promote.
-  const promotableCount = useMemo(() => {
-    if (!bid) return 0;
-    return bid.lines.filter(l =>
-      l.sell_order_id == null && draft[l.id]?.decision === 'accepted',
-    ).length;
+  // True when the local draft diverges from the persisted line state for ANY
+  // line. A fresh bid defaults every non-declined line to 'accepted' while the
+  // persisted line_status is still 'pending' → dirty, which is exactly the
+  // case that must block Promote until the manager Saves.
+  const dirty = useMemo(() => {
+    if (!bid) return false;
+    return bid.lines.some(l => {
+      const d = draft[l.id];
+      if (!d) return false;
+      if (d.decision !== l.line_status) return true;
+      if (d.decision === 'accepted') {
+        if (d.acceptedQty !== (l.accepted_qty ?? l.offered_qty)) return true;
+        if (d.acceptedUnitPrice !== (l.accepted_unit_price ?? l.offered_unit_price)) return true;
+      }
+      return false;
+    });
   }, [bid, draft]);
+
+  // Lines the backend will actually consume on promote: PERSISTED accepted and
+  // not yet promoted (sell_order_id null). Derived from persisted state only,
+  // never from the unsaved draft.
+  const persistedPromotable = useMemo(() => {
+    if (!bid) return 0;
+    return bid.lines.filter(l => l.line_status === 'accepted' && !l.sell_order_id).length;
+  }, [bid]);
 
   // All-accepted-but-already-promoted: nothing left to promote because the
   // accepted lines already carry a sell_order_id. Derived from lines, not the
@@ -314,6 +331,12 @@ function VendorBidDetail({
 
   const promote = async () => {
     if (!bid) return;
+    // Belt-and-suspenders: never fire the endpoint with unsaved decisions —
+    // the backend filters on persisted state and would 400 with a raw error.
+    if (dirty) {
+      onToast?.(t('vbSaveFirst'), 'error');
+      return;
+    }
     setPromoting(true);
     try {
       const r = await api.post<{ sellOrderId: string }>(`/api/vendor-bids/${bid.id}/promote`, {});
@@ -437,9 +460,11 @@ function VendorBidDetail({
                             className="so-mini-input"
                             type="number"
                             min={0}
+                            max={l.available}
+                            step={1}
                             value={d.acceptedQty}
                             disabled={!accepted || promoted}
-                            onChange={e => setLine(l.id, { acceptedQty: Math.max(0, Number(e.target.value) || 0) })}
+                            onChange={e => setLine(l.id, { acceptedQty: Math.min(l.available, Math.max(0, Math.floor(Number(e.target.value) || 0))) })}
                             style={{ width: 72 }}
                           />
                         </td>
@@ -469,7 +494,12 @@ function VendorBidDetail({
             <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
               {allPromoted ? t('vbAllPromoted') : ''}
             </span>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {dirty && (
+                <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                  {t('vbSaveFirst')}
+                </span>
+              )}
               <button className="btn" onClick={onClose}>{t('vbClose')}</button>
               <button className="btn" onClick={save} disabled={saving}>
                 <Icon name="check2" size={14} /> {saving ? t('vbSaving') : t('vbSaveDecisions')}
@@ -477,11 +507,11 @@ function VendorBidDetail({
               <button
                 className="btn accent"
                 onClick={promote}
-                disabled={promoting || promotableCount === 0}
-                title={promotableCount === 0 ? t('vbAllPromoted') : undefined}
+                disabled={promoting || dirty || persistedPromotable === 0}
+                title={dirty ? t('vbSaveFirst') : persistedPromotable === 0 ? t('vbAllPromoted') : undefined}
               >
                 <Icon name="invoice" size={14} />{' '}
-                {promoting ? t('vbPromoting') : t('vbPromote', { n: promotableCount })}
+                {promoting ? t('vbPromoting') : t('vbPromote', { n: persistedPromotable })}
               </button>
             </div>
           </div>
