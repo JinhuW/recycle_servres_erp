@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
+import { canonPartCol, canonPartArg } from '../lib/part-number';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -114,6 +115,49 @@ inventory.get('/aggregate/by-part', async (c) => {
   }
   const lineCount = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM order_lines WHERE part_number = ${pn}`)[0].n;
   return c.json({ partNumber: pn, inTransit, inStock, lines: lineCount });
+});
+
+// Product-level change log: the UNION of inventory_events across every line
+// that shares a part number. PO lines are never merged into a real product
+// row, so "the product's history" is the merged history of its peer lines.
+//
+// Part numbers are matched on a CANONICAL form (strip a leading PN/P/N/S/N/
+// PART prefix, drop all whitespace, upper-case) so the same item entered
+// sloppily on two POs — "ABC-123", " abc-123 ", "PN: ABC-123" — counts as one
+// product. Kept in lockstep with frontend canonicalPartNumber() in
+// frontend/src/lib/format.ts and the scan-time rule in src/ai/normalize.ts.
+//
+// Scoped exactly like the inventory list: managers see the whole workspace,
+// purchasers only their own lines (also prevents a purchaser reading another
+// buyer's unit_cost out of an 'edited' event detail).
+inventory.get('/events/by-part', async (c) => {
+  const u = c.var.user;
+  const pnRaw = c.req.query('partNumber');
+  if (!pnRaw || !pnRaw.trim()) return c.json({ error: 'partNumber is required' }, 400);
+  const sql = getDb(c.env);
+  const isManager = u.role === 'manager';
+  const scopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+
+  const canonCol = canonPartCol(sql, sql`l.part_number`);
+  const canonArg = canonPartArg(sql, pnRaw);
+
+  const rows = await sql`
+    SELECT
+      e.id, e.kind, e.detail, e.created_at,
+      l.id AS line_id, l.category, l.brand, l.capacity, l.generation, l.type,
+      l.interface, l.description, l.part_number, l.rpm,
+      act.name AS actor_name, act.initials AS actor_initials
+    FROM inventory_events e
+    JOIN order_lines l ON l.id = e.order_line_id
+    JOIN orders o      ON o.id = l.order_id
+    LEFT JOIN users act ON act.id = e.actor_id
+    WHERE ${scopeFrag}
+      AND l.part_number IS NOT NULL
+      AND ${canonCol} = ${canonArg}
+    ORDER BY e.created_at DESC
+    LIMIT 200
+  `;
+  return c.json({ events: rows });
 });
 
 // Transfer orders. Manager-only. ?status=pending|received|all (default
@@ -284,6 +328,22 @@ inventory.patch('/:id', async (c) => {
   }
   if (u.role !== 'manager' && (body.status !== undefined || body.sellPrice !== undefined)) {
     return c.json({ error: 'Only managers can change status or sell price' }, 403);
+  }
+
+  // A line committed to an open (non-Done) sell order is "spoken for": editing
+  // its qty or status out from under the deal silently corrupts that sell
+  // order's totals/sellability. Mirrors the reopen guard (sell_count > 0) and
+  // the one-active-sell-order-per-line invariant. Other fields stay editable.
+  if (body.qty !== undefined || body.status !== undefined) {
+    const open = (await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n
+      FROM sell_order_lines sol
+      JOIN sell_orders so ON so.id = sol.sell_order_id
+      WHERE sol.inventory_id = ${id} AND so.status <> 'Done'
+    `)[0];
+    if (open.n > 0) {
+      return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
+    }
   }
 
   await sql.begin(async (tx) => {
