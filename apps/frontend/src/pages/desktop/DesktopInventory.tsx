@@ -187,7 +187,50 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   });
   const clearSelection = () => setSelected(new Set());
 
-  const selectedItems = useMemo(() => items.filter(r => selected.has(r.id)), [items, selected]);
+  // Selected lot ids can originate in the grouped product view, whose lots
+  // are NOT in the flat `items` list (different endpoint + caps). Synthesise
+  // an InventoryRow-equivalent from each ProductGroup's spec + its ProductLot
+  // so bulk actions (sell order / transfer) and the selection totals see
+  // grouped-view selections too — not just the flat 200-row slice.
+  const groupedRowsById = useMemo(() => {
+    const m = new Map<string, InventoryRow>();
+    for (const g of products) {
+      for (const lot of g.lines) {
+        m.set(lot.id, {
+          id: lot.id,
+          category: g.category as InventoryRow['category'],
+          brand: g.brand, capacity: g.capacity, generation: g.generation,
+          type: g.type, classification: g.classification, rank: g.rank,
+          speed: g.speed, interface: g.interface, form_factor: g.form_factor,
+          description: g.description, part_number: g.part_number,
+          condition: lot.condition, qty: lot.qty,
+          unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,
+          status: lot.status, health: lot.health, rpm: g.rpm,
+          warehouse_id: lot.warehouse_id, warehouse_short: lot.warehouse_short,
+          warehouse_region: null,
+          user_initials: lot.user_initials, user_name: lot.user_name,
+          created_at: lot.created_at, order_id: lot.order_id,
+        });
+      }
+    }
+    return m;
+  }, [products]);
+
+  // Flat rows first (preserve existing behaviour); then any selected lot that
+  // only exists in the grouped view.
+  const selectedItems = useMemo(() => {
+    const out: InventoryRow[] = [];
+    const seen = new Set<string>();
+    for (const r of items) {
+      if (selected.has(r.id)) { out.push(r); seen.add(r.id); }
+    }
+    for (const id of selected) {
+      if (seen.has(id)) continue;
+      const g = groupedRowsById.get(id);
+      if (g) out.push(g);
+    }
+    return out;
+  }, [items, selected, groupedRowsById]);
   const selectedTotals = useMemo(() => {
     const lines = selectedItems.length;
     const qty   = selectedItems.reduce((a, r) => a + r.qty, 0);
