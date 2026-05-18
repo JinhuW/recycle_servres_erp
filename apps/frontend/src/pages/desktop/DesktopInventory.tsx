@@ -14,6 +14,8 @@ import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
 import { DesktopActivityDrawer } from './DesktopActivityDrawer';
 import { TableSkeleton } from '../../components/Skeleton';
+import { InventoryProductTable } from './InventoryProductTable';
+import type { ProductGroup } from './InventoryProductTable';
 
 type InventoryRow = {
   id: string;
@@ -95,6 +97,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     () => ALL_COLS.filter(c => !c.managerOnly || isManager).map(c => c.id) as string[],
     [ALL_COLS, isManager],
   );
+  const [view, setView] = usePreference('inventory.view', 'grouped');
+  const [products, setProducts] = useState<ProductGroup[]>([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [colsList, setColsList] = usePreference(colsKey, defaultCols);
   const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
   const isVis = (id: ColId) => visibleCols.has(id);
@@ -131,6 +136,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     }, 200);
     return () => clearTimeout(handle);
   }, [filter, statusFilter, warehouseFilter, search]);
+
+  useEffect(() => {
+    if (view !== 'grouped') return;
+    let alive = true;
+    const params = new URLSearchParams();
+    if (filter !== 'all') params.set('category', filter);
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
+    if (search.trim()) params.set('q', search.trim());
+    const h = setTimeout(() => {
+      api.get<{ products: ProductGroup[] }>(`/api/inventory/products?${params}`)
+        .then(r => { if (alive) { setProducts(r.products); setProductsLoaded(true); } })
+        .catch(() => { if (alive) { setProducts([]); setProductsLoaded(true); } });
+    }, 200);
+    return () => { alive = false; clearTimeout(h); };
+  }, [view, filter, statusFilter, warehouseFilter, search]);
 
   useEffect(() => {
     api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => setWhs(r.items));
@@ -381,6 +402,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="seg inv-view-toggle" role="group" aria-label="Inventory view">
+              <button type="button" className={view === 'grouped' ? 'active' : ''} onClick={() => setView('grouped')}>Grouped</button>
+              <button type="button" className={view === 'flat' ? 'active' : ''} onClick={() => setView('flat')}>Flat</button>
+            </div>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
                 position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -466,7 +491,45 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         </div>
 
         <div className="table-scroll">
-          {!loadedOnce ? (
+          {view === 'grouped' ? (
+            <>
+              {!productsLoaded ? (
+                <TableSkeleton rows={10} cols={8} withCheckbox={isManager} />
+              ) : (
+                <InventoryProductTable
+                  groups={products}
+                  isManager={isManager}
+                  selected={selected}
+                  onToggleLot={(id) => {
+                    setSelected(prev => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id); else next.add(id);
+                      return next;
+                    });
+                  }}
+                  onToggleGroup={(g) => {
+                    const sellable = g.lines.filter(l => l.status === 'Reviewing' || l.status === 'Done').map(l => l.id);
+                    setSelected(prev => {
+                      const next = new Set(prev);
+                      const allOn = sellable.length > 0 && sellable.every(id => next.has(id));
+                      for (const id of sellable) { if (allOn) next.delete(id); else next.add(id); }
+                      return next;
+                    });
+                  }}
+                  onQuickView={(lotId) => {
+                    const row = items.find(i => i.id === lotId);
+                    if (row) setQuickView(row); else onEditItem(lotId);
+                  }}
+                  onEditLot={(lotId) => onEditItem(lotId)}
+                />
+              )}
+              {productsLoaded && products.length === 0 && (
+                <div style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
+                  No products match these filters.
+                </div>
+              )}
+            </>
+          ) : !loadedOnce ? (
             <TableSkeleton rows={10} cols={8} withCheckbox={isManager} />
           ) : (
           <table className="table">
