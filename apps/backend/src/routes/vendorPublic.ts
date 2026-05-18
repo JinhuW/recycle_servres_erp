@@ -1,7 +1,5 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
-import { nextHumanId } from '../lib/id-seq';
-import { notifyManagers } from '../lib/notify';
 import type { Env } from '../types';
 
 const vendorPublic = new Hono<{ Bindings: Env }>();
@@ -50,6 +48,7 @@ vendorPublic.get('/:token/catalog', async (c) => {
     FROM order_lines l
     WHERE l.status = 'Done' AND l.qty > 0
     ORDER BY l.category, l.brand, l.created_at DESC
+    LIMIT 2000
   `;
   const groups: { category: string; items: Record<string, unknown>[] }[] = [];
   for (const r of rows) {
