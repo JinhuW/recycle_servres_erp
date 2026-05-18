@@ -167,12 +167,28 @@ describe('vendor public — me & catalog', () => {
     await api('POST', `/api/public/vendor/${token}/bids`, {
       body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
     });
-    const r = await api<{ bids: Array<{ status: string; lines: unknown[] }> }>(
+    const r = await api<{ bids: Array<{ status: string; lines: Array<Record<string, unknown>> }> }>(
       'GET', `/api/public/vendor/${token}/bids`);
     expect(r.status).toBe(200);
     expect(r.body.bids.length).toBe(1);
     expect(r.body.bids[0].status).toBe('new');
     expect(r.body.bids[0].lines.length).toBe(1);
+    expect(r.body.bids[0].lines[0]).toMatchObject({ offeredQty: 1, offeredUnitPrice: 5 });
+  });
+
+  it('a vendor link never sees another link\'s bids', async () => {
+    const a = await seedLink();
+    const b = await seedLink();
+    const line = await anInStockLine(a.mgr);
+    const sub = await api('POST', `/api/public/vendor/${a.token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+    });
+    expect(sub.status).toBe(201);
+    const aSees = await api<{ bids: unknown[] }>('GET', `/api/public/vendor/${a.token}/bids`);
+    expect(aSees.body.bids.length).toBe(1);
+    const bSees = await api<{ bids: unknown[] }>('GET', `/api/public/vendor/${b.token}/bids`);
+    expect(bSees.status).toBe(200);
+    expect(bSees.body.bids.length).toBe(0);
   });
 
   it('rejects qty over availability with 409', async () => {

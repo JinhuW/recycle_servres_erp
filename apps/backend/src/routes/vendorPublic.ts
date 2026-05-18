@@ -158,6 +158,7 @@ vendorPublic.get('/:token/bids', async (c) => {
     SELECT id, contact_name, note, status, created_at
     FROM vendor_bids WHERE vendor_link_id = ${link.id}
     ORDER BY created_at DESC
+    LIMIT 500
   `;
   const lines = await sql<{ bid_id: string; label: string; offered_qty: number;
     offered_unit_price: number; line_status: string;
@@ -167,6 +168,7 @@ vendorPublic.get('/:token/bids', async (c) => {
     FROM vendor_bid_lines
     WHERE bid_id IN (SELECT id FROM vendor_bids WHERE vendor_link_id = ${link.id})
     ORDER BY position
+    LIMIT 5000
   `;
   return c.json({
     bids: bids.map(b => ({
