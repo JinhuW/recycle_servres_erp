@@ -72,7 +72,9 @@ vendorBids.post('/:id/decide', async (c) => {
       const ln = (await tx<{ offered_qty: number; offered_unit_price: number;
         inventory_id: string | null }[]>`
         SELECT offered_qty, offered_unit_price::float AS offered_unit_price, inventory_id
-        FROM vendor_bid_lines WHERE id = ${d.lineId} AND bid_id = ${id} FOR UPDATE
+        FROM vendor_bid_lines
+        WHERE id = ${d.lineId} AND bid_id = ${id} AND sell_order_id IS NULL
+        FOR UPDATE
       `)[0];
       if (!ln) continue;
       if (d.decision !== 'accepted' && d.decision !== 'declined') continue;

@@ -88,6 +88,19 @@ vendorPublic.post('/:token/bids', async (c) => {
     }
   }
 
+  // Per-link flood throttle: count this link's recent bids in a sliding
+  // window (same windowed-COUNT idiom as auth.ts's login_attempts gate).
+  // Runs after cheap input validation (so a malformed body still 400s) and
+  // before nextHumanId/tx so abuse can't burn id-seq rows.
+  const recent = (await sql<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM vendor_bids
+    WHERE vendor_link_id = ${link.id}
+      AND created_at > NOW() - INTERVAL '10 minutes'
+  `)[0].n;
+  if (recent >= 10) {
+    return c.json({ error: 'too many offers; please try again later' }, 429);
+  }
+
   type Outcome =
     | { code: 201; bidId: string }
     | { code: 409; bad: string[] }

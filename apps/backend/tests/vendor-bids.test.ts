@@ -186,4 +186,25 @@ describe('vendor-bids manager route', () => {
     const r = await api('POST', '/api/vendor-bids/VB-1/promote', { token: pur });
     expect(r.status).toBe(403);
   });
+
+  it('decide cannot mutate an already-promoted line', async () => {
+    const { mgr, bidId } = await setup();
+    const detail = await api<DetailResp>('GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    const lineId = detail.body.bid.lines[0].id;
+    const dec = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [{ lineId, decision: 'accepted', acceptedQty: 1, acceptedUnitPrice: 4 }] },
+    });
+    expect(dec.status).toBe(200);
+    const p = await api<{ sellOrderId: string }>('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
+    expect(p.status).toBe(201);
+    // Re-deciding the promoted line as declined: call succeeds but is a no-op.
+    const redec = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [{ lineId, decision: 'declined' }] },
+    });
+    expect(redec.status).toBe(200);
+    const after = await api<{ bid: { lines: Array<{ line_status: string; sell_order_id: string | null }> } }>(
+      'GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    expect(after.body.bid.lines[0].line_status).toBe('accepted');
+    expect(after.body.bid.lines[0].sell_order_id).not.toBe(null);
+  });
 });

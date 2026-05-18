@@ -207,4 +207,19 @@ describe('vendor public — me & catalog', () => {
     });
     expect(r.status).toBe(400);
   });
+
+  it('rate-limits a flood of bids from one link (429)', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    for (let i = 0; i < 10; i++) {
+      const ok = await api('POST', `/api/public/vendor/${token}/bids`, {
+        body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+      });
+      expect(ok.status).toBe(201);
+    }
+    const r = await api('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+    });
+    expect(r.status).toBe(429);
+  });
 });
