@@ -10,7 +10,7 @@ type SqlLike = Sql | TransactionSql;
 // allocate independently (gaps on rollback are fine, same as a sequence).
 export async function nextHumanId(
   sql: SqlLike,
-  name: 'SO' | 'SL' | 'TO',
+  name: 'SO' | 'SL' | 'TO' | 'VB',
   prefix: string,
 ): Promise<string> {
   const rows = await sql<{ value: number }[]>`
