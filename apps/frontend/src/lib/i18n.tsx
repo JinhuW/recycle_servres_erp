@@ -352,6 +352,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     vendorSubmit: 'Submit offer', vendorSubmitted: 'Offer submitted',
     vendorNonBinding: 'Offers are non-binding — we review and reply.',
     vendorPending: 'Pending', vendorAccepted: 'Accepted', vendorDeclined: 'Declined',
+    vendorLoadError: 'Something went wrong. Please try again.', vendorRetry: 'Retry',
+    vendorOffersLoadError: 'Couldn’t load your offers.',
+    vendorUnavailableSome: 'These items are no longer available — please remove them',
   },
   zh: {
     tabHome: '首页', tabOrders: '订单', tabCapture: '扫描', tabMarket: '市场',
@@ -536,6 +539,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     vendorSubmit: '提交报价', vendorSubmitted: '报价已提交',
     vendorNonBinding: '报价为非约束性，我们审核后回复。',
     vendorPending: '待处理', vendorAccepted: '已接受', vendorDeclined: '已拒绝',
+    vendorLoadError: '出错了，请重试。', vendorRetry: '重试',
+    vendorOffersLoadError: '无法加载您的报价。',
+    vendorUnavailableSome: '以下商品已无货，请移除',
   },
 };
 

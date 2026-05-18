@@ -13,24 +13,50 @@ export function VendorApp({ token }: { token: string }) {
   const [groups, setGroups] = useState<{ category: string; items: CatalogItem[] }[]>([]);
   const [basket, setBasket] = useState<BasketLine[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [errored, setErrored] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [review, setReview] = useState(false);
 
   const base = `/api/public/vendor/${encodeURIComponent(token)}`;
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const m = await fetch(`${base}/me`);
-      if (m.status === 404) { setNotFound(true); return; }
-      setMe(await m.json());
-      const cat = await fetch(`${base}/catalog`);
-      if (cat.ok) setGroups((await cat.json()).groups);
+      try {
+        const m = await fetch(`${base}/me`);
+        if (cancelled) return;
+        if (m.status === 404) { setNotFound(true); return; }
+        if (!m.ok) { setErrored(true); return; }
+        setMe(await m.json());
+        const cat = await fetch(`${base}/catalog`);
+        if (cancelled) return;
+        if (cat.ok) setGroups((await cat.json()).groups);
+      } catch {
+        if (!cancelled) setErrored(true);
+      }
     })();
-  }, [base]);
+    return () => { cancelled = true; };
+  }, [base, reloadKey]);
+
+  function reload() {
+    setErrored(false);
+    setReloadKey(k => k + 1);
+  }
 
   if (notFound) {
     return <div style={{ padding: 40, textAlign: 'center' }}>
       <h2>Link unavailable</h2>
       <p style={{ color: 'var(--fg-muted)' }}>This link is invalid or has expired.</p>
+    </div>;
+  }
+
+  if (errored) {
+    return <div style={{ padding: 40, textAlign: 'center' }}>
+      <h2>{t('vendorLoadError')}</h2>
+      <p style={{ color: 'var(--fg-muted)' }}>Couldn’t reach the server.</p>
+      <button className="btn accent" onClick={reload} style={{ marginTop: 14 }}>
+        {t('vendorRetry')}
+      </button>
     </div>;
   }
 
@@ -161,8 +187,16 @@ function ReviewView({ base, basket, t, onBack, onDone }: {
       }),
     });
     setBusy(false);
-    if (r.ok) onDone();
-    else setErr((await r.json().catch(() => ({}))).error ?? 'Submit failed');
+    if (r.ok) { onDone(); return; }
+    const body: { error?: string; unavailable?: string[] } =
+      await r.json().catch(() => ({}));
+    if (r.status === 409 && Array.isArray(body.unavailable) && body.unavailable.length) {
+      const labels = body.unavailable.map((id: string) =>
+        basket.find(l => l.inventoryId === id)?.label ?? id);
+      setErr(`${t('vendorUnavailableSome')}: ${labels.join(', ')}`);
+      return;
+    }
+    setErr(body.error ?? 'Submit failed');
   }
   return (
     <div style={{ padding: '0 16px 24px' }}>
@@ -198,16 +232,37 @@ function MyOffersView({ base, t }: { base: string; t: (k: string) => string }) {
     lines: Array<{ label: string; offeredQty: number; offeredUnitPrice: number;
       status: string; acceptedUnitPrice: number | null }>;
   }>>([]);
-  useEffect(() => { (async () => {
-    const r = await fetch(`${base}/bids`);
-    if (r.ok) setBids((await r.json()).bids);
-  })(); }, [base]);
+  const [offersErr, setOffersErr] = useState(false);
+  const [offersKey, setOffersKey] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${base}/bids`);
+        if (cancelled) return;
+        if (!r.ok) { setOffersErr(true); return; }
+        setOffersErr(false);
+        setBids((await r.json()).bids);
+      } catch {
+        if (!cancelled) setOffersErr(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [base, offersKey]);
   const badge: Record<string, string> = {
     pending: t('vendorPending'), accepted: t('vendorAccepted'), declined: t('vendorDeclined'),
   };
   return (
     <div style={{ padding: '0 16px 24px' }}>
-      {bids.length === 0 && <p style={{ color: 'var(--fg-muted)' }}>No offers yet.</p>}
+      {offersErr && (
+        <p style={{ color: 'var(--neg)' }}>
+          {t('vendorOffersLoadError')}{' '}
+          <button className="btn ghost" onClick={() => setOffersKey(k => k + 1)}>
+            {t('vendorRetry')}
+          </button>
+        </p>
+      )}
+      {!offersErr && bids.length === 0 && <p style={{ color: 'var(--fg-muted)' }}>No offers yet.</p>}
       {bids.map(b => (
         <div key={b.id} style={{ marginTop: 16 }}>
           <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--fg-subtle)' }}>
