@@ -11,6 +11,7 @@ import type { Env, LineCategory } from '../types';
 import type { ScanResult, OcrProvider } from './types';
 import { stubScan } from './stub';
 import { openRouterScan } from './openrouter';
+import { ocrCallsTotal } from '../metrics';
 
 export type { ScanResult, OcrProvider } from './types';
 export { CONFIDENCE_FLOOR } from './types';
@@ -25,10 +26,18 @@ export async function scanLabel(
   category: LineCategory,
   imageBytes: ArrayBuffer,
 ): Promise<ScanResult> {
-  switch (pickProvider(env)) {
-    case 'openrouter':
-      return openRouterScan(env, category, imageBytes);
-    default:
-      return stubScan(env, category);
+  const provider = pickProvider(env);
+  try {
+    const result =
+      provider === 'openrouter'
+        ? await openRouterScan(env, category, imageBytes)
+        : await stubScan(env, category);
+    // Outcome is "stub" for the canned provider (never observably "ok" from
+    // a stubbed pipeline), "ok" for a successful real-model call.
+    ocrCallsTotal.inc({ provider, outcome: provider === 'stub' ? 'stub' : 'ok' });
+    return result;
+  } catch (e) {
+    ocrCallsTotal.inc({ provider, outcome: 'error' });
+    throw e;
   }
 }

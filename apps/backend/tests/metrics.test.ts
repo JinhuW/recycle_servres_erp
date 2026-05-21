@@ -26,3 +26,17 @@ describe('GET /metrics', () => {
     expect(body).toMatch(/http_requests_total\{[^}]*route="\/api\/health"[^}]*\}/);
   });
 });
+
+describe('ocr_calls_total counter', () => {
+  it('increments on every scanLabel call', async () => {
+    // Call the stub provider directly so the test doesn't need a real model.
+    const { scanLabel } = await import('../src/ai');
+    const env = { DATABASE_URL: process.env.DATABASE_URL! } as never;
+    await scanLabel(env, 'RAM', new ArrayBuffer(8));
+    await scanLabel(env, 'RAM', new ArrayBuffer(8));
+
+    const r = await api<string>('GET', '/metrics');
+    const body = r.body as unknown as string;
+    expect(body).toMatch(/ocr_calls_total\{[^}]*provider="stub"[^}]*outcome="stub"[^}]*\}\s+\d+/);
+  });
+});
