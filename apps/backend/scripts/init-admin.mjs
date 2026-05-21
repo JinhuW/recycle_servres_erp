@@ -13,7 +13,7 @@
 
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
-import 'dotenv/config';
+import './load-env.mjs';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -54,7 +54,7 @@ try {
     console.log(`✓ init-admin: created ${role} ${email}`);
     if (password === 'admin') {
       console.log(
-        '  ⚠ Using DEFAULT password "admin" — set ADMIN_PASSWORD in apps/backend/.env before exposing the service.',
+        '  ⚠ Using DEFAULT password "admin" — set ADMIN_PASSWORD in repo-root .env before exposing the service.',
       );
     }
   }

@@ -6,14 +6,14 @@ import postgres from 'postgres';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import 'dotenv/config';
+import './load-env.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, '..', 'migrations');
 
 const url = process.env.DATABASE_URL;
 if (!url) {
-  console.error('DATABASE_URL is not set. Add it to apps/backend/.env');
+  console.error('DATABASE_URL is not set. Add it to the repo-root .env');
   process.exit(1);
 }
 

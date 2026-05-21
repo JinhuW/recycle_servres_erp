@@ -16,10 +16,10 @@ COPY apps/backend apps/backend
 
 WORKDIR /app/apps/backend
 # Image defaults: lowest precedence in Compose env merge order — anything in
-# apps/backend/.env (env_file) or compose `environment:` overrides them.
+# the repo-root .env (env_file) or compose `environment:` overrides them.
 # These exist so `docker compose up` works on a fresh clone with no .env at
 # all. For prod, set NODE_ENV=production + CORS_ALLOWED_ORIGINS + a real
-# JWT_SECRET in apps/backend/.env (which then wins over these defaults).
+# JWT_SECRET in .env (which then wins over these defaults).
 ENV NODE_ENV=development \
     JWT_SECRET=dev-jwt-secret-change-me-in-prod \
     ENABLE_DEMO_ACCOUNTS=true \

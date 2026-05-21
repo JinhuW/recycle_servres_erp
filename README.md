@@ -114,30 +114,34 @@ must not ship to prod.
 
 ## Environment
 
-`apps/backend/.env` (used by both `pnpm dev` and the Docker backend):
+A single `.env` at the repo root drives everything — Compose interpolation,
+the backend container's `env_file`, and host-side `pnpm dev` (resolved off the
+repo root via `apps/backend/scripts/load-env.mjs`, regardless of CWD). Copy
+`.env.example` and fill in. See that file for the full annotated list; the
+core keys:
 
 ```
-DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp
+POSTGRES_PASSWORD=recycle
+DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp        # localhost for host pnpm dev; compose overrides to postgres:5432
 JWT_SECRET=dev-secret-change-me
-CORS_ALLOWED_ORIGINS=                     # required in prod, comma-separated
-OPENROUTER_API_KEY=                       # OCR; stub used when absent
-# OPENROUTER_OCR_MODEL=google/gemma-3-27b-it
+ADMIN_EMAIL=admin@recycle.local
+ADMIN_PASSWORD=admin
+OPENROUTER_API_KEY=                                                       # OCR; stub used when absent
 R2_S3_ENDPOINT=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET=recycle-erp-attachments
-R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com/recycle-erp-attachments
-ENABLE_DEMO_ACCOUNTS=1                    # dev only — opens password to "any"
+R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com
+# CORS_ALLOWED_ORIGINS=https://erp.recycleservers.com                     # required when NODE_ENV=production
+# ENABLE_DEMO_ACCOUNTS=true                                               # dev only — exposes /api/auth/demo-accounts
 ```
 
-The bucket's public URL must include the `/<bucket>` segment if R2 serves
-objects at `/<bucket>/<key>` (as `static.recycleservers.com` does today).
-Otherwise URLs in the SPA will 404.
-
-Repo root `.env` only carries `POSTGRES_PASSWORD` for `docker-compose.yml`.
+`CLOUDFLARE_API_TOKEN` is deliberately NOT in this file — it belongs in the
+shell when running `terraform apply` (see `infra/terraform/`). The backend
+talks to R2 over the S3 API using `R2_ACCESS_KEY_ID/SECRET_ACCESS_KEY`.
 
 Frontend dev proxy target is `VITE_API_BASE` (defaults to
-`http://localhost:8787`).  No `VITE_` vars are baked into prod — Caddy
+`http://localhost:8787`). No `VITE_` vars are baked into prod — Caddy
 proxies relative `/api/*`.
 
 ## Tests
@@ -181,17 +185,16 @@ production by editing `docker-compose.yml`'s `web.ports` (e.g.
 
 Single-host Docker Compose:
 
-1. Create `apps/backend/.env` with `NODE_ENV=production`, a real
-   `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`, the R2 credentials, and
-   `OPENROUTER_API_KEY`.  Those values override the dev defaults baked into
-   the backend image (`NODE_ENV=development`, throwaway JWT, demo accounts on).
-2. Put `POSTGRES_PASSWORD=…` in repo-root `.env` (compose interpolates it;
-   defaults to `recycle` if absent — fine for dev, not for prod).
-3. `docker compose up -d --build` — the backend runs migrations on startup
+1. Create repo-root `.env` (copy `.env.example`) with `NODE_ENV=production`,
+   a real `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`, `POSTGRES_PASSWORD`, the R2
+   credentials, and `OPENROUTER_API_KEY`. Those values override the dev
+   defaults baked into the backend image (`NODE_ENV=development`, throwaway
+   JWT, demo accounts on, `admin/admin` initial user).
+2. `docker compose up -d --build` — the backend runs migrations on startup
    and a healthcheck pings `/api/health`.
-4. App is at `http://<host>:8080`.  Front it with your TLS-terminating
+3. App is at `http://<host>:8080`.  Front it with your TLS-terminating
    reverse proxy.
-5. **Do not** ship `docker-compose.override.yml` — it re-publishes Postgres
+4. **Do not** ship `docker-compose.override.yml` — it re-publishes Postgres
    on the host loopback for the dev test harness.
 
 Postgres cluster files live in `./data/postgres/` (bind-mount).  Back them

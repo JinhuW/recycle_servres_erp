@@ -6,16 +6,17 @@ import { spawnSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const backendRoot = join(here, '..', '..');
+const repoRoot = join(backendRoot, '..', '..');
 const migrationsDir = join(backendRoot, 'migrations');
 const seedScript = join(backendRoot, 'scripts', 'seed.mjs');
 
-// Load TEST_DATABASE_URL from apps/backend/.env if not already in the
+// Load TEST_DATABASE_URL from the repo-root .env if not already in the
 // environment (vitest runs as a plain Node process, so process.env isn't
 // auto-populated).
 function loadDevVars(): void {
   if (process.env.TEST_DATABASE_URL) return;
   try {
-    const raw = readFileSync(join(backendRoot, '.env'), 'utf8');
+    const raw = readFileSync(join(repoRoot, '.env'), 'utf8');
     for (const line of raw.split(/\r?\n/)) {
       const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
       if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
@@ -26,7 +27,7 @@ loadDevVars();
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL!;
 if (!TEST_DATABASE_URL) {
-  throw new Error('TEST_DATABASE_URL not set — add it to apps/backend/.env');
+  throw new Error('TEST_DATABASE_URL not set — add it to the repo-root .env');
 }
 
 let sql: postgres.Sql | null = null;

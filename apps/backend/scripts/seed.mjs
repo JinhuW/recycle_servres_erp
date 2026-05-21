@@ -4,11 +4,11 @@
 
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
-import 'dotenv/config';
+import './load-env.mjs';
 
 const url = process.env.DATABASE_URL;
 if (!url) {
-  console.error('DATABASE_URL is not set. Add it to apps/backend/.env');
+  console.error('DATABASE_URL is not set. Add it to repo-root .env');
   process.exit(1);
 }
 const sql = postgres(url, { onnotice: () => {} });

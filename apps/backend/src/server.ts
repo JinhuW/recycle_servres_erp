@@ -3,7 +3,7 @@
 // @hono/node-server otherwise passes Node's req/res as `env`, which would
 // shadow our config — so we pass buildEnv() explicitly per request.
 
-import 'dotenv/config';
+import '../scripts/load-env.mjs';
 import { serve } from '@hono/node-server';
 import app from './index';
 import { buildEnv } from './env';

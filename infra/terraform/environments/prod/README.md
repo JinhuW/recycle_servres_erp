@@ -28,7 +28,7 @@ the dashboard:
 
 ## Wire the backend
 
-After apply, read the outputs and set the backend (`apps/backend/.env` or
+After apply, read the outputs and set the backend (`.env` at repo root, or
 Docker secrets):
 
     terraform output -raw r2_s3_endpoint        # -> R2_S3_ENDPOINT
