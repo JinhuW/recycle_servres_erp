@@ -118,6 +118,7 @@ services:
       - backend
     ports:
       - "8080:80"
+      - "9090:9090"
     security_opt:
       - "no-new-privileges:true"
     cap_drop:

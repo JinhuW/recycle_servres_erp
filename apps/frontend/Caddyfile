@@ -13,3 +13,16 @@
 		file_server
 	}
 }
+
+:9090 {
+	encode gzip
+	handle_path /metrics/backend {
+		rewrite * /metrics
+		reverse_proxy backend:8787
+	}
+	handle_path /metrics/postgres {
+		rewrite * /metrics
+		reverse_proxy postgres-exporter:9187
+	}
+	respond 404
+}
