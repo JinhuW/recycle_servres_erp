@@ -4,16 +4,11 @@ import { join } from 'node:path';
 import { resetDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { freeSellableLine } from './helpers/inventory';
 
 const pdf = join(__dirname, 'fixtures', 'invoice.pdf');
 
-async function findSellableLine(token: string): Promise<{ id: string; qty: number; unit_cost: number; sell_price: number }> {
-  const r = await api<{ items: Array<{ id: string; status: string; qty: number; unit_cost: number; sell_price: number | null }> }>(
-    'GET', '/api/inventory?status=Reviewing', { token });
-  const line = r.body.items.find(i => i.sell_price != null);
-  if (!line) throw new Error('no sellable line in seed');
-  return { id: line.id, qty: line.qty, unit_cost: line.unit_cost, sell_price: line.sell_price as number };
-}
+const findSellableLine = (token: string) => freeSellableLine(token);
 
 async function firstCustomerId(token: string): Promise<string> {
   const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
@@ -79,7 +74,7 @@ describe('POST /api/sell-orders/:id/status', () => {
     expect(r.status).toBe(200);
   });
 
-  it('Done flips underlying inventory lines to Done', async () => {
+  it('Done consumes stock: decrements the source line qty (status unchanged)', async () => {
     const { token } = await loginAs(ALEX);
     const line = await findSellableLine(token);
     const customerId = await firstCustomerId(token);
@@ -96,8 +91,9 @@ describe('POST /api/sell-orders/:id/status', () => {
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Awaiting payment', note: 'a' } });
     await api('POST', `/api/sell-orders/${soId}/status`, { token, body: { to: 'Done', note: 'paid' } });
 
-    const got = await api<{ item: { status: string } }>('GET', `/api/inventory/${line.id}`, { token });
-    expect(got.body.item.status).toBe('Done');
+    const got = await api<{ item: { status: string; qty: number } }>('GET', `/api/inventory/${line.id}`, { token });
+    expect(got.body.item.qty).toBe(line.qty - 1);
+    expect(got.body.item.status).toBe('Reviewing'); // status is left untouched; qty is the source of truth
   });
 
   it('purchaser is forbidden', async () => {
@@ -114,11 +110,10 @@ describe('payment_received notification', () => {
 
   it('notifies submitter when sell order is Done', async () => {
     const { token: mTok } = await loginAs(ALEX);
-    const list = await api<{ items: { id: string; user_id: string; sell_price: number | null }[] }>(
-      'GET', '/api/inventory?status=Reviewing', { token: mTok });
-    const target = list.body.items.find(i => i.sell_price != null)!;
+    const target = await freeSellableLine(mTok);
+    const owner = await api<{ item: { user_id: string } }>('GET', `/api/inventory/${target.id}`, { token: mTok });
     const submitterRow = (await api<{ items: { id: string; email: string }[] }>(
-      'GET', '/api/members', { token: mTok })).body.items.find(m => m.id === target.user_id);
+      'GET', '/api/members', { token: mTok })).body.items.find(m => m.id === owner.body.item.user_id);
     const submitterEmail = submitterRow!.email;
     const { token: subTok } = await loginAs(submitterEmail);
 
@@ -221,7 +216,14 @@ describe('PATCH /api/sell-orders/:id — editing customer + lines', () => {
   it('rejects line/customer edits on a Done order', async () => {
     const { token } = await loginAs(ALEX);
     const { id, line } = await makeOrder(token);
-    await api('PATCH', `/api/sell-orders/${id}`, { token, body: { status: 'Done' } });
+    // Walk Draft → Shipped → Awaiting payment → Done via the dedicated route.
+    // PATCH no longer accepts a status change (see "PATCH rejects status …").
+    for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      const r = await api('POST', `/api/sell-orders/${id}/status`, {
+        token, body: { to, note: 'evidence' },
+      });
+      expect(r.status).toBe(200);
+    }
 
     const r = await api('PATCH', `/api/sell-orders/${id}`, {
       token,
@@ -231,6 +233,28 @@ describe('PATCH /api/sell-orders/:id — editing customer + lines', () => {
       }] },
     });
     expect(r.status).toBe(409);
+  });
+
+  it('PATCH rejects status changes — must go through POST /:id/status', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id } = await makeOrder(token);
+    // Move to Done via the dedicated route first.
+    for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      const r = await api('POST', `/api/sell-orders/${id}/status`, {
+        token, body: { to, note: 'evidence' },
+      });
+      expect(r.status).toBe(200);
+    }
+    // PATCH attempting to revert status must 400 AND leave the row untouched.
+    const bad = await api<{ error: string }>('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { status: 'Draft' },
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/POST/i);
+
+    const got = await api<{ order: { status: string } }>(
+      'GET', `/api/sell-orders/${id}`, { token });
+    expect(got.body.order.status).toBe('Done');
   });
 });
 
@@ -253,31 +277,3 @@ describe('sell-order qty clamp', () => {
   });
 });
 
-describe('sell-order discount clamp', () => {
-  beforeEach(async () => { await resetDb(); });
-
-  it('clamps an out-of-range discountPct so the total never goes negative', async () => {
-    const { token } = await loginAs(ALEX);
-    const line = await findSellableLine(token);
-    const customerId = await firstCustomerId(token);
-    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
-      token,
-      body: {
-        customerId,
-        discountPct: 5, // bad input: discountPct is a 0..1 fraction
-        lines: [{
-          inventoryId: line.id, category: 'RAM', label: 'x', partNumber: 'pn',
-          qty: 1, unitPrice: 100, warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
-        }],
-      },
-    });
-    expect(create.status).toBe(201);
-
-    const detail = await api<{ order: { discountPct: number; total: number } }>(
-      'GET', `/api/sell-orders/${create.body.id}`, { token });
-    expect(detail.status).toBe(200);
-    expect(detail.body.order.discountPct).toBeLessThanOrEqual(1);
-    expect(detail.body.order.discountPct).toBeGreaterThanOrEqual(0);
-    expect(detail.body.order.total).toBeGreaterThanOrEqual(0);
-  });
-});

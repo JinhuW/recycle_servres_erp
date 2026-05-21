@@ -1,15 +1,43 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { clampLimit } from '../lib/pagination';
 import type { Env, User } from '../types';
 
 const categories = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
+// Reject wrong-typed PATCH fields before the COALESCE UPDATE. Present-only
+// (partial PATCH). `enabled:'true'` (string) and `defaultMargin:'high'` must
+// not silently corrupt the row.
+function validateCategoryFields(b: Record<string, unknown>): string | null {
+  for (const f of ['label', 'icon'] as const) {
+    if (b[f] !== undefined && b[f] !== null && typeof b[f] !== 'string') {
+      return `${f} must be a string`;
+    }
+  }
+  for (const f of ['enabled', 'aiCapture', 'requiresPn'] as const) {
+    if (b[f] !== undefined && b[f] !== null && typeof b[f] !== 'boolean') {
+      return `${f} must be a boolean`;
+    }
+  }
+  if (b.defaultMargin !== undefined && b.defaultMargin !== null &&
+      !(typeof b.defaultMargin === 'number' && Number.isFinite(b.defaultMargin) && b.defaultMargin >= 0)) {
+    return 'defaultMargin must be a number >= 0';
+  }
+  if (b.position !== undefined && b.position !== null &&
+      !(typeof b.position === 'number' && Number.isInteger(b.position))) {
+    return 'position must be an integer';
+  }
+  return null;
+}
+
 categories.get('/', async (c) => {
   const sql = getDb(c.env);
+  const limit = clampLimit(c.req.query('limit'), 200, 500);
   const rows = await sql`
     SELECT id, label, icon, enabled, ai_capture, requires_pn,
            default_margin::float AS default_margin, position
     FROM categories ORDER BY position
+    LIMIT ${limit}
   `;
   return c.json({ items: rows });
 });
@@ -55,6 +83,8 @@ categories.patch('/:id', async (c) => {
         requiresPn?: boolean; defaultMargin?: number; position?: number }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  const invalid = validateCategoryFields(body as Record<string, unknown>);
+  if (invalid) return c.json({ error: invalid }, 400);
   const sql = getDb(c.env);
   const r = await sql`
     UPDATE categories SET

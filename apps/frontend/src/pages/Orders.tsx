@@ -3,6 +3,8 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
+import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
@@ -21,7 +23,8 @@ type Props = {
 };
 
 export function Orders({ onEdit, onToast }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [filter, setFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
@@ -38,21 +41,25 @@ export function Orders({ onEdit, onToast }: Props) {
   const lastHandledRouteId = useRef<string | null>(null);
 
   useEffect(() => {
+    let alive = true;
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
-      .then(r => setOrders(r.orders))
-      .catch(console.error)
-      .finally(() => setLoadedOnce(true));
+      .then(r => { if (alive) setOrders(r.orders); })
+      .catch(handleFetchError)
+      .finally(() => { if (alive) setLoadedOnce(true); });
+    return () => { alive = false; };
   }, [filter, statusFilter]);
 
   // When a row is expanded, fetch its lines lazily.
   useEffect(() => {
     if (!openId) { setOpenLines(null); return; }
+    let alive = true;
     api.get<{ order: Order }>(`/api/orders/${openId}`)
-      .then(r => setOpenLines(r.order))
-      .catch(console.error);
+      .then(r => { if (alive) setOpenLines(r.order); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
   }, [openId]);
 
   // CC-5: when the URL matches /purchase-orders/:id, expand that row and (if
@@ -159,19 +166,13 @@ export function Orders({ onEdit, onToast }: Props) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        const url = `${location.origin}${location.pathname}#/purchase-orders/${o.id}`;
-                        const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
-                        if (typeof share === 'function') {
-                          share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
-                            if (err.name !== 'AbortError') onToast?.(t('orderIdCopyFailed'), 'error');
-                          });
-                        } else if (navigator.clipboard?.writeText) {
-                          navigator.clipboard.writeText(url)
-                            .then(() => onToast?.(t('orderIdCopied')))
-                            .catch(() => onToast?.(t('orderIdCopyFailed'), 'error'));
-                        } else {
-                          onToast?.(t('orderIdCopyFailed'), 'error');
-                        }
+                        shareOrCopy({
+                          url: `${location.origin}${location.pathname}#/purchase-orders/${o.id}`,
+                          title: t('shareOrder'),
+                          copiedMsg: t('orderIdCopied'),
+                          failedMsg: t('orderIdCopyFailed'),
+                          onToast,
+                        });
                       }}
                       aria-label={t('shareOrder')}
                       style={{ background: 'transparent', border: 'none', color: 'var(--fg-subtle)', padding: 0, lineHeight: 0, cursor: 'pointer' }}
@@ -181,12 +182,12 @@ export function Orders({ onEdit, onToast }: Props) {
                     <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>· {o.lineCount} {o.lineCount === 1 ? t('item') : t('items')}</span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {fmtDateShort(o.createdAt)}{o.warehouse ? ' · ' + o.warehouse.short : ''} · <span style={{ color: 'var(--fg-muted)' }}>{o.status}</span>
+                    {fmtDateShort(o.createdAt, locale)}{o.warehouse ? ' · ' + o.warehouse.short : ''} · <span style={{ color: 'var(--fg-muted)' }}>{o.status}</span>
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(o.profit)}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{fmtUSD0(o.revenue)}</div>
+                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(o.profit, locale)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{fmtUSD0(o.revenue, locale)}</div>
                 </div>
                 <Icon name="chevronDown" size={16} style={{ color: 'var(--fg-subtle)', transition: 'transform 0.18s', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
               </div>
@@ -225,11 +226,11 @@ export function Orders({ onEdit, onToast }: Props) {
                       <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4, fontFamily: 'JetBrains Mono, monospace' }}>{l.partNumber}</div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5 }}>
                         <span style={{ color: 'var(--fg-subtle)' }}>
-                          Qty {l.qty} · {fmtUSD(l.unitCost)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice)}</>}
+                          Qty {l.qty} · {fmtUSD(l.unitCost, locale)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice, locale)}</>}
                         </span>
                         {l.sellPrice != null && (
                           <span className="mono pos" style={{ fontWeight: 600, color: 'var(--pos)' }}>
-                            +{fmtUSD0((l.sellPrice - l.unitCost) * l.qty)}
+                            +{fmtUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
                           </span>
                         )}
                       </div>
@@ -240,17 +241,13 @@ export function Orders({ onEdit, onToast }: Props) {
                     <button
                       className="btn sm"
                       style={{ flex: 1, justifyContent: 'center' }}
-                      disabled={isCompleted(o.status)}
-                      title={isCompleted(o.status) ? t('completedLocked') : t('editOrder')}
+                      title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (!isCompleted(o.status)) {
-                          navigate('/purchase-orders/' + o.id);
-                          onEdit(openLines);
-                        }
+                        navigate('/purchase-orders/' + o.id);
                       }}
                     >
-                      <Icon name="edit" size={11} /> {t('edit')}
+                      <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={11} /> {isCompleted(o.status) ? t('done') : t('edit')}
                     </button>
                   </div>
                 </div>

@@ -12,6 +12,20 @@ describe('smoke', () => {
     expect((r.body as { service: string }).service).toBe('recycle-erp-backend');
   });
 
+  it('GET /api/health is unauthenticated and reports ok when the DB is up', async () => {
+    const r = await api('GET', '/api/health');
+    expect(r.status).toBe(200);
+    expect((r.body as { status: string }).status).toBe('ok');
+  });
+
+  it('GET /api/health returns 503 when the DB is unreachable', async () => {
+    const r = await api('GET', '/api/health', {
+      env: { DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/none' },
+    });
+    expect(r.status).toBe(503);
+    expect((r.body as { status: string }).status).toBe('error');
+  });
+
   it('login as manager returns a JWT', async () => {
     const { token, user } = await loginAs(ALEX);
     expect(token).toMatch(/^eyJ/);

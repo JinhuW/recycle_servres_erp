@@ -5,8 +5,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { bodyLimit } from 'hono/body-limit';
+
+import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 
 import { authMiddleware } from './auth';
+import { csrfGuard } from './csrf';
 import { dbScope, getDb } from './db';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
@@ -28,7 +32,17 @@ import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
 import type { Env, User } from './types';
 
-const app = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+const app = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string } }>();
+
+// ── Request ID ───────────────────────────────────────────────────────────────
+// Attach a per-request UUID so every log line and error can be correlated.
+// Returned in X-Request-Id so clients can surface it in bug reports.
+app.use('*', async (c, next) => {
+  const id = crypto.randomUUID();
+  c.set('requestId', id);
+  c.header('X-Request-Id', id);
+  await next();
+});
 
 app.use('*', logger());
 app.use(
@@ -53,10 +67,11 @@ app.use(
       return null;
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-By'],
     credentials: true,
   }),
 );
+app.use('*', csrfGuard);
 // Bind one pooled Postgres client per request and close it when the request
 // ends — prevents the connection-pool leak that exhausts Postgres and takes
 // the whole service down under load.
@@ -83,11 +98,60 @@ app.get('/api/health', async (c) => {
   }
 });
 
+// ── Body caps ────────────────────────────────────────────────────────────────
+// Upload routes (scan / attachments / sell-orders) are allowed up to
+// UPLOAD_HARD_CAP_BYTES (50 MiB) because they carry multipart file payloads.
+// All other API routes get a tight 1 MiB JSON cap so a malformed or malicious
+// request is rejected before auth, without buffering.
+//
+// Order matters: upload routes register their cap FIRST. Hono matches
+// middleware in registration order; a path-specific handler runs only once, so
+// when a request matches /api/scan/* it will hit the upload limit and not the
+// global 1 MiB limit (because the global limit is applied only to paths that
+// did NOT match an upload prefix below).
+const JSON_BODY_LIMIT = 1_048_576; // 1 MiB
+const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
+// Upload-bearing routes: apply the generous cap first.
+app.use('/api/scan/*', uploadBodyLimit);
+app.use('/api/attachments/*', uploadBodyLimit);
+app.use('/api/sell-orders/*', uploadBodyLimit);
+
+// All other routes: apply the 1 MiB JSON cap.  We skip the three upload
+// prefixes with an explicit guard so the middleware doesn't double-trigger on
+// them (Hono runs '*' after path-specific handlers in this version).
+const jsonBodyLimit = bodyLimit({
+  maxSize: JSON_BODY_LIMIT,
+  onError: (c) => c.json({ error: 'Payload too large' }, 413),
+});
+app.use('*', (c, next) => {
+  const path = c.req.path;
+  if (
+    path.startsWith('/api/scan/') ||
+    path.startsWith('/api/attachments/') ||
+    path.startsWith('/api/sell-orders/')
+  ) {
+    return next();
+  }
+  return jsonBodyLimit(c, next);
+});
+
+// ── Cache headers on reference-data endpoints ────────────────────────────────
+// Read-only reference endpoints (lookups, categories, workspace, warehouses)
+// get a short private cache so browsers/CDN don't hammer the DB on every
+// navigation. User-specific endpoints (/api/me, /api/dashboard) are excluded.
+const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/warehouses'];
+app.use('*', async (c, next) => {
+  await next();
+  const path = c.req.path;
+  if (CACHEABLE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) {
+    c.header('Cache-Control', 'private, max-age=60');
+  }
+});
+
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
 
-// ── Authed ──────────────────────────────────────────────────────────────────
 app.use('/api/me/*', authMiddleware);
 app.use('/api/dashboard/*', authMiddleware);
 app.use('/api/orders/*', authMiddleware);
@@ -123,8 +187,19 @@ app.route('/api/workspace', workspaceRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
 
 app.onError((err, c) => {
-  console.error('Unhandled', err);
-  return c.json({ error: err.message ?? 'Internal error' }, 500);
+  // Log the full error server-side with the request ID for correlation, but
+  // never return err.message to the client — postgres.js errors embed
+  // table/column/constraint names and SQL fragments that aid schema
+  // reconnaissance.
+  const requestId = c.var.requestId ?? 'unknown';
+  console.error(JSON.stringify({
+    level: 'error',
+    requestId,
+    message: 'Unhandled error',
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  }));
+  return c.json({ error: 'Internal error' }, 500);
 });
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));

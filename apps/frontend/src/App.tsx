@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { LangProvider } from './lib/i18n';
-import { MobileApp } from './MobileApp';
-import { DesktopApp } from './DesktopApp';
-import { VendorApp } from './VendorApp';
 import { vendorTokenFromPath } from './lib/vendor';
 
 import './styles/desktop.css';
+
+const DesktopApp = lazy(() => import('./DesktopApp').then(m => ({ default: m.DesktopApp })));
+const MobileApp  = lazy(() => import('./MobileApp').then(m => ({ default: m.MobileApp })));
+const VendorApp  = lazy(() => import('./VendorApp').then(m => ({ default: m.VendorApp })));
 
 const PHONE_BREAKPOINT = 720;
 
@@ -25,11 +26,19 @@ export default function App() {
   const vendorToken = typeof window !== 'undefined'
     ? vendorTokenFromPath(window.location.pathname) : null;
   if (vendorToken) {
-    return <LangProvider><VendorApp token={vendorToken} /></LangProvider>;
+    return (
+      <LangProvider>
+        <Suspense fallback={<div className="app-loading" />}>
+          <VendorApp token={vendorToken} isPhone={isPhone} />
+        </Suspense>
+      </LangProvider>
+    );
   }
   return (
     <LangProvider>
-      {isPhone ? <MobileApp /> : <DesktopApp />}
+      <Suspense fallback={<div className="app-loading" />}>
+        {isPhone ? <MobileApp /> : <DesktopApp />}
+      </Suspense>
     </LangProvider>
   );
 }

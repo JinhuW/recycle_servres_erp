@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Warehouse } from '../../lib/types';
 import { useT } from '../../lib/i18n';
 
@@ -39,14 +40,8 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Esc closes the modal.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, submitting]);
+  // Esc closes the modal (ignored mid-submit).
+  useEscapeKey(onClose, !submitting);
 
   // Destination picker excludes any warehouse that is already a source on at
   // least one of the selected lines — moving to "self" is a no-op.

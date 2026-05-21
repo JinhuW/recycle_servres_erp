@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { api } from '../../lib/api';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtDate } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { ListSkeleton } from '../../components/Skeleton';
+import { useT } from '../../lib/i18n';
 
 // Workspace-wide inventory activity log, shown as a right-side drawer.
 // Ported from design/inventory.jsx#HistoryDrawer with the local SUBMISSIONS
@@ -38,6 +40,8 @@ const ACTION_META: Record<string, { icon: IconName; label: string; dot: string }
 };
 
 export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<Event[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
@@ -54,11 +58,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(handle);
   }, [filter, search]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   // Quick counts per action for the filter pills.
   const counts = useMemo(() => {
@@ -185,7 +185,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
                 color: 'var(--fg-subtle)',
                 borderBottom: '1px solid var(--border)',
               }}>
-                {fmtDate(g.date)}
+                {fmtDate(g.date, locale)}
               </div>
               <div style={{ padding: '6px 22px 12px' }}>
                 {g.events.map((e, ei) => {

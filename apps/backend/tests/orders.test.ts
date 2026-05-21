@@ -135,9 +135,10 @@ describe('GET /api/orders — per-order commission rate', () => {
 
   it('manager can PATCH commissionRate; purchaser is forbidden', async () => {
     const { token: mgr } = await loginAs(ALEX);
-    const list = await api<{ orders: { id: string; userId: string }[] }>(
+    const list = await api<{ orders: { id: string; userId: string; lifecycle: string }[] }>(
       'GET', '/api/orders', { token: mgr });
-    const target = list.body.orders[0];
+    // Done orders are now frozen against PATCH edits — pick the first non-done.
+    const target = list.body.orders.find(o => o.lifecycle !== 'done')!;
 
     const ok = await api('PATCH', `/api/orders/${target.id}`,
       { token: mgr, body: { commissionRate: 0.1 } });
@@ -149,8 +150,9 @@ describe('GET /api/orders — per-order commission rate', () => {
 
     // A purchaser editing their own order's rate is rejected.
     const { token: pur, user: pu } = await loginAs(MARCUS);
-    const mine = (await api<{ orders: { id: string; userId: string }[] }>(
-      'GET', '/api/orders', { token: pur })).body.orders.find(o => o.userId === pu.id)!;
+    const mine = (await api<{ orders: { id: string; userId: string; lifecycle: string }[] }>(
+      'GET', '/api/orders', { token: pur })).body.orders
+      .find(o => o.userId === pu.id && o.lifecycle !== 'done')!;
     const denied = await api('PATCH', `/api/orders/${mine.id}`,
       { token: pur, body: { commissionRate: 0.2 } });
     expect(denied.status).toBe(403);
@@ -158,7 +160,9 @@ describe('GET /api/orders — per-order commission rate', () => {
 
   it('clamps out-of-range rate and allows null to unset', async () => {
     const { token: mgr } = await loginAs(ALEX);
-    const id = (await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token: mgr })).body.orders[0].id;
+    const list = await api<{ orders: { id: string; lifecycle: string }[] }>(
+      'GET', '/api/orders', { token: mgr });
+    const id = list.body.orders.find(o => o.lifecycle !== 'done')!.id;
     await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: 5 } });
     let r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
     expect(r.body.orders.find(o => o.id === id)!.commissionRate).toBe(1);
@@ -169,7 +173,9 @@ describe('GET /api/orders — per-order commission rate', () => {
 
   it('clamps a negative rate to 0 and rejects non-finite input', async () => {
     const { token: mgr } = await loginAs(ALEX);
-    const id = (await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token: mgr })).body.orders[0].id;
+    const list = await api<{ orders: { id: string; lifecycle: string }[] }>(
+      'GET', '/api/orders', { token: mgr });
+    const id = list.body.orders.find(o => o.lifecycle !== 'done')!.id;
 
     await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: -0.5 } });
     let r = await api<{ orders: { id: string; commissionRate: number | null }[] }>('GET', '/api/orders', { token: mgr });
@@ -185,7 +191,9 @@ describe('GET /api/orders — per-order commission rate', () => {
 
   it('GET /api/orders/:id returns the order commissionRate (so the PO editor can show it)', async () => {
     const { token: mgr } = await loginAs(ALEX);
-    const id = (await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token: mgr })).body.orders[0].id;
+    const list = await api<{ orders: { id: string; lifecycle: string }[] }>(
+      'GET', '/api/orders', { token: mgr });
+    const id = list.body.orders.find(o => o.lifecycle !== 'done')!.id;
 
     const set = await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { commissionRate: 0.2 } });
     expect(set.status).toBe(200);
@@ -199,6 +207,67 @@ describe('GET /api/orders — per-order commission rate', () => {
     const cleared = await api<{ order: { commissionRate: number | null } }>(
       'GET', `/api/orders/${id}`, { token: mgr });
     expect(cleared.body.order.commissionRate).toBeNull();
+  });
+});
+
+describe('PATCH /api/orders/:id — Done is read-only', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Walk a fresh purchase order all the way to Done so we can assert what
+  // PATCH refuses to touch once the order is closed.
+  async function makeDoneOrder(mgr: string): Promise<{ id: string; lineId: string }> {
+    const { token: pTok } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: pTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    const id = created.body.id;
+    await api('POST', `/api/orders/${id}/advance`, { token: pTok }); // draft → in_transit
+    for (const stage of ['reviewing', 'done']) {
+      await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: stage } });
+    }
+    const detail = await api<{ order: { lifecycle: string; lines: { id: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(detail.body.order.lifecycle).toBe('done');
+    return { id, lineId: detail.body.order.lines[0].id };
+  }
+
+  it('rejects line edits / cost edits / commission edits with 409', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineId } = await makeDoneOrder(mgr);
+
+    const lineEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { lines: [{ id: lineId, qty: 99 }] },
+    });
+    expect(lineEdit.status).toBe(409);
+
+    const costEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { totalCost: 99999 },
+    });
+    expect(costEdit.status).toBe(409);
+
+    const rateEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { commissionRate: 0.42 },
+    });
+    expect(rateEdit.status).toBe(409);
+
+    // Verify the row is unchanged — line still qty=1, totalCost untouched.
+    const after = await api<{ order: { lines: { qty: number }[]; commissionRate: number | null; totalCost: number | null } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(after.body.order.lines[0].qty).toBe(1);
+  });
+
+  it('allows notes-only PATCH on a Done order', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await makeDoneOrder(mgr);
+    const r = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { notes: 'archive: case closed' },
+    });
+    expect(r.status).toBe(200);
+    const after = await api<{ order: { notes: string | null } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(after.body.order.notes).toBe('archive: case closed');
   });
 });
 

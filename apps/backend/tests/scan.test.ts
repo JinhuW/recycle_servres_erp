@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { multipart } from './helpers/app';
-import { loginAs, MARCUS } from './helpers/auth';
+import { loginAs, MARCUS, ALEX } from './helpers/auth';
 
 function jpeg(): File {
   return new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'label.jpg', { type: 'image/jpeg' });
@@ -53,5 +53,28 @@ describe('POST /api/scan/label', () => {
     );
     expect(r.status).toBe(502);
     expect((r.body as { error: string }).error).toMatch(/OCR failed/);
+  });
+});
+
+describe('POST /api/scan/label — per-user rate limit', () => {
+  beforeEach(async () => { await resetDb(); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns 429 after 20 scans within 60 seconds and includes Retry-After header', async () => {
+    // Use a second user (ALEX) so this test's calls do not bleed into the
+    // other describe block's MARCUS-keyed bucket.
+    const { token } = await loginAs(ALEX);
+
+    // Fire 20 successful stubs to saturate the window.
+    for (let i = 0; i < 20; i++) {
+      const r = await multipart('/api/scan/label', { file: jpeg(), category: 'RAM' }, { token });
+      expect(r.status).toBe(200);
+    }
+
+    // The 21st call should hit the rate limiter.
+    const r = await multipart('/api/scan/label', { file: jpeg(), category: 'RAM' }, { token });
+    expect(r.status).toBe(429);
+    expect((r.body as { error: string }).error).toMatch(/Too many scans/);
+    expect(r.headers.get('retry-after')).not.toBeNull();
   });
 });

@@ -33,6 +33,11 @@ services:
       - SETGID
       - SETUID
     mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   backend:
     build:
@@ -48,16 +53,22 @@ services:
     environment:
       DATABASE_URL: postgres://recycle:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/recycle_erp
       PORT: "8787"
-    # Published to the host so the Vite dev server (:5173) and other host
-    # clients can reach the API at localhost:8787, matching the pre-Docker
-    # contract. The web/Caddy container still reaches it as backend:8787.
+    # Bind to loopback only: Caddy reverse-proxies /api/* to backend:8787
+    # over the internal compose network, so a 0.0.0.0 binding would bypass
+    # Caddy. Loopback keeps the port reachable from the host shell and via
+    # SSH tunnel for dev tooling without exposing it to the network.
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     security_opt:
       - "no-new-privileges:true"
     cap_drop:
       - ALL
     mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   web:
     build:
@@ -80,6 +91,11 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 volumes:
   recycle_pgdata:

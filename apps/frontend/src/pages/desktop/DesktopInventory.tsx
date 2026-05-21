@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Icon } from '../../components/Icon';
+import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
+import { usePersisted, useScrollMemory } from '../../lib/listMemory';
 import { api } from '../../lib/api';
-import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
+import { handleFetchError } from '../../lib/errorToast';
+import { useEscapeKey } from '../../lib/useEscapeKey';
+import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isSellable } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import { wsNumber } from '../../lib/workspace';
@@ -56,19 +59,28 @@ type ColId =
   | 'id' | 'date' | 'category' | 'partNumber' | 'warehouse' | 'condition'
   | 'qty' | 'unitCost' | 'sellPrice' | 'profit' | 'margin' | 'submitter';
 
+// Columns the grouped view can actually honor. The rest (id/date/profit/
+// margin/submitter) are lot-level only and have no grouped column, so the
+// Columns menu hides them while in grouped view instead of listing dead toggles.
+const GROUPED_COL_IDS = new Set<ColId>([
+  'category', 'partNumber', 'warehouse', 'condition', 'qty', 'unitCost', 'sellPrice',
+]);
+
 export function DesktopInventory({ onEditItem, showToast }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
 
   const [items, setItems] = useState<InventoryRow[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [whs, setWhs] = useState<Warehouse[]>([]);
-  const [filter, setFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  // Persisted across the open-item → back round-trip (see lib/listMemory).
+  const [filter, setFilter] = usePersisted<string>('desktop.inventory.filter', 'all');
+  const [statusFilter, setStatusFilter] = usePersisted<string>('desktop.inventory.statusFilter', 'all');
+  const [warehouseFilter, setWarehouseFilter] = usePersisted<string>('desktop.inventory.warehouseFilter', 'all');
+  const [search, setSearch] = usePersisted<string>('desktop.inventory.search', '');
+  const [selected, setSelected] = usePersisted<Set<string>>('desktop.inventory.selected', new Set());
 
   // Persisted column visibility
   const ALL_COLS: { id: ColId; label: string; managerOnly?: boolean }[] = useMemo(() => ([
@@ -103,6 +115,19 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [colsList, setColsList] = usePreference(colsKey, defaultCols);
   const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
   const isVis = (id: ColId) => visibleCols.has(id);
+  // Menu only lists toggles the active view honors (grouped drops the
+  // lot-level-only ones). All/None below scope to these and preserve the
+  // other view's stored prefs.
+  const menuCols = useMemo(
+    () => view === 'grouped'
+      ? TOGGLEABLE_COLS.filter(c => GROUPED_COL_IDS.has(c.id))
+      : TOGGLEABLE_COLS,
+    [view, TOGGLEABLE_COLS],
+  );
+  const menuOnCount = useMemo(
+    () => menuCols.filter(c => visibleCols.has(c.id)).length,
+    [menuCols, visibleCols],
+  );
   const toggleCol = (id: ColId) => {
     const next = new Set(visibleCols);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -134,13 +159,14 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
 
   // Data fetch (debounced on search/filters)
   useEffect(() => {
+    let alive = true;
     const handle = setTimeout(() => {
       api.get<{ items: InventoryRow[] }>(`/api/inventory?${filterQuery}`)
-        .then(r => setItems(r.items))
-        .catch(console.error)
-        .finally(() => setLoadedOnce(true));
+        .then(r => { if (alive) setItems(r.items); })
+        .catch(handleFetchError)
+        .finally(() => { if (alive) setLoadedOnce(true); });
     }, 200);
-    return () => clearTimeout(handle);
+    return () => { alive = false; clearTimeout(handle); };
   }, [filterQuery]);
 
   useEffect(() => {
@@ -155,8 +181,17 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   }, [view, filterQuery]);
 
   useEffect(() => {
-    api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => setWhs(r.items));
+    let alive = true;
+    api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => { if (alive) setWhs(r.items); });
+    return () => { alive = false; };
   }, []);
+
+  // Restore the list scroll position when returning from an item's edit page.
+  // "Ready" = the rows for the active view have actually rendered.
+  const tableScrollRef = useScrollMemory(
+    'desktop.inventory',
+    view === 'grouped' ? productsLoaded : loadedOnce,
+  );
 
   // Per-warehouse counts: derived from the currently loaded items.
   // (Server returns at most 200; the count is approximate for very large
@@ -313,7 +348,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     if (search.trim()) params.set('q', search.trim());
     api.get<{ items: InventoryRow[] }>(`/api/inventory?${params}`)
       .then(r => setItems(r.items))
-      .catch(console.error);
+      .catch(handleFetchError);
   };
 
   return (
@@ -442,7 +477,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               onChange={e => setStatusFilter(e.target.value)}
             >
               <option value="all">All statuses</option>
-              {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              {[...ORDER_STATUSES, 'Sold'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -475,7 +510,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 <span className="mono" style={{
                   fontSize: 10.5, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
                   background: 'var(--bg-soft)', color: 'var(--fg-subtle)', border: '1px solid var(--border)',
-                }}>{visibleCols.size}/{TOGGLEABLE_COLS.length}</span>
+                }}>{menuOnCount}/{menuCols.length}</span>
               </button>
               {colsMenuOpen && (
                 <div style={{
@@ -494,13 +529,21 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     }}>Columns</span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button className="btn sm ghost" style={{ fontSize: 11, padding: '2px 6px' }}
-                        onClick={() => setColsList(TOGGLEABLE_COLS.map(c => c.id) as string[])}>All</button>
+                        onClick={() => {
+                          const next = new Set(visibleCols);
+                          menuCols.forEach(c => next.add(c.id));
+                          setColsList([...next]);
+                        }}>All</button>
                       <button className="btn sm ghost" style={{ fontSize: 11, padding: '2px 6px' }}
-                        onClick={() => setColsList([])}>None</button>
+                        onClick={() => {
+                          const next = new Set(visibleCols);
+                          menuCols.forEach(c => next.delete(c.id));
+                          setColsList([...next]);
+                        }}>None</button>
                     </div>
                   </div>
                   <div style={{ maxHeight: 320, overflowY: 'auto', padding: 4 }}>
-                    {TOGGLEABLE_COLS.map(c => {
+                    {menuCols.map(c => {
                       const on = visibleCols.has(c.id);
                       return (
                         <button
@@ -534,7 +577,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           </div>
         </div>
 
-        <div className="table-scroll">
+        <div className="table-scroll" ref={tableScrollRef}>
           {view === 'grouped' ? (
             <>
               {!productsLoaded ? (
@@ -543,6 +586,15 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 <InventoryProductTable
                   groups={products}
                   isManager={isManager}
+                  cols={{
+                    category:   isVis('category'),
+                    partNumber: isVis('partNumber'),
+                    qty:        isVis('qty'),
+                    warehouse:  isVis('warehouse'),
+                    unitCost:   isVis('unitCost'),
+                    sellPrice:  isVis('sellPrice'),
+                    condition:  isVis('condition'),
+                  }}
                   selected={selected}
                   onToggleLot={(id) => {
                     setSelected(prev => {
@@ -636,7 +688,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                       </td>
                     )}
                     {isVis('id')       && <td className="mono" style={{ fontSize: 11.5 }}>{r.id.slice(0, 8)}</td>}
-                    {isVis('date')     && <td className="muted">{fmtDateShort(r.created_at)}</td>}
+                    {isVis('date')     && <td className="muted">{fmtDateShort(r.created_at, locale)}</td>}
                     {isVis('category') && (
                       <td>
                         <span className={'chip ' + (r.category === 'RAM' ? 'info' : r.category === 'SSD' ? 'pos' : r.category === 'HDD' ? 'cool' : 'warn')}>
@@ -683,12 +735,12 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                         </span>
                       </td>
                     )}
-                    {isManager && isVis('unitCost')  && <td className="num mono muted">{fmtUSD(r.unit_cost)}</td>}
+                    {isManager && isVis('unitCost')  && <td className="num mono muted">{fmtUSD(r.unit_cost, locale)}</td>}
                     {isVis('sellPrice')  && (
-                      <td className="num mono">{r.sell_price != null ? fmtUSD(r.sell_price) : '—'}</td>
+                      <td className="num mono">{r.sell_price != null ? fmtUSD(r.sell_price, locale) : '—'}</td>
                     )}
                     {isManager && isVis('profit')    && (
-                      <td className="num mono pos">{profit != null ? fmtUSD(profit) : '—'}</td>
+                      <td className="num mono pos">{profit != null ? fmtUSD(profit, locale) : '—'}</td>
                     )}
                     {isManager && isVis('margin')    && (
                       <td className={'num mono ' + (margin == null ? 'muted' : margin >= 25 ? 'pos' : margin >= 10 ? '' : 'neg')}>
@@ -754,7 +806,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             </div>
             <span className="sel-bar-divider" />
             <div>
-              <span className="sel-bar-num">{fmtUSD0(selectedTotals.value)}</span>{' '}
+              <span className="sel-bar-num">{fmtUSD0(selectedTotals.value, locale)}</span>{' '}
               <span className="sel-bar-label">est. revenue</span>
             </div>
           </div>
@@ -803,7 +855,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       {quickView && (
         <InventoryQuickView
           item={quickView}
-          peers={items.filter(p => p.part_number && p.part_number === quickView.part_number)}
+          peers={(() => {
+            const key = canonicalPartNumber(quickView.part_number);
+            return key ? items.filter(p => canonicalPartNumber(p.part_number) === key) : [quickView];
+          })()}
           onClose={() => setQuickView(null)}
           onEdit={() => { onEditItem(quickView.id); setQuickView(null); }}
         />
@@ -823,11 +878,22 @@ function InventoryQuickView({
   onClose: () => void;
   onEdit: () => void;
 }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  useEscapeKey(onClose);
+
+  // Merged change log: union of inventory_events across every PO line sharing
+  // this part number (backend canonicalises the match, same rule as peers).
+  const [log, setLog] = useState<QvEvent[] | null>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    let alive = true;
+    const pn = item.part_number;
+    if (!pn) { setLog([]); return; }
+    api.get<{ events: QvEvent[] }>(`/api/inventory/events/by-part?partNumber=${encodeURIComponent(pn)}`)
+      .then(r => { if (alive) setLog(r.events); })
+      .catch(() => { if (alive) setLog([]); });
+    return () => { alive = false; };
+  }, [item.part_number]);
 
   const title =
     item.category === 'RAM' ? `${item.brand ?? ''} ${item.capacity ?? ''} ${item.generation ?? ''}`.trim()
@@ -953,7 +1019,7 @@ function InventoryQuickView({
             <QVCell label="Part number" value={<span className="mono" style={{ fontSize: 12 }}>{item.part_number ?? '—'}</span>} borderTop />
             <QVCell label="Sell price" value={
               <span className="mono" style={{ fontWeight: 600 }}>
-                {item.sell_price != null ? fmtUSD(item.sell_price) : '—'}
+                {item.sell_price != null ? fmtUSD(item.sell_price, locale) : '—'}
               </span>
             } borderLeft borderTop />
           </div>
@@ -961,7 +1027,44 @@ function InventoryQuickView({
           {/* Submitter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--fg-subtle)' }}>
             <span className="avatar" style={{ width: 22, height: 22, fontSize: 10 }}>{item.user_initials}</span>
-            Submitted by <span style={{ color: 'var(--fg)', fontWeight: 500 }}>{item.user_name}</span> · {fmtDateShort(item.created_at)}
+            Submitted by <span style={{ color: 'var(--fg)', fontWeight: 500 }}>{item.user_name}</span> · {fmtDateShort(item.created_at, locale)}
+          </div>
+
+          {/* Change log — merged across every PO line with this part number */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+                Change log
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>across part number</span>
+            </div>
+            <div style={{
+              border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
+              maxHeight: 220, overflowY: 'auto',
+            }}>
+              {log == null && (
+                <div style={{ padding: 14, fontSize: 12, color: 'var(--fg-subtle)' }}>Loading…</div>
+              )}
+              {log != null && log.length === 0 && (
+                <div style={{ padding: 14, fontSize: 12, color: 'var(--fg-subtle)' }}>No changes logged yet.</div>
+              )}
+              {log != null && log.map((e, i) => (
+                <div key={e.id} style={{
+                  display: 'flex', gap: 10, padding: '10px 14px',
+                  borderBottom: i < log.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{ width: 24, height: 24, borderRadius: 7, background: 'var(--bg-soft)', color: 'var(--fg-muted)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                    <Icon name={QV_KIND_ICON[e.kind] ?? 'info'} size={12} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 500 }}>{summarizeQvEvent(e, locale)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                      {e.actor_name ?? 'system'} · {relTime(e.created_at, locale)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -977,6 +1080,42 @@ function InventoryQuickView({
       </div>
     </div>
   );
+}
+
+// One row of the merged change log. Shape mirrors GET /api/inventory/events/by-part.
+type QvEvent = {
+  id: string;
+  kind: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+  line_id: string;
+  actor_name: string | null;
+};
+
+const QV_KIND_ICON: Record<string, IconName> = {
+  created: 'plus',
+  edited:  'edit',
+  status:  'flag',
+  priced:  'tag',
+  transferred: 'truck',
+  received: 'warehouse',
+  reopened: 'history',
+  sold: 'tag',
+};
+
+function summarizeQvEvent(e: QvEvent, locale = 'en-US'): string {
+  const d = e.detail ?? {};
+  switch (e.kind) {
+    case 'created':     return 'Item created';
+    case 'status':      return `Status → ${String(d.to ?? '?')}`;
+    case 'priced':      return `Sell price → ${fmtUSD0(Number(d.to ?? 0), locale)}`;
+    case 'edited':      return `${String(d.field ?? 'field')}: ${String(d.from ?? '?')} → ${String(d.to ?? '?')}`;
+    case 'transferred': return `Transferred ${String(d.qty ?? '')} → ${String(d.to ?? '?')}`.replace('  ', ' ');
+    case 'received':    return `Received at ${String(d.at ?? '?')}`;
+    case 'reopened':    return 'Transfer re-opened';
+    case 'sold':        return `Sold${d.qty != null ? ` ${String(d.qty)}` : ''}`;
+    default:            return e.kind;
+  }
 }
 
 function QVCell({ label, value, borderLeft, borderTop }: {

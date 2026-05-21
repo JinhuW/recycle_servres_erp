@@ -35,30 +35,50 @@ export function getTestDb() {
   return sql;
 }
 
+// Cluster-wide serialization key for the whole drop→migrate→seed sequence.
+// The suite shares ONE Postgres database; if two resetDb sequences ever
+// overlap (test runner concurrency, a lingering connection, the migration-
+// ledger scratch-DB test, etc.) their concurrent catalog DDL collides with
+// pg_type / pg_extension duplicate-key errors and seed runs against a
+// half-built schema ("relation users does not exist"). A session-level
+// advisory lock held on one reserved connection across the ENTIRE sequence
+// (including the external seed process) makes resetDb safe under any
+// concurrency: a second caller blocks on pg_advisory_lock until the first
+// fully finishes.
+const RESET_LOCK = 0x7265_7365_7464_62n & 0x7fffffffffffffffn; // arbitrary stable key
+
 export async function resetDb(): Promise<void> {
   const db = getTestDb();
-  // Drop everything in public schema (mirrors what migrate.mjs --reset does).
-  await db.unsafe(`
-    DO $$
-    DECLARE r RECORD;
-    BEGIN
-      FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-        EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
-      END LOOP;
-    END $$;
-  `);
-  const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
-  for (const f of files) {
-    const sqlText = readFileSync(join(migrationsDir, f), 'utf8');
-    await db.unsafe(sqlText);
-  }
-  // Run the existing seed.mjs against TEST_DATABASE_URL
-  const r = spawnSync('node', [seedScript], {
-    env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
-    encoding: 'utf8',
-  });
-  if (r.status !== 0) {
-    throw new Error(`seed failed: ${r.stderr}\n${r.stdout}`);
+  const conn = await db.reserve();
+  try {
+    await conn`SELECT pg_advisory_lock(${RESET_LOCK})`;
+
+    // Drop everything in public schema (mirrors migrate.mjs --reset).
+    await conn.unsafe(`
+      DO $$
+      DECLARE r RECORD;
+      BEGIN
+        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+          EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+        END LOOP;
+      END $$;
+    `);
+    const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+    for (const f of files) {
+      await conn.unsafe(readFileSync(join(migrationsDir, f), 'utf8'));
+    }
+    // Seed runs as a separate process; the advisory lock is still held on
+    // `conn` so no other resetDb can drop tables out from under it.
+    const r = spawnSync('node', [seedScript], {
+      env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
+      encoding: 'utf8',
+    });
+    if (r.status !== 0) {
+      throw new Error(`seed failed: ${r.stderr}\n${r.stdout}`);
+    }
+  } finally {
+    await conn`SELECT pg_advisory_unlock(${RESET_LOCK})`.catch(() => {});
+    conn.release();
   }
 }
 

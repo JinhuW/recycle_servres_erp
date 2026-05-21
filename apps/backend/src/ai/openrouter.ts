@@ -5,6 +5,10 @@ import { PROMPT_BY_CATEGORY, parseModelJson } from './prompts';
 
 const DEFAULT_MODEL = 'google/gemma-3-27b-it';
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+// Cap each OpenRouter call so a hung/slow model can't hold a request (and a
+// server worker) open indefinitely. On timeout fetch throws an AbortError,
+// which scan.ts already converts to a 502 "retry the shot".
+const OCR_TIMEOUT_MS = 20_000;
 
 function sniffMime(b: Uint8Array): string {
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
@@ -59,6 +63,7 @@ export async function openRouterScan(
         max_tokens: 1024,
         messages,
       }),
+      signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');

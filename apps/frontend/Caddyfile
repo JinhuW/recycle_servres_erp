@@ -1,5 +1,7 @@
 :80 {
 	encode gzip
+	# Vendor tokens appear in URL paths like /v/<token>; prevent Referer leakage.
+	header Referrer-Policy "same-origin"
 	# API → backend container.
 	handle /api/* {
 		reverse_proxy backend:8787

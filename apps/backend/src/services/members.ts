@@ -3,7 +3,7 @@
 // functions are usable from routes, scripts, or tests.
 
 import type { Sql } from 'postgres';
-import { hashPassword, generateTempPassword } from '../auth';
+import { hashPassword, generateTempPassword, revokeUserRefreshTokens } from '../auth';
 
 export type MemberRole = 'manager' | 'purchaser';
 
@@ -62,15 +62,24 @@ export async function listMembers(
   opts: ListMembersOptions = {},
 ): Promise<MemberSummary[]> {
   const activeFilter = opts.includeInactive ? sql`TRUE` : sql`u.active = TRUE`;
+  // lifetime_profit: realized revenue from sell_order_lines of Done sell orders,
+  // attributed to the purchaser who created the source order (order_lines → orders).
+  // Uses a scalar subquery to avoid inflating order_count via the sell-side joins.
   const rows = await sql`
     SELECT u.id, u.email, u.name, u.initials, u.role, u.team, u.phone, u.title,
            u.active, u.created_at,
            u.last_seen_at,
            COUNT(DISTINCT o.id)::int AS order_count,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS lifetime_profit
+           COALESCE((
+             SELECT SUM((sol.unit_price - ol.unit_cost) * sol.qty)
+             FROM orders po
+             JOIN order_lines ol ON ol.order_id = po.id
+             JOIN sell_order_lines sol ON sol.inventory_id = ol.id
+             JOIN sell_orders so ON so.id = sol.sell_order_id AND so.status = 'Done'
+             WHERE po.user_id = u.id
+           ), 0)::float AS lifetime_profit
     FROM users u
     LEFT JOIN orders o ON o.user_id = u.id
-    LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${activeFilter}
     GROUP BY u.id
     ORDER BY u.role DESC, u.name
@@ -105,19 +114,38 @@ export async function updateMember(
   id: string,
   input: UpdateMemberInput,
 ): Promise<void> {
-  await sql`
-    UPDATE users SET
-      name            = COALESCE(${input.name ?? null},            name),
-      team            = COALESCE(${input.team ?? null},            team),
-      phone           = COALESCE(${input.phone ?? null},           phone),
-      title           = COALESCE(${input.title ?? null},           title),
-      role            = COALESCE(${input.role ?? null},            role),
-      active          = COALESCE(${input.active ?? null},          active)
-    WHERE id = ${id}
-  `;
   if (input.password) {
+    // Password change + token revoke must be atomic: either both land or
+    // neither does. A crash between the two would leave old (possibly stolen)
+    // tokens live against the new password.
     const hash = await hashPassword(input.password);
-    await sql`UPDATE users SET password_hash = ${hash} WHERE id = ${id}`;
+    await sql.begin(async (tx) => {
+      await tx`
+        UPDATE users SET
+          name            = COALESCE(${input.name ?? null},            name),
+          team            = COALESCE(${input.team ?? null},            team),
+          phone           = COALESCE(${input.phone ?? null},           phone),
+          title           = COALESCE(${input.title ?? null},           title),
+          role            = COALESCE(${input.role ?? null},            role),
+          active          = COALESCE(${input.active ?? null},          active),
+          password_hash   = ${hash}
+        WHERE id = ${id}
+      `;
+      // A password reset must invalidate any existing (possibly stolen)
+      // refresh tokens, mirroring deactivateMember's revoke.
+      await revokeUserRefreshTokens(tx, id);
+    });
+  } else {
+    await sql`
+      UPDATE users SET
+        name            = COALESCE(${input.name ?? null},            name),
+        team            = COALESCE(${input.team ?? null},            team),
+        phone           = COALESCE(${input.phone ?? null},           phone),
+        title           = COALESCE(${input.title ?? null},           title),
+        role            = COALESCE(${input.role ?? null},            role),
+        active          = COALESCE(${input.active ?? null},          active)
+      WHERE id = ${id}
+    `;
   }
 }
 
@@ -143,6 +171,17 @@ export async function countOtherActiveManagers(sql: Sql, exceptId: string): Prom
 
 // Soft-delete. Returns true if a row was updated, false if no such user.
 export async function deactivateMember(sql: Sql, id: string): Promise<boolean> {
-  const r = await sql`UPDATE users SET active = FALSE WHERE id = ${id} RETURNING id`;
-  return r.length > 0;
+  let updated = false;
+  // Wrap deactivation + token revoke in a single transaction so they are
+  // always consistent: a crash between the two would leave a deactivated
+  // user whose refresh tokens can still mint new access tokens.
+  await sql.begin(async (tx) => {
+    const r = await tx`UPDATE users SET active = FALSE WHERE id = ${id} RETURNING id`;
+    if (r.length === 0) return; // no such user — nothing to revoke
+    updated = true;
+    // Close the refresh path immediately so they can't mint new access tokens.
+    // (Their current short-lived access token still expires naturally <=15 min.)
+    await revokeUserRefreshTokens(tx, id);
+  });
+  return updated;
 }

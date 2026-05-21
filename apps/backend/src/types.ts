@@ -17,9 +17,14 @@ export type Env = {
   R2_BUCKET?: string;
   R2_ATTACHMENTS_PUBLIC_URL?: string;
   // Comma-separated list of origins allowed to make credentialed CORS
-  // requests. Unset = permissive (reflect any origin) for local dev; set it
-  // in production to the real frontend origin(s).
+  // requests. Unset = loopback-only (dev); set it in production to the real
+  // frontend origin(s).
   CORS_ALLOWED_ORIGINS?: string;
+  // 'production' locks down dev-only conveniences (e.g. the demo-accounts
+  // login picker). Sourced from process.env.NODE_ENV.
+  NODE_ENV?: string;
+  // Explicit opt-in to expose /api/auth/demo-accounts even in production.
+  ENABLE_DEMO_ACCOUNTS?: string;
 };
 
 export type Role = 'manager' | 'purchaser';

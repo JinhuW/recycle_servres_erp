@@ -5,6 +5,10 @@ import type { Env } from './types';
 
 export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (!src.JWT_SECRET) throw new Error('JWT_SECRET is not configured');
+  if (!src.DATABASE_URL) throw new Error('DATABASE_URL is required');
+  if (src.NODE_ENV === 'production' && !src.CORS_ALLOWED_ORIGINS) {
+    throw new Error('CORS_ALLOWED_ORIGINS is required in production');
+  }
   return {
     DATABASE_URL: src.DATABASE_URL,
     JWT_SECRET: src.JWT_SECRET,
@@ -18,5 +22,7 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
     R2_BUCKET: src.R2_BUCKET,
     R2_ATTACHMENTS_PUBLIC_URL: src.R2_ATTACHMENTS_PUBLIC_URL,
     CORS_ALLOWED_ORIGINS: src.CORS_ALLOWED_ORIGINS,
+    NODE_ENV: src.NODE_ENV,
+    ENABLE_DEMO_ACCOUNTS: src.ENABLE_DEMO_ACCOUNTS,
   };
 }

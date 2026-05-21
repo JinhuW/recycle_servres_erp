@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { PhTabBar, type View } from './components/PhTabBar';
 import { PhCategorySheet } from './components/PhCategorySheet';
@@ -12,6 +12,7 @@ import { Camera } from './pages/Camera';
 import { SubmitForm } from './pages/SubmitForm';
 import { OrderReview } from './pages/OrderReview';
 import { Orders } from './pages/Orders';
+import { OrderDetail } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
@@ -20,7 +21,7 @@ import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
 import { api, createDraftOrder, deleteOrder } from './lib/api';
 import {
-  navigate, useRoute,
+  navigate, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
@@ -60,18 +61,41 @@ function Shell() {
   const [notifSheet, setNotifSheet] = useState(false);
   const [aboutSheet, setAboutSheet] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [detailOrder, setDetailOrder] = useState<Order | null>(null);
+  const orderDetailMatch = match('/purchase-orders/:id', path);
 
   // Load notifications when the user is signed in.
   useEffect(() => {
     if (!user) return;
+    let alive = true;
     api.get<{ items: Notification[] }>('/api/notifications')
-      .then(r => setNotifs(r.items))
+      .then(r => { if (alive) setNotifs(r.items); })
       .catch(console.error);
+    return () => { alive = false; };
   }, [user?.id]);
 
+  // Drive the order-detail screen from the URL. Suspended while a capture
+  // flow is active so the camera/form/review screens take over the shell.
+  useEffect(() => {
+    if (!orderDetailMatch || capture.phase !== 'idle') {
+      if (detailOrder) setDetailOrder(null);
+      return;
+    }
+    if (detailOrder?.id === orderDetailMatch.id) return;
+    let alive = true;
+    api.get<{ order: Order }>(`/api/orders/${orderDetailMatch.id}`)
+      .then(r => { if (alive) setDetailOrder(r.order); })
+      .catch(() => {/* order may have been deleted — let Orders handle it */});
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, capture.phase]);
+
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
     setToast({ msg, kind });
-    setTimeout(() => setToast(null), 2600);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
 
   // ── Capture flow handlers ────────────────────────────────────────────────
@@ -260,10 +284,15 @@ function Shell() {
     }
     try {
       await api.patch(req.url, req.body);
+      const editingId = capture.editingId;
       setCapture({ phase: 'idle' });
-      // setView('history') navigates to /purchase-orders; if the user arrived
-      // via a /purchase-orders/:id deep link, this also clears the id.
-      setView('history');
+      if (editingId) {
+        // Editing an existing order — return to its detail screen so the user
+        // sees their updated line items in context with the lifecycle/log.
+        navigate('/purchase-orders/' + editingId);
+      } else {
+        setView('history');
+      }
       showToast(t('orderSubmitted'));
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
@@ -370,7 +399,18 @@ function Shell() {
           unreadCount={unreadCount}
         />
       )}
-      {view === 'history' && <Orders onEdit={startEdit} onToast={showToast} />}
+      {view === 'history' && orderDetailMatch && detailOrder && (
+        <OrderDetail
+          order={detailOrder}
+          onCancel={() => navigate('/purchase-orders')}
+          onSaved={(msg) => showToast(msg)}
+          onDeleted={() => navigate('/purchase-orders')}
+          onEditItems={(o) => startEdit(o)}
+        />
+      )}
+      {view === 'history' && (!orderDetailMatch || !detailOrder) && (
+        <Orders onEdit={(o) => navigate('/purchase-orders/' + o.id)} onToast={showToast} />
+      )}
       {view === 'market' && <Market />}
       {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
       {view === 'me' && (

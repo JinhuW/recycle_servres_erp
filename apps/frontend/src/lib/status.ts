@@ -30,6 +30,7 @@ const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
   'In Transit': 'info',
   'Reviewing':  'warn',
   'Done':       'pos',
+  'Sold':       'muted',
   'Mixed':      'muted',
   'Pending':    'warn',
   'Received':   'pos',

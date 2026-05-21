@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { clampLimit } from '../lib/pagination';
 import type { Env, User } from '../types';
 
 const warehouses = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -100,6 +101,8 @@ async function fetchWarehouse(
 
 warehouses.get('/', async (c) => {
   const sql = getDb(c.env);
+  const isManager = c.var.user.role === 'manager';
+  const limit = clampLimit(c.req.query('limit'), 200, 500);
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
            w.timezone, w.active, w.manager_user_id,
@@ -108,8 +111,18 @@ warehouses.get('/', async (c) => {
     LEFT JOIN users mu ON mu.id = w.manager_user_id
     WHERE w.active = TRUE
     ORDER BY w.region, w.short
+    LIMIT ${limit}
   `;
-  return c.json({ items: rows.map((r) => toApi(r as WhRow)) });
+  return c.json({
+    items: rows.map((r) => {
+      const item = toApi(r as WhRow);
+      if (!isManager) {
+        item.managerPhone = null;
+        item.managerEmail = null;
+      }
+      return item;
+    }),
+  });
 });
 
 warehouses.post('/', async (c) => {
@@ -198,7 +211,11 @@ warehouses.patch('/:id', async (c) => {
   return c.json(toApi(row as WhRow));
 });
 
-// DELETE /:id[?transferTo=<warehouseId>] — unchanged.
+// DELETE /:id[?transferTo=<warehouseId>]
+// Reassigns every warehouses(id) FK before the row is deleted. transfer_orders
+// has TWO references: from_warehouse_id (nullable, so safe to NULL out) and
+// to_warehouse_id (NOT NULL, so we refuse with 409 unless transferTo names a
+// real warehouse to migrate them onto).
 warehouses.delete('/:id', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
@@ -214,13 +231,31 @@ warehouses.delete('/:id', async (c) => {
   }
 
   let deleted = 0;
+  let blockingTransfers = 0;
   await sql.begin(async (tx) => {
-    await tx`UPDATE orders           SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
-    await tx`UPDATE order_lines      SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
-    await tx`UPDATE sell_order_lines SET warehouse_id = ${transferTo} WHERE warehouse_id = ${id}`;
+    if (!transferTo) {
+      const r = await tx<{ n: number }[]>`
+        SELECT COUNT(*)::int AS n FROM transfer_orders WHERE to_warehouse_id = ${id}
+      `;
+      blockingTransfers = r[0]?.n ?? 0;
+      if (blockingTransfers > 0) return;
+    }
+
+    await tx`UPDATE orders           SET warehouse_id      = ${transferTo} WHERE warehouse_id      = ${id}`;
+    await tx`UPDATE order_lines      SET warehouse_id      = ${transferTo} WHERE warehouse_id      = ${id}`;
+    await tx`UPDATE sell_order_lines SET warehouse_id      = ${transferTo} WHERE warehouse_id      = ${id}`;
+    await tx`UPDATE transfer_orders  SET from_warehouse_id = ${transferTo} WHERE from_warehouse_id = ${id}`;
+    if (transferTo) {
+      await tx`UPDATE transfer_orders SET to_warehouse_id  = ${transferTo} WHERE to_warehouse_id  = ${id}`;
+    }
     const r = await tx`DELETE FROM warehouses WHERE id = ${id} RETURNING id`;
     deleted = r.length;
   });
+  if (blockingTransfers > 0) {
+    return c.json({
+      error: `Cannot delete: ${blockingTransfers} transfer order(s) target this warehouse. Pick a transferTo warehouse or finalize those transfers first.`,
+    }, 409);
+  }
   if (deleted === 0) return c.json({ error: 'not found' }, 404);
   return c.json({ ok: true });
 });

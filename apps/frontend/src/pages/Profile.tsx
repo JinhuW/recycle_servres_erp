@@ -4,6 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { Skeleton } from '../components/Skeleton';
@@ -19,13 +20,16 @@ type Props = {
 
 export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity }: Props) {
   const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user, logout } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
-    api.get<{ stats: Stats }>('/api/me').then(r => setStats(r.stats)).catch(console.error);
+    let alive = true;
+    api.get<{ stats: Stats }>('/api/me').then(r => { if (alive) setStats(r.stats); }).catch(handleFetchError);
+    return () => { alive = false; };
   }, []);
 
   if (!user) return null;
@@ -68,8 +72,8 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
           ) : (
             <>
               <div className="ph-kpi"><div className="ph-kpi-label">{t('orders')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{stats.count}</div></div>
-              <div className="ph-kpi"><div className="ph-kpi-label">{t('profit')}</div><div className="ph-kpi-value" style={{ fontSize: 18, color: 'var(--pos)' }}>{fmtUSD0(stats.profit)}</div></div>
-              <div className="ph-kpi"><div className="ph-kpi-label">{t('earned')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(stats.commission)}</div></div>
+              <div className="ph-kpi"><div className="ph-kpi-label">{t('profit')}</div><div className="ph-kpi-value" style={{ fontSize: 18, color: 'var(--pos)' }}>{fmtUSD0(stats.profit, locale)}</div></div>
+              <div className="ph-kpi"><div className="ph-kpi-label">{t('earned')}</div><div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(stats.commission, locale)}</div></div>
             </>
           )}
         </div>

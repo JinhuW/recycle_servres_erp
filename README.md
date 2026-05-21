@@ -108,6 +108,7 @@ Single-host Docker Compose:
    edge/reverse proxy). The backend runs DB migrations on startup; on first
    deploy, seed demo/reference data once with
    `docker compose exec backend node scripts/seed.mjs`.
+4. Database backups: `bash apps/backend/scripts/backup.sh --out ./backups/`
 
 Local dev (only Postgres in Docker):
 

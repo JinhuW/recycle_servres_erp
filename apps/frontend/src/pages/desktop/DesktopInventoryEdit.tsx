@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
 import { CONDITIONS } from '../../lib/catalog';
@@ -107,7 +108,8 @@ type RefMatch = {
 };
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [item, setItem] = useState<DetailRow | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [tab, setTab] = useState<Tab>('details');
@@ -121,8 +123,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const [internalNotes, setInternalNotes] = useState('');
 
   useEffect(() => {
+    let alive = true;
     api.get<{ item: DetailRow; events: Event[] }>(`/api/inventory/${itemId}`)
       .then(r => {
+        if (!alive) return;
         setItem(r.item);
         setEvents(r.events);
         const d: Draft = {
@@ -138,7 +142,8 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         setDraft(d);
         initialRef.current = JSON.stringify(d);
       })
-      .catch(console.error);
+      .catch(handleFetchError);
+    return () => { alive = false; };
   }, [itemId]);
 
   // Peers: other inventory lines that share this part_number. Drives the
@@ -147,28 +152,35 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   useEffect(() => {
     const pn = item?.part_number;
     if (!pn) { setPeers([]); return; }
+    let alive = true;
     api.get<{ items: PeerRow[] }>(`/api/inventory?q=${encodeURIComponent(pn)}`)
-      .then(r => setPeers(r.items.filter(p => p.part_number === pn)))
-      .catch(() => setPeers([]));
+      .then(r => { if (alive) setPeers(r.items.filter(p => p.part_number === pn)); })
+      .catch(() => { if (alive) setPeers([]); });
+    return () => { alive = false; };
   }, [item?.part_number]);
 
   // Market reference match: same part number wins; fall back to first row.
   useEffect(() => {
     const pn = item?.part_number;
     if (!pn) { setRefMatch(null); return; }
+    let alive = true;
     api.get<{ items: RefMatch[] }>(`/api/market?q=${encodeURIComponent(pn)}`)
       .then(r => {
+        if (!alive) return;
         const match = r.items.find(x => x.partNumber === pn) ?? r.items[0] ?? null;
         setRefMatch(match);
       })
-      .catch(() => setRefMatch(null));
+      .catch(() => { if (alive) setRefMatch(null); });
+    return () => { alive = false; };
   }, [item?.part_number]);
 
   // Sell orders that drew from this inventory line.
   useEffect(() => {
+    let alive = true;
     api.get<{ items: LinkedSellOrder[] }>(`/api/inventory/${itemId}/sell-orders`)
-      .then(r => setLinkedSellOrders(r.items))
-      .catch(() => setLinkedSellOrders([]));
+      .then(r => { if (alive) setLinkedSellOrders(r.items); })
+      .catch(() => { if (alive) setLinkedSellOrders([]); });
+    return () => { alive = false; };
   }, [itemId]);
 
   if (!item || !draft) {
@@ -279,7 +291,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
               <span style={{ color: 'var(--border-strong)' }}>·</span>
               <span className="mono" style={{ color: 'var(--fg-muted)' }}>{draft.partNumber || '—'}</span>
               <span style={{ color: 'var(--border-strong)' }}>·</span>
-              <span>{t('submittedBy')} {item.user_name.split(' ')[0]} · {fmtDate(item.created_at)}</span>
+              <span>{t('submittedBy')} {item.user_name.split(' ')[0]} · {fmtDate(item.created_at, locale)}</span>
             </div>
           </div>
         </div>
@@ -384,6 +396,8 @@ function DetailsPanel({
   currentWhId: string | null;
   linkedSellOrders: LinkedSellOrder[];
 }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const cat = item.category;
   return (
     <>
@@ -612,9 +626,9 @@ function DetailsPanel({
                       )} style={{ fontSize: 10.5 }}>{so.status}</span>
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>{so.qty}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD(so.unit_price)}</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD(so.unit_price, locale)}</td>
                     <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--fg-muted)' }}>
-                      {relTime(so.created_at)}
+                      {relTime(so.created_at, locale)}
                     </td>
                   </tr>
                 ))}
@@ -674,6 +688,8 @@ function PricingPanel({
   lossy: boolean;
   refMatch: RefMatch | null;
 }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   return (
     <>
       <div className="card">
@@ -742,8 +758,8 @@ function PricingPanel({
           <div className="divider" />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-            <Stat label="Revenue" value={fmtUSD(revenue)} />
-            <Stat label="Profit"  value={fmtUSD(profit)}  tone={profit >= 0 ? 'pos' : 'neg'} />
+            <Stat label="Revenue" value={fmtUSD(revenue, locale)} />
+            <Stat label="Profit"  value={fmtUSD(profit, locale)}  tone={profit >= 0 ? 'pos' : 'neg'} />
             <Stat label="Margin"  value={margin.toFixed(1) + '%'} tone={margin >= 25 ? 'pos' : margin >= 10 ? 'muted' : 'neg'} />
           </div>
         </div>
@@ -769,20 +785,20 @@ function PricingPanel({
           <div className="card-body" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
             <div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Target cost</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>{fmtUSD(refMatch.target)}</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>{fmtUSD(refMatch.target, locale)}</div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                Range {fmtUSD0(refMatch.low)}–{fmtUSD0(refMatch.high)}
+                Range {fmtUSD0(refMatch.low, locale)}–{fmtUSD0(refMatch.high, locale)}
               </div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Avg sell</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 600, marginTop: 4, color: 'var(--pos)' }}>{fmtUSD(refMatch.avgSell)}</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, marginTop: 4, color: 'var(--pos)' }}>{fmtUSD(refMatch.avgSell, locale)}</div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>{refMatch.samples} sample lines</div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Suggested price</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <span className="mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtUSD(refMatch.avgSell)}</span>
+                <span className="mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtUSD(refMatch.avgSell, locale)}</span>
                 <button
                   className="btn sm"
                   onClick={() => set({ sellPrice: refMatch.avgSell.toFixed(2) })}
@@ -790,7 +806,7 @@ function PricingPanel({
                 >Apply</button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                Updated {fmtDate(refMatch.updated)}
+                Updated {fmtDate(refMatch.updated, locale)}
               </div>
             </div>
           </div>
@@ -828,6 +844,8 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'po
 
 // ─── Activity log ────────────────────────────────────────────────────────────
 function HistoryPanel({ events }: { events: Event[] }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   return (
     <div className="card">
       <div className="card-head">
@@ -849,10 +867,10 @@ function HistoryPanel({ events }: { events: Event[] }) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>
-                  {summarizeEvent(e)}
+                  {summarizeEvent(e, locale)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                  {e.actor_name ?? 'system'} · {relTime(e.created_at)}
+                  {e.actor_name ?? 'system'} · {relTime(e.created_at, locale)}
                 </div>
               </div>
             </div>
@@ -863,11 +881,11 @@ function HistoryPanel({ events }: { events: Event[] }) {
   );
 }
 
-function summarizeEvent(e: Event): string {
+function summarizeEvent(e: Event, locale = 'en-US'): string {
   const d = e.detail as Record<string, unknown>;
   if (e.kind === 'created') return 'Item created';
   if (e.kind === 'status')  return `Status → ${String(d.to ?? '?')}`;
-  if (e.kind === 'priced')  return `Sell price → ${fmtUSD0(Number(d.to ?? 0))}`;
+  if (e.kind === 'priced')  return `Sell price → ${fmtUSD0(Number(d.to ?? 0), locale)}`;
   if (e.kind === 'edited')  return `${String(d.field ?? 'field')}: ${String(d.from ?? '?')} → ${String(d.to ?? '?')}`;
   return e.kind;
 }
@@ -884,6 +902,8 @@ function SummaryColumn({
   internalNotes: string;
   setInternalNotes: (v: string) => void;
 }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const sellable = draft.status === 'Reviewing' || draft.status === 'Done';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 16 }}>
@@ -894,13 +914,13 @@ function SummaryColumn({
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SummaryRow label="Status" value={<span className={'chip dot ' + statusTone(draft.status)}>{draft.status}</span>} />
           <SummaryRow label="Quantity" value={<span className="mono">{draft.qty}</span>} />
-          <SummaryRow label="Unit cost" value={<span className="mono">{fmtUSD(Number(draft.unitCost) || 0)}</span>} />
+          <SummaryRow label="Unit cost" value={<span className="mono">{fmtUSD(Number(draft.unitCost) || 0, locale)}</span>} />
           <SummaryRow label="Sell price" value={
-            <span className="mono">{draft.sellPrice ? fmtUSD(Number(draft.sellPrice)) : '—'}</span>
+            <span className="mono">{draft.sellPrice ? fmtUSD(Number(draft.sellPrice), locale) : '—'}</span>
           } />
           <div className="divider" style={{ margin: '4px 0' }} />
-          <SummaryRow label="Revenue" value={<span className="mono">{fmtUSD(revenue)}</span>} />
-          <SummaryRow label="Profit" value={<span className={'mono ' + (profit >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{fmtUSD(profit)}</span>} />
+          <SummaryRow label="Revenue" value={<span className="mono">{fmtUSD(revenue, locale)}</span>} />
+          <SummaryRow label="Profit" value={<span className={'mono ' + (profit >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{fmtUSD(profit, locale)}</span>} />
           <SummaryRow label="Margin" value={<span className="mono">{margin.toFixed(1)}%</span>} />
         </div>
       </div>
@@ -934,7 +954,7 @@ function SummaryColumn({
               {item.user_name.split(' ')[0]}
             </span>
           } />
-          <SummaryRow label="Submitted" value={fmtDate(item.created_at)} />
+          <SummaryRow label="Submitted" value={fmtDate(item.created_at, locale)} />
         </div>
       </div>
 

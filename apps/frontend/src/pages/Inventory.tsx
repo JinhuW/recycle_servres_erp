@@ -4,6 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { categoryFilterOptions } from '../lib/lookups';
 import { wsNumber } from '../lib/workspace';
@@ -35,7 +36,8 @@ type Props = {
 };
 
 export function Inventory({ onNewEntry }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const [filter, setFilter] = useState<string>('all');
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -44,12 +46,14 @@ export function Inventory({ onNewEntry }: Props) {
   const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
+    let alive = true;
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     api.get<{ items: InventoryItem[] }>(`/api/inventory?${params}`)
-      .then(r => setItems(r.items))
-      .catch(console.error)
-      .finally(() => setLoadedOnce(true));
+      .then(r => { if (alive) setItems(r.items); })
+      .catch(handleFetchError)
+      .finally(() => { if (alive) setLoadedOnce(true); });
+    return () => { alive = false; };
   }, [filter]);
 
   const isManager = user?.role === 'manager';
@@ -122,7 +126,7 @@ export function Inventory({ onNewEntry }: Props) {
               <div style={{ textAlign: 'right' }}>
                 <span className={'chip ' + statusTone(r.status) + ' dot'} style={{ fontSize: 10 }}>{r.status}</span>
                 {isManager && r.sell_price != null && (
-                  <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>{fmtUSD0(r.sell_price)}</div>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>{fmtUSD0(r.sell_price, locale)}</div>
                 )}
               </div>
             </div>

@@ -18,6 +18,29 @@ import type { Env, User } from '../types';
 
 const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
+const VALID_ROLES: MemberRole[] = ['manager', 'purchaser'];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LEN = 8;
+
+// Shared field validation for create/update. Returns an error string for the
+// first invalid field, or null when every supplied field is acceptable.
+// `email`/`role` are only checked when present so a partial PATCH stays valid.
+function validateMemberFields(f: {
+  email?: unknown; role?: unknown; password?: unknown;
+}): string | null {
+  if (f.email !== undefined && (typeof f.email !== 'string' || !EMAIL_RE.test(f.email.trim()))) {
+    return 'email is not a valid address';
+  }
+  if (f.role !== undefined && !VALID_ROLES.includes(f.role as MemberRole)) {
+    return `role must be one of: ${VALID_ROLES.join(', ')}`;
+  }
+  if (f.password !== undefined &&
+      (typeof f.password !== 'string' || f.password.length < MIN_PASSWORD_LEN)) {
+    return `password must be at least ${MIN_PASSWORD_LEN} characters`;
+  }
+  return null;
+}
+
 members.use('*', async (c, next) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   await next();
@@ -37,6 +60,8 @@ members.post('/', async (c) => {
   if (!body?.email || !body?.name || !body?.role) {
     return c.json({ error: 'email, name, role required' }, 400);
   }
+  const invalid = validateMemberFields(body);
+  if (invalid) return c.json({ error: invalid }, 400);
   const sql = getDb(c.env);
   const r = await createMember(sql, {
     email: body.email,
@@ -54,7 +79,28 @@ members.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as UpdateMemberInput | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  const invalid = validateMemberFields(body);
+  if (invalid) return c.json({ error: invalid }, 400);
   const sql = getDb(c.env);
+
+  // Same lockout protections as DELETE: PATCH accepts {active} and {role}, so
+  // it can deactivate or demote a manager just as destructively.
+  const deactivating = body.active === false;
+  const demoting = body.role !== undefined && body.role !== 'manager';
+  if (deactivating && id === c.var.user.id) {
+    return c.json({ error: "You can't deactivate yourself" }, 400);
+  }
+  if (deactivating || demoting) {
+    const target = await getMemberStatus(sql, id);
+    if (!target) return c.json({ error: 'Member not found' }, 404);
+    if (target.role === 'manager' && target.active) {
+      const others = await countOtherActiveManagers(sql, id);
+      if (others === 0) {
+        return c.json({ error: "Can't remove the last active manager" }, 400);
+      }
+    }
+  }
+
   await updateMember(sql, id, body);
   return c.json({ ok: true });
 });

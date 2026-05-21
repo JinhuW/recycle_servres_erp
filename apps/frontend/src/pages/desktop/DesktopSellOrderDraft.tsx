@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { fmtUSD, fmtDate } from '../../lib/format';
+import { useEscapeKey } from '../../lib/useEscapeKey';
+import { useT } from '../../lib/i18n';
 
 // Draft-sell-order modal: manager picks items off Inventory, the modal lets
 // them pick a customer, tweak qty / unit price per line, and save a Draft sell
@@ -52,6 +54,8 @@ type Props = {
 };
 
 export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<string>('');
   const [notes, setNotes] = useState('');
@@ -89,11 +93,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape closes.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const totals = useMemo(() => {
     let subtotal = 0, cost = 0, units = 0;
@@ -240,7 +240,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                         const lineTotal = l.qty * l.unitPrice;
                         const adjusted = l.unitPrice.toFixed(2) !== l.listPrice.toFixed(2);
                         return (
-                          <tr key={idx}>
+                          <tr key={l.inventoryId}>
                             <td>
                               <div style={{ fontWeight: 500, fontSize: 13 }}>{l.label}</div>
                               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
@@ -275,11 +275,11 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                                 value={l.unitPrice}
                                 onChange={e => setLine(idx, { unitPrice: Number(e.target.value) || 0 })}
                                 style={adjusted ? { borderColor: 'var(--warn)', background: 'var(--warn-soft)' } : undefined}
-                                title={adjusted ? `List price: ${fmtUSD(l.listPrice)}` : undefined}
+                                title={adjusted ? `List price: ${fmtUSD(l.listPrice, locale)}` : undefined}
                               />
                             </td>
                             <td className="num mono" style={{ fontWeight: 500 }}>
-                              {fmtUSD(lineTotal)}
+                              {fmtUSD(lineTotal, locale)}
                             </td>
                             <td>
                               <button
@@ -331,20 +331,19 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
             <div className="so-summary">
               <div className="so-summary-head">Order summary</div>
 
-              <div className="so-row"><span>Subtotal</span><span className="mono">{fmtUSD(totals.subtotal)}</span></div>
               <div className="so-row muted"><span>Units</span><span className="mono">{totals.units}</span></div>
 
               <div className="so-row total">
                 <span>Customer total</span>
-                <span className="mono">{fmtUSD(totals.subtotal)}</span>
+                <span className="mono">{fmtUSD(totals.subtotal, locale)}</span>
               </div>
 
               <div className="so-divider" />
 
-              <div className="so-row muted"><span>Cost basis</span><span className="mono">{fmtUSD(totals.cost)}</span></div>
+              <div className="so-row muted"><span>Cost basis</span><span className="mono">{fmtUSD(totals.cost, locale)}</span></div>
               <div className="so-row" style={{ color: 'var(--pos)' }}>
                 <span>Profit</span>
-                <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(totals.profit)}</span>
+                <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(totals.profit, locale)}</span>
               </div>
               <div className="so-row muted"><span>Margin</span><span className="mono">{totals.margin.toFixed(1)}%</span></div>
             </div>
@@ -362,7 +361,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         {/* Footer */}
         <div className="so-footer">
           <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-            Draft · {fmtDate(new Date())}
+            Draft · {fmtDate(new Date(), locale)}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={onClose}>Cancel</button>

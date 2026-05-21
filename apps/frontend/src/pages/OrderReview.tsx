@@ -6,6 +6,12 @@ import { api } from '../lib/api';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 
+/** Strip thousands-separator commas, then parse — handles "1,234.56" correctly. */
+const parseDecimal = (s: string) => {
+  const n = Number(String(s).replace(/,/g, ''));
+  return Number.isFinite(n) ? n : NaN;
+};
+
 type Props = {
   category: Category;
   lines: DraftLine[];
@@ -22,7 +28,8 @@ export function OrderReview({
   onAddItem, onEditLine, onRemoveLine,
   onSubmit, onCancel,
 }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [warehouseId, setWarehouseId] = useState('');
@@ -31,10 +38,13 @@ export function OrderReview({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => {
+      if (!alive) return;
       setWarehouses(r.items);
       if (r.items[0]) setWarehouseId(r.items[0].id);
     });
+    return () => { alive = false; };
   }, []);
 
   const computedCost = lines.reduce((a, l) => a + l.qty * l.unitCost, 0);
@@ -43,9 +53,14 @@ export function OrderReview({
   useEffect(() => { setTotalCost(computedCost.toFixed(2)); }, [computedCost]);
 
   const submit = async () => {
+    const parsed = parseDecimal(totalCost);
+    if (Number.isNaN(parsed)) {
+      alert(t('totalCostInvalid'));
+      return;
+    }
     setSubmitting(true);
     try {
-      await onSubmit({ warehouseId, payment, notes, totalCost: parseFloat(totalCost) });
+      await onSubmit({ warehouseId, payment, notes, totalCost: parsed });
     } finally {
       setSubmitting(false);
     }
@@ -67,7 +82,7 @@ export function OrderReview({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {lines.map((l, i) => (
             <div
-              key={i}
+              key={l.id ?? l._cid ?? i}
               className="ph-line"
               onClick={() => onEditLine(i)}
               style={{ cursor: 'pointer' }}
@@ -98,8 +113,8 @@ export function OrderReview({
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>Qty {l.qty} · unit {fmtUSD(l.unitCost)}</span>
-                <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.unitCost * l.qty)}</span>
+                <span>Qty {l.qty} · unit {fmtUSD(l.unitCost, locale)}</span>
+                <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.unitCost * l.qty, locale)}</span>
               </div>
             </div>
           ))}
@@ -172,7 +187,7 @@ export function OrderReview({
         </div>
 
         {(() => {
-          const edited = parseFloat(totalCost) !== computedCost;
+          const edited = parseDecimal(totalCost) !== computedCost;
           return (
             <div className="ph-card" style={{ marginTop: 16, background: 'var(--accent-soft)', borderColor: 'color-mix(in oklch, var(--accent) 30%, transparent)', overflow: 'hidden' }}>
               <div style={{ padding: '14px 14px 12px' }}>
@@ -220,13 +235,13 @@ export function OrderReview({
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, fontSize: 11.5, color: 'var(--accent-strong)' }}>
                   <span style={{ opacity: 0.75 }}>{t('calculated')}</span>
-                  <span className="mono" style={{ opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(computedCost)}</span>
+                  <span className="mono" style={{ opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(computedCost, locale)}</span>
                 </div>
                 {edited && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, fontSize: 11.5, color: 'var(--accent-strong)' }}>
                     <span style={{ opacity: 0.75 }}>{t('adjustment')}</span>
                     <span className="mono" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                      {(parseFloat(totalCost) - computedCost) >= 0 ? '+' : '−'}{fmtUSD(Math.abs(parseFloat(totalCost) - computedCost))}
+                      {(parseDecimal(totalCost) - computedCost) >= 0 ? '+' : '−'}{fmtUSD(Math.abs(parseDecimal(totalCost) - computedCost), locale)}
                     </span>
                   </div>
                 )}

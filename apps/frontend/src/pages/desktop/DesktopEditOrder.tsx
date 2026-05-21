@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
@@ -8,6 +8,7 @@ import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
 import { LineDrawer, blankLine, type Line } from './DesktopSubmit';
 import { ImageLightbox } from '../../components/ImageLightbox';
+import { OrderActivityLog } from '../../components/OrderActivityLog';
 
 const realScan = (u?: string | null): u is string =>
   !!u && !u.startsWith('data:image/placeholder');
@@ -47,7 +48,8 @@ type EditLine = Line & { _id?: string; _status?: string; _dirty?: boolean };
 // move it through any stage and edit prices/qty. Once an order reaches "Done"
 // the whole page becomes read-only.
 export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const isPurchaser = user?.role !== 'manager';
   // Edit-gating keys off the authoritative lifecycle, not the 'Mixed'-prone
@@ -68,31 +70,19 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
+  // Default to 0% when no rate has been set on the order yet, so the field
+  // and the side commission summary show a concrete value out of the gate
+  // instead of a blank input. Saving 0 against a still-null DB rate is
+  // suppressed below by treating null and 0 as equivalent.
   const [commissionPct, setCommissionPct] = useState<string>(
-    order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '');
+    order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '0');
   const [totalCostInput, setTotalCostInput] = useState<string>(
     order.totalCost != null ? order.totalCost.toFixed(2) : '',
   );
   const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  // The status/meta sections are foldable so the pinned action card stays
-  // compact when the items table is long. They start EXPANDED; a one-shot
-  // post-mount measurement collapses them only if the table actually
-  // overflows. Measuring while expanded means the table is in its most
-  // space-constrained state, so "fits" stays true after — no fold/unfold loop.
-  const [statusOpen, setStatusOpen] = useState(true);
-  const [metaOpen, setMetaOpen] = useState(true);
   const tableScrollRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = tableScrollRef.current;
-    if (el && el.scrollHeight - el.clientHeight > 1) {
-      setStatusOpen(false);
-      setMetaOpen(false);
-    }
-    // Run once on mount: an explicit user toggle afterwards must stick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -102,9 +92,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const canDelete = canEditOrder && effectiveStatus === 'Draft';
 
   useEffect(() => {
+    let alive = true;
     api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => setWarehouses(r.items))
+      .then(r => { if (alive) setWarehouses(r.items); })
       .catch(() => { /* non-fatal — keep existing warehouse pinned */ });
+    return () => { alive = false; };
   }, []);
 
   // Escape closes the drawer; if none open, closes the page.
@@ -144,16 +136,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   const totals = useMemo(() => {
     let qty = 0, cost = 0, revenue = 0, profit = 0;
+    // "Priced" = lines that have a sell price set, which is the subset that
+    // can actually contribute to a realised commission.
+    let pricedCount = 0, pricedProfit = 0;
     for (const l of lines) {
       const q = Number(l.qty) || 0;
       const c = Number(l.unitCost) || 0;
-      const sp = l.sellPrice == null || l.sellPrice === '' ? 0 : Number(l.sellPrice);
+      const spRaw = l.sellPrice;
+      const hasPrice = spRaw != null && spRaw !== '' && Number(spRaw) > 0;
+      const sp = hasPrice ? Number(spRaw) : 0;
       qty += q;
       cost += q * c;
       revenue += q * sp;
       profit += q * (sp - c);
+      if (hasPrice) {
+        pricedCount += 1;
+        pricedProfit += q * (sp - c);
+      }
     }
-    return { qty, cost, revenue, profit };
+    return { qty, cost, revenue, profit, pricedCount, pricedProfit };
   }, [lines]);
 
   const statusDirty = status !== effectiveStatus;
@@ -169,13 +170,32 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     parsedCommission === null || Number.isFinite(parsedCommission);
   const commissionRateValue =
     parsedCommission === null ? null : parsedCommission / 100;
+  // null (unset) and 0 are equivalent — both yield zero commission — so
+  // opening an order with a null DB rate at the default 0% UI value isn't
+  // flagged as a pending change.
   const commissionDirty =
-    commissionValid && commissionRateValue !== (order.commissionRate ?? null);
+    commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   const parsedTotalCost = totalCostInput.trim() === '' ? null : Number(totalCostInput);
   const totalCostDirty =
     totalCostOverride &&
     !Number.isNaN(parsedTotalCost as number) &&
     (parsedTotalCost ?? null) !== (order.totalCost ?? null);
+
+  // Derived values for the side Payment-detail panel.
+  // Self pay → the purchaser is reimbursed for what they paid out of pocket
+  // (effectiveTotalCost) AND earns commission on profit. Company pay → only
+  // the commission on profit. When the manager/purchaser overrides Total cost,
+  // that override is the authoritative cost for EVERY part of the formula —
+  // including (Revenue − Cost), so the commission preview reconciles cleanly
+  // with the Self-pay reimbursement instead of mixing two cost figures.
+  const effectiveTotalCost =
+    totalCostOverride && parsedTotalCost != null ? parsedTotalCost : totals.cost;
+  const effectiveProfit = totals.revenue - effectiveTotalCost;
+  const commissionRateApplied = commissionRateValue ?? 0;
+  const commissionOnProfit = effectiveProfit * commissionRateApplied;
+  const purchaserEarn =
+    (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
+
   const dirty =
     statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty || commissionDirty;
 
@@ -256,7 +276,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </span>
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
-            {fmtDateShort(order.createdAt)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length} line{lines.length === 1 ? '' : 's'} · {t('editOrderSub')}
+            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length} line{lines.length === 1 ? '' : 's'} · {t('editOrderSub')}
           </div>
         </div>
         {canDelete && (
@@ -270,14 +290,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         )}
       </div>
 
+      <div className="oe-body">
       <div className={'card oe-items-card' + (!canEditOrder ? ' order-readonly' : '')}>
         <div className="card-head">
           <div>
             <div className="card-title">{t('orderDetails')}</div>
-            <div className="card-sub">An order contains multiple line items of the same category ({order.category}).</div>
+            <div className="card-sub">{t('orderContainsMultiple', { cat: order.category })}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span className="chip mono">{totals.qty} units · {fmtUSD(totals.cost)}</span>
+            <span className="chip mono">{totals.qty} units · {fmtUSD(totals.cost, locale)}</span>
             <span className="chip mono">{order.id} · Editing</span>
             {canEditOrder && (
               <button className="btn accent" style={{ marginLeft: 'auto' }} onClick={addLine}>
@@ -298,7 +319,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 <th className="num">{t('sellUnit')}</th>
                 <th className="num">{t('revenue')}</th>
                 <th className="num">{t('profit')}</th>
-                <th>{t('status')}</th>
                 {canEditOrder && <th style={{ width: 40 }}></th>}
               </tr>
             </thead>
@@ -313,7 +333,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 const isActive = i === activeIdx;
                 return (
                   <tr
-                    key={l._id ?? `new-${i}`}
+                    key={l._id ?? l._cid}
                     className={canEditOrder ? 'row-hover' : ''}
                     style={{
                       cursor: canEditOrder ? 'pointer' : 'default',
@@ -358,18 +378,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     </td>
                     <td className="mono muted" style={{ fontSize: 11 }}>{l.partNumber || '—'}</td>
                     <td className="num mono">{qty}</td>
-                    <td className="num mono">{lCost ? fmtUSD(lCost) : '—'}</td>
-                    <td className="num mono">{sp ? fmtUSD(sp) : '—'}</td>
-                    <td className="num mono">{sp && qty ? fmtUSD(sp * qty) : '—'}</td>
+                    <td className="num mono">{lCost ? fmtUSD(lCost, locale) : '—'}</td>
+                    <td className="num mono">{sp ? fmtUSD(sp, locale) : '—'}</td>
+                    <td className="num mono">{sp && qty ? fmtUSD(sp * qty, locale) : '—'}</td>
                     <td className={'num mono ' + (sp ? (profit >= 0 ? 'pos' : 'neg') : 'muted')}>
-                      {sp ? fmtUSD(profit) : '—'}
+                      {sp ? fmtUSD(profit, locale) : '—'}
                       {lossy && <Icon name="alert" size={11} style={{ marginLeft: 4, color: 'var(--warn)' }} />}
-                    </td>
-                    <td>
-                      {isActive && <span className="chip info"><Icon name="edit" size={10} /> Editing</span>}
-                      {!isActive && (
-                        <span className={'chip dot ' + statusTone(statusOf(l, status))}>{statusOf(l, status)}</span>
-                      )}
                     </td>
                     {canEditOrder && (
                       <td>
@@ -396,44 +410,138 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           fontSize: 13, background: 'var(--bg-soft)',
         }}>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            Revenue <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue)}</span>
+            Revenue <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue, locale)}</span>
           </span>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            Cost <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.cost)}</span>
+            Cost <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.cost, locale)}</span>
           </span>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            Profit <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.profit)}</span>
+            Profit <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.profit, locale)}</span>
           </span>
         </div>
       </div>
 
-      <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <button
-            type="button"
-            onClick={() => setStatusOpen(o => !o)}
-            aria-expanded={statusOpen}
+      <aside className="oe-side">
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Payment detail</div>
+          <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
+            What {order.userName.split(' ')[0]} earns on this PO
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <span
+              className={'chip ' + (payment === 'self' ? 'info' : 'pos')}
+              style={{ fontSize: 11 }}
+            >
+              {payment === 'self' ? 'Self pay' : 'Company pay'}
+            </span>
+          </div>
+
+          <div style={{
+            marginTop: 14, fontSize: 10.5, color: 'var(--fg-subtle)',
+            textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600,
+          }}>
+            Purchaser earns
+          </div>
+          <div
+            className="mono"
             style={{
-              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              fontFamily: 'inherit',
-              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              marginBottom: statusOpen ? 10 : 0,
+              fontSize: 26, fontWeight: 600, marginTop: 4, lineHeight: 1.1,
+              color: purchaserEarn >= 0 ? 'var(--pos)' : 'var(--neg)',
             }}
           >
-            <Icon name="flag" size={12} /> {t('orderStatus')}
-            {!statusOpen && (
-              <span className={'chip dot ' + statusTone(status)} style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
-                {status}
-              </span>
+            {fmtUSD(purchaserEarn, locale)}
+          </div>
+
+          {/* Formula — symbolic then numeric, so the breakdown explains the
+              number above. The self-pay term only appears when the purchaser
+              fronted the cost themselves. */}
+          <div style={{
+            marginTop: 12, padding: '10px 12px',
+            background: 'var(--bg-soft)', border: '1px solid var(--border)',
+            borderRadius: 6, fontSize: 11.5, lineHeight: 1.55,
+          }}>
+            <div style={{ color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, fontSize: 10 }}>
+              Formula
+            </div>
+            <div style={{ marginTop: 4 }}>
+              {payment === 'self' ? 'Self pay + (Revenue − Cost) × Rate' : '(Revenue − Cost) × Rate'}
+            </div>
+            <div className="mono" style={{ marginTop: 4, color: 'var(--fg)' }}>
+              {payment === 'self' ? `${fmtUSD(effectiveTotalCost, locale)} + ` : ''}
+              ({fmtUSD(totals.revenue, locale)} − {fmtUSD(effectiveTotalCost, locale)}) × {(commissionRateApplied * 100).toFixed(2)}%
+            </div>
+            <div className="mono" style={{ marginTop: 2, color: 'var(--fg-subtle)' }}>
+              = {payment === 'self' ? `${fmtUSD(effectiveTotalCost, locale)} + ` : ''}{fmtUSD(commissionOnProfit, locale)} = <span style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(purchaserEarn, locale)}</span>
+            </div>
+          </div>
+
+          <div style={{
+            marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)',
+            display: 'grid', gap: 8, fontSize: 12.5,
+          }}>
+            {payment === 'self' && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--fg-subtle)' }}>Self pay</span>
+                <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
+              </div>
             )}
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-              {statusOpen && t('advanceAsProgresses')}
-              <Icon name={statusOpen ? 'chevronUp' : 'chevronDown'} size={13} />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>Revenue</span>
+              <span className="mono">{fmtUSD(totals.revenue, locale)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>Cost</span>
+              <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>Profit</span>
+              <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>Rate</span>
+              <span className="mono">{(commissionRateApplied * 100).toFixed(2)}%</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>Commission on profit</span>
+              <span className="mono">{fmtUSD(commissionOnProfit, locale)}</span>
+            </div>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              paddingTop: 6, borderTop: '1px dashed var(--border)',
+              fontWeight: 600,
+            }}>
+              <span>Total</span>
+              <span className="mono">{fmtUSD(purchaserEarn, locale)}</span>
+            </div>
+          </div>
+
+          {totals.pricedCount < lines.length && (
+            <div style={{ marginTop: 12, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+              {lines.length - totals.pricedCount} line{lines.length - totals.pricedCount === 1 ? '' : 's'} without a sell price drag profit down until priced.
+            </div>
+          )}
+        </div>
+
+        {/* PO audit log — lives under Payment detail in the side column, fully
+            foldable. The component hides its own card chrome before load and
+            handles the empty-state copy for drafts. */}
+        <OrderActivityLog orderId={order.id} />
+      </aside>
+
+      <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+            textTransform: 'uppercase', letterSpacing: '0.06em',
+            marginBottom: 10,
+          }}>
+            <Icon name="flag" size={12} /> {t('orderStatus')}
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+              {t('advanceAsProgresses')}
             </span>
-          </button>
-          {statusOpen && (<>
+          </div>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
               const active = s === status;
@@ -481,7 +589,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="info" size={13} />
-              Advance to <strong>In Transit</strong> when you've shipped the order. You can keep editing line items until it moves to Reviewing.
+              {t('oeHintDraftPre')}<strong>In Transit</strong>{t('oeHintDraftPost')}
             </div>
           )}
           {isPurchaser && purchaserCanEdit && effectiveStatus === 'In Transit' && (
@@ -491,7 +599,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="info" size={13} />
-              Update line items as needed. Advance to <strong>Reviewing</strong> when you're ready to hand the order off to the manager for pricing.
+              {t('oeHintInTransitPre')}<strong>Reviewing</strong>{t('oeHintInTransitPost')}
             </div>
           )}
           {statusDirty && !isPurchaser && (
@@ -514,39 +622,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               Status will change from <strong>{effectiveStatus}</strong> to <strong>{status}</strong> when you save — this hands the order off to the manager.
             </div>
           )}
-          </>)}
         </div>
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <button
-            type="button"
-            onClick={() => setMetaOpen(o => !o)}
-            aria-expanded={metaOpen}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              fontFamily: 'inherit',
-              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-              textTransform: 'uppercase', letterSpacing: '0.06em',
-              marginBottom: metaOpen ? 10 : 0,
-            }}
-          >
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+            fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+            textTransform: 'uppercase', letterSpacing: '0.06em',
+            marginBottom: 10,
+          }}>
             <Icon name="warehouse" size={12} /> {t('orderDetails')}
-            {!metaOpen && (
-              <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: 'var(--fg-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {(warehouses.find(w => w.id === warehouseId)?.name
-                  ?? warehouses.find(w => w.id === warehouseId)?.short
-                  ?? order.warehouse?.short ?? '—')}
-                {' · '}{payment === 'company' ? 'Company' : 'Self-paid'}
-                {' · '}{fmtUSD(totalCostOverride ? (parsedTotalCost ?? 0) : totals.cost)}
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-              <Icon name={metaOpen ? 'chevronUp' : 'chevronDown'} size={13} />
-            </span>
-          </button>
-          {metaOpen && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14 }}>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>
               <div style={{ position: 'relative' }}>
@@ -580,18 +667,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   style={{ flex: 1, whiteSpace: 'nowrap' }}
                   onClick={() => canEditOrder && setPayment('company')}
                   disabled={!canEditOrder}
-                >Company</button>
+                >{t('payCompanyShort')}</button>
                 <button
                   type="button"
                   className={payment === 'self' ? 'active' : ''}
                   style={{ flex: 1, whiteSpace: 'nowrap' }}
                   onClick={() => canEditOrder && setPayment('self')}
                   disabled={!canEditOrder}
-                >Self-paid</button>
+                >{t('paySelfShort')}</button>
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">Commission rate (%)</label>
+              <label className="label">{t('commissionRate')}</label>
               <input
                 className="input"
                 type="number"
@@ -614,7 +701,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       setTotalCostInput(totals.cost.toFixed(2));
                     }}
                     style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-strong)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                    title={`Auto-sum is ${fmtUSD(totals.cost)}`}
+                    title={`Auto-sum is ${fmtUSD(totals.cost, locale)}`}
                   >reset</button>
                 )}
               </label>
@@ -636,18 +723,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 />
               </div>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
+            {/* Notes gets its own row and spans the full grid so there's
+                room to write more than a single short phrase. */}
+            <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
               <label className="label">{t('orderNotes')}</label>
-              <input
+              <textarea
                 className="input"
+                rows={3}
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 placeholder={t('orderNotesPh')}
                 disabled={!canEditOrder}
+                style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
               />
             </div>
           </div>
-          )}
         </div>
 
         <div style={{
@@ -670,7 +760,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
-              {fmtUSD(totalCostOverride ? (parsedTotalCost ?? 0) : totals.cost)}
+              {fmtUSD(totalCostOverride ? (parsedTotalCost ?? 0) : totals.cost, locale)}
             </div>
           </div>
           {saveError && (
@@ -689,6 +779,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </button>
           </div>
         </div>
+      </div>
       </div>
 
       {activeIdx !== null && lines[activeIdx] && (
@@ -781,6 +872,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 // ─── Conversion helpers ──────────────────────────────────────────────────────
 function orderLineToEditLine(l: OrderLine): EditLine {
   return {
+    _cid:           crypto.randomUUID(),
     _id:            l.id,
     _status:        l.status,
     category:       l.category,
@@ -854,12 +946,4 @@ function editLineToInsert(l: EditLine, status: string) {
     health:         l.health ?? null,
     rpm:            l.rpm ?? null,
   };
-}
-
-// Per-line status display: while the user is changing the stepper but hasn't
-// saved yet, the chip still shows each line's persisted status (the banner
-// already explains the pending transition). Lines created in-session don't
-// have a persisted status yet — they inherit the current stepper value.
-function statusOf(l: EditLine, draftStatus: string) {
-  return l._status ?? draftStatus;
 }

@@ -4,7 +4,10 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
+import { usePersisted, useScrollMemory } from '../../lib/listMemory';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
+import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
@@ -100,13 +103,15 @@ type Props = {
 };
 
 export function DesktopOrders({ onEdit, onToast }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const isManager = user?.role === 'manager';
 
-  const [filter, setFilter] = useState<string>('all');
-  const [stageFilter, setStageFilter] = useState<'all' | string>('all');
-  const [search, setSearch] = useState('');
+  // Persisted across the open-order → back round-trip (see lib/listMemory).
+  const [filter, setFilter] = usePersisted<string>('desktop.orders.filter', 'all');
+  const [stageFilter, setStageFilter] = usePersisted<'all' | string>('desktop.orders.stageFilter', 'all');
+  const [search, setSearch] = usePersisted<string>('desktop.orders.search', '');
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -136,28 +141,45 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   }, [colsMenuOpen]);
 
   // Sortable columns: click cycles desc → asc → reset to default (date desc).
-  const [sort, setSort] = useState<SortState>({ col: 'date', dir: 'desc' });
+  const [sort, setSort] = usePersisted<SortState>('desktop.orders.sort', { col: 'date', dir: 'desc' });
+
+  // Restore the list scroll position when returning from an order's edit page.
+  const tableScrollRef = useScrollMemory('desktop.orders', loadedOnce);
   const cycleSort = (col: string) => setSort(s => {
     if (s.col !== col) return { col, dir: 'desc' };
     if (s.dir === 'desc') return { col, dir: 'asc' };
     return { col: 'date', dir: 'desc' };
   });
 
+  // Managers don't see drafts (purchasers' in-progress work). The pipeline
+  // cards and the persisted stage filter both need to drop 'draft' for them.
+  const stages = useMemo(
+    () => isManager ? WORKFLOW_STAGES.filter(s => s.id !== 'draft') : WORKFLOW_STAGES,
+    [isManager],
+  );
+  useEffect(() => {
+    if (isManager && stageFilter === 'draft') setStageFilter('all');
+  }, [isManager, stageFilter, setStageFilter]);
+
 
   useEffect(() => {
+    let alive = true;
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
-      .then(r => setOrders(r.orders))
-      .catch(console.error)
-      .finally(() => setLoadedOnce(true));
+      .then(r => { if (alive) setOrders(r.orders); })
+      .catch(handleFetchError)
+      .finally(() => { if (alive) setLoadedOnce(true); });
+    return () => { alive = false; };
   }, [filter]);
 
   useEffect(() => {
     if (!openId) { setOpenLines(null); return; }
+    let alive = true;
     api.get<{ order: Order }>(`/api/orders/${openId}`)
-      .then(r => setOpenLines(r.order))
-      .catch(console.error);
+      .then(r => { if (alive) setOpenLines(r.order); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
   }, [openId]);
 
   // Search filter — server already scopes by user (managers see all, others
@@ -203,7 +225,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   // Aggregate count + revenue per workflow stage for the pipeline cards.
   const stageAgg = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
-    WORKFLOW_STAGES.forEach(s => { m[s.id] = { count: 0, revenue: 0 }; });
+    stages.forEach(s => { m[s.id] = { count: 0, revenue: 0 }; });
     visible.forEach(o => {
       const k = o.lifecycle || 'draft';
       if (!m[k]) m[k] = { count: 0, revenue: 0 };
@@ -211,7 +233,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       m[k].revenue += o.revenue;
     });
     return m;
-  }, [visible]);
+  }, [visible, stages]);
 
   // colSpan for the expanded row — covers chevron + every toggleable col + actions,
   // regardless of which are currently hidden via display:none.
@@ -253,10 +275,10 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
           </div>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: `repeat(${WORKFLOW_STAGES.length}, 1fr)`,
+            gridTemplateColumns: `repeat(${stages.length}, 1fr)`,
             gap: 0, padding: '0 8px 12px',
           }}>
-            {WORKFLOW_STAGES.map((s, i) => {
+            {stages.map((s, i) => {
               const agg = stageAgg[s.id] ?? { count: 0, revenue: 0 };
               const active = stageFilter === s.id;
               return (
@@ -286,7 +308,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                     }}>{s.label}</span>
                   </div>
                   <div className="mono" style={{ fontSize: 19, fontWeight: 600, lineHeight: 1, color: 'var(--fg)' }}>{agg.count}</div>
-                  <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 4 }}>{fmtUSD0(agg.revenue)}</div>
+                  <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 4 }}>{fmtUSD0(agg.revenue, locale)}</div>
                 </button>
               );
             })}
@@ -301,15 +323,15 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
         </div>
         <div className="kpi">
           <div className="kpi-label">{t('totalRevenue')}</div>
-          <div className="kpi-value mono">{fmtUSD0(totals.revenue)}</div>
+          <div className="kpi-value mono">{fmtUSD0(totals.revenue, locale)}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">{t('grossProfit')}</div>
-          <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(totals.profit)}</div>
+          <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(totals.profit, locale)}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
-          <div className="kpi-value mono">{fmtUSD0(totals.commission)}</div>
+          <div className="kpi-value mono">{fmtUSD0(totals.commission, locale)}</div>
         </div>
       </div>
 
@@ -324,7 +346,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines)} {t('lines').toLowerCase()}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ position: 'relative' }}>
@@ -420,7 +442,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
           </div>
         </div>
 
-        <div className="table-scroll">
+        <div className="table-scroll" ref={tableScrollRef}>
           {!loadedOnce ? (
             <TableSkeleton rows={10} cols={9} />
           ) : (
@@ -468,19 +490,13 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              const url = `${location.origin}${location.pathname}#/purchase-orders/${o.id}`;
-                              const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
-                              if (typeof share === 'function') {
-                                share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
-                                  if (err.name !== 'AbortError') onToast?.(t('orderIdCopyFailed'), 'error');
-                                });
-                              } else if (navigator.clipboard?.writeText) {
-                                navigator.clipboard.writeText(url)
-                                  .then(() => onToast?.(t('orderIdCopied')))
-                                  .catch(() => onToast?.(t('orderIdCopyFailed'), 'error'));
-                              } else {
-                                onToast?.(t('orderIdCopyFailed'), 'error');
-                              }
+                              shareOrCopy({
+                                url: `${location.origin}${location.pathname}#/purchase-orders/${o.id}`,
+                                title: t('shareOrder'),
+                                copiedMsg: t('orderIdCopied'),
+                                failedMsg: t('orderIdCopyFailed'),
+                                onToast,
+                              });
                             }}
                             aria-label={t('shareOrder')}
                             title={t('shareOrder')}
@@ -490,7 +506,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           </button>
                         </span>
                       </td>
-                      <td className="muted" style={{ display: isVis('date') ? undefined : 'none' }}>{fmtDateShort(o.createdAt)}</td>
+                      <td className="muted" style={{ display: isVis('date') ? undefined : 'none' }}>{fmtDateShort(o.createdAt, locale)}</td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div className="avatar">{o.userInitials}</div>
@@ -513,9 +529,9 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                       </td>
                       <td className="num mono" style={{ display: isVis('lines') ? undefined : 'none' }}>{o.lineCount}</td>
                       <td className="num mono" style={{ display: isVis('qty') ? undefined : 'none' }}>{o.qty}</td>
-                      <td className="num mono" style={{ display: isVis('revenue') ? undefined : 'none' }}>{fmtUSD0(o.revenue)}</td>
-                      <td className="num mono pos" style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit)}</td>
-                      <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission)}</td>
+                      <td className="num mono" style={{ display: isVis('revenue') ? undefined : 'none' }}>{fmtUSD0(o.revenue, locale)}</td>
+                      <td className="num mono pos" style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
+                      <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         <span className="chip">{o.payment === 'company' ? 'Company' : 'Self'}</span>
                       </td>
@@ -525,16 +541,14 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                       <td>
                         <button
                           className="btn icon sm"
-                          disabled={isCompleted(o.status)}
-                          title={isCompleted(o.status) ? t('completedLocked') : t('editOrder')}
-                          style={isCompleted(o.status) ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                          title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (openLines && openLines.id === o.id) onEdit(openLines);
                             else api.get<{ order: Order }>(`/api/orders/${o.id}`).then(r => onEdit(r.order));
                           }}
                         >
-                          <Icon name="edit" size={12} />
+                          <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={12} />
                         </button>
                       </td>
                     </tr>
@@ -555,7 +569,6 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                                 <th className="num">{t('sellUnit')}</th>
                                 <th className="num">{t('revenue')}</th>
                                 <th className="num">{t('profit')}</th>
-                                <th>{t('status')}</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -581,13 +594,12 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                                     </td>
                                     <td className="mono muted">{l.partNumber}</td>
                                     <td className="num">{l.qty}</td>
-                                    <td className="num mono">{fmtUSD0(l.unitCost)}</td>
-                                    <td className="num mono">{l.sellPrice != null ? fmtUSD0(l.sellPrice) : '—'}</td>
-                                    <td className="num mono">{revenue != null ? fmtUSD0(revenue) : '—'}</td>
+                                    <td className="num mono">{fmtUSD0(l.unitCost, locale)}</td>
+                                    <td className="num mono">{l.sellPrice != null ? fmtUSD0(l.sellPrice, locale) : '—'}</td>
+                                    <td className="num mono">{revenue != null ? fmtUSD0(revenue, locale) : '—'}</td>
                                     <td className={'num mono' + (profit != null && profit >= 0 ? ' pos' : profit != null ? ' neg' : '')}>
-                                      {profit != null ? fmtUSD0(profit) : '—'}
+                                      {profit != null ? fmtUSD0(profit, locale) : '—'}
                                     </td>
-                                    <td><span className={'chip dot ' + statusTone(l.status)}>{l.status}</span></td>
                                   </tr>
                                 );
                               })}

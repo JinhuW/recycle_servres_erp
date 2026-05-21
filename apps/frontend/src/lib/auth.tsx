@@ -1,8 +1,33 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, auth as tokenStore, ApiError } from './api';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { api, ApiError } from './api';
 import { loadLookups, resetLookups } from './lookups';
 import { loadWorkspaceSettings, resetWorkspaceSettings } from './workspace';
 import type { User, Lang } from './types';
+
+// Drop all client-side auth state. Shared by the user-initiated logout() and
+// the no-session `auth:unauthorized` path so both clear identically.
+function clearLocalAuthState(setUser: (u: User | null) => void) {
+  setUser(null);
+  resetLookups();
+  resetWorkspaceSettings();
+}
+
+// Decide what `auth:unauthorized` should do. With a live user we run the full
+// logout (server revoke + local reset). With no user — e.g. the bootstrap
+// /api/me 401 on a logged-out cold load — there is no session to revoke, so we
+// skip the pointless POST /api/auth/logout and just ensure local state is
+// clear. Exported for unit testing without a React renderer.
+export function handleUnauthorized(
+  currentUser: User | null,
+  logout: () => Promise<void> | void,
+  setUser: (u: User | null) => void,
+): void {
+  if (currentUser) {
+    void logout();
+  } else {
+    clearLocalAuthState(setUser);
+  }
+}
 
 type AuthState = {
   user: User | null;
@@ -17,16 +42,18 @@ const Ctx = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  // Mirror `user` so the once-bound auth:unauthorized listener can read the
+  // live value without re-subscribing on every user change.
+  const userRef = useRef<User | null>(user);
+  userRef.current = user;
 
-  // On mount: if we have a token, validate it and load DB-backed lookup data
-  // (catalog dropdowns, statuses, payment terms, price sources) in parallel.
-  // Lookups are fetched here so every authenticated page can read them
-  // synchronously from lib/lookups.ts module state.
+  // On mount: bootstrap the session from the auth cookie via /api/me and load
+  // DB-backed lookup data (catalog dropdowns, statuses, payment terms, price
+  // sources) in parallel. Lookups are fetched here so every authenticated page
+  // can read them synchronously from lib/lookups.ts module state. The api
+  // client already attempts a silent refresh before surfacing a 401, so a 401
+  // here just means "no valid session" — treat it as logged-out, quietly.
   useEffect(() => {
-    if (!tokenStore.token) {
-      setLoading(false);
-      return;
-    }
     Promise.all([
       api.get<{ user: User }>('/api/me').then(r => setUser(r.user)),
       // Lookups are best-effort: a transient failure must not look like an
@@ -42,14 +69,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }),
     ])
       .catch((e) => {
-        if (e instanceof ApiError && e.status === 401) tokenStore.token = null;
+        // Not logged in: quietly stay on the login screen, no console error,
+        // no bounce. Re-surface anything that isn't an auth failure.
+        if (e instanceof ApiError && e.status === 401) {
+          setUser(null);
+          return;
+        }
+        // eslint-disable-next-line no-console
+        console.warn('Session bootstrap failed; continuing as logged-out.', e);
+        setUser(null);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const login = async (email: string, password: string) => {
-    const r = await api.post<{ token: string; user: User }>('/api/auth/login', { email, password });
-    tokenStore.token = r.token;
+    const r = await api.post<{ user: User }>('/api/auth/login', { email, password });
     // A lookups failure must not abort an otherwise-successful login; it's
     // best-effort and retry-able on the next call.
     try { await loadLookups(); }
@@ -65,18 +99,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(r.user);
   };
 
-  const logout = () => {
-    tokenStore.token = null;
-    setUser(null);
-    resetLookups();
-    resetWorkspaceSettings();
+  const logout = async () => {
+    // Best-effort: server revokes the refresh token and clears the auth
+    // cookies. Even if it fails (offline/expired) we still drop local state.
+    await api.post('/api/auth/logout', {}).catch(() => {});
+    clearLocalAuthState(setUser);
   };
 
   // api.ts fires `auth:unauthorized` when any call gets a 401 mid-session
   // (expired/revoked token). Drop to the login screen instead of leaving the
-  // user staring at stale data while every request silently fails.
+  // user staring at stale data while every request silently fails. But on a
+  // logged-out cold load the bootstrap's own /api/me 401 also fires this — and
+  // hitting POST /api/auth/logout when there was never a session is pointless
+  // (and noisy). So only do the server logout when a user is actually set;
+  // otherwise just ensure local state is clear. A user-initiated logout()
+  // from the UI is unaffected and always hits the server.
   useEffect(() => {
-    const onUnauthorized = () => logout();
+    // Read the current user lazily via a ref so the once-bound listener still
+    // sees the live value without re-subscribing on every user change.
+    const onUnauthorized = () => handleUnauthorized(userRef.current, logout, setUser);
     window.addEventListener('auth:unauthorized', onUnauthorized);
     return () => window.removeEventListener('auth:unauthorized', onUnauthorized);
     // logout only touches stable setters/module resets; safe to bind once.

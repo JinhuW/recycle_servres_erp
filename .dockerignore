@@ -4,3 +4,9 @@
 **/*.log
 .git
 .claude
+.superpowers
+**/tests
+**/*.test.ts
+infra
+docs
+*.md

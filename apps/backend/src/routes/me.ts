@@ -8,20 +8,35 @@ const me = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 me.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
-  // Lifetime stats for the Profile screen (count, profit, commission).
+  // Lifetime stats for the Profile screen. Realized model: revenue, profit
+  // and commission all come from actual sales (sell_order_lines of Done sell
+  // orders), priced at the sell-order unit_price (NOT the PO-side sell_price,
+  // which is a projection). Commission is credited to the purchaser whose PO
+  // brought the source inventory in. `count` is the number of sold line items
+  // attributed to this purchaser.
   const stats = (await sql`
     SELECT
-      COUNT(*)::int                           AS count,
-      COALESCE(SUM((sell_price - unit_cost) * qty), 0)::float AS profit,
-      COALESCE(SUM((sell_price - unit_cost) * qty * COALESCE(o.commission_rate, 0)), 0)::float AS commission
-    FROM order_lines l
-    JOIN orders o ON o.id = l.order_id
-    WHERE o.user_id = ${u.id} AND l.sell_price IS NOT NULL
-  `)[0] as { count: number; profit: number; commission: number };
+      COUNT(*)::int                                                                AS count,
+      COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                            AS revenue,
+      COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float           AS profit,
+      COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+                   * COALESCE(po.commission_rate, 0)), 0)::float                   AS commission
+    FROM sell_order_lines sol
+    JOIN sell_orders so ON so.id = sol.sell_order_id
+    JOIN order_lines ol ON ol.id = sol.inventory_id
+    JOIN orders po      ON po.id = ol.order_id
+    WHERE so.status = 'Done' AND po.user_id = ${u.id}
+  `)[0] as { count: number; revenue: number; profit: number; commission: number };
 
+  const r2dp = (v: number) => Math.round(v * 100) / 100;
   return c.json({
     user: u,
-    stats,
+    stats: {
+      count: stats.count,
+      revenue: r2dp(stats.revenue),
+      profit: r2dp(stats.profit),
+      commission: r2dp(stats.commission),
+    },
   });
 });
 

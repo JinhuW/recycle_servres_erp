@@ -78,8 +78,28 @@ export type OrderSummary = {
 
 export type Order = OrderSummary & { lines: OrderLine[] };
 
+export type OrderEventKind =
+  | 'submitted'
+  | 'advanced'
+  | 'line_added'
+  | 'line_removed'
+  | 'line_edited'
+  | 'meta_changed';
+
+export type OrderEventChange = { field: string; from: unknown; to: unknown };
+
+export type OrderEvent = {
+  id: string;
+  kind: OrderEventKind;
+  actor: { id: string; name: string; initials: string } | null;
+  detail: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type DraftLine = {
   id?: string;
+  /** Stable client-side key for React lists; never sent to the API. */
+  _cid?: string;
   category: Category;
   brand?: string | null;
   capacity?: string | null;
@@ -180,8 +200,9 @@ export type DashboardData = {
     rpm: number | null;
     health: number | null;
     qty: number;
-    unit_cost: number;
+    unit_cost?: number;
     sell_price: number | null;
+    profit: number;
     created_at: string;
     user_name: string;
     user_initials: string;

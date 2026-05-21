@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, relTime } from '../../lib/format';
 import { priceSources, categoryFilterOptions } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
@@ -65,7 +66,8 @@ const TARGET_MARGIN_FALLBACK = 0.30;
 type Sort = 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples';
 
 export function DesktopMarket() {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('recent');
@@ -84,7 +86,7 @@ export function DesktopMarket() {
           setItems(r.items);
           if (typeof r.targetMargin === 'number') setTargetMargin(r.targetMargin);
         })
-        .catch(console.error)
+        .catch(handleFetchError)
         .finally(() => setLoadedOnce(true));
     }, 200);
     return () => clearTimeout(handle);
@@ -238,7 +240,7 @@ export function DesktopMarket() {
                       </td>
                       <td className="mono muted" style={{ fontSize: 11 }}>{r.partNumber}</td>
                       <td className="num">
-                        <div className="mono" style={{ fontWeight: 600, fontSize: 14, color: 'var(--pos)' }}>{fmtUSD(r.avgSell)}</div>
+                        <div className="mono" style={{ fontWeight: 600, fontSize: 14, color: 'var(--pos)' }}>{fmtUSD(r.avgSell, locale)}</div>
                         <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)' }}>n = {r.samples}</div>
                       </td>
                       <td>
@@ -255,18 +257,18 @@ export function DesktopMarket() {
                           border: '1px dashed color-mix(in oklch, var(--accent) 35%, transparent)',
                         }}>
                           <span style={{ fontSize: 10, color: 'var(--accent-strong)', fontWeight: 600 }}>≤</span>
-                          <span className="mono" style={{ fontWeight: 600, color: 'var(--accent-strong)' }}>{fmtUSD(r.maxBuy)}</span>
+                          <span className="mono" style={{ fontWeight: 600, color: 'var(--accent-strong)' }}>{fmtUSD(r.maxBuy, locale)}</span>
                         </div>
                       </td>
                       <td className="num">
                         <div className="mono" style={{ color: onTarget ? 'var(--fg)' : 'var(--neg)', fontWeight: 500 }}>
-                          {fmtUSD(r.target)}
+                          {fmtUSD(r.target, locale)}
                         </div>
                         <div style={{ fontSize: 10.5, color: onTarget ? 'var(--pos)' : 'var(--neg)' }}>
                           {onTarget ? '✓ on target' : 'over ceiling'}
                         </div>
                       </td>
-                      <td className="muted" style={{ fontSize: 11.5 }}>{relTime(r.updated)}</td>
+                      <td className="muted" style={{ fontSize: 11.5 }}>{relTime(r.updated, locale)}</td>
                       <td>
                         <Icon
                           name={isOpen ? 'chevronDown' : 'chevronRight'}
@@ -317,6 +319,8 @@ export function DesktopMarket() {
 function DetailExpand({
   row, sellHistory, targetMargin,
 }: { row: RefPrice & { maxBuy: number }; sellHistory: number[]; targetMargin: number }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const buyHistory = row.history;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 18 }}>
@@ -347,10 +351,10 @@ function DetailExpand({
           Your buying guide
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <GuideRow label="Avg sell price"        value={fmtUSD(row.avgSell)} tone="pos" emphasis />
-          <GuideRow label="Recommended max buy"   value={fmtUSD(row.maxBuy)}  tone="accent" emphasis sub={`${(targetMargin * 100).toFixed(0)}% margin floor`} />
-          <GuideRow label="Last paid (this team)" value={fmtUSD(row.target)}  sub={row.target <= row.maxBuy ? 'within target' : 'above ceiling — push back'} />
-          <GuideRow label="Range seen"            value={`${fmtUSD0(row.low)} — ${fmtUSD0(row.high)}`} sub="Recent broker quotes" />
+          <GuideRow label="Avg sell price"        value={fmtUSD(row.avgSell, locale)} tone="pos" emphasis />
+          <GuideRow label="Recommended max buy"   value={fmtUSD(row.maxBuy, locale)}  tone="accent" emphasis sub={`${(targetMargin * 100).toFixed(0)}% margin floor`} />
+          <GuideRow label="Last paid (this team)" value={fmtUSD(row.target, locale)}  sub={row.target <= row.maxBuy ? 'within target' : 'above ceiling — push back'} />
+          <GuideRow label="Range seen"            value={`${fmtUSD0(row.low, locale)} — ${fmtUSD0(row.high, locale)}`} sub="Recent broker quotes" />
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
           <GuideRow
             label="Current stock"
@@ -371,7 +375,7 @@ function DetailExpand({
             return (
               <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5 }}>
                 <span style={{ color: 'var(--fg-muted)' }}>{s.label}</span>
-                <span className="mono" style={{ fontWeight: 500 }}>{fmtUSD(v)}</span>
+                <span className="mono" style={{ fontWeight: 500 }}>{fmtUSD(v, locale)}</span>
               </div>
             );
           })}

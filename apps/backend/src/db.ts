@@ -1,62 +1,56 @@
-// Postgres client. Connection string comes from DATABASE_URL. One pooled
-// client per request, torn down when the request ends.
+// Postgres client. Connection string comes from DATABASE_URL.
 //
-// IMPORTANT: in Cloudflare Workers, I/O objects (sockets, streams) are scoped
-// to the request that created them — caching a pg client at module scope
-// triggers "Cannot perform I/O on behalf of a different request". So the
-// client must be created *within* a request and torn down when that request
-// ends. Previously `getDb()` created a brand-new pool on every call and never
-// closed it, so each call leaked up to `max` connections until idle_timeout —
-// route files call getDb many times per request, which exhausts Postgres'
-// max_connections under any real load and takes the whole service down.
-//
-// Fix: one pooled client per request, stored in an AsyncLocalStorage so the
-// 59 existing `getDb(c.env)` call sites keep working unchanged, and closed in
-// the `dbScope` middleware's finally once the response is produced.
+// One shared, lazily-created pool for the whole process. The backend runs
+// under @hono/node-server (Node) where module-scope sockets are fine — the
+// old "new pool per request" design (a Cloudflare Workers I/O-scoping
+// workaround) meant N concurrent requests opened up to N*`max` connections
+// and exhausted Postgres' max_connections under load. postgres.js already
+// pools and is concurrency-safe, so a single shared pool is correct here.
 
 import postgres from 'postgres';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Env } from './types';
 
 type Sql = ReturnType<typeof postgres>;
 
-const requestDb = new AsyncLocalStorage<Sql>();
-
-function createClient(env: Env): Sql {
-  const url = env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL is not configured');
-  return postgres(url, {
-    max: 5,
-    idle_timeout: 20,
-    connect_timeout: 10,
-    prepare: false, // disable prepared statements (safe with poolers; no perf need here)
-  });
-}
+// One shared pool per distinct connection string. Production has exactly one
+// DATABASE_URL, so this is a single process-wide shared pool; tests that
+// inject an alternate URL (e.g. to simulate the DB being unreachable) get
+// their own pool keyed by that URL rather than silently reusing the first.
+const pools = new Map<string, Sql>();
 
 export function getDb(env: Env): Sql {
-  // Inside a request the dbScope middleware has bound a shared client.
-  const scoped = requestDb.getStore();
-  if (scoped) return scoped;
-  // Fallback for non-request contexts (scripts, direct unit calls). Callers
-  // there own the lifecycle; this path is never hit on the request pathway.
-  return createClient(env);
+  const url = env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is not configured');
+  let pool = pools.get(url);
+  if (!pool) {
+    pool = postgres(url, {
+      max: 10,
+      idle_timeout: 20,
+      connect_timeout: 10,
+      prepare: false, // disable prepared statements (safe with poolers; no perf need here)
+    });
+    pools.set(url, pool);
+  }
+  return pool;
 }
 
-// Hono middleware: bind exactly one pooled client for the lifetime of the
-// request, then close it once the response has been produced so the request's
-// connections are released immediately instead of leaking until idle_timeout.
+// Close every shared pool. Intended for test teardown / graceful shutdown so
+// the process can exit without dangling sockets. Safe to call when none
+// have been created.
+export async function closeSharedDb(): Promise<void> {
+  const all = [...pools.values()];
+  pools.clear();
+  await Promise.all(
+    all.map(p => p.end({ timeout: 5 }).catch(() => { /* already closed */ })),
+  );
+}
+
+// Hono middleware: previously bound a per-request pool. The shared pool now
+// lives for the process lifetime, so this is a passthrough kept only so the
+// existing `app.use('*', (c, next) => dbScope(c, next))` mount is unchanged.
 export async function dbScope(
-  c: { env: Env },
+  _c: { env: Env },
   next: () => Promise<void>,
 ): Promise<void> {
-  const client = createClient(c.env);
-  try {
-    await requestDb.run(client, next);
-  } finally {
-    try {
-      await client.end({ timeout: 5 });
-    } catch {
-      /* already closed / nothing in flight */
-    }
-  }
+  await next();
 }

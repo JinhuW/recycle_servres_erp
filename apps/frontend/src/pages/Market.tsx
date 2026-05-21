@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0, relTime } from '../lib/format';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
@@ -10,7 +11,8 @@ import type { RefPrice } from '../lib/types';
 import { PhoneListSkeleton } from '../components/Skeleton';
 
 export function Market() {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<RefPrice[]>([]);
@@ -20,16 +22,17 @@ export function Market() {
   const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
+    let alive = true;
     const handle = setTimeout(() => {
       const params = new URLSearchParams();
       if (filter !== 'all') params.set('category', filter);
       if (search.trim()) params.set('q', search.trim());
       api.get<{ items: RefPrice[] }>(`/api/market?${params}`)
-        .then(r => setItems(r.items))
-        .catch(console.error)
-        .finally(() => setLoadedOnce(true));
+        .then(r => { if (alive) setItems(r.items); })
+        .catch(handleFetchError)
+        .finally(() => { if (alive) setLoadedOnce(true); });
     }, 250);
-    return () => clearTimeout(handle);
+    return () => { alive = false; clearTimeout(handle); };
   }, [filter, search]);
 
   return (
@@ -82,7 +85,7 @@ export function Market() {
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.sub}</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD0(r.avgSell)}</div>
+                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD0(r.avgSell, locale)}</div>
                     <div style={{ fontSize: 10.5, color: trendColor, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                       <Icon name={trendUp ? 'arrowUp' : trendDown ? 'arrowDown' : 'minus'} size={9} />
                       {Math.abs(r.trend * 100).toFixed(1)}%
@@ -100,7 +103,7 @@ export function Market() {
                   <span style={{ fontSize: 11, color: 'var(--accent-strong)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     {t('maxBuy')}
                   </span>
-                  <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent-strong)' }}>≤ {fmtUSD(r.maxBuy)}</span>
+                  <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent-strong)' }}>≤ {fmtUSD(r.maxBuy, locale)}</span>
                 </div>
 
                 {open && (
@@ -108,19 +111,19 @@ export function Market() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: 'var(--fg-muted)' }}>{t('lastPaid')}</span>
                       <span className="mono" style={{ color: onTarget ? 'var(--pos)' : 'var(--neg)', fontWeight: 600 }}>
-                        {fmtUSD(r.target)} {onTarget ? '✓' : '↑ over'}
+                        {fmtUSD(r.target, locale)} {onTarget ? '✓' : '↑ over'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: 'var(--fg-muted)' }}>{t('rangeSeen')}</span>
-                      <span className="mono">{fmtUSD0(r.low)} – {fmtUSD0(r.high)}</span>
+                      <span className="mono">{fmtUSD0(r.low, locale)} – {fmtUSD0(r.high, locale)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: 'var(--fg-muted)' }}>{t('status')}</span>
                       <span className="mono">{t('units', { n: r.stock })}</span>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                      {t('updatedRel', { rel: relTime(r.updated), s: r.samples })}
+                      {t('updatedRel', { rel: relTime(r.updated, locale), s: r.samples })}
                     </div>
                   </div>
                 )}

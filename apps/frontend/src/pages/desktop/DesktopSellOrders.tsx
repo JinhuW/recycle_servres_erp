@@ -6,6 +6,8 @@ import {
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { useRoute, navigate, match } from '../../lib/route';
+import { useEscapeKey } from '../../lib/useEscapeKey';
+import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
@@ -26,14 +28,12 @@ type StatusMetaMap = Record<MetaStatus, StatusMetaEntry>;
 type SellOrderSummary = {
   id: string;
   status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done';
-  discountPct: number;
   notes: string | null;
   createdAt: string;
   customer: { id: string; name: string; short: string; region: string };
   lineCount: number;
   qty: number;
   subtotal: number;
-  discount: number;
   total: number;
 };
 
@@ -56,6 +56,7 @@ type SellOrderLine = {
 
 // Editable line shape used by the edit modal (mirrors the new-order builder).
 type EditLine = {
+  _cid: string;                 // stable client id for React keys (never sent to the API)
   inventoryId: string | null;
   category: SellOrderLine['category'];
   label: string;
@@ -70,6 +71,7 @@ type EditLine = {
 };
 
 const toEditLine = (l: SellOrderLine): EditLine => ({
+  _cid:        crypto.randomUUID(),
   inventoryId: l.inventoryId,
   category:    l.category,
   label:       l.label,
@@ -92,11 +94,9 @@ type SellOrderDetailType = {
   status: SellOrderSummary['status'];
   notes: string | null;
   createdAt: string;
-  discountPct: number;
   customer: { id: string; name: string; short: string; region: string };
   lines: SellOrderLine[];
   subtotal: number;
-  discount: number;
   total: number;
   statusMeta: StatusMetaMap;
 };
@@ -112,7 +112,8 @@ type SellOrdersProps = {
 };
 
 export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersProps = {}) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [orders, setOrders] = useState<SellOrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
@@ -133,7 +134,16 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
       .catch(console.error)
       .finally(() => setLoadedOnce(true));
   };
-  useEffect(reload, [statusFilter]);
+  useEffect(() => {
+    let alive = true;
+    const p = new URLSearchParams();
+    if (statusFilter !== 'all') p.set('status', statusFilter);
+    api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
+      .then(r => { if (alive) setOrders(r.items); })
+      .catch(console.error)
+      .finally(() => { if (alive) setLoadedOnce(true); });
+    return () => { alive = false; };
+  }, [statusFilter]);
 
   const visible = useMemo(() => {
     if (!search.trim()) return orders;
@@ -187,7 +197,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                 <span className={'chip ' + toneFor(s) + ' dot'} style={{ fontSize: 10.5 }}>{shortFor(s)}</span>
               </div>
               <div className="so-stat-num">{stats[s].count}</div>
-              <div className="so-stat-sub">{fmtUSD0(stats[s].revenue)}</div>
+              <div className="so-stat-sub">{fmtUSD0(stats[s].revenue, locale)}</div>
             </button>
           );
         })}
@@ -252,19 +262,13 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          const url = `${location.origin}${location.pathname}#/sell-orders/${o.id}`;
-                          const share = (navigator as Navigator & { share?: (data: { url: string; title: string }) => Promise<void> }).share;
-                          if (typeof share === 'function') {
-                            share.call(navigator, { url, title: t('shareOrder') }).catch((err: Error) => {
-                              if (err.name !== 'AbortError') onToast?.(t('orderIdCopyFailed'), 'error');
-                            });
-                          } else if (navigator.clipboard?.writeText) {
-                            navigator.clipboard.writeText(url)
-                              .then(() => onToast?.(t('orderIdCopied')))
-                              .catch(() => onToast?.(t('orderIdCopyFailed'), 'error'));
-                          } else {
-                            onToast?.(t('orderIdCopyFailed'), 'error');
-                          }
+                          shareOrCopy({
+                            url: `${location.origin}${location.pathname}#/sell-orders/${o.id}`,
+                            title: t('shareOrder'),
+                            copiedMsg: t('orderIdCopied'),
+                            failedMsg: t('orderIdCopyFailed'),
+                            onToast,
+                          });
                         }}
                         aria-label={t('shareOrder')}
                         title={t('shareOrder')}
@@ -278,10 +282,10 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                     <div style={{ fontWeight: 500 }}>{o.customer.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{o.customer.region}</div>
                   </td>
-                  <td className="muted">{fmtDateShort(o.createdAt)}</td>
+                  <td className="muted">{fmtDateShort(o.createdAt, locale)}</td>
                   <td className="num mono">{o.lineCount}</td>
                   <td className="num mono">{o.qty}</td>
-                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total)}</td>
+                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total, locale)}</td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -344,6 +348,8 @@ function SellOrderDetail({
   onSaved: () => void;
   onSwitchToEdit: () => void;
 }) {
+  const { lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
   const [draft, setDraft] = useState<{
     status: SellOrderDetailType['status'];
@@ -353,6 +359,7 @@ function SellOrderDetail({
   } | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Per-status evidence — loaded from the order, mutated live by the dialog,
   // and used to render paperclip badges on each step.
   const [statusMeta, setStatusMeta] = useState<StatusMetaMap | null>(null);
@@ -360,8 +367,10 @@ function SellOrderDetail({
   const [pending, setPending] = useState<MetaStatus | null>(null);
 
   useEffect(() => {
+    let alive = true;
     api.get<{ order: SellOrderDetailType }>(`/api/sell-orders/${id}`)
       .then(r => {
+        if (!alive) return;
         setOrder(r.order);
         setStatusMeta(r.order.statusMeta);
         setDraft({
@@ -372,21 +381,20 @@ function SellOrderDetail({
         });
       })
       .catch(console.error);
+    return () => { alive = false; };
   }, [id]);
 
   // Customer list — only needed when editing (re-pick customer).
   useEffect(() => {
     if (mode !== 'edit') return;
+    let alive = true;
     api.get<{ items: Customer[] }>('/api/customers')
-      .then(r => setCustomers(r.items))
+      .then(r => { if (alive) setCustomers(r.items); })
       .catch(() => {/* picker still shows the current customer */});
+    return () => { alive = false; };
   }, [mode]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
   const linesChanged = !!order && !!draft
@@ -401,11 +409,9 @@ function SellOrderDetail({
   const editTotals = useMemo(() => {
     if (!draft || !order) return null;
     const subtotal = draft.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0);
-    const discount = subtotal * order.discountPct;
     return {
       subtotal: +subtotal.toFixed(2),
-      discount: +discount.toFixed(2),
-      total: +(subtotal - discount).toFixed(2),
+      total: +subtotal.toFixed(2),
     };
   }, [draft, order]);
 
@@ -418,28 +424,52 @@ function SellOrderDetail({
     if (!order || !draft) return;
     if (draft.lines.length === 0) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      await api.patch(`/api/sell-orders/${order.id}`, {
-        status: draft.status,
-        notes: draft.notes,
-        // Only send structural edits when they actually changed — keeps a
-        // plain status/notes save from churning line ids on the backend.
-        ...(customerChanged ? { customerId: draft.customerId } : {}),
-        ...(linesChanged ? {
-          lines: draft.lines.map(l => ({
-            inventoryId: l.inventoryId,
-            category:    l.category,
-            label:       l.label,
-            subLabel:    l.subLabel,
-            partNumber:  l.partNumber,
-            qty:         l.qty,
-            unitPrice:   l.unitPrice,
-            warehouseId: l.warehouseId,
-            condition:   l.condition,
-          })),
-        } : {}),
-      });
+      // Status transitions live on the dedicated endpoint — it takes a row
+      // lock + an idempotency guard so a Done order can't be reverted, and so
+      // a double-submit can't fire the consume-stock side-effects twice. PATCH
+      // refuses to touch status outright.
+      const statusChanged = draft.status !== order.status;
+      if (statusChanged) {
+        await api.post(`/api/sell-orders/${order.id}/status`, {
+          to: draft.status,
+          // Evidence (note + attachments) is uploaded live by
+          // StatusChangeDialog into status-meta tables, so we just announce
+          // the transition here. Re-send the note so the POST passes the
+          // "note or attachments" evidence gate even if nothing was uploaded
+          // through the attachments path.
+          note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
+            ?.[draft.status]?.note ?? undefined,
+        });
+      }
+      // Structural / notes edits go through PATCH. Skip the call entirely if
+      // only status changed — saves a round trip and avoids touching
+      // updated_at when nothing else moved.
+      const patchBody: Record<string, unknown> = {};
+      if ((draft.notes ?? '') !== (order.notes ?? '')) patchBody.notes = draft.notes;
+      if (customerChanged) patchBody.customerId = draft.customerId;
+      if (linesChanged) {
+        patchBody.lines = draft.lines.map(l => ({
+          inventoryId: l.inventoryId,
+          category:    l.category,
+          label:       l.label,
+          subLabel:    l.subLabel,
+          partNumber:  l.partNumber,
+          qty:         l.qty,
+          unitPrice:   l.unitPrice,
+          warehouseId: l.warehouseId,
+          condition:   l.condition,
+        }));
+      }
+      if (Object.keys(patchBody).length > 0) {
+        await api.patch(`/api/sell-orders/${order.id}`, patchBody);
+      }
       onSaved();
+    } catch (e) {
+      // Keep the editor open with the user's edits intact — calling onSaved
+      // here would navigate away and discard unsaved work.
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
     }
@@ -462,7 +492,7 @@ function SellOrderDetail({
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                  {fmtDate(order.createdAt)} · {order.customer.region}
+                  {fmtDate(order.createdAt, locale)} · {order.customer.region}
                 </div>
               </>
             )}
@@ -598,12 +628,12 @@ function SellOrderDetail({
                       </td>
                       <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
                       <td className="num mono">{l.qty}</td>
-                      <td className="num mono">{fmtUSD(l.unitPrice)}</td>
-                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.lineTotal)}</td>
+                      <td className="num mono">{fmtUSD(l.unitPrice, locale)}</td>
+                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.lineTotal, locale)}</td>
                     </tr>
                   ))}
                   {editable && draft.lines.map((l, idx) => (
-                    <tr key={l.inventoryId ?? idx}>
+                    <tr key={l._cid}>
                       <td>
                         <div style={{ fontWeight: 500 }}>{l.label}</div>
                         <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
@@ -637,7 +667,7 @@ function SellOrderDetail({
                           style={{ width: 90 }}
                         />
                       </td>
-                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.qty * l.unitPrice)}</td>
+                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.qty * l.unitPrice, locale)}</td>
                       <td>
                         <button
                           className="btn icon sm"
@@ -659,10 +689,9 @@ function SellOrderDetail({
               )}
 
               <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
-                <div className="so-row"><span>Subtotal</span><span className="mono">{fmtUSD(editable && editTotals ? editTotals.subtotal : order.subtotal)}</span></div>
                 <div className="so-row total">
                   <span>Total</span>
-                  <span className="mono">{fmtUSD(editable && editTotals ? editTotals.total : order.total)}</span>
+                  <span className="mono">{fmtUSD(editable && editTotals ? editTotals.total : order.total, locale)}</span>
                 </div>
               </div>
 
@@ -688,6 +717,11 @@ function SellOrderDetail({
               {!editable && (order.notes ? `Notes: ${order.notes}` : 'No internal notes')}
               {editable && (dirty ? 'Unsaved changes' : 'No changes')}
             </span>
+            {saveError && (
+              <div role="alert" style={{ marginRight: 'auto', alignSelf: 'center', color: 'var(--neg, #c0392b)', fontSize: 13 }}>
+                {saveError}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
               {!editable && order.status !== 'Done' && (

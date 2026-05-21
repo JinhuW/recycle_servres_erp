@@ -565,12 +565,12 @@ try {
     LIMIT 36
   `;
   const sample = [
-    { custIdx: 0, status: 'Draft',            ago: 1,  count: 6, discount: 0.04 },
-    { custIdx: 3, status: 'Draft',            ago: 3,  count: 4, discount: 0.07 },
-    { custIdx: 1, status: 'Shipped',          ago: 6,  count: 6, discount: 0.03 },
-    { custIdx: 2, status: 'Shipped',          ago: 11, count: 5, discount: 0.05 },
-    { custIdx: 4, status: 'Awaiting payment', ago: 18, count: 7, discount: 0.06 },
-    { custIdx: 5, status: 'Done',             ago: 25, count: 3, discount: 0.02 },
+    { custIdx: 0, status: 'Draft',            ago: 1,  count: 6 },
+    { custIdx: 3, status: 'Draft',            ago: 3,  count: 4 },
+    { custIdx: 1, status: 'Shipped',          ago: 6,  count: 6 },
+    { custIdx: 2, status: 'Shipped',          ago: 11, count: 5 },
+    { custIdx: 4, status: 'Awaiting payment', ago: 18, count: 7 },
+    { custIdx: 5, status: 'Done',             ago: 25, count: 3 },
   ];
   let soId = 4000;
   let cursor = 0;
@@ -582,8 +582,8 @@ try {
     const id = 'SL-' + (++soId);
     const created = new Date(Date.now() - s.ago * 86400000);
     await sql`
-      INSERT INTO sell_orders (id, customer_id, status, discount_pct, created_by, created_at, updated_at)
-      VALUES (${id}, ${cust.id}, ${s.status}, ${s.discount}, ${protoToUuid['u1']}, ${created}, ${created})
+      INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
+      VALUES (${id}, ${cust.id}, ${s.status}, ${protoToUuid['u1']}, ${created}, ${created})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];

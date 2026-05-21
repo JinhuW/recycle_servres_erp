@@ -23,7 +23,7 @@ const TONE_FG: Record<string, string> = {
   muted:  'var(--fg-muted)',
 };
 
-function relTime(iso: string) {
+function relTime(iso: string, locale = 'en-US') {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.round(ms / 60000);
   if (m < 1) return 'now';
@@ -32,11 +32,12 @@ function relTime(iso: string) {
   if (h < 24) return h + 'h';
   const days = Math.round(h / 24);
   if (days < 7) return days + 'd';
-  return new Date(iso).toLocaleDateString('en', { month: 'short', day: 'numeric' });
+  return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
 
 export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const unreadCount = items.filter(n => n.unread).length;
   return (
     <>
@@ -93,7 +94,7 @@ export function PhNotificationsSheet({ items, onClose, onMarkAllRead }: Props) {
                     {n.title}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-                    {relTime(n.time)}
+                    {relTime(n.time, locale)}
                   </div>
                 </div>
                 <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', marginTop: 3, lineHeight: 1.45 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { Sidebar, type DesktopView } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -72,9 +72,12 @@ export function DesktopApp() {
     return () => { document.body.classList.remove('desktop'); };
   }, []);
 
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
     setToast({ msg, kind });
-    setTimeout(() => setToast(null), 2600);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
 
   if (loading) {

@@ -207,4 +207,32 @@ describe('vendor-bids manager route', () => {
     expect(after.body.bid.lines[0].line_status).toBe('accepted');
     expect(after.body.bid.lines[0].sell_order_id).not.toBe(null);
   });
+
+  it("accept-but-unavailable flips the line to declined with a reason — vendor sees the truth", async () => {
+    // Pre-condition: the underlying inventory has been sold since the bid
+    // arrived, so the availability subquery returns 0. The old route would
+    // silently write line_status='accepted', accepted_qty=0; the vendor
+    // portal then showed an "accepted" line that couldn't be promoted.
+    const { mgr, bidId, invId } = await setup();
+    // Move the source line out of 'Done' so availability is 0. The simplest
+    // path is to flip its status to In Transit (which is what the inventory
+    // route would do for a transfer); availability subquery filters on Done.
+    const { getTestDb } = await import('./helpers/db');
+    const db = getTestDb();
+    await db`UPDATE order_lines SET status = 'In Transit' WHERE id = ${invId}`;
+
+    const detail = await api<DetailResp>('GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    const lineId = detail.body.bid.lines[0].id;
+    const dec = await api('POST', `/api/vendor-bids/${bidId}/decide`, {
+      token: mgr, body: { lines: [{ lineId, decision: 'accepted', acceptedQty: 1 }] },
+    });
+    expect(dec.status).toBe(200);
+
+    const after = await api<{ bid: { lines: Array<{ line_status: string; accepted_qty: number | null; decline_reason: string | null }> } }>(
+      'GET', `/api/vendor-bids/${bidId}`, { token: mgr });
+    // Crucial: NOT accepted with qty=0. Declined with the no-longer-available reason.
+    expect(after.body.bid.lines[0].line_status).toBe('declined');
+    expect(after.body.bid.lines[0].accepted_qty).toBeNull();
+    expect(after.body.bid.lines[0].decline_reason).toMatch(/no longer available/i);
+  });
 });

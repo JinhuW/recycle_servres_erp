@@ -13,127 +13,165 @@ dashboard.get('/', async (c) => {
   const range = c.req.query('range') ?? '30d';
   const days = RANGE_DAYS[range] ?? 30;
 
-  const scopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+  // Realized financials: revenue/profit/commission come from sell_order_lines
+  // of Done sell orders, priced at sol.unit_price (NOT the PO-side sell_price,
+  // which is a projection — different scope entirely). Commission is credited
+  // to the purchaser whose PO brought the source inventory in. Manual sell-
+  // order lines (inventory_id IS NULL) are excluded — no source PO, no
+  // purchaser to credit.
+  const saleScopeFrag = isManager ? sql`TRUE` : sql`po.user_id = ${u.id}`;
+  const saleDateWin   = sql`so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval`;
+  // The "Recent activity" panel still tracks ingest (the purchasing pipeline),
+  // not sales, so it keeps the PO-side date scoping.
+  const poScopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+  const poDateWin   = sql`o.created_at >= NOW() - (${days} || ' days')::interval`;
+  // Weekly chart spans the selected range, in weekly buckets.
+  const chartWeeksBack = Math.max(1, Math.ceil(days / 7)) - 1;
 
-  const lineRows = await sql<{ qty: number; unit_cost: number; sell_price: number | null }[]>`
-    SELECT l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price
-    FROM order_lines l JOIN orders o ON o.id = l.order_id
-    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
-  `;
-  let revenue = 0, cost = 0;
-  for (const r of lineRows) {
-    const sp = r.sell_price ?? r.unit_cost;
-    revenue += sp * r.qty;
-    cost += r.unit_cost * r.qty;
-  }
-  const profit = revenue - cost;
+  const [totals, cntRows, weeks, leaderboardRaw, byCatRows, recentRows] =
+    await Promise.all([
+      // KPI totals — realized.
+      sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
+        SELECT
+          COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
+          COALESCE(SUM(ol.unit_cost   * sol.qty), 0)::float                              AS cost,
+          COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float             AS profit,
+          COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+                       * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        JOIN orders po      ON po.id = ol.order_id
+        WHERE ${saleDateWin} AND ${saleScopeFrag}
+      `,
+      // Number of distinct Done sell orders in the window (scope-filtered).
+      sql<{ n: number }[]>`
+        SELECT COUNT(DISTINCT so.id)::int AS n
+        FROM sell_orders so
+        JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        JOIN orders po      ON po.id = ol.order_id
+        WHERE ${saleDateWin} AND ${saleScopeFrag}
+      `,
+      // Realized profit per week, bucketed by the sell order's Done date.
+      sql<{ label: string; profit: number }[]>`
+        WITH series AS (
+          SELECT generate_series(
+            date_trunc('week', NOW()) - (${chartWeeksBack} || ' weeks')::interval,
+            date_trunc('week', NOW()),
+            INTERVAL '1 week'
+          ) AS week_start
+        )
+        SELECT to_char(s.week_start,'IW') AS label,
+               COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+        FROM series s
+        LEFT JOIN sell_orders so
+          ON so.status = 'Done'
+         AND so.updated_at >= s.week_start
+         AND so.updated_at <  s.week_start + INTERVAL '1 week'
+        LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+        LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+        LEFT JOIN orders po      ON po.id = ol.order_id
+                                AND (${isManager}::boolean OR po.user_id = ${u.id})
+        GROUP BY s.week_start ORDER BY s.week_start
+      `,
+      // Leaderboard — realized per purchaser (the PO owner). LEFT JOIN keeps
+      // purchasers with zero realized sales on the board with 0s.
+      sql<{
+        id: string; name: string; initials: string; email: string; role: string;
+        count: number; revenue: number; profit: number; commission: number;
+      }[]>`
+        WITH per_user AS (
+          SELECT po.user_id,
+                 COUNT(*)::int                                                                  AS count,
+                 COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
+                 COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float             AS profit,
+                 COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+                              * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
+          FROM sell_order_lines sol
+          JOIN sell_orders so ON so.id = sol.sell_order_id
+          JOIN order_lines ol ON ol.id = sol.inventory_id
+          JOIN orders po      ON po.id = ol.order_id
+          WHERE so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval
+          GROUP BY po.user_id
+        )
+        SELECT u.id, u.name, u.initials, u.email, u.role,
+               COALESCE(pu.count,      0)::int   AS count,
+               COALESCE(pu.revenue,    0)::float AS revenue,
+               COALESCE(pu.profit,     0)::float AS profit,
+               COALESCE(pu.commission, 0)::float AS commission
+        FROM users u
+        LEFT JOIN per_user pu ON pu.user_id = u.id
+        WHERE u.role = 'purchaser'
+        ORDER BY profit DESC
+      `,
+      // Per-category realized rollup. sol.category is the snapshot taken at
+      // sale time and is what reporting should reflect.
+      sql<{ category: string; count: number; revenue: number; profit: number }[]>`
+        SELECT sol.category, COUNT(*)::int AS count,
+               COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
+               COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        JOIN orders po      ON po.id = ol.order_id
+        WHERE ${saleDateWin} AND ${saleScopeFrag}
+        GROUP BY sol.category
+      `,
+      // Recent activity — tracks ingest (purchasing), not sales, so it stays
+      // PO-line based with the PO date window.
+      sql<Record<string, unknown>[]>`
+        SELECT l.id, l.category, l.brand, l.capacity, l.type, l.interface, l.description,
+               l.rpm, l.health::float AS health,
+               l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
+               o.created_at, o.id AS order_id,
+               u.id AS user_id, u.name AS user_name, u.initials AS user_initials
+        FROM order_lines l JOIN orders o ON o.id = l.order_id JOIN users u ON u.id = o.user_id
+        WHERE ${poDateWin} AND ${poScopeFrag} ORDER BY o.created_at DESC, l.position ASC LIMIT 4
+      `,
+    ]);
 
-  // Commission is the per-order rate the manager set, applied to that order's
-  // profit, summed over the scope. NULL rate = $0. LEFT JOIN keeps line-less
-  // orders (profit 0) so this stays equal to the leaderboard's inner-JOIN CTE.
-  const perOrder = await sql<{ profit: number; commission_rate: number | null }[]>`
-    SELECT
-      COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
-      o.commission_rate::float AS commission_rate
-    FROM orders o
-    LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
-    GROUP BY o.id, o.commission_rate
-  `;
-  let commission = 0;
-  for (const r of perOrder) commission += r.profit * (r.commission_rate ?? 0);
-  commission = +commission.toFixed(2);
+  const t = totals[0];
+  const r2dp = (v: number) => Math.round(v * 100) / 100;
+  const revenue    = r2dp(t.revenue);
+  const cost       = r2dp(t.cost);
+  const profit     = r2dp(t.profit);
+  const commission = r2dp(t.commission);
+  const cnt = cntRows[0].n;
 
-  const cnt = (await sql<{ n: number }[]>`
-    SELECT COUNT(DISTINCT o.id)::int AS n FROM orders o
-    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
-  `)[0].n;
-
-  const weeks = await sql<{ label: string; profit: number }[]>`
-    WITH series AS (
-      SELECT generate_series(
-        date_trunc('week', NOW()) - INTERVAL '7 weeks',
-        date_trunc('week', NOW()),
-        INTERVAL '1 week'
-      ) AS week_start
-    )
-    SELECT to_char(s.week_start,'IW') AS label,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
-    FROM series s
-    LEFT JOIN orders o ON o.created_at >= s.week_start AND o.created_at < s.week_start + INTERVAL '1 week' AND ${scopeFrag}
-    LEFT JOIN order_lines l ON l.order_id = o.id
-    GROUP BY s.week_start ORDER BY s.week_start
-  `;
-
-  // Top contributors (purchasers only) — used by both roles, but only managers
-  // see the full list; purchasers see their rank. Honors the same ?range=
-  // window as the rest of the dashboard (PRD §6.8). Commission is
-  // SUM(order profit × the order's commission_rate), selected in the per_order
-  // CTE below; a NULL rate counts as 0.
-  const leaderboardRaw = await sql<{
-    id: string; name: string; initials: string; email: string; role: string;
-    count: number; revenue: number; profit: number; commission: number;
-  }[]>`
-    WITH per_order AS (
-      SELECT o.id, o.user_id, o.commission_rate::float AS rate,
-             COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
-             COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
-      FROM orders o JOIN order_lines l ON l.order_id = o.id
-      WHERE o.created_at >= NOW() - (${days} || ' days')::interval
-      GROUP BY o.id, o.user_id, o.commission_rate
-    )
-    SELECT u.id, u.name, u.initials, u.email, u.role,
-           COUNT(DISTINCT po.id)::int AS count,
-           COALESCE(SUM(po.revenue), 0)::float AS revenue,
-           COALESCE(SUM(po.profit), 0)::float AS profit,
-           COALESCE(SUM(po.profit * COALESCE(po.rate, 0)), 0)::float AS commission
-    FROM users u JOIN per_order po ON po.user_id = u.id
-    WHERE u.role = 'purchaser'
-    GROUP BY u.id, u.name, u.initials, u.email, u.role
-    ORDER BY profit DESC
-  `;
-  // A purchaser sees everyone's rank but only their own financials (PRD §6.8).
+  // Top contributors (purchasers only). A purchaser sees everyone's rank but
+  // only their own financials (PRD §6.8).
   const leaderboard = leaderboardRaw.map(row => {
     const showFinancials = isManager || row.id === u.id;
     return {
-      id: row.id, name: row.name, initials: row.initials, email: row.email, role: row.role,
+      id: row.id, name: row.name, initials: row.initials,
+      email: showFinancials ? row.email : null, role: row.role,
       count: row.count,
-      revenue: showFinancials ? row.revenue : null,
-      profit: showFinancials ? row.profit : null,
-      commission: showFinancials ? +row.commission.toFixed(2) : null,
+      revenue: showFinancials ? r2dp(row.revenue) : null,
+      profit: showFinancials ? r2dp(row.profit) : null,
+      commission: showFinancials ? r2dp(row.commission) : null,
     };
   });
 
-  const byCatRows = await sql<{ category: string; count: number; revenue: number; profit: number }[]>`
-    SELECT l.category, COUNT(*)::int AS count,
-           COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float AS revenue,
-           COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit
-    FROM order_lines l JOIN orders o ON o.id = l.order_id
-    WHERE o.created_at >= NOW() - (${days} || ' days')::interval AND ${scopeFrag}
-    GROUP BY l.category
-  `;
   const byCat: Record<string, { count: number; revenue: number; profit: number }> = {};
-  for (const r of byCatRows) byCat[r.category] = { count: r.count, revenue: r.revenue, profit: r.profit };
+  for (const r of byCatRows) byCat[r.category] = { count: r.count, revenue: r2dp(r.revenue), profit: r2dp(r.profit) };
 
-  // Recent activity — latest 4 lines, with denormalized user info for the row.
-  const recentRows = await sql<Record<string, unknown>[]>`
-    SELECT l.id, l.category, l.brand, l.capacity, l.type, l.interface, l.description,
-           l.rpm, l.health::float AS health,
-           l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
-           o.created_at, o.id AS order_id,
-           u.id AS user_id, u.name AS user_name, u.initials AS user_initials
-    FROM order_lines l JOIN orders o ON o.id = l.order_id JOIN users u ON u.id = o.user_id
-    WHERE ${scopeFrag} ORDER BY o.created_at DESC, l.position ASC LIMIT 4
-  `;
-  // Match inventory's role-based cost-strip (PRD §6.8): purchasers don't see unit_cost.
-  const recent = isManager
-    ? recentRows
-    : recentRows.map(({ unit_cost: _uc, ...rest }) => rest);
+  // Recent activity — latest 4 ingest lines. Compute projected profit per row
+  // before the cost-strip (purchasers don't see unit_cost per PRD §6.8).
+  const recent = recentRows.map(r => {
+    const unitCost = Number(r.unit_cost) || 0;
+    const sellPrice = r.sell_price == null ? unitCost : Number(r.sell_price);
+    const qty = Number(r.qty) || 0;
+    const projectedProfit = (sellPrice - unitCost) * qty;
+    const { unit_cost, ...rest } = r;
+    return isManager ? { ...rest, unit_cost, profit: projectedProfit } : { ...rest, profit: projectedProfit };
+  });
 
   return c.json({
     role: u.role,
     kpis: { count: cnt, cost, revenue, profit, commission },
-    weeks, leaderboard, byCat, recent,
+    weeks: weeks.map(w => ({ ...w, profit: r2dp(w.profit) })),
+    leaderboard, byCat, recent,
   });
 });
 

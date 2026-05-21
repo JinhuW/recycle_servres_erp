@@ -2,9 +2,17 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { scanLabel } from '../ai';
+import { normalizeFields } from '../ai/normalize';
+import { getUploadLimits } from '../lib/settings';
 import type { Env, LineCategory, User } from '../types';
 
 const scan = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+
+// Per-user sliding-window rate limit: max 20 scans per 60-second window.
+// Keys are user IDs; values are arrays of timestamps (ms) for recent calls.
+const scanTimestamps = new Map<string, number[]>();
+const SCAN_WINDOW_MS = 60_000;
+const SCAN_MAX = 20;
 
 // Single endpoint: receive a multipart upload, store the image in R2 (same
 // bucket as sell-order attachments, under a label-scans/ prefix), run OCR,
@@ -12,6 +20,21 @@ const scan = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 // calls this once per shot.
 scan.post('/label', async (c) => {
   const u = c.var.user;
+
+  // Rate-limit check: slide the window forward, then count.
+  const now = Date.now();
+  const cutoff = now - SCAN_WINDOW_MS;
+  const prev = (scanTimestamps.get(u.id) ?? []).filter(t => t > cutoff);
+  if (prev.length >= SCAN_MAX) {
+    const retryAfter = Math.ceil((prev[0]! - cutoff) / 1000);
+    return c.json(
+      { error: 'Too many scans, please wait.' },
+      429,
+      { 'Retry-After': String(retryAfter) },
+    );
+  }
+  prev.push(now);
+  scanTimestamps.set(u.id, prev);
   const sql = getDb(c.env);
 
   const form = await c.req.formData().catch(() => null);
@@ -25,6 +48,20 @@ scan.post('/label', async (c) => {
   if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
   if (!category || !['RAM', 'SSD', 'HDD', 'Other'].includes(category)) {
     return c.json({ error: 'category must be RAM | SSD | HDD | Other' }, 400);
+  }
+
+  // Reject unscannable / abusive uploads BEFORE touching R2 or the LLM. This
+  // is a camera label flow so only images are allowed (the workspace MIME
+  // allowlist may also permit PDFs for sell-order attachments — filter those
+  // out here). Size cap is the workspace-configurable upload_max_bytes.
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  const imageMime = new Set([...allowedMime].filter(m => m.startsWith('image/')));
+  const mime = file.type || '';
+  if (!imageMime.has(mime)) {
+    return c.json({ error: `unsupported image type: ${mime || 'unknown'}` }, 415);
+  }
+  if (file.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
   // Upload first, then OCR. If upload fails the user retries with the same
@@ -50,6 +87,11 @@ scan.post('/label', async (c) => {
     console.error('ocr error', e);
     return c.json({ error: 'label OCR failed — retry the shot' }, 502);
   }
+
+  // Canonicalise to the catalog vocabulary before it is stored or returned —
+  // otherwise near-miss values ("32 GB", "4800 MT/s", generation-in-`type`)
+  // never match a UI dropdown and silently vanish from the form.
+  result.fields = normalizeFields(category, result.fields);
 
   await sql`
     INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category, extracted, confidence, provider)

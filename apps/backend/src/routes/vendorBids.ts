@@ -42,11 +42,12 @@ vendorBids.get('/:id', async (c) => {
     sub_label: string | null; category: string; offered_qty: number;
     offered_unit_price: number; line_status: string; accepted_qty: number | null;
     accepted_unit_price: number | null; sell_order_id: string | null;
-    available: number }[]>`
+    available: number; decline_reason: string | null }[]>`
     SELECT bl.id, bl.inventory_id, bl.label, bl.sub_label, bl.category,
            bl.offered_qty, bl.offered_unit_price::float AS offered_unit_price,
            bl.line_status, bl.accepted_qty,
            bl.accepted_unit_price::float AS accepted_unit_price, bl.sell_order_id,
+           bl.decline_reason,
            COALESCE((SELECT ol.qty FROM order_lines ol
                      WHERE ol.id = bl.inventory_id AND ol.status = 'Done'), 0) AS available
     FROM vendor_bid_lines bl WHERE bl.bid_id = ${id} ORDER BY bl.position
@@ -68,15 +69,34 @@ vendorBids.post('/:id/decide', async (c) => {
   }
 
   await sql.begin(async (tx) => {
+    // Bulk-lock all targeted lines in one query (N+1 collapse). Only lines
+    // that belong to this bid and are not yet promoted (sell_order_id IS NULL)
+    // are lockable — promoted lines are silently skipped (existing behaviour).
+    const lineIds = body.lines.map(d => d.lineId);
+    const locked = await tx<{ id: string; offered_qty: number; offered_unit_price: number;
+      inventory_id: string | null }[]>`
+      SELECT id, offered_qty, offered_unit_price::float AS offered_unit_price, inventory_id
+      FROM vendor_bid_lines
+      WHERE id = ANY(${lineIds}::uuid[]) AND bid_id = ${id} AND sell_order_id IS NULL
+      FOR UPDATE
+    `;
+    const lockedMap = new Map(locked.map(l => [l.id, l]));
+
+    // Bulk-read availability for all inventory-backed lines in one query.
+    const inventoryIds = locked
+      .map(l => l.inventory_id)
+      .filter((v): v is string => v !== null);
+    const availRows = inventoryIds.length > 0
+      ? await tx<{ id: string; qty: number }[]>`
+          SELECT id, qty FROM order_lines
+          WHERE id = ANY(${inventoryIds}::uuid[]) AND status = 'Done'
+        `
+      : [] as { id: string; qty: number }[];
+    const availMap = new Map(availRows.map(r => [r.id, r.qty]));
+
     for (const d of body.lines) {
-      const ln = (await tx<{ offered_qty: number; offered_unit_price: number;
-        inventory_id: string | null }[]>`
-        SELECT offered_qty, offered_unit_price::float AS offered_unit_price, inventory_id
-        FROM vendor_bid_lines
-        WHERE id = ${d.lineId} AND bid_id = ${id} AND sell_order_id IS NULL
-        FOR UPDATE
-      `)[0];
-      if (!ln) continue;
+      const ln = lockedMap.get(d.lineId);
+      if (!ln) continue; // not found or already promoted — skip
       if (d.decision !== 'accepted' && d.decision !== 'declined') continue;
       if (d.decision === 'declined') {
         await tx`
@@ -87,15 +107,27 @@ vendorBids.post('/:id/decide', async (c) => {
         `;
         continue;
       }
-      const avail = (await tx<{ qty: number }[]>`
-        SELECT COALESCE((SELECT qty FROM order_lines
-          WHERE id=${ln.inventory_id} AND status='Done'),0) AS qty
-      `)[0].qty;
+      const avail = ln.inventory_id !== null ? (availMap.get(ln.inventory_id) ?? 0) : Infinity;
       const wantQty = Number.isInteger(d.acceptedQty) ? (d.acceptedQty as number) : ln.offered_qty;
-      const qty = Math.max(0, Math.min(wantQty, avail));
+      const qty = Math.max(0, Math.min(wantQty, avail === Infinity ? wantQty : avail));
       const ap = d.acceptedUnitPrice;
       const price = (typeof ap === 'number' && Number.isFinite(ap) && ap >= 0 && ap <= 1e9)
         ? ap : ln.offered_unit_price;
+      // The manager said "accept" but the referenced inventory has been
+      // closed / consumed since the bid arrived (avail==0). Silently
+      // writing accepted_qty=0 looked accepted to the vendor while being
+      // unpromotable to a sell order. Flip to declined with a reason so the
+      // vendor portal shows the truth.
+      if (qty <= 0) {
+        await tx`
+          UPDATE vendor_bid_lines
+          SET line_status='declined', accepted_qty=NULL, accepted_unit_price=NULL,
+              decided_at=NOW(), decided_by=${u.id},
+              decline_reason='no longer available'
+          WHERE id=${d.lineId}
+        `;
+        continue;
+      }
       await tx`
         UPDATE vendor_bid_lines
         SET line_status='accepted', accepted_qty=${qty}, accepted_unit_price=${price},
@@ -123,9 +155,10 @@ vendorBids.post('/:id/promote', async (c) => {
 
   type Outcome = { code: 201; sellId: string } | { code: 400; msg: string };
   let outcome: Outcome = { code: 400, msg: 'no accepted lines to promote' };
-  const sellId = await nextHumanId(sql, 'SL', 'SL');
+  let sellId!: string;
 
   await sql.begin(async (tx) => {
+    sellId = await nextHumanId(tx, 'SL', 'SL');
     const head = (await tx<{ customer_id: string }[]>`
       SELECT customer_id FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
     if (!head) { outcome = { code: 400, msg: 'bid not found' }; return; }
@@ -140,9 +173,31 @@ vendorBids.post('/:id/promote', async (c) => {
       ORDER BY position FOR UPDATE
     `;
     if (lines.length === 0) { outcome = { code: 400, msg: 'no accepted lines to promote' }; return; }
+
+    // accepted_qty was recorded at decide-time. Revalidate the underlying
+    // inventory under a row lock before creating sell-order lines, exactly
+    // like validateSellLines does for a normal sell order — otherwise stock
+    // consumed/closed since decide gets oversold. Manual lines (no
+    // inventory_id) skip the check.
+    for (const l of lines) {
+      if (!l.inventory_id) continue;
+      const inv = (await tx<{ qty: number; status: string }[]>`
+        SELECT qty, status FROM order_lines WHERE id = ${l.inventory_id} LIMIT 1 FOR UPDATE
+      `)[0];
+      if (!inv) {
+        outcome = { code: 400, msg: `inventory line ${l.inventory_id} not found` }; return;
+      }
+      if (inv.status !== 'Reviewing' && inv.status !== 'Done') {
+        outcome = { code: 400, msg: `inventory line not sellable (status=${inv.status})` }; return;
+      }
+      if (l.accepted_qty > inv.qty) {
+        outcome = { code: 400, msg: `qty ${l.accepted_qty} exceeds inventory available ${inv.qty}` }; return;
+      }
+    }
+
     await tx`
-      INSERT INTO sell_orders (id, customer_id, status, discount_pct, notes, created_by)
-      VALUES (${sellId}, ${head.customer_id}, 'Draft', 0,
+      INSERT INTO sell_orders (id, customer_id, status, notes, created_by)
+      VALUES (${sellId}, ${head.customer_id}, 'Draft',
               ${'From vendor bid ' + id}, ${u.id})
     `;
     for (let i = 0; i < lines.length; i++) {

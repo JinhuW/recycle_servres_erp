@@ -5,6 +5,7 @@ import { PhSparkline } from '../components/PhSparkline';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
 import type { DashboardData } from '../lib/types';
@@ -18,12 +19,15 @@ type Props = {
 };
 
 export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCount }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
-    api.get<DashboardData>('/api/dashboard').then(setData).catch(console.error);
+    let alive = true;
+    api.get<DashboardData>('/api/dashboard').then(r => { if (alive) setData(r); }).catch(handleFetchError);
+    return () => { alive = false; };
   }, []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -88,7 +92,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           border: '1px solid color-mix(in oklch, var(--accent) 22%, var(--border))',
         }}>
           <div className="ph-kpi-label">{isManager ? t('grossProfit') : t('profitYouGenerated')}</div>
-          <div className="ph-kpi-value" style={{ fontSize: 30, color: 'var(--accent-strong)' }}>{fmtUSD0(totals.profit)}</div>
+          <div className="ph-kpi-value" style={{ fontSize: 30, color: 'var(--accent-strong)' }}>{fmtUSD0(totals.profit, locale)}</div>
           <div className="ph-kpi-trend" style={{ color: 'var(--pos)' }}>
             <Icon name="arrowUp" size={11} /> {t('vsLast30', { pct: '—' })}
           </div>
@@ -104,11 +108,11 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
           <div className="ph-kpi">
             <div className="ph-kpi-label">{t('revenue')}</div>
-            <div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(totals.revenue)}</div>
+            <div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(totals.revenue, locale)}</div>
           </div>
           <div className="ph-kpi">
             <div className="ph-kpi-label">{isManager ? t('commissionPaid') : t('yourCommission')}</div>
-            <div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(totals.commission)}</div>
+            <div className="ph-kpi-value" style={{ fontSize: 18 }}>{fmtUSD0(totals.commission, locale)}</div>
           </div>
         </div>
         )}
@@ -145,7 +149,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{t('youreRank', { n: myRank + 1, total: lb.length })}</div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-                    {myRank > 0 && t('behindBy', { amt: fmtUSD0(lb[myRank - 1].profit - lb[myRank].profit), name: lb[myRank - 1].name.split(' ')[0] })}
+                    {myRank > 0 && t('behindBy', { amt: fmtUSD0(lb[myRank - 1].profit - lb[myRank].profit, locale), name: lb[myRank - 1].name.split(' ')[0] })}
                     {myRank === 0 && t('leadingTeam')}
                   </div>
                 </div>
@@ -167,7 +171,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{row.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('nOrders', { n: row.count })}</div>
                   </div>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD0(row.profit)}</div>
+                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD0(row.profit, locale)}</div>
                 </div>
               ))}
             </div>
@@ -184,7 +188,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                       : r.category === 'SSD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? 'Item');
-          const profit = ((r.sell_price ?? r.unit_cost) - r.unit_cost) * r.qty;
+          const profit = r.profit ?? 0;
           return (
             <div key={r.id} className="ph-row">
               <div className="ph-mini-avatar">{r.user_initials}</div>
@@ -192,9 +196,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                 <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {label}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{r.user_name.split(' ')[0]} · {relTime(r.created_at)} · {t('qtyShort', { n: r.qty })}</div>
+                <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{r.user_name.split(' ')[0]} · {relTime(r.created_at, locale)} · {t('qtyShort', { n: r.qty })}</div>
               </div>
-              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(profit)}</div>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(profit, locale)}</div>
             </div>
           );
         })}

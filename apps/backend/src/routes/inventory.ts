@@ -457,36 +457,67 @@ inventory.patch('/:id', async (c) => {
   if (body.health !== undefined && body.health !== null && (body.health < 0 || body.health > 100)) {
     return c.json({ error: 'health must be between 0 and 100' }, 400);
   }
+  // Field range gates — surface as 400s before we ever reach the DB. Without
+  // these, qty=0 / negative price hit a CHECK constraint and surfaced as a
+  // 500 (looks like an internal error to the caller).
+  if (body.qty !== undefined && (!Number.isInteger(body.qty) || body.qty <= 0)) {
+    return c.json({ error: 'qty must be a positive integer' }, 400);
+  }
+  if (body.unitCost !== undefined && (!Number.isFinite(body.unitCost) || body.unitCost < 0)) {
+    return c.json({ error: 'unitCost must be ≥ 0' }, 400);
+  }
+  if (body.sellPrice !== undefined && body.sellPrice !== null &&
+      (!Number.isFinite(body.sellPrice) || body.sellPrice < 0)) {
+    return c.json({ error: 'sellPrice must be ≥ 0' }, 400);
+  }
 
-  const before = (await sql`SELECT * FROM order_lines WHERE id = ${id} LIMIT 1`)[0];
-  if (!before) return c.json({ error: 'Not found' }, 404);
-
-  // Purchasers can only edit their own lines, and not status/pricing.
-  const orderRow = (await sql`SELECT user_id FROM orders WHERE id = ${before.order_id} LIMIT 1`)[0];
-  if (u.role !== 'manager' && orderRow.user_id !== u.id) {
+  // Permission probe runs outside the tx — it doesn't write and the user_id
+  // on the parent order doesn't change under us.
+  const probe = (await sql<{ user_id: string }[]>`
+    SELECT o.user_id FROM order_lines ol
+    JOIN orders o ON o.id = ol.order_id
+    WHERE ol.id = ${id} LIMIT 1
+  `)[0];
+  if (!probe) return c.json({ error: 'Not found' }, 404);
+  if (u.role !== 'manager' && probe.user_id !== u.id) {
     return c.json({ error: 'Forbidden' }, 403);
   }
   if (u.role !== 'manager' && (body.status !== undefined || body.sellPrice !== undefined)) {
     return c.json({ error: 'Only managers can change status or sell price' }, 403);
   }
 
-  // A line committed to an open (non-Done) sell order is "spoken for": editing
-  // its qty or status out from under the deal silently corrupts that sell
-  // order's totals/sellability. Mirrors the reopen guard (sell_count > 0) and
-  // the one-active-sell-order-per-line invariant. Other fields stay editable.
-  if (body.qty !== undefined || body.status !== undefined) {
-    const open = (await sql<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n
-      FROM sell_order_lines sol
-      JOIN sell_orders so ON so.id = sol.sell_order_id
-      WHERE sol.inventory_id = ${id} AND so.status <> 'Done'
+  // The snapshot read, the open-sell-order check and the UPDATE all run in
+  // one transaction with the order_lines row locked FOR UPDATE. Previously
+  // the snapshot + the sell-order check happened on the pool, then the
+  // UPDATE on a separate connection — a concurrent sell-order POST could
+  // attach an open order to the line between the check and the UPDATE and
+  // we'd silently change qty/status out from under the deal.
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'committed' }
+    | { kind: 'ok'; before: Record<string, unknown> };
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const before = (await tx<Record<string, unknown>[]>`
+      SELECT * FROM order_lines WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
-    if (open.n > 0) {
-      return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
-    }
-  }
+    if (!before) return { kind: 'notFound' };
 
-  await sql.begin(async (tx) => {
+    // A line committed to an open (non-Done) sell order is "spoken for":
+    // editing its qty or status out from under the deal silently corrupts
+    // that sell order's totals/sellability. Mirrors the reopen guard
+    // (sell_count > 0) and the one-active-sell-order-per-line invariant.
+    // Other fields stay editable. Run under the row lock so a concurrent
+    // sell-order create can't slip an attachment in between.
+    if (body.qty !== undefined || body.status !== undefined) {
+      const open = (await tx<{ n: number }[]>`
+        SELECT COUNT(*)::int AS n
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        WHERE sol.inventory_id = ${id} AND so.status <> 'Done'
+      `)[0];
+      if (open.n > 0) return { kind: 'committed' };
+    }
+
     await tx`
       UPDATE order_lines SET
         status      = COALESCE(${body.status ?? null}, status),
@@ -519,7 +550,14 @@ inventory.patch('/:id', async (c) => {
         VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
       `;
     }
+    return { kind: 'ok', before };
   });
+
+  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'committed') {
+    return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
+  }
+  const before = outcome.before;
 
   // Margin guard rails (PRD §10): warn the manager — and drop a notification —
   // when a sell price puts the line below cost or below the 15% margin floor.
@@ -632,52 +670,57 @@ inventory.post('/transfer', async (c) => {
   };
 
   const ids = reqLines.map((r) => r.id);
-  const sources = (await sql`
-    SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
-           l.rank, l.speed, l.interface, l.form_factor, l.description, l.part_number,
-           l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
-           l.health, l.rpm, l.scan_image_id, l.scan_confidence,
-           COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh
-    FROM order_lines l
-    JOIN orders o ON o.id = l.order_id
-    WHERE l.id = ANY(${ids}::uuid[])
-  `) as unknown as SourceRow[];
-
-  if (sources.length !== reqLines.length) {
-    return c.json({ error: 'one or more lines not found' }, 404);
-  }
-  const byId = new Map(sources.map((s) => [s.id, s]));
-
-  // Validate every line before touching anything. One bad line aborts the
-  // whole submission — partial transfers across the batch are confusing.
-  for (const r of reqLines) {
-    const s = byId.get(r.id);
-    if (!s) return c.json({ error: `line ${r.id} not found` }, 404);
-    if (s.status !== 'Reviewing' && s.status !== 'Done') {
-      return c.json({ error: `line ${r.id} is ${s.status}; only Reviewing/Done can be transferred` }, 400);
-    }
-    if (r.qty > s.qty) {
-      return c.json({ error: `line ${r.id} only has ${s.qty} units` }, 400);
-    }
-    if (s.effective_wh === toWarehouseId) {
-      return c.json({ error: `line ${r.id} is already in ${toWarehouseId}` }, 400);
-    }
-  }
 
   type ResultLine = { sourceId: string; destId: string; qty: number };
-  const result: ResultLine[] = [];
+  type Outcome =
+    | { kind: 'missing' }
+    | { kind: 'lineNotFound'; id: string }
+    | { kind: 'notSellable'; id: string; status: string }
+    | { kind: 'overQty'; id: string; have: number }
+    | { kind: 'alreadyThere'; id: string }
+    | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
 
-  // Single common source if every line shares one effective warehouse,
-  // else NULL (mixed-source transfer order). effective_wh may be null.
-  const sourceSet = new Set(reqLines.map((r) => byId.get(r.id)!.effective_wh ?? null));
-  const fromWarehouse = sourceSet.size === 1 ? ([...sourceSet][0] ?? null) : null;
+  // Source read, validation and writes all run in one tx with the source
+  // order_lines rows locked FOR UPDATE. Validating a pre-tx snapshot let a
+  // concurrent transfer / qty edit / sell-order consumption change the rows
+  // before the writes — double-moves or a CHECK(qty>0) 500.
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const sources = (await tx`
+      SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
+             l.rank, l.speed, l.interface, l.form_factor, l.description, l.part_number,
+             l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
+             l.health, l.rpm, l.scan_image_id, l.scan_confidence,
+             COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh
+      FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
+      WHERE l.id = ANY(${ids}::uuid[])
+      FOR UPDATE OF l
+    `) as unknown as SourceRow[];
 
-  let transferOrderId = '';
+    if (sources.length !== reqLines.length) return { kind: 'missing' };
+    const byId = new Map(sources.map((s) => [s.id, s]));
 
-  await sql.begin(async (tx) => {
+    // Validate every line before touching anything. One bad line aborts the
+    // whole submission — partial transfers across the batch are confusing.
+    for (const r of reqLines) {
+      const s = byId.get(r.id);
+      if (!s) return { kind: 'lineNotFound', id: r.id };
+      if (s.status !== 'Reviewing' && s.status !== 'Done') {
+        return { kind: 'notSellable', id: r.id, status: s.status };
+      }
+      if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
+      if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
+    }
+
+    const result: ResultLine[] = [];
+
+    // Single common source if every line shares one effective warehouse,
+    // else NULL (mixed-source transfer order). effective_wh may be null.
+    const sourceSet = new Set(reqLines.map((r) => byId.get(r.id)!.effective_wh ?? null));
+    const fromWarehouse = sourceSet.size === 1 ? ([...sourceSet][0] ?? null) : null;
+
     // Human-friendly id like TO-1001, allocated atomically (see id-seq.ts).
-    // Stays inside this transaction via the tx handle.
-    transferOrderId = await nextHumanId(tx, 'TO', 'TO');
+    const transferOrderId = await nextHumanId(tx, 'TO', 'TO');
     await tx`
       INSERT INTO transfer_orders (id, from_warehouse_id, to_warehouse_id, note, created_by, status)
       VALUES (${transferOrderId}, ${fromWarehouse}, ${toWarehouseId}, ${note}, ${u.id}, 'Pending')
@@ -739,9 +782,17 @@ inventory.post('/transfer', async (c) => {
         result.push({ sourceId: r.id, destId, qty: r.qty });
       }
     }
+    return { kind: 'ok', transferOrderId, result };
   });
 
-  return c.json({ ok: true, transferOrderId, lines: result });
+  if (outcome.kind === 'missing') return c.json({ error: 'one or more lines not found' }, 404);
+  if (outcome.kind === 'lineNotFound') return c.json({ error: `line ${outcome.id} not found` }, 404);
+  if (outcome.kind === 'notSellable') {
+    return c.json({ error: `line ${outcome.id} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
+  }
+  if (outcome.kind === 'overQty') return c.json({ error: `line ${outcome.id} only has ${outcome.have} units` }, 400);
+  if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
+  return c.json({ ok: true, transferOrderId: outcome.transferOrderId, lines: outcome.result });
 });
 
 // Receive a whole transfer order. Manager-only. Validates the order is
@@ -772,12 +823,22 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
       SELECT id FROM order_lines
       WHERE transfer_order_id = ${id} AND status = 'In Transit'
     `) as unknown as Array<{ id: string }>;
-    for (const ln of lines) {
-      await tx`UPDATE order_lines SET status = 'Done' WHERE id = ${ln.id}`;
+    if (lines.length > 0) {
+      // Collapse the per-line UPDATE+INSERT pair into two bulk statements.
+      // Receiving a 200-line transfer order used to fire 400 sequential
+      // round-trips inside the tx — under load that's a slow request and
+      // unnecessary lock duration on the order_lines rows.
+      const lineIds = lines.map(l => l.id);
+      await tx`
+        UPDATE order_lines SET status = 'Done'
+        WHERE id = ANY(${lineIds}::uuid[])
+      `;
+      const detail = tx.json({ at: ord.to_warehouse_id, transfer_order_id: id });
       await tx`
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        VALUES (${ln.id}, ${u.id}, 'received',
-                ${tx.json({ at: ord.to_warehouse_id, transfer_order_id: id })})
+        SELECT id, ${u.id}::uuid, 'received', ${detail}::jsonb
+        FROM order_lines
+        WHERE id = ANY(${lineIds}::uuid[])
       `;
     }
     await tx`

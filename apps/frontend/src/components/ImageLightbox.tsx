@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
 import { Icon } from './Icon';
+import { useEscapeKey } from '../lib/useEscapeKey';
 
 type Props = {
   url: string;
@@ -10,13 +10,7 @@ type Props = {
 // Full-screen read-only image viewer. Sits above the desktop LineDrawer
 // (z-index 80) and the mobile shell. Close via X button, backdrop click, or Esc.
 export function ImageLightbox({ url, alt, onClose }: Props) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeKey(onClose);
 
   return (
     <div

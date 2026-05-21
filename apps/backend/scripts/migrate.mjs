@@ -20,7 +20,20 @@ if (!url) {
 const sql = postgres(url, { onnotice: () => {} });
 const reset = process.argv.includes('--reset');
 
+if (reset && process.env.NODE_ENV === 'production' && process.env.ALLOW_DESTRUCTIVE_RESET !== 'true') {
+  console.error(
+    '✗ --reset is not allowed in production (NODE_ENV=production).\n' +
+    '  If you really mean it, re-run with ALLOW_DESTRUCTIVE_RESET=true as well.',
+  );
+  process.exit(1);
+}
+
+// Cluster-wide lock so two instances starting at once (rolling deploy,
+// compose --scale) can't both read an empty ledger and double-apply.
+const MIGRATE_LOCK_KEY = 778423; // arbitrary, dedicated to this runner
+
 try {
+  await sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
   if (reset) {
     console.log('· Dropping existing tables…');
     // Drop everything in the public schema (dev-only). Older versions of this
@@ -38,16 +51,43 @@ try {
     `);
   }
 
+  // Ledger so each migration runs exactly once. Without it every .sql
+  // re-ran on every boot — fine for IF-NOT-EXISTS DDL, but non-idempotent
+  // backfills (0027/0031) re-executed each restart and rescanned all rows.
+  // On --reset the table was just dropped, so it starts empty and every
+  // file (re)applies once against the fresh DB.
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      filename   TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  const applied = new Set(
+    (await sql`SELECT filename FROM schema_migrations`).map(r => r.filename),
+  );
+
   const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
   for (const file of files) {
+    if (applied.has(file)) {
+      console.log('↻ skip (already applied) ' + file);
+      continue;
+    }
     console.log('→ ' + file);
     const ddl = readFileSync(join(migrationsDir, file), 'utf8');
-    await sql.unsafe(ddl);
+    // One transaction per file: a mid-file failure rolls the whole file
+    // back, and the ledger row is only written if the DDL fully succeeded —
+    // so a crashed migration never half-applies and never records itself.
+    await sql.begin(async (tx) => {
+      await tx.unsafe(ddl);
+      await tx`INSERT INTO schema_migrations (filename) VALUES (${file})
+               ON CONFLICT (filename) DO NOTHING`;
+    });
   }
   console.log('✓ migrations applied');
 } catch (e) {
   console.error('✗ migration failed:', e);
   process.exitCode = 1;
 } finally {
+  try { await sql`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`; } catch { /* session ending anyway */ }
   await sql.end();
 }

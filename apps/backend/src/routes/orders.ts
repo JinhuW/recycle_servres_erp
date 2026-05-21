@@ -4,6 +4,9 @@ import { deleteAttachment } from '../r2';
 import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
+import {
+  diff, writeOrderEvent, META_FIELDS, LINE_FIELDS,
+} from '../services/orderAudit';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -38,7 +41,7 @@ orders.get('/', async (c) => {
   const isManager = u.role === 'manager';
 
   const category = c.req.query('category');                 // RAM/SSD/Other
-  const status = c.req.query('status');                     // mapped to line status
+  const status = c.req.query('status');                     // order stage label (Draft/In Transit/…)
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const sortRaw = c.req.query('sort');
   if (sortRaw && !parseSort('orders', sortRaw)) {
@@ -50,11 +53,26 @@ orders.get('/', async (c) => {
   // Build the query in pieces to keep dynamic filters tidy. Each fragment
   // either narrows the result set or evaluates to TRUE so the AND chain
   // composes cleanly regardless of which params are present.
-  const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+  //
+  // Managers don't see drafts — purchasers' in-progress work shouldn't clutter
+  // the manager review queue. Purchasers still see their own drafts.
+  const scopeFrag    = isManager
+    ? sql`o.lifecycle <> 'draft'`
+    : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`o.category = ${category}` : sql`TRUE`;
-  // Per-line status filter via EXISTS so we don't inflate row counts.
-  const statusFrag   = status
-    ? sql`EXISTS (SELECT 1 FROM order_lines l2 WHERE l2.order_id = o.id AND l2.status = ${status})`
+  // The mobile filter chip sends the order's stage label — map to lifecycle.
+  // Filtering on per-line status (an earlier design) silently hid empty drafts
+  // and drafts whose lines had already advanced past 'Draft'.
+  const STATUS_TO_LIFECYCLE: Record<string, string> = {
+    'Draft': 'draft',
+    'In Transit': 'in_transit',
+    'Reviewing': 'reviewing',
+    'Done': 'done',
+  };
+  const statusFrag = status
+    ? (STATUS_TO_LIFECYCLE[status]
+        ? sql`o.lifecycle = ${STATUS_TO_LIFECYCLE[status]}`
+        : sql`FALSE`)
     : sql`TRUE`;
 
   // keyset pagination: (created_at, id) lexicographic
@@ -201,6 +219,48 @@ orders.get('/:id', async (c) => {
   });
 });
 
+// ── Audit timeline for a single order. Same access rules as GET /:id:
+// owner + manager. Used by the PO edit page's Activity panel.
+orders.get('/:id/events', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const owner = (await sql`SELECT user_id FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { user_id: string } | undefined;
+  if (!owner) return c.json({ error: 'Not found' }, 404);
+  if (u.role !== 'manager' && owner.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+
+  const rows = await sql`
+    SELECT e.id, e.kind, e.detail, e.created_at,
+           act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
+    FROM order_events e
+    LEFT JOIN users act ON act.id = e.actor_id
+    WHERE e.order_id = ${id}
+    ORDER BY e.created_at ASC, e.id ASC
+  ` as Array<{
+    id: string;
+    kind: string;
+    detail: Record<string, unknown>;
+    created_at: string;
+    actor_id: string | null;
+    actor_name: string | null;
+    actor_initials: string | null;
+  }>;
+
+  return c.json({
+    events: rows.map(r => ({
+      id: r.id,
+      kind: r.kind,
+      detail: r.detail,
+      createdAt: r.created_at,
+      actor: r.actor_id
+        ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
+        : null,
+    })),
+  });
+});
+
 // ── Create a new order with its lines (purchaser submits from phone).
 orders.post('/', async (c) => {
   const u = c.var.user;
@@ -233,9 +293,10 @@ orders.post('/', async (c) => {
   if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
 
   // Human-friendly id like SO-1289, allocated atomically (see id-seq.ts).
-  const newId = await nextHumanId(sql, 'SO', 'SO');
-
+  // Allocated inside the transaction so a rollback also rolls back the counter.
+  let newId!: string;
   await sql.begin(async (tx) => {
+    newId = await nextHumanId(tx, 'SO', 'SO');
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
@@ -338,12 +399,90 @@ orders.patch('/:id', async (c) => {
     : body.commissionRate === null ? null
     : Math.min(1, Math.max(0, Number(body.commissionRate)));
 
+  // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
+  // a malformed value hits the order_lines CHECK constraint inside the tx
+  // and surfaces as a 500. Both the line-patch list (`lines`) and the
+  // insert list (`addLines`) need the same check.
+  const badLine = (l: { qty?: number | null; unitCost?: number | null; sellPrice?: number | null }) => {
+    if (l.qty !== undefined && l.qty !== null && (!Number.isInteger(l.qty) || l.qty <= 0)) {
+      return 'qty must be a positive integer';
+    }
+    if (l.unitCost !== undefined && l.unitCost !== null && (!Number.isFinite(l.unitCost) || l.unitCost < 0)) {
+      return 'unitCost must be ≥ 0';
+    }
+    if (l.sellPrice !== undefined && l.sellPrice !== null && (!Number.isFinite(l.sellPrice) || l.sellPrice < 0)) {
+      return 'sellPrice must be ≥ 0';
+    }
+    return null;
+  };
+  for (const l of body.lines ?? []) {
+    const e = badLine(l);
+    if (e) return c.json({ error: e }, 400);
+  }
+  for (const l of body.addLines ?? []) {
+    const e = badLine(l);
+    if (e) return c.json({ error: e }, 400);
+  }
+
   // R2 keys of label scans whose lines get removed — deleted after the tx
   // commits (R2 isn't transactional; never delete on a rolled-back change).
   const removedScanKeys: string[] = [];
 
   try {
     await sql.begin(async (tx) => {
+      // Lock the order + read fields we need for audit-diffing. The lock keeps
+      // a concurrent advance from changing lifecycle between our pre/post
+      // snapshots, so the "skip audit while draft" gate is race-free.
+      const orderBefore = (await tx`
+        SELECT id, lifecycle, notes, warehouse_id, payment,
+               total_cost::float AS total_cost,
+               commission_rate::float AS commission_rate
+        FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+      `)[0] as
+        | { id: string; lifecycle: string; notes: string | null; warehouse_id: string | null;
+            payment: string; total_cost: number | null; commission_rate: number | null }
+        | undefined;
+      if (!orderBefore) throw new Error('order disappeared mid-edit');
+      // A Done PO is the closed-book record of what was bought / sold. Any
+      // edit to lines, costs, or commission corrupts that record (and may
+      // also confuse downstream sell-order / commission math). Re-open via
+      // the advance-back flow first if the data really needs to change.
+      // Notes are the only field a manager may freely append on a Done PO.
+      if (orderBefore.lifecycle === 'done') {
+        const touchesFrozen =
+          (Array.isArray(body.lines) && body.lines.length > 0) ||
+          (Array.isArray(body.addLines) && body.addLines.length > 0) ||
+          (Array.isArray(body.removeLineIds) && body.removeLineIds.length > 0) ||
+          body.totalCost !== undefined ||
+          body.commissionRate !== undefined;
+        if (touchesFrozen) {
+          // Outcome thrown out of the tx callback — the surrounding try/catch
+          // re-throws unrecognised errors, so we encode the response intent
+          // on the error message instead.
+          throw new Error('__DONE_LOCKED__');
+        }
+      }
+      const auditable = orderBefore.lifecycle !== 'draft';
+
+      // Snapshot the lines we'll edit / remove so we can diff after the writes.
+      // NUMERIC columns come back as strings from postgres.js by default; cast
+      // to float so the diff compares numbers, not "120.00" string forms.
+      const editIds = Array.isArray(body.lines) ? body.lines.map(l => l.id) : [];
+      const linesBefore = editIds.length
+        ? await tx`
+            SELECT id, status, qty, brand, capacity, type, generation, classification,
+                   rank, speed, interface, form_factor, description, part_number,
+                   condition, rpm,
+                   unit_cost::float AS unit_cost,
+                   sell_price::float AS sell_price,
+                   health::float AS health
+            FROM order_lines WHERE order_id = ${id} AND id = ANY(${editIds}::uuid[])`
+        : [];
+      const beforeMap = new Map<string, Record<string, unknown>>(
+        linesBefore.map(l => [l.id as string, l as Record<string, unknown>]));
+
+      let removedSnapshots: Array<{ id: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+
       const touchesOrder =
         body.totalCost !== undefined ||
         body.notes !== undefined ||
@@ -371,19 +510,20 @@ orders.patch('/:id', async (c) => {
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
-          SELECT scan_image_id FROM order_lines
+          SELECT id, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
-            AND scan_image_id IS NOT NULL
-        ` as { scan_image_id: string }[];
-        for (const r of doomed) removedScanKeys.push(r.scan_image_id);
+        ` as { id: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
+        removedSnapshots = doomed.map(r => ({ id: r.id, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
+        for (const r of doomed) if (r.scan_image_id) removedScanKeys.push(r.scan_image_id);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
       }
       if (Array.isArray(body.lines)) {
         for (const l of body.lines) {
+          const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
           await tx`
             UPDATE order_lines SET
               status         = COALESCE(${l.status ?? null}, status),
-              sell_price     = COALESCE(${l.sellPrice ?? null}, sell_price),
+              sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${l.sellPrice ?? null} ELSE sell_price END,
               qty            = COALESCE(${l.qty ?? null}, qty),
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
               brand          = COALESCE(${l.brand ?? null}, brand),
@@ -404,13 +544,14 @@ orders.patch('/:id', async (c) => {
           `;
         }
       }
+      let addedRows: Array<{ id: string; part_number: string | null; qty: number; unit_cost: number }> = [];
       if (Array.isArray(body.addLines) && body.addLines.length) {
         // New lines default to the order's category. Position appends after
         // current max so they sort to the end.
         const posRow = (await tx`SELECT COALESCE(MAX(position), -1) AS p FROM order_lines WHERE order_id = ${id}`)[0] as { p: number };
         let pos = posRow.p + 1;
         for (const l of body.addLines) {
-          await tx`
+          const inserted = await tx`
             INSERT INTO order_lines (
               order_id, category, brand, capacity, generation, type, classification, rank, speed,
               interface, form_factor, description, part_number, condition, qty,
@@ -426,12 +567,86 @@ orders.patch('/:id', async (c) => {
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
             )
-          `;
+            RETURNING id, part_number, qty, unit_cost::float AS unit_cost
+          ` as { id: string; part_number: string | null; qty: number; unit_cost: number }[];
+          addedRows.push(inserted[0]);
+        }
+      }
+
+      // ── Audit: only for orders that have left Draft. Each kind is written
+      // as its own event row so the timeline reads in the order it happened.
+      if (auditable) {
+        if (touchesOrder) {
+          const orderAfter = (await tx`
+            SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
+                   commission_rate::float AS commission_rate
+            FROM orders WHERE id = ${id} LIMIT 1
+          `)[0] as Record<string, unknown>;
+          const metaChanges = diff(
+            orderBefore as unknown as Record<string, unknown>,
+            orderAfter,
+            META_FIELDS,
+          );
+          if (metaChanges.length) {
+            await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
+          }
+        }
+        // Fetch the post-write snapshot for every edited line in ONE query,
+        // then walk the in-memory map. The previous per-line SELECT was an
+        // N+1 inside the tx: a 50-line PATCH cost 50 sequential round trips
+        // just to render the audit diff.
+        const patches = body.lines ?? [];
+        if (patches.length > 0) {
+          const patchIds = patches.map(p => p.id);
+          const afters = (await tx`
+            SELECT id, status, qty, brand, capacity, type, generation, classification,
+                   rank, speed, interface, form_factor, description, part_number,
+                   condition, rpm,
+                   unit_cost::float AS unit_cost,
+                   sell_price::float AS sell_price,
+                   health::float AS health
+            FROM order_lines WHERE id = ANY(${patchIds}::uuid[])
+          `) as Record<string, unknown>[];
+          const afterMap = new Map<string, Record<string, unknown>>(
+            afters.map(a => [a.id as string, a]),
+          );
+          for (const patch of patches) {
+            const before = beforeMap.get(patch.id);
+            const after = afterMap.get(patch.id);
+            if (!before || !after) continue;
+            const changes = diff(before, after, LINE_FIELDS);
+            if (changes.length) {
+              await writeOrderEvent(tx, id, u.id, 'line_edited', {
+                lineId: patch.id,
+                partNumber: after.part_number ?? null,
+                changes,
+              });
+            }
+          }
+        }
+        for (const r of addedRows) {
+          await writeOrderEvent(tx, id, u.id, 'line_added', {
+            lineId: r.id,
+            partNumber: r.part_number,
+            qty: r.qty,
+            unitCost: r.unit_cost,
+          });
+        }
+        for (const r of removedSnapshots) {
+          await writeOrderEvent(tx, id, u.id, 'line_removed', {
+            lineId: r.id,
+            partNumber: r.part_number,
+            qty: r.qty,
+            unitCost: r.unit_cost,
+          });
         }
       }
     });
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
+    if (msg.includes('__DONE_LOCKED__')) {
+      return c.json({ error: 'Order is Done and cannot be modified. Use the advance-back flow if needed.' }, 409);
+    }
     if (/foreign key|violates|referenced/i.test(msg)) {
       return c.json({ error: 'A line you tried to remove is referenced by a sell-order and cannot be deleted' }, 409);
     }
@@ -459,16 +674,19 @@ orders.post('/draft', async (c) => {
     return c.json({ error: 'category is required' }, 400);
   }
 
-  const newId = await nextHumanId(sql, 'SO', 'SO');
-
-  await sql`
-    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
-    VALUES (
-      ${newId}, ${u.id}, ${body.category},
-      ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
-      ${null}, 'draft'
-    )
-  `;
+  // Allocated inside the transaction so a rollback also rolls back the counter.
+  let newId!: string;
+  await sql.begin(async (tx) => {
+    newId = await nextHumanId(tx, 'SO', 'SO');
+    await tx`
+      INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
+      VALUES (
+        ${newId}, ${u.id}, ${body.category},
+        ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+        ${null}, 'draft'
+      )
+    `;
+  });
 
   return c.json({ id: newId }, 201);
 });
@@ -480,35 +698,49 @@ orders.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
-  const existing = (await sql`
-    SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1
-  `)[0] as { user_id: string; lifecycle: string } | undefined;
-  if (!existing) return c.json({ error: 'Not found' }, 404);
-  if (u.role !== 'manager' && existing.user_id !== u.id) {
-    return c.json({ error: 'Forbidden' }, 403);
-  }
-  if (existing.lifecycle !== 'draft') {
-    return c.json({ error: 'Only Draft orders can be deleted' }, 403);
-  }
+  // Guards + DELETE run in one tx with the orders row locked FOR UPDATE so a
+  // concurrent advance can't move the order out of Draft (or a sell-order
+  // attach a line) between the check and the delete.
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'forbidden' }
+    | { kind: 'notDraft' }
+    | { kind: 'sold' }
+    | { kind: 'ok'; scanned: { scan_image_id: string }[] };
 
-  const sold = (await sql`
-    SELECT 1 FROM sell_order_lines sol
-    JOIN order_lines ol ON ol.id = sol.inventory_id
-    WHERE ol.order_id = ${id} LIMIT 1
-  `)[0];
-  if (sold) {
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const existing = (await tx`
+      SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0] as { user_id: string; lifecycle: string } | undefined;
+    if (!existing) return { kind: 'notFound' };
+    if (u.role !== 'manager' && existing.user_id !== u.id) return { kind: 'forbidden' };
+    if (existing.lifecycle !== 'draft') return { kind: 'notDraft' };
+
+    const sold = (await tx`
+      SELECT 1 FROM sell_order_lines sol
+      JOIN order_lines ol ON ol.id = sol.inventory_id
+      WHERE ol.order_id = ${id} LIMIT 1
+    `)[0];
+    if (sold) return { kind: 'sold' };
+
+    const scanned = await tx`
+      SELECT scan_image_id FROM order_lines
+      WHERE order_id = ${id} AND scan_image_id IS NOT NULL
+    ` as { scan_image_id: string }[];
+
+    await tx`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
+    return { kind: 'ok', scanned };
+  });
+
+  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'forbidden') return c.json({ error: 'Forbidden' }, 403);
+  if (outcome.kind === 'notDraft') return c.json({ error: 'Only Draft orders can be deleted' }, 403);
+  if (outcome.kind === 'sold') {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
   }
 
-  const scanned = await sql`
-    SELECT scan_image_id FROM order_lines
-    WHERE order_id = ${id} AND scan_image_id IS NOT NULL
-  ` as { scan_image_id: string }[];
-
-  await sql`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
-
-  // Best-effort: drop the label-scan images from R2 too.
-  for (const r of scanned) {
+  // Best-effort: drop the label-scan images from R2 too (after the commit).
+  for (const r of outcome.scanned) {
     await deleteAttachment(c.env, r.scan_image_id).catch(e => console.error('r2 delete (order deleted)', e));
   }
 
@@ -532,40 +764,110 @@ orders.post('/:id/advance', async (c) => {
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
 
-  const cur = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { user_id: string; lifecycle: string } | undefined;
-  if (!cur) return c.json({ error: 'Not found' }, 404);
-  if (u.role !== 'manager' && cur.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
-
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE)
     .map((id, position) => ({ id, position }));
-  const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
-  let nextStageId: string;
-  if (body?.toStage) {
-    if (u.role !== 'manager') return c.json({ error: 'Only managers can jump stages' }, 403);
-    if (!stages.find(s => s.id === body.toStage)) return c.json({ error: 'Unknown stage' }, 400);
-    nextStageId = body.toStage;
-  } else {
-    if (curIdx < 0 || curIdx >= stages.length - 1) {
-      return c.json({ error: 'Already at the final stage' }, 409);
-    }
-    nextStageId = stages[curIdx + 1].id;
-  }
-  // Purchaser can only advance Draft → in_transit.
-  if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
-    return c.json({ error: 'Purchasers can only advance Draft to In Transit' }, 403);
-  }
 
-  const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
-  await sql.begin(async (tx) => {
+  // The lifecycle read, all stage guards and the writes run inside one tx
+  // with the orders row locked FOR UPDATE. Reading lifecycle outside the tx
+  // let a concurrent delete (which also guarded on a stale lifecycle read)
+  // delete an order that was being advanced, and vice-versa.
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'forbidden'; msg: string }
+    | { kind: 'badStage'; msg: string }
+    | { kind: 'finalStage' }
+    | { kind: 'committedLines'; offendingLineIds: string[] }
+    | { kind: 'ok'; nextStageId: string };
+
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const cur = (await tx`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
+      | { user_id: string; lifecycle: string } | undefined;
+    if (!cur) return { kind: 'notFound' };
+    if (u.role !== 'manager' && cur.user_id !== u.id) return { kind: 'forbidden', msg: 'Forbidden' };
+
+    const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
+    let nextStageId: string;
+    if (body?.toStage) {
+      if (u.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
+      if (!stages.find(s => s.id === body.toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
+      nextStageId = body.toStage;
+    } else {
+      if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
+      nextStageId = stages[curIdx + 1].id;
+    }
+    // Purchaser can only advance Draft → in_transit.
+    if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
+      return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
+    }
+
+    // Guard: if the transition would move non-Sold lines away from Done status,
+    // check whether any of those lines are committed to an open sell order.
+    // Un-doing a Done line that a sell order depends on leaves it in a status
+    // that validateSellLines rejects, making the sell order unpromotable/broken.
+    const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
+    if (newLineStatus && newLineStatus !== 'Done') {
+      // The transition sets lines to something other than Done — any lines
+      // currently Done that are referenced by open sell orders will break.
+      const committed = await tx<{ id: string }[]>`
+        SELECT DISTINCT ol.id
+        FROM order_lines ol
+        JOIN sell_order_lines sol ON sol.inventory_id = ol.id
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        WHERE ol.order_id = ${id}
+          AND ol.status = 'Done'
+          AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
+      `;
+      if (committed.length > 0) {
+        return { kind: 'committedLines', offendingLineIds: committed.map(r => r.id) };
+      }
+    }
     await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
+
+    // PO-level audit: the Draft → In Transit transition is the "submitted"
+    // baseline (snapshot of lineCount + totalCost); every subsequent advance
+    // is an `advanced` event with from/to.
+    if (cur.lifecycle === 'draft' && nextStageId === 'in_transit') {
+      const snap = (await tx`
+        SELECT COUNT(*)::int AS line_count,
+               COALESCE(SUM(qty), 0)::int AS qty,
+               COALESCE(SUM(qty * unit_cost), 0)::float AS total_cost
+        FROM order_lines WHERE order_id = ${id}
+      `)[0] as { line_count: number; qty: number; total_cost: number };
+      await writeOrderEvent(tx, id, u.id, 'submitted', {
+        lineCount: snap.line_count,
+        qty: snap.qty,
+        totalCost: snap.total_cost,
+      });
+    } else {
+      await writeOrderEvent(tx, id, u.id, 'advanced', {
+        from: cur.lifecycle,
+        to: nextStageId,
+      });
+    }
     if (newLineStatus) {
-      await tx`UPDATE order_lines SET status = ${newLineStatus} WHERE order_id = ${id}`;
+      // 'Sold' is a terminal post-sale state, not a lifecycle stage — a PO
+      // re-advance/stage-jump must never resurrect a sold-out line.
+      // All CTEs see the snapshot from before the statement, so `targets`
+      // captures the pre-update status while `upd` applies the new one.
+      // (A separate post-UPDATE SELECT would always read the already-
+      // updated status, so `status IS DISTINCT FROM $new` would be
+      // universally false and zero audit rows would ever be written.)
       await tx`
+        WITH targets AS (
+          SELECT id, status AS old_status
+          FROM order_lines
+          WHERE order_id = ${id} AND status <> 'Sold'
+            AND status IS DISTINCT FROM ${newLineStatus}
+          FOR UPDATE
+        ),
+        upd AS (
+          UPDATE order_lines ol SET status = ${newLineStatus}
+          FROM targets t WHERE ol.id = t.id
+        )
         INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        SELECT id, ${u.id}::uuid, 'status',
-               jsonb_build_object('field','status','from',status,'to',${newLineStatus}::text)
-        FROM order_lines WHERE order_id = ${id} AND status IS DISTINCT FROM ${newLineStatus}
+        SELECT t.id, ${u.id}::uuid, 'status',
+               jsonb_build_object('field','status','from',t.old_status,'to',${newLineStatus}::text)
+        FROM targets t
       `;
     }
     // PRD §10: managers want to see when a purchaser finalises an order.
@@ -580,9 +882,20 @@ orders.post('/:id/advance', async (c) => {
         body: `${u.name} advanced ${id} to In Transit`,
       });
     }
+    return { kind: 'ok', nextStageId };
   });
 
-  return c.json({ ok: true, lifecycle: nextStageId });
+  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'forbidden') return c.json({ error: outcome.msg }, 403);
+  if (outcome.kind === 'badStage') return c.json({ error: outcome.msg }, 400);
+  if (outcome.kind === 'finalStage') return c.json({ error: 'Already at the final stage' }, 409);
+  if (outcome.kind === 'committedLines') {
+    return c.json({
+      error: 'Lines committed to open sell orders — cancel those sell orders first.',
+      offendingLineIds: outcome.offendingLineIds,
+    }, 409);
+  }
+  return c.json({ ok: true, lifecycle: outcome.nextStageId });
 });
 
 export default orders;

@@ -2,6 +2,10 @@ resource "cloudflare_r2_bucket" "attachments" {
   account_id = var.cloudflare_account_id
   name       = var.bucket_name
   location   = var.bucket_location
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "cloudflare_r2_bucket_cors" "attachments" {

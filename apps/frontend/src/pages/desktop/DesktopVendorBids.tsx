@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort, relTime } from '../../lib/format';
+import { shareOrCopy } from '../../lib/shareOrCopy';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 
 // Vendor-bid lifecycle. Mirrors the backend `status` column; drives the
@@ -63,10 +65,12 @@ type VendorBidsProps = {
 };
 
 export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps = {}) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [bids, setBids] = useState<VbSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | VbStatus>('all');
+  const [linksOpen, setLinksOpen] = useState(false);
   const { path } = useRoute();
   const openMatch = match('/vendor-bids/:id', path);
   const openId = openMatch?.id ?? null;
@@ -76,7 +80,7 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
     if (statusFilter !== 'all') p.set('status', statusFilter);
     api.get<{ items: VbSummary[] }>(`/api/vendor-bids?${p}`)
       .then(r => { if (!alive || alive.v) setBids(r.items); })
-      .catch(console.error)
+      .catch(handleFetchError)
       .finally(() => { if (!alive || alive.v) setLoadedOnce(true); });
   };
 
@@ -101,6 +105,11 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
           <h1 className="page-title">{t('vendorBids')}</h1>
           <div className="page-sub">{t('vendorBidsSub')}</div>
         </div>
+        <div className="page-actions">
+          <button className="btn" onClick={() => setLinksOpen(true)}>
+            <Icon name="globe" size={14} /> {t('vendorLinksManage')}
+          </button>
+        </div>
       </div>
 
       {/* Status pipeline tiles — click to filter (matches sell-orders so-stat). */}
@@ -122,7 +131,7 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
                 <span className={'chip ' + tone + ' dot'} style={{ fontSize: 10.5 }}>{t(tKey)}</span>
               </div>
               <div className="so-stat-num">{stats[s].count}</div>
-              <div className="so-stat-sub">{fmtUSD0(stats[s].offered)}</div>
+              <div className="so-stat-sub">{fmtUSD0(stats[s].offered, locale)}</div>
             </button>
           );
         })}
@@ -181,8 +190,8 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
                     )}
                   </td>
                   <td className="num mono">{b.line_count}</td>
-                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(b.total_offered)}</td>
-                  <td className="muted">{fmtDateShort(b.created_at)}</td>
+                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(b.total_offered, locale)}</td>
+                  <td className="muted">{fmtDateShort(b.created_at, locale)}</td>
                   <td><span className={'chip dot ' + toneFor(b.status)}>{t(STATUSES.find(s => s.id === b.status)?.tKey ?? 'vbColStatus')}</span></td>
                 </tr>
               ))}
@@ -208,6 +217,13 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
           onChanged={() => load()}
         />
       )}
+
+      {linksOpen && (
+        <VendorLinksManager
+          onClose={() => setLinksOpen(false)}
+          onToast={onToast}
+        />
+      )}
     </>
   );
 }
@@ -231,7 +247,8 @@ function VendorBidDetail({
   onOpenSellOrder?: (sellOrderId: string) => void;
   onChanged: () => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [bid, setBid] = useState<VbDetail | null>(null);
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
   const [saving, setSaving] = useState(false);
@@ -252,7 +269,7 @@ function VendorBidDetail({
         }
         setDraft(d);
       })
-      .catch(console.error);
+      .catch(handleFetchError);
   };
 
   useEffect(() => {
@@ -366,7 +383,7 @@ function VendorBidDetail({
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{bid.customer_name}</h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                  {fmtDate(bid.created_at)}
+                  {fmtDate(bid.created_at, locale)}
                   {bid.contact_name ? ` · ${bid.contact_name}` : ''}
                 </div>
               </>
@@ -425,7 +442,7 @@ function VendorBidDetail({
                           )}
                         </td>
                         <td className="num mono">{l.offered_qty}</td>
-                        <td className="num mono">{fmtUSD(l.offered_unit_price)}</td>
+                        <td className="num mono">{fmtUSD(l.offered_unit_price, locale)}</td>
                         <td
                           className="num mono"
                           style={over ? { color: 'var(--warn-strong, var(--danger))', fontWeight: 600 } : undefined}
@@ -517,6 +534,277 @@ function VendorBidDetail({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Vendor-links manager ────────────────────────────────────────────────────
+// Single surface for the manager to mint/copy/revoke per-customer public bid
+// tokens. Replaces the old per-customer panel that was buried inside the
+// Settings → Customers edit modal. Sorted with link-less customers last so the
+// active links (copy/revoke surface) sit at the top.
+type VendorLinkRow = {
+  customerId: string;
+  customerName: string;
+  customerShort: string | null;
+  region: string | null;
+  active: boolean;
+  link: {
+    id: string;
+    token: string;
+    createdAt: string | null;
+    lastSeenAt: string | null;
+    bidCount: number;
+  } | null;
+};
+
+function VendorLinksManager({
+  onClose, onToast,
+}: {
+  onClose: () => void;
+  onToast?: (msg: string, kind?: 'success' | 'error') => void;
+}) {
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const [rows, setRows] = useState<VendorLinkRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [search, setSearch] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  // Row IDs that just got a fresh link this session — used to drive the
+  // reveal animation so the manager visually confirms the generate action.
+  const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
+
+  const reload = () => api.get<{ items: VendorLinkRow[] }>('/api/customers/vendor-links')
+    .then(r => setRows(r.items))
+    .catch(e => onToast?.(e instanceof Error ? e.message : 'Failed to load vendor links', 'error'))
+    .finally(() => setLoaded(true));
+  useEffect(() => { reload(); }, []);
+
+  useEscapeKey(onClose);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(r =>
+      r.customerName.toLowerCase().includes(q)
+      || (r.customerShort ?? '').toLowerCase().includes(q)
+      || (r.region ?? '').toLowerCase().includes(q));
+  }, [rows, search]);
+
+  const stats = useMemo(() => {
+    const active = rows.filter(r => r.link).length;
+    const bids = rows.reduce((s, r) => s + (r.link?.bidCount ?? 0), 0);
+    const missing = rows.length - active;
+    return { active, bids, missing };
+  }, [rows]);
+
+  const urlFor = (token: string) => `${location.origin}/v/${token}`;
+
+  const generate = async (row: VendorLinkRow) => {
+    setBusyId(row.customerId);
+    try {
+      await api.post(`/api/customers/${row.customerId}/vendor-link`, {});
+      // Mark this row "fresh" so the new URL chip animates in.
+      setFlashIds(prev => {
+        const next = new Set(prev);
+        next.add(row.customerId);
+        return next;
+      });
+      window.setTimeout(() => {
+        setFlashIds(prev => {
+          const next = new Set(prev);
+          next.delete(row.customerId);
+          return next;
+        });
+      }, 1400);
+      await reload();
+      onToast?.(t('vendorLinkGenerated', { name: row.customerName }), 'success');
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Failed to generate vendor link', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const revoke = async (row: VendorLinkRow) => {
+    if (!row.link) return;
+    if (!window.confirm(t('vendorLinkRevokeConfirm', { name: row.customerName }))) return;
+    setBusyId(row.customerId);
+    try {
+      await api.patch(`/api/customers/vendor-link/${row.link.id}`, { active: false });
+      await reload();
+      onToast?.(t('vendorLinkRevoked', { name: row.customerName }), 'success');
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Failed to revoke vendor link', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const copy = (row: VendorLinkRow) => {
+    if (!row.link) return;
+    shareOrCopy({
+      url: urlFor(row.link.token),
+      title: t('vendorLink'),
+      copiedMsg: t('vendorLinkCopied'),
+      failedMsg: t('orderIdCopyFailed'),
+      onToast,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal-shell" style={{ maxWidth: 980, width: 'calc(100vw - 80px)' }}>
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+              {t('vendorLinksOverline')}
+            </div>
+            <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{t('vendorLinksTitle')}</h2>
+            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 4, maxWidth: 640 }}>
+              {t('vendorLinksSub')}
+            </div>
+          </div>
+          <button className="btn icon" onClick={onClose}><Icon name="x" size={16} /></button>
+        </div>
+
+        <div style={{ padding: '14px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+          <VlStat label={t('vendorLinksStatActive')} value={stats.active} tone="pos" />
+          <VlStat label={t('vendorLinksStatBids')} value={stats.bids} />
+          <VlStat label={t('vendorLinksStatMissing')} value={stats.missing} tone={stats.missing > 0 ? 'warn' : 'muted'} />
+          <div style={{ flex: 1 }} />
+          <div className="settings-search" style={{ minWidth: 240 }}>
+            <Icon name="search" size={13} />
+            <input
+              type="text"
+              placeholder={t('vendorLinksSearchPh')}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div style={{ padding: '8px 0 0', overflowY: 'auto', flex: 1, maxHeight: '64vh' }}>
+          {!loaded ? (
+            <div style={{ padding: '0 24px 16px' }}>
+              <TableSkeleton rows={6} cols={4} />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+              {rows.length === 0 ? t('vendorLinksEmpty') : t('vendorLinksNoMatch')}
+            </div>
+          ) : (
+            <table className="table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th style={{ paddingLeft: 24 }}>{t('vbColCustomer')}</th>
+                  <th>{t('vendorLinksColLink')}</th>
+                  <th className="num">{t('vendorLinksColBids')}</th>
+                  <th>{t('vendorLinksColLastSeen')}</th>
+                  <th style={{ paddingRight: 24, textAlign: 'right' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(row => {
+                  const isBusy = busyId === row.customerId;
+                  const fresh = flashIds.has(row.customerId);
+                  return (
+                    <tr key={row.customerId} className="row-hover">
+                      <td style={{ paddingLeft: 24 }}>
+                        <div style={{ fontWeight: 500 }}>{row.customerName}</div>
+                        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8 }}>
+                          {row.customerShort && <span>{row.customerShort}</span>}
+                          {row.region && <span>· {row.region}</span>}
+                        </div>
+                      </td>
+                      <td style={{ minWidth: 360 }}>
+                        {row.link ? (
+                          <div
+                            className={fresh ? 'vl-url vl-url-fresh' : 'vl-url'}
+                            title={urlFor(row.link.token)}
+                          >
+                            <span className="vl-dot" aria-hidden />
+                            <span className="vl-url-text mono">{urlFor(row.link.token)}</span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                            {t('vendorLinksNone')}
+                          </span>
+                        )}
+                      </td>
+                      <td className="num mono">{row.link?.bidCount ?? 0}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>
+                        {row.link?.lastSeenAt
+                          ? relTime(row.link.lastSeenAt, locale)
+                          : row.link
+                            ? <span style={{ color: 'var(--fg-subtle)' }}>{t('vendorLinksNeverSeen')}</span>
+                            : '—'}
+                      </td>
+                      <td style={{ paddingRight: 24, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {row.link ? (
+                          <div style={{ display: 'inline-flex', gap: 4 }}>
+                            <button
+                              className="btn sm"
+                              disabled={isBusy}
+                              onClick={() => copy(row)}
+                              title={t('vendorLinkCopy')}
+                            >
+                              <Icon name="paperclip" size={12} /> {t('vendorLinkCopy')}
+                            </button>
+                            <button
+                              className="btn sm"
+                              disabled={isBusy}
+                              onClick={() => revoke(row)}
+                              style={{ color: 'var(--neg)' }}
+                              title={t('vendorLinkRevoke')}
+                            >
+                              {t('vendorLinkRevoke')}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="btn sm accent"
+                            disabled={isBusy}
+                            onClick={() => generate(row)}
+                          >
+                            <Icon name="globe" size={12} /> {isBusy ? t('vendorLinkGenerating') : t('vendorLinkGenerate')}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="so-footer">
+          <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+            {t('vendorLinksHint')}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>{t('vbClose')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VlStat({ label, value, tone }: { label: string; value: number; tone?: 'pos' | 'warn' | 'muted' }) {
+  const color =
+    tone === 'pos' ? 'var(--pos, var(--accent-strong))'
+    : tone === 'warn' ? 'var(--warn, var(--neg))'
+    : 'var(--fg)';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 88 }}>
+      <span style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 20, fontWeight: 600, color, lineHeight: 1, fontFeatureSettings: "'tnum'" }}>
+        {value}
+      </span>
     </div>
   );
 }

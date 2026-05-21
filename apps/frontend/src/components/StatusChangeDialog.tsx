@@ -4,9 +4,10 @@
 // survive a parent-modal Cancel; (2) attachments come back as URLs the
 // frontend can render.
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api } from '../lib/api';
+import { useEscapeKey } from '../lib/useEscapeKey';
 
 export type StatusAttachment = {
   id: string;
@@ -84,11 +85,7 @@ export function StatusChangeDialog({
   const cfg = PRESETS[to];
 
   // Escape closes the dialog.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+  useEscapeKey(onCancel);
 
   const addFiles = async (fileList: FileList | null) => {
     const files = Array.from(fileList || []);

@@ -22,8 +22,20 @@ describe('CORS allowlist', () => {
     expect(r.headers.get('access-control-allow-origin')).not.toBe('https://evil.example.com');
   });
 
-  it('stays permissive in dev when the allowlist is unset', async () => {
+  it('stays permissive for localhost in dev when the allowlist is unset', async () => {
     const r = await api('GET', '/', { headers: { Origin: 'http://localhost:5173' } });
     expect(r.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+  });
+
+  it('allows a 127.0.0.1 dev origin when the allowlist is unset', async () => {
+    const r = await api('GET', '/', { headers: { Origin: 'http://127.0.0.1:4173' } });
+    expect(r.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:4173');
+  });
+
+  it('does NOT reflect an arbitrary remote origin when the allowlist is unset (fail-closed)', async () => {
+    const r = await api('GET', '/', { headers: { Origin: 'https://evil.example.com' } });
+    const acao = r.headers.get('access-control-allow-origin');
+    expect(acao).not.toBe('https://evil.example.com');
+    expect(acao).not.toBe('*');
   });
 });

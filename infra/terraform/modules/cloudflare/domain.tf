@@ -5,4 +5,8 @@ resource "cloudflare_r2_custom_domain" "attachments" {
   zone_id     = var.cloudflare_zone_id
   enabled     = true
   min_tls     = "1.2"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }

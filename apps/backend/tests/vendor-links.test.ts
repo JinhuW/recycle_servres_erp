@@ -42,4 +42,23 @@ describe('vendor links CRUD', () => {
     const r = await api('POST', `/api/customers/${cust}/vendor-link`, { token: pur });
     expect(r.status).toBe(403);
   });
+
+  it('GET /vendor-links lists active links per customer (manager only)', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const withLink = await aCustomer(mgr);
+    await api('POST', `/api/customers/${withLink}/vendor-link`, { token: mgr });
+    const withoutLink = await aCustomer(mgr);
+
+    const { token: pur } = await loginAs(MARCUS);
+    const denied = await api('GET', '/api/customers/vendor-links', { token: pur });
+    expect(denied.status).toBe(403);
+
+    type Item = { customerId: string; link: { id: string } | null };
+    const r = await api<{ items: Item[] }>('GET', '/api/customers/vendor-links', { token: mgr });
+    expect(r.status).toBe(200);
+    const linked   = r.body.items.find(i => i.customerId === withLink);
+    const unlinked = r.body.items.find(i => i.customerId === withoutLink);
+    expect(linked?.link).not.toBeNull();
+    expect(unlinked?.link).toBeNull();
+  });
 });

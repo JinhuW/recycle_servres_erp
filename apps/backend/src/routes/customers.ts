@@ -35,6 +35,7 @@ function validateCustomerFields(b: Record<string, unknown>): string | null {
 }
 
 customers.get('/', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const search = c.req.query('q')?.toLowerCase().trim();
   const status = c.req.query('status') ?? 'all';                  // active|inactive|all
@@ -85,6 +86,58 @@ customers.post('/', async (c) => {
     RETURNING id
   `;
   return c.json({ id: r[0].id }, 201);
+});
+
+// Manager dashboard view: every customer with their active vendor-link (if any)
+// + a rolled-up bid count. Sorted active-with-link first so the action surface
+// (copy / revoke) sits at the top and "generate" candidates queue below.
+customers.get('/vendor-links', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const rows = await sql<{
+    customer_id: string; customer_name: string; customer_short: string | null;
+    region: string | null; active: boolean;
+    link_id: string | null; token: string | null;
+    created_at: string | null; last_seen_at: string | null;
+    bid_count: number;
+  }[]>`
+    SELECT c.id          AS customer_id,
+           c.name        AS customer_name,
+           c.short_name  AS customer_short,
+           c.region,
+           c.active,
+           vl.id         AS link_id,
+           vl.token,
+           vl.created_at,
+           vl.last_seen_at,
+           COALESCE((SELECT COUNT(*)::int FROM vendor_bids vb
+                       WHERE vb.vendor_link_id = vl.id), 0) AS bid_count
+      FROM customers c
+      LEFT JOIN LATERAL (
+        SELECT id, token, created_at, last_seen_at
+          FROM vendor_links
+         WHERE customer_id = c.id AND active = TRUE
+         ORDER BY created_at DESC
+         LIMIT 1
+      ) vl ON TRUE
+     WHERE c.active = TRUE
+     ORDER BY (vl.id IS NULL), c.name
+  `;
+  return c.json({
+    items: rows.map(r => ({
+      customerId: r.customer_id,
+      customerName: r.customer_name,
+      customerShort: r.customer_short,
+      region: r.region,
+      active: r.active,
+      link: r.link_id ? {
+        id: r.link_id, token: r.token!,
+        createdAt: r.created_at, lastSeenAt: r.last_seen_at,
+        bidCount: r.bid_count,
+      } : null,
+    })),
+  });
 });
 
 // Generate (or regenerate) the active vendor link for a customer. Regenerating
@@ -157,7 +210,7 @@ customers.patch('/:id', async (c) => {
   if (invalid) return c.json({ error: invalid }, 400);
 
   const sql = getDb(c.env);
-  await sql`
+  const rows = await sql`
     UPDATE customers SET
       name          = COALESCE(${body.name as string ?? null}, name),
       short_name    = COALESCE(${body.shortName as string ?? null}, short_name),
@@ -171,7 +224,9 @@ customers.patch('/:id', async (c) => {
       notes         = COALESCE(${body.notes as string ?? null}, notes),
       active        = COALESCE(${body.active as boolean ?? null}, active)
     WHERE id = ${id}
+    RETURNING id
   `;
+  if (rows.length === 0) return c.json({ error: 'Not found' }, 404);
   return c.json({ ok: true });
 });
 

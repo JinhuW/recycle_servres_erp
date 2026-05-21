@@ -1,20 +1,14 @@
-// Tiny fetch wrapper with bearer-token auth. The Vite dev proxy forwards
-// /api/* to the backend on :8787 (see vite.config.ts); in prod Caddy proxies
-// /api/* to the backend. Either way paths stay relative.
+// Tiny fetch wrapper with cookie-based auth. The backend sets httpOnly
+// `at`/`rt` cookies on login/refresh/logout; we never see tokens in JS.
+// Every state-changing request carries the `X-Requested-By` CSRF header and
+// `credentials: 'include'`. The Vite dev proxy forwards /api/* to the backend
+// on :8787 (see vite.config.ts); in prod Caddy proxies /api/* to the backend.
+// Either way paths stay relative (same-origin), so cookies ride along.
 
 import type { Category, OrderSummary } from './types';
 
-const TOKEN_KEY = 'recycle_erp_token';
-
-export const auth = {
-  get token(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-  },
-  set token(value: string | null) {
-    if (value) localStorage.setItem(TOKEN_KEY, value);
-    else localStorage.removeItem(TOKEN_KEY);
-  },
-};
+const CSRF_HEADER = 'X-Requested-By';
+const CSRF_VALUE = 'recycle-erp';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -22,14 +16,32 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  opts: { isForm?: boolean } = {},
-): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
+// Single-flight refresh: while a refresh is in flight, concurrent 401s await
+// the same promise instead of stampeding the refresh endpoint.
+let refreshing: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshing) {
+    refreshing = (async () => {
+      try {
+        const res = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { [CSRF_HEADER]: CSRF_VALUE },
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
+async function doFetch(method: string, path: string, opts: { isForm?: boolean }, body?: unknown): Promise<Response> {
+  const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
 
   let payload: BodyInit | undefined;
   if (body !== undefined) {
@@ -41,27 +53,48 @@ async function request<T>(
     }
   }
 
-  const res = await fetch(path, { method, headers, body: payload });
+  return fetch(path, { method, headers, body: payload, credentials: 'include' });
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts: { isForm?: boolean } = {},
+): Promise<T> {
+  let res = await doFetch(method, path, opts, body);
+
+  // A 401 on any call other than the refresh endpoint itself means the access
+  // cookie expired. Silently refresh once, then retry the original request a
+  // single time. The refresh call never recurses into this logic.
+  if (res.status === 401 && !path.includes('/api/auth/refresh')) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      res = await doFetch(method, path, opts, body);
+    }
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth:unauthorized'));
+      }
+      const text = await res.text();
+      const json = text ? safeJson(text) : null;
+      throw new ApiError(401, errMsg(json, 401));
+    }
+  }
+
   const text = await res.text();
   const json = text ? safeJson(text) : null;
 
   if (!res.ok) {
-    const msg = (json && typeof json === 'object' && 'error' in json && typeof json.error === 'string')
-      ? json.error
-      : `HTTP ${res.status}`;
-    // A 401 on any call other than the login attempt itself means the token
-    // expired or was revoked mid-session. Clear it and signal the app so the
-    // AuthProvider drops to the login screen instead of every component
-    // silently swallowing the error and showing stale/empty data.
-    if (res.status === 401 && !path.includes('/api/auth/login')) {
-      auth.token = null;
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('auth:unauthorized'));
-      }
-    }
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, errMsg(json, res.status));
   }
   return json as T;
+}
+
+function errMsg(json: unknown, status: number): string {
+  return (json && typeof json === 'object' && 'error' in json && typeof json.error === 'string')
+    ? json.error
+    : `HTTP ${status}`;
 }
 
 function safeJson(text: string): unknown {

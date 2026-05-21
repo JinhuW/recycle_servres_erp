@@ -3,6 +3,7 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD0, relTime } from '../../lib/format';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { Category, DashboardData } from '../../lib/types';
@@ -18,7 +19,8 @@ const CAT_COLOR: Record<Category, string> = {
 type Range = '7d' | '30d' | '90d' | 'ytd';
 
 export function DesktopDashboard() {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [lbCategory, setLbCategory] = useState<string>('all');
@@ -30,7 +32,7 @@ export function DesktopDashboard() {
   useEffect(() => {
     const params = new URLSearchParams();
     if (range !== '30d') params.set('range', range);
-    api.get<DashboardData>(`/api/dashboard?${params}`).then(setData).catch(console.error);
+    api.get<DashboardData>(`/api/dashboard?${params}`).then(setData).catch(handleFetchError);
   }, [range]);
 
   if (!user) return null;
@@ -79,19 +81,19 @@ export function DesktopDashboard() {
       <div className="kpi-grid">
         <div className="kpi">
           <div className="kpi-label">{t('totalRevenue')}</div>
-          <div className="kpi-value mono">{fmtUSD0(k.revenue)}</div>
+          <div className="kpi-value mono">{fmtUSD0(k.revenue, locale)}</div>
           <div className="kpi-trend up"><Icon name="arrowUp" size={11} /> 12.4% {t('vsLastPeriod')}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">{t('grossProfit')}</div>
-          <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(k.profit)}</div>
+          <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(k.profit, locale)}</div>
           <div className="kpi-trend up">
             <Icon name="arrowUp" size={11} /> 8.7% {t('vsLastPeriod')}
           </div>
         </div>
         <div className="kpi">
           <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
-          <div className="kpi-value mono">{fmtUSD0(k.commission)}</div>
+          <div className="kpi-value mono">{fmtUSD0(k.commission, locale)}</div>
           <div className="kpi-trend">
             <span style={{ color: 'var(--fg-subtle)' }}>
               {commissionPct.toFixed(1)}{t('ofGross')}
@@ -100,7 +102,7 @@ export function DesktopDashboard() {
         </div>
         <div className="kpi">
           <div className="kpi-label">{t('netProfit')}</div>
-          <div className="kpi-value mono">{fmtUSD0(netProfit)}</div>
+          <div className="kpi-value mono">{fmtUSD0(netProfit, locale)}</div>
           <div className="kpi-trend">
             <span style={{ color: 'var(--fg-subtle)' }}>{t('afterCommission')}</span>
           </div>
@@ -117,7 +119,7 @@ export function DesktopDashboard() {
             <span className="chip pos dot">{t('trackingUp')}</span>
           </div>
           <div className="card-body">
-            <TrendChart weeks={weeks} />
+            <TrendChart weeks={weeks} locale={locale} />
           </div>
         </div>
 
@@ -127,7 +129,7 @@ export function DesktopDashboard() {
             <span className="card-sub">{t('byRevenue')}</span>
           </div>
           <div className="card-body">
-            <CategoryBreakdown byCat={byCat} totalRevenue={k.revenue} />
+            <CategoryBreakdown byCat={byCat} totalRevenue={k.revenue} locale={locale} />
           </div>
         </div>
       </div>
@@ -159,7 +161,6 @@ export function DesktopDashboard() {
                 <tr>
                   <th style={{ width: 50 }}>#</th>
                   <th>{t('contributor')}</th>
-                  <th>{t('role')}</th>
                   <th className="num">{t('entries')}</th>
                   <th className="num">{t('revenue')}</th>
                   <th className="num">{t('profit')}</th>
@@ -169,7 +170,7 @@ export function DesktopDashboard() {
               <tbody>
                 {leaderboard.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+                    <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
                       No contributors have logged any {lbCategory === 'all' ? '' : `${lbCategory} `}sales yet.
                       {lbCategory !== 'all' && (
                         <>
@@ -205,11 +206,10 @@ export function DesktopDashboard() {
                         </div>
                       </div>
                     </td>
-                    <td className="muted">{row.role === 'manager' ? t('role_manager') : t('role_purchaser')}</td>
                     <td className="num mono">{row.count}</td>
-                    <td className="num mono">{fmtUSD0(row.revenue)}</td>
-                    <td className="num mono pos">{fmtUSD0(row.profit)}</td>
-                    <td className="num mono">{fmtUSD0(row.commission)}</td>
+                    <td className="num mono">{fmtUSD0(row.revenue, locale)}</td>
+                    <td className="num mono pos">{fmtUSD0(row.profit, locale)}</td>
+                    <td className="num mono">{fmtUSD0(row.commission, locale)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -243,7 +243,7 @@ export function DesktopDashboard() {
                       : r.category === 'HDD'
                         ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                         : (r.description ?? 'Item');
-                  const profit = ((r.sell_price ?? r.unit_cost) - r.unit_cost) * r.qty;
+                  const profit = r.profit ?? 0;
                   return (
                     <tr key={r.id} className="row-hover">
                       <td>{label}</td>
@@ -254,8 +254,8 @@ export function DesktopDashboard() {
                         </div>
                       </td>
                       <td className="num">{r.qty}</td>
-                      <td className="muted">{relTime(r.created_at)}</td>
-                      <td className="num pos mono">+{fmtUSD0(profit)}</td>
+                      <td className="muted">{relTime(r.created_at, locale)}</td>
+                      <td className="num pos mono">+{fmtUSD0(profit, locale)}</td>
                     </tr>
                   );
                 })}
@@ -274,7 +274,7 @@ export function DesktopDashboard() {
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-function TrendChart({ weeks }: { weeks: { label: string; profit: number }[] }) {
+function TrendChart({ weeks, locale = 'en-US' }: { weeks: { label: string; profit: number }[]; locale?: string }) {
   if (weeks.length === 0) {
     return <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)' }}>No data yet.</div>;
   }
@@ -315,7 +315,7 @@ function TrendChart({ weeks }: { weeks: { label: string; profit: number }[] }) {
           fill="var(--fg-subtle)" fontSize="10" textAnchor="end"
           fontFamily="JetBrains Mono, monospace"
         >
-          {fmtUSD0(max - p * (max - min))}
+          {fmtUSD0(max - p * (max - min), locale)}
         </text>
       ))}
       <path d={areaPath} fill="url(#dashSpark)" />
@@ -335,9 +335,11 @@ function TrendChart({ weeks }: { weeks: { label: string; profit: number }[] }) {
 function CategoryBreakdown({
   byCat,
   totalRevenue,
+  locale = 'en-US',
 }: {
   byCat: DashboardData['byCat'];
   totalRevenue: number;
+  locale?: string;
 }) {
   const cats: Category[] = ['RAM', 'SSD', 'HDD', 'Other'];
   return (
@@ -353,7 +355,7 @@ function CategoryBreakdown({
                 <span style={{ fontWeight: 500 }}>{cat}</span>
                 <span style={{ color: 'var(--fg-subtle)', fontSize: 11 }}>· {c.count}</span>
               </span>
-              <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(c.revenue)}</span>
+              <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(c.revenue, locale)}</span>
             </div>
             <div className="bar-track">
               <div className="bar-fill" style={{ width: pct + '%', background: CAT_COLOR[cat] }} />
@@ -363,7 +365,7 @@ function CategoryBreakdown({
               display: 'flex', justifyContent: 'space-between',
             }}>
               <span>{pct.toFixed(1)}% of revenue</span>
-              <span>Profit {fmtUSD0(c.profit)}</span>
+              <span>Profit {fmtUSD0(c.profit, locale)}</span>
             </div>
           </div>
         );

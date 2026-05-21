@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
+import { AI_CONFIDENCE_FLOOR } from '../lib/status';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -23,6 +24,7 @@ type Props = {
 };
 
 const blankDefaults = (category: Category): DraftLine => ({
+  _cid: crypto.randomUUID(),
   category,
   brand: null,
   capacity: null,
@@ -65,6 +67,7 @@ const aiPatch = (scan: ScanResponse): Partial<DraftLine> => {
 const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   const f = scan.extracted ?? {};
   return {
+    _cid: crypto.randomUUID(),
     category,
     brand:          (f.brand as string)          ?? null,
     capacity:       (f.capacity as string)       ?? null,
@@ -164,13 +167,30 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         )}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
-        {aiFilled && (
-          <div className="ph-ai-banner" style={{ borderRadius: 12, marginTop: 6 }}>
-            <span className="pill-ai">AI</span>
-            <span>{t('extractedConf', { pct: Math.round((detected!.confidence) * 100) })}</span>
-            <Icon name="sparkles" size={13} style={{ marginLeft: 'auto' }} />
-          </div>
-        )}
+        {aiFilled && (() => {
+          const pct = Math.round(detected!.confidence * 100);
+          const lowConf = detected!.confidence < AI_CONFIDENCE_FLOOR;
+          return (
+            <div
+              className="ph-ai-banner"
+              role={lowConf ? 'alert' : undefined}
+              style={{
+                borderRadius: 12, marginTop: 6,
+                ...(lowConf
+                  ? {
+                      background: 'var(--warn-soft, #fef3c7)',
+                      color: 'var(--warn-strong, #92400e)',
+                      border: '1px solid var(--warn, #f59e0b)',
+                    }
+                  : {}),
+              }}
+            >
+              <span className="pill-ai">AI</span>
+              <span>{lowConf ? t('lowConfVerify', { pct }) : t('extractedConf', { pct })}</span>
+              <Icon name={lowConf ? 'alert' : 'sparkles'} size={13} style={{ marginLeft: 'auto' }} />
+            </div>
+          );
+        })()}
         {showThumb && (
           <div
             style={{
