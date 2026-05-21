@@ -45,6 +45,30 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: recycle_pg_exporter
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The metrics role is created by migration 0042 and only has
+      # pg_monitor — no application-table access.
+      DATA_SOURCE_NAME: "postgresql://metrics:${POSTGRES_METRICS_PASSWORD:-metrics}@postgres:5432/recycle_erp?sslmode=disable"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
+      # Default exposes :9187/metrics inside the compose net; not host-published.
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   backend:
     build:
       context: .
