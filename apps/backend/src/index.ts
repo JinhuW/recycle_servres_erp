@@ -12,6 +12,7 @@ import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { dbScope, getDb } from './db';
+import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
@@ -71,6 +72,8 @@ app.use(
     credentials: true,
   }),
 );
+app.use('*', metricsMiddleware);
+app.get('/metrics', metricsHandler);
 app.use('*', csrfGuard);
 // Bind one pooled Postgres client per request and close it when the request
 // ends — prevents the connection-pool leak that exhausts Postgres and takes
