@@ -39,17 +39,21 @@ export const ocrCallsTotal = new Counter({
 // route pattern is available when next() returns.
 export async function metricsMiddleware(c: Context, next: Next): Promise<void> {
   const start = process.hrtime.bigint();
-  await next();
-  const elapsedNs = Number(process.hrtime.bigint() - start);
-  const seconds = elapsedNs / 1e9;
-  // c.req.routePath is the registered pattern (e.g. "/api/orders/:id"),
-  // null if no route matched (404s). Substitute a literal so cardinality
-  // stays bounded.
-  const route = c.req.routePath || 'unmatched';
-  const status = String(c.res.status);
-  const labels = { method: c.req.method, route, status };
-  httpRequestDuration.observe(labels, seconds);
-  httpRequestsTotal.inc(labels);
+  try {
+    await next();
+  } finally {
+    const elapsedNs = Number(process.hrtime.bigint() - start);
+    const seconds = elapsedNs / 1e9;
+    // c.req.routePath is the matched Hono pattern (e.g. "/api/orders/:id").
+    // For requests that match only a catch-all middleware (e.g. true 404s)
+    // it returns "*"; defended with || 'unmatched' in case Hono ever changes
+    // that contract. Either way the label cardinality stays bounded.
+    const route = c.req.routePath || 'unmatched';
+    const status = String(c.res.status);
+    const labels = { method: c.req.method, route, status };
+    httpRequestDuration.observe(labels, seconds);
+    httpRequestsTotal.inc(labels);
+  }
 }
 
 // /metrics handler: serializes the registry in Prometheus exposition format.
