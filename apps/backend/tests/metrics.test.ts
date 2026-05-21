@@ -25,14 +25,4 @@ describe('GET /metrics', () => {
     expect(body).toContain('http_request_duration_seconds_bucket');
     expect(body).toMatch(/http_requests_total\{[^}]*route="\/api\/health"[^}]*\}/);
   });
-
-  it('does not require X-Requested-By (GETs are CSRF-exempt)', async () => {
-    // api() defaults to setting the CSRF header; bypass to confirm GET works
-    // without it.
-    const res = await fetch('http://test/metrics', { method: 'GET' });
-    // Above is a unit-style sanity check; the real assertion is the previous
-    // test's 200 status without any auth cookies (which the helper omits by
-    // default).
-    expect(res).toBeDefined();
-  });
 });
