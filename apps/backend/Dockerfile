@@ -15,7 +15,18 @@ COPY packages/shared packages/shared
 COPY apps/backend apps/backend
 
 WORKDIR /app/apps/backend
-ENV NODE_ENV=production
+# Image defaults: lowest precedence in Compose env merge order — anything in
+# apps/backend/.env (env_file) or compose `environment:` overrides them.
+# These exist so `docker compose up` works on a fresh clone with no .env at
+# all. For prod, set NODE_ENV=production + CORS_ALLOWED_ORIGINS + a real
+# JWT_SECRET in apps/backend/.env (which then wins over these defaults).
+ENV NODE_ENV=development \
+    JWT_SECRET=dev-jwt-secret-change-me-in-prod \
+    ENABLE_DEMO_ACCOUNTS=true \
+    ADMIN_EMAIL=admin@recycle.local \
+    ADMIN_PASSWORD=admin \
+    ADMIN_NAME=Admin \
+    ADMIN_ROLE=manager
 
 # Drop root: node:22-slim ships a non-root `node` user. Deps were installed as
 # root above (needed for corepack/global store); hand the app tree to `node`
@@ -29,5 +40,6 @@ EXPOSE 8787
 # catch-all 200. node has fetch built in (Node 22) — no extra dependency.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-# Run migrations, then start the server (single instance — no migration race).
-CMD ["sh", "-c", "node ./scripts/migrate.mjs && pnpm start"]
+# Run migrations, provision the default admin (idempotent), then start the
+# server. Single instance — no migration race.
+CMD ["sh", "-c", "node ./scripts/migrate.mjs && node ./scripts/init-admin.mjs && pnpm start"]

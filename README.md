@@ -1,119 +1,203 @@
-# Recycle Servers ERP — Mobile
+# Recycle Servers ERP
 
-Mobile companion app for the Recycle Servers inventory ERP. Field purchasers
-scan part labels with their phone, the AI fills out the spec sheet, and the
-order lands in the warehouse pipeline. Built as two services:
+Inventory ERP for a server-parts recycler. Field purchasers scan part labels
+with their phone, the AI fills the spec sheet, and the order flows through
+warehouse intake → inventory → sell orders → vendor bidding. One backend
+serves three React shells out of the same SPA bundle.
 
-- **`backend/`** — Node + Hono + Postgres. Runs as a Docker container; Cloudflare
-  R2 (via its S3-compatible API) stores label-scan images and sell-order
-  attachments. OpenRouter vision does label OCR, with a deterministic stub
-  fallback so dev/tests run offline.
-- **`frontend/`** — Vite + React + TypeScript PWA. Two shells share auth +
-  i18n + API client and switch on viewport width:
-    - **Mobile (< 720px)**: 8 phone screens — Login, Role picker, Dashboard,
-      Capture (camera + AI), Orders, Market, Profile, Language sheet.
-    - **Desktop (≥ 720px)**: sidebar shell with Dashboard, Purchase orders
-      (with line-item drill-down), Inventory + edit page (with append-only
-      audit log), Market value table, Sell orders pipeline, Settings
-      (Members/Customers/Workflow tabs).
+## Repository layout
 
-## Quick start
-
-```bash
-# 1. Boot Postgres locally
-docker compose up -d postgres
-
-# 2. Run migrations + seed
-cd backend
-npm install
-npm run db:migrate
-npm run db:seed
-
-# 3. Start the backend on :8787
-npm run dev
-
-# 4. In a second terminal, start the SPA on :5173
-cd ../frontend
-npm install
-npm run dev
+```
+apps/
+  backend/         Node + Hono + Postgres API.  Mounted under /api/*.
+  frontend/        Vite + React SPA.  Mobile / Desktop / Vendor shells.
+packages/
+  shared/          Types and helpers shared across the workspace.
+infra/
+  terraform/       Cloudflare R2 bucket + custom domain + token.
+docs/
+  superpowers/     Per-feature design specs and implementation plans.
+docker-compose.yml Production-shaped stack (postgres + backend + Caddy/SPA).
+docker-compose.override.yml  Local dev only — re-publishes Postgres on 127.0.0.1.
 ```
 
-Open <http://localhost:5173> in mobile-emulator mode (Chrome devtools → iPhone
-14 Pro). Sign in with `marcus@recycleservers.io` / `demo` (any password works
-in dev).
+## The three shells
+
+Mounted from one bundle in `apps/frontend/src/App.tsx` (lazy-imported per
+shell, so each ships its own chunk):
+
+- **Mobile (`window.innerWidth < 720`)** — Field-purchaser phone app. Login,
+  Role picker, Dashboard, Capture (camera + AI), Orders, Market, Profile,
+  Language sheet.
+- **Desktop (≥ 720)** — Manager UI with sidebar: Dashboard, Purchase Orders,
+  Inventory (grouped-by-part-number with per-PO drilldown, or flat),
+  Inventory Transfers, Market, Sell Orders, Vendor Bids, Settings
+  (Members / Customers / Categories / Warehouses / General).
+- **Vendor portal (`/v/<token>`)** — Public, token-scoped pages: browse the
+  catalog the manager has published, place bids, view your offers. No
+  account, no cookie auth — token in the URL.
+
+## Stack
+
+- **Backend** — Node 22, Hono, postgres.js, `@aws-sdk/client-s3` for R2,
+  bcryptjs, `@tsndr/cloudflare-worker-jwt` for JWT.
+- **Frontend** — Vite 6, React 18, TypeScript 5, no UI framework.
+- **DB** — Postgres 16. 41 SQL migrations under `apps/backend/migrations/`,
+  applied automatically by the backend on startup.
+- **Storage** — Cloudflare R2 via S3 API.  Label scans + sell-order
+  attachments live under `recycle-erp-attachments`, public-served at
+  `https://static.recycleservers.com/recycle-erp-attachments/`.
+- **OCR** — OpenRouter (Gemma 3 27B by default).  Falls back to a
+  deterministic stub when `OPENROUTER_API_KEY` is unset so dev and CI run
+  offline.
+- **Edge** — Caddy serves the built SPA and reverse-proxies `/api/*` to the
+  backend over the compose network.
 
 ## Architecture
 
 ```
 ┌─────────────────┐  HTTPS  ┌──────────────────────┐
 │  React SPA      │ ──────▶ │  Caddy (web)         │
-│  (served by     │         │   / → static SPA     │
-│   Caddy)        │         │   /api → backend     │
-└─────────────────┘         └──────────┬───────────┘
-                                        │
-                             ┌──────────▼───────────┐
-                             │  backend (Node/Hono) │
-                             │  Postgres · R2 (S3)  │
-                             │  OpenRouter OCR      │
-                             └──────────────────────┘
+│  (Caddy-served) │         │   / → static SPA     │
+└─────────────────┘         │   /api → backend     │
+                            └──────────┬───────────┘
+                                       │  internal compose net
+                            ┌──────────▼───────────┐
+                            │  backend (Node/Hono) │
+                            │  Postgres · R2 (S3)  │
+                            │  OpenRouter OCR      │
+                            └──────────────────────┘
 ```
 
-## Environment variables
+## Quick start
 
-Backend (`apps/backend/.env`):
+The fastest path is the full Docker stack — zero host setup, one command:
+
+```bash
+docker compose up -d --build
+```
+
+That's it. Open <http://localhost:8080>.  Sign in with
+`marcus@recycleservers.io` and any password (dev image ships with
+`ENABLE_DEMO_ACCOUNTS=true`).  Mobile-emulate narrower than 720px to land
+in the phone shell.
+
+Postgres data lives in `./data/postgres/` (bind-mounted, gitignored,
+owned by the in-container postgres user — read with `sudo`).  Wipe with
+`docker compose down && sudo rm -rf data/postgres` for a fresh DB.
+
+### Host-side dev loop (faster reload)
+
+If you want vitest + Vite HMR against a local Postgres:
+
+```bash
+pnpm install                                                  # pnpm@11.0.9
+POSTGRES_PASSWORD=recycle docker compose up -d postgres       # DB only
+pnpm db:migrate && pnpm db:seed                               # one-time
+pnpm dev                                                       # backend :8787 + SPA :5173
+```
+
+Open <http://localhost:5173>.  The `docker-compose.override.yml` re-publishes
+Postgres on `127.0.0.1:5432` for the host vitest suite — it is gitignored and
+must not ship to prod.
+
+## Auth model
+
+- **No bearer tokens, no `localStorage`.**  Login sets an `at` (access) and
+  `rt` (refresh) cookie — both `httpOnly`, `Secure` in prod, `SameSite=Lax`.
+- The access cookie is a 15-minute JWT.  The refresh cookie is a rotating
+  family — refresh swaps it for a new one and revokes the previous; reuse of
+  a revoked token revokes the whole family.
+- CSRF: every state-changing request must carry `X-Requested-By: recycle-erp`
+  (see `apps/backend/src/csrf.ts`).  Safe methods, `/api/health`, and the
+  unauthenticated `/api/public/*` vendor endpoints are exempt.
+
+## Environment
+
+`apps/backend/.env` (used by both `pnpm dev` and the Docker backend):
 
 ```
 DATABASE_URL=postgres://recycle:recycle@localhost:5432/recycle_erp
 JWT_SECRET=dev-secret-change-me
-OPENROUTER_API_KEY=                # label OCR — required in prod, stub used when absent
-# OPENROUTER_OCR_MODEL=google/gemini-2.0-flash-001   # or anthropic/claude-sonnet-4.5, openai/gpt-4o
+CORS_ALLOWED_ORIGINS=                     # required in prod, comma-separated
+OPENROUTER_API_KEY=                       # OCR; stub used when absent
+# OPENROUTER_OCR_MODEL=google/gemma-3-27b-it
 R2_S3_ENDPOINT=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 R2_BUCKET=recycle-erp-attachments
-# Base URL the bucket is publicly served under. MUST match how the R2 custom
-# domain actually serves objects: include the /<bucket> path segment if it
-# serves at /<bucket>/<key> (as static.recycleservers.com does), or use the
-# bare domain if it serves at the bucket root.
 R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com/recycle-erp-attachments
+ENABLE_DEMO_ACCOUNTS=1                    # dev only — opens password to "any"
 ```
 
-Frontend (`apps/frontend/.env.local`) — optional; only needed to point the
-Vite dev server's `/api` proxy somewhere other than the default:
+The bucket's public URL must include the `/<bucket>` segment if R2 serves
+objects at `/<bucket>/<key>` (as `static.recycleservers.com` does today).
+Otherwise URLs in the SPA will 404.
 
+Repo root `.env` only carries `POSTGRES_PASSWORD` for `docker-compose.yml`.
+
+Frontend dev proxy target is `VITE_API_BASE` (defaults to
+`http://localhost:8787`).  No `VITE_` vars are baked into prod — Caddy
+proxies relative `/api/*`.
+
+## Tests
+
+```bash
+pnpm typecheck                 # all workspaces
+pnpm --filter recycle-erp-backend  test
+pnpm --filter recycle-erp-frontend test
 ```
-# Backend origin the dev proxy forwards /api/* to. Default if unset:
-VITE_API_BASE=http://localhost:8787
-```
 
-The SPA always calls relative `/api/*` paths; in dev they are proxied to
-`VITE_API_BASE` (see `apps/frontend/vite.config.ts`), and in production Caddy
-proxies them to the backend (no client base URL is baked in).
+Backend tests are integration tests against a real Postgres (~60 files,
+~300 tests).  `vitest.config.ts` runs them serially with `pool: 'forks'`
++ `fileParallelism: false`; the shared DB is reset per-file via an
+advisory lock to stop catalog-DDL races.
 
-## Deployment
+## Production deploy
 
 Single-host Docker Compose:
 
-1. Create `apps/backend/.env` with `JWT_SECRET`, `OPENROUTER_API_KEY`, and the
-   R2 S3 settings (`R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-   `R2_BUCKET=recycle-erp-attachments`,
-   `R2_ATTACHMENTS_PUBLIC_URL=https://static.recycleservers.com/recycle-erp-attachments`).
-   Set `R2_ATTACHMENTS_PUBLIC_URL` to exactly the base under which the bucket is
-   publicly served — include the `/<bucket>` segment if the R2 custom domain
-   serves objects at `/<bucket>/<key>` (as `static.recycleservers.com` does),
-   or use the bare domain if it serves at the bucket root. Generate the R2
-   credentials in the Cloudflare dashboard → R2 → Manage API Tokens.
-2. `docker compose up -d --build`
-3. The app is served at `http://<host>:8080` (put it behind your TLS-terminating
-   edge/reverse proxy). The backend runs DB migrations on startup; on first
-   deploy, seed demo/reference data once with
-   `docker compose exec backend node scripts/seed.mjs`.
-4. Database backups: `bash apps/backend/scripts/backup.sh --out ./backups/`
+1. Create `apps/backend/.env` with `NODE_ENV=production`, a real
+   `JWT_SECRET`, `CORS_ALLOWED_ORIGINS`, the R2 credentials, and
+   `OPENROUTER_API_KEY`.  Those values override the dev defaults baked into
+   the backend image (`NODE_ENV=development`, throwaway JWT, demo accounts on).
+2. Put `POSTGRES_PASSWORD=…` in repo-root `.env` (compose interpolates it;
+   defaults to `recycle` if absent — fine for dev, not for prod).
+3. `docker compose up -d --build` — the backend runs migrations on startup
+   and a healthcheck pings `/api/health`.
+4. App is at `http://<host>:8080`.  Front it with your TLS-terminating
+   reverse proxy.
+5. **Do not** ship `docker-compose.override.yml` — it re-publishes Postgres
+   on the host loopback for the dev test harness.
 
-Local dev (only Postgres in Docker):
+Postgres cluster files live in `./data/postgres/` (bind-mount).  Back them
+up with `apps/backend/scripts/backup.sh` or snapshot the directory while pg
+is stopped.
 
-```bash
-docker compose up -d postgres
-pnpm --filter recycle-erp-backend dev
-pnpm --filter recycle-erp-frontend dev
-```
+Daily backups: `bash apps/backend/scripts/backup.sh --out /var/backups/`
+(pg_dump custom format, gzipped, retains last 14).
+
+The compose stack is hardened: `cap_drop: ALL` everywhere with the minimum
+caps re-added (Postgres needs CHOWN/DAC_OVERRIDE/FOWNER/FSETID/SETGID/SETUID
+for its entrypoint user-switch; Caddy needs NET_BIND_SERVICE to bind :80
+non-root), `no-new-privileges`, memory limits, JSON log rotation.
+
+## Infrastructure (Terraform)
+
+`infra/terraform/` manages the Cloudflare side: the R2 attachments bucket,
+its custom domain (`static.recycleservers.com`), and an API token scoped to
+the bucket.  State lives in a separate R2 bucket
+(`recycle-erp-tfstate`).  The bucket has `prevent_destroy` set — destroying
+it requires editing the lifecycle block first.
+
+See `infra/terraform/environments/prod/` for the prod composition.
+
+## Documentation
+
+Per-feature design and implementation docs live under
+`docs/superpowers/`.  Specs (`specs/YYYY-MM-DD-*-design.md`) capture intent
+at design time; plans (`plans/YYYY-MM-DD-*.md`) track the build.  Finished
+plans graduate to `plans/finished/`.
+
+See also `CLAUDE.md` for conventions and quirks future contributors (human
+or AI) should know before changing things.

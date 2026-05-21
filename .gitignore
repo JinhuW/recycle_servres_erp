@@ -47,3 +47,6 @@ crash.*.log
 
 # Local-only compose override (host-published Postgres for the test loop)
 docker-compose.override.yml
+
+# Bind-mounted Postgres data dir (created on `docker compose up`).
+/data/

@@ -10,3 +10,5 @@
 infra
 docs
 *.md
+# Bind-mounted Postgres cluster — never copy into the build context.
+data

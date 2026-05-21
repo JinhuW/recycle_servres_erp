@@ -5,12 +5,18 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: recycle
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      # Default to `recycle` so a fresh clone runs `docker compose up` with
+      # zero setup. Override via repo-root .env (or shell env) for prod.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recycle}
       POSTGRES_DB: recycle_erp
     # No host port: backend reaches Postgres as `postgres:5432` over the
     # compose network. Not publishing 5432 keeps the DB off the host.
+    # Bind-mounted to ./data/postgres so the cluster's files are visible on
+    # the host (easy to back up, inspect, or wipe with `rm -rf data/postgres`).
+    # The dir is gitignored. The official postgres entrypoint chowns it to its
+    # `postgres` user on first boot — the cap_add block below allows that.
     volumes:
-      - recycle_pgdata:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U recycle -d recycle_erp"]
       interval: 5s
@@ -48,17 +54,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Optional — fresh clones boot without it (Dockerfile ENV supplies dev
+    # defaults for JWT_SECRET / NODE_ENV / ENABLE_DEMO_ACCOUNTS). Real deploys
+    # drop secrets (JWT_SECRET, R2_*, OPENROUTER_API_KEY, CORS_ALLOWED_ORIGINS)
+    # in apps/backend/.env and they win over the image defaults.
     env_file:
-      - apps/backend/.env
+      - path: apps/backend/.env
+        required: false
     environment:
-      DATABASE_URL: postgres://recycle:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/recycle_erp
+      # DATABASE_URL is network-derived (compose hostname `postgres`), so it
+      # MUST come from compose, not from apps/backend/.env which is written
+      # for host-side `pnpm dev` against localhost.
+      DATABASE_URL: postgres://recycle:${POSTGRES_PASSWORD:-recycle}@postgres:5432/recycle_erp
       PORT: "8787"
-    # Bind to loopback only: Caddy reverse-proxies /api/* to backend:8787
-    # over the internal compose network, so a 0.0.0.0 binding would bypass
-    # Caddy. Loopback keeps the port reachable from the host shell and via
-    # SSH tunnel for dev tooling without exposing it to the network.
-    ports:
-      - "127.0.0.1:8787:8787"
+    # No host-port publish — the only consumer is Caddy, which reaches the
+    # backend as `backend:8787` over the internal compose network. Skipping
+    # the host bind also avoids clashing with a parallel `pnpm dev` that
+    # often holds :8787 on the host. To hit the API directly during compose
+    # debugging, use `docker compose exec backend wget -qO- localhost:8787/api/health`
+    # or temporarily add `ports: ["127.0.0.1:8787:8787"]` in a local override.
     security_opt:
       - "no-new-privileges:true"
     cap_drop:
@@ -96,6 +110,3 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
-
-volumes:
-  recycle_pgdata:
