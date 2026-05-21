@@ -153,6 +153,30 @@ Backend tests are integration tests against a real Postgres (~60 files,
 + `fileParallelism: false`; the shared DB is reset per-file via an
 advisory lock to stop catalog-DDL races.
 
+## Metrics
+
+The compose stack exposes Prometheus scrape targets on host port **9090**.
+
+| URL                                          | Source                                  |
+| -------------------------------------------- | --------------------------------------- |
+| `http://<host>:9090/metrics/backend`         | Hono backend (prom-client, default Node + http duration + ocr) |
+| `http://<host>:9090/metrics/postgres`        | postgres-exporter (`pg_monitor` role)   |
+
+Add the two jobs to your Prometheus config:
+
+```yaml
+- job_name: 'recycle-erp-backend'
+  static_configs: [{ targets: ['<host>:9090'] }]
+  metrics_path: /metrics/backend
+- job_name: 'recycle-erp-postgres'
+  static_configs: [{ targets: ['<host>:9090'] }]
+  metrics_path: /metrics/postgres
+```
+
+The endpoint is unauthenticated; bind the port to a private interface in
+production by editing `docker-compose.yml`'s `web.ports` (e.g.
+`"10.0.0.5:9090:9090"`).
+
 ## Production deploy
 
 Single-host Docker Compose:
