@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from './lib/i18n';
 import { Icon, type IconName } from './components/Icon';
+import { ImageLightbox } from './components/ImageLightbox';
 import { PhHeader } from './components/PhHeader';
 import { PhoneListSkeleton, TableSkeleton } from './components/Skeleton';
 import { usePhScrolled } from './lib/usePhScrolled';
 import {
-  type CatalogItem, type BasketLine, itemLabel, basketTotal,
+  type CatalogItem, type BasketLine, itemLabel, basketTotal, previewUrl,
 } from './lib/vendor';
 
 type Tab = 'browse' | 'mine';
@@ -22,6 +23,47 @@ function catThumb(category: string): IconName {
   return category === 'RAM' ? 'chip'
     : category === 'SSD' || category === 'HDD' ? 'drive'
     : 'box';
+}
+
+// Square preview tile.  Shows the line's own scan when present; otherwise
+// borrows from any sibling line that shares the same part_number (backend
+// resolves the fallback). Falls back to a category icon when neither exists.
+function ItemThumb({ it, size, onZoom }: {
+  it: CatalogItem; size: number; onZoom?: (url: string) => void;
+}) {
+  const url = previewUrl(it);
+  const radius = Math.round(size * 0.27);
+  if (url) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onZoom?.(url); }}
+        title={itemLabel(it)}
+        style={{
+          width: size, height: size, borderRadius: radius, flexShrink: 0,
+          border: '1px solid var(--border)', overflow: 'hidden',
+          padding: 0, background: 'var(--bg-soft)',
+          cursor: onZoom ? 'zoom-in' : 'default',
+        }}
+      >
+        <img
+          src={url}
+          alt={itemLabel(it)}
+          loading="lazy"
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      </button>
+    );
+  }
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: radius, flexShrink: 0,
+      background: 'var(--bg-soft)', border: '1px solid var(--border)',
+      display: 'grid', placeItems: 'center', color: 'var(--fg-muted)',
+    }}>
+      <Icon name={catThumb(it.category)} size={Math.round(size * 0.5)} />
+    </div>
+  );
 }
 
 function offerTone(status: string): string {
@@ -255,6 +297,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
     itemCount, loadedOnce, basket, byId, addToBasket, removeFromBasket, setReview,
   } = vm;
   const [openId, setOpenId] = useState<string | null>(null);
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
 
   return (
     <>
@@ -303,9 +346,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
                 <button className="ph-inv-card"
                   style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }}
                   onClick={() => setOpenId(open ? null : it.id)}>
-                  <div className="ph-inv-thumb">
-                    <Icon name={catThumb(it.category)} size={18} />
-                  </div>
+                  <ItemThumb it={it} size={44} onZoom={setZoomUrl} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {itemLabel(it)}
@@ -355,6 +396,10 @@ function MobileBrowse({ vm }: { vm: VM }) {
             {t('vendorReview')} <Icon name="chevronRight" size={15} />
           </button>
         </div>
+      )}
+
+      {zoomUrl && (
+        <ImageLightbox url={zoomUrl} alt={t('aiPhotoLabel')} onClose={() => setZoomUrl(null)} />
       )}
     </>
   );
@@ -580,6 +625,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
     loadedOnce, basket, byId, addToBasket, removeFromBasket, clearBasket,
   } = vm;
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
   const rows = filteredGroups.flatMap(g => g.items);
 
   return (
@@ -629,6 +675,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
                 {rows.map(it => (
                   <DesktopBrowseRow key={it.id} it={it} t={t}
                     existing={byId.get(it.id)}
+                    onZoom={setZoomUrl}
                     onAdd={(q, p) => addToBasket(it, q, p)}
                     onRemove={() => removeFromBasket(it.id)} />
                 ))}
@@ -669,13 +716,19 @@ function DesktopBrowse({ vm }: { vm: VM }) {
       {reviewOpen && (
         <DesktopReviewModal vm={vm} onClose={() => setReviewOpen(false)} />
       )}
+
+      {zoomUrl && (
+        <ImageLightbox url={zoomUrl} alt={t('aiPhotoLabel')} onClose={() => setZoomUrl(null)} />
+      )}
     </>
   );
 }
 
-function DesktopBrowseRow({ it, t, existing, onAdd, onRemove }: {
+function DesktopBrowseRow({ it, t, existing, onAdd, onRemove, onZoom }: {
   it: CatalogItem; existing: BasketLine | undefined; t: T;
-  onAdd: (qty: number, price: number) => void; onRemove: () => void;
+  onAdd: (qty: number, price: number) => void;
+  onRemove: () => void;
+  onZoom: (url: string) => void;
 }) {
   const [qty, setQty] = useState(existing?.qty ?? 1);
   const [price, setPrice] = useState(existing ? String(existing.unitPrice) : '');
@@ -684,13 +737,7 @@ function DesktopBrowseRow({ it, t, existing, onAdd, onRemove }: {
     <tr style={added ? { background: 'var(--accent-soft)' } : undefined}>
       <td>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: 8, background: 'var(--bg-soft)',
-            border: '1px solid var(--border)', display: 'grid', placeItems: 'center',
-            color: 'var(--fg-muted)', flexShrink: 0,
-          }}>
-            <Icon name={catThumb(it.category)} size={15} />
-          </div>
+          <ItemThumb it={it} size={36} onZoom={onZoom} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 500 }}>{itemLabel(it)}</div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>

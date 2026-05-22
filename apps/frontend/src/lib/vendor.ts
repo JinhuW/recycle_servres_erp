@@ -4,7 +4,14 @@ export type CatalogItem = {
   rank?: string | null; speed?: string | null; interface?: string | null;
   form_factor?: string | null; description?: string | null;
   part_number?: string | null; condition?: string | null; qty: number;
+  scan_image_url?: string | null;
 };
+
+// Stub scans emit `data:image/placeholder…` URLs; treat those as "no preview".
+export function previewUrl(it: CatalogItem): string | null {
+  const u = it.scan_image_url;
+  return u && !u.startsWith('data:image/placeholder') ? u : null;
+}
 
 export type BasketLine = {
   inventoryId: string; label: string; category: string;

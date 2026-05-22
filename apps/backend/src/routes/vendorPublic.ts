@@ -43,13 +43,37 @@ vendorPublic.get('/:token/catalog', async (c) => {
 
   // Explicit non-cost column list. NEVER select unit_cost / sell_price /
   // profit / margin / notes / user / warehouse.
+  //
+  // scan_image_url: prefer this line's own scan; if none, fall back to any
+  // sibling line on a different PO that shares the same part_number — vendors
+  // see one preview photo per product even when only some of the POs
+  // happened to be photographed at intake.
   const rows = await sql<Record<string, unknown>[]>`
-    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type,
-           l.classification, l.rank, l.speed, l.interface, l.form_factor,
-           l.description, l.part_number, l.condition, l.qty
-    FROM order_lines l
-    WHERE l.status = 'Done' AND l.qty > 0
-    ORDER BY l.category, l.brand, l.created_at DESC
+    WITH live AS (
+      SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type,
+             l.classification, l.rank, l.speed, l.interface, l.form_factor,
+             l.description, l.part_number, l.condition, l.qty, l.created_at,
+             ls.delivery_url AS own_scan_url
+      FROM order_lines l
+      LEFT JOIN label_scans ls ON ls.cf_image_id = l.scan_image_id
+      WHERE l.status = 'Done' AND l.qty > 0
+    ),
+    sib AS (
+      SELECT part_number,
+             (ARRAY_AGG(own_scan_url) FILTER (WHERE own_scan_url IS NOT NULL))[1]
+               AS scan_url
+      FROM live
+      WHERE part_number IS NOT NULL AND part_number <> ''
+      GROUP BY part_number
+    )
+    SELECT live.id, live.category, live.brand, live.capacity, live.generation,
+           live.type, live.classification, live.rank, live.speed, live.interface,
+           live.form_factor, live.description, live.part_number, live.condition,
+           live.qty,
+           COALESCE(live.own_scan_url, sib.scan_url) AS scan_image_url
+    FROM live
+    LEFT JOIN sib ON sib.part_number = live.part_number
+    ORDER BY live.category, live.brand, live.created_at DESC
     LIMIT 2000
   `;
   const groups: { category: string; items: Record<string, unknown>[] }[] = [];
