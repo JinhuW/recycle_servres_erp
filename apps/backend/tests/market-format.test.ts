@@ -17,9 +17,35 @@ describe('formatRefPrice', () => {
       FROM ref_prices LIMIT 1
     `)[0];
     const v = formatRefPrice(row, 0.30);
-    expect(v.id).toBe(row.id);
-    expect(v.label).toBe(row.label);
-    expect(v.formFactor).toBe(row.form_factor);
+    // Pass-through snake→camel renames must all be wired correctly so the MCP
+    // tool and REST endpoint share a single contract.
+    expect(v).toMatchObject({
+      id: row.id,
+      category: row.category,
+      brand: row.brand,
+      capacity: row.capacity,
+      type: row.type,
+      classification: row.classification,
+      rank: row.rank,
+      speed: row.speed,
+      interface: row.interface,
+      formFactor: row.form_factor,
+      description: row.description,
+      partNumber: row.part_number,
+      label: row.label,
+      sub: row.sub_label,
+      target: row.target,
+      low: row.low_price,
+      high: row.high_price,
+      avgSell: row.avg_sell,
+      trend: row.trend,
+      samples: row.samples,
+      source: row.source,
+      stock: row.stock,
+      demand: row.demand,
+      health: row.health,
+      rpm: row.rpm,
+    });
     expect(v.maxBuy).toBe(+(row.avg_sell * 0.70).toFixed(2));
     expect(v.updatedAt).toBe(row.updated_at.toISOString());
   });

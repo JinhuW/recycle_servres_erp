@@ -88,7 +88,7 @@ export function formatRefPrice(r: MarketValueRow, targetMargin: number): MarketV
     stock: r.stock,
     demand: r.demand,
     history: r.history,
-    updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+    updatedAt: r.updated_at.toISOString(),
     maxBuy: +(r.avg_sell * (1 - targetMargin)).toFixed(2),
     health: r.health,
     rpm: r.rpm,
