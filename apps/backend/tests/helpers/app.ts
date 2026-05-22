@@ -2,8 +2,8 @@ import app from '../../src/index';
 import { TEST_DATABASE_URL } from './db';
 import type { Env } from '../../src/types';
 
-// Re-read OAUTH_DCR_OPEN from process.env on every access so tests that flip
-// the gate via `process.env.OAUTH_DCR_OPEN = 'true'` see their mutation.
+// Re-read OAUTH_DCR_OPEN + OAUTH_SIGNING_KEY_CURRENT from process.env on every
+// access so tests can flip the DCR gate or seed a signing key in a beforeAll.
 const TEST_ENV_BASE = {
   DATABASE_URL: TEST_DATABASE_URL,
   JWT_SECRET: 'test-secret-' + Math.random().toString(36).slice(2),
@@ -13,6 +13,7 @@ const TEST_ENV_BASE = {
 export const testEnv: Env = new Proxy(TEST_ENV_BASE as Env, {
   get(target, prop, receiver) {
     if (prop === 'OAUTH_DCR_OPEN') return process.env.OAUTH_DCR_OPEN;
+    if (prop === 'OAUTH_SIGNING_KEY_CURRENT') return process.env.__TEST_OAUTH_KEY__;
     return Reflect.get(target, prop, receiver);
   },
 });
@@ -27,9 +28,13 @@ export type ApiResult<T = unknown> = {
 export type ApiOptions = {
   token?: string;
   body?: unknown;
+  form?: Record<string, string>;
   headers?: Record<string, string>;
   cookies?: Record<string, string>;
   env?: Partial<Env>;
+  // Accepted for parity with fetch RequestInit. `app.fetch` never auto-follows,
+  // so this is a no-op in tests — kept so call sites read naturally.
+  redirect?: 'manual' | 'follow' | 'error';
 };
 
 export type MultipartOptions = {
@@ -91,8 +96,11 @@ export async function api<T = unknown>(
   path: string,
   opts: ApiOptions = {},
 ): Promise<ApiResult<T>> {
+  const usingForm = opts.form !== undefined;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // Form-encoded bodies (the OAuth /token endpoint) need a different
+    // Content-Type than the default JSON.
+    'Content-Type': usingForm ? 'application/x-www-form-urlencoded' : 'application/json',
     ...(opts.headers ?? {}),
   };
   // Default CSRF header unless the caller already provided it (caller override wins).
@@ -103,7 +111,8 @@ export async function api<T = unknown>(
   applyCookies(headers, opts.cookies);
 
   const init: RequestInit = { method, headers };
-  if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+  if (usingForm) init.body = new URLSearchParams(opts.form).toString();
+  else if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
 
   const env = opts.env ? { ...testEnv, ...opts.env } : testEnv;
   const res = await app.fetch(new Request('http://test' + path, init), env);

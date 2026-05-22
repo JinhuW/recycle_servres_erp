@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import { createHash, randomBytes } from 'node:crypto';
 import { getCookie } from 'hono/cookie';
-import type { Env, User } from '../types';
+import type { Context } from 'hono';
+import type { Env, OAuthScope, User } from '../types';
 import { authorizationServerMetadata, protectedResourceMetadata } from './metadata';
 import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
-import { createOAuthClient, findOAuthClient } from './clients';
+import { createOAuthClient, findOAuthClient, verifyClientSecret } from './clients';
+import { verifyChallenge } from './pkce';
+import { signAccessToken, issueRefreshToken, rotateRefreshToken } from './tokens';
 
 const CODE_TTL_SEC = 600;
 const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -163,6 +166,159 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
   url.searchParams.set('code', result.code);
   if (result.state) url.searchParams.set('state', result.state);
   return c.redirect(url.toString(), 302);
+});
+
+// ── /oauth/token helpers ────────────────────────────────────────────────────
+
+type ParsedClientCreds = { id: string; secret: string | null };
+
+function readClientCreds(
+  c: Context<{ Bindings: Env; Variables: { user: User } }>,
+  body: Record<string, string>,
+): ParsedClientCreds | null {
+  const authz = c.req.header('authorization');
+  if (authz?.startsWith('Basic ')) {
+    const decoded = Buffer.from(authz.slice(6), 'base64').toString('utf8');
+    const i = decoded.indexOf(':');
+    if (i > 0) {
+      return {
+        id: decodeURIComponent(decoded.slice(0, i)),
+        secret: decodeURIComponent(decoded.slice(i + 1)),
+      };
+    }
+  }
+  if (body.client_id) {
+    return { id: body.client_id, secret: body.client_secret ?? null };
+  }
+  return null;
+}
+
+async function readFormBody(
+  c: Context<{ Bindings: Env; Variables: { user: User } }>,
+): Promise<Record<string, string>> {
+  const ct = c.req.header('content-type') ?? '';
+  if (ct.includes('application/json')) return await c.req.json();
+  const text = await c.req.text();
+  return Object.fromEntries(new URLSearchParams(text)) as Record<string, string>;
+}
+
+oauth.post('/token', async (c) => {
+  const env = c.env;
+  const sql = getDb(env);
+  const form = await readFormBody(c);
+  const creds = readClientCreds(c, form);
+  if (!creds) return c.json({ error: 'invalid_client' }, 401);
+
+  const client = await findOAuthClient(sql, creds.id);
+  if (!client) return c.json({ error: 'invalid_client' }, 401);
+
+  if (client.secret_hash) {
+    if (!creds.secret || !(await verifyClientSecret(client, creds.secret))) {
+      return c.json({ error: 'invalid_client' }, 401);
+    }
+  }
+
+  const grant = form.grant_type;
+
+  if (grant === 'authorization_code') {
+    if (!client.grant_types.includes('authorization_code')) {
+      return c.json({ error: 'unauthorized_client' }, 400);
+    }
+    const { code, code_verifier, redirect_uri } = form;
+    if (!code || !code_verifier || !redirect_uri) {
+      return c.json({ error: 'invalid_request' }, 400);
+    }
+    type CodeRow = {
+      client_id: string; user_id: string; redirect_uri: string;
+      scopes: OAuthScope[]; code_challenge: string;
+    };
+    const row = await sql.begin<CodeRow | null>(async (tx): Promise<CodeRow | null> => {
+      const r = (await tx<{
+        client_id: string; user_id: string; redirect_uri: string;
+        scopes: OAuthScope[]; code_challenge: string; expired: boolean;
+        consumed_at: Date | null;
+      }[]>`
+        SELECT client_id, user_id, redirect_uri, scopes, code_challenge,
+               (expires_at <= NOW()) AS expired, consumed_at
+        FROM oauth_authorization_codes
+        WHERE code_hash = ${sha256hex(code)}
+        FOR UPDATE
+        LIMIT 1
+      `)[0];
+      if (!r || r.consumed_at || r.expired) return null;
+      if (r.client_id !== client.id) return null;
+      if (r.redirect_uri !== redirect_uri) return null;
+      if (!verifyChallenge(r.code_challenge, code_verifier)) return null;
+      await tx`
+        UPDATE oauth_authorization_codes
+        SET consumed_at = NOW()
+        WHERE code_hash = ${sha256hex(code)}
+      `;
+      return {
+        client_id: r.client_id, user_id: r.user_id, redirect_uri: r.redirect_uri,
+        scopes: r.scopes, code_challenge: r.code_challenge,
+      };
+    });
+    if (!row) return c.json({ error: 'invalid_grant' }, 400);
+    const at = await signAccessToken(env, {
+      clientId: client.id, userId: row.user_id, scopes: row.scopes,
+    });
+    const rt = client.grant_types.includes('refresh_token')
+      ? await issueRefreshToken(sql, env, {
+          clientId: client.id, userId: row.user_id, scopes: row.scopes,
+        })
+      : null;
+    return c.json({
+      access_token: at,
+      token_type: 'Bearer',
+      expires_in: Number.parseInt(env.OAUTH_ACCESS_TOKEN_TTL_SEC ?? '900', 10),
+      refresh_token: rt?.raw,
+      scope: row.scopes.join(' '),
+    });
+  }
+
+  if (grant === 'refresh_token') {
+    if (!client.grant_types.includes('refresh_token')) {
+      return c.json({ error: 'unauthorized_client' }, 400);
+    }
+    const raw = form.refresh_token;
+    if (!raw) return c.json({ error: 'invalid_request' }, 400);
+    const res = await rotateRefreshToken(sql, env, raw);
+    if (!res.ok) return c.json({ error: 'invalid_grant' }, 400);
+    if (res.clientId !== client.id) return c.json({ error: 'invalid_grant' }, 400);
+    const at = await signAccessToken(env, {
+      clientId: client.id, userId: res.userId, scopes: res.scopes,
+    });
+    return c.json({
+      access_token: at,
+      token_type: 'Bearer',
+      expires_in: Number.parseInt(env.OAUTH_ACCESS_TOKEN_TTL_SEC ?? '900', 10),
+      refresh_token: res.raw,
+      scope: res.scopes.join(' '),
+    });
+  }
+
+  if (grant === 'client_credentials') {
+    if (!client.grant_types.includes('client_credentials')) {
+      return c.json({ error: 'unauthorized_client' }, 400);
+    }
+    const requested = (form.scope ?? '').split(' ').filter(Boolean);
+    if (requested.length === 0) return c.json({ error: 'invalid_scope' }, 400);
+    for (const s of requested) {
+      if (!client.scopes.includes(s)) return c.json({ error: 'invalid_scope' }, 400);
+    }
+    const at = await signAccessToken(env, {
+      clientId: client.id, userId: null, scopes: requested as OAuthScope[],
+    });
+    return c.json({
+      access_token: at,
+      token_type: 'Bearer',
+      expires_in: Number.parseInt(env.OAUTH_ACCESS_TOKEN_TTL_SEC ?? '900', 10),
+      scope: requested.join(' '),
+    });
+  }
+
+  return c.json({ error: 'unsupported_grant_type' }, 400);
 });
 
 oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
