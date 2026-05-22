@@ -35,6 +35,13 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   setLanguage: (lang: Lang) => Promise<void>;
+  // Set to true after a successful login() when the freshly-authenticated user
+  // is a manager — the app shell renders the RolePicker gate so they can pick
+  // whether to enter as Manager or as Purchaser. NOT set when the session is
+  // restored from /api/me on cold-load: a page reload should respect the
+  // already-chosen rolePreview without re-asking.
+  pendingRoleChoice: boolean;
+  confirmRoleChoice: () => void;
 };
 
 const Ctx = createContext<AuthState | null>(null);
@@ -42,6 +49,7 @@ const Ctx = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingRoleChoice, setPendingRoleChoice] = useState(false);
   // Mirror `user` so the once-bound auth:unauthorized listener can read the
   // live value without re-subscribing on every user change.
   const userRef = useRef<User | null>(user);
@@ -97,13 +105,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn('Workspace settings failed to load after login; continuing.', e);
     }
     setUser(r.user);
+    // Only managers see the picker — for purchasers there's only one path in.
+    if (r.user.role === 'manager') setPendingRoleChoice(true);
   };
+
+  const confirmRoleChoice = () => setPendingRoleChoice(false);
 
   const logout = async () => {
     // Best-effort: server revokes the refresh token and clears the auth
     // cookies. Even if it fails (offline/expired) we still drop local state.
     await api.post('/api/auth/logout', {}).catch(() => {});
     clearLocalAuthState(setUser);
+    setPendingRoleChoice(false);
   };
 
   // api.ts fires `auth:unauthorized` when any call gets a 401 mid-session
@@ -131,7 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     catch { /* keep optimistic update; revisit if it gets noisy */ }
   };
 
-  return <Ctx.Provider value={{ user, loading, login, logout, setLanguage }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ user, loading, login, logout, setLanguage, pendingRoleChoice, confirmRoleChoice }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useAuth() {

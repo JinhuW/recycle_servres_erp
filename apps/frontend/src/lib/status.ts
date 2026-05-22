@@ -45,3 +45,7 @@ export const isSellable = (s: string) => s === 'Reviewing' || s === 'Done';
 
 // Keep in sync with backend ai.ts CONFIDENCE_FLOOR.
 export const AI_CONFIDENCE_FLOOR = 0.6;
+// Below this we treat the extraction as "couldn't read the label" — fields are
+// still shown (a rough draft beats an empty form) but the banner is escalated
+// from amber "please verify" to red "re-shoot or enter manually".
+export const AI_UNREADABLE_FLOOR = 0.3;

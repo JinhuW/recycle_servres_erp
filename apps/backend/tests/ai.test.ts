@@ -26,6 +26,12 @@ describe('PROMPT_BY_CATEGORY', () => {
     expect(PROMPT_BY_CATEGORY.RAM).toContain('"generation"');
     expect(PROMPT_BY_CATEGORY.RAM).toContain('Desktop|Server|Laptop');
   });
+  it.each(['RAM', 'SSD', 'HDD', 'Other'] as const)(
+    'asks the model for an explicit _confidence value (%s)',
+    (cat) => {
+      expect(PROMPT_BY_CATEGORY[cat]).toContain('_confidence');
+    },
+  );
 });
 
 describe('stubScan', () => {
@@ -67,12 +73,33 @@ describe('openRouterScan', () => {
     );
   }
 
-  it('parses a valid completion', async () => {
-    mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","capacity":"32GB"}' } }] });
+  it('parses a valid completion and reads model-reported confidence', async () => {
+    mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","capacity":"32GB","_confidence":0.72}' } }] });
     const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
     expect(r.provider).toBe('openrouter');
-    expect(r.confidence).toBe(0.85);
+    expect(r.confidence).toBe(0.72);
     expect(r.fields).toEqual({ brand: 'Samsung', capacity: '32GB' });
+  });
+
+  it('defaults confidence to 0.5 when the model omits _confidence', async () => {
+    mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung"}' } }] });
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.confidence).toBe(0.5);
+    expect(r.fields).toEqual({ brand: 'Samsung' });
+  });
+
+  it('clamps out-of-range _confidence into [0,1]', async () => {
+    mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","_confidence":1.4}' } }] });
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.confidence).toBe(1);
+    expect(r.fields._confidence).toBeUndefined();
+  });
+
+  it('treats a non-numeric _confidence as missing (default 0.5)', async () => {
+    mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","_confidence":"high"}' } }] });
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.confidence).toBe(0.5);
+    expect(r.fields._confidence).toBeUndefined();
   });
 
   it('parses fenced JSON content', async () => {

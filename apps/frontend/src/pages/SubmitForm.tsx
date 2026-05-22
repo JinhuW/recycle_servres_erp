@@ -3,7 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
-import { AI_CONFIDENCE_FLOOR } from '../lib/status';
+import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../lib/status';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -168,26 +168,51 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
         {aiFilled && (() => {
-          const pct = Math.round(detected!.confidence * 100);
-          const lowConf = detected!.confidence < AI_CONFIDENCE_FLOOR;
+          // Banner has four severities, escalating:
+          //   stub      → demo data, not a real reading        (amber)
+          //   unreadable → conf < 0.3 or no fields returned    (red, alert role)
+          //   lowConf    → 0.3 ≤ conf < 0.6                    (amber, alert role)
+          //   ok         → conf ≥ 0.6                          (neutral)
+          const conf = detected!.confidence;
+          const pct = Math.round(conf * 100);
+          const isStub = detected!.provider === 'stub';
+          const noFields = Object.keys(detected!.extracted ?? {}).length === 0;
+          const unreadable = !isStub && (conf < AI_UNREADABLE_FLOOR || noFields);
+          const lowConf = !isStub && !unreadable && conf < AI_CONFIDENCE_FLOOR;
+          const severe = unreadable;
+          const warn = isStub || lowConf;
           return (
             <div
               className="ph-ai-banner"
-              role={lowConf ? 'alert' : undefined}
+              role={severe || warn ? 'alert' : undefined}
               style={{
                 borderRadius: 12, marginTop: 6,
-                ...(lowConf
+                ...(severe
                   ? {
-                      background: 'var(--warn-soft, #fef3c7)',
-                      color: 'var(--warn-strong, #92400e)',
-                      border: '1px solid var(--warn, #f59e0b)',
+                      background: 'var(--neg-soft, #fee2e2)',
+                      color: 'var(--neg-strong, #991b1b)',
+                      border: '1px solid var(--neg, #dc2626)',
                     }
-                  : {}),
+                  : warn
+                    ? {
+                        background: 'var(--warn-soft, #fef3c7)',
+                        color: 'var(--warn-strong, #92400e)',
+                        border: '1px solid var(--warn, #f59e0b)',
+                      }
+                    : {}),
               }}
             >
               <span className="pill-ai">AI</span>
-              <span>{lowConf ? t('lowConfVerify', { pct }) : t('extractedConf', { pct })}</span>
-              <Icon name={lowConf ? 'alert' : 'sparkles'} size={13} style={{ marginLeft: 'auto' }} />
+              <span>
+                {isStub
+                  ? t('stubScanWarn')
+                  : unreadable
+                    ? t('unreadableLabel')
+                    : lowConf
+                      ? t('lowConfVerify', { pct })
+                      : t('extractedConf', { pct })}
+              </span>
+              <Icon name={severe || warn ? 'alert' : 'sparkles'} size={13} style={{ marginLeft: 'auto' }} />
             </div>
           );
         })()}

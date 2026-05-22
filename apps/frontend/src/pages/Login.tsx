@@ -55,7 +55,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
   const { t } = useT();
   const { login } = useAuth();
   const [picking, setPicking] = useState(initialPicking);
-  const [email, setEmail] = useState('marcus@recycleservers.io');
+  const [email, setEmail] = useState('user@recycleservers.com');
   const [password, setPassword] = useState('demo');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

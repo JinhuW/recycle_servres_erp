@@ -16,8 +16,17 @@ import { ocrCallsTotal } from '../metrics';
 export type { ScanResult, OcrProvider } from './types';
 export { CONFIDENCE_FLOOR } from './types';
 
+let warnedAboutStub = false;
 export function pickProvider(env: Env): OcrProvider {
   if (env.OPENROUTER_API_KEY) return 'openrouter';
+  // Loud one-shot WARN so the dev console can't quietly swallow the fallback
+  // — prod boot already refuses (see env.ts), this catches dev/CI.
+  if (!warnedAboutStub) {
+    warnedAboutStub = true;
+    console.warn(
+      '[ai] OPENROUTER_API_KEY is not set — falling back to STUB OCR. Extractions will be canned data with a hardcoded confidence. Set OPENROUTER_API_KEY to enable real label scanning.',
+    );
+  }
   return 'stub';
 }
 

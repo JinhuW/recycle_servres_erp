@@ -5,7 +5,7 @@ import { api, createDraftOrder } from '../../lib/api';
 import { fmtUSD } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
-import { AI_CONFIDENCE_FLOOR } from '../../lib/status';
+import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../lib/status';
 import { LineDrawer } from './submit/LineDrawer';
 
 // ─── Public component ────────────────────────────────────────────────────────
@@ -232,6 +232,7 @@ function OrderForm({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
   const [submitting, setSubmitting] = useState(false);
 
   // Create a server-side draft order as soon as the form mounts so that
@@ -267,8 +268,17 @@ function OrderForm({
       form.append('category', category);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
       const newLine = lineFromScan(category, scan);
-      if ((scan.confidence ?? 0) < AI_CONFIDENCE_FLOOR) {
-        setAiNotice('Low confidence reading the label — the fields are prefilled but please verify them.');
+      const conf = scan.confidence ?? 0;
+      const noFields = Object.keys(scan.extracted ?? {}).length === 0;
+      if (scan.provider === 'stub') {
+        setAiNotice(t('stubScanWarn'));
+        setAiNoticeSeverity('warn');
+      } else if (conf < AI_UNREADABLE_FLOOR || noFields) {
+        setAiNotice(t('unreadableLabel'));
+        setAiNoticeSeverity('severe');
+      } else if (conf < AI_CONFIDENCE_FLOOR) {
+        setAiNotice(t('lowConfVerify', { pct: Math.round(conf * 100) }));
+        setAiNoticeSeverity('warn');
       }
       setLines(ls => {
         const next = [...ls, newLine];
@@ -442,11 +452,27 @@ function OrderForm({
           </div>
         )}
         {aiNotice && (
-          <div style={{
-            margin: '0 18px 12px', padding: '8px 12px',
-            fontSize: 12, color: 'var(--fg-subtle)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          }}>
+          <div
+            role="alert"
+            style={{
+              margin: '0 18px 12px', padding: '8px 12px',
+              borderRadius: 8, fontSize: 12,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              ...(aiNoticeSeverity === 'severe'
+                ? {
+                    background: 'rgba(220,40,40,0.08)',
+                    border: '1px solid rgba(220,40,40,0.25)',
+                    color: 'var(--neg, #b22)',
+                  }
+                : aiNoticeSeverity === 'warn'
+                  ? {
+                      background: 'var(--warn-soft, #fef3c7)',
+                      border: '1px solid var(--warn, #f59e0b)',
+                      color: 'var(--warn-strong, #92400e)',
+                    }
+                  : { color: 'var(--fg-subtle)' }),
+            }}
+          >
             <span>{aiNotice}</span>
             <button
               className="btn icon sm"

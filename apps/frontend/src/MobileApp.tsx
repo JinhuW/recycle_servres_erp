@@ -7,6 +7,7 @@ import { PhNotificationsSheet } from './components/PhNotificationsSheet';
 import { PhAboutSheet } from './components/PhAboutSheet';
 
 import { Login } from './pages/Login';
+import { RolePicker } from './pages/RolePicker';
 import { Dashboard } from './pages/Dashboard';
 import { Camera } from './pages/Camera';
 import { SubmitForm } from './pages/SubmitForm';
@@ -39,7 +40,7 @@ type CaptureState =
 type Toast = { msg: string; kind: 'success' | 'error' };
 
 function Shell() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, pendingRoleChoice } = useAuth();
   const { t } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
@@ -343,6 +344,8 @@ function Shell() {
   }
 
   if (!user) return <Login />;
+  // Fresh manager login: gate the app until they pick a role to enter as.
+  if (pendingRoleChoice && user.role === 'manager') return <RolePicker variant="mobile" />;
 
   // Full-screen camera/form/review intercept the normal tab UI
   if (capture.phase === 'camera') {

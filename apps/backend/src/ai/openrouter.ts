@@ -88,10 +88,18 @@ export async function openRouterScan(
   }
   if (!json) throw new Error('OpenRouter: could not parse JSON from response');
 
+  // Pull the model's self-rated confidence out of the JSON. If it's missing or
+  // not a finite number, default to 0.5 — high enough to autofill (above
+  // CONFIDENCE_FLOOR) but low enough to trip the UI's "please verify" banner,
+  // so a silently-omitted confidence never reads as "85% sure".
+  const { _confidence, ...rest } = json as Record<string, unknown>;
+  const raw = typeof _confidence === 'number' && Number.isFinite(_confidence) ? _confidence : null;
+  const confidence = raw === null ? 0.5 : Math.max(0, Math.min(1, raw));
+
   return {
     category,
-    confidence: 0.85,
-    fields: json as Record<string, string>,
+    confidence,
+    fields: rest as Record<string, string>,
     provider: 'openrouter',
   };
 }

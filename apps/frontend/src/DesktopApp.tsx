@@ -24,6 +24,7 @@ import { DesktopTransfers } from './pages/desktop/DesktopTransfers';
 import { DesktopSettings } from './pages/desktop/DesktopSettings';
 import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
+import { RolePicker } from './pages/RolePicker';
 import { FormSkeleton } from './components/Skeleton';
 
 import type { Order } from './lib/types';
@@ -31,7 +32,7 @@ import type { Order } from './lib/types';
 type Toast = { msg: string; kind: 'success' | 'error' };
 
 export function DesktopApp() {
-  const { loading } = useAuth();
+  const { loading, user: realUser, pendingRoleChoice } = useAuth();
   const user = useEffectiveUser();
   const [toast, setToast] = useState<Toast | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -84,6 +85,10 @@ export function DesktopApp() {
     return <div style={{ padding: 60, color: 'var(--fg-subtle)' }}>Loading…</div>;
   }
   if (!user) return <Login variant="desktop" />;
+  // Fresh manager login: gate the app until they pick a role to enter as.
+  // Tested on realUser so the rolePreview transformation in useEffectiveUser
+  // doesn't accidentally close the gate.
+  if (pendingRoleChoice && realUser?.role === 'manager') return <RolePicker variant="desktop" />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
   const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')

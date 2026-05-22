@@ -9,6 +9,12 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production' && !src.CORS_ALLOWED_ORIGINS) {
     throw new Error('CORS_ALLOWED_ORIGINS is required in production');
   }
+  // The stub OCR provider returns canned data with a fixed high confidence —
+  // safe for dev/tests, catastrophic in prod where users would trust it as
+  // real readings. Refuse to boot prod without a real key.
+  if (src.NODE_ENV === 'production' && !src.OPENROUTER_API_KEY) {
+    throw new Error('OPENROUTER_API_KEY is required in production (the stub OCR returns canned data)');
+  }
   return {
     DATABASE_URL: src.DATABASE_URL,
     JWT_SECRET: src.JWT_SECRET,
