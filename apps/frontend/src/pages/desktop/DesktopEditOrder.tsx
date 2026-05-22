@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
-import { api, deleteOrder } from '../../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
@@ -92,6 +92,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [deleting, setDeleting] = useState(false);
   const canDelete = canEditOrder && effectiveStatus === 'Draft';
 
+  // Archive: owner-or-manager, any non-Draft stage. Either flips to the other.
+  // (Draft uses Delete instead; the backend enforces the same split.)
+  const isArchived = !!order.archivedAt;
+  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
+  const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
+  const [showArchive, setShowArchive] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+
   useEffect(() => {
     let alive = true;
     api.get<{ items: Warehouse[] }>('/api/warehouses')
@@ -110,12 +118,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         if (!deleting) setShowDelete(false);
         return;
       }
+      if (showArchive) {
+        if (!archiving) setShowArchive(false);
+        return;
+      }
       if (activeIdx !== null) setActiveIdx(null);
       else onCancel();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeIdx, onCancel, showDelete, deleting]);
+  }, [activeIdx, onCancel, showDelete, deleting, showArchive, archiving]);
 
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
@@ -294,16 +306,66 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length} line{lines.length === 1 ? '' : 's'} · {t('editOrderSub')}
           </div>
         </div>
-        {canDelete && (
-          <button
-            className="btn"
-            style={{ color: 'var(--neg)', borderColor: 'var(--neg)', alignSelf: 'flex-start' }}
-            onClick={() => { setTypedId(''); setShowDelete(true); }}
-          >
-            <Icon name="trash" size={13} /> Delete order
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+          {canArchive && (
+            isArchived ? (
+              <button
+                className="btn"
+                style={{ color: 'var(--accent-strong)', borderColor: 'var(--accent)' }}
+                disabled={archiving}
+                onClick={async () => {
+                  setArchiving(true);
+                  try {
+                    await unarchiveOrder(order.id);
+                    onSaved('Order restored');
+                  } catch (e) {
+                    handleFetchError(e);
+                    setArchiving(false);
+                  }
+                }}
+                title="Restore this order to the active list"
+              >
+                <Icon name="rotate" size={13} /> {archiving ? '…' : 'Unarchive'}
+              </button>
+            ) : (
+              <button
+                className="btn"
+                onClick={() => setShowArchive(true)}
+                title="Hide from default list (reversible)"
+              >
+                <Icon name="box" size={13} /> Archive order
+              </button>
+            )
+          )}
+          {canDelete && (
+            <button
+              className="btn"
+              style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
+              onClick={() => { setTypedId(''); setShowDelete(true); }}
+            >
+              <Icon name="trash" size={13} /> Delete order
+            </button>
+          )}
+        </div>
       </div>
+      {isArchived && (
+        <div className="card" style={{
+          padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+          background: 'var(--bg-soft)', borderStyle: 'dashed',
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: 'oklch(0.96 0.04 295)', color: 'oklch(0.45 0.16 295)',
+            display: 'grid', placeItems: 'center', flexShrink: 0,
+          }}>
+            <Icon name="box" size={14} />
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
+            <strong style={{ color: 'var(--fg)' }}>Archived</strong> · hidden from the default order list.
+            Toggle <em>Show archived</em> on the list page to find it, or click <em>Unarchive</em> above to restore.
+          </div>
+        </div>
+      )}
 
       <div className="oe-body">
       <div className={'card oe-items-card' + (!canEditOrder ? ' order-readonly' : '')}>
@@ -879,6 +941,55 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 }}
               >
                 {deleting ? '…' : 'Delete order'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showArchive && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) setShowArchive(false); }}>
+          <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  // Cool/violet tone — deliberately distinct from the destructive
+                  // red of Delete. Archive is reversible; the colour should not
+                  // alarm.
+                  background: 'oklch(0.96 0.04 295)', color: 'oklch(0.45 0.16 295)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="box" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">Archive order {order.id}?</div>
+                  <div className="modal-sub">
+                    Hides it from the default list. Lines, audit trail and any commission stay intact, and you can unarchive at any time.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setShowArchive(false)} disabled={archiving}>
+                Cancel
+              </button>
+              <button
+                className="btn accent"
+                disabled={archiving}
+                onClick={async () => {
+                  setArchiving(true);
+                  try {
+                    await archiveOrder(order.id);
+                    onSaved('Order archived');
+                  } catch (e) {
+                    handleFetchError(e);
+                    setArchiving(false);
+                    setShowArchive(false);
+                  }
+                }}
+              >
+                {archiving ? '…' : 'Archive order'}
               </button>
             </div>
           </div>

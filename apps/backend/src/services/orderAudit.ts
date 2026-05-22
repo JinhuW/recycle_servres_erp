@@ -19,7 +19,9 @@ export type EventKind =
   | 'line_added'
   | 'line_removed'
   | 'line_edited'
-  | 'meta_changed';
+  | 'meta_changed'
+  | 'archived'
+  | 'unarchived';
 
 // Order-level fields whose mutation we surface as `meta_changed`. These are
 // exactly the fields PATCH /api/orders/:id may touch on the orders row.

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
 describe('POST /api/orders defaults', () => {
   beforeEach(async () => { await resetDb(); });
@@ -24,7 +24,7 @@ describe('POST /api/orders defaults', () => {
     });
     expect(r.status).toBe(201);
     const id = r.body.id;
-    expect(id).toMatch(/^SO-\d+$/);
+    expect(id).toMatch(/^PO-\d+$/);
 
     const got = await api<{ order: { lifecycle: string; lines: { status: string }[] } }>(
       'GET', '/api/orders/' + id, { token },
@@ -283,6 +283,102 @@ describe('concurrent order creation gets unique ids', () => {
     for (const r of results) expect(r.status).toBe(201);
     const ids = results.map(r => r.body.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('POST /api/orders/:id/archive (+/unarchive)', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Helper: create + advance an order out of Draft so it is eligible for archive.
+  async function createInTransitOrder(token: string) {
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    await api('POST', `/api/orders/${created.body.id}/advance`, { token });
+    return created.body.id;
+  }
+
+  it('owner can archive their own non-Draft order, and unarchive it back', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createInTransitOrder(token);
+
+    const arch = await api('POST', `/api/orders/${id}/archive`, { token });
+    expect(arch.status).toBe(200);
+
+    const got = await api<{ order: { archivedAt: string | null } }>('GET', `/api/orders/${id}`, { token });
+    expect(got.body.order.archivedAt).not.toBeNull();
+
+    const unarch = await api('POST', `/api/orders/${id}/unarchive`, { token });
+    expect(unarch.status).toBe(200);
+    const got2 = await api<{ order: { archivedAt: string | null } }>('GET', `/api/orders/${id}`, { token });
+    expect(got2.body.order.archivedAt).toBeNull();
+  });
+
+  it('manager can archive any non-Draft order', async () => {
+    const { token: pTok } = await loginAs(MARCUS);
+    const { token: mTok } = await loginAs(ALEX);
+    const id = await createInTransitOrder(pTok);
+
+    const r = await api('POST', `/api/orders/${id}/archive`, { token: mTok });
+    expect(r.status).toBe(200);
+  });
+
+  it('forbids a different purchaser from archiving someone else\'s order', async () => {
+    const { token: ownerTok } = await loginAs(MARCUS);
+    const { token: otherTok } = await loginAs(PRIYA);
+    const id = await createInTransitOrder(ownerTok);
+
+    const r = await api<{ error: string }>('POST', `/api/orders/${id}/archive`, { token: otherTok });
+    expect(r.status).toBe(403);
+  });
+
+  it('refuses to archive a Draft (delete instead)', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    const r = await api<{ error: string }>('POST', `/api/orders/${created.body.id}/archive`, { token });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toMatch(/draft/i);
+  });
+
+  it('double-archive returns 409', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createInTransitOrder(token);
+    await api('POST', `/api/orders/${id}/archive`, { token });
+    const r = await api('POST', `/api/orders/${id}/archive`, { token });
+    expect(r.status).toBe(409);
+  });
+
+  it('list endpoint excludes archived orders by default, includes them with ?includeArchived=true', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createInTransitOrder(token);
+    await api('POST', `/api/orders/${id}/archive`, { token });
+
+    const dflt = await api<{ orders: { id: string }[] }>('GET', '/api/orders', { token });
+    expect(dflt.body.orders.find(o => o.id === id)).toBeUndefined();
+
+    const all = await api<{ orders: { id: string; archivedAt: string | null }[] }>(
+      'GET', '/api/orders?includeArchived=true', { token });
+    const row = all.body.orders.find(o => o.id === id);
+    expect(row).toBeDefined();
+    expect(row!.archivedAt).not.toBeNull();
+  });
+
+  it('writes archived / unarchived audit events', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createInTransitOrder(token);
+    await api('POST', `/api/orders/${id}/archive`,   { token });
+    await api('POST', `/api/orders/${id}/unarchive`, { token });
+
+    const ev = await api<{ events: { kind: string }[] }>('GET', `/api/orders/${id}/events`, { token });
+    const kinds = ev.body.events.map(e => e.kind);
+    expect(kinds).toContain('archived');
+    expect(kinds).toContain('unarchived');
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * Wave 2B backend fix tests.
  * Fix 1: sell_price can be explicitly cleared to null in PATCH
- * Fix 2: Human-IDs (SL-/SO-) allocated inside their transaction
+ * Fix 2: Human-IDs (SL-/PO-) allocated inside their transaction
  * Fix 3: Backward-advance guard on committed inventory
  * Fix 4: Vendor-bid decide N+1 collapse (behavior unchanged)
  *

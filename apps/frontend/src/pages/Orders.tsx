@@ -27,6 +27,7 @@ export function Orders({ onEdit, onToast }: Props) {
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [filter, setFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
+  const [showArchived, setShowArchived] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -45,12 +46,13 @@ export function Orders({ onEdit, onToast }: Props) {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (showArchived) params.set('includeArchived', 'true');
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
       .then(r => { if (alive) setOrders(r.orders); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [filter, statusFilter]);
+  }, [filter, statusFilter, showArchived]);
 
   // When a row is expanded, fetch its lines lazily.
   useEffect(() => {
@@ -134,6 +136,15 @@ export function Orders({ onEdit, onToast }: Props) {
               {s}
             </button>
           ))}
+          <button
+            className={'ph-chip-btn ' + (showArchived ? 'active' : '')}
+            onClick={() => setShowArchived(v => !v)}
+            title="Include archived orders"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <Icon name="box" size={11} />
+            Archived
+          </button>
         </div>
         {!loadedOnce && <PhoneListSkeleton rows={5} variant="order" />}
         {loadedOnce && orders.length === 0 && (
@@ -155,7 +166,7 @@ export function Orders({ onEdit, onToast }: Props) {
           return filtered.slice(0, 30).map(o => {
           const isOpen = openId === o.id;
           return (
-            <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }}>
+            <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }} style={o.archivedAt ? { opacity: 0.6 } : undefined}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
                 <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
                   {o.category}
@@ -180,6 +191,11 @@ export function Orders({ onEdit, onToast }: Props) {
                       <Icon name="paperclip" size={12} />
                     </button>
                     <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>· {o.lineCount} {o.lineCount === 1 ? t('item') : t('items')}</span>
+                    {o.archivedAt && (
+                      <span className="chip muted" style={{ fontSize: 9.5, padding: '1px 5px', lineHeight: 1.3 }}>
+                        archived
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {fmtDateShort(o.createdAt, locale)}{o.warehouse ? ' · ' + o.warehouse.short : ''} · <span style={{ color: 'var(--fg-muted)' }}>{o.status}</span>

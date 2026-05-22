@@ -117,3 +117,9 @@ export const createDraftOrder = (
 
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);
+
+export const archiveOrder = (orderId: string) =>
+  api.post<{ ok: true }>(`/api/orders/${orderId}/archive`, {});
+
+export const unarchiveOrder = (orderId: string) =>
+  api.post<{ ok: true }>(`/api/orders/${orderId}/unarchive`, {});

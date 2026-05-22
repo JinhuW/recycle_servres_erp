@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
 import { deleteAttachment } from '../r2';
 import { notifyManagers } from '../lib/notify';
@@ -42,6 +42,7 @@ orders.get('/', async (c) => {
 
   const category = c.req.query('category');                 // RAM/SSD/Other
   const status = c.req.query('status');                     // order stage label (Draft/In Transit/…)
+  const includeArchived = c.req.query('includeArchived') === 'true';
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const sortRaw = c.req.query('sort');
   if (sortRaw && !parseSort('orders', sortRaw)) {
@@ -74,6 +75,8 @@ orders.get('/', async (c) => {
         ? sql`o.lifecycle = ${STATUS_TO_LIFECYCLE[status]}`
         : sql`FALSE`)
     : sql`TRUE`;
+  // Archived orders drop out of the default view; clients opt in to see them.
+  const archivedFrag = includeArchived ? sql`TRUE` : sql`o.archived_at IS NULL`;
 
   // keyset pagination: (created_at, id) lexicographic
   const cursorFrag = cursor
@@ -85,6 +88,7 @@ orders.get('/', async (c) => {
   const rows = await sql`
     SELECT
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+      o.archived_at,
       o.total_cost::float AS total_cost,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
@@ -98,7 +102,7 @@ orders.get('/', async (c) => {
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} ${cursorFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
     ORDER BY o.${sql(sort.col)} ${sql.unsafe(sort.dir.toUpperCase())}, o.id ${sql.unsafe(sort.dir.toUpperCase())}
     LIMIT ${limit + 1}
@@ -120,6 +124,7 @@ orders.get('/', async (c) => {
       payment: r.payment,
       notes: r.notes,
       lifecycle: r.lifecycle,
+      archivedAt: r.archived_at,
       createdAt: r.created_at,
       totalCost: r.total_cost,
       warehouse: r.warehouse_id ? { id: r.warehouse_id, short: r.warehouse_short, region: r.warehouse_region } : null,
@@ -141,6 +146,7 @@ orders.get('/:id', async (c) => {
 
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+           o.archived_at,
            o.total_cost::float AS total_cost,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
@@ -182,6 +188,7 @@ orders.get('/:id', async (c) => {
       payment: order.payment,
       notes: order.notes,
       lifecycle: order.lifecycle,
+      archivedAt: order.archived_at,
       status,
       createdAt: order.created_at,
       totalCost: order.total_cost,
@@ -292,11 +299,11 @@ orders.post('/', async (c) => {
   if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
   if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
 
-  // Human-friendly id like SO-1289, allocated atomically (see id-seq.ts).
+  // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   await sql.begin(async (tx) => {
-    newId = await nextHumanId(tx, 'SO', 'SO');
+    newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
@@ -677,7 +684,7 @@ orders.post('/draft', async (c) => {
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   await sql.begin(async (tx) => {
-    newId = await nextHumanId(tx, 'SO', 'SO');
+    newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
@@ -746,6 +753,68 @@ orders.delete('/:id', async (c) => {
 
   return c.json({ ok: true });
 });
+
+// ── Archive / unarchive a Purchase Order.
+//
+// Archive is a reversible "hide from default list" flag (orders.archived_at),
+// available to the owner or any manager once the order has left Draft. Hard
+// delete stays Draft-only — once business records exist we want them around
+// for audit, sell-order references, and commission history.
+//
+// Both endpoints lock the orders row FOR UPDATE inside a single tx so a
+// concurrent archive + unarchive can't race, and so the audit event is only
+// committed if the flag flip succeeds.
+type OrderCtx = Context<{ Bindings: Env; Variables: { user: User } }>;
+
+async function setArchived(c: OrderCtx, archive: boolean) {
+  const u = c.var.user;
+  // Route is mounted with `:id`, so Hono populates this — assert for the type.
+  const id = c.req.param('id') as string;
+  const sql = getDb(c.env);
+
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'forbidden' }
+    | { kind: 'isDraft' }
+    | { kind: 'noChange' }
+    | { kind: 'ok' };
+
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const existing = (await tx`
+      SELECT user_id, lifecycle, archived_at FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0] as { user_id: string; lifecycle: string; archived_at: string | null } | undefined;
+    if (!existing) return { kind: 'notFound' };
+    if (u.role !== 'manager' && existing.user_id !== u.id) return { kind: 'forbidden' };
+    // Draft orders use Delete, not Archive — Archive only applies once an
+    // order is part of the business record.
+    if (existing.lifecycle === 'draft') return { kind: 'isDraft' };
+    const wasArchived = existing.archived_at !== null;
+    if (wasArchived === archive) return { kind: 'noChange' };
+
+    if (archive) {
+      await tx`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+    } else {
+      await tx`UPDATE orders SET archived_at = NULL WHERE id = ${id}`;
+    }
+    await writeOrderEvent(
+      tx, id, u.id,
+      archive ? 'archived' : 'unarchived',
+      {},
+    );
+    return { kind: 'ok' };
+  });
+
+  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'forbidden') return c.json({ error: 'Forbidden' }, 403);
+  if (outcome.kind === 'isDraft') return c.json({ error: 'Draft orders cannot be archived — delete instead' }, 403);
+  if (outcome.kind === 'noChange') {
+    return c.json({ error: archive ? 'Order is already archived' : 'Order is not archived' }, 409);
+  }
+  return c.json({ ok: true });
+}
+
+orders.post('/:id/archive',   c => setArchived(c, true));
+orders.post('/:id/unarchive', c => setArchived(c, false));
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → done) is the source of

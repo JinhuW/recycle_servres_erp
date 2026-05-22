@@ -5,7 +5,7 @@ import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
-import { api, deleteOrder } from '../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
@@ -60,6 +60,15 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
+  // archive is reversible so we keep the gesture short, matching the
+  // platform's "one tap, one sheet" rhythm.
+  const isArchived = !!order.archivedAt;
+  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
+  const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
+  const [showArchive, setShowArchive] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   // Reset meta inputs when the order itself changes (e.g. refetch after save).
   useEffect(() => {
@@ -175,6 +184,24 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
         leading={<button className="ph-icon-btn" onClick={onCancel}><Icon name="chevronLeft" size={16} /></button>}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
+        {isArchived && (
+          <div className="ph-card" style={{
+            margin: '10px 12px 0', padding: '10px 12px',
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'oklch(0.97 0.025 295)', borderStyle: 'dashed',
+          }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: 6,
+              background: 'oklch(0.92 0.05 295)', color: 'oklch(0.40 0.16 295)',
+              display: 'grid', placeItems: 'center', flexShrink: 0,
+            }}>
+              <Icon name="box" size={13} />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+              <strong style={{ color: 'var(--fg)' }}>Archived.</strong> Tap the restore button below to bring it back.
+            </div>
+          </div>
+        )}
         <div className="ph-section-h" style={{ paddingTop: 10 }}>
           <span>{t('orderStatus')}</span>
           <span style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
@@ -437,6 +464,36 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             <Icon name="trash" size={16} />
           </button>
         )}
+        {canArchive && (
+          <button
+            className="ph-icon-btn"
+            onClick={async () => {
+              if (isArchived) {
+                setArchiving(true);
+                try {
+                  await unarchiveOrder(order.id);
+                  onSaved('Order restored');
+                } catch (e) {
+                  handleFetchError(e);
+                  setArchiving(false);
+                }
+              } else {
+                setShowArchive(true);
+              }
+            }}
+            disabled={archiving}
+            aria-label={isArchived ? 'Unarchive order' : 'Archive order'}
+            style={{
+              width: 50, height: 50, borderRadius: 14,
+              border: '1px solid var(--border-strong)',
+              background: isArchived ? 'oklch(0.96 0.04 295)' : 'var(--bg-elev)',
+              color: isArchived ? 'oklch(0.45 0.16 295)' : 'var(--fg-muted)',
+              flex: '0 0 auto',
+            }}
+          >
+            <Icon name={isArchived ? 'rotate' : 'box'} size={16} />
+          </button>
+        )}
         {dirty && canEditOrder && (
           <button
             className="ph-btn dark"
@@ -508,6 +565,52 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                 }}
               >
                 {deleting ? t('deleting') : t('deleteOrderConfirmCta')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showArchive && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) setShowArchive(false); }}>
+          <div className="modal-shell" style={{ maxWidth: 380, width: '92vw' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'oklch(0.96 0.04 295)', color: 'oklch(0.45 0.16 295)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="box" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">Archive {order.id}?</div>
+                  <div className="modal-sub">
+                    Hides from the default list. Reversible — unarchive any time.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setShowArchive(false)} disabled={archiving}>
+                {t('cancel')}
+              </button>
+              <button
+                className="btn accent"
+                disabled={archiving}
+                onClick={async () => {
+                  setArchiving(true);
+                  try {
+                    await archiveOrder(order.id);
+                    onSaved('Order archived');
+                  } catch (e) {
+                    handleFetchError(e);
+                    setArchiving(false);
+                    setShowArchive(false);
+                  }
+                }}
+              >
+                {archiving ? '…' : 'Archive'}
               </button>
             </div>
           </div>

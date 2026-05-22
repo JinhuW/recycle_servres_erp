@@ -112,6 +112,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const [filter, setFilter] = usePersisted<string>('desktop.orders.filter', 'all');
   const [stageFilter, setStageFilter] = usePersisted<'all' | string>('desktop.orders.stageFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.orders.search', '');
+  const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.orders.showArchived', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -166,12 +167,13 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
     let alive = true;
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
+    if (showArchived) params.set('includeArchived', 'true');
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
       .then(r => { if (alive) setOrders(r.orders); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [filter]);
+  }, [filter, showArchived]);
 
   useEffect(() => {
     if (!openId) { setOpenLines(null); return; }
@@ -349,6 +351,20 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn"
+              onClick={() => setShowArchived(v => !v)}
+              title={showArchived ? 'Hide archived purchase orders' : 'Show archived purchase orders'}
+              style={{
+                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: showArchived ? 'var(--bg-soft)' : undefined,
+                borderColor: showArchived ? 'var(--border-strong)' : undefined,
+                color: showArchived ? 'var(--fg)' : 'var(--fg-muted)',
+              }}
+            >
+              <Icon name="box" size={12} />
+              {showArchived ? 'Hide archived' : 'Show archived'}
+            </button>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
                 position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -476,7 +492,16 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                 const isOpen = openId === o.id;
                 return (
                   <Fragment key={o.id}>
-                    <tr className="row-hover" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
+                    <tr
+                      className="row-hover"
+                      onClick={() => setOpenId(isOpen ? null : o.id)}
+                      style={{
+                        cursor: 'pointer',
+                        // Archived rows fade to signal they're outside the active queue
+                        // while staying readable on hover.
+                        opacity: o.archivedAt ? 0.55 : 1,
+                      }}
+                    >
                       <td>
                         <Icon name="chevronDown" size={13} style={{
                           transition: 'transform 0.15s',
@@ -485,7 +510,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                         }} />
                       </td>
                       <td className="mono" style={{ fontWeight: 600, display: isVis('id') ? undefined : 'none' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           {o.id}
                           <button
                             onClick={(e) => {
@@ -504,6 +529,12 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           >
                             <Icon name="paperclip" size={12} />
                           </button>
+                          {o.archivedAt && (
+                            <span className="chip muted" style={{ fontSize: 10, padding: '1px 6px' }}>
+                              <Icon name="box" size={9} style={{ marginRight: 3 }} />
+                              archived
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="muted" style={{ display: isVis('date') ? undefined : 'none' }}>{fmtDateShort(o.createdAt, locale)}</td>

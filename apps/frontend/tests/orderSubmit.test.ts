@@ -10,15 +10,15 @@ const line = (over: Partial<DraftLine> = {}): DraftLine => ({
 describe('buildOrderSubmit — editing an existing order', () => {
   it('PATCHes the existing order and never creates a new one', () => {
     const r = buildOrderSubmit(
-      { editingId: 'SO-1289', category: 'RAM', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] },
+      { editingId: 'PO-1289', category: 'RAM', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] },
       meta,
     );
-    expect(r).toMatchObject({ kind: 'patch', url: '/api/orders/SO-1289' });
+    expect(r).toMatchObject({ kind: 'patch', url: '/api/orders/PO-1289' });
   });
 
   it('updates lines that still carry their DB id (no status, so it is preserved)', () => {
     const r = buildOrderSubmit(
-      { editingId: 'SO-1', category: 'RAM', lines: [line({ id: 'l1', qty: 5 })], originalLineIds: ['l1'] },
+      { editingId: 'PO-1', category: 'RAM', lines: [line({ id: 'l1', qty: 5 })], originalLineIds: ['l1'] },
       meta,
     );
     if (r.kind !== 'patch') throw new Error('expected patch');
@@ -32,7 +32,7 @@ describe('buildOrderSubmit — editing an existing order', () => {
   it('adds lines with no id and removes originals the user deleted', () => {
     const r = buildOrderSubmit(
       {
-        editingId: 'SO-1',
+        editingId: 'PO-1',
         category: 'RAM',
         lines: [line({ id: 'l1' }), line({ brand: 'Crucial' })],
         originalLineIds: ['l1', 'l2'],
@@ -49,11 +49,11 @@ describe('buildOrderSubmit — editing an existing order', () => {
 describe('buildOrderSubmit — finalizing a new draft', () => {
   it('PATCHes the draft with only the unconfirmed lines', () => {
     const r = buildOrderSubmit(
-      { draftId: 'SO-9', category: 'RAM', lines: [line({ _confirmed: true }), line({ brand: 'New' })] },
+      { draftId: 'PO-9', category: 'RAM', lines: [line({ _confirmed: true }), line({ brand: 'New' })] },
       meta,
     );
     if (r.kind !== 'patch') throw new Error('expected patch');
-    expect(r.url).toBe('/api/orders/SO-9');
+    expect(r.url).toBe('/api/orders/PO-9');
     expect((r.body.addLines as unknown[])).toHaveLength(1);
   });
 
@@ -66,7 +66,7 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
 describe('buildOrderSubmit — line fields are not dropped', () => {
   it('carries RAM generation on added lines (purchaser-filled product info must persist)', () => {
     const r = buildOrderSubmit(
-      { draftId: 'SO-9', category: 'RAM', lines: [line({ generation: 'DDR4' })] },
+      { draftId: 'PO-9', category: 'RAM', lines: [line({ generation: 'DDR4' })] },
       meta,
     );
     if (r.kind !== 'patch') throw new Error('expected patch');
@@ -75,7 +75,7 @@ describe('buildOrderSubmit — line fields are not dropped', () => {
 
   it('carries RAM generation on updated lines', () => {
     const r = buildOrderSubmit(
-      { editingId: 'SO-1', category: 'RAM', lines: [line({ id: 'l1', generation: 'DDR5' })], originalLineIds: ['l1'] },
+      { editingId: 'PO-1', category: 'RAM', lines: [line({ id: 'l1', generation: 'DDR5' })], originalLineIds: ['l1'] },
       meta,
     );
     if (r.kind !== 'patch') throw new Error('expected patch');

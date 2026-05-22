@@ -66,6 +66,7 @@ export type OrderSummary = {
   payment: 'company' | 'self';
   notes: string | null;
   lifecycle: string;
+  archivedAt: string | null;
   createdAt: string;
   totalCost: number | null;
   warehouse: Warehouse | null;
@@ -84,7 +85,9 @@ export type OrderEventKind =
   | 'line_added'
   | 'line_removed'
   | 'line_edited'
-  | 'meta_changed';
+  | 'meta_changed'
+  | 'archived'
+  | 'unarchived';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 

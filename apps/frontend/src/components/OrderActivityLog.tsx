@@ -19,6 +19,8 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_removed: 'trash',
   line_edited:  'edit',
   meta_changed: 'settings',
+  archived:     'box',
+  unarchived:   'rotate',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -29,6 +31,8 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_removed: 'warn',
   line_edited:  'info',
   meta_changed: 'muted',
+  archived:     'muted',
+  unarchived:   'info',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -132,6 +136,12 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
     case 'meta_changed': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
       return { title: 'Updated order details', lines: changes.map(c => changeLine(c, locale)) };
+    }
+    case 'archived': {
+      return { title: 'Archived', lines: ['Hidden from the default order list'] };
+    }
+    case 'unarchived': {
+      return { title: 'Unarchived', lines: ['Restored to the active list'] };
     }
   }
 }
