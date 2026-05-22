@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDate } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useT } from '../../lib/i18n';
@@ -89,7 +90,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           setCustomerId(r.items[0].id);
         }
       })
-      .catch(() => {/* keep an empty list — Save will still validate */});
+      .catch(handleFetchError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape closes.
@@ -130,6 +131,13 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
     setLines(arr => arr.filter((_, i) => i !== idx));
 
   const canSubmit = lines.length > 0 && lines.every(l => l.qty > 0) && !!customerId;
+
+  const saveDisabledReason: string | null =
+    saving                                ? null
+  : lines.length === 0                    ? 'Add at least one item before saving.'
+  : !customerId                           ? 'Pick a customer before saving.'
+  : lines.some(l => l.qty <= 0)           ? 'Every line needs a quantity greater than zero.'
+  : null;
 
   const save = async () => {
     setSaving(true);
@@ -363,11 +371,23 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             Draft · {fmtDate(new Date(), locale)}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onClose}>Cancel</button>
-            <button className="btn accent" disabled={!canSubmit || saving} onClick={save}>
-              <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save draft'}
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={onClose}>Cancel</button>
+              <button
+                className="btn accent"
+                disabled={!canSubmit || saving}
+                title={saveDisabledReason ?? undefined}
+                onClick={save}
+              >
+                <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save draft'}
+              </button>
+            </div>
+            {saveDisabledReason && (
+              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
+                {saveDisabledReason}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -403,8 +423,10 @@ export function CustomerPicker({
       setCreating(false);
       setNewName('');
       setOpen(false);
-    } catch {
-      // leave the form open; user can retry
+    } catch (e) {
+      // Surface the error so the user knows why nothing happened; leave the
+      // form open so they can retry.
+      handleFetchError(e);
     } finally {
       setSavingNew(false);
     }

@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
+import { handleFetchError, showErrorToast } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 
@@ -39,11 +40,13 @@ export function OrderReview({
 
   useEffect(() => {
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => {
-      if (!alive) return;
-      setWarehouses(r.items);
-      if (r.items[0]) setWarehouseId(r.items[0].id);
-    });
+    api.get<{ items: Warehouse[] }>('/api/warehouses')
+      .then(r => {
+        if (!alive) return;
+        setWarehouses(r.items);
+        if (r.items[0]) setWarehouseId(r.items[0].id);
+      })
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
 
@@ -55,7 +58,7 @@ export function OrderReview({
   const submit = async () => {
     const parsed = parseDecimal(totalCost);
     if (Number.isNaN(parsed)) {
-      alert(t('totalCostInvalid'));
+      showErrorToast(t('totalCostInvalid'));
       return;
     }
     setSubmitting(true);
@@ -65,6 +68,13 @@ export function OrderReview({
       setSubmitting(false);
     }
   };
+
+  const submitDisabledReason: string | null =
+    submitting             ? null
+  : lines.length === 0     ? t('reviewNoLinesHint')
+  : warehouses.length === 0 ? t('reviewWarehousesLoadingHint')
+  : !warehouseId           ? t('reviewPickWarehouseHint')
+  : null;
 
   return (
     <div className="phone-app">
@@ -261,9 +271,28 @@ export function OrderReview({
         })()}
       </div>
 
+      {submitDisabledReason && (
+        <div
+          role="status"
+          style={{
+            position: 'absolute', left: 16, right: 16, bottom: 76,
+            padding: '8px 12px', borderRadius: 10,
+            background: 'var(--bg-elev)', border: '1px solid var(--border)',
+            color: 'var(--fg-subtle)', fontSize: 12, textAlign: 'center',
+            boxShadow: '0 2px 8px rgba(15,23,42,0.06)', zIndex: 5,
+          }}
+        >
+          {submitDisabledReason}
+        </div>
+      )}
       <div className="ph-action-bar">
         <button className="ph-btn ghost" onClick={onCancel}>{t('cancel')}</button>
-        <button className="ph-btn dark" onClick={submit} disabled={submitting || lines.length === 0 || !warehouseId}>
+        <button
+          className="ph-btn dark"
+          onClick={submit}
+          disabled={submitting || lines.length === 0 || !warehouseId}
+          title={submitDisabledReason ?? undefined}
+        >
           <Icon name="check" size={16} /> {submitting ? '…' : t('submitOrder')}
         </button>
       </div>

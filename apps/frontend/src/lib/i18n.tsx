@@ -185,6 +185,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     unit: 'unit',
     units2: 'units',
     totalCostInvalid: 'Total cost must be a valid number.',
+    reviewNoLinesHint: 'Add at least one item before submitting.',
+    reviewWarehousesLoadingHint: 'Warehouses are still loading — try again in a moment.',
+    reviewPickWarehouseHint: 'Pick a warehouse before submitting.',
+    transferPickDestinationHint: 'Pick a destination warehouse before transferring.',
+    transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',
 
     // ── Mobile parity additions (2026-05-12) ──
     rescanWithAi: 'Rescan with AI',
@@ -538,6 +543,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     adjustHint: '若供应商实际收取的金额不同(整数化、批量折扣、附加费),可在此调整。',
     reset: '重置', unit: '件', units2: '件',
     totalCostInvalid: '总成本必须是有效数字。',
+    reviewNoLinesHint: '请先添加至少一项再提交。',
+    reviewWarehousesLoadingHint: '仓库仍在加载，请稍后再试。',
+    reviewPickWarehouseHint: '请先选择仓库再提交。',
+    transferPickDestinationHint: '请先选择目标仓库再调拨。',
+    transferQtyOutOfRangeHint: '有数量无效（必须 ≥ 1 且 ≤ 库存）。',
 
     // ── Desktop (zh) ──
     appBrand: '回收服务器', brandSub: '库存与利润',

@@ -1,18 +1,27 @@
 /**
- * Centralized fetch-error handler.
+ * Centralized error-surfacing helpers.
  *
- * Usage:  api.get(...).then(...).catch(handleFetchError)
+ * The shell components (DesktopApp, MobileApp) register `window.__showToast`
+ * on mount; any module can call it through these helpers without being
+ * directly coupled to a React tree. Falls back to console.error when no
+ * shell is mounted (tests, SSR, errors during initial render).
  *
- * - Always logs to console.error so DevTools capture it.
- * - Emits a CustomEvent so any shell component (DesktopApp, MobileApp) can
- *   surface a toast without being directly coupled to this module.
- * - If a host page registers `window.__showToast`, that function is called
- *   directly (optional progressive-enhancement).
+ * Usage:
+ *   api.get(...).then(...).catch(handleFetchError)   // fetch failures
+ *   showErrorToast('Could not parse total cost')      // validation errors
  */
 
 declare global {
   interface Window {
-    __showToast?: (msg: string, tone?: string) => void;
+    __showToast?: (msg: string, tone?: 'success' | 'error') => void;
+  }
+}
+
+export function showErrorToast(msg: string): void {
+  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
+    window.__showToast(msg, 'error');
+  } else {
+    console.error('[toast]', msg);
   }
 }
 
@@ -22,15 +31,7 @@ export function handleFetchError(err: unknown): void {
   const msg =
     err instanceof Error ? err.message : 'Something went wrong. Please try again.';
 
-  // Emit a CustomEvent — listeners in DesktopApp/MobileApp can pick this up.
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('app:error', { detail: { message: msg } }),
-    );
-
-    // Progressive enhancement: if the host registered a direct toast hook, call it.
-    if (typeof window.__showToast === 'function') {
-      window.__showToast(msg, 'error');
-    }
+  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
+    window.__showToast(msg, 'error');
   }
 }

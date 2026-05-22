@@ -3,6 +3,7 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api, deleteOrder } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
@@ -95,7 +96,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     let alive = true;
     api.get<{ items: Warehouse[] }>('/api/warehouses')
       .then(r => { if (alive) setWarehouses(r.items); })
-      .catch(() => { /* non-fatal — keep existing warehouse pinned */ });
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
 
@@ -199,12 +200,26 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const dirty =
     statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty || commissionDirty;
 
-  const canSave = dirty && !saving && !orderLocked && lines.every(l => {
+  const lineReady = (l: EditLine) => {
     const qty = Number(l.qty) || 0;
     const cost = Number(l.unitCost) || 0;
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
     return qty > 0 && cost >= 0 && hasIdentity;
-  });
+  };
+  const canSave = dirty && !saving && !orderLocked && lines.every(lineReady);
+
+  // Inline hint near the Save button — explains why it's disabled instead of
+  // leaving the user clicking a dead button. Order matches the canSave gates.
+  const saveDisabledReason: string | null =
+    saving || canSave  ? null
+  : orderLocked        ? 'This order is Done — it can no longer be edited.'
+  : !dirty             ? 'No changes to save.'
+  : (() => {
+      const bad = lines.findIndex(l => !lineReady(l));
+      if (bad < 0) return null;
+      const which = lines.length === 1 ? 'this line' : `line ${bad + 1}`;
+      return `Fill in brand/description, quantity and unit cost on ${which} before saving.`;
+    })();
 
   const save = async () => {
     setSaving(true);
@@ -768,15 +783,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               {saveError}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-            <button
-              className="btn primary"
-              disabled={!canSave}
-              onClick={save}
-            >
-              <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+              <button
+                className="btn primary"
+                disabled={!canSave}
+                title={saveDisabledReason ?? undefined}
+                onClick={save}
+              >
+                <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
+              </button>
+            </div>
+            {saveDisabledReason && (
+              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
+                {saveDisabledReason}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -850,7 +873,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     await deleteOrder(order.id);
                     onCancel();
                   } catch (e) {
-                    alert(e instanceof Error ? e.message : 'Delete failed');
+                    handleFetchError(e);
                     setDeleting(false);
                   }
                 }}

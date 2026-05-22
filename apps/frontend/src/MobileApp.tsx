@@ -21,6 +21,7 @@ import { Profile } from './pages/Profile';
 import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
 import { api, createDraftOrder, deleteOrder } from './lib/api';
+import { handleFetchError } from './lib/errorToast';
 import {
   navigate, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView,
@@ -71,7 +72,7 @@ function Shell() {
     let alive = true;
     api.get<{ items: Notification[] }>('/api/notifications')
       .then(r => { if (alive) setNotifs(r.items); })
-      .catch(console.error);
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, [user?.id]);
 
@@ -98,6 +99,17 @@ function Shell() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
+
+  // Register the global toast hook so `handleFetchError` / `showErrorToast` in
+  // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
+  useEffect(() => {
+    window.__showToast = (msg, kind) => {
+      setToast({ msg, kind: kind === 'error' ? 'error' : 'success' });
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 2600);
+    };
+    return () => { delete window.__showToast; };
+  }, []);
 
   // ── Capture flow handlers ────────────────────────────────────────────────
   const startSubmit = () => setCapture({ phase: 'category' });

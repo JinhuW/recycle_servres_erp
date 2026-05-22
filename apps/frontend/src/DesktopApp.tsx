@@ -81,6 +81,17 @@ export function DesktopApp() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
 
+  // Register the global toast hook so `handleFetchError` / `showErrorToast` in
+  // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
+  useEffect(() => {
+    window.__showToast = (msg, kind) => {
+      setToast({ msg, kind: kind === 'error' ? 'error' : 'success' });
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 2600);
+    };
+    return () => { delete window.__showToast; };
+  }, []);
+
   if (loading) {
     return <div style={{ padding: 60, color: 'var(--fg-subtle)' }}>Loading…</div>;
   }

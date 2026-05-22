@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
-import { handleFetchError } from '../../lib/errorToast';
+import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
 import { CONDITIONS } from '../../lib/catalog';
@@ -155,7 +155,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     let alive = true;
     api.get<{ items: PeerRow[] }>(`/api/inventory?q=${encodeURIComponent(pn)}`)
       .then(r => { if (alive) setPeers(r.items.filter(p => p.part_number === pn)); })
-      .catch(() => { if (alive) setPeers([]); });
+      .catch(err => {
+        if (alive) setPeers([]);
+        handleFetchError(err);
+      });
     return () => { alive = false; };
   }, [item?.part_number]);
 
@@ -170,7 +173,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         const match = r.items.find(x => x.partNumber === pn) ?? r.items[0] ?? null;
         setRefMatch(match);
       })
-      .catch(() => { if (alive) setRefMatch(null); });
+      .catch(err => {
+        if (alive) setRefMatch(null);
+        handleFetchError(err);
+      });
     return () => { alive = false; };
   }, [item?.part_number]);
 
@@ -179,7 +185,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     let alive = true;
     api.get<{ items: LinkedSellOrder[] }>(`/api/inventory/${itemId}/sell-orders`)
       .then(r => { if (alive) setLinkedSellOrders(r.items); })
-      .catch(() => { if (alive) setLinkedSellOrders([]); });
+      .catch(err => {
+        if (alive) setLinkedSellOrders([]);
+        handleFetchError(err);
+      });
     return () => { alive = false; };
   }, [itemId]);
 
@@ -973,7 +982,7 @@ function SummaryColumn({
             <button
               className="btn"
               style={{ color: 'var(--neg)', borderColor: 'color-mix(in oklch, var(--neg) 30%, var(--border))' }}
-              onClick={() => alert('Archive flow not yet implemented')}
+              onClick={() => showErrorToast('Archive flow not yet implemented')}
             >
               Archive
             </button>

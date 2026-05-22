@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
+import { handleFetchError } from '../../../lib/errorToast';
 import type { Lang } from '../../../lib/types';
 
 // ─── Language radio (used inside the General tab) ─────────────────────────────
@@ -98,11 +99,14 @@ export function GeneralPanel() {
           capacityAlert: typeof s.notify_capacity       === 'boolean' ? s.notify_capacity       : d.notify.capacityAlert,
         },
       })))
-      .catch(() => { /* keep current values */ });
+      .catch(handleFetchError);
   useEffect(() => { reload(); }, []);
 
   const persist = (body: Record<string, unknown>) =>
-    api.patch('/api/workspace', body).catch(() => reload());
+    api.patch('/api/workspace', body).catch(err => {
+      handleFetchError(err);
+      reload();
+    });
 
   const upd = <K extends keyof GeneralData>(k: K, v: GeneralData[K]) =>
     setData(d => ({ ...d, [k]: v }));

@@ -62,6 +62,13 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   });
   const canSubmit = !!toWarehouseId && !anyInvalidQty && !submitting;
 
+  const submitDisabledReason: string | null =
+    submitting             ? null
+  : destinations.length === 0 ? null  // dedicated banner above already explains
+  : !toWarehouseId       ? t('transferPickDestinationHint')
+  : anyInvalidQty        ? t('transferQtyOutOfRangeHint')
+  : null;
+
   const setLineQty = (id: string, raw: string) => {
     const n = Number(raw);
     setQty(prev => ({ ...prev, [id]: Number.isFinite(n) ? Math.floor(n) : 0 }));
@@ -263,8 +270,14 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
         {/* Footer */}
         <div style={{
           padding: '12px 20px', borderTop: '1px solid var(--border)',
-          background: 'var(--bg-soft)', display: 'flex', justifyContent: 'flex-end', gap: 8,
+          background: 'var(--bg-soft)', display: 'flex', justifyContent: 'flex-end',
+          alignItems: 'center', gap: 12,
         }}>
+          {submitDisabledReason && (
+            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginRight: 'auto' }}>
+              {submitDisabledReason}
+            </div>
+          )}
           <button className="btn" onClick={onClose} disabled={submitting}>
             {t('cancel')}
           </button>
@@ -272,6 +285,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
             className="btn accent"
             onClick={submit}
             disabled={!canSubmit}
+            title={submitDisabledReason ?? undefined}
           >
             <Icon name="truck" size={13} />
             {submitting ? t('transferring') : t('transferSubmit')}

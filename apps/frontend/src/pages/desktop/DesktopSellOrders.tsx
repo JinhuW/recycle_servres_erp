@@ -5,6 +5,7 @@ import {
 } from '../../components/StatusChangeDialog';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
@@ -131,7 +132,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     if (statusFilter !== 'all') p.set('status', statusFilter);
     api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
       .then(r => setOrders(r.items))
-      .catch(console.error)
+      .catch(handleFetchError)
       .finally(() => setLoadedOnce(true));
   };
   useEffect(() => {
@@ -140,7 +141,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     if (statusFilter !== 'all') p.set('status', statusFilter);
     api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
       .then(r => { if (alive) setOrders(r.items); })
-      .catch(console.error)
+      .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
   }, [statusFilter]);
@@ -380,7 +381,7 @@ function SellOrderDetail({
           lines: r.order.lines.map(toEditLine),
         });
       })
-      .catch(console.error);
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, [id]);
 
@@ -390,7 +391,7 @@ function SellOrderDetail({
     let alive = true;
     api.get<{ items: Customer[] }>('/api/customers')
       .then(r => { if (alive) setCustomers(r.items); })
-      .catch(() => {/* picker still shows the current customer */});
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, [mode]);
 

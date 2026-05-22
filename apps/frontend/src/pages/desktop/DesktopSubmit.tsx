@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api, createDraftOrder } from '../../lib/api';
+import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
@@ -213,7 +214,7 @@ function OrderForm({
   useEffect(() => {
     api.get<{ items: Warehouse[] }>('/api/warehouses')
       .then(r => setWarehouses(r.items))
-      .catch(() => {/* keep empty list — UI shows a hint */});
+      .catch(handleFetchError);
   }, []);
 
   const [lines, setLines] = useState<Line[]>([blankLine(category)]);
@@ -379,6 +380,22 @@ function OrderForm({
 
   // Escape closes the drawer.
   useEscapeKey(useCallback(() => setActiveIdx(null), []), activeIdx !== null);
+
+  // Reason the Submit button is disabled, surfaced inline so the user isn't
+  // staring at a dead button wondering what's wrong. Checked in priority
+  // order: still submitting → draft creation → warehouse pick → per-line completeness.
+  const submitDisabledReason: string | null =
+    submitting              ? null
+  : !draftId                ? 'Starting draft order…'
+  : warehouses.length === 0 ? 'Warehouses haven\'t loaded — refresh the page.'
+  : !meta.warehouseId       ? 'Pick a warehouse before submitting.'
+  : !canSubmit              ? (() => {
+      const bad = lines.findIndex(l => !lineReady(l));
+      if (bad < 0) return null;
+      const which = lines.length === 1 ? 'this line' : `line ${bad + 1}`;
+      return `Fill in brand/description, quantity and unit cost on ${which} before submitting.`;
+    })()
+  : null;
 
   return (
     <>
@@ -644,36 +661,44 @@ function OrderForm({
               {fmtUSD(meta.totalCostOverride !== null ? (Number(meta.totalCostOverride) || 0) : totals.cost, locale)}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
-            <button
-              className="btn accent"
-              disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
-              onClick={async () => {
-                if (!draftId) { setAiError('No draft order — refresh and try again.'); return; }
-                const totalCost = meta.totalCostOverride != null
-                  ? (Number(meta.totalCostOverride) || 0)
-                  : totals.cost;
-                const unconfirmedLines = lines.filter(l => !l._confirmed);
-                setSubmitting(true);
-                try {
-                  await api.patch('/api/orders/' + draftId, {
-                    warehouseId: meta.warehouseId,
-                    payment: meta.payment === 'Company' ? 'company' : 'self',
-                    notes: meta.notes || null,
-                    totalCost,
-                    ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
-                  });
-                  onDone({ msg: 'Order submitted — added to inventory', kind: 'success' });
-                } catch (e) {
-                  setAiError(e instanceof Error ? e.message : 'Submit failed');
-                } finally {
-                  setSubmitting(false);
-                }
-              }}
-            >
-              Submit order <Icon name="check" size={14} />
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn" onClick={onCancel}>Cancel</button>
+              <button
+                className="btn accent"
+                disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
+                title={submitDisabledReason ?? undefined}
+                onClick={async () => {
+                  if (!draftId) { setAiError('No draft order — refresh and try again.'); return; }
+                  const totalCost = meta.totalCostOverride != null
+                    ? (Number(meta.totalCostOverride) || 0)
+                    : totals.cost;
+                  const unconfirmedLines = lines.filter(l => !l._confirmed);
+                  setSubmitting(true);
+                  try {
+                    await api.patch('/api/orders/' + draftId, {
+                      warehouseId: meta.warehouseId,
+                      payment: meta.payment === 'Company' ? 'company' : 'self',
+                      notes: meta.notes || null,
+                      totalCost,
+                      ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
+                    });
+                    onDone({ msg: 'Order submitted — added to inventory', kind: 'success' });
+                  } catch (e) {
+                    setAiError(e instanceof Error ? e.message : 'Submit failed');
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+              >
+                Submit order <Icon name="check" size={14} />
+              </button>
+            </div>
+            {submitDisabledReason && (
+              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
+                {submitDisabledReason}
+              </div>
+            )}
           </div>
         </div>
       </div>

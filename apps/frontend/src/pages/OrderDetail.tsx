@@ -6,6 +6,7 @@ import { OrderActivityLog } from '../components/OrderActivityLog';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api, deleteOrder } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
 import type { Order, OrderLine, Warehouse } from '../lib/types';
@@ -71,7 +72,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     let alive = true;
     api.get<{ items: Warehouse[] }>('/api/warehouses')
       .then(r => { if (alive) setWarehouses(r.items); })
-      .catch(() => {/* non-fatal — keep the existing pinned warehouse */});
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
 
@@ -93,7 +94,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     try {
       const r = await api.get<{ order: Order }>(`/api/orders/${order.id}`);
       setOrder(r.order);
-    } catch {/* leave current state */}
+    } catch (e) {
+      // Refetch is best-effort after a save; the save toast already confirmed
+      // the write succeeded. Surface refetch failures so the user knows the
+      // on-screen state may be stale.
+      handleFetchError(e);
+    }
   };
 
   const save = async () => {
@@ -496,7 +502,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                     await deleteOrder(order.id);
                     onDeleted();
                   } catch (e) {
-                    alert(e instanceof Error ? e.message : 'Delete failed');
+                    handleFetchError(e);
                     setDeleting(false);
                   }
                 }}

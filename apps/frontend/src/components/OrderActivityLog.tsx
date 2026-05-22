@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
@@ -146,7 +147,7 @@ export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
     let alive = true;
     api.get<{ events: OrderEvent[] }>(`/api/orders/${orderId}/events`)
       .then(r => { if (alive) setEvents(r.events); })
-      .catch(console.error)
+      .catch(handleFetchError)
       .finally(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
   }, [orderId, refreshKey]);

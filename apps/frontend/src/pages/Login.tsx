@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { handleFetchError } from '../lib/errorToast';
 import type { Lang } from '../lib/types';
 
 type DemoAccount = { id: string; email: string; name: string; initials: string; role: 'manager' | 'purchaser'; team: string | null };
@@ -77,7 +78,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
           setAccounts(r.users.filter(u => u.role === 'purchaser').slice(0, 4));
         }
       })
-      .catch(() => {/* swallow — keep the picker usable */});
+      .catch(handleFetchError);
   }, [picking, accounts.length, variant]);
 
   const submitEmail = async () => {

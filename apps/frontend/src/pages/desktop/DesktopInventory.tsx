@@ -175,14 +175,19 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     const h = setTimeout(() => {
       api.get<{ products: ProductGroup[] }>(`/api/inventory/products?${filterQuery}`)
         .then(r => { if (alive) { setProducts(r.products); setProductsLoaded(true); } })
-        .catch(() => { if (alive) { setProducts([]); setProductsLoaded(true); } });
+        .catch(err => {
+          if (alive) { setProducts([]); setProductsLoaded(true); }
+          handleFetchError(err);
+        });
     }, 200);
     return () => { alive = false; clearTimeout(h); };
   }, [view, filterQuery]);
 
   useEffect(() => {
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses').then(r => { if (alive) setWhs(r.items); });
+    api.get<{ items: Warehouse[] }>('/api/warehouses')
+      .then(r => { if (alive) setWhs(r.items); })
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
 
@@ -891,7 +896,10 @@ function InventoryQuickView({
     if (!pn) { setLog([]); return; }
     api.get<{ events: QvEvent[] }>(`/api/inventory/events/by-part?partNumber=${encodeURIComponent(pn)}`)
       .then(r => { if (alive) setLog(r.events); })
-      .catch(() => { if (alive) setLog([]); });
+      .catch(err => {
+        if (alive) setLog([]);
+        handleFetchError(err);
+      });
     return () => { alive = false; };
   }, [item.part_number]);
 

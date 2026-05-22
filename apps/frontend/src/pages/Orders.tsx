@@ -83,7 +83,7 @@ export function Orders({ onEdit, onToast }: Props) {
     const summary = orders.find(o => o.id === m.id);
     if (summary && !isCompleted(summary.status)) {
       // Fetch the full order to pass to onEdit (it expects the lines).
-      api.get<{ order: Order }>(`/api/orders/${m.id}`).then(r => onEdit(r.order)).catch(() => {});
+      api.get<{ order: Order }>(`/api/orders/${m.id}`).then(r => onEdit(r.order)).catch(handleFetchError);
     }
     // Eslint: omitting onEdit on purpose — the parent provides a stable callback.
     // eslint-disable-next-line react-hooks/exhaustive-deps

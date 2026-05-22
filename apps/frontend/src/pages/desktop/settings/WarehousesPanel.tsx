@@ -200,7 +200,7 @@ function WarehouseEditModal({
   useEffect(() => {
     api.get<{ items: Member[] }>('/api/members')
       .then(r => setManagers(r.items.filter(m => m.role === 'manager' && m.active)))
-      .catch(() => { /* leave empty; field still renders */ });
+      .catch(handleFetchError);
   }, []);
   const selectedMgr = managers.find(m => m.id === draft.managerUserId) ?? null;
   const [saving, setSaving] = useState(false);

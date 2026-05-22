@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon, type IconName } from '../../../components/Icon';
 import { api } from '../../../lib/api';
+import { handleFetchError } from '../../../lib/errorToast';
 import { SettingsHeader, Toggle } from './_shared';
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -30,16 +31,19 @@ export function CategoriesPanel() {
         id: c.id, label: c.label, icon: c.icon as IconName, enabled: c.enabled,
         aiCapture: c.ai_capture, requiresPN: c.requires_pn, defaultMargin: c.default_margin,
       }))))
-      .catch(() => { /* keep whatever is on screen */ });
+      .catch(handleFetchError);
   useEffect(() => { reload(); }, []);
 
   const upd = (id: string, patch: Partial<CategoryRow>) =>
     setCats(p => p.map(c => c.id === id ? { ...c, ...patch } : c));
 
-  // Optimistic update already applied by the caller; persist and resync from
-  // the server if the write fails (e.g. a purchaser hitting the manager gate).
+  // Optimistic update already applied by the caller; on PATCH failure we
+  // surface the error AND resync from the server so the user sees the revert.
   const persist = (id: string, body: Record<string, unknown>) =>
-    api.patch(`/api/categories/${id}`, body).catch(() => reload());
+    api.patch(`/api/categories/${id}`, body).catch(err => {
+      handleFetchError(err);
+      reload();
+    });
 
   return (
     <>
