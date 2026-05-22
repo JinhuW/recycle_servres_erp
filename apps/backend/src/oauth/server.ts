@@ -8,7 +8,7 @@ import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret } from './clients';
 import { verifyChallenge } from './pkce';
-import { signAccessToken, issueRefreshToken, rotateRefreshToken } from './tokens';
+import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily } from './tokens';
 
 const CODE_TTL_SEC = 600;
 const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -324,6 +324,30 @@ oauth.post('/token', async (c) => {
   }
 
   return c.json({ error: 'unsupported_grant_type' }, 400);
+});
+
+// RFC 7009 token revocation. Returns 200 even when the token is unknown so a
+// client can blindly revoke without leaking which tokens exist.
+oauth.post('/revoke', async (c) => {
+  const form = await readFormBody(c);
+  const creds = readClientCreds(c, form);
+  if (!creds) return c.json({ error: 'invalid_client' }, 401);
+  const sql = getDb(c.env);
+  const client = await findOAuthClient(sql, creds.id);
+  if (!client) return c.json({ error: 'invalid_client' }, 401);
+  if (client.secret_hash && !(await verifyClientSecret(client, creds.secret ?? ''))) {
+    return c.json({ error: 'invalid_client' }, 401);
+  }
+  const raw = form.token;
+  if (!raw) return c.json({}, 200);
+  const row = (await sql<{ family_id: string; client_id: string }[]>`
+    SELECT family_id, client_id FROM oauth_refresh_tokens
+    WHERE token_hash = ${sha256hex(raw)} LIMIT 1
+  `)[0];
+  if (row && row.client_id === client.id) {
+    await revokeRefreshFamily(sql, row.family_id);
+  }
+  return c.json({}, 200);
 });
 
 oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {

@@ -339,3 +339,42 @@ describe('/oauth/token', () => {
     expect(rotate2.status).toBe(400);
   });
 });
+
+describe('/oauth/revoke', () => {
+  it('revokes a refresh token family; subsequent rotate fails', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'tk-revoke', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const verifier = generateVerifier();
+    const challenge = challengeS256(verifier);
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=${challenge}&code_challenge_method=S256&scope=market:read&state=st`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const consent = await api('POST', '/oauth/authorize/consent', { body: { req }, token, redirect: 'manual' });
+    const code = new URL(consent.headers.get('location')!).searchParams.get('code')!;
+    const tk = await api('POST', '/oauth/token', {
+      form: { grant_type: 'authorization_code', code, code_verifier: verifier,
+              redirect_uri: 'https://example.com/cb', client_id: c.clientId, client_secret: c.clientSecret! },
+    });
+    const rt = (tk.body as any).refresh_token as string;
+    // Revoke.
+    const rev = await api('POST', '/oauth/revoke', {
+      form: { token: rt, client_id: c.clientId, client_secret: c.clientSecret! },
+    });
+    expect(rev.status).toBe(200);
+    // Subsequent rotate must fail.
+    const rot = await api('POST', '/oauth/token', {
+      form: { grant_type: 'refresh_token', refresh_token: rt,
+              client_id: c.clientId, client_secret: c.clientSecret! },
+    });
+    expect(rot.status).toBe(400);
+  });
+});
