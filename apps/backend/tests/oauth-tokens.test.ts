@@ -71,13 +71,13 @@ describe('oauth tokens', () => {
     const r1 = await issueRefreshToken(db, env(), {
       clientId: c.clientId, userId: u, scopes: ['market:read'],
     });
-    const r2 = await rotateRefreshToken(db, r1.raw);
+    const r2 = await rotateRefreshToken(db, env(), r1.raw);
     expect(r2.ok).toBe(true);
-    const reuse = await rotateRefreshToken(db, r1.raw);
+    const reuse = await rotateRefreshToken(db, env(), r1.raw);
     expect(reuse.ok).toBe(false);
     // The just-issued r2 token is now revoked transitively.
     if (r2.ok) {
-      const after = await rotateRefreshToken(db, r2.raw);
+      const after = await rotateRefreshToken(db, env(), r2.raw);
       expect(after.ok).toBe(false);
     }
   });

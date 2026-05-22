@@ -30,7 +30,7 @@ function loadPublicKey(b64: string): KeyObject {
 
 // Deterministic short kid derived from the key bytes; lets the verifier pick
 // the matching key from the ring without exposing the key itself.
-function keyKid(b64: string): string {
+export function keyKid(b64: string): string {
   return sha256hex(b64).slice(0, 16);
 }
 
@@ -125,6 +125,7 @@ export type RotateRefreshResult =
 
 export async function rotateRefreshToken(
   sql: postgres.Sql,
+  env: Env,
   raw: string,
 ): Promise<RotateRefreshResult> {
   return sql.begin<RotateRefreshResult>(async (tx) => {
@@ -147,7 +148,6 @@ export async function rotateRefreshToken(
     }
     if (row.expired) return { ok: false, reason: 'expired' };
     await tx`UPDATE oauth_refresh_tokens SET revoked_at = NOW() WHERE id = ${row.id}`;
-    const env = process.env as unknown as Env;
     const next = await issueRefreshToken(tx, env, {
       clientId: row.client_id,
       userId: row.user_id,
