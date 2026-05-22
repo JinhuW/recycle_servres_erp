@@ -15,6 +15,9 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production' && !src.OPENROUTER_API_KEY) {
     throw new Error('OPENROUTER_API_KEY is required in production (the stub OCR returns canned data)');
   }
+  if (src.NODE_ENV === 'production' && !src.OAUTH_SIGNING_KEY_CURRENT) {
+    throw new Error('OAUTH_SIGNING_KEY_CURRENT must be set in production');
+  }
   return {
     DATABASE_URL: src.DATABASE_URL,
     JWT_SECRET: src.JWT_SECRET,

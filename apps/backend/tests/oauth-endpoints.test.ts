@@ -121,6 +121,42 @@ describe('/oauth/authorize', () => {
     expect(r.status).toBe(302);
     expect(r.headers.get('location')).toMatch(/^\/authorize\?req=/);
   });
+
+  it('redirects with error=invalid_request when code_challenge is missing', async () => {
+    const c = await aClient();
+    const r = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&state=s1&scope=market:read`,
+    );
+    expect(r.status).toBe(302);
+    const loc = new URL(r.headers.get('location')!, 'http://localhost');
+    expect(loc.origin + loc.pathname).toBe('https://example.com/cb');
+    expect(loc.searchParams.get('error')).toBe('invalid_request');
+    expect(loc.searchParams.get('state')).toBe('s1');
+  });
+
+  it('redirects with error=invalid_scope when client lacks requested scope', async () => {
+    const c = await aClient();
+    const r = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&state=s1&scope=market:write&code_challenge=ch&code_challenge_method=S256`,
+    );
+    expect(r.status).toBe(302);
+    const loc = new URL(r.headers.get('location')!, 'http://localhost');
+    expect(loc.origin + loc.pathname).toBe('https://example.com/cb');
+    expect(loc.searchParams.get('error')).toBe('invalid_scope');
+    expect(loc.searchParams.get('state')).toBe('s1');
+  });
+
+  it('redirects with error=unsupported_response_type when response_type is not code', async () => {
+    const c = await aClient();
+    const r = await api('GET',
+      `/oauth/authorize?response_type=token&client_id=${c.clientId}&redirect_uri=https://example.com/cb&state=s1&scope=market:read&code_challenge=ch&code_challenge_method=S256`,
+    );
+    expect(r.status).toBe(302);
+    const loc = new URL(r.headers.get('location')!, 'http://localhost');
+    expect(loc.origin + loc.pathname).toBe('https://example.com/cb');
+    expect(loc.searchParams.get('error')).toBe('unsupported_response_type');
+    expect(loc.searchParams.get('state')).toBe('s1');
+  });
 });
 
 describe('/oauth/authorize/consent', () => {
@@ -487,5 +523,23 @@ describe('/api/oauth/clients (admin)', () => {
     expect(del.status).toBe(200);
     const list3 = await api('GET', '/api/oauth/clients', { token });
     expect(((list3.body as any).clients as any[]).length).toBe(beforeCount);
+  });
+
+  it('400s on unknown grant_type', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/oauth/clients', {
+      token,
+      body: { name: 'bad-grant', grantTypes: ['password'], scopes: ['market:read'] },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('400s on unknown scope', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/oauth/clients', {
+      token,
+      body: { name: 'bad-scope', scopes: ['market.read'] },
+    });
+    expect(r.status).toBe(400);
   });
 });

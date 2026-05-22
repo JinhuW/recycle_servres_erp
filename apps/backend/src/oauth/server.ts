@@ -85,17 +85,26 @@ oauth.get('/authorize', async (c) => {
   const sql = getDb(c.env);
   const client = await findOAuthClient(sql, q.client_id);
   if (!client) return c.json({ error: 'invalid_client' }, 400);
-  if (q.response_type !== 'code') return c.json({ error: 'unsupported_response_type' }, 400);
   if (!q.redirect_uri || !client.redirect_uris.includes(q.redirect_uri)) {
     return c.json({ error: 'invalid_redirect_uri' }, 400);
   }
+  // Per RFC 6749 §4.1.2.1, once client_id + redirect_uri are validated,
+  // subsequent errors must redirect back so the client sees a structured
+  // error rather than a 400 page.
+  const redirectWithError = (code: string) => {
+    const u = new URL(q.redirect_uri!);
+    u.searchParams.set('error', code);
+    if (q.state) u.searchParams.set('state', q.state);
+    return c.redirect(u.toString(), 302);
+  };
+  if (q.response_type !== 'code') return redirectWithError('unsupported_response_type');
   if (q.code_challenge_method !== 'S256' || !q.code_challenge) {
-    return c.json({ error: 'invalid_request', detail: 'PKCE S256 required' }, 400);
+    return redirectWithError('invalid_request');
   }
   const requested = (q.scope ?? '').split(' ').filter(Boolean);
   for (const s of requested) {
     if (!client.scopes.includes(s)) {
-      return c.json({ error: 'invalid_scope', detail: `client lacks scope ${s}` }, 400);
+      return redirectWithError('invalid_scope');
     }
   }
   const at = getCookie(c, 'at');
@@ -383,6 +392,9 @@ oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
 // > Connectors tab and lets managers mint service clients (for the market
 // scraper) or revoke existing ones. The mutating verbs go through csrfGuard
 // like every other /api/* route — this surface is NOT exempt.
+const VALID_GRANT_TYPES = ['authorization_code', 'refresh_token', 'client_credentials'] as const;
+const VALID_SCOPES = ['market:read', 'market:write'] as const;
+
 export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
   .use('*', async (c, next) => {
@@ -410,11 +422,23 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
       public?: boolean;
     };
     if (!body?.name) return c.json({ error: 'name required' }, 400);
+    const grantTypes = body.grantTypes ?? ['client_credentials'];
+    const scopes = body.scopes ?? ['market:read'];
+    for (const g of grantTypes) {
+      if (!VALID_GRANT_TYPES.includes(g as typeof VALID_GRANT_TYPES[number])) {
+        return c.json({ error: `invalid grant_type: ${g}` }, 400);
+      }
+    }
+    for (const s of scopes) {
+      if (!VALID_SCOPES.includes(s as typeof VALID_SCOPES[number])) {
+        return c.json({ error: `invalid scope: ${s}` }, 400);
+      }
+    }
     const out = await createOAuthClient(getDb(c.env), {
       name: body.name,
       redirectUris: body.redirectUris ?? [],
-      grantTypes: body.grantTypes ?? ['client_credentials'],
-      scopes: body.scopes ?? ['market:read'],
+      grantTypes,
+      scopes,
       createdBy: c.var.user.id,
       public: body.public ?? false,
     });
