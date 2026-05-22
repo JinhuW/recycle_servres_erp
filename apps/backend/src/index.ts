@@ -31,7 +31,7 @@ import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
-import wellKnown, { oauth as oauthRoutes } from './oauth/server';
+import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
 import type { Env, User } from './types';
@@ -209,6 +209,10 @@ app.route('/api/categories', categoriesRoutes);
 app.route('/api/attachments', attachmentsRoutes);
 app.route('/api/workspace', workspaceRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
+// /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
+// authMiddleware + a role check, so we don't add it to the broad /api/* auth
+// list above. csrfGuard still runs from the global stack.
+app.route('/api/oauth/clients', oauthAdmin);
 
 app.onError((err, c) => {
   // Log the full error server-side with the request ID for correlation, but

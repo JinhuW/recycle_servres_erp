@@ -6,7 +6,7 @@ import type { Env, OAuthScope, User } from '../types';
 import { authorizationServerMetadata, protectedResourceMetadata } from './metadata';
 import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
-import { createOAuthClient, findOAuthClient, verifyClientSecret } from './clients';
+import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
 import { verifyChallenge } from './pkce';
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily } from './tokens';
 
@@ -377,3 +377,51 @@ oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
     state: row.state,
   });
 });
+
+// ── /api/oauth/clients (admin) ──────────────────────────────────────────────
+// Cookie-authed, manager-only. Surfaces the OAuth client list to the Settings
+// > Connectors tab and lets managers mint service clients (for the market
+// scraper) or revoke existing ones. The mutating verbs go through csrfGuard
+// like every other /api/* route — this surface is NOT exempt.
+export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>()
+  .use('*', authMiddleware)
+  .use('*', async (c, next) => {
+    if (c.var.user.role !== 'manager') return c.json({ error: 'forbidden' }, 403);
+    return next();
+  })
+  .get('/', async (c) => {
+    const rows = await listOAuthClients(getDb(c.env));
+    return c.json({
+      clients: rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        scopes: r.scopes,
+        grantTypes: r.grant_types,
+        redirectUris: r.redirect_uris,
+        createdAt: r.created_at,
+      })),
+    });
+  })
+  .post('/', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as null | {
+      name?: string;
+      redirectUris?: string[];
+      grantTypes?: string[];
+      scopes?: string[];
+      public?: boolean;
+    };
+    if (!body?.name) return c.json({ error: 'name required' }, 400);
+    const out = await createOAuthClient(getDb(c.env), {
+      name: body.name,
+      redirectUris: body.redirectUris ?? [],
+      grantTypes: body.grantTypes ?? ['client_credentials'],
+      scopes: body.scopes ?? ['market:read'],
+      createdBy: c.var.user.id,
+      public: body.public ?? false,
+    });
+    return c.json(out, 201);
+  })
+  .delete('/:id', async (c) => {
+    await revokeOAuthClient(getDb(c.env), c.req.param('id'));
+    return c.json({ ok: true });
+  });

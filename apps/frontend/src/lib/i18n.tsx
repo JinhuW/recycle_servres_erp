@@ -460,6 +460,24 @@ export const I18N: Record<Lang, Record<string, string>> = {
     oauthConsentApprovedTitle: 'Authorization recorded',
     oauthConsentApprovedSub: 'Return to {client} to finish signing in. You can close this tab.',
 
+    // ── Settings > Connectors ──
+    connectorsTab: 'Connectors',
+    connectorsSub: 'OAuth integrations & scraper service clients.',
+    connectorsAddServiceTitle: 'Add a service client (scraper)',
+    connectorsAddServiceSub: 'Mints a confidential client_credentials client with the market:write scope.',
+    connectorsNamePlaceholder: 'e.g. ebay-scraper-prod',
+    connectorsCreate: 'Create',
+    connectorsSecretOnce: 'Client secret (shown ONCE — copy now):',
+    connectorsSecretDismiss: "I've copied it",
+    connectorsListTitle: 'Connectors',
+    connectorsHeaderName: 'Name',
+    connectorsHeaderScopes: 'Scopes',
+    connectorsHeaderGrants: 'Grants',
+    connectorsHeaderCreated: 'Created',
+    connectorsRevoke: 'Revoke',
+    connectorsRevokeConfirm: 'Revoke this connector? Any access tokens issued to it will stop working when they expire.',
+    connectorsEmpty: 'No connectors yet. DCR-registered integrations and service clients appear here.',
+
     // ── Vendor bidding portal ──
     vendorBrowse: 'Browse', vendorMyOffers: 'My offers',
     vendorAvailable: '{n} available', vendorAddOffer: '+ Add offer',
@@ -766,6 +784,24 @@ export const I18N: Record<Lang, Record<string, string>> = {
     oauthConsentApproving: '处理中…',
     oauthConsentApprovedTitle: '授权已记录',
     oauthConsentApprovedSub: '请回到 {client} 完成登录。可关闭此页面。',
+
+    // ── Settings > Connectors ──
+    connectorsTab: '连接器',
+    connectorsSub: 'OAuth 集成与抓取器服务客户端。',
+    connectorsAddServiceTitle: '添加服务客户端（抓取器）',
+    connectorsAddServiceSub: '创建一个具有 market:write 权限的机密 client_credentials 客户端。',
+    connectorsNamePlaceholder: '例如：ebay-scraper-prod',
+    connectorsCreate: '创建',
+    connectorsSecretOnce: '客户端密钥（仅显示一次 — 立即复制）：',
+    connectorsSecretDismiss: '我已复制',
+    connectorsListTitle: '连接器',
+    connectorsHeaderName: '名称',
+    connectorsHeaderScopes: '作用域',
+    connectorsHeaderGrants: '授权类型',
+    connectorsHeaderCreated: '创建时间',
+    connectorsRevoke: '撤销',
+    connectorsRevokeConfirm: '撤销此连接器？已签发的访问令牌将在过期时停止工作。',
+    connectorsEmpty: '暂无连接器。已注册的集成与服务客户端将显示在此。',
 
     // ── Vendor bidding portal ──
     vendorBrowse: '浏览', vendorMyOffers: '我的报价',

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX } from './helpers/auth';
+import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { generateVerifier, challengeS256 } from '../src/oauth/pkce';
 
 describe('OAuth discovery', () => {
@@ -445,5 +445,47 @@ describe('/oauth/revoke', () => {
               client_id: c.clientId, client_secret: c.clientSecret! },
     });
     expect(rot.status).toBe(400);
+  });
+});
+
+describe('/api/oauth/clients (admin)', () => {
+  it('403 for non-managers', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('GET', '/api/oauth/clients', { token });
+    expect(r.status).toBe(403);
+  });
+
+  it('200 list, 201 POST, 200 DELETE for manager', async () => {
+    const { token } = await loginAs(ALEX);
+    const list1 = await api('GET', '/api/oauth/clients', { token });
+    expect(list1.status).toBe(200);
+    const beforeCount = ((list1.body as any).clients as any[]).length;
+
+    const post = await api('POST', '/api/oauth/clients', {
+      token,
+      body: {
+        name: 'admin-created-scraper',
+        grantTypes: ['client_credentials'],
+        scopes: ['market:write'],
+        public: false,
+      },
+    });
+    expect(post.status).toBe(201);
+    const created = post.body as any;
+    expect(typeof created.clientId).toBe('string');
+    expect(typeof created.clientSecret).toBe('string');
+
+    const list2 = await api('GET', '/api/oauth/clients', { token });
+    expect(((list2.body as any).clients as any[]).length).toBe(beforeCount + 1);
+    // Secret must never appear in the list response.
+    const listed = ((list2.body as any).clients as any[]).find((c) => c.id === created.clientId);
+    expect(listed).toBeTruthy();
+    expect((listed as any).clientSecret).toBeUndefined();
+    expect((listed as any).secret_hash).toBeUndefined();
+
+    const del = await api('DELETE', `/api/oauth/clients/${created.clientId}`, { token });
+    expect(del.status).toBe(200);
+    const list3 = await api('GET', '/api/oauth/clients', { token });
+    expect(((list3.body as any).clients as any[]).length).toBe(beforeCount);
   });
 });
