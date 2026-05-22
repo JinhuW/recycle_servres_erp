@@ -1,8 +1,14 @@
 import { Hono } from 'hono';
+import { createHash, randomBytes } from 'node:crypto';
+import { getCookie } from 'hono/cookie';
 import type { Env, User } from '../types';
 import { authorizationServerMetadata, protectedResourceMetadata } from './metadata';
 import { getDb } from '../db';
-import { createOAuthClient } from './clients';
+import { authMiddleware } from '../auth';
+import { createOAuthClient, findOAuthClient } from './clients';
+
+const CODE_TTL_SEC = 600;
+const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
 const wellKnown = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -68,4 +74,94 @@ oauth.post('/register', async (c) => {
     grant_types: grants,
     scope: scopes.join(' '),
   }, 201);
+});
+
+oauth.get('/authorize', async (c) => {
+  const q = c.req.query();
+  if (!q.client_id) return c.json({ error: 'invalid_request', detail: 'client_id required' }, 400);
+  const sql = getDb(c.env);
+  const client = await findOAuthClient(sql, q.client_id);
+  if (!client) return c.json({ error: 'invalid_client' }, 400);
+  if (q.response_type !== 'code') return c.json({ error: 'unsupported_response_type' }, 400);
+  if (!q.redirect_uri || !client.redirect_uris.includes(q.redirect_uri)) {
+    return c.json({ error: 'invalid_redirect_uri' }, 400);
+  }
+  if (q.code_challenge_method !== 'S256' || !q.code_challenge) {
+    return c.json({ error: 'invalid_request', detail: 'PKCE S256 required' }, 400);
+  }
+  const requested = (q.scope ?? '').split(' ').filter(Boolean);
+  for (const s of requested) {
+    if (!client.scopes.includes(s)) {
+      return c.json({ error: 'invalid_scope', detail: `client lacks scope ${s}` }, 400);
+    }
+  }
+  if (!getCookie(c, 'at')) {
+    const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
+    return c.redirect(`/login?next=${next}`, 302);
+  }
+  // Park the request server-side; hand the SPA an opaque handle so the long
+  // PKCE challenge stays out of the URL on the consent screen.
+  const req = randomBytes(16).toString('hex');
+  await sql`
+    INSERT INTO oauth_pending_consent (req, client_id, redirect_uri, scopes, code_challenge, state, expires_at, user_id_from_cookie)
+    VALUES (${req}, ${q.client_id}, ${q.redirect_uri}, ${requested}, ${q.code_challenge}, ${q.state ?? null},
+            NOW() + INTERVAL '10 minutes', NULL)
+  `;
+  return c.redirect(`/authorize?req=${req}`, 302);
+});
+
+oauth.post('/authorize/consent', authMiddleware, async (c) => {
+  const body = (await c.req.json().catch(() => null)) as null | {
+    client_id?: string; redirect_uri?: string; scope?: string; state?: string;
+    code_challenge?: string; code_challenge_method?: string;
+  };
+  if (!body) return c.json({ error: 'invalid_request' }, 400);
+  const sql = getDb(c.env);
+  const client = body.client_id ? await findOAuthClient(sql, body.client_id) : null;
+  if (!client) return c.json({ error: 'invalid_client' }, 400);
+  if (!body.redirect_uri || !client.redirect_uris.includes(body.redirect_uri)) {
+    return c.json({ error: 'invalid_redirect_uri' }, 400);
+  }
+  if (body.code_challenge_method !== 'S256' || !body.code_challenge) {
+    return c.json({ error: 'invalid_request' }, 400);
+  }
+  const user = c.var.user;
+  const scopes = (body.scope ?? '').split(' ').filter(Boolean);
+  const code = randomBytes(32).toString('base64url');
+  const expires = new Date(Date.now() + CODE_TTL_SEC * 1000);
+  await sql`
+    INSERT INTO oauth_authorization_codes
+      (code_hash, client_id, user_id, redirect_uri, scopes, code_challenge, expires_at)
+    VALUES
+      (${sha256hex(code)}, ${client.id}, ${user.id}, ${body.redirect_uri}, ${scopes},
+       ${body.code_challenge}, ${expires})
+  `;
+  const url = new URL(body.redirect_uri);
+  url.searchParams.set('code', code);
+  if (body.state) url.searchParams.set('state', body.state);
+  return c.redirect(url.toString(), 302);
+});
+
+oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
+  const sql = getDb(c.env);
+  const row = (await sql<{
+    client_id: string; redirect_uri: string; scopes: string[];
+    code_challenge: string; state: string | null;
+  }[]>`
+    SELECT client_id, redirect_uri, scopes, code_challenge, state
+    FROM oauth_pending_consent
+    WHERE req = ${c.req.param('req')} AND expires_at > NOW()
+    LIMIT 1
+  `)[0];
+  if (!row) return c.json({ error: 'expired_or_unknown' }, 404);
+  const client = await findOAuthClient(sql, row.client_id);
+  if (!client) return c.json({ error: 'invalid_client' }, 400);
+  return c.json({
+    clientId: row.client_id,
+    clientName: client.name,
+    redirectUri: row.redirect_uri,
+    scopes: row.scopes,
+    codeChallenge: row.code_challenge,
+    state: row.state,
+  });
 });
