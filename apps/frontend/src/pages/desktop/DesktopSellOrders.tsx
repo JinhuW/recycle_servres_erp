@@ -157,7 +157,14 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const stats = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
     for (const o of sellOrderStatuses) m[o.id] = { count: 0, revenue: 0 };
-    orders.forEach(o => { m[o.status].count++; m[o.status].revenue += o.total; });
+    // Guard: if lookups didn't load, or an order carries an unknown status,
+    // skip it rather than crashing the page.
+    orders.forEach(o => {
+      const entry = m[o.status];
+      if (!entry) return;
+      entry.count++;
+      entry.revenue += o.total;
+    });
     return m;
   }, [orders]);
 
