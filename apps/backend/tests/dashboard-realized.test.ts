@@ -95,6 +95,23 @@ describe('GET /api/dashboard — realized financials', () => {
     expect(r.body.kpis.commission).toBe(0);
   });
 
+  it('kpis.prev reflects the equal-length previous window (current excluded)', async () => {
+    const { unitCost } = await setupOneDoneSale({ rate: 0.10, unitPrice: 200, soldQty: 1 });
+    // Backdate the Done transition into the previous 30d window (45 days ago).
+    const db = getTestDb();
+    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '45 days' WHERE id = 'SL-TEST-DASH-1'`;
+
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{
+      kpis: { revenue: number; profit: number; prev: { revenue: number; profit: number } };
+    }>('GET', '/api/dashboard?range=30d', { token });
+
+    expect(r.body.kpis.revenue).toBe(0);
+    expect(r.body.kpis.profit).toBe(0);
+    expect(r.body.kpis.prev.revenue).toBeCloseTo(200, 2);
+    expect(r.body.kpis.prev.profit).toBeCloseTo(200 - unitCost, 2);
+  });
+
   it('range windows on the sell-order Done date (updated_at), not PO created_at', async () => {
     await setupOneDoneSale({ rate: 0.1, unitPrice: 100, soldQty: 1 });
     // Backdate the Done transition beyond the 7d window.

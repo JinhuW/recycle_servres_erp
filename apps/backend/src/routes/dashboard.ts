@@ -21,6 +21,11 @@ dashboard.get('/', async (c) => {
   // purchaser to credit.
   const saleScopeFrag = isManager ? sql`TRUE` : sql`po.user_id = ${u.id}`;
   const saleDateWin   = sql`so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval`;
+  // Previous equal-length window, immediately before the current one — used for
+  // KPI trend deltas. Half-open: [-2d, -d) so the boundary day isn't counted twice.
+  const salePrevWin   = sql`so.status = 'Done'
+                            AND so.updated_at >= NOW() - (${days * 2} || ' days')::interval
+                            AND so.updated_at <  NOW() - (${days}     || ' days')::interval`;
   // The "Recent activity" panel still tracks ingest (the purchasing pipeline),
   // not sales, so it keeps the PO-side date scoping.
   const poScopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
@@ -28,7 +33,7 @@ dashboard.get('/', async (c) => {
   // Weekly chart spans the selected range, in weekly buckets.
   const chartWeeksBack = Math.max(1, Math.ceil(days / 7)) - 1;
 
-  const [totals, cntRows, weeks, leaderboardRaw, byCatRows, recentRows] =
+  const [totals, prevTotals, cntRows, weeks, leaderboardRaw, byCatRows, recentRows] =
     await Promise.all([
       // KPI totals — realized.
       sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
@@ -43,6 +48,17 @@ dashboard.get('/', async (c) => {
         JOIN order_lines ol ON ol.id = sol.inventory_id
         JOIN orders po      ON po.id = ol.order_id
         WHERE ${saleDateWin} AND ${saleScopeFrag}
+      `,
+      // Previous-period revenue/profit — only what the KPI trend chips need.
+      sql<{ revenue: number; profit: number }[]>`
+        SELECT
+          COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
+          COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+        FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        JOIN order_lines ol ON ol.id = sol.inventory_id
+        JOIN orders po      ON po.id = ol.order_id
+        WHERE ${salePrevWin} AND ${saleScopeFrag}
       `,
       // Number of distinct Done sell orders in the window (scope-filtered).
       sql<{ n: number }[]>`
@@ -132,11 +148,13 @@ dashboard.get('/', async (c) => {
     ]);
 
   const t = totals[0];
+  const p = prevTotals[0];
   const r2dp = (v: number) => Math.round(v * 100) / 100;
   const revenue    = r2dp(t.revenue);
   const cost       = r2dp(t.cost);
   const profit     = r2dp(t.profit);
   const commission = r2dp(t.commission);
+  const prev = { revenue: r2dp(p.revenue), profit: r2dp(p.profit) };
   const cnt = cntRows[0].n;
 
   // Top contributors (purchasers only). A purchaser sees everyone's rank but
@@ -169,7 +187,7 @@ dashboard.get('/', async (c) => {
 
   return c.json({
     role: u.role,
-    kpis: { count: cnt, cost, revenue, profit, commission },
+    kpis: { count: cnt, cost, revenue, profit, commission, prev },
     weeks: weeks.map(w => ({ ...w, profit: r2dp(w.profit) })),
     leaderboard, byCat, recent,
   });

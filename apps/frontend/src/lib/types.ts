@@ -181,7 +181,10 @@ export type Notification = {
 
 export type DashboardData = {
   role: Role;
-  kpis: { count: number; cost: number; revenue: number; profit: number; commission: number };
+  kpis: {
+    count: number; cost: number; revenue: number; profit: number; commission: number;
+    prev: { revenue: number; profit: number };
+  };
   weeks: { label: string; profit: number }[];
   leaderboard: {
     id: string; name: string; initials: string; email: string; role: Role;

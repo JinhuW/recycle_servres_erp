@@ -24,9 +24,6 @@ export function DesktopDashboard() {
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [lbCategory, setLbCategory] = useState<string>('all');
-  // The dashboard endpoint doesn't yet accept a range parameter — the seg
-  // selector is wired so the UI matches the design, with a placeholder query
-  // string ready for when the backend grows the filter.
   const [range, setRange] = useState<Range>('30d');
 
   useEffect(() => {
@@ -37,7 +34,10 @@ export function DesktopDashboard() {
 
   if (!user) return null;
   const isManager = user.role === 'manager';
-  const k = data?.kpis ?? { count: 0, cost: 0, revenue: 0, profit: 0, commission: 0 };
+  const k = data?.kpis ?? {
+    count: 0, cost: 0, revenue: 0, profit: 0, commission: 0,
+    prev: { revenue: 0, profit: 0 },
+  };
   const weeks = data?.weeks ?? [];
   const byCat = data?.byCat ?? ({} as DashboardData['byCat']);
   const rawLb = data?.leaderboard ?? [];
@@ -82,14 +82,12 @@ export function DesktopDashboard() {
         <div className="kpi">
           <div className="kpi-label">{t('totalRevenue')}</div>
           <div className="kpi-value mono">{fmtUSD0(k.revenue, locale)}</div>
-          <div className="kpi-trend up"><Icon name="arrowUp" size={11} /> 12.4% {t('vsLastPeriod')}</div>
+          <TrendChip current={k.revenue} prev={k.prev.revenue} label={t('vsLastPeriod')} />
         </div>
         <div className="kpi">
           <div className="kpi-label">{t('grossProfit')}</div>
           <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(k.profit, locale)}</div>
-          <div className="kpi-trend up">
-            <Icon name="arrowUp" size={11} /> 8.7% {t('vsLastPeriod')}
-          </div>
+          <TrendChip current={k.profit} prev={k.prev.profit} label={t('vsLastPeriod')} />
         </div>
         <div className="kpi">
           <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
@@ -273,6 +271,19 @@ export function DesktopDashboard() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
+
+// Render nothing when prev is 0 — a "vs last period" chip is meaningless without
+// a comparator, and "+∞%" or "—" both add visual noise without conveying signal.
+function TrendChip({ current, prev, label }: { current: number; prev: number; label: string }) {
+  if (prev === 0) return null;
+  const delta = ((current - prev) / prev) * 100;
+  const up = delta >= 0;
+  return (
+    <div className={'kpi-trend ' + (up ? 'up' : 'down')}>
+      <Icon name={up ? 'arrowUp' : 'arrowDown'} size={11} /> {Math.abs(delta).toFixed(1)}% {label}
+    </div>
+  );
+}
 
 function TrendChart({ weeks, locale = 'en-US' }: { weeks: { label: string; profit: number }[]; locale?: string }) {
   if (weeks.length === 0) {

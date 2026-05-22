@@ -38,7 +38,12 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
 
   const lb = data?.leaderboard ?? [];
   const myRank = lb.findIndex(x => x.id === user.id);
-  const totals = data?.kpis ?? { count: 0, cost: 0, revenue: 0, profit: 0, commission: 0 };
+  const totals = data?.kpis ?? {
+    count: 0, cost: 0, revenue: 0, profit: 0, commission: 0,
+    prev: { revenue: 0, profit: 0 },
+  };
+  const prevProfit = totals.prev.profit;
+  const profitDelta = prevProfit === 0 ? null : ((totals.profit - prevProfit) / prevProfit) * 100;
 
   return (
     <>
@@ -93,9 +98,12 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
         }}>
           <div className="ph-kpi-label">{isManager ? t('grossProfit') : t('profitYouGenerated')}</div>
           <div className="ph-kpi-value" style={{ fontSize: 30, color: 'var(--accent-strong)' }}>{fmtUSD0(totals.profit, locale)}</div>
-          <div className="ph-kpi-trend" style={{ color: 'var(--pos)' }}>
-            <Icon name="arrowUp" size={11} /> {t('vsLast30', { pct: '—' })}
-          </div>
+          {profitDelta !== null && (
+            <div className="ph-kpi-trend" style={{ color: profitDelta >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+              <Icon name={profitDelta >= 0 ? 'arrowUp' : 'arrowDown'} size={11} />
+              {' '}{t('vsLast30', { pct: `${profitDelta >= 0 ? '+' : '−'}${Math.abs(profitDelta).toFixed(1)}%` })}
+            </div>
+          )}
           <PhSparkline data={data?.weeks ?? []} />
         </div>
         )}
