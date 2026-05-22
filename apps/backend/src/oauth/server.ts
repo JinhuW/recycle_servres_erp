@@ -4,7 +4,7 @@ import { getCookie } from 'hono/cookie';
 import type { Env, User } from '../types';
 import { authorizationServerMetadata, protectedResourceMetadata } from './metadata';
 import { getDb } from '../db';
-import { authMiddleware } from '../auth';
+import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient } from './clients';
 
 const CODE_TTL_SEC = 600;
@@ -95,7 +95,13 @@ oauth.get('/authorize', async (c) => {
       return c.json({ error: 'invalid_scope', detail: `client lacks scope ${s}` }, 400);
     }
   }
-  if (!getCookie(c, 'at')) {
+  const at = getCookie(c, 'at');
+  if (!at) {
+    const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
+    return c.redirect(`/login?next=${next}`, 302);
+  }
+  const payload = await verifyToken(c.env, at);
+  if (!payload) {
     const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
     return c.redirect(`/login?next=${next}`, 302);
   }
@@ -105,40 +111,57 @@ oauth.get('/authorize', async (c) => {
   await sql`
     INSERT INTO oauth_pending_consent (req, client_id, redirect_uri, scopes, code_challenge, state, expires_at, user_id_from_cookie)
     VALUES (${req}, ${q.client_id}, ${q.redirect_uri}, ${requested}, ${q.code_challenge}, ${q.state ?? null},
-            NOW() + INTERVAL '10 minutes', NULL)
+            NOW() + INTERVAL '10 minutes', ${payload.sub})
   `;
   return c.redirect(`/authorize?req=${req}`, 302);
 });
 
 oauth.post('/authorize/consent', authMiddleware, async (c) => {
-  const body = (await c.req.json().catch(() => null)) as null | {
-    client_id?: string; redirect_uri?: string; scope?: string; state?: string;
-    code_challenge?: string; code_challenge_method?: string;
-  };
-  if (!body) return c.json({ error: 'invalid_request' }, 400);
+  const body = (await c.req.json().catch(() => null)) as null | { req?: string };
+  if (!body?.req) return c.json({ error: 'invalid_request', detail: 'req required' }, 400);
+  // Capture into a local so the narrowed string survives the async closure.
+  const reqHandle = body.req;
   const sql = getDb(c.env);
-  const client = body.client_id ? await findOAuthClient(sql, body.client_id) : null;
-  if (!client) return c.json({ error: 'invalid_client' }, 400);
-  if (!body.redirect_uri || !client.redirect_uris.includes(body.redirect_uri)) {
-    return c.json({ error: 'invalid_redirect_uri' }, 400);
-  }
-  if (body.code_challenge_method !== 'S256' || !body.code_challenge) {
-    return c.json({ error: 'invalid_request' }, 400);
-  }
   const user = c.var.user;
-  const scopes = (body.scope ?? '').split(' ').filter(Boolean);
-  const code = randomBytes(32).toString('base64url');
-  const expires = new Date(Date.now() + CODE_TTL_SEC * 1000);
-  await sql`
-    INSERT INTO oauth_authorization_codes
-      (code_hash, client_id, user_id, redirect_uri, scopes, code_challenge, expires_at)
-    VALUES
-      (${sha256hex(code)}, ${client.id}, ${user.id}, ${body.redirect_uri}, ${scopes},
-       ${body.code_challenge}, ${expires})
-  `;
-  const url = new URL(body.redirect_uri);
-  url.searchParams.set('code', code);
-  if (body.state) url.searchParams.set('state', body.state);
+
+  type Outcome =
+    | { ok: true; redirectUri: string; code: string; state: string | null }
+    | { ok: false; status: 400 | 404; error: string };
+
+  const result: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const row = (await tx`
+      SELECT client_id, redirect_uri, scopes, code_challenge, state,
+             user_id_from_cookie, (expires_at <= NOW()) AS expired
+      FROM oauth_pending_consent
+      WHERE req = ${reqHandle}
+      FOR UPDATE
+      LIMIT 1
+    `)[0] as {
+      client_id: string; redirect_uri: string; scopes: string[];
+      code_challenge: string; state: string | null;
+      user_id_from_cookie: string | null; expired: boolean;
+    } | undefined;
+    if (!row) return { ok: false, status: 404, error: 'expired_or_unknown' };
+    if (row.expired) return { ok: false, status: 404, error: 'expired_or_unknown' };
+    if (row.user_id_from_cookie !== user.id) {
+      return { ok: false, status: 400, error: 'user_mismatch' };
+    }
+    const code = randomBytes(32).toString('base64url');
+    const expires = new Date(Date.now() + CODE_TTL_SEC * 1000);
+    await tx`
+      INSERT INTO oauth_authorization_codes
+        (code_hash, client_id, user_id, redirect_uri, scopes, code_challenge, expires_at)
+      VALUES
+        (${sha256hex(code)}, ${row.client_id}, ${user.id}, ${row.redirect_uri},
+         ${row.scopes}, ${row.code_challenge}, ${expires})
+    `;
+    await tx`DELETE FROM oauth_pending_consent WHERE req = ${reqHandle}`;
+    return { ok: true, redirectUri: row.redirect_uri, code, state: row.state };
+  });
+  if (!result.ok) return c.json({ error: result.error }, result.status);
+  const url = new URL(result.redirectUri);
+  url.searchParams.set('code', result.code);
+  if (result.state) url.searchParams.set('state', result.state);
   return c.redirect(url.toString(), 302);
 });
 

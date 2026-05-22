@@ -133,12 +133,18 @@ describe('/oauth/authorize/consent', () => {
       createdBy: u, public: false,
     });
     const { token } = await loginAs(ALEX);
+    // Park the consent request via /authorize.
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s1`,
+      { token },
+    );
+    expect(start.status).toBe(302);
+    const startLoc = start.headers.get('location') ?? '';
+    const req = new URL(startLoc, 'http://localhost').searchParams.get('req');
+    expect(req).toBeTruthy();
+    // Approve.
     const r = await api('POST', '/oauth/authorize/consent', {
-      body: {
-        client_id: c.clientId, redirect_uri: 'https://example.com/cb',
-        scope: 'market:read', state: 's1',
-        code_challenge: 'ch', code_challenge_method: 'S256',
-      },
+      body: { req },
       token,
     });
     expect(r.status).toBe(302);
