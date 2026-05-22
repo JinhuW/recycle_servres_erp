@@ -165,7 +165,7 @@ export type RefPrice = {
   stock: number;
   demand: 'high' | 'medium' | 'low';
   history: number[];
-  updated: string;
+  updatedAt: string;
   maxBuy: number;
   health: number | null;
   rpm: number | null;

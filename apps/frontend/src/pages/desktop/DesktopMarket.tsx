@@ -103,7 +103,7 @@ export function DesktopMarket() {
 
   const rows = useMemo(() => {
     const arr = [...allRows];
-    if (sort === 'recent')    arr.sort((a, b) => +new Date(b.updated) - +new Date(a.updated));
+    if (sort === 'recent')    arr.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
     if (sort === 'sell-high') arr.sort((a, b) => b.avgSell - a.avgSell);
     if (sort === 'rising')    arr.sort((a, b) => b.trend - a.trend);
     if (sort === 'falling')   arr.sort((a, b) => a.trend - b.trend);
@@ -268,7 +268,7 @@ export function DesktopMarket() {
                           {onTarget ? '✓ on target' : 'over ceiling'}
                         </div>
                       </td>
-                      <td className="muted" style={{ fontSize: 11.5 }}>{relTime(r.updated, locale)}</td>
+                      <td className="muted" style={{ fontSize: 11.5 }}>{relTime(r.updatedAt, locale)}</td>
                       <td>
                         <Icon
                           name={isOpen ? 'chevronDown' : 'chevronRight'}

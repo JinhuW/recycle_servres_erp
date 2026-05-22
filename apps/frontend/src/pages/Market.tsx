@@ -123,7 +123,7 @@ export function Market() {
                       <span className="mono">{t('units', { n: r.stock })}</span>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                      {t('updatedRel', { rel: relTime(r.updated, locale), s: r.samples })}
+                      {t('updatedRel', { rel: relTime(r.updatedAt, locale), s: r.samples })}
                     </div>
                   </div>
                 )}

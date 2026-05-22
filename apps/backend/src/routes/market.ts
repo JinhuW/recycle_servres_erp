@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
+import { formatRefPrice, type MarketValueRow } from '../lib/market';
 import type { Env, User } from '../types';
 
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -12,7 +13,7 @@ market.get('/', async (c) => {
   const category = c.req.query('category');
   const search = c.req.query('q')?.toLowerCase().trim();
 
-  const rows = await sql`
+  const rows = await sql<MarketValueRow[]>`
     SELECT id, category, brand, capacity, type, classification, rank, speed,
            interface, form_factor, description, part_number, label, sub_label,
            target::float AS target, low_price::float AS low_price,
@@ -33,36 +34,7 @@ market.get('/', async (c) => {
   const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
   return c.json({
     targetMargin: TARGET_MARGIN,
-    items: rows.map(r => ({
-      id: r.id,
-      category: r.category,
-      brand: r.brand,
-      capacity: r.capacity,
-      type: r.type,
-      classification: r.classification,
-      rank: r.rank,
-      speed: r.speed,
-      interface: r.interface,
-      formFactor: r.form_factor,
-      description: r.description,
-      partNumber: r.part_number,
-      label: r.label,
-      sub: r.sub_label,
-      target: r.target,
-      low: r.low_price,
-      high: r.high_price,
-      avgSell: r.avg_sell,
-      trend: r.trend,
-      samples: r.samples,
-      source: r.source,
-      stock: r.stock,
-      demand: r.demand,
-      history: r.history,
-      updated: r.updated_at,
-      maxBuy: +(r.avg_sell * (1 - TARGET_MARGIN)).toFixed(2),
-      health: r.health,
-      rpm: r.rpm,
-    })),
+    items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
   });
 });
 

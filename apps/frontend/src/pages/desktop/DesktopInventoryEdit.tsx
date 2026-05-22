@@ -104,7 +104,7 @@ type RefMatch = {
   avgSell: number;
   samples: number;
   demand: 'high' | 'medium' | 'low';
-  updated: string;
+  updatedAt: string;
 };
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
@@ -815,7 +815,7 @@ function PricingPanel({
                 >Apply</button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                Updated {fmtDate(refMatch.updated, locale)}
+                Updated {fmtDate(refMatch.updatedAt, locale)}
               </div>
             </div>
           </div>
