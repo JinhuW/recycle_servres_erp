@@ -133,17 +133,23 @@ vendorPublic.post('/:token/bids', async (c) => {
 
   const bidId = await nextHumanId(sql, 'VB', 'VB');
 
+  // Aggregate requested qty per inventory_id BEFORE the row check. The
+  // per-line guard alone sees each duplicate line independently against the
+  // same row.qty and lets all of them through; the sum then exceeds the cap.
+  const wanted = new Map<string, number>();
+  for (const l of lines) wanted.set(l.inventoryId, (wanted.get(l.inventoryId) ?? 0) + l.qty);
+
   await sql.begin(async (tx) => {
     const bad: string[] = [];
     const snap: Record<string, { category: string; label: string; sub: string | null; pn: string | null }> = {};
-    for (const l of lines) {
+    for (const [inventoryId, totalQty] of wanted) {
       const row = (await tx<{ category: string; brand: string | null; capacity: string | null;
         type: string | null; part_number: string | null; qty: number; status: string }[]>`
         SELECT category, brand, capacity, type, part_number, qty, status
-        FROM order_lines WHERE id = ${l.inventoryId} FOR UPDATE
+        FROM order_lines WHERE id = ${inventoryId} FOR UPDATE
       `)[0];
-      if (!row || row.status !== 'Done' || row.qty < l.qty) { bad.push(l.inventoryId); continue; }
-      snap[l.inventoryId] = {
+      if (!row || row.status !== 'Done' || row.qty < totalQty) { bad.push(inventoryId); continue; }
+      snap[inventoryId] = {
         category: row.category,
         label: [row.brand, row.capacity, row.type].filter(Boolean).join(' ') || row.category,
         sub: row.part_number,

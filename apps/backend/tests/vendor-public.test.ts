@@ -200,6 +200,31 @@ describe('vendor public — me & catalog', () => {
     expect(r.status).toBe(409);
   });
 
+  // Duplicate-line attack: split the over-cap qty across two lines that
+  // each fit individually. The per-line guard sees `5 < 5` is false twice
+  // and lets BOTH through, so the bid lands with offered_qty totalling 2×
+  // the cap. Must be aggregated by inventory_id before the check.
+  it('rejects two lines for the same inventory id whose sum exceeds qty', async () => {
+    const { token, mgr } = await seedLink();
+    const line = await anInStockLine(mgr);
+    const r = await api('POST', `/api/public/vendor/${token}/bids`, {
+      body: {
+        contactName: 'Lin',
+        lines: [
+          { inventoryId: line.id, qty: line.qty, unitPrice: 5 },
+          { inventoryId: line.id, qty: line.qty, unitPrice: 6 },
+        ],
+      },
+    });
+    expect(r.status).toBe(409);
+    if (r.status === 201) {
+      const list = await api<{ bids: Array<{ lines: Array<{ offeredQty: number }> }> }>(
+        'GET', `/api/public/vendor/${token}/bids`);
+      const total = list.body.bids[0].lines.reduce((a, l) => a + l.offeredQty, 0);
+      expect(total).toBeLessThanOrEqual(line.qty);
+    }
+  });
+
   it('rejects malformed body with 400', async () => {
     const { token } = await seedLink();
     const r = await api('POST', `/api/public/vendor/${token}/bids`, {
