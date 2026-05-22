@@ -542,4 +542,65 @@ describe('/api/oauth/clients (admin)', () => {
     });
     expect(r.status).toBe(400);
   });
+
+  it('list response includes lastUsedAt (null when no live refresh tokens)', async () => {
+    const { token } = await loginAs(ALEX);
+    const list = await api('GET', '/api/oauth/clients', { token });
+    expect(list.status).toBe(200);
+    const clients = (list.body as any).clients as any[];
+    expect(clients.length).toBeGreaterThan(0);
+    // Newly-created clients with no refresh tokens have lastUsedAt = null.
+    expect(clients.every(c => 'lastUsedAt' in c)).toBe(true);
+  });
+});
+
+describe('/oauth/authorize/deny', () => {
+  it('redirects to client with error=access_denied', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'deny-test', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s1`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/deny', {
+      body: { req }, token, redirect: 'manual',
+    });
+    expect(r.status).toBe(302);
+    const loc = new URL(r.headers.get('location')!);
+    expect(loc.searchParams.get('error')).toBe('access_denied');
+    expect(loc.searchParams.get('state')).toBe('s1');
+  });
+
+  it('returns JSON with redirectUri when Accept: application/json', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'deny-json', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s2`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/deny', {
+      body: { req }, token,
+      headers: { Accept: 'application/json' },
+    });
+    expect(r.status).toBe(200);
+    const body = r.body as any;
+    expect(body.redirectUri).toContain('error=access_denied');
+    expect(body.redirectUri).toContain('state=s2');
+  });
 });

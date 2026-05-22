@@ -14,6 +14,7 @@ type Client = {
   scopes: string[];
   grantTypes: string[];
   createdAt: string;
+  lastUsedAt: string | null;
 };
 
 export function DesktopSettingsConnectors() {
@@ -173,6 +174,7 @@ export function DesktopSettingsConnectors() {
                 <th>{t('connectorsHeaderScopes')}</th>
                 <th>{t('connectorsHeaderGrants')}</th>
                 <th>{t('connectorsHeaderCreated')}</th>
+                <th>{t('connectorsHeaderLastUsed')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -187,6 +189,9 @@ export function DesktopSettingsConnectors() {
                   <td className="mono" style={{ fontSize: 12 }}>{c.grantTypes.join(' ') || '—'}</td>
                   <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                     {new Date(c.createdAt).toLocaleString(locale)}
+                  </td>
+                  <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
+                    {c.lastUsedAt ? new Date(c.lastUsedAt).toLocaleString(locale) : t('connectorsNever')}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <button

@@ -32,6 +32,7 @@ type State =
   | { kind: 'ready'; pending: Pending }
   | { kind: 'error'; message: string }
   | { kind: 'approving' }
+  | { kind: 'denying' }
   | { kind: 'approved'; clientName: string };
 
 function readReqParam(): string | null {
@@ -111,10 +112,33 @@ export function Authorize() {
     }
   }
 
-  function cancel() {
-    // Closing the tab is the OAuth-spec way to deny — there's no
-    // explicit deny endpoint. The pending row expires server-side.
-    if (typeof window !== 'undefined') window.close();
+  async function deny() {
+    if (state.kind !== 'ready' || !req) return;
+    setState({ kind: 'denying' });
+    try {
+      const res = await rawFetch('POST', '/oauth/authorize/deny', { req }, {
+        Accept: 'application/json',
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { redirectUri?: string };
+        if (body.redirectUri) {
+          window.location.href = body.redirectUri;
+          return;
+        }
+        setState({ kind: 'error', message: 'missing redirectUri' });
+        return;
+      }
+      const text = await res.text();
+      let msg = `HTTP ${res.status}`;
+      try {
+        const j = JSON.parse(text) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch { /* keep HTTP status */ }
+      setState({ kind: 'error', message: msg });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setState({ kind: 'error', message: msg });
+    }
   }
 
   return (
@@ -143,7 +167,7 @@ export function Authorize() {
           </>
         )}
 
-        {(state.kind === 'ready' || state.kind === 'approving') && (
+        {(state.kind === 'ready' || state.kind === 'approving' || state.kind === 'denying') && (
           <>
             <h1 style={{ fontSize: 20, margin: '0 0 4px', letterSpacing: '-0.02em' }}>
               {t('oauthConsentTitle', { client: state.kind === 'ready' ? state.pending.clientName : '' })}
@@ -173,17 +197,17 @@ export function Authorize() {
               <button
                 type="button"
                 className="btn"
-                onClick={cancel}
-                disabled={state.kind === 'approving'}
+                onClick={deny}
+                disabled={state.kind !== 'ready'}
                 style={{ flex: 1 }}
               >
-                {t('cancel')}
+                {state.kind === 'denying' ? t('oauthConsentDenying') : t('oauthConsentDeny')}
               </button>
               <button
                 type="button"
                 className="btn primary"
                 onClick={approve}
-                disabled={state.kind === 'approving'}
+                disabled={state.kind !== 'ready'}
                 style={{ flex: 1 }}
               >
                 {state.kind === 'approving' ? t('oauthConsentApproving') : t('oauthConsentApprove')}

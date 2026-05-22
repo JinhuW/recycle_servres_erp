@@ -182,6 +182,49 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
   return c.redirect(target, 302);
 });
 
+// RFC 6749 §4.1.2.1 access_denied: explicit deny path so the OAuth client sees
+// a structured error rather than a hung redirect when the user refuses.
+oauth.post('/authorize/deny', authMiddleware, async (c) => {
+  const body = (await c.req.json().catch(() => null)) as null | { req?: string };
+  if (!body?.req) return c.json({ error: 'invalid_request', detail: 'req required' }, 400);
+  const reqHandle = body.req;
+  const sql = getDb(c.env);
+  const user = c.var.user;
+
+  type Outcome =
+    | { ok: true; redirectUri: string; state: string | null }
+    | { ok: false; status: 400 | 404; error: string };
+
+  const result: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const row = (await tx<{
+      redirect_uri: string; state: string | null;
+      user_id_from_cookie: string | null; expired: boolean;
+    }[]>`
+      SELECT redirect_uri, state, user_id_from_cookie,
+             (expires_at <= NOW()) AS expired
+      FROM oauth_pending_consent
+      WHERE req = ${reqHandle}
+      FOR UPDATE
+      LIMIT 1
+    `)[0];
+    if (!row || row.expired) return { ok: false, status: 404, error: 'expired_or_unknown' };
+    if (row.user_id_from_cookie !== user.id) {
+      return { ok: false, status: 400, error: 'user_mismatch' };
+    }
+    await tx`DELETE FROM oauth_pending_consent WHERE req = ${reqHandle}`;
+    return { ok: true, redirectUri: row.redirect_uri, state: row.state };
+  });
+  if (!result.ok) return c.json({ error: result.error }, result.status);
+  const url = new URL(result.redirectUri);
+  url.searchParams.set('error', 'access_denied');
+  if (result.state) url.searchParams.set('state', result.state);
+  const target = url.toString();
+  if ((c.req.header('accept') ?? '').includes('application/json')) {
+    return c.json({ redirectUri: target });
+  }
+  return c.redirect(target, 302);
+});
+
 // ── /oauth/token helpers ────────────────────────────────────────────────────
 
 type ParsedClientCreds = { id: string; secret: string | null };
@@ -442,7 +485,17 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
     return next();
   })
   .get('/', async (c) => {
-    const rows = await listOAuthClients(getDb(c.env));
+    const sql = getDb(c.env);
+    const rows = await listOAuthClients(sql);
+    // Separate aggregate keeps listOAuthClients pure — admin UI is the only
+    // surface that wants last_used_at, so the join doesn't belong in the helper.
+    const lastUsed = await sql<{ client_id: string; last_used_at: Date }[]>`
+      SELECT client_id, MAX(created_at) AS last_used_at
+      FROM oauth_refresh_tokens
+      WHERE revoked_at IS NULL
+      GROUP BY client_id
+    `;
+    const lastUsedByClient = new Map(lastUsed.map(r => [r.client_id, r.last_used_at]));
     return c.json({
       clients: rows.map(r => ({
         id: r.id,
@@ -450,6 +503,7 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
         scopes: r.scopes,
         grantTypes: r.grant_types,
         createdAt: r.created_at,
+        lastUsedAt: lastUsedByClient.get(r.id) ?? null,
       })),
     });
   })
