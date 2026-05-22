@@ -93,12 +93,6 @@ services:
       # `pnpm dev`; this override flips it onto the compose network.
       DATABASE_URL: postgres://recycle:${POSTGRES_PASSWORD:-recycle}@postgres:5432/recycle_erp
       PORT: "8787"
-      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL}
-      OAUTH_SIGNING_KEY_CURRENT: ${OAUTH_SIGNING_KEY_CURRENT}
-      OAUTH_SIGNING_KEY_PREVIOUS: ${OAUTH_SIGNING_KEY_PREVIOUS}
-      OAUTH_ACCESS_TOKEN_TTL_SEC: ${OAUTH_ACCESS_TOKEN_TTL_SEC}
-      OAUTH_REFRESH_TOKEN_TTL_SEC: ${OAUTH_REFRESH_TOKEN_TTL_SEC}
-      OAUTH_DCR_OPEN: ${OAUTH_DCR_OPEN}
     # No host-port publish — the only consumer is Caddy, which reaches the
     # backend as `backend:8787` over the internal compose network. Skipping
     # the host bind also avoids clashing with a parallel `pnpm dev` that

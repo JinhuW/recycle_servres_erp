@@ -25,8 +25,7 @@ export type Env = {
   NODE_ENV?: string;
   // Explicit opt-in to expose /api/auth/demo-accounts even in production.
   ENABLE_DEMO_ACCOUNTS?: string;
-  // OAuth 2.1 AS used by the MCP server. See spec
-  // 2026-05-22-market-value-mcp-design.md.
+  // OAuth 2.1 AS for the market-value MCP read + scraper write surfaces.
   OAUTH_ISSUER_URL?: string;
   OAUTH_SIGNING_KEY_CURRENT?: string;
   OAUTH_SIGNING_KEY_PREVIOUS?: string;
