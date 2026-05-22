@@ -1,0 +1,170 @@
+import { createHash, createPrivateKey, createPublicKey, randomBytes, type KeyObject } from 'node:crypto';
+import { exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from 'jose';
+import type postgres from 'postgres';
+import type { Env, OAuthScope } from '../types';
+
+type AnySql = postgres.Sql | postgres.TransactionSql;
+
+const sha256hex = (s: string): string => createHash('sha256').update(s).digest('hex');
+const sec = (n?: string, d?: number) => Number.parseInt(n ?? String(d), 10) || (d ?? 0);
+
+// Operator stores Ed25519 private keys in env as base64-encoded PKCS#8 PEM so
+// .env doesn't have to wrap multi-line values.
+export async function generateSigningKey(): Promise<string> {
+  const { privateKey } = await generateKeyPair('EdDSA', { crv: 'Ed25519', extractable: true });
+  const pem = await exportPKCS8(privateKey);
+  return Buffer.from(pem).toString('base64');
+}
+
+// jose's importPKCS8 only yields a "private" CryptoKey, which can sign but not
+// verify. Round-tripping through node's KeyObject lets us derive the matching
+// public key for verification from the same env-stored secret.
+function loadPrivateKey(b64: string): KeyObject {
+  const pem = Buffer.from(b64, 'base64').toString('utf8');
+  return createPrivateKey(pem);
+}
+
+function loadPublicKey(b64: string): KeyObject {
+  return createPublicKey(loadPrivateKey(b64));
+}
+
+// Deterministic short kid derived from the key bytes; lets the verifier pick
+// the matching key from the ring without exposing the key itself.
+function keyKid(b64: string): string {
+  return sha256hex(b64).slice(0, 16);
+}
+
+export type AccessClaims = {
+  iss: string;
+  sub: string | null;
+  cid: string;
+  scopes: OAuthScope[];
+  jti: string;
+  exp: number;
+  iat: number;
+  aud: 'recycle-erp-api';
+};
+
+export async function signAccessToken(env: Env, input: {
+  clientId: string; userId: string | null; scopes: OAuthScope[];
+}): Promise<string> {
+  if (!env.OAUTH_SIGNING_KEY_CURRENT) throw new Error('OAUTH_SIGNING_KEY_CURRENT not set');
+  const key = loadPrivateKey(env.OAUTH_SIGNING_KEY_CURRENT);
+  const kid = keyKid(env.OAUTH_SIGNING_KEY_CURRENT);
+  const ttl = sec(env.OAUTH_ACCESS_TOKEN_TTL_SEC, 900);
+  const now = Math.floor(Date.now() / 1000);
+  return new SignJWT({ cid: input.clientId, scopes: input.scopes })
+    .setProtectedHeader({ alg: 'EdDSA', typ: 'at+jwt', kid })
+    .setIssuedAt(now)
+    .setExpirationTime(now + ttl)
+    .setIssuer(env.OAUTH_ISSUER_URL ?? '')
+    .setAudience('recycle-erp-api')
+    .setSubject(input.userId ?? '')
+    .setJti(randomBytes(16).toString('hex'))
+    .sign(key);
+}
+
+export async function verifyAccessToken(env: Env, token: string): Promise<AccessClaims | null> {
+  const candidates = [env.OAUTH_SIGNING_KEY_CURRENT, env.OAUTH_SIGNING_KEY_PREVIOUS]
+    .filter((s): s is string => Boolean(s));
+  for (const b64 of candidates) {
+    try {
+      const key = loadPublicKey(b64);
+      const { payload } = await jwtVerify(token, key, {
+        issuer: env.OAUTH_ISSUER_URL ?? '',
+        audience: 'recycle-erp-api',
+      });
+      return {
+        iss: payload.iss as string,
+        sub: (payload.sub as string) || null,
+        cid: payload.cid as string,
+        scopes: payload.scopes as OAuthScope[],
+        jti: payload.jti as string,
+        exp: payload.exp as number,
+        iat: payload.iat as number,
+        aud: 'recycle-erp-api',
+      };
+    } catch { /* try next key in ring */ }
+  }
+  return null;
+}
+
+const opaqueToken = () => randomBytes(32).toString('hex');
+
+export type IssueRefreshInput = {
+  clientId: string;
+  userId: string | null;
+  scopes: OAuthScope[];
+  familyId?: string;
+  parentId?: number;
+};
+
+export async function issueRefreshToken(
+  sql: AnySql,
+  env: Env,
+  input: IssueRefreshInput,
+): Promise<{ raw: string; familyId: string; id: number }> {
+  const raw = opaqueToken();
+  const familyId = input.familyId ?? crypto.randomUUID();
+  const ttl = sec(env.OAUTH_REFRESH_TOKEN_TTL_SEC, 2_592_000);
+  const exp = new Date(Date.now() + ttl * 1000);
+  const rows = await sql<{ id: number }[]>`
+    INSERT INTO oauth_refresh_tokens
+      (token_hash, client_id, user_id, scopes, family_id, parent_id, expires_at)
+    VALUES
+      (${sha256hex(raw)}, ${input.clientId}, ${input.userId}, ${input.scopes},
+       ${familyId}, ${input.parentId ?? null}, ${exp})
+    RETURNING id
+  `;
+  return { raw, familyId, id: rows[0].id };
+}
+
+export type RotateRefreshResult =
+  | { ok: true; raw: string; clientId: string; userId: string | null; scopes: OAuthScope[]; familyId: string }
+  | { ok: false; reason: 'not_found' | 'expired' | 'revoked' | 'reused' };
+
+export async function rotateRefreshToken(
+  sql: postgres.Sql,
+  raw: string,
+): Promise<RotateRefreshResult> {
+  return sql.begin<RotateRefreshResult>(async (tx) => {
+    const row = (await tx<{
+      id: number; client_id: string; user_id: string | null; scopes: OAuthScope[];
+      family_id: string; revoked_at: Date | null; expired: boolean;
+    }[]>`
+      SELECT id, client_id, user_id, scopes, family_id, revoked_at,
+             (expires_at <= NOW()) AS expired
+      FROM oauth_refresh_tokens
+      WHERE token_hash = ${sha256hex(raw)}
+      FOR UPDATE
+      LIMIT 1
+    `)[0];
+    if (!row) return { ok: false, reason: 'not_found' };
+    if (row.revoked_at) {
+      // Token-theft signal: someone replayed an already-rotated token.
+      await revokeRefreshFamily(tx, row.family_id);
+      return { ok: false, reason: 'reused' };
+    }
+    if (row.expired) return { ok: false, reason: 'expired' };
+    await tx`UPDATE oauth_refresh_tokens SET revoked_at = NOW() WHERE id = ${row.id}`;
+    const env = process.env as unknown as Env;
+    const next = await issueRefreshToken(tx, env, {
+      clientId: row.client_id,
+      userId: row.user_id,
+      scopes: row.scopes,
+      familyId: row.family_id,
+      parentId: row.id,
+    });
+    return {
+      ok: true, raw: next.raw, clientId: row.client_id, userId: row.user_id,
+      scopes: row.scopes, familyId: row.family_id,
+    };
+  });
+}
+
+export async function revokeRefreshFamily(sql: AnySql, familyId: string): Promise<void> {
+  await sql`
+    UPDATE oauth_refresh_tokens SET revoked_at = NOW()
+    WHERE family_id = ${familyId} AND revoked_at IS NULL
+  `;
+}
