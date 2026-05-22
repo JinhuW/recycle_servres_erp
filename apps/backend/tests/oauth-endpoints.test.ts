@@ -30,3 +30,47 @@ describe('OAuth discovery', () => {
     expect((body.scopes_supported as string[])).toEqual(expect.arrayContaining(['market:read','market:write']));
   });
 });
+
+describe('DCR /oauth/register', () => {
+  it('rejects DCR by default (OAUTH_DCR_OPEN=false)', async () => {
+    const r = await api('POST', '/oauth/register', {
+      body: { client_name: 'x', redirect_uris: ['https://example.com/cb'] },
+    });
+    expect(r.status).toBe(403);
+  });
+
+  it('with OAUTH_DCR_OPEN=true, registers and returns client_id + secret', async () => {
+    const prev = process.env.OAUTH_DCR_OPEN;
+    process.env.OAUTH_DCR_OPEN = 'true';
+    try {
+      const r = await api('POST', '/oauth/register', {
+        body: {
+          client_name: 'claude-ai connector',
+          redirect_uris: ['https://claude.ai/oauth/callback'],
+          grant_types: ['authorization_code','refresh_token'],
+          scope: 'market:read',
+        },
+      });
+      expect(r.status).toBe(201);
+      const body = r.body as Record<string, unknown>;
+      expect(typeof body.client_id).toBe('string');
+      expect(typeof body.client_secret).toBe('string');
+      expect((body.redirect_uris as string[])[0]).toBe('https://claude.ai/oauth/callback');
+    } finally {
+      process.env.OAUTH_DCR_OPEN = prev;
+    }
+  });
+
+  it('rejects non-https + non-localhost redirect URIs', async () => {
+    const prev = process.env.OAUTH_DCR_OPEN;
+    process.env.OAUTH_DCR_OPEN = 'true';
+    try {
+      const r = await api('POST', '/oauth/register', {
+        body: { client_name: 'evil', redirect_uris: ['http://evil.example.com/cb'] },
+      });
+      expect(r.status).toBe(400);
+    } finally {
+      process.env.OAUTH_DCR_OPEN = prev;
+    }
+  });
+});

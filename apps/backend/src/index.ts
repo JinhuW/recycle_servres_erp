@@ -31,7 +31,7 @@ import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
-import wellKnown from './oauth/server';
+import wellKnown, { oauth as oauthRoutes } from './oauth/server';
 import type { Env, User } from './types';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string } }>();
@@ -156,6 +156,7 @@ app.use('*', async (c, next) => {
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
 app.route('/.well-known', wellKnown);
+app.route('/oauth', oauthRoutes);
 
 app.use('/api/me/*', authMiddleware);
 app.use('/api/dashboard/*', authMiddleware);

@@ -2,12 +2,20 @@ import app from '../../src/index';
 import { TEST_DATABASE_URL } from './db';
 import type { Env } from '../../src/types';
 
-export const testEnv: Env = {
+// Re-read OAUTH_DCR_OPEN from process.env on every access so tests that flip
+// the gate via `process.env.OAUTH_DCR_OPEN = 'true'` see their mutation.
+const TEST_ENV_BASE = {
   DATABASE_URL: TEST_DATABASE_URL,
   JWT_SECRET: 'test-secret-' + Math.random().toString(36).slice(2),
   JWT_ISSUER: 'recycle-erp-test',
   OAUTH_ISSUER_URL: 'http://localhost:8787',
 };
+export const testEnv: Env = new Proxy(TEST_ENV_BASE as Env, {
+  get(target, prop, receiver) {
+    if (prop === 'OAUTH_DCR_OPEN') return process.env.OAUTH_DCR_OPEN;
+    return Reflect.get(target, prop, receiver);
+  },
+});
 
 export type ApiResult<T = unknown> = {
   status: number;
