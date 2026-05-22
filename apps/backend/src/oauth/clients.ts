@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type postgres from 'postgres';
+import { revokeRefreshFamily } from './tokens';
 
 export type OAuthClientRow = {
   id: string;
@@ -73,9 +74,14 @@ export async function revokeOAuthClient(sql: AnySql, clientId: string): Promise<
   await sql`
     UPDATE oauth_clients SET revoked_at = NOW() WHERE id = ${clientId} AND revoked_at IS NULL
   `;
-  // Cascade revoke any live refresh tokens for this client.
-  await sql`
-    UPDATE oauth_refresh_tokens SET revoked_at = NOW()
+  // Cascade revoke any live refresh-token families. Routing through
+  // revokeRefreshFamily(reason='client_revoked') keeps the
+  // oauth_refresh_revocations_total counter labelled correctly.
+  const families = await sql<{ family_id: string }[]>`
+    SELECT DISTINCT family_id FROM oauth_refresh_tokens
     WHERE client_id = ${clientId} AND revoked_at IS NULL
   `;
+  for (const f of families) {
+    await revokeRefreshFamily(sql, f.family_id, 'client_revoked');
+  }
 }

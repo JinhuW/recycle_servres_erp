@@ -6,6 +6,7 @@ import type { Context } from 'hono';
 import { getDb } from '../db';
 import { readPackageVersion } from '../lib/version';
 import { TOOL_DEFS, callListMarketValues, callGetMarketValue } from './tools/market';
+import { mcpToolCallsTotal } from '../metrics';
 import type { Env } from '../types';
 
 type JsonRpcReq = { jsonrpc: '2.0'; id: number | string; method: string; params?: Record<string, unknown> };
@@ -41,15 +42,21 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
       return c.json(rpcOk(req.id, { tools: TOOL_DEFS }));
     case 'tools/call': {
       const { name, arguments: args = {} } = (req.params ?? {}) as { name?: string; arguments?: any };
+      const toolLabel = name ?? 'unknown';
       try {
         let payload: unknown;
         if (name === 'list_market_values') payload = await callListMarketValues(sql, args);
         else if (name === 'get_market_value') payload = await callGetMarketValue(sql, args);
-        else return c.json(rpcErr(req.id, -32601, `unknown tool: ${name}`));
+        else {
+          mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
+          return c.json(rpcErr(req.id, -32601, `unknown tool: ${name}`));
+        }
+        mcpToolCallsTotal.inc({ tool: toolLabel, status: 'ok' });
         return c.json(rpcOk(req.id, {
           content: [{ type: 'text', text: JSON.stringify(payload) }],
         }));
       } catch (e) {
+        mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
         return c.json(rpcErr(req.id, -32602, e instanceof Error ? e.message : 'invalid params'));
       }
     }

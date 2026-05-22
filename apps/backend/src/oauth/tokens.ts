@@ -2,6 +2,7 @@ import { createHash, createPrivateKey, createPublicKey, randomBytes, type KeyObj
 import { exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from 'jose';
 import type postgres from 'postgres';
 import type { Env, OAuthScope } from '../types';
+import { oauthRefreshRevocationsTotal } from '../metrics';
 
 type AnySql = postgres.Sql | postgres.TransactionSql;
 
@@ -143,7 +144,7 @@ export async function rotateRefreshToken(
     if (!row) return { ok: false, reason: 'not_found' };
     if (row.revoked_at) {
       // Token-theft signal: someone replayed an already-rotated token.
-      await revokeRefreshFamily(tx, row.family_id);
+      await revokeRefreshFamily(tx, row.family_id, 'reuse');
       return { ok: false, reason: 'reused' };
     }
     if (row.expired) return { ok: false, reason: 'expired' };
@@ -162,9 +163,16 @@ export async function rotateRefreshToken(
   });
 }
 
-export async function revokeRefreshFamily(sql: AnySql, familyId: string): Promise<void> {
+export type RevokeReason = 'reuse' | 'manual' | 'client_revoked';
+
+export async function revokeRefreshFamily(
+  sql: AnySql,
+  familyId: string,
+  reason: RevokeReason = 'manual',
+): Promise<void> {
   await sql`
     UPDATE oauth_refresh_tokens SET revoked_at = NOW()
     WHERE family_id = ${familyId} AND revoked_at IS NULL
   `;
+  oauthRefreshRevocationsTotal.inc({ reason });
 }

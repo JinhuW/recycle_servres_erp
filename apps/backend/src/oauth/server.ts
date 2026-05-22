@@ -9,6 +9,7 @@ import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
 import { verifyChallenge } from './pkce';
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily } from './tokens';
+import { oauthGrantsTotal } from '../metrics';
 
 const CODE_TTL_SEC = 600;
 const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -222,13 +223,24 @@ oauth.post('/token', async (c) => {
   const sql = getDb(env);
   const form = await readFormBody(c);
   const creds = readClientCreds(c, form);
-  if (!creds) return c.json({ error: 'invalid_client' }, 401);
+  // Failed-mint counter: label with the requested grant_type if known, else
+  // 'unknown' for top-of-handler rejects (no client/secret means we never
+  // got far enough to commit to a particular grant flow).
+  const labelGrant = (form.grant_type || 'unknown') as string;
+  if (!creds) {
+    oauthGrantsTotal.inc({ grant_type: labelGrant, status: 'error' });
+    return c.json({ error: 'invalid_client' }, 401);
+  }
 
   const client = await findOAuthClient(sql, creds.id);
-  if (!client) return c.json({ error: 'invalid_client' }, 401);
+  if (!client) {
+    oauthGrantsTotal.inc({ grant_type: labelGrant, status: 'error' });
+    return c.json({ error: 'invalid_client' }, 401);
+  }
 
   if (client.secret_hash) {
     if (!creds.secret || !(await verifyClientSecret(client, creds.secret))) {
+      oauthGrantsTotal.inc({ grant_type: labelGrant, status: 'error' });
       return c.json({ error: 'invalid_client' }, 401);
     }
   }
@@ -237,10 +249,12 @@ oauth.post('/token', async (c) => {
 
   if (grant === 'authorization_code') {
     if (!client.grant_types.includes('authorization_code')) {
+      oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'error' });
       return c.json({ error: 'unauthorized_client' }, 400);
     }
     const { code, code_verifier, redirect_uri } = form;
     if (!code || !code_verifier || !redirect_uri) {
+      oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'error' });
       return c.json({ error: 'invalid_request' }, 400);
     }
     type CodeRow = {
@@ -274,7 +288,10 @@ oauth.post('/token', async (c) => {
         scopes: r.scopes, code_challenge: r.code_challenge,
       };
     });
-    if (!row) return c.json({ error: 'invalid_grant' }, 400);
+    if (!row) {
+      oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'error' });
+      return c.json({ error: 'invalid_grant' }, 400);
+    }
     const at = await signAccessToken(env, {
       clientId: client.id, userId: row.user_id, scopes: row.scopes,
     });
@@ -283,6 +300,7 @@ oauth.post('/token', async (c) => {
           clientId: client.id, userId: row.user_id, scopes: row.scopes,
         })
       : null;
+    oauthGrantsTotal.inc({ grant_type: 'authorization_code', status: 'ok' });
     return c.json({
       access_token: at,
       token_type: 'Bearer',
@@ -294,16 +312,27 @@ oauth.post('/token', async (c) => {
 
   if (grant === 'refresh_token') {
     if (!client.grant_types.includes('refresh_token')) {
+      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
       return c.json({ error: 'unauthorized_client' }, 400);
     }
     const raw = form.refresh_token;
-    if (!raw) return c.json({ error: 'invalid_request' }, 400);
+    if (!raw) {
+      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
+      return c.json({ error: 'invalid_request' }, 400);
+    }
     const res = await rotateRefreshToken(sql, env, raw);
-    if (!res.ok) return c.json({ error: 'invalid_grant' }, 400);
-    if (res.clientId !== client.id) return c.json({ error: 'invalid_grant' }, 400);
+    if (!res.ok) {
+      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
+      return c.json({ error: 'invalid_grant' }, 400);
+    }
+    if (res.clientId !== client.id) {
+      oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'error' });
+      return c.json({ error: 'invalid_grant' }, 400);
+    }
     const at = await signAccessToken(env, {
       clientId: client.id, userId: res.userId, scopes: res.scopes,
     });
+    oauthGrantsTotal.inc({ grant_type: 'refresh_token', status: 'ok' });
     return c.json({
       access_token: at,
       token_type: 'Bearer',
@@ -315,19 +344,28 @@ oauth.post('/token', async (c) => {
 
   if (grant === 'client_credentials') {
     if (!client.grant_types.includes('client_credentials')) {
+      oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
       return c.json({ error: 'unauthorized_client' }, 400);
     }
     if (!client.secret_hash) {
+      oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
       return c.json({ error: 'invalid_client', detail: 'client_credentials requires a confidential client' }, 401);
     }
     const requested = (form.scope ?? '').split(' ').filter(Boolean);
-    if (requested.length === 0) return c.json({ error: 'invalid_scope' }, 400);
+    if (requested.length === 0) {
+      oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
+      return c.json({ error: 'invalid_scope' }, 400);
+    }
     for (const s of requested) {
-      if (!client.scopes.includes(s)) return c.json({ error: 'invalid_scope' }, 400);
+      if (!client.scopes.includes(s)) {
+        oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'error' });
+        return c.json({ error: 'invalid_scope' }, 400);
+      }
     }
     const at = await signAccessToken(env, {
       clientId: client.id, userId: null, scopes: requested as OAuthScope[],
     });
+    oauthGrantsTotal.inc({ grant_type: 'client_credentials', status: 'ok' });
     return c.json({
       access_token: at,
       token_type: 'Bearer',
@@ -336,6 +374,8 @@ oauth.post('/token', async (c) => {
     });
   }
 
+  // unsupported_grant_type: skip counter — labels assume a known grant_type
+  // and we don't want to mint an 'unknown'-labeled series for malformed input.
   return c.json({ error: 'unsupported_grant_type' }, 400);
 });
 
@@ -358,7 +398,7 @@ oauth.post('/revoke', async (c) => {
     WHERE token_hash = ${sha256hex(raw)} LIMIT 1
   `)[0];
   if (row && row.client_id === client.id) {
-    await revokeRefreshFamily(sql, row.family_id);
+    await revokeRefreshFamily(sql, row.family_id, 'manual');
   }
   return c.json({}, 200);
 });

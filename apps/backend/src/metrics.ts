@@ -34,6 +34,34 @@ export const ocrCallsTotal = new Counter({
   registers: [registry],
 });
 
+export const oauthGrantsTotal = new Counter({
+  name: 'oauth_grants_total',
+  help: 'OAuth 2.1 access-token mints by grant_type and outcome.',
+  labelNames: ['grant_type', 'status'] as const,
+  registers: [registry],
+});
+
+export const oauthRefreshRevocationsTotal = new Counter({
+  name: 'oauth_refresh_revocations_total',
+  help: 'Refresh-token family revocations by reason.',
+  labelNames: ['reason'] as const,
+  registers: [registry],
+});
+
+export const mcpToolCallsTotal = new Counter({
+  name: 'mcp_tool_calls_total',
+  help: 'MCP tools/call invocations by tool name and outcome.',
+  labelNames: ['tool', 'status'] as const,
+  registers: [registry],
+});
+
+export const marketWritesTotal = new Counter({
+  name: 'market_writes_total',
+  help: 'Per-row outcomes from POST /api/market/values.',
+  labelNames: ['outcome'] as const,
+  registers: [registry],
+});
+
 // Hono middleware: times every request and records the result.
 // Must run after request-id/CORS but before route handlers so the matched
 // route pattern is available when next() returns.

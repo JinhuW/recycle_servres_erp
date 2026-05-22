@@ -1,4 +1,5 @@
 import type postgres from 'postgres';
+import { marketWritesTotal } from '../metrics';
 
 export type WriteSelector = { id?: string; partNumber?: string };
 export type WriteValue = {
@@ -33,18 +34,22 @@ export async function applyMarketWrites(
       const low = parseNum(v.low), high = parseNum(v.high), avg = parseNum(v.avgSell);
       if (low === null || high === null || avg === null) {
         out.errors.push({ selector: v.selector, error: 'non-numeric low/high/avgSell' });
+        marketWritesTotal.inc({ outcome: 'error' });
         continue;
       }
       if (low < 0 || high < 0 || avg < 0) {
         out.errors.push({ selector: v.selector, error: 'negative price' });
+        marketWritesTotal.inc({ outcome: 'error' });
         continue;
       }
       if (!(low <= avg && avg <= high)) {
         out.errors.push({ selector: v.selector, error: 'low <= avgSell <= high required' });
+        marketWritesTotal.inc({ outcome: 'error' });
         continue;
       }
       if (!Number.isInteger(v.samples) || v.samples < 0) {
         out.errors.push({ selector: v.selector, error: 'samples must be a non-negative integer' });
+        marketWritesTotal.inc({ outcome: 'error' });
         continue;
       }
       const idRow = (await tx<{ id: string; prev_avg: number | null; history: unknown }[]>`
@@ -55,7 +60,11 @@ export async function applyMarketWrites(
                AND LOWER(COALESCE(part_number,'')) = LOWER(${v.selector.partNumber ?? ''}))
         LIMIT 1
       `)[0];
-      if (!idRow) { out.notFound++; continue; }
+      if (!idRow) {
+        out.notFound++;
+        marketWritesTotal.inc({ outcome: 'notfound' });
+        continue;
+      }
       const trend = idRow.prev_avg === null ? null : +(avg - idRow.prev_avg).toFixed(2);
       const newPoint = { ts: new Date().toISOString(), avg };
       await tx`
@@ -71,6 +80,7 @@ export async function applyMarketWrites(
         WHERE id = ${idRow.id}
       `;
       out.updated++;
+      marketWritesTotal.inc({ outcome: 'updated' });
     }
     return out;
   });
