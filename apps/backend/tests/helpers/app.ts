@@ -6,6 +6,7 @@ export const testEnv: Env = {
   DATABASE_URL: TEST_DATABASE_URL,
   JWT_SECRET: 'test-secret-' + Math.random().toString(36).slice(2),
   JWT_ISSUER: 'recycle-erp-test',
+  OAUTH_ISSUER_URL: 'http://localhost:8787',
 };
 
 export type ApiResult<T = unknown> = {
