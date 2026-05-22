@@ -4,6 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../lib/status';
+import { validateScan, stripUnmatched } from '../lib/scanValidation';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -106,10 +107,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // When returning from a rescan, merge the new scan into the draft the user
   // was editing (rescanDraft) — even for a brand-new, unsaved line — so typed
   // values survive the trip through the Camera page.
+  // Filter out AI extractions whose values aren't in the catalog before they
+  // hit the form. A <select> whose value isn't an <option> renders empty, so
+  // unrecognized values would silently disappear; the warning banner below
+  // surfaces them instead so the user can verify or pick from the dropdown.
+  const validation = validateScan(category, detected?.extracted);
+  const cleanDetected: ScanResponse | null = detected
+    ? { ...detected, extracted: stripUnmatched(detected.extracted ?? {}, validation.unmatched) }
+    : null;
   const mergeBase = rescanDraft ?? (isEditing ? existingLine : undefined);
   const initial: DraftLine = mergeBase
-    ? (detected ? { ...mergeBase, ...aiPatch(detected) } : mergeBase)
-    : (detected ? aiDefaults(category, detected) : blankDefaults(category));
+    ? (cleanDetected ? { ...mergeBase, ...aiPatch(cleanDetected) } : mergeBase)
+    : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
   const [lightbox, setLightbox] = useState(false);
@@ -216,6 +225,34 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             </div>
           );
         })()}
+        {aiFilled && validation.unmatched.length > 0 && (
+          <div
+            role="alert"
+            className="ph-ai-banner"
+            style={{
+              borderRadius: 12, marginTop: 6,
+              display: 'block', padding: '10px 12px',
+              background: 'var(--warn-soft, #fef3c7)',
+              color: 'var(--warn-strong, #92400e)',
+              border: '1px solid var(--warn, #f59e0b)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, fontSize: 12.5 }}>
+              <Icon name="alert" size={13} />
+              <span>{t('scanUnmatchedTitle', { n: validation.unmatched.length })}</span>
+            </div>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }}>
+              {validation.unmatched.map(u => (
+                <li key={u.field}>
+                  <span style={{ fontWeight: 600 }}>{u.field}</span>: “{u.value}”
+                </li>
+              ))}
+            </ul>
+            <div style={{ fontSize: 11.5, marginTop: 6, opacity: 0.8 }}>
+              {t('scanUnmatchedHint')}
+            </div>
+          </div>
+        )}
         {showThumb && (
           <div
             style={{

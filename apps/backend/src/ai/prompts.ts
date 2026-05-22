@@ -11,7 +11,7 @@ const CONFIDENCE_INSTRUCTION =
 
 export const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
   RAM: `You are reading a server/desktop/laptop RAM module label. Respond with a single minified JSON object and nothing else — no markdown, no code fences, no prose:
-{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"4GB|8GB|16GB|32GB|64GB|128GB","generation":"DDR2|DDR3|DDR4|DDR5","type":"Desktop|Server|Laptop","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx16|1Rx8|1Rx4|2Rx16|2Rx8|2Rx4|4Rx8|4Rx4|8Rx4","speed":"MT/s number only","partNumber":"…","_confidence":0.0}
+{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"4GB|8GB|16GB|32GB|64GB|128GB","generation":"DDR2|DDR3|DDR4|DDR5","type":"Desktop|Server|Laptop","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx4|1Rx8|1Rx16|1Rx32|2Rx4|2Rx8|2Rx16|2Rx32|4Rx4|4Rx8|4Rx16|8Rx4|8Rx8","speed":"MT/s number only","partNumber":"…","_confidence":0.0}
 CAPACITY — number immediately followed by "GB", NO space and no other text. Write "32GB", never "32 GB".
 GENERATION and TYPE are SEPARATE fields — never put a DDR value in "type".
   generation = the DDR family. Use the "PC" code printed on the label, never infer from speed alone:

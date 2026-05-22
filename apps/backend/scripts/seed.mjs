@@ -59,7 +59,16 @@ const RAM_CLASS  = ['UDIMM', 'RDIMM', 'LRDIMM', 'SODIMM'];
 // and repurposed `type` as the device class, backfilled from the DIMM form
 // factor. Mirror that mapping so a freshly seeded DB matches the schema.
 const DIMM_DEVICE_CLASS = { SODIMM: 'Laptop', UDIMM: 'Desktop', RDIMM: 'Server', LRDIMM: 'Server' };
-const RAM_RANK   = ['1Rx16', '1Rx8', '1Rx4', '2Rx16', '2Rx8', '2Rx4', '4Rx8', '4Rx4', '8Rx4'];
+// Real-world server/desktop/laptop RAM ranks. Ordered by rank count, then by
+// bit-width (rarest narrow first) so the dropdown reads naturally.
+// DDR5 introduces 1Rx32 / 2Rx32 on dense SODIMM/UDIMM; 4Rx16 + 8Rx8 are
+// LRDIMM stacks seen on enterprise modules.
+const RAM_RANK   = [
+  '1Rx4', '1Rx8', '1Rx16', '1Rx32',
+  '2Rx4', '2Rx8', '2Rx16', '2Rx32',
+  '4Rx4', '4Rx8', '4Rx16',
+  '8Rx4', '8Rx8',
+];
 const RAM_CAP    = ['4GB','8GB','16GB','32GB','64GB','128GB'];
 const RAM_SPEED  = ['800','1066','1333','1600','1866','2133','2400','2666','2933','3200','4000','4400','4800','5200','5600','6000','6400','6800','7200','7600','8000'];
 const SSD_BRANDS = ['Samsung','Intel','Micron','WD','Seagate','Kioxia'];
@@ -147,7 +156,7 @@ function buildSubmissions() {
     }
     row.qty = qty;
     row.warehouse = pick(WAREHOUSES);
-    row.id = 'SO-LINE-' + (id++);
+    row.id = 'PO-LINE-' + (id++);
     row.userId = user.id;
     row.date = date;
     row.status = STATUSES[randInt(0, STATUSES.length-1)];
@@ -172,7 +181,7 @@ function buildOrders(subs) {
       const lines = group.slice(i, i+size);
       const totalCost = lines.reduce((a,l) => a + l.unitCost*l.qty, 0);
       orders.push({
-        id: 'SO-' + (oid++),
+        id: 'PO-' + (oid++),
         user_id: lines[0].userId,
         category: lines[0].category,
         warehouse_id: lines[0].warehouse.id,
@@ -369,7 +378,7 @@ function buildNotificationsForUser(userId) {
   return [
     { user_id:userId, kind:'status',     tone:'pos',    icon:'check2',    title:'Sold — commission released',         body:'Samsung 32GB DDR4 · qty 4 cleared. $84 added to your balance.', unread:true,  created_at: min(8) },
     { user_id:userId, kind:'price',      tone:'accent', icon:'trending',  title:'Price watch — Samsung 32GB DDR5',     body:'Avg sell up 4.2% this week. Buy ceiling now $114 — more headroom.', unread:true, created_at: min(42) },
-    { user_id:userId, kind:'mention',    tone:'info',   icon:'mail',      title:'Alex mentioned you',                  body:'"Marcus — can we re-quote SO-1287? Customer pushing for 6% off."', unread:true, created_at: hr(2) },
+    { user_id:userId, kind:'mention',    tone:'info',   icon:'mail',      title:'Alex mentioned you',                  body:'"Marcus — can we re-quote PO-1287? Customer pushing for 6% off."', unread:true, created_at: hr(2) },
     { user_id:userId, kind:'status',     tone:'info',   icon:'truck',     title:'Hynix 64GB DDR4 → In Transit',        body:'Carrier picked up at HK warehouse. ETA Wed, 14 May.', unread:false, created_at: hr(5) },
     { user_id:userId, kind:'price',      tone:'warn',   icon:'trendDown', title:'Price watch — Intel 3.84TB U.2',      body:'Avg sell down 3.1%. Tighten buy targets — last paid $498 vs new ceiling $462.', unread:false, created_at: hr(9) },
     { user_id:userId, kind:'commission', tone:'pos',    icon:'cash',      title:'Weekly commission paid',              body:'$342 deposited from 6 closed orders. Statement in Profile.', unread:false, created_at: d(1) },
@@ -637,8 +646,8 @@ try {
   console.log('· Syncing id_counters…');
   await sql`
     INSERT INTO id_counters (name, value) VALUES
-      ('SO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288)
-                FROM orders WHERE id ~ '^SO-[0-9]+$')),
+      ('PO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288)
+                FROM orders WHERE id ~ '^PO-[0-9]+$')),
       ('SL', (SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int), 4000)
                 FROM sell_orders)),
       ('TO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1000)
