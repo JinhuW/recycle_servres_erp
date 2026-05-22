@@ -397,7 +397,6 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
         name: r.name,
         scopes: r.scopes,
         grantTypes: r.grant_types,
-        redirectUris: r.redirect_uris,
         createdAt: r.created_at,
       })),
     });

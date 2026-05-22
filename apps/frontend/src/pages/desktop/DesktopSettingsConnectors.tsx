@@ -13,7 +13,6 @@ type Client = {
   name: string;
   scopes: string[];
   grantTypes: string[];
-  redirectUris: string[];
   createdAt: string;
 };
 
@@ -24,6 +23,14 @@ export function DesktopSettingsConnectors() {
   const [newName, setNewName] = useState('');
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copySecret() {
+    if (!newSecret) return;
+    await navigator.clipboard.writeText(newSecret);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
 
   const load = () =>
     api.get<{ clients: Client[] }>('/api/oauth/clients')
@@ -131,14 +138,22 @@ export function DesktopSettingsConnectors() {
               >
                 {newSecret}
               </code>
-              <button
-                type="button"
-                className="btn sm ghost"
-                style={{ marginTop: 8 }}
-                onClick={() => setNewSecret(null)}
-              >
-                {t('connectorsSecretDismiss')}
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={copySecret}
+                >
+                  {copied ? t('connectorsCopied') : t('connectorsCopy')}
+                </button>
+                <button
+                  type="button"
+                  className="btn sm ghost"
+                  onClick={() => setNewSecret(null)}
+                >
+                  {t('connectorsSecretDismiss')}
+                </button>
+              </div>
             </div>
           )}
         </div>

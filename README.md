@@ -112,6 +112,69 @@ must not ship to prod.
   (see `apps/backend/src/csrf.ts`).  Safe methods, `/api/health`, and the
   unauthenticated `/api/public/*` vendor endpoints are exempt.
 
+## Market-value MCP
+
+External LLM agents (Claude Code, Claude.ai connectors) can read the
+market-value table at `/api/mcp` using OAuth 2.1 Bearer tokens. Read
+scope: `market:read`. The scraper push endpoint
+`POST /api/market/values` uses `market:write`.
+
+### Set up a Claude Code MCP connector
+
+1. **Settings → Connectors → Add a service client.** Pick a name; copy the
+   one-time secret shown.
+2. Add to `~/.config/claude-code/mcp.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "recycle-erp-market": {
+         "url": "http://localhost:8787/api/mcp",
+         "auth": {
+           "type": "oauth2",
+           "discoveryUrl": "http://localhost:8787/.well-known/oauth-authorization-server",
+           "clientId": "<paste from Settings>",
+           "clientSecret": "<paste from Settings>",
+           "scope": "market:read"
+         }
+       }
+     }
+   }
+   ```
+
+### Scraper push
+
+```sh
+TOKEN=$(curl -sX POST http://localhost:8787/oauth/token \
+  -d 'grant_type=client_credentials' \
+  -d "client_id=$ID" -d "client_secret=$SECRET" \
+  -d 'scope=market:write' | jq -r '.access_token')
+
+curl -X POST http://localhost:8787/api/market/values \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"values":[{"selector":{"partNumber":"M393A4K40DB2-CWE"},
+        "low":"120","high":"180","avgSell":"145","samples":12,
+        "source":"ebay-sold-30d"}]}'
+```
+
+### Generate the OAuth signing key
+
+The backend signs access tokens with Ed25519. Generate a key once and
+store it in `.env` as `OAUTH_SIGNING_KEY_CURRENT` (base64-encoded PKCS#8 PEM).
+
+```sh
+node -e "import('jose').then(async j => {
+  const {privateKey} = await j.generateKeyPair('EdDSA', { crv: 'Ed25519', extractable: true });
+  const pem = await j.exportPKCS8(privateKey);
+  process.stdout.write(Buffer.from(pem).toString('base64'));
+})"
+```
+
+To rotate without breaking outstanding access tokens, move the current
+key to `OAUTH_SIGNING_KEY_PREVIOUS` first, then write a new value to
+`OAUTH_SIGNING_KEY_CURRENT`.
+
 ## Environment
 
 A single `.env` at the repo root drives everything — Compose interpolation,
