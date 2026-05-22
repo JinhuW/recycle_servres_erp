@@ -25,6 +25,14 @@ export type Env = {
   NODE_ENV?: string;
   // Explicit opt-in to expose /api/auth/demo-accounts even in production.
   ENABLE_DEMO_ACCOUNTS?: string;
+  // OAuth 2.1 AS used by the MCP server. See spec
+  // 2026-05-22-market-value-mcp-design.md.
+  OAUTH_ISSUER_URL?: string;
+  OAUTH_SIGNING_KEY_CURRENT?: string;
+  OAUTH_SIGNING_KEY_PREVIOUS?: string;
+  OAUTH_ACCESS_TOKEN_TTL_SEC?: string;
+  OAUTH_REFRESH_TOKEN_TTL_SEC?: string;
+  OAUTH_DCR_OPEN?: string;
 };
 
 export type Role = 'manager' | 'purchaser';
@@ -87,4 +95,13 @@ export type Order = {
   revenue: number;
   profit: number;
   status: string;
+};
+
+export type OAuthScope = 'market:read' | 'market:write';
+
+export type OAuthCtx = {
+  clientId: string;
+  userId: string | null;   // null for client_credentials grant
+  scopes: OAuthScope[];
+  jti: string;
 };
