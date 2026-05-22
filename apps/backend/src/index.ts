@@ -32,6 +32,8 @@ import workspaceRoutes from './routes/workspace';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
 import wellKnown, { oauth as oauthRoutes } from './oauth/server';
+import { handleMcp } from './mcp/server';
+import { bearerGuard } from './oauth/guard';
 import type { Env, User } from './types';
 
 const app = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string } }>();
@@ -157,6 +159,12 @@ app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
+
+// MCP JSON-RPC endpoint — Bearer-authenticated (no cookies, no CSRF). Sits
+// outside the cookie-auth /api/* tree so authMiddleware doesn't run.
+app.use('/api/mcp', bearerGuard({ scopes: ['market:read'] }));
+app.post('/api/mcp', (c) => handleMcp(c));
+app.get('/api/mcp', (c) => c.json({ error: 'use POST for JSON-RPC' }, 405));
 
 app.use('/api/me/*', authMiddleware);
 app.use('/api/dashboard/*', authMiddleware);
