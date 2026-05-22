@@ -9,7 +9,13 @@ import { useEffect, useState } from 'react';
 function readPath(): string {
   if (typeof window === 'undefined') return '/';
   const h = window.location.hash || '';
-  return h.startsWith('#') ? h.slice(1) || '/' : '/';
+  if (h.startsWith('#')) return h.slice(1) || '/';
+  // OAuth consent lands on `/authorize?req=…` as a real path, not a hash
+  // route — the backend redirects there from `/oauth/authorize`. Fall back to
+  // pathname so the SPA can recognise that route on the cold load.
+  const p = window.location.pathname || '/';
+  if (p === '/authorize') return '/authorize';
+  return '/';
 }
 
 export function navigate(path: string): void {
@@ -77,6 +83,13 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/transfers') return 'transfers';
   if (path === '/settings') return 'settings';
   return 'dashboard';
+}
+
+// OAuth consent screen — a real-path route (not hash) because the backend
+// redirects to it from `/oauth/authorize`. Kept off DESKTOP_VIEW_TO_PATH so
+// it stays out of the sidebar and the DesktopView discriminant.
+export function isAuthorizePath(path: string): boolean {
+  return path === '/authorize';
 }
 
 // Mobile view ids ↔ URL paths.

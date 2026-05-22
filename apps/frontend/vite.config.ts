@@ -13,6 +13,18 @@ export default defineConfig({
         target: process.env.VITE_API_BASE || 'http://localhost:8787',
         changeOrigin: true,
       },
+      // OAuth surfaces live off `/api` — RFC 8414 puts discovery at
+      // `/.well-known/oauth-authorization-server`, the token/authorize/consent
+      // endpoints under `/oauth/*`. Proxy them through so the SPA can talk to
+      // the backend without same-origin gymnastics in dev.
+      '/oauth': {
+        target: process.env.VITE_API_BASE || 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      '/.well-known': {
+        target: process.env.VITE_API_BASE || 'http://localhost:8787',
+        changeOrigin: true,
+      },
     },
   },
 });

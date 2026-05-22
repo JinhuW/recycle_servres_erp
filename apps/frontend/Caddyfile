@@ -6,6 +6,13 @@
 	handle /api/* {
 		reverse_proxy backend:8787
 	}
+	# OAuth surfaces — RFC 8414 discovery + /oauth/{authorize,token,consent,…}.
+	handle /oauth/* {
+		reverse_proxy backend:8787
+	}
+	handle /.well-known/* {
+		reverse_proxy backend:8787
+	}
 	# SPA static assets with history-API fallback.
 	handle {
 		root * /srv

@@ -446,6 +446,20 @@ export const I18N: Record<Lang, Record<string, string>> = {
     advancing: 'Advancing…',
     savedShort: 'Saved',
 
+    // ── OAuth consent screen ──
+    oauthConsentOverline: 'OAuth authorization',
+    oauthConsentLoading: 'Loading authorization request…',
+    oauthConsentErrorTitle: 'Cannot show this authorization request',
+    oauthConsentMissingReq: 'No request handle provided.',
+    oauthConsentTitle: 'Allow {client} to access your account?',
+    oauthConsentSub: 'Approving signs you in to this integration with the scopes listed below.',
+    oauthConsentScopesLabel: 'Permissions requested',
+    oauthConsentScopesNone: 'No additional permissions requested.',
+    oauthConsentApprove: 'Approve',
+    oauthConsentApproving: 'Approving…',
+    oauthConsentApprovedTitle: 'Authorization recorded',
+    oauthConsentApprovedSub: 'Return to {client} to finish signing in. You can close this tab.',
+
     // ── Vendor bidding portal ──
     vendorBrowse: 'Browse', vendorMyOffers: 'My offers',
     vendorAvailable: '{n} available', vendorAddOffer: '+ Add offer',
@@ -738,6 +752,20 @@ export const I18N: Record<Lang, Record<string, string>> = {
     deleting: '正在删除…',
     advancing: '正在推进…',
     savedShort: '已保存',
+
+    // ── OAuth consent screen ──
+    oauthConsentOverline: 'OAuth 授权',
+    oauthConsentLoading: '正在加载授权请求…',
+    oauthConsentErrorTitle: '无法显示此授权请求',
+    oauthConsentMissingReq: '缺少请求句柄。',
+    oauthConsentTitle: '允许 {client} 访问您的账户？',
+    oauthConsentSub: '批准后即以下列权限范围向该集成登录。',
+    oauthConsentScopesLabel: '请求的权限',
+    oauthConsentScopesNone: '未请求额外权限。',
+    oauthConsentApprove: '批准',
+    oauthConsentApproving: '处理中…',
+    oauthConsentApprovedTitle: '授权已记录',
+    oauthConsentApprovedSub: '请回到 {client} 完成登录。可关闭此页面。',
 
     // ── Vendor bidding portal ──
     vendorBrowse: '浏览', vendorMyOffers: '我的报价',

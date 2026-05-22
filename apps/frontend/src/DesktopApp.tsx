@@ -8,7 +8,7 @@ import { useAuth } from './lib/auth';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, navigate,
-  DESKTOP_VIEW_TO_PATH, pathToDesktopView,
+  DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath,
 } from './lib/route';
 import { api } from './lib/api';
 
@@ -25,6 +25,7 @@ import { DesktopSettings } from './pages/desktop/DesktopSettings';
 import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
+import { Authorize } from './pages/Authorize';
 import { FormSkeleton } from './components/Skeleton';
 
 import type { Order } from './lib/types';
@@ -100,6 +101,9 @@ export function DesktopApp() {
   // Tested on realUser so the rolePreview transformation in useEffectiveUser
   // doesn't accidentally close the gate.
   if (pendingRoleChoice && realUser?.role === 'manager') return <RolePicker variant="desktop" />;
+  // OAuth consent screen — render standalone (no sidebar/topbar). Reached via
+  // the backend's `/oauth/authorize` 302 to `/authorize?req=…`.
+  if (isAuthorizePath(path)) return <Authorize />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
   const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')

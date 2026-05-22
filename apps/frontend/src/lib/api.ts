@@ -110,6 +110,26 @@ export const api = {
   upload: <T,>(path: string, form: FormData) => request<T>('POST', path, form, { isForm: true }),
 };
 
+// Raw fetch helper for the OAuth consent screen. The consent endpoint lives
+// on `/oauth/*` (not `/api/*`), is cookie-authed, and on success replies with
+// a 302 to a cross-origin redirect_uri — which `fetch` cannot follow because
+// the target lacks CORS headers. We use `redirect: 'manual'` so an opaque
+// redirect response is returned instead of throwing; the caller treats that
+// as "consent recorded" and surfaces a hand-off message.
+export async function rawFetch(method: string, path: string, body?: unknown): Promise<Response> {
+  const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
+  let payload: BodyInit | undefined;
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    payload = JSON.stringify(body);
+  }
+  return fetch(path, {
+    method, headers, body: payload,
+    credentials: 'include',
+    redirect: 'manual',
+  });
+}
+
 export const createDraftOrder = (
   category: Category,
   meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
