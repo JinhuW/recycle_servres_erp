@@ -164,7 +164,10 @@ app.route('/oauth', oauthRoutes);
 // outside the cookie-auth /api/* tree so authMiddleware doesn't run.
 app.use('/api/mcp', bearerGuard({ scopes: ['market:read'] }));
 app.post('/api/mcp', (c) => handleMcp(c));
-app.get('/api/mcp', (c) => c.json({ error: 'use POST for JSON-RPC' }, 405));
+app.get('/api/mcp', (c) => {
+  c.header('Allow', 'POST');
+  return c.json({ error: 'use POST for JSON-RPC' }, 405);
+});
 
 app.use('/api/me/*', authMiddleware);
 app.use('/api/dashboard/*', authMiddleware);

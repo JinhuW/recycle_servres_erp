@@ -16,7 +16,7 @@ const CAPABILITIES = { tools: { listChanged: false } };
 function rpcOk(id: number | string, result: unknown) {
   return { jsonrpc: '2.0', id, result };
 }
-function rpcErr(id: number | string, code: number, message: string, data?: unknown) {
+function rpcErr(id: number | string | null, code: number, message: string, data?: unknown) {
   return { jsonrpc: '2.0', id, error: { code, message, data } };
 }
 
@@ -26,7 +26,7 @@ function rpcErr(id: number | string, code: number, message: string, data?: unkno
 export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): Promise<Response> {
   let req: JsonRpcReq;
   try { req = await c.req.json() as JsonRpcReq; }
-  catch { return c.json(rpcErr(0, -32700, 'parse error'), 400); }
+  catch { return c.json(rpcErr(null, -32700, 'parse error')); }
 
   const sql = getDb(c.env);
 

@@ -111,13 +111,18 @@ export const api = {
 };
 
 // Raw fetch helper for the OAuth consent screen. The consent endpoint lives
-// on `/oauth/*` (not `/api/*`), is cookie-authed, and on success replies with
-// a 302 to a cross-origin redirect_uri — which `fetch` cannot follow because
-// the target lacks CORS headers. We use `redirect: 'manual'` so an opaque
-// redirect response is returned instead of throwing; the caller treats that
-// as "consent recorded" and surfaces a hand-off message.
-export async function rawFetch(method: string, path: string, body?: unknown): Promise<Response> {
-  const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
+// on `/oauth/*` (not `/api/*`) and is cookie-authed. It returns either a 302
+// (browser navigation) or — when the SPA opts in with `Accept: application/json`
+// — a JSON `{redirectUri}` body the SPA navigates to itself. `redirect: 'manual'`
+// keeps fetch from throwing on the 302 path; cross-origin redirect targets
+// can't be followed by fetch anyway (no CORS on the OAuth client).
+export async function rawFetch(
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<Response> {
+  const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE, ...(extraHeaders ?? {}) };
   let payload: BodyInit | undefined;
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';

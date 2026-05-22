@@ -11,14 +11,11 @@ import { ApiError, rawFetch } from '../lib/api';
  *      302-redirects to `/authorize?req=<handle>` (this page).
  *   2. SPA fetches `GET /oauth/authorize/pending/:req` to display client +
  *      scope details.
- *   3. On approve, SPA `POST /oauth/authorize/consent` with `{ req }`. The
- *      backend mints a code and 302-redirects to the client's `redirect_uri`.
- *
- * Cross-origin gotcha: because the final hop is cross-origin, `fetch` cannot
- * follow the 302 (no CORS on the OAuth client). We submit with
- * `redirect: 'manual'`, treat the resulting opaque-redirect as success, and
- * tell the user to return to the OAuth client tab — the only safe behaviour
- * given that the access code is in the unreadable Location header.
+ *   3. On approve, SPA `POST /oauth/authorize/consent` with `{ req }` and
+ *      `Accept: application/json`. The backend mints a code and replies with
+ *      `{ redirectUri }`; the SPA navigates the top-level window there, so
+ *      the OAuth client receives a normal browser request (with its `code`
+ *      query param) and completes the flow.
  */
 
 type Pending = {
@@ -88,16 +85,19 @@ export function Authorize() {
     const clientName = state.pending.clientName;
     setState({ kind: 'approving' });
     try {
-      const res = await rawFetch('POST', '/oauth/authorize/consent', { req });
-      // With `redirect: 'manual'` a 302 surfaces as type='opaqueredirect'
-      // (status 0). That means the backend accepted us and is redirecting
-      // somewhere we cannot read — treat as success.
-      if (res.type === 'opaqueredirect' || res.status === 0) {
-        setState({ kind: 'approved', clientName });
+      const res = await rawFetch('POST', '/oauth/authorize/consent', { req }, {
+        Accept: 'application/json',
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { redirectUri?: string };
+        if (body.redirectUri) {
+          setState({ kind: 'approved', clientName });
+          window.location.href = body.redirectUri;
+          return;
+        }
+        setState({ kind: 'error', message: 'missing redirectUri' });
         return;
       }
-      // Non-redirect responses are always errors here (the consent endpoint
-      // only ever returns 302 on success).
       const text = await res.text();
       let msg = `HTTP ${res.status}`;
       try {

@@ -165,7 +165,11 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
   const url = new URL(result.redirectUri);
   url.searchParams.set('code', result.code);
   if (result.state) url.searchParams.set('state', result.state);
-  return c.redirect(url.toString(), 302);
+  const target = url.toString();
+  if ((c.req.header('accept') ?? '').includes('application/json')) {
+    return c.json({ redirectUri: target });
+  }
+  return c.redirect(target, 302);
 });
 
 // ── /oauth/token helpers ────────────────────────────────────────────────────

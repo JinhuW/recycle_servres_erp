@@ -154,6 +154,32 @@ describe('/oauth/authorize/consent', () => {
     expect(loc).toMatch(/[?&]code=/);
     expect(loc).toMatch(/[?&]state=s1\b/);
   });
+
+  it('consent returns JSON redirectUri when Accept: application/json', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'consent-json', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=ch&code_challenge_method=S256&scope=market:read&state=s1`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/consent', {
+      body: { req }, token,
+      headers: { Accept: 'application/json' },
+    });
+    expect(r.status).toBe(200);
+    const body = r.body as any;
+    expect(typeof body.redirectUri).toBe('string');
+    expect(body.redirectUri.startsWith('https://example.com/cb')).toBe(true);
+    expect(body.redirectUri).toContain('code=');
+  });
 });
 
 describe('/oauth/token', () => {
@@ -341,6 +367,49 @@ describe('/oauth/token', () => {
 });
 
 describe('/oauth/revoke', () => {
+  it('client cannot revoke another client\'s token', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const ca = await createOAuthClient(sql, {
+      name: 'rev-A', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const cb = await createOAuthClient(sql, {
+      name: 'rev-B', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const verifier = generateVerifier();
+    const challenge = challengeS256(verifier);
+    const { token } = await loginAs(ALEX);
+    // Mint a refresh token for client A.
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${ca.clientId}&redirect_uri=https://example.com/cb&code_challenge=${challenge}&code_challenge_method=S256&scope=market:read&state=st`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const consent = await api('POST', '/oauth/authorize/consent', { body: { req }, token, redirect: 'manual' });
+    const code = new URL(consent.headers.get('location')!).searchParams.get('code')!;
+    const tk = await api('POST', '/oauth/token', {
+      form: { grant_type: 'authorization_code', code, code_verifier: verifier,
+              redirect_uri: 'https://example.com/cb', client_id: ca.clientId, client_secret: ca.clientSecret! },
+    });
+    const rt = (tk.body as any).refresh_token as string;
+    // Client B attempts to revoke client A's token.
+    const rev = await api('POST', '/oauth/revoke', {
+      form: { token: rt, client_id: cb.clientId, client_secret: cb.clientSecret! },
+    });
+    expect(rev.status).toBe(200); // RFC 7009: silent on unknown/unauthorized — but family must remain alive
+    // Client A's token still works for rotation.
+    const rot = await api('POST', '/oauth/token', {
+      form: { grant_type: 'refresh_token', refresh_token: rt,
+              client_id: ca.clientId, client_secret: ca.clientSecret! },
+    });
+    expect(rot.status).toBe(200);
+  });
+
   it('revokes a refresh token family; subsequent rotate fails', async () => {
     const sql = getTestDb();
     const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
