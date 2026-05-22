@@ -9,10 +9,17 @@ import type { Line } from '../DesktopSubmit';
 // ─── Field groups ────────────────────────────────────────────────────────────
 type FieldsProps = { line: Line; set: (patch: Partial<Line>) => void };
 
+// Catalog dropdowns must never silently swallow the stored value. If the
+// catalog hasn't finished loading yet, or the value pre-dates a catalog
+// edit (renamed/removed option), include it as a one-off option so the
+// user still sees what was actually saved instead of an empty select.
 function CatSelect({ value, options, onChange }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void }) {
+  const hasValue = value != null && value !== '';
+  const orphan = hasValue && !options.includes(value);
   return (
     <select className="select" value={value ?? ''} onChange={e => onChange(e.target.value)}>
       <option value="">Select…</option>
+      {orphan && <option value={value}>{value}</option>}
       {options.map(o => <option key={o}>{o}</option>)}
     </select>
   );
