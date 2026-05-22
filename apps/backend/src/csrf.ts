@@ -12,6 +12,7 @@ const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 function exempt(path: string): boolean {
   return path === '/api/health'
     || path === '/api/mcp'
+    || path === '/api/market/values'
     || path.startsWith('/api/public/')
     || path.startsWith('/oauth/')
     || path.startsWith('/.well-known/');

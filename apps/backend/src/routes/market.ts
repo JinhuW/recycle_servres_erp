@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, type MarketValueRow } from '../lib/market';
+import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
+import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
 
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -36,6 +38,19 @@ market.get('/', async (c) => {
     targetMargin: TARGET_MARGIN,
     items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
   });
+});
+
+// Scraper push surface. Bearer-only (no cookie/CSRF). Batch capped at 500 rows
+// and rejected before the transaction so oversized payloads cost us nothing.
+market.post('/values', bearerGuard({ scopes: ['market:write'] }), async (c) => {
+  const body = (await c.req.json().catch(() => null)) as null | { values?: WriteValue[] };
+  if (!body || !Array.isArray(body.values)) return c.json({ error: 'invalid_request' }, 400);
+  if (body.values.length > 500) {
+    return c.json({ error: 'payload_too_large', hint: 'paginate to <=500 rows' }, 413);
+  }
+  const sql = getDb(c.env);
+  const result = await applyMarketWrites(sql, body.values);
+  return c.json(result);
 });
 
 export default market;

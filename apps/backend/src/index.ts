@@ -169,7 +169,14 @@ app.get('/api/mcp', (c) => c.json({ error: 'use POST for JSON-RPC' }, 405));
 app.use('/api/me/*', authMiddleware);
 app.use('/api/dashboard/*', authMiddleware);
 app.use('/api/orders/*', authMiddleware);
-app.use('/api/market/*', authMiddleware);
+// /api/market/values is Bearer-only (scraper push surface); all other
+// /api/market/* paths use the SPA cookie-auth flow.
+app.use('/api/market/*', async (c, next) => {
+  if (c.req.path === '/api/market/values') return next();
+  // authMiddleware's generic is the cookie-auth subset of this app's context;
+  // the cast is safe because authMiddleware only reads/sets `user`.
+  return (authMiddleware as unknown as (c: unknown, next: unknown) => Promise<void>)(c, next);
+});
 app.use('/api/scan/*', authMiddleware);
 app.use('/api/notifications/*', authMiddleware);
 app.use('/api/warehouses/*', authMiddleware);
