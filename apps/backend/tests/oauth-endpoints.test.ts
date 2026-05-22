@@ -10,6 +10,9 @@ describe('OAuth discovery', () => {
     expect(r.status).toBe(200);
     const body = r.body as Record<string, unknown>;
     expect(typeof body.issuer).toBe('string');
+    expect(body.issuer).toBe('http://localhost:8787');
+    expect(body.response_types_supported).toEqual(['code']);
+    expect(body.token_endpoint_auth_signing_alg_values_supported).toEqual(['EdDSA']);
     expect(body.authorization_endpoint).toMatch(/\/oauth\/authorize$/);
     expect(body.token_endpoint).toMatch(/\/oauth\/token$/);
     expect(body.registration_endpoint).toMatch(/\/oauth\/register$/);
