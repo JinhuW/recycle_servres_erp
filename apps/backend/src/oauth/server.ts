@@ -67,6 +67,5 @@ oauth.post('/register', async (c) => {
     redirect_uris: body.redirect_uris,
     grant_types: grants,
     scope: scopes.join(' '),
-    token_endpoint_auth_method: 'client_secret_basic',
   }, 201);
 });
