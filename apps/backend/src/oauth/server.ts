@@ -178,14 +178,16 @@ function readClientCreds(
 ): ParsedClientCreds | null {
   const authz = c.req.header('authorization');
   if (authz?.startsWith('Basic ')) {
-    const decoded = Buffer.from(authz.slice(6), 'base64').toString('utf8');
-    const i = decoded.indexOf(':');
-    if (i > 0) {
-      return {
-        id: decodeURIComponent(decoded.slice(0, i)),
-        secret: decodeURIComponent(decoded.slice(i + 1)),
-      };
-    }
+    try {
+      const decoded = Buffer.from(authz.slice(6), 'base64').toString('utf8');
+      const i = decoded.indexOf(':');
+      if (i > 0) {
+        return {
+          id: decodeURIComponent(decoded.slice(0, i)),
+          secret: decodeURIComponent(decoded.slice(i + 1)),
+        };
+      }
+    } catch { /* malformed Basic header — fall through */ }
   }
   if (body.client_id) {
     return { id: body.client_id, secret: body.client_secret ?? null };
@@ -301,6 +303,9 @@ oauth.post('/token', async (c) => {
   if (grant === 'client_credentials') {
     if (!client.grant_types.includes('client_credentials')) {
       return c.json({ error: 'unauthorized_client' }, 400);
+    }
+    if (!client.secret_hash) {
+      return c.json({ error: 'invalid_client', detail: 'client_credentials requires a confidential client' }, 401);
     }
     const requested = (form.scope ?? '').split(' ').filter(Boolean);
     if (requested.length === 0) return c.json({ error: 'invalid_scope' }, 400);
