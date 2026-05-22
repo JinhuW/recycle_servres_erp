@@ -19,11 +19,18 @@ describe('0046_oauth migration', () => {
     }
   });
 
-  it('creates oauth_authorization_codes with expected columns', async () => {
+  it('creates oauth_authorization_codes with expected columns + indexes', async () => {
     const cols = await tableColumns('oauth_authorization_codes');
     for (const c of ['code_hash','client_id','user_id','redirect_uri','scopes','code_challenge','expires_at','consumed_at']) {
       expect(cols.has(c), `oauth_authorization_codes missing column ${c}`).toBe(true);
     }
+    const db = getTestDb();
+    const idx = await db<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='oauth_authorization_codes'
+    `;
+    const inames = new Set(idx.map(i => i.indexname));
+    expect(inames.has('oauth_authorization_codes_client_idx')).toBe(true);
+    expect(inames.has('oauth_authorization_codes_user_idx')).toBe(true);
   });
 
   it('creates oauth_refresh_tokens with expected columns + indexes', async () => {

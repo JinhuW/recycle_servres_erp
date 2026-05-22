@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
 );
 CREATE INDEX IF NOT EXISTS oauth_authorization_codes_expires_idx
   ON oauth_authorization_codes (expires_at);
+CREATE INDEX IF NOT EXISTS oauth_authorization_codes_client_idx
+  ON oauth_authorization_codes (client_id);
+CREATE INDEX IF NOT EXISTS oauth_authorization_codes_user_idx
+  ON oauth_authorization_codes (user_id);
 
 CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
   id          BIGSERIAL PRIMARY KEY,
