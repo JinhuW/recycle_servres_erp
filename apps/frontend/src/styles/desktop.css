@@ -118,11 +118,11 @@ html.desktop, body.desktop, .desktop #root {
   width: 100%;
   max-width: 1280px;
   margin: 0 auto;
-  padding: 10px 3px 24px;
+  padding: 10px 24px 24px;
   min-width: 0;
   box-sizing: border-box;
 }
-[data-density="compact"] .main > .page { padding: 6px 3px 20px; }
+[data-density="compact"] .main > .page { padding: 6px 20px 20px; }
 
 /* ===== Topbar =====
    Workspace context label rendered above each page. Mirrors design's Topbar
@@ -131,7 +131,7 @@ html.desktop, body.desktop, .desktop #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 8px 0;
+  padding: 12px 24px 0;
   width: 100%;
   max-width: 1280px;
   margin: 0 auto;
@@ -141,7 +141,7 @@ html.desktop, body.desktop, .desktop #root {
   font-size: 12px;
   color: var(--fg-subtle);
 }
-[data-density="compact"] .topbar { padding: 8px 8px 0; }
+[data-density="compact"] .topbar { padding: 8px 20px 0; }
 
 /* ===== Role-preview banner =====
    Shown when a manager has the rolePreview tweak set to "as_purchaser". */
