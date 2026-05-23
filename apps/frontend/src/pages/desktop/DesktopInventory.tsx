@@ -221,6 +221,21 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [colsMenuOpen]);
 
+  // Auto-collapse the refine panel when the user clicks anywhere outside it.
+  // Mirrors the cols-menu behaviour above so the panel doesn't linger over the
+  // table after the user has dialed in their chips.
+  const subfilterRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!attrPanelOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (subfilterRef.current && !subfilterRef.current.contains(e.target as Node)) {
+        setAttrPanelOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [attrPanelOpen, setAttrPanelOpen]);
+
   // Shared query string for the flat list and the grouped product fetch, so
   // the two views always filter identically (was duplicated in both effects).
   // Attribute chips are flattened into multi-value params (`?generation=DDR4,DDR5`)
@@ -683,7 +698,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         </div>
 
         {attrSchema.length > 0 && (
-          <div className="inv-subfilter" data-open={attrPanelOpen ? 'true' : 'false'}>
+          <div ref={subfilterRef} className="inv-subfilter" data-open={attrPanelOpen ? 'true' : 'false'}>
             <button
               type="button"
               className="inv-subfilter__head"

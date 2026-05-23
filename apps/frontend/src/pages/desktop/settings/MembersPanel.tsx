@@ -237,6 +237,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
 
         {inviting && (
           <InviteMemberModal
+            existing={members}
             onClose={() => setInviting(false)}
             onInvited={(name) => { setInviting(false); reload(); showToast?.(`${name} added to workspace`); }}
             onError={(msg) => showToast?.(msg, 'error')}
@@ -258,33 +259,51 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
   );
 }
 
+// RFC-5322 lite: local + @ + domain.tld, no whitespace, tld 2+ chars.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 function InviteMemberModal({
-  onClose, onInvited, onError,
+  existing, onClose, onInvited, onError,
 }: {
+  existing: Member[];
   onClose: () => void;
   onInvited: (name: string) => void;
   onError: (msg: string) => void;
 }) {
   const [draft, setDraft] = useState({
     name: '', email: '', role: 'purchaser' as 'manager' | 'purchaser',
-    team: '', title: '', phone: '',
+    phone: '',
   });
   const [saving, setSaving] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [createdName, setCreatedName] = useState('');
   const set = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) => setDraft(p => ({ ...p, [k]: v }));
 
-  const canSave = draft.name.trim() && /.+@.+\..+/.test(draft.email.trim()) && !saving;
+  const emailTrimmed = draft.email.trim().toLowerCase();
+  const emailCheck = useMemo<{ state: 'empty' | 'invalid' | 'duplicate' | 'ok'; msg?: string }>(() => {
+    if (!emailTrimmed) return { state: 'empty' };
+    if (!EMAIL_RE.test(emailTrimmed)) return { state: 'invalid', msg: 'Enter a valid email address.' };
+    const dup = existing.find(m => m.email.toLowerCase() === emailTrimmed);
+    if (dup) {
+      return {
+        state: 'duplicate',
+        msg: dup.active
+          ? `${dup.name} is already a member.`
+          : `${dup.name} was archived — restore from the members list instead.`,
+      };
+    }
+    return { state: 'ok', msg: 'Looks good.' };
+  }, [emailTrimmed, existing]);
+
+  const canSave = draft.name.trim() && emailCheck.state === 'ok' && !saving;
 
   const submit = async () => {
     setSaving(true);
     try {
       const res = await api.post<{ id: string; password: string }>('/api/members', {
         name: draft.name.trim(),
-        email: draft.email.trim().toLowerCase(),
+        email: emailTrimmed,
         role: draft.role,
-        team: draft.team.trim() || undefined,
-        title: draft.title.trim() || undefined,
         phone: draft.phone.trim() || undefined,
       });
       setTempPassword(res.password);
@@ -348,7 +367,7 @@ function InviteMemberModal({
           <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
         </div>
         <div className="modal-body">
-          <div className="field-row">
+          <div className="field-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div className="field">
               <label className="label">Full name *</label>
               <input
@@ -359,37 +378,55 @@ function InviteMemberModal({
               />
             </div>
             <div className="field">
-              <label className="label">Email *</label>
-              <input
-                className="input"
-                type="email"
-                value={draft.email}
-                onChange={e => set('email', e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label className="label">Title</label>
-              <input
-                className="input"
-                value={draft.title}
-                onChange={e => set('title', e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label className="label">Team</label>
-              <input
-                className="input"
-                value={draft.team}
-                onChange={e => set('team', e.target.value)}
-              />
-            </div>
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label className="label">Phone</label>
               <input
                 className="input"
                 value={draft.phone}
                 onChange={e => set('phone', e.target.value)}
               />
+            </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label className="label">
+                Email *
+                {emailCheck.state === 'ok' && (
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--pos)', fontWeight: 500 }}>
+                    <Icon name="check" size={12} /> Valid
+                  </span>
+                )}
+                {(emailCheck.state === 'invalid' || emailCheck.state === 'duplicate') && (
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--neg)', fontWeight: 500 }}>
+                    <Icon name="x" size={12} /> {emailCheck.state === 'duplicate' ? 'Already used' : 'Invalid'}
+                  </span>
+                )}
+              </label>
+              <input
+                className="input"
+                type="email"
+                autoComplete="email"
+                spellCheck={false}
+                value={draft.email}
+                onChange={e => set('email', e.target.value)}
+                style={
+                  emailCheck.state === 'invalid' || emailCheck.state === 'duplicate'
+                    ? { borderColor: 'var(--neg)' }
+                    : undefined
+                }
+              />
+              {emailCheck.msg && (
+                <div
+                  className="help"
+                  style={{
+                    color:
+                      emailCheck.state === 'ok'
+                        ? 'var(--pos)'
+                        : emailCheck.state === 'empty'
+                          ? 'var(--fg-subtle)'
+                          : 'var(--neg)',
+                  }}
+                >
+                  {emailCheck.msg}
+                </div>
+              )}
             </div>
           </div>
           <div className="role-picker" style={{ marginTop: 12 }}>
