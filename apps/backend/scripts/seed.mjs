@@ -512,7 +512,11 @@ try {
   await sql`DELETE FROM inventory_events`;   // → order_lines
   await sql`ALTER TABLE inventory_events ENABLE TRIGGER inventory_events_no_delete`;
   await sql`DELETE FROM sell_order_lines`;   // → sell_orders, order_lines (inventory_id)
-  await sql`DELETE FROM sell_orders`;        // → customers
+  // sell_order_events is append-only (BEFORE DELETE trigger). The DELETE on
+  // sell_orders cascades into it, so disable the lock just for this reset.
+  await sql`ALTER TABLE sell_order_events DISABLE TRIGGER sell_order_events_no_delete`;
+  await sql`DELETE FROM sell_orders`;        // → customers, sell_order_events
+  await sql`ALTER TABLE sell_order_events ENABLE TRIGGER sell_order_events_no_delete`;
   await sql`DELETE FROM order_lines`;        // → orders (cascade to inventory_events now empty)
   await sql`DELETE FROM orders`;
   const orders = buildOrders(buildSubmissions());
