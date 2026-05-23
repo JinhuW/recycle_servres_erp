@@ -170,6 +170,10 @@ export type RefPrice = {
   health: number | null;
   rpm: number | null;
   internalSales: { avgPrice: number | null; samples: number };
+  lastPrice: number | null;
+  lastPriceAt: string | null;
+  lastPriceSource: string | null;
+  recentPrices: { ts: string; price: number }[];
 };
 
 export type Notification = {
