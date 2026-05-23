@@ -45,13 +45,28 @@ market.get('/', async (c) => {
            rp.trend, rp.samples, rp.source, rp.stock, rp.demand, rp.history,
            rp.updated_at, rp.health::float AS health, rp.rpm,
            ils.avg_price AS internal_avg,
-           ils.samples   AS internal_samples
+           ils.samples   AS internal_samples,
+           rp.last_price::float AS last_price,
+           rp.last_price_at AS last_price_at,
+           rp.last_price_source AS last_price_source,
+           rec.recent AS recent_prices
     FROM ref_prices rp
     LEFT JOIN internal_sales ils
       ON ils.canon = UPPER(REGEXP_REPLACE(
                        REGEXP_REPLACE(COALESCE(rp.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
                        '[[:space:]]+', '', 'g'
                      ))
+    LEFT JOIN LATERAL (
+      SELECT JSONB_AGG(
+               JSONB_BUILD_OBJECT('ts', e.created_at, 'price', e.price::float)
+               ORDER BY e.created_at
+             ) AS recent
+      FROM (
+        SELECT created_at, price FROM ref_price_events
+        WHERE ref_price_id = rp.id
+        ORDER BY created_at DESC LIMIT 12
+      ) e
+    ) rec ON TRUE
     WHERE (${category ?? null}::text IS NULL OR rp.category = ${category ?? null})
       AND (
         ${search ?? null}::text IS NULL

@@ -22,5 +22,19 @@ describe('GET /api/market — target margin', () => {
     expect(r.body.targetMargin).toBe(0.5);
     const row = r.body.items.find(i => i.avgSell > 0)!;
     expect(row.maxBuy).toBeCloseTo(+(row.avgSell * 0.5).toFixed(2), 2);
+
+    const item = (r.body as any).items[0];
+    expect(item).toHaveProperty('lastPrice');
+    expect(item).toHaveProperty('lastPriceAt');
+    expect(item).toHaveProperty('lastPriceSource');
+    expect(item).toHaveProperty('recentPrices');
+    expect(Array.isArray(item.recentPrices)).toBe(true);
+    if (item.recentPrices.length >= 2) {
+      const first = new Date(item.recentPrices[0].ts).getTime();
+      const last = new Date(item.recentPrices[item.recentPrices.length - 1].ts).getTime();
+      expect(last).toBeGreaterThanOrEqual(first); // oldest first
+    }
+    // avg_sell still present (MCP/legacy compatibility)
+    expect(item).toHaveProperty('avgSell');
   });
 });

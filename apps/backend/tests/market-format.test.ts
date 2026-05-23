@@ -13,7 +13,9 @@ describe('formatRefPrice', () => {
              target::float AS target, low_price::float AS low_price,
              high_price::float AS high_price, avg_sell::float AS avg_sell,
              trend, samples, source, stock, demand, history, updated_at,
-             health::float AS health, rpm
+             health::float AS health, rpm,
+             last_price::float AS last_price, last_price_at, last_price_source,
+             NULL::jsonb AS recent_prices
       FROM ref_prices LIMIT 1
     `)[0];
     const v = formatRefPrice(row, 0.30);

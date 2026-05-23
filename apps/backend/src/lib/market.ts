@@ -31,6 +31,10 @@ export type MarketValueRow = {
   rpm: number | null;
   internal_avg: number | null;
   internal_samples: number | null;
+  last_price: number | null;
+  last_price_at: Date | null;
+  last_price_source: string | null;
+  recent_prices: { ts: string; price: number }[] | null;
 };
 
 export type MarketValue = {
@@ -68,9 +72,17 @@ export type MarketValue = {
   // on the Market Value page renders this directly instead of the synthetic
   // offset used for external broker placeholders.
   internalSales: { avgPrice: number | null; samples: number };
+  lastPrice: number | null;
+  lastPriceAt: string | null;
+  lastPriceSource: string | null;
+  recentPrices: { ts: string; price: number }[];
 };
 
 export function formatRefPrice(r: MarketValueRow, targetMargin: number): MarketValue {
+  // maxBuy migrates to last_price as the basis (more meaningful with few
+  // samples). Falls back to avg_sell when no recorded last_price yet — same
+  // numeric behaviour as before for un-touched rows.
+  const basis = r.last_price ?? r.avg_sell;
   return {
     id: r.id,
     category: r.category,
@@ -97,12 +109,16 @@ export function formatRefPrice(r: MarketValueRow, targetMargin: number): MarketV
     demand: r.demand,
     history: r.history,
     updatedAt: r.updated_at.toISOString(),
-    maxBuy: r.avg_sell === null ? null : +(r.avg_sell * (1 - targetMargin)).toFixed(2),
+    maxBuy: basis === null ? null : +(basis * (1 - targetMargin)).toFixed(2),
     health: r.health,
     rpm: r.rpm,
     internalSales: {
       avgPrice: r.internal_avg == null ? null : +r.internal_avg.toFixed(2),
       samples: r.internal_samples ?? 0,
     },
+    lastPrice: r.last_price === null ? null : +r.last_price.toFixed(2),
+    lastPriceAt: r.last_price_at ? r.last_price_at.toISOString() : null,
+    lastPriceSource: r.last_price_source,
+    recentPrices: r.recent_prices ?? [],
   };
 }
