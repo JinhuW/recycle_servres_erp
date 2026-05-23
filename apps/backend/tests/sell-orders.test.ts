@@ -319,3 +319,37 @@ describe('GET /api/sell-orders — archive filter', () => {
   });
 });
 
+describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Advance a sell order out of Draft so it is eligible for archive.
+  async function nonDraftSellOrder(token: string): Promise<string> {
+    const id = await createDraftSellOrder(token);
+    const r = await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Shipped', note: 'shipped for test' },
+    });
+    expect(r.status).toBe(200);
+    return id;
+  }
+
+  it('manager can archive a non-Draft sell order, and unarchive it back', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await nonDraftSellOrder(token);
+
+    const arch = await api('POST', `/api/sell-orders/${id}/archive`, { token });
+    expect(arch.status).toBe(200);
+
+    const got = await api<{ order: { archivedAt: string | null } }>(
+      'GET', `/api/sell-orders/${id}`, { token },
+    );
+    expect(typeof got.body.order.archivedAt).toBe('string');
+
+    const unarch = await api('POST', `/api/sell-orders/${id}/unarchive`, { token });
+    expect(unarch.status).toBe(200);
+    const got2 = await api<{ order: { archivedAt: string | null } }>(
+      'GET', `/api/sell-orders/${id}`, { token },
+    );
+    expect(got2.body.order.archivedAt).toBeNull();
+  });
+});
+

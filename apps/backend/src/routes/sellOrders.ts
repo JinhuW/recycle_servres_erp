@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type postgres from 'postgres';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
@@ -6,6 +7,7 @@ import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
+import { writeSellOrderEvent } from '../services/sellOrderAudit';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -616,5 +618,61 @@ sellOrders.post('/:id/status', async (c) => {
   if (outcome.kind === 'idempotent') return c.json({ ok: true, status: outcome.status });
   return c.json({ ok: true, status: body.to });
 });
+
+// ── Archive / unarchive a Sell Order.
+//
+// Archive is a reversible "hide from default list" flag (sell_orders.archived_at).
+// Manager-only (sell-orders is a manager-only surface throughout). The handler
+// runs inside sql.begin with a row-level lock so concurrent archive +
+// unarchive can't race, and so the audit event is only committed if the flag
+// flip succeeds.
+type SOCtx = Context<{ Bindings: Env; Variables: { user: User } }>;
+
+async function setSellOrderArchived(c: SOCtx, archive: boolean) {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id') as string;
+  const sql = getDb(c.env);
+
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'isDraft' }
+    | { kind: 'noChange' }
+    | { kind: 'ok' };
+
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const existing = (await tx`
+      SELECT status, archived_at FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0] as { status: string; archived_at: string | null } | undefined;
+    if (!existing) return { kind: 'notFound' };
+    if (existing.status === 'Draft') return { kind: 'isDraft' };
+    const wasArchived = existing.archived_at !== null;
+    if (wasArchived === archive) return { kind: 'noChange' };
+
+    if (archive) {
+      await tx`UPDATE sell_orders SET archived_at = NOW() WHERE id = ${id}`;
+    } else {
+      await tx`UPDATE sell_orders SET archived_at = NULL WHERE id = ${id}`;
+    }
+    await writeSellOrderEvent(
+      tx, id, u.id,
+      archive ? 'archived' : 'unarchived',
+      {},
+    );
+    return { kind: 'ok' };
+  });
+
+  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
+  if (outcome.kind === 'isDraft') {
+    return c.json({ error: 'Draft sell orders cannot be archived — delete instead' }, 403);
+  }
+  if (outcome.kind === 'noChange') {
+    return c.json({ error: archive ? 'Sell order is already archived' : 'Sell order is not archived' }, 409);
+  }
+  return c.json({ ok: true });
+}
+
+sellOrders.post('/:id/archive',   c => setSellOrderArchived(c, true));
+sellOrders.post('/:id/unarchive', c => setSellOrderArchived(c, false));
 
 export default sellOrders;
