@@ -127,10 +127,11 @@ sellOrders.get('/:id', async (c) => {
 
   const head = (await sql<{
     id: string; status: string; notes: string | null; created_at: string;
+    archived_at: string | null;
     customer_id: string; customer_name: string; customer_short: string;
     customer_region: string;
   }[]>`
-    SELECT so.id, so.status, so.notes, so.created_at,
+    SELECT so.id, so.status, so.notes, so.created_at, so.archived_at,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
     FROM sell_orders so JOIN customers c ON c.id = so.customer_id
     WHERE so.id = ${id} LIMIT 1
@@ -185,6 +186,7 @@ sellOrders.get('/:id', async (c) => {
   return c.json({
     order: {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
+      archivedAt: head.archived_at,
       customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
       lines: lines.map(l => ({
         id: l.id, category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,

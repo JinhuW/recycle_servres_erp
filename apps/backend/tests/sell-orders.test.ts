@@ -303,5 +303,19 @@ describe('GET /api/sell-orders — archive filter', () => {
     expect(row).toBeDefined();
     expect(row!.archivedAt).not.toBeNull();
   });
+
+  it('detail response includes archivedAt', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createDraftSellOrder(token);
+
+    const sql = getTestDb();
+    await sql`UPDATE sell_orders SET archived_at = NOW() WHERE id = ${id}`;
+
+    const got = await api<{ order: { id: string; archivedAt: string | null } }>(
+      'GET', `/api/sell-orders/${id}`, { token },
+    );
+    expect(got.status).toBe(200);
+    expect(got.body.order.archivedAt).not.toBeNull();
+  });
 });
 
