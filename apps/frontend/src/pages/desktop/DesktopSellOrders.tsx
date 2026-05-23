@@ -375,6 +375,8 @@ function SellOrderDetail({
   const [statusMeta, setStatusMeta] = useState<StatusMetaMap | null>(null);
   // Pending transition into a meta-status. null = no dialog showing.
   const [pending, setPending] = useState<MetaStatus | null>(null);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [unarchiving, setUnarchiving] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -733,6 +735,35 @@ function SellOrderDetail({
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
+              {editable && order.status !== 'Draft' && order.archivedAt === null && (
+                <button
+                  className="btn"
+                  onClick={() => setConfirmArchive(true)}
+                  title="Archive this sell order"
+                  style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--neg, #c0392b)' }}
+                >
+                  <Icon name="box" size={14} /> Archive
+                </button>
+              )}
+              {editable && order.archivedAt !== null && (
+                <button
+                  className="btn"
+                  disabled={unarchiving}
+                  onClick={async () => {
+                    setUnarchiving(true);
+                    try {
+                      await unarchiveSellOrder(order.id);
+                      onSaved();
+                      onClose();
+                    } catch (e) {
+                      handleFetchError(e);
+                      setUnarchiving(false);
+                    }
+                  }}
+                >
+                  <Icon name="box" size={14} /> {unarchiving ? 'Unarchiving…' : 'Unarchive'}
+                </button>
+              )}
               <button className="btn" onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
               {!editable && order.status !== 'Done' && (
                 <button className="btn accent" onClick={onSwitchToEdit}>
@@ -769,6 +800,13 @@ function SellOrderDetail({
           setDraft({ ...draft, status: pending });
           setPending(null);
         }}
+      />
+    )}
+    {confirmArchive && order && (
+      <ArchiveSellOrderDialog
+        orderId={order.id}
+        onCancel={() => setConfirmArchive(false)}
+        onConfirmed={() => { setConfirmArchive(false); onSaved(); onClose(); }}
       />
     )}
     </>
