@@ -408,3 +408,20 @@ describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
   });
 });
 
+describe('sell_order_events append-only triggers', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('UPDATE on sell_order_events raises the lock exception', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createDraftSellOrder(token);
+    await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Shipped', note: 'n' },
+    });
+    await api('POST', `/api/sell-orders/${id}/archive`, { token });
+
+    const sql = getTestDb();
+    await expect(sql`UPDATE sell_order_events SET kind = 'tampered' WHERE sell_order_id = ${id}`)
+      .rejects.toThrow(/append-only/);
+  });
+});
+
