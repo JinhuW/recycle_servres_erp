@@ -48,7 +48,8 @@ describe('formatRefPrice', () => {
       health: row.health,
       rpm: row.rpm,
     });
-    expect(v.maxBuy).toBe(+(row.avg_sell * 0.70).toFixed(2));
+    const basis = row.last_price ?? row.avg_sell;
+    expect(v.maxBuy).toBe(+(basis * 0.70).toFixed(2));
     expect(v.updatedAt).toBe(row.updated_at.toISOString());
   });
 });
