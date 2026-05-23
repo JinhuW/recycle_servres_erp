@@ -4,6 +4,7 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, type MarketValueRow } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
 import { PART_PREFIX_RE } from '../lib/part-number';
+import { appendPriceEvent } from '../lib/refPriceEvents';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
 
@@ -66,6 +67,39 @@ market.get('/', async (c) => {
     targetMargin: TARGET_MARGIN,
     items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
   });
+});
+
+// Manual price entry from the Market page. Manager-only; auth + CSRF are
+// handled by the mounted middleware chain. Records one row in
+// ref_price_events and bumps ref_prices.last_price* via appendPriceEvent.
+market.post('/:id/manual-price', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+
+  const body = (await c.req.json().catch(() => null)) as null | { price?: unknown; note?: unknown };
+  const price = typeof body?.price === 'number' ? body.price : NaN;
+  if (!Number.isFinite(price) || price < 0) {
+    return c.json({ error: 'invalid_price' }, 400);
+  }
+  const note = typeof body?.note === 'string' ? body.note : null;
+  if (note !== null && note.length > 280) {
+    return c.json({ error: 'note_too_long' }, 400);
+  }
+
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const ev = await sql.begin(async (tx) => {
+    const exists = (await tx`SELECT 1 FROM ref_prices WHERE id = ${id}`)[0];
+    if (!exists) return null;
+    return appendPriceEvent(tx, {
+      refPriceId: id,
+      price,
+      source: `manual:${c.var.user.email}`,
+      note,
+      actorUserId: c.var.user.id,
+    });
+  });
+  if (!ev) return c.json({ error: 'not_found' }, 404);
+  return c.json({ lastPrice: ev.price, lastPriceAt: ev.createdAt.toISOString() });
 });
 
 // Scraper push surface. Bearer-only (no cookie/CSRF). Batch capped at 500 rows
