@@ -29,8 +29,9 @@ DROP TRIGGER IF EXISTS sell_order_events_no_update ON sell_order_events;
 DROP TRIGGER IF EXISTS sell_order_events_no_delete ON sell_order_events;
 CREATE TRIGGER sell_order_events_no_update BEFORE UPDATE ON sell_order_events
   FOR EACH ROW EXECUTE FUNCTION sell_order_events_lock();
--- Note: BEFORE DELETE fires even on CASCADE. Sell orders can only be deleted
--- while in 'Draft' status (no events emitted yet), so the cascade never has
--- rows to delete in practice.
+-- Note: BEFORE DELETE fires even on CASCADE. Sell orders are never
+-- deleted (the route layer exposes archive only, never DELETE), so the
+-- cascade path here is theoretical — but the trigger still guarantees
+-- the append-only invariant if a future change ever touches the parent.
 CREATE TRIGGER sell_order_events_no_delete BEFORE DELETE ON sell_order_events
   FOR EACH ROW EXECUTE FUNCTION sell_order_events_lock();
