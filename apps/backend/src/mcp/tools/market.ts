@@ -18,14 +18,13 @@ export const TOOL_DEFS = [
   },
   {
     name: 'get_market_value',
-    description: 'Fetch one market-value record by id or partNumber.',
+    description: 'Fetch one market-value record. Exactly one of id or partNumber must be provided.',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string' },
         partNumber: { type: 'string' },
       },
-      oneOf: [{ required: ['id'] }, { required: ['partNumber'] }],
       additionalProperties: false,
     },
   },
