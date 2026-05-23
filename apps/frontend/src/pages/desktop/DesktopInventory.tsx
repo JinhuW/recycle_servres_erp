@@ -66,6 +66,46 @@ const GROUPED_COL_IDS = new Set<ColId>([
   'category', 'partNumber', 'warehouse', 'condition', 'qty', 'unitCost', 'sellPrice',
 ]);
 
+// Sub-filter facets per category. `key` doubles as the facets-response key the
+// backend returns; `param` is what the query string sends (the backend uses
+// `form` as the param shortcut for the `form_factor` column).
+type AttrSpec = { key: string; param: string; label: string; format?: (v: string) => string };
+const ATTR_SCHEMA: Record<'RAM' | 'SSD' | 'HDD', AttrSpec[]> = {
+  RAM: [
+    { key: 'generation',     param: 'generation',     label: 'Generation' },
+    { key: 'speed',          param: 'speed',          label: 'Speed', format: v => `${v} MHz` },
+    { key: 'brand',          param: 'brand',          label: 'Brand' },
+    { key: 'capacity',       param: 'capacity',       label: 'Capacity' },
+    { key: 'type',           param: 'type',           label: 'Device' },
+    { key: 'classification', param: 'classification', label: 'Form' },
+    { key: 'rank',           param: 'rank',           label: 'Rank' },
+  ],
+  SSD: [
+    { key: 'brand',       param: 'brand',     label: 'Brand' },
+    { key: 'capacity',    param: 'capacity',  label: 'Capacity' },
+    { key: 'interface',   param: 'interface', label: 'Interface' },
+    { key: 'form_factor', param: 'form',      label: 'Form factor' },
+  ],
+  HDD: [
+    { key: 'brand',       param: 'brand',     label: 'Brand' },
+    { key: 'capacity',    param: 'capacity',  label: 'Capacity' },
+    { key: 'interface',   param: 'interface', label: 'Interface' },
+    { key: 'form_factor', param: 'form',      label: 'Form factor' },
+    { key: 'rpm',         param: 'rpm',       label: 'RPM', format: v => `${v} RPM` },
+  ],
+};
+// Numeric attrs need natural sort (2400 before 16000); the rest collate as
+// strings so e.g. 4GB/8GB/16GB still go in catalog-natural order on chips.
+const NUMERIC_ATTRS = new Set(['speed', 'rpm']);
+function sortAttrValues(key: string, values: string[]): string[] {
+  if (NUMERIC_ATTRS.has(key)) {
+    return [...values].sort((a, b) => Number(a) - Number(b));
+  }
+  return [...values].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+  );
+}
+
 export function DesktopInventory({ onEditItem, showToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -112,6 +152,41 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [view, setView] = usePreference('inventory.view', 'grouped');
   const [products, setProducts] = useState<ProductGroup[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
+
+  // Sub-filter state. Persisted PER CATEGORY so toggling RAM → SSD → RAM keeps
+  // your RAM chips, but new category lookups start fresh. Fold-open is sticky
+  // across all categories; we auto-open it on first selection (see below).
+  type AttrMap = Record<string, string[]>;
+  const [attrFiltersByCat, setAttrFiltersByCat] =
+    usePersisted<Record<string, AttrMap>>('desktop.inventory.attrs', {});
+  const attrFilters: AttrMap = attrFiltersByCat[filter] ?? {};
+  const setAttrFilters = (next: AttrMap) =>
+    setAttrFiltersByCat({ ...attrFiltersByCat, [filter]: next });
+  const [attrPanelOpen, setAttrPanelOpen] =
+    usePersisted<boolean>('desktop.inventory.attrPanelOpen', false);
+  const [facets, setFacets] =
+    useState<Record<string, Record<string, number>>>({});
+  const [whProductCounts, setWhProductCounts] =
+    useState<Record<string, number>>({});
+  const [whProductTotal, setWhProductTotal] = useState<number>(0);
+
+  const attrSchema: AttrSpec[] =
+    filter === 'RAM' || filter === 'SSD' || filter === 'HDD'
+      ? ATTR_SCHEMA[filter as 'RAM' | 'SSD' | 'HDD']
+      : [];
+  const activeAttrCount = Object.values(attrFilters).reduce(
+    (n, vs) => n + (vs?.length ?? 0), 0,
+  );
+  const toggleAttrValue = (key: string, value: string) => {
+    const cur = attrFilters[key] ?? [];
+    const next = cur.includes(value)
+      ? cur.filter(v => v !== value)
+      : [...cur, value];
+    const merged = { ...attrFilters };
+    if (next.length === 0) delete merged[key]; else merged[key] = next;
+    setAttrFilters(merged);
+  };
+  const clearAttrFilters = () => setAttrFilters({});
   const [colsList, setColsList] = usePreference(colsKey, defaultCols);
   const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
   const isVis = (id: ColId) => visibleCols.has(id);
@@ -148,14 +223,21 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
 
   // Shared query string for the flat list and the grouped product fetch, so
   // the two views always filter identically (was duplicated in both effects).
+  // Attribute chips are flattened into multi-value params (`?generation=DDR4,DDR5`)
+  // and only sent when the active category has them in its schema — keeps
+  // stale RAM chips out of an SSD query.
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
+    for (const spec of attrSchema) {
+      const vals = attrFilters[spec.key];
+      if (vals && vals.length) params.set(spec.param, vals.join(','));
+    }
     return params.toString();
-  }, [filter, statusFilter, warehouseFilter, search]);
+  }, [filter, statusFilter, warehouseFilter, search, attrSchema, attrFilters]);
 
   // Data fetch (debounced on search/filters)
   useEffect(() => {
@@ -170,11 +252,25 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   }, [filterQuery]);
 
   useEffect(() => {
-    if (view !== 'grouped') return;
+    // Products endpoint is also our source of facet + warehouse counts, so we
+    // fire it even when the user is on the flat view — otherwise the chip-bar
+    // counts and the warehouse pills would stale when toggling views.
     let alive = true;
     const h = setTimeout(() => {
-      api.get<{ products: ProductGroup[] }>(`/api/inventory/products?${filterQuery}`)
-        .then(r => { if (alive) { setProducts(r.products); setProductsLoaded(true); } })
+      api.get<{
+        products: ProductGroup[];
+        facets?: Record<string, Record<string, number>>;
+        warehouse_counts?: Record<string, number>;
+        total?: number;
+      }>(`/api/inventory/products?${filterQuery}`)
+        .then(r => {
+          if (!alive) return;
+          setProducts(r.products);
+          setProductsLoaded(true);
+          setFacets(r.facets ?? {});
+          setWhProductCounts(r.warehouse_counts ?? {});
+          setWhProductTotal(r.total ?? r.products.length);
+        })
         .catch(err => {
           if (alive) { setProducts([]); setProductsLoaded(true); }
           handleFetchError(err);
@@ -198,14 +294,18 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     view === 'grouped' ? productsLoaded : loadedOnce,
   );
 
-  // Per-warehouse counts: derived from the currently loaded items.
-  // (Server returns at most 200; the count is approximate for very large
-  // result sets, but matches the design's at-a-glance feel.)
+  // Per-warehouse counts come from /api/inventory/products which counts
+  // distinct products with drop-self warehouse semantics — so a warehouse pill
+  // shows its true product count even after another warehouse is selected.
+  // Falls back to a flat-list approximation while the products call is in
+  // flight (first paint only).
   const warehouseCounts = useMemo(() => {
+    if (Object.keys(whProductCounts).length) return whProductCounts;
     const m: Record<string, number> = {};
     items.forEach(r => { if (r.warehouse_id) m[r.warehouse_id] = (m[r.warehouse_id] ?? 0) + 1; });
     return m;
-  }, [items]);
+  }, [whProductCounts, items]);
+  const allWarehousesCount = whProductTotal || items.length;
 
   // Selection helpers
   const selectableRows = useMemo(() => items.filter(r => isSellable(r.status)), [items]);
@@ -432,7 +532,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           >
             <Icon name="globe" size={13} />
             <span>All warehouses</span>
-            <span className="wh-count">{items.length}</span>
+            <span className="wh-count">{allWarehousesCount}</span>
           </button>
           {whs.map(w => (
             <button
@@ -581,6 +681,91 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             </div>
           </div>
         </div>
+
+        {attrSchema.length > 0 && (
+          <div className="inv-subfilter" data-open={attrPanelOpen ? 'true' : 'false'}>
+            <button
+              type="button"
+              className="inv-subfilter__head"
+              onClick={() => setAttrPanelOpen(!attrPanelOpen)}
+              aria-expanded={attrPanelOpen}
+              aria-controls="inv-subfilter-body"
+            >
+              <span className="inv-subfilter__chevron">
+                <Icon name="chevronDown" size={13} />
+              </span>
+              <span className="inv-subfilter__title">
+                Refine <strong>{filter}</strong>
+              </span>
+              {activeAttrCount > 0 && (
+                <span className="inv-subfilter__badge">
+                  {activeAttrCount} filter{activeAttrCount === 1 ? '' : 's'} active
+                </span>
+              )}
+              <span className="inv-subfilter__spacer" />
+              {activeAttrCount > 0 && (
+                <span
+                  className="inv-subfilter__clear"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); clearAttrFilters(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      clearAttrFilters();
+                    }
+                  }}
+                >
+                  Clear all
+                </span>
+              )}
+              <span className="inv-subfilter__hint">
+                {attrPanelOpen ? 'Hide' : 'Show'}
+              </span>
+            </button>
+            <div
+              id="inv-subfilter-body"
+              className="inv-subfilter__body"
+              hidden={!attrPanelOpen}
+            >
+              {attrSchema.map((spec) => {
+                const counts = facets[spec.key] ?? {};
+                const selected = attrFilters[spec.key] ?? [];
+                const values = sortAttrValues(spec.key, Object.keys(counts));
+                // Also surface selected values that no longer have any matches
+                // (count 0) so they remain visible & removable.
+                for (const s of selected) if (!values.includes(s)) values.push(s);
+                if (values.length === 0) return null;
+                return (
+                  <div className="inv-subfilter__row" key={spec.key}>
+                    <div className="inv-subfilter__label">{spec.label}</div>
+                    <div className="inv-subfilter__chips">
+                      {values.map((v) => {
+                        const isOn = selected.includes(v);
+                        const count = counts[v] ?? 0;
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            className={'inv-chip' + (isOn ? ' on' : '') + (count === 0 && !isOn ? ' empty' : '')}
+                            onClick={() => toggleAttrValue(spec.key, v)}
+                            disabled={count === 0 && !isOn}
+                          >
+                            <span className="inv-chip__label">
+                              {spec.format ? spec.format(v) : v}
+                            </span>
+                            <span className="inv-chip__count">{count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="table-scroll" ref={tableScrollRef}>
           {view === 'grouped' ? (

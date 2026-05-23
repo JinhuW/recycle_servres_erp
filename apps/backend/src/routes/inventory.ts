@@ -8,6 +8,40 @@ import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
+// Category-specific attribute filter parsing. Comma-separated multi-select per
+// facet — within a facet values OR, across facets they AND. Numeric columns
+// (speed, rpm) are coerced and any non-numeric token is dropped silently so a
+// stale chip from a deleted catalog row can't poison the query.
+type AttrFilters = {
+  brand: string[]; capacity: string[]; generation: string[]; type: string[];
+  classification: string[]; rank: string[]; speed: number[];
+  interface: string[]; form_factor: string[]; rpm: number[];
+};
+function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
+  const list = (k: string) => (q(k) ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const ints = (k: string) => list(k).map(Number).filter(n => Number.isFinite(n));
+  return {
+    brand: list('brand'), capacity: list('capacity'), generation: list('generation'),
+    type: list('type'), classification: list('classification'), rank: list('rank'),
+    speed: ints('speed'), interface: list('interface'), form_factor: list('form'),
+    rpm: ints('rpm'),
+  };
+}
+function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
+  return sql`
+    ${a.brand.length          ? sql`l.brand = ANY(${a.brand}::text[])`                   : sql`TRUE`} AND
+    ${a.capacity.length       ? sql`l.capacity = ANY(${a.capacity}::text[])`             : sql`TRUE`} AND
+    ${a.generation.length     ? sql`l.generation = ANY(${a.generation}::text[])`         : sql`TRUE`} AND
+    ${a.type.length           ? sql`l.type = ANY(${a.type}::text[])`                     : sql`TRUE`} AND
+    ${a.classification.length ? sql`l.classification = ANY(${a.classification}::text[])` : sql`TRUE`} AND
+    ${a.rank.length           ? sql`l.rank = ANY(${a.rank}::text[])`                     : sql`TRUE`} AND
+    ${a.speed.length          ? sql`l.speed = ANY(${a.speed}::int[])`                    : sql`TRUE`} AND
+    ${a.interface.length      ? sql`l.interface = ANY(${a.interface}::text[])`           : sql`TRUE`} AND
+    ${a.form_factor.length    ? sql`l.form_factor = ANY(${a.form_factor}::text[])`       : sql`TRUE`} AND
+    ${a.rpm.length            ? sql`l.rpm = ANY(${a.rpm}::int[])`                        : sql`TRUE`}
+  `;
+}
+
 // List inventory with the same filters as the desktop screen.
 inventory.get('/', async (c) => {
   const u = c.var.user;
@@ -17,6 +51,7 @@ inventory.get('/', async (c) => {
   const status = c.req.query('status');
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
+  const attrs = parseAttrFilters((k) => c.req.query(k));
 
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
@@ -28,6 +63,7 @@ inventory.get('/', async (c) => {
   const searchFrag   = search
     ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
+  const attrFrag     = attrFragments(sql, attrs);
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
@@ -43,7 +79,7 @@ inventory.get('/', async (c) => {
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag}
     ORDER BY l.created_at DESC
     LIMIT 200
   `;
@@ -242,6 +278,7 @@ inventory.get('/products', async (c) => {
   const status = c.req.query('status');
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
+  const attrs = parseAttrFilters((k) => c.req.query(k));
 
   const RAW_CAP = 2000;
   const GROUP_CAP = 200;
@@ -249,7 +286,9 @@ inventory.get('/products', async (c) => {
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
   const statusFrag   = status ? sql`l.status = ${status}` : sql`TRUE`;
-  const whFrag       = warehouse ? sql`COALESCE(l.warehouse_id, o.warehouse_id) = ${warehouse}` : sql`TRUE`;
+  // Warehouse is intentionally NOT pushed into SQL here — keeping every
+  // warehouse's rows in the working set lets the warehouse pill counts use the
+  // same drop-self facet semantics as the attribute chips.
   const searchFrag   = search
     ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
@@ -284,7 +323,7 @@ inventory.get('/products', async (c) => {
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${searchFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
@@ -298,9 +337,59 @@ inventory.get('/products', async (c) => {
     else { groups.set(key, [r]); order.push(key); }
   }
 
+  // Facet model: across-facet AND, within-facet OR. Each facet's chip counts
+  // are computed with that facet's OWN filter dropped (drop-self) so picking
+  // DDR4 doesn't make DDR5 vanish from the bar — same applies to warehouses.
+  type FacetKey = keyof AttrFilters;
+  const FACET_KEYS: FacetKey[] = ['brand','capacity','generation','type','classification','rank','speed','interface','form_factor','rpm'];
+  const groupMatchesWarehouse = (lots: Row[]): boolean => {
+    if (!warehouse) return true;
+    return lots.some((l) => l.warehouse_id === warehouse);
+  };
+  const groupMatchesAttr = (lots: Row[], skip: FacetKey | null): boolean => {
+    for (const fk of FACET_KEYS) {
+      if (fk === skip) continue;
+      const sel = attrs[fk] as Array<string | number>;
+      if (!sel.length) continue;
+      const ok = lots.some((l) => {
+        const v = (l as unknown as Record<string, unknown>)[fk];
+        if (v == null) return false;
+        return (sel as Array<string | number>).some((s) => String(s) === String(v));
+      });
+      if (!ok) return false;
+    }
+    return true;
+  };
+  const facets: Record<FacetKey, Record<string, number>> = {
+    brand: {}, capacity: {}, generation: {}, type: {}, classification: {},
+    rank: {}, speed: {}, interface: {}, form_factor: {}, rpm: {},
+  };
+  for (const key of order) {
+    const lots = groups.get(key)!;
+    if (!groupMatchesWarehouse(lots)) continue;
+    for (const fk of FACET_KEYS) {
+      if (!groupMatchesAttr(lots, fk)) continue;
+      const seen = new Set<string>();
+      for (const l of lots) {
+        const v = (l as unknown as Record<string, unknown>)[fk];
+        if (v == null || v === '') continue;
+        const sv = String(v);
+        if (seen.has(sv)) continue;
+        seen.add(sv);
+        facets[fk][sv] = (facets[fk][sv] ?? 0) + 1;
+      }
+    }
+  }
+
+  // Final product list: keep groups where at least one lot matches every facet
+  // (warehouse + attributes).
+  const applyAll = (lots: Row[]) =>
+    groupMatchesWarehouse(lots) && groupMatchesAttr(lots, null);
+  const filteredOrder = order.filter((k) => applyAll(groups.get(k)!));
+
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','rpm'] as const;
 
-  const products = order.slice(0, GROUP_CAP).map((key) => {
+  const products = filteredOrder.slice(0, GROUP_CAP).map((key) => {
     const lots = groups.get(key)!;
     const head = lots[0];
     const isSingleton = !(head.canon && head.canon.length > 0);
@@ -363,7 +452,27 @@ inventory.get('/products', async (c) => {
     };
   });
 
-  return c.json({ products });
+  // Warehouse pill counts: drop-self warehouse facet — every warehouse shows
+  // its count assuming the warehouse filter is cleared, with all attribute
+  // filters still applied. `total` is the "All warehouses" pill count under
+  // the same attribute filters.
+  const warehouseProducts: Record<string, number> = {};
+  let totalProducts = 0;
+  for (const key of order) {
+    const lots = groups.get(key)!;
+    if (!groupMatchesAttr(lots, null)) continue;
+    totalProducts += 1;
+    const whs = new Set<string>();
+    for (const l of lots) if (l.warehouse_id) whs.add(l.warehouse_id);
+    for (const w of whs) warehouseProducts[w] = (warehouseProducts[w] ?? 0) + 1;
+  }
+
+  return c.json({
+    products,
+    facets,
+    warehouse_counts: warehouseProducts,
+    total: totalProducts,
+  });
 });
 
 // Single inventory line + its audit log.
