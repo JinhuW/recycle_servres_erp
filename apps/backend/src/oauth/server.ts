@@ -48,6 +48,7 @@ oauth.post('/register', async (c) => {
     redirect_uris?: string[];
     grant_types?: string[];
     scope?: string;
+    token_endpoint_auth_method?: string;
   };
   if (!body?.client_name || !Array.isArray(body.redirect_uris) || body.redirect_uris.length === 0) {
     return c.json({ error: 'client_name and redirect_uris required' }, 400);
@@ -58,10 +59,16 @@ oauth.post('/register', async (c) => {
   const allowedGrants = new Set(['authorization_code', 'refresh_token']);
   const grants = (body.grant_types ?? ['authorization_code', 'refresh_token']).filter(g => allowedGrants.has(g));
   if (grants.length === 0) return c.json({ error: 'no allowed grant_types requested' }, 400);
-  const scopes = (body.scope?.split(' ').filter(Boolean) ?? ['market:read']);
-  for (const s of scopes) {
-    if (s !== 'market:read') return c.json({ error: `scope ${s} not grantable via DCR` }, 400);
-  }
+  // Narrow rather than reject: MCP SDKs request the union of advertised
+  // scopes_supported (market:read + market:write). Only market:read is
+  // grantable via DCR — market:write is reserved for manually-minted
+  // scraper clients. RFC 7591 §3.2.1 lets the AS return a narrower scope.
+  const requested = body.scope?.split(' ').filter(Boolean) ?? ['market:read'];
+  const scopes = requested.filter(s => s === 'market:read');
+  if (scopes.length === 0) scopes.push('market:read');
+  // token_endpoint_auth_method: "none" = public client (PKCE only, no secret).
+  // Honour it so the SDK that asked for it isn't handed a secret it'll discard.
+  const isPublic = body.token_endpoint_auth_method === 'none';
   const sql = getDb(c.env);
   const out = await createOAuthClient(sql, {
     name: body.client_name,
@@ -69,14 +76,15 @@ oauth.post('/register', async (c) => {
     grantTypes: grants,
     scopes,
     createdBy: null,
-    public: false,
+    public: isPublic,
   });
   return c.json({
     client_id: out.clientId,
-    client_secret: out.clientSecret,
+    ...(out.clientSecret ? { client_secret: out.clientSecret } : {}),
     redirect_uris: body.redirect_uris,
     grant_types: grants,
     scope: scopes.join(' '),
+    token_endpoint_auth_method: isPublic ? 'none' : 'client_secret_basic',
   }, 201);
 });
 
@@ -102,12 +110,15 @@ oauth.get('/authorize', async (c) => {
   if (q.code_challenge_method !== 'S256' || !q.code_challenge) {
     return redirectWithError('invalid_request');
   }
-  const requested = (q.scope ?? '').split(' ').filter(Boolean);
-  for (const s of requested) {
-    if (!client.scopes.includes(s)) {
-      return redirectWithError('invalid_scope');
-    }
-  }
+  // Narrow rather than reject: an MCP SDK may request the union of
+  // scopes_supported (market:read + market:write) even after DCR returned
+  // only market:read. Drop scopes the client wasn't registered for; only
+  // fail if nothing remains. RFC 6749 §3.3 permits a narrower granted scope.
+  const requestedRaw = (q.scope ?? '').split(' ').filter(Boolean);
+  const requested = requestedRaw.length === 0
+    ? [...client.scopes]
+    : requestedRaw.filter(s => client.scopes.includes(s));
+  if (requested.length === 0) return redirectWithError('invalid_scope');
   const at = getCookie(c, 'at');
   if (!at) {
     const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
