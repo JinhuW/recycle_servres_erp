@@ -31,6 +31,7 @@ export type PrefMap = {
   'inventory.cols.purchaser': string[];
   'inventory.view': 'grouped' | 'flat';
   'orders.cols': string[];
+  'market.showStaleOnly': boolean;
 };
 
 export type PrefKey = keyof PrefMap;

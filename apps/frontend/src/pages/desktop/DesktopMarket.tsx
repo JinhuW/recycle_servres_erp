@@ -9,6 +9,7 @@ import { priceSources, categoryFilterOptions } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { staleness, STALE_DAYS } from './marketStaleness';
+import { usePreference } from '../../lib/preferences';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
 function Sparkline({
@@ -80,6 +81,7 @@ export function DesktopMarket() {
   const [targetMargin, setTargetMargin] = useState(TARGET_MARGIN_FALLBACK);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [editing, setEditing] = useState<null | { row: RefPrice & { maxBuy: number | null } }>(null);
+  const [showStaleOnly, setShowStaleOnly] = usePreference('market.showStaleOnly', false);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -120,8 +122,11 @@ export function DesktopMarket() {
     if (sort === 'rising')    arr.sort((a, b) => b.trend - a.trend);
     if (sort === 'falling')   arr.sort((a, b) => a.trend - b.trend);
     if (sort === 'samples')   arr.sort((a, b) => b.samples - a.samples);
+    if (showStaleOnly) {
+      return arr.filter(p => staleness(p.lastPriceAt).isStale);
+    }
     return arr;
-  }, [allRows, sort]);
+  }, [allRows, sort, showStaleOnly]);
 
   return (
     <>
@@ -182,6 +187,14 @@ export function DesktopMarket() {
               <option value="falling">Sort: sell falling fastest</option>
               <option value="samples">Sort: most data points</option>
             </select>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showStaleOnly}
+                onChange={(e) => setShowStaleOnly(e.target.checked)}
+              />
+              {t('marketShowStaleOnly')}
+            </label>
           </div>
           <div style={{ position: 'relative' }}>
             <Icon name="search" size={13} style={{

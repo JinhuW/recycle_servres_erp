@@ -13,6 +13,8 @@ const isOneOf = <T extends string>(...allowed: T[]): Validator =>
 const isStringArray: Validator = (v) =>
   Array.isArray(v) && v.every((x) => typeof x === 'string');
 
+const isBoolean: Validator = (v) => typeof v === 'boolean';
+
 // Keys map to validators. Unknown keys are rejected.
 const SCHEMA: Record<string, Validator> = {
   'language':                 isOneOf('en', 'zh'),
@@ -21,6 +23,7 @@ const SCHEMA: Record<string, Validator> = {
   'inventory.cols.manager':   isStringArray,
   'inventory.cols.purchaser': isStringArray,
   'orders.cols':              isStringArray,
+  'market.showStaleOnly':     isBoolean,
 };
 
 export type PreferencePatchResult =
