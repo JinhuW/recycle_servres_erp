@@ -50,3 +50,7 @@ docker-compose.override.yml
 
 # Bind-mounted Postgres data dir (created on `docker compose up`).
 /data/
+
+# Ad-hoc DB dumps (pg_dump output) — keep out of git, may contain real data.
+*.sql.dump
+recycle_erp_dump.sql
