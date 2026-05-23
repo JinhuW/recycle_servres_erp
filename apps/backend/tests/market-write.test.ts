@@ -52,11 +52,11 @@ describe('POST /api/market/values', () => {
     expect(r.status).toBe(403);
   });
 
-  it('updates an existing row, appends history, recomputes trend', async () => {
+  it('updates an existing row, appends an event, recomputes trend', async () => {
     const sql = getTestDb();
-    const before = (await sql<{ avg_sell: number; samples: number | null; history: unknown }[]>`
-      SELECT avg_sell::float AS avg_sell, samples, history FROM ref_prices WHERE id = ${knownId}
-    `)[0];
+    const beforeEvents = (await sql<{ c: number }[]>`
+      SELECT COUNT(*)::int AS c FROM ref_price_events WHERE ref_price_id = ${knownId}
+    `)[0].c;
     const r = await api('POST', '/api/market/values', {
       headers: { authorization: `Bearer ${writeBearer}` },
       body: {
@@ -72,14 +72,29 @@ describe('POST /api/market/values', () => {
     expect(body.updated).toBe(1);
     expect(body.notFound).toBe(0);
     expect(body.errors).toEqual([]);
-    const after = (await sql<{ avg_sell: number; samples: number; trend: number | null; source: string; history: any }[]>`
-      SELECT avg_sell::float AS avg_sell, samples, trend, source, history FROM ref_prices WHERE id = ${knownId}
+
+    const after = (await sql<{ avg_sell: number; samples: number; trend: number | null; source: string; last_price: number; last_price_source: string }[]>`
+      SELECT avg_sell::float AS avg_sell, samples, trend, source,
+             last_price::float AS last_price, last_price_source
+      FROM ref_prices WHERE id = ${knownId}
     `)[0];
     expect(after.avg_sell).toBe(130);
     expect(after.samples).toBe(9);
     expect(after.source).toBe('test-scraper');
-    expect(Array.isArray(after.history)).toBe(true);
-    expect(after.history.length).toBeGreaterThan((Array.isArray(before.history) ? before.history.length : 0));
+    expect(after.last_price).toBe(130);
+    expect(after.last_price_source).toBe('scraper:test-scraper');
+
+    const afterEvents = (await sql<{ c: number; latest_source: string; latest_actor: string | null }[]>`
+      SELECT COUNT(*)::int AS c,
+             (SELECT source FROM ref_price_events
+              WHERE ref_price_id = ${knownId} ORDER BY created_at DESC LIMIT 1) AS latest_source,
+             (SELECT actor_user_id FROM ref_price_events
+              WHERE ref_price_id = ${knownId} ORDER BY created_at DESC LIMIT 1) AS latest_actor
+      FROM ref_price_events WHERE ref_price_id = ${knownId}
+    `)[0];
+    expect(afterEvents.c).toBe(beforeEvents + 1);
+    expect(afterEvents.latest_source).toBe('scraper:test-scraper');
+    expect(afterEvents.latest_actor).toBeNull();
   });
 
   it('reports notFound for unknown selectors', async () => {

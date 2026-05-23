@@ -1,5 +1,6 @@
 import type postgres from 'postgres';
 import { marketWritesTotal } from '../metrics';
+import { appendPriceEvent } from './refPriceEvents';
 
 export type WriteSelector = { id?: string; partNumber?: string };
 export type WriteValue = {
@@ -52,8 +53,8 @@ export async function applyMarketWrites(
         marketWritesTotal.inc({ outcome: 'error' });
         continue;
       }
-      const idRow = (await tx<{ id: string; prev_avg: number | null; history: unknown }[]>`
-        SELECT id, avg_sell AS prev_avg, history
+      const idRow = (await tx<{ id: string; prev_avg: number | null }[]>`
+        SELECT id, avg_sell AS prev_avg
         FROM ref_prices
         WHERE (${v.selector.id ?? null}::text IS NOT NULL AND id::text = ${v.selector.id ?? null})
            OR (${v.selector.partNumber ?? null}::text IS NOT NULL
@@ -66,7 +67,9 @@ export async function applyMarketWrites(
         continue;
       }
       const trend = idRow.prev_avg === null ? null : +(avg - idRow.prev_avg).toFixed(2);
-      const newPoint = { ts: new Date().toISOString(), avg };
+      // Keep the legacy columns (low_price/high_price/avg_sell/samples/source/trend)
+      // in sync — MCP + market.ts read them. last_price* + events are handled by
+      // appendPriceEvent below.
       await tx`
         UPDATE ref_prices SET
           low_price = ${low},
@@ -74,11 +77,16 @@ export async function applyMarketWrites(
           avg_sell = ${avg},
           samples = ${v.samples},
           source = ${v.source},
-          trend = ${trend},
-          history = COALESCE(history, '[]'::jsonb) || ${JSON.stringify([newPoint])}::jsonb,
-          updated_at = NOW()
+          trend = ${trend}
         WHERE id = ${idRow.id}
       `;
+      await appendPriceEvent(tx, {
+        refPriceId: idRow.id,
+        price: avg,
+        source: 'scraper:' + v.source,
+        note: null,
+        actorUserId: null,
+      });
       out.updated++;
       marketWritesTotal.inc({ outcome: 'updated' });
     }
