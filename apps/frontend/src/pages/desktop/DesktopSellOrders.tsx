@@ -11,6 +11,7 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
 import { sellOrderStatuses } from '../../lib/lookups';
+import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 
@@ -121,6 +122,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.sellOrders.showArchived', false);
   const { path } = useRoute();
   const editMatch = match('/sell-orders/:id/edit', path);
   const viewMatch = match('/sell-orders/:id', path);
@@ -132,6 +134,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const reload = () => {
     const p = new URLSearchParams();
     if (statusFilter !== 'all') p.set('status', statusFilter);
+    if (showArchived) p.set('includeArchived', 'true');
     api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
       .then(r => setOrders(r.items))
       .catch(handleFetchError)
@@ -141,12 +144,13 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     let alive = true;
     const p = new URLSearchParams();
     if (statusFilter !== 'all') p.set('status', statusFilter);
+    if (showArchived) p.set('includeArchived', 'true');
     api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
       .then(r => { if (alive) setOrders(r.items); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [statusFilter]);
+  }, [statusFilter, showArchived]);
 
   const visible = useMemo(() => {
     if (!search.trim()) return orders;
@@ -239,6 +243,20 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
               style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 260 }}
             />
           </div>
+          <button
+            className="btn"
+            onClick={() => setShowArchived(v => !v)}
+            title={showArchived ? 'Hide archived sell orders' : 'Show archived sell orders'}
+            style={{
+              height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: showArchived ? 'var(--bg-soft)' : undefined,
+              borderColor: showArchived ? 'var(--border-strong)' : undefined,
+              color: showArchived ? 'var(--fg)' : 'var(--fg-muted)',
+            }}
+          >
+            <Icon name="box" size={12} />
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
         </div>
 
         <div className="table-scroll">
@@ -263,7 +281,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                 <tr
                   key={o.id}
                   className="row-hover"
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', opacity: o.archivedAt ? 0.55 : 1 }}
                   onClick={() => navigate('/sell-orders/' + o.id)}
                 >
                   <td className="mono" style={{ fontWeight: 600, fontSize: 11.5 }}>
@@ -286,6 +304,12 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                       >
                         <Icon name="paperclip" size={12} />
                       </button>
+                      {o.archivedAt && (
+                        <span className="chip muted" style={{ fontSize: 10, padding: '1px 6px', marginLeft: 6 }}>
+                          <Icon name="box" size={9} style={{ marginRight: 3 }} />
+                          archived
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td>
