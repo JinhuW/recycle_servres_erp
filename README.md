@@ -175,6 +175,10 @@ To rotate without breaking outstanding access tokens, move the current
 key to `OAUTH_SIGNING_KEY_PREVIOUS` first, then write a new value to
 `OAUTH_SIGNING_KEY_CURRENT`.
 
+For the full setup walkthrough (deployment, Caddy config, scraper
+integration, troubleshooting, security model), see
+[docs/market-value-mcp.md](docs/market-value-mcp.md).
+
 ## Environment
 
 A single `.env` at the repo root drives everything — Compose interpolation,
