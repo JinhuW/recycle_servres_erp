@@ -4,7 +4,7 @@ import {
   StatusChangeDialog, type MetaStatus, type StatusAttachment,
 } from '../../components/StatusChangeDialog';
 import { useT } from '../../lib/i18n';
-import { api } from '../../lib/api';
+import { api, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -772,5 +772,82 @@ function SellOrderDetail({
       />
     )}
     </>
+  );
+}
+
+// Type-the-SO-id confirm dialog. Local to DesktopSellOrders — the only
+// caller. Disabled "Archive" button until the typed text exactly matches
+// the order id (case-sensitive). Errors render inline; dialog stays open
+// so the user can retry.
+function ArchiveSellOrderDialog({
+  orderId, onCancel, onConfirmed,
+}: {
+  orderId: string;
+  onCancel: () => void;
+  onConfirmed: () => void;
+}) {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEscapeKey(onCancel);
+
+  const matches = typed.trim() === orderId;
+
+  const submit = async () => {
+    if (!matches || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await archiveSellOrder(orderId);
+      onConfirmed();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Archive failed';
+      setError(msg);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal-shell" style={{ maxWidth: 460, width: 'calc(100vw - 80px)' }}>
+        <div className="modal-head">
+          <div className="modal-title">Archive sell order</div>
+        </div>
+        <div className="modal-body" style={{ padding: 20 }}>
+          <p style={{ marginTop: 0, fontSize: 13.5 }}>
+            Archiving hides this sell order from the default list. It stays in the
+            database with its lines, commissions, and audit history intact, and can
+            be unarchived later.
+          </p>
+          <label className="label" style={{ marginTop: 12 }}>
+            Type <span className="mono" style={{ fontWeight: 600 }}>{orderId}</span> to confirm
+          </label>
+          <input
+            className="input mono"
+            autoFocus
+            value={typed}
+            onChange={e => setTyped(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && matches) submit(); }}
+            placeholder={orderId}
+          />
+          {error && (
+            <div role="alert" style={{ marginTop: 10, color: 'var(--neg, #c0392b)', fontSize: 13 }}>
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button
+            className="btn danger"
+            onClick={submit}
+            disabled={!matches || busy}
+            style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
+          >
+            {busy ? 'Archiving…' : 'Archive'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
