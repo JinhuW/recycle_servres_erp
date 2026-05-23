@@ -394,5 +394,17 @@ describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
     expect(kinds).toContain('archived');
     expect(kinds).toContain('unarchived');
   });
+
+  it('two concurrent archive POSTs result in one ok + one 409 (FOR UPDATE lock)', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await nonDraftSellOrder(token);
+
+    const [a, b] = await Promise.all([
+      api('POST', `/api/sell-orders/${id}/archive`, { token }),
+      api('POST', `/api/sell-orders/${id}/archive`, { token }),
+    ]);
+    const codes = [a.status, b.status].sort();
+    expect(codes).toEqual([200, 409]);
+  });
 });
 
