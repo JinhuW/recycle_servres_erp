@@ -1634,6 +1634,9 @@ html.desktop, body.desktop, .desktop #root {
   gap: 8px;
   animation: inv-subfilter-fade 0.18s cubic-bezier(.4,0,.2,1);
 }
+/* Collapsed state — data-open on the parent drives visibility so the
+   user-agent `hidden` attribute doesn't fight our `display: grid` above. */
+.inv-subfilter[data-open="false"] .inv-subfilter__body { display: none; }
 @keyframes inv-subfilter-fade {
   from { opacity: 0; transform: translateY(-2px); }
   to   { opacity: 1; transform: translateY(0); }

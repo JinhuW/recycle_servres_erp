@@ -727,7 +727,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             <div
               id="inv-subfilter-body"
               className="inv-subfilter__body"
-              hidden={!attrPanelOpen}
             >
               {attrSchema.map((spec) => {
                 const counts = facets[spec.key] ?? {};
