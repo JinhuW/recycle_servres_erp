@@ -485,23 +485,41 @@ try {
   }
 
   console.log('· Seeding ref_prices…');
+  await sql`DELETE FROM ref_price_events`;
   await sql`DELETE FROM ref_prices`;
   for (const p of buildRefPrices()) {
+    // Spread the synthetic 12-point history across the last 12 weeks
+    // ending at the row's updated_at. Newest entry is the last_price.
+    const ts = [];
+    const baseMs = +new Date(p.updated_at);
+    for (let i = 0; i < p.history.length; i++) {
+      ts.push(new Date(baseMs - (p.history.length - 1 - i) * 7 * 86400000));
+    }
+    const lastIdx = p.history.length - 1;
+    const lastPrice = p.history[lastIdx];
+    const lastTs = ts[lastIdx];
+
     await sql`
       INSERT INTO ref_prices (
         id, category, brand, capacity, type, classification, rank, speed,
         interface, form_factor, description, part_number,
         label, sub_label, target, low_price, high_price, avg_sell,
         trend, samples, source, stock, demand, history, updated_at,
-        rpm
+        rpm, last_price, last_price_at, last_price_source
       ) VALUES (
         ${p.id}, ${p.category}, ${p.brand ?? null}, ${p.capacity ?? null}, ${p.type ?? null}, ${p.classification ?? null}, ${p.rank ?? null}, ${p.speed ?? null},
         ${p.interface ?? null}, ${p.form_factor ?? null}, ${p.description ?? null}, ${p.part_number},
         ${p.label}, ${p.sub_label}, ${p.target}, ${p.low_price}, ${p.high_price}, ${p.avg_sell},
         ${p.trend}, ${p.samples}, ${p.source}, ${p.stock}, ${p.demand}, ${sql.json(p.history)}, ${p.updated_at},
-        ${p.rpm ?? null}
+        ${p.rpm ?? null}, ${lastPrice}, ${lastTs}, 'seed'
       )
     `;
+    for (let i = 0; i < p.history.length; i++) {
+      await sql`
+        INSERT INTO ref_price_events (ref_price_id, price, source, note, actor_user_id, created_at)
+        VALUES (${p.id}, ${p.history[i]}, 'seed', NULL, NULL, ${ts[i]})
+      `;
+    }
   }
 
   console.log('· Seeding orders + lines…');
