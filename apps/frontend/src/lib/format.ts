@@ -5,15 +5,19 @@
 // Call sites obtain the locale via `useT().lang` from i18n.tsx and convert with
 // `lang === 'zh' ? 'zh-CN' : 'en-US'`. Defaults to 'en-US' when omitted.
 
-export const fmt = (n: number, locale = 'en-US') =>
-  n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const fmt = (n: number | null | undefined, locale = 'en-US') =>
+  n == null
+    ? '—'
+    : n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export const fmtUSD = (n: number, locale = 'en-US') => '$' + fmt(n, locale);
+export const fmtUSD = (n: number | null | undefined, locale = 'en-US') =>
+  n == null ? '—' : '$' + fmt(n, locale);
 
-export const fmt0 = (n: number, locale = 'en-US') =>
-  Math.round(n).toLocaleString(locale);
+export const fmt0 = (n: number | null | undefined, locale = 'en-US') =>
+  n == null ? '—' : Math.round(n).toLocaleString(locale);
 
-export const fmtUSD0 = (n: number, locale = 'en-US') => '$' + fmt0(n, locale);
+export const fmtUSD0 = (n: number | null | undefined, locale = 'en-US') =>
+  n == null ? '—' : '$' + fmt0(n, locale);
 
 export const fmtDate = (d: Date | string, locale = 'en-US') =>
   new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });

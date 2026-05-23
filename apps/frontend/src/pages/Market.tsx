@@ -64,7 +64,8 @@ export function Market() {
             const trendUp = r.trend > 0.005;
             const trendDown = r.trend < -0.005;
             const trendColor = trendUp ? 'var(--pos)' : trendDown ? 'var(--neg)' : 'var(--fg-subtle)';
-            const onTarget = r.target <= r.maxBuy;
+            const hasTarget = r.target != null && r.maxBuy != null;
+            const onTarget = hasTarget && r.target! <= r.maxBuy!;
             return (
               <div key={r.id} className="ph-inv-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0, padding: 0, cursor: 'pointer' }} onClick={() => setOpenId(open ? null : r.id)}>
                 <div style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -110,8 +111,8 @@ export function Market() {
                   <div style={{ borderTop: '1px solid var(--border)', padding: 12, background: 'var(--bg-soft)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                       <span style={{ color: 'var(--fg-muted)' }}>{t('lastPaid')}</span>
-                      <span className="mono" style={{ color: onTarget ? 'var(--pos)' : 'var(--neg)', fontWeight: 600 }}>
-                        {fmtUSD(r.target, locale)} {onTarget ? '✓' : '↑ over'}
+                      <span className="mono" style={{ color: !hasTarget ? 'var(--fg-subtle)' : onTarget ? 'var(--pos)' : 'var(--neg)', fontWeight: 600 }}>
+                        {fmtUSD(r.target, locale)} {hasTarget && (onTarget ? '✓' : '↑ over')}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>

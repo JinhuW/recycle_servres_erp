@@ -1,6 +1,7 @@
 import type postgres from 'postgres';
 import { formatRefPrice, type MarketValueRow } from '../../lib/market';
 import { getWorkspaceSetting } from '../../lib/settings';
+import { PART_PREFIX_RE } from '../../lib/part-number';
 
 export const TOOL_DEFS = [
   {
@@ -37,20 +38,43 @@ export async function callListMarketValues(
   const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
   const q = args.q?.toLowerCase().trim();
   const rows = await sql<MarketValueRow[]>`
-    SELECT id, category, brand, capacity, type, classification, rank, speed,
-           interface, form_factor, description, part_number, label, sub_label,
-           target::float AS target, low_price::float AS low_price,
-           high_price::float AS high_price, avg_sell::float AS avg_sell,
-           trend, samples, source, stock, demand, history, updated_at,
-           health::float AS health, rpm
-    FROM ref_prices
-    WHERE (${args.category ?? null}::text IS NULL OR category = ${args.category ?? null})
+    WITH internal_sales AS (
+      SELECT UPPER(REGEXP_REPLACE(
+               REGEXP_REPLACE(COALESCE(l.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
+               '[[:space:]]+', '', 'g'
+             )) AS canon,
+             AVG(l.sell_price)::float AS avg_price,
+             COUNT(*)::int AS samples
+      FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
+      WHERE o.created_at >= NOW() - INTERVAL '30 days'
+        AND l.sell_price IS NOT NULL
+        AND l.part_number IS NOT NULL
+        AND l.part_number <> ''
+      GROUP BY canon
+    )
+    SELECT rp.id, rp.category, rp.brand, rp.capacity, rp.type, rp.classification,
+           rp.rank, rp.speed, rp.interface, rp.form_factor, rp.description,
+           rp.part_number, rp.label, rp.sub_label,
+           rp.target::float AS target, rp.low_price::float AS low_price,
+           rp.high_price::float AS high_price, rp.avg_sell::float AS avg_sell,
+           rp.trend, rp.samples, rp.source, rp.stock, rp.demand, rp.history,
+           rp.updated_at, rp.health::float AS health, rp.rpm,
+           ils.avg_price AS internal_avg,
+           ils.samples   AS internal_samples
+    FROM ref_prices rp
+    LEFT JOIN internal_sales ils
+      ON ils.canon = UPPER(REGEXP_REPLACE(
+                       REGEXP_REPLACE(COALESCE(rp.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
+                       '[[:space:]]+', '', 'g'
+                     ))
+    WHERE (${args.category ?? null}::text IS NULL OR rp.category = ${args.category ?? null})
       AND (
         ${q ?? null}::text IS NULL
-        OR LOWER(label) LIKE '%' || ${q ?? ''} || '%'
-        OR LOWER(COALESCE(part_number,'')) LIKE '%' || ${q ?? ''} || '%'
+        OR LOWER(rp.label) LIKE '%' || ${q ?? ''} || '%'
+        OR LOWER(COALESCE(rp.part_number,'')) LIKE '%' || ${q ?? ''} || '%'
       )
-    ORDER BY updated_at DESC
+    ORDER BY rp.updated_at DESC
     LIMIT ${limit}
   `;
   const margin = await getWorkspaceSetting(sql, 'target_margin', 0.30);
@@ -63,16 +87,39 @@ export async function callGetMarketValue(
 ) {
   if (!args.id && !args.partNumber) throw new Error('id or partNumber required');
   const rows = await sql<MarketValueRow[]>`
-    SELECT id, category, brand, capacity, type, classification, rank, speed,
-           interface, form_factor, description, part_number, label, sub_label,
-           target::float AS target, low_price::float AS low_price,
-           high_price::float AS high_price, avg_sell::float AS avg_sell,
-           trend, samples, source, stock, demand, history, updated_at,
-           health::float AS health, rpm
-    FROM ref_prices
-    WHERE (${args.id ?? null}::text IS NOT NULL AND id::text = ${args.id ?? null})
+    WITH internal_sales AS (
+      SELECT UPPER(REGEXP_REPLACE(
+               REGEXP_REPLACE(COALESCE(l.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
+               '[[:space:]]+', '', 'g'
+             )) AS canon,
+             AVG(l.sell_price)::float AS avg_price,
+             COUNT(*)::int AS samples
+      FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
+      WHERE o.created_at >= NOW() - INTERVAL '30 days'
+        AND l.sell_price IS NOT NULL
+        AND l.part_number IS NOT NULL
+        AND l.part_number <> ''
+      GROUP BY canon
+    )
+    SELECT rp.id, rp.category, rp.brand, rp.capacity, rp.type, rp.classification,
+           rp.rank, rp.speed, rp.interface, rp.form_factor, rp.description,
+           rp.part_number, rp.label, rp.sub_label,
+           rp.target::float AS target, rp.low_price::float AS low_price,
+           rp.high_price::float AS high_price, rp.avg_sell::float AS avg_sell,
+           rp.trend, rp.samples, rp.source, rp.stock, rp.demand, rp.history,
+           rp.updated_at, rp.health::float AS health, rp.rpm,
+           ils.avg_price AS internal_avg,
+           ils.samples   AS internal_samples
+    FROM ref_prices rp
+    LEFT JOIN internal_sales ils
+      ON ils.canon = UPPER(REGEXP_REPLACE(
+                       REGEXP_REPLACE(COALESCE(rp.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
+                       '[[:space:]]+', '', 'g'
+                     ))
+    WHERE (${args.id ?? null}::text IS NOT NULL AND rp.id::text = ${args.id ?? null})
        OR (${args.partNumber ?? null}::text IS NOT NULL
-           AND LOWER(COALESCE(part_number, '')) = LOWER(${args.partNumber ?? ''}))
+           AND LOWER(COALESCE(rp.part_number, '')) = LOWER(${args.partNumber ?? ''}))
     LIMIT 1
   `;
   if (rows.length === 0) return null;

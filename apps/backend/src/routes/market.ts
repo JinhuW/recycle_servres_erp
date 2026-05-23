@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, type MarketValueRow } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
+import { PART_PREFIX_RE } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
 
@@ -15,21 +16,48 @@ market.get('/', async (c) => {
   const category = c.req.query('category');
   const search = c.req.query('q')?.toLowerCase().trim();
 
+  // `internal_sales` aggregates the team's last-30d projected sell prices
+  // from PO order_lines, keyed by canonical part_number (same rule as
+  // lib/part-number.ts). Used by the "Internal sales (last 30d)" row in the
+  // Market Value detail's Price sources panel.
   const rows = await sql<MarketValueRow[]>`
-    SELECT id, category, brand, capacity, type, classification, rank, speed,
-           interface, form_factor, description, part_number, label, sub_label,
-           target::float AS target, low_price::float AS low_price,
-           high_price::float AS high_price, avg_sell::float AS avg_sell,
-           trend, samples, source, stock, demand, history, updated_at,
-           health::float AS health, rpm
-    FROM ref_prices
-    WHERE (${category ?? null}::text IS NULL OR category = ${category ?? null})
+    WITH internal_sales AS (
+      SELECT UPPER(REGEXP_REPLACE(
+               REGEXP_REPLACE(COALESCE(l.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
+               '[[:space:]]+', '', 'g'
+             )) AS canon,
+             AVG(l.sell_price)::float AS avg_price,
+             COUNT(*)::int AS samples
+      FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
+      WHERE o.created_at >= NOW() - INTERVAL '30 days'
+        AND l.sell_price IS NOT NULL
+        AND l.part_number IS NOT NULL
+        AND l.part_number <> ''
+      GROUP BY canon
+    )
+    SELECT rp.id, rp.category, rp.brand, rp.capacity, rp.type, rp.classification,
+           rp.rank, rp.speed, rp.interface, rp.form_factor, rp.description,
+           rp.part_number, rp.label, rp.sub_label,
+           rp.target::float AS target, rp.low_price::float AS low_price,
+           rp.high_price::float AS high_price, rp.avg_sell::float AS avg_sell,
+           rp.trend, rp.samples, rp.source, rp.stock, rp.demand, rp.history,
+           rp.updated_at, rp.health::float AS health, rp.rpm,
+           ils.avg_price AS internal_avg,
+           ils.samples   AS internal_samples
+    FROM ref_prices rp
+    LEFT JOIN internal_sales ils
+      ON ils.canon = UPPER(REGEXP_REPLACE(
+                       REGEXP_REPLACE(COALESCE(rp.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
+                       '[[:space:]]+', '', 'g'
+                     ))
+    WHERE (${category ?? null}::text IS NULL OR rp.category = ${category ?? null})
       AND (
         ${search ?? null}::text IS NULL
-        OR LOWER(label) LIKE '%' || ${search ?? ''} || '%'
-        OR LOWER(COALESCE(part_number,'')) LIKE '%' || ${search ?? ''} || '%'
+        OR LOWER(rp.label) LIKE '%' || ${search ?? ''} || '%'
+        OR LOWER(COALESCE(rp.part_number,'')) LIKE '%' || ${search ?? ''} || '%'
       )
-    ORDER BY updated_at DESC
+    ORDER BY rp.updated_at DESC
     LIMIT 100
   `;
 

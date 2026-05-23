@@ -92,19 +92,23 @@ export function DesktopMarket() {
     return () => clearTimeout(handle);
   }, [filter, search]);
 
-  // Enrich with derived max buy (sell × (1 - target margin)).
+  // Enrich with derived max buy (sell × (1 - target margin)). avgSell is
+  // null for auto-tracked rows that the scraper hasn't priced yet — leave
+  // maxBuy null too so the UI can render '—'.
   const allRows = useMemo(
     () => items.map(p => ({
       ...p,
-      maxBuy: p.maxBuy || +(p.avgSell * (1 - targetMargin)).toFixed(2),
+      maxBuy: p.maxBuy ?? (p.avgSell == null ? null : +(p.avgSell * (1 - targetMargin)).toFixed(2)),
     })),
     [items, targetMargin],
   );
 
   const rows = useMemo(() => {
     const arr = [...allRows];
+    // Null prices sort last in price-based orderings.
+    const nullsLast = (v: number | null) => (v == null ? -Infinity : v);
     if (sort === 'recent')    arr.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
-    if (sort === 'sell-high') arr.sort((a, b) => b.avgSell - a.avgSell);
+    if (sort === 'sell-high') arr.sort((a, b) => nullsLast(b.avgSell) - nullsLast(a.avgSell));
     if (sort === 'rising')    arr.sort((a, b) => b.trend - a.trend);
     if (sort === 'falling')   arr.sort((a, b) => a.trend - b.trend);
     if (sort === 'samples')   arr.sort((a, b) => b.samples - a.samples);
@@ -205,7 +209,9 @@ export function DesktopMarket() {
                 const isOpen = openKey === r.id;
                 const sellHistory = r.history.map(c => +(c * 1.35).toFixed(2));
                 const trendColor = r.trend > 0.005 ? 'var(--pos)' : r.trend < -0.005 ? 'var(--neg)' : 'var(--fg-muted)';
-                const onTarget = r.target <= r.maxBuy;
+                // Null target = auto-tracked, never bought yet → no badge.
+                const onTarget = r.target != null && r.maxBuy != null && r.target <= r.maxBuy;
+                const hasTarget = r.target != null && r.maxBuy != null;
                 return (
                   <Fragment key={r.id}>
                     <tr
@@ -261,12 +267,14 @@ export function DesktopMarket() {
                         </div>
                       </td>
                       <td className="num">
-                        <div className="mono" style={{ color: onTarget ? 'var(--fg)' : 'var(--neg)', fontWeight: 500 }}>
+                        <div className="mono" style={{ color: !hasTarget ? 'var(--fg-subtle)' : onTarget ? 'var(--fg)' : 'var(--neg)', fontWeight: 500 }}>
                           {fmtUSD(r.target, locale)}
                         </div>
-                        <div style={{ fontSize: 10.5, color: onTarget ? 'var(--pos)' : 'var(--neg)' }}>
-                          {onTarget ? '✓ on target' : 'over ceiling'}
-                        </div>
+                        {hasTarget && (
+                          <div style={{ fontSize: 10.5, color: onTarget ? 'var(--pos)' : 'var(--neg)' }}>
+                            {onTarget ? '✓ on target' : 'over ceiling'}
+                          </div>
+                        )}
                       </td>
                       <td className="muted" style={{ fontSize: 11.5 }}>{relTime(r.updatedAt, locale)}</td>
                       <td>
@@ -318,7 +326,7 @@ export function DesktopMarket() {
 // ─── Expanded row ────────────────────────────────────────────────────────────
 function DetailExpand({
   row, sellHistory, targetMargin,
-}: { row: RefPrice & { maxBuy: number }; sellHistory: number[]; targetMargin: number }) {
+}: { row: RefPrice; sellHistory: number[]; targetMargin: number }) {
   const { lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const buyHistory = row.history;
@@ -353,7 +361,7 @@ function DetailExpand({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <GuideRow label="Avg sell price"        value={fmtUSD(row.avgSell, locale)} tone="pos" emphasis />
           <GuideRow label="Recommended max buy"   value={fmtUSD(row.maxBuy, locale)}  tone="accent" emphasis sub={`${(targetMargin * 100).toFixed(0)}% margin floor`} />
-          <GuideRow label="Last paid (this team)" value={fmtUSD(row.target, locale)}  sub={row.target <= row.maxBuy ? 'within target' : 'above ceiling — push back'} />
+          <GuideRow label="Last paid (this team)" value={fmtUSD(row.target, locale)}  sub={row.target == null || row.maxBuy == null ? 'no buys yet' : row.target <= row.maxBuy ? 'within target' : 'above ceiling — push back'} />
           <GuideRow label="Range seen"            value={`${fmtUSD0(row.low, locale)} — ${fmtUSD0(row.high, locale)}`} sub="Recent broker quotes" />
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
           <GuideRow
@@ -370,12 +378,24 @@ function DetailExpand({
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {priceSources.map((s, i) => {
+            // 'internal-sales' is the team's own number — pulled from PO
+            // sell_price projections in the last 30d. Other rows remain
+            // synthetic broker placeholders pending a real feed.
+            const isInternal = s.id === 'internal-sales';
             const offset = (i - (priceSources.length - 1) / 2) * 0.04;
-            const v = row.avgSell * (1 + offset);
+            const v = isInternal
+              ? row.internalSales.avgPrice
+              : (row.avgSell == null ? null : row.avgSell * (1 + offset));
+            const sub = isInternal && row.internalSales.samples > 0
+              ? `n = ${row.internalSales.samples}`
+              : null;
             return (
               <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5 }}>
                 <span style={{ color: 'var(--fg-muted)' }}>{s.label}</span>
-                <span className="mono" style={{ fontWeight: 500 }}>{fmtUSD(v, locale)}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+                  {sub && <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)' }}>{sub}</span>}
+                  <span className="mono" style={{ fontWeight: 500 }}>{fmtUSD(v, locale)}</span>
+                </span>
               </div>
             );
           })}

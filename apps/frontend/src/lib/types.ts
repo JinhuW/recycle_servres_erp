@@ -155,10 +155,10 @@ export type RefPrice = {
   partNumber: string | null;
   label: string;
   sub: string | null;
-  target: number;
-  low: number;
-  high: number;
-  avgSell: number;
+  target: number | null;
+  low: number | null;
+  high: number | null;
+  avgSell: number | null;
   trend: number;
   samples: number;
   source: string | null;
@@ -166,9 +166,10 @@ export type RefPrice = {
   demand: 'high' | 'medium' | 'low';
   history: number[];
   updatedAt: string;
-  maxBuy: number;
+  maxBuy: number | null;
   health: number | null;
   rpm: number | null;
+  internalSales: { avgPrice: number | null; samples: number };
 };
 
 export type Notification = {

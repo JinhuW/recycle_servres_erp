@@ -7,6 +7,7 @@ import { nextHumanId } from '../lib/id-seq';
 import {
   diff, writeOrderEvent, META_FIELDS, LINE_FIELDS,
 } from '../services/orderAudit';
+import { autoTrackParts } from '../lib/marketAutoTrack';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -331,6 +332,21 @@ orders.post('/', async (c) => {
         )
       `;
     }
+    await autoTrackParts(tx, body.lines.map(l => ({
+      category: l.category ?? body.category,
+      partNumber: l.partNumber,
+      brand: l.brand,
+      capacity: l.capacity,
+      type: l.type,
+      classification: l.classification,
+      rank: l.rank,
+      speed: l.speed,
+      interface: l.interface,
+      formFactor: l.formFactor,
+      description: l.description,
+      health: l.health,
+      rpm: l.rpm,
+    })));
   });
 
   return c.json({ id: newId }, 201);
@@ -578,6 +594,21 @@ orders.patch('/:id', async (c) => {
           ` as { id: string; part_number: string | null; qty: number; unit_cost: number }[];
           addedRows.push(inserted[0]);
         }
+        await autoTrackParts(tx, body.addLines.map(l => ({
+          category: l.category ?? (existing.category as string),
+          partNumber: l.partNumber,
+          brand: l.brand,
+          capacity: l.capacity,
+          type: l.type,
+          classification: l.classification,
+          rank: l.rank,
+          speed: l.speed,
+          interface: l.interface,
+          formFactor: l.formFactor,
+          description: l.description,
+          health: l.health,
+          rpm: l.rpm,
+        })));
       }
 
       // ── Audit: only for orders that have left Draft. Each kind is written

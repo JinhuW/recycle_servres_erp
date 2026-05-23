@@ -98,10 +98,10 @@ type RefMatch = {
   label: string;
   sub: string | null;
   source: string | null;
-  target: number;
-  low: number;
-  high: number;
-  avgSell: number;
+  target: number | null;
+  low: number | null;
+  high: number | null;
+  avgSell: number | null;
   samples: number;
   demand: 'high' | 'medium' | 'low';
   updatedAt: string;
@@ -808,11 +808,13 @@ function PricingPanel({
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Suggested price</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                 <span className="mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtUSD(refMatch.avgSell, locale)}</span>
-                <button
-                  className="btn sm"
-                  onClick={() => set({ sellPrice: refMatch.avgSell.toFixed(2) })}
-                  title="Apply suggested sell price"
-                >Apply</button>
+                {refMatch.avgSell != null && (
+                  <button
+                    className="btn sm"
+                    onClick={() => set({ sellPrice: refMatch.avgSell!.toFixed(2) })}
+                    title="Apply suggested sell price"
+                  >Apply</button>
+                )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
                 Updated {fmtDate(refMatch.updatedAt, locale)}
