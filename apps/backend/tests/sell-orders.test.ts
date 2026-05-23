@@ -5,6 +5,7 @@ import { resetDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
+import { getTestDb } from './helpers/db';
 
 const pdf = join(__dirname, 'fixtures', 'invoice.pdf');
 
@@ -274,6 +275,33 @@ describe('sell-order qty clamp', () => {
     });
     expect(r.status).toBe(400);
     expect(JSON.stringify(r.body)).toMatch(/qty/i);
+  });
+});
+
+describe('GET /api/sell-orders — archive filter', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('hides archived sell orders by default; includes them with ?includeArchived=true', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createDraftSellOrder(token);
+
+    // Soft-archive directly via SQL (the endpoints don't exist yet).
+    const sql = getTestDb();
+    await sql`UPDATE sell_orders SET archived_at = NOW() WHERE id = ${id}`;
+
+    const def = await api<{ items: { id: string; archivedAt: string | null }[] }>(
+      'GET', '/api/sell-orders', { token },
+    );
+    expect(def.status).toBe(200);
+    expect(def.body.items.find(o => o.id === id)).toBeUndefined();
+
+    const all = await api<{ items: { id: string; archivedAt: string | null }[] }>(
+      'GET', '/api/sell-orders?includeArchived=true', { token },
+    );
+    expect(all.status).toBe(200);
+    const row = all.body.items.find(o => o.id === id);
+    expect(row).toBeDefined();
+    expect(row!.archivedAt).not.toBeNull();
   });
 });
 

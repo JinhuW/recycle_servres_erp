@@ -63,6 +63,12 @@ sellOrders.get('/', async (c) => {
   const status = c.req.query('status');                 // Draft|Shipped|Awaiting payment|Done
   const statusFrag = status ? sql`so.status = ${status}` : sql`TRUE`;
 
+  // Archived rows are soft-hidden by default — the inbox is for live work.
+  // ?includeArchived=true unhides them so the manager can find a stale order
+  // (and unarchive it if needed) without DB access.
+  const includeArchived = c.req.query('includeArchived') === 'true';
+  const archivedFrag = includeArchived ? sql`TRUE` : sql`so.archived_at IS NULL`;
+
   // Keyset pagination on (created_at DESC, id DESC) — same shape as
   // /api/orders. Without a LIMIT the workspace inbox returned every sell
   // order forever; eventually that's an OOM risk and a slow first paint.
@@ -74,7 +80,7 @@ sellOrders.get('/', async (c) => {
 
   const rows = await sql`
     SELECT
-      so.id, so.status, so.notes, so.created_at,
+      so.id, so.status, so.notes, so.created_at, so.archived_at,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       COUNT(sol.id)::int                                AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
@@ -82,7 +88,7 @@ sellOrders.get('/', async (c) => {
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
-    WHERE ${statusFrag} ${cursorFrag}
+    WHERE ${statusFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY so.id, c.id
     ORDER BY so.created_at DESC, so.id DESC
     LIMIT ${limit + 1}
@@ -98,6 +104,7 @@ sellOrders.get('/', async (c) => {
   const shaped = slice.map(r => ({
     id: r.id, status: r.status,
     notes: r.notes, createdAt: r.created_at,
+    archivedAt: r.archived_at,
     customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
     lineCount: r.line_count, qty: r.qty,
     subtotal: r.subtotal,
