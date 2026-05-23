@@ -301,7 +301,7 @@ describe('GET /api/sell-orders — archive filter', () => {
     expect(all.status).toBe(200);
     const row = all.body.items.find(o => o.id === id);
     expect(row).toBeDefined();
-    expect(row!.archivedAt).not.toBeNull();
+    expect(typeof row!.archivedAt).toBe('string');
   });
 
   it('detail response includes archivedAt', async () => {
@@ -315,7 +315,7 @@ describe('GET /api/sell-orders — archive filter', () => {
       'GET', `/api/sell-orders/${id}`, { token },
     );
     expect(got.status).toBe(200);
-    expect(got.body.order.archivedAt).not.toBeNull();
+    expect(typeof got.body.order.archivedAt).toBe('string');
   });
 });
 
