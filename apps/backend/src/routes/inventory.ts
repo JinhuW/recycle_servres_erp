@@ -9,21 +9,24 @@ import type { Env, User } from '../types';
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 // Category-specific attribute filter parsing. Comma-separated multi-select per
-// facet — within a facet values OR, across facets they AND. Numeric columns
-// (speed, rpm) are coerced and any non-numeric token is dropped silently so a
-// stale chip from a deleted catalog row can't poison the query.
+// facet — within a facet values OR, across facets they AND. `rpm` is a smallint
+// column so values get coerced to int; `speed` is stored as text (OCR-derived,
+// e.g. "2400") so values stay as strings. Non-numeric tokens for either are
+// dropped silently so a stale chip from a deleted catalog row can't poison the
+// query.
 type AttrFilters = {
   brand: string[]; capacity: string[]; generation: string[]; type: string[];
-  classification: string[]; rank: string[]; speed: number[];
+  classification: string[]; rank: string[]; speed: string[];
   interface: string[]; form_factor: string[]; rpm: number[];
 };
 function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
   const list = (k: string) => (q(k) ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const ints = (k: string) => list(k).map(Number).filter(n => Number.isFinite(n));
+  const numericStrings = (k: string) => list(k).filter(s => Number.isFinite(Number(s)));
   return {
     brand: list('brand'), capacity: list('capacity'), generation: list('generation'),
     type: list('type'), classification: list('classification'), rank: list('rank'),
-    speed: ints('speed'), interface: list('interface'), form_factor: list('form'),
+    speed: numericStrings('speed'), interface: list('interface'), form_factor: list('form'),
     rpm: ints('rpm'),
   };
 }
@@ -35,7 +38,7 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
     ${a.type.length           ? sql`l.type = ANY(${a.type}::text[])`                     : sql`TRUE`} AND
     ${a.classification.length ? sql`l.classification = ANY(${a.classification}::text[])` : sql`TRUE`} AND
     ${a.rank.length           ? sql`l.rank = ANY(${a.rank}::text[])`                     : sql`TRUE`} AND
-    ${a.speed.length          ? sql`l.speed = ANY(${a.speed}::int[])`                    : sql`TRUE`} AND
+    ${a.speed.length          ? sql`l.speed = ANY(${a.speed}::text[])`                   : sql`TRUE`} AND
     ${a.interface.length      ? sql`l.interface = ANY(${a.interface}::text[])`           : sql`TRUE`} AND
     ${a.form_factor.length    ? sql`l.form_factor = ANY(${a.form_factor}::text[])`       : sql`TRUE`} AND
     ${a.rpm.length            ? sql`l.rpm = ANY(${a.rpm}::int[])`                        : sql`TRUE`}
