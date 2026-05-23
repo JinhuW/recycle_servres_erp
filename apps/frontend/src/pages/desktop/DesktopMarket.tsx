@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, relTime } from '../../lib/format';
 import { priceSources, categoryFilterOptions } from '../../lib/lookups';
@@ -69,6 +70,8 @@ type Sort = 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples';
 export function DesktopMarket() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { user } = useAuth();
+  const isManager = user?.role === 'manager';
   const [filter, setFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<Sort>('recent');
@@ -76,6 +79,7 @@ export function DesktopMarket() {
   const [items, setItems] = useState<RefPrice[]>([]);
   const [targetMargin, setTargetMargin] = useState(TARGET_MARGIN_FALLBACK);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [editing, setEditing] = useState<null | { row: RefPrice & { maxBuy: number | null } }>(null);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -121,6 +125,9 @@ export function DesktopMarket() {
 
   return (
     <>
+      <style>{`
+        .row-hover:hover .pencil-btn { opacity: 1; }
+      `}</style>
       <div className="page-head">
         <div>
           <h1 className="page-title">{t('marketValue')}</h1>
@@ -250,37 +257,57 @@ export function DesktopMarket() {
                         </div>
                       </td>
                       <td className="mono muted" style={{ fontSize: 11 }}>{r.partNumber}</td>
-                      <td className="num">
-                        {r.lastPrice == null ? (
-                          <div className="mono muted">—</div>
-                        ) : (
-                          <div
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 6,
-                              padding: stale.isStale ? '2px 8px' : 0,
-                              borderRadius: 6,
-                              background: stale.isStale
-                                ? 'color-mix(in oklch, var(--neg) 8%, transparent)'
-                                : 'transparent',
-                            }}
-                            title={stale.isStale ? `No update in the last ${STALE_DAYS} days — manually refresh` : undefined}
-                          >
-                            {stale.isStale && (
-                              <Icon name="alert" size={11} style={{ color: 'var(--neg)' }} />
+                      <td className="num" style={{ position: 'relative' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                          <div>
+                            {r.lastPrice == null ? (
+                              <div className="mono muted">—</div>
+                            ) : (
+                              <div
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                                  padding: stale.isStale ? '2px 8px' : 0,
+                                  borderRadius: 6,
+                                  background: stale.isStale
+                                    ? 'color-mix(in oklch, var(--neg) 8%, transparent)'
+                                    : 'transparent',
+                                }}
+                                title={stale.isStale ? `No update in the last ${STALE_DAYS} days — manually refresh` : undefined}
+                              >
+                                {stale.isStale && (
+                                  <Icon name="alert" size={11} style={{ color: 'var(--neg)' }} />
+                                )}
+                                <span
+                                  className="mono"
+                                  style={{
+                                    fontWeight: 600, fontSize: 14,
+                                    color: stale.isStale ? 'var(--neg)' : 'var(--pos)',
+                                  }}
+                                >{fmtUSD(r.lastPrice, locale)}</span>
+                              </div>
                             )}
-                            <span
-                              className="mono"
-                              style={{
-                                fontWeight: 600, fontSize: 14,
-                                color: stale.isStale ? 'var(--neg)' : 'var(--pos)',
-                              }}
-                            >{fmtUSD(r.lastPrice, locale)}</span>
+                            <div style={{ fontSize: 10.5, color: stale.isStale ? 'var(--neg)' : 'var(--fg-subtle)' }}>
+                              {r.lastPriceAt
+                                ? `${relTime(r.lastPriceAt, locale)}${stale.isStale ? ' · stale' : ''}`
+                                : `no data · stale`}
+                            </div>
                           </div>
-                        )}
-                        <div style={{ fontSize: 10.5, color: stale.isStale ? 'var(--neg)' : 'var(--fg-subtle)' }}>
-                          {r.lastPriceAt
-                            ? `${relTime(r.lastPriceAt, locale)}${stale.isStale ? ' · stale' : ''}`
-                            : `no data · stale`}
+                          {isManager && (
+                            <button
+                              type="button"
+                              className="pencil-btn"
+                              aria-label={t('marketUpdatePrice')}
+                              title={t('marketUpdatePrice')}
+                              onClick={(e) => { e.stopPropagation(); setEditing({ row: r }); }}
+                              style={{
+                                opacity: 0, transition: 'opacity 120ms',
+                                background: 'transparent', border: 'none', cursor: 'pointer',
+                                color: 'var(--fg-subtle)', padding: 4, borderRadius: 4,
+                              }}
+                            >
+                              <Icon name="edit" size={13} />
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -356,6 +383,20 @@ export function DesktopMarket() {
             Max buy = last sell × (1 − {(targetMargin * 100).toFixed(0)}% target margin) · stale = no update in {STALE_DAYS}+ days
           </div>
         </div>
+
+        {editing && (
+          <ManualPriceDialog
+            row={editing.row}
+            onClose={() => setEditing(null)}
+            onSaved={(price, atIso) => {
+              setItems(prev => prev.map(it => it.id === editing.row.id
+                ? { ...it, lastPrice: price, lastPriceAt: atIso,
+                    recentPrices: [...(it.recentPrices ?? []), { ts: atIso, price }].slice(-12) }
+                : it));
+              setEditing(null);
+            }}
+          />
+        )}
       </div>
     </>
   );
@@ -505,5 +546,90 @@ function DualLineChart({ sell, cost }: { sell: number[]; cost: number[] }) {
         <text key={i} x={x(i)} y={h - 6} fontSize={9} textAnchor="middle" fill="var(--fg-subtle)">W{i + 1}</text>
       ))}
     </svg>
+  );
+}
+
+function ManualPriceDialog({
+  row, onClose, onSaved,
+}: {
+  row: RefPrice & { maxBuy: number | null };
+  onClose: () => void;
+  onSaved: (price: number, atIso: string) => void;
+}) {
+  const { t } = useT();
+  const [price, setPrice] = useState<string>(row.lastPrice == null ? '' : String(row.lastPrice));
+  const [note, setNote] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    const n = Number(price);
+    if (!Number.isFinite(n) || n < 0) return;
+    setSaving(true);
+    try {
+      const r = await api.post<{ lastPrice: number; lastPriceAt: string }>(
+        `/api/market/${row.id}/manual-price`,
+        { price: n, note: note.trim() || undefined },
+      );
+      onSaved(r.lastPrice, r.lastPriceAt);
+    } catch (err) {
+      handleFetchError(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onClose();
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save();
+      }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.32)',
+        display: 'grid', placeItems: 'center', zIndex: 50,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 320, background: 'var(--bg)', border: '1px solid var(--border)',
+          borderRadius: 12, padding: 18, boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{row.label}</div>
+        <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginBottom: 14 }}>{row.partNumber ?? '—'}</div>
+        <label style={{ fontSize: 11, color: 'var(--fg-muted)', display: 'block', marginBottom: 4 }}>USD</label>
+        <input
+          className="input"
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          autoFocus
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          style={{ width: '100%', fontSize: 16, marginBottom: 12 }}
+        />
+        <input
+          className="input"
+          type="text"
+          maxLength={280}
+          placeholder={t('marketPriceNotePlaceholder')}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          style={{ width: '100%', fontSize: 12, marginBottom: 14 }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button type="button" className="btn" onClick={onClose} disabled={saving}>{t('cancel')}</button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={save}
+            disabled={saving || !Number.isFinite(Number(price)) || Number(price) < 0}
+          >{saving ? '…' : t('save')}</button>
+        </div>
+      </div>
+    </div>
   );
 }
