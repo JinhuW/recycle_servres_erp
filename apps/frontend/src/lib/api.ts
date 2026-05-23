@@ -148,3 +148,9 @@ export const archiveOrder = (orderId: string) =>
 
 export const unarchiveOrder = (orderId: string) =>
   api.post<{ ok: true }>(`/api/orders/${orderId}/unarchive`, {});
+
+export const archiveSellOrder = (id: string) =>
+  api.post<{ ok: true }>(`/api/sell-orders/${id}/archive`, {});
+
+export const unarchiveSellOrder = (id: string) =>
+  api.post<{ ok: true }>(`/api/sell-orders/${id}/unarchive`, {});

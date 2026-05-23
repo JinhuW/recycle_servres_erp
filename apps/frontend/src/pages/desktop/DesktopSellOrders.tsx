@@ -31,6 +31,7 @@ type SellOrderSummary = {
   status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done';
   notes: string | null;
   createdAt: string;
+  archivedAt: string | null;
   customer: { id: string; name: string; short: string; region: string };
   lineCount: number;
   qty: number;
@@ -95,6 +96,7 @@ type SellOrderDetailType = {
   status: SellOrderSummary['status'];
   notes: string | null;
   createdAt: string;
+  archivedAt: string | null;
   customer: { id: string; name: string; short: string; region: string };
   lines: SellOrderLine[];
   subtotal: number;
