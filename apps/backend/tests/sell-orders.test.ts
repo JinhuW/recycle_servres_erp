@@ -351,5 +351,48 @@ describe('POST /api/sell-orders/:id/archive (+/unarchive)', () => {
     );
     expect(got2.body.order.archivedAt).toBeNull();
   });
+
+  it('refuses to archive a Draft (delete instead)', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createDraftSellOrder(token);
+    const r = await api<{ error: string }>(
+      'POST', `/api/sell-orders/${id}/archive`, { token },
+    );
+    expect(r.status).toBe(403);
+    expect(r.body.error).toMatch(/delete instead/);
+  });
+
+  it('double-archive returns 409', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await nonDraftSellOrder(token);
+    await api('POST', `/api/sell-orders/${id}/archive`, { token });
+    const r = await api('POST', `/api/sell-orders/${id}/archive`, { token });
+    expect(r.status).toBe(409);
+  });
+
+  it('non-manager (purchaser) gets 403', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await nonDraftSellOrder(mgr);
+    const { token: pTok } = await loginAs(MARCUS);
+    const r = await api('POST', `/api/sell-orders/${id}/archive`, { token: pTok });
+    expect(r.status).toBe(403);
+  });
+
+  it('writes archived / unarchived audit events into sell_order_events', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await nonDraftSellOrder(token);
+    await api('POST', `/api/sell-orders/${id}/archive`,   { token });
+    await api('POST', `/api/sell-orders/${id}/unarchive`, { token });
+
+    const sql = getTestDb();
+    const evts = await sql<{ kind: string }[]>`
+      SELECT kind FROM sell_order_events
+      WHERE sell_order_id = ${id}
+      ORDER BY created_at ASC
+    `;
+    const kinds = evts.map(e => e.kind);
+    expect(kinds).toContain('archived');
+    expect(kinds).toContain('unarchived');
+  });
 });
 
