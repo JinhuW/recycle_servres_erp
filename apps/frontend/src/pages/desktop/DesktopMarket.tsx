@@ -7,6 +7,7 @@ import { fmtUSD, fmtUSD0, relTime } from '../../lib/format';
 import { priceSources, categoryFilterOptions } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
+import { staleness, STALE_DAYS } from './marketStaleness';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
 function Sparkline({
@@ -92,14 +93,17 @@ export function DesktopMarket() {
     return () => clearTimeout(handle);
   }, [filter, search]);
 
-  // Enrich with derived max buy (sell × (1 - target margin)). avgSell is
-  // null for auto-tracked rows that the scraper hasn't priced yet — leave
-  // maxBuy null too so the UI can render '—'.
   const allRows = useMemo(
-    () => items.map(p => ({
-      ...p,
-      maxBuy: p.maxBuy ?? (p.avgSell == null ? null : +(p.avgSell * (1 - targetMargin)).toFixed(2)),
-    })),
+    () => items.map(p => {
+      // Prefer the recorded last_price over avg_sell as the basis. Both can be
+      // null on brand-new rows; if so, leave maxBuy null and the cell renders an
+      // em-dash.
+      const basis = p.lastPrice ?? p.avgSell;
+      const maxBuy = p.maxBuy != null
+        ? p.maxBuy
+        : basis != null ? +(basis * (1 - targetMargin)).toFixed(2) : null;
+      return { ...p, maxBuy };
+    }),
     [items, targetMargin],
   );
 
@@ -196,7 +200,7 @@ export function DesktopMarket() {
               <tr>
                 <th style={{ minWidth: 240 }}>Item / Spec</th>
                 <th>{t('partNumber')}</th>
-                <th className="num" style={{ color: 'var(--pos)' }}>Avg sell price</th>
+                <th className="num" style={{ color: 'var(--pos)' }}>Last sell price</th>
                 <th>12-week sell trend</th>
                 <th className="num" style={{ color: 'var(--accent-strong)' }}>Max buy (target)</th>
                 <th className="num">Last paid</th>
@@ -207,7 +211,8 @@ export function DesktopMarket() {
             <tbody>
               {rows.slice(0, 40).map(r => {
                 const isOpen = openKey === r.id;
-                const sellHistory = r.history.map(c => +(c * 1.35).toFixed(2));
+                const sellHistory = r.recentPrices.map(p => p.price);
+                const stale = staleness(r.lastPriceAt);
                 const trendColor = r.trend > 0.005 ? 'var(--pos)' : r.trend < -0.005 ? 'var(--neg)' : 'var(--fg-muted)';
                 // Null target = auto-tracked, never bought yet → no badge.
                 const onTarget = r.target != null && r.maxBuy != null && r.target <= r.maxBuy;
@@ -246,8 +251,37 @@ export function DesktopMarket() {
                       </td>
                       <td className="mono muted" style={{ fontSize: 11 }}>{r.partNumber}</td>
                       <td className="num">
-                        <div className="mono" style={{ fontWeight: 600, fontSize: 14, color: 'var(--pos)' }}>{fmtUSD(r.avgSell, locale)}</div>
-                        <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)' }}>n = {r.samples}</div>
+                        {r.lastPrice == null ? (
+                          <div className="mono muted">—</div>
+                        ) : (
+                          <div
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 6,
+                              padding: stale.isStale ? '2px 8px' : 0,
+                              borderRadius: 6,
+                              background: stale.isStale
+                                ? 'color-mix(in oklch, var(--neg) 8%, transparent)'
+                                : 'transparent',
+                            }}
+                            title={stale.isStale ? `No update in the last ${STALE_DAYS} days — manually refresh` : undefined}
+                          >
+                            {stale.isStale && (
+                              <Icon name="alert" size={11} style={{ color: 'var(--neg)' }} />
+                            )}
+                            <span
+                              className="mono"
+                              style={{
+                                fontWeight: 600, fontSize: 14,
+                                color: stale.isStale ? 'var(--neg)' : 'var(--pos)',
+                              }}
+                            >{fmtUSD(r.lastPrice, locale)}</span>
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10.5, color: stale.isStale ? 'var(--neg)' : 'var(--fg-subtle)' }}>
+                          {r.lastPriceAt
+                            ? `${relTime(r.lastPriceAt, locale)}${stale.isStale ? ' · stale' : ''}`
+                            : `no data · stale`}
+                        </div>
                       </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -256,15 +290,19 @@ export function DesktopMarket() {
                         </div>
                       </td>
                       <td className="num">
-                        <div style={{
-                          display: 'inline-flex', alignItems: 'baseline', gap: 4,
-                          padding: '4px 8px', borderRadius: 6,
-                          background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
-                          border: '1px dashed color-mix(in oklch, var(--accent) 35%, transparent)',
-                        }}>
-                          <span style={{ fontSize: 10, color: 'var(--accent-strong)', fontWeight: 600 }}>≤</span>
-                          <span className="mono" style={{ fontWeight: 600, color: 'var(--accent-strong)' }}>{fmtUSD(r.maxBuy, locale)}</span>
-                        </div>
+                        {r.maxBuy == null ? (
+                          <span className="mono muted">—</span>
+                        ) : (
+                          <div style={{
+                            display: 'inline-flex', alignItems: 'baseline', gap: 4,
+                            padding: '4px 8px', borderRadius: 6,
+                            background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+                            border: '1px dashed color-mix(in oklch, var(--accent) 35%, transparent)',
+                          }}>
+                            <span style={{ fontSize: 10, color: 'var(--accent-strong)', fontWeight: 600 }}>≤</span>
+                            <span className="mono" style={{ fontWeight: 600, color: 'var(--accent-strong)' }}>{fmtUSD(r.maxBuy, locale)}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="num">
                         <div className="mono" style={{ color: !hasTarget ? 'var(--fg-subtle)' : onTarget ? 'var(--fg)' : 'var(--neg)', fontWeight: 500 }}>
@@ -315,7 +353,7 @@ export function DesktopMarket() {
           <div>Showing {Math.min(40, rows.length)} of {rows.length} tracked SKUs</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="info" size={11} />
-            Max buy = avg sell × (1 − {(targetMargin * 100).toFixed(0)}% target margin)
+            Max buy = last sell × (1 − {(targetMargin * 100).toFixed(0)}% target margin) · stale = no update in {STALE_DAYS}+ days
           </div>
         </div>
       </div>
@@ -329,7 +367,8 @@ function DetailExpand({
 }: { row: RefPrice; sellHistory: number[]; targetMargin: number }) {
   const { lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const buyHistory = row.history;
+  // Cost series is still synthetic — out of scope for this slice.
+  const buyHistory = (row.recentPrices ?? []).map(p => +(p.price * 0.7).toFixed(2));
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 18 }}>
       <div className="card" style={{ padding: 16, background: 'var(--bg-elev)' }}>
@@ -400,13 +439,21 @@ function DetailExpand({
             );
           })}
         </div>
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--fg-subtle)' }}>
-          Confidence:{' '}
-          <strong style={{ color: row.samples > 20 ? 'var(--pos)' : row.samples > 10 ? 'var(--warn)' : 'var(--neg)' }}>
-            {row.samples > 20 ? 'High' : row.samples > 10 ? 'Medium' : 'Low'}
-          </strong>{' '}
-          — based on {row.samples} data points across {priceSources.length} sources.
-        </div>
+        {(() => {
+          const stale = staleness(row.lastPriceAt);
+          const label = stale.isStale
+            ? 'Stale'
+            : row.samples > 20 ? 'High' : row.samples > 10 ? 'Medium' : 'Low';
+          const color = stale.isStale
+            ? 'var(--neg)'
+            : row.samples > 20 ? 'var(--pos)' : row.samples > 10 ? 'var(--warn)' : 'var(--neg)';
+          return (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--fg-subtle)' }}>
+              Confidence: <strong style={{ color }}>{label}</strong>{' '}
+              — based on {row.samples} data points across {priceSources.length} sources.
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
