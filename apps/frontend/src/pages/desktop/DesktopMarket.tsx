@@ -131,7 +131,9 @@ export function DesktopMarket() {
   return (
     <>
       <style>{`
+        .pencil-btn { opacity: 0.55; }
         .row-hover:hover .pencil-btn { opacity: 1; }
+        .pencil-btn:hover { background: var(--bg-soft) !important; color: var(--accent-strong) !important; }
       `}</style>
       <div className="page-head">
         <div>
@@ -313,7 +315,7 @@ export function DesktopMarket() {
                               title={t('marketUpdatePrice')}
                               onClick={(e) => { e.stopPropagation(); setEditing({ row: r }); }}
                               style={{
-                                opacity: 0, transition: 'opacity 120ms',
+                                transition: 'opacity 120ms, background 120ms, color 120ms',
                                 background: 'transparent', border: 'none', cursor: 'pointer',
                                 color: 'var(--fg-subtle)', padding: 4, borderRadius: 4,
                               }}
