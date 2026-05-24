@@ -222,7 +222,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select
               className="select"
-              style={{ width: 160, height: 32, fontSize: 12.5 }}
+              style={{ width: 160, height: 32, fontSize: 12.5, padding: '0 12px' }}
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
             >

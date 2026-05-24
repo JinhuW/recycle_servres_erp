@@ -179,7 +179,7 @@ export function DesktopMarket() {
             </div>
             <select
               className="select"
-              style={{ width: 'auto', minWidth: 240, height: 32, fontSize: 12.5, paddingRight: 28 }}
+              style={{ width: 'auto', minWidth: 240, height: 32, fontSize: 12.5, padding: '0 28px 0 12px' }}
               value={sort}
               onChange={e => setSort(e.target.value as Sort)}
             >
