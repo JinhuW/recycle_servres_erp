@@ -8,6 +8,7 @@ import {
   diff, writeOrderEvent, META_FIELDS, LINE_FIELDS,
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
+import { effectiveRole } from '../lib/role';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -39,7 +40,9 @@ type LineInput = {
 orders.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
-  const isManager = u.role === 'manager';
+  // A manager in rolePreview=as_purchaser mode is scoped to their own POs,
+  // matching what the FE shows so the two layers can't disagree.
+  const isManager = effectiveRole(u) === 'manager';
 
   const category = c.req.query('category');                 // RAM/SSD/Other
   const status = c.req.query('status');                     // order stage label (Draft/In Transit/…)
@@ -160,7 +163,7 @@ orders.get('/:id', async (c) => {
   `)[0];
 
   if (!order) return c.json({ error: 'Not found' }, 404);
-  if (u.role !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const lines = await sql`
     SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
@@ -237,7 +240,7 @@ orders.get('/:id/events', async (c) => {
   const owner = (await sql`SELECT user_id FROM orders WHERE id = ${id} LIMIT 1`)[0] as
     | { user_id: string } | undefined;
   if (!owner) return c.json({ error: 'Not found' }, 404);
-  if (u.role !== 'manager' && owner.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  if (effectiveRole(u) !== 'manager' && owner.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   const rows = await sql`
     SELECT e.id, e.kind, e.detail, e.created_at,
