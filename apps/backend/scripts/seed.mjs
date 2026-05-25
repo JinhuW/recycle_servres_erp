@@ -474,6 +474,7 @@ try {
     { id: 'Shipped',          short: 'Shipped',      tone: 'info',  needsMeta: true  },
     { id: 'Awaiting payment', short: 'Awaiting pay', tone: 'warn',  needsMeta: true  },
     { id: 'Done',             short: 'Done',         tone: 'pos',   needsMeta: true  },
+    { id: 'Closed',           short: 'Closed',       tone: 'muted', needsMeta: true  },
   ];
   await sql`DELETE FROM sell_order_statuses`;
   for (let i = 0; i < SELL_ORDER_STATUSES.length; i++) {
@@ -482,6 +483,28 @@ try {
       INSERT INTO sell_order_statuses (id, label, short_label, tone, needs_meta, position)
       VALUES (${s.id}, ${s.id}, ${s.short}, ${s.tone}, ${s.needsMeta}, ${i})
     `;
+  }
+
+  // Close-reason taxonomy. Surfaced in the CloseSellOrderDialog reason
+  // dropdown. Lookup table so adding a reason is a seed change.
+  {
+    const reasons = [
+      { id: 'customer_cancelled', label: 'Customer cancelled', position: 1 },
+      { id: 'lost_deal',          label: 'Lost deal',          position: 2 },
+      { id: 'returned',           label: 'Returned',           position: 3 },
+      { id: 'duplicate',          label: 'Duplicate',          position: 4 },
+      { id: 'other',              label: 'Other',              position: 5 },
+    ];
+    for (const r of reasons) {
+      await sql`
+        INSERT INTO sell_order_close_reasons (id, label, position, active)
+        VALUES (${r.id}, ${r.label}, ${r.position}, TRUE)
+        ON CONFLICT (id) DO UPDATE SET
+          label    = EXCLUDED.label,
+          position = EXCLUDED.position,
+          active   = TRUE
+      `;
+    }
   }
 
   console.log('· Seeding ref_prices…');
