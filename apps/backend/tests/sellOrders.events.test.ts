@@ -275,4 +275,47 @@ describe('sell-order audit events', () => {
       filename: 'invoice.pdf',
     });
   });
+
+  it('DELETE status-meta attachment emits `status_meta_changed`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const file = new File([readFileSync(pdf)], 'invoice.pdf', { type: 'application/pdf' });
+    const upload = await multipart(
+      `/api/sell-orders/${id}/status-meta/Shipped/attachments`,
+      { file },
+      { token },
+    );
+    expect(upload.status).toBe(200);
+    const attachmentId = (upload.body as { attachment: { id: string } }).attachment.id;
+
+    const del = await api(
+      'DELETE',
+      `/api/sell-orders/${id}/status-meta/Shipped/attachments/${attachmentId}`,
+      { token },
+    );
+    expect(del.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind === 'status_meta_changed');
+    expect(events).toHaveLength(2);
+    expect(events[0].detail).toMatchObject({
+      status: 'Shipped',
+      field: 'attachment_added',
+    });
+    expect(events[1].detail).toMatchObject({
+      status: 'Shipped',
+      field: 'attachment_removed',
+      filename: 'invoice.pdf',
+      attachmentId,
+    });
+  });
 });
