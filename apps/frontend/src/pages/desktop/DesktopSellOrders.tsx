@@ -3,6 +3,9 @@ import { Icon } from '../../components/Icon';
 import {
   StatusChangeDialog, type MetaStatus, type StatusAttachment,
 } from '../../components/StatusChangeDialog';
+import {
+  CloseSellOrderDialog, ReopenSellOrderDialog,
+} from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
 import { api, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -10,7 +13,7 @@ import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
-import { sellOrderStatuses } from '../../lib/lookups';
+import { sellOrderStatuses, closeReasons } from '../../lib/lookups';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
@@ -98,6 +101,7 @@ type SellOrderDetailType = {
   notes: string | null;
   createdAt: string;
   archivedAt: string | null;
+  closeReasonId: string | null;
   customer: { id: string; name: string; short: string; region: string };
   lines: SellOrderLine[];
   subtotal: number;
@@ -330,7 +334,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                       >
                         <Icon name="eye" size={12} />
                       </button>
-                      {o.status !== 'Done' && (
+                      {o.status !== 'Done' && o.status !== 'Closed' && (
                         <button
                           className="btn icon sm"
                           title={`Edit ${o.status.toLowerCase()} order`}
@@ -401,6 +405,15 @@ function SellOrderDetail({
   const [pending, setPending] = useState<MetaStatus | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [unarchiving, setUnarchiving] = useState(false);
+  // Close (Draft/Shipped/Awaiting → Closed) and Reopen (Closed → Draft).
+  // Both go through dedicated dialogs because the backend gates differ from
+  // the standard meta-status dialog: Close needs a structured reason +
+  // freeform note; Reopen needs a freeform note (and clears the reason).
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
+  // Bumped after a Close/Reopen succeeds so the order effect re-fetches —
+  // simpler than pulling a stale callback through the dialog props.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -418,7 +431,7 @@ function SellOrderDetail({
       })
       .catch(handleFetchError);
     return () => { alive = false; };
-  }, [id]);
+  }, [id, refreshKey]);
 
   // Customer list — only needed when editing (re-pick customer).
   useEffect(() => {
@@ -511,7 +524,21 @@ function SellOrderDetail({
     }
   };
 
-  const editable = mode === 'edit';
+  // "locked" = no structural edits or status moves allowed. Done is the
+  // terminal happy path; Closed is the off-ramp (line set + customer + status
+  // are all frozen until the order is Reopened). Both the list-page edit
+  // pencil and the in-page status stepper / line inputs respect this guard.
+  const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
+  const editable = mode === 'edit' && !locked;
+  const closeReasonLabel = order?.closeReasonId
+    ? closeReasons.find(r => r.id === order.closeReasonId)?.label ?? order.closeReasonId
+    : null;
+  // statusMeta is typed as Record<MetaStatus,…> (Shipped/Awaiting/Done) but
+  // the backend now also emits a 'Closed' entry (needs_meta=TRUE on the row);
+  // read it through a widened lens so TS doesn't complain.
+  const closedNote = order?.status === 'Closed'
+    ? ((statusMeta as Record<string, StatusMetaEntry> | null)?.Closed?.note ?? null)
+    : null;
 
   return (
     <>
@@ -552,6 +579,24 @@ function SellOrderDetail({
             <FormSkeleton fields={6} withHeader={false} />
           ) : order && draft ? (
             <>
+              {order.status === 'Closed' && (
+                <div style={{
+                  marginBottom: 18, padding: '10px 14px', borderRadius: 8,
+                  background: 'var(--bg-soft)', border: '1px solid var(--border)',
+                  fontSize: 12.5, color: 'var(--fg-muted)',
+                  display: 'flex', alignItems: 'flex-start', gap: 8,
+                }}>
+                  <Icon name="x" size={13} style={{ marginTop: 2, color: 'var(--fg-subtle)' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--fg)' }}>
+                      Closed{closeReasonLabel ? ` — ${closeReasonLabel}` : ''}
+                    </div>
+                    {closedNote && (
+                      <div style={{ marginTop: 2, color: 'var(--fg-subtle)' }}>{closedNote}</div>
+                    )}
+                  </div>
+                </div>
+              )}
               {editable && (
                 <div style={{ marginBottom: 18 }}>
                   <div style={{
@@ -789,7 +834,29 @@ function SellOrderDetail({
                 </button>
               )}
               <button className="btn" onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
-              {!editable && order.status !== 'Done' && (
+              {/* Close as off-ramp: available everywhere except Done (terminal)
+                  and Closed (already closed → use Reopen instead). Manager-only
+                  surface is enforced at the page level so no extra role check. */}
+              {!locked && order.status !== 'Done' && (
+                <button
+                  className="btn"
+                  onClick={() => setShowCloseDialog(true)}
+                  title="Close this sell order"
+                  style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
+                >
+                  <Icon name="x" size={14} /> Close…
+                </button>
+              )}
+              {order.status === 'Closed' && (
+                <button
+                  className="btn accent"
+                  onClick={() => setShowReopenDialog(true)}
+                  title="Reopen this sell order"
+                >
+                  <Icon name="edit" size={14} /> Reopen
+                </button>
+              )}
+              {!editable && !locked && (
                 <button className="btn accent" onClick={onSwitchToEdit}>
                   <Icon name="edit" size={14} /> Edit order
                 </button>
@@ -831,6 +898,32 @@ function SellOrderDetail({
         orderId={order.id}
         onCancel={() => setConfirmArchive(false)}
         onConfirmed={() => { setConfirmArchive(false); onSaved(); onClose(); }}
+      />
+    )}
+    {showCloseDialog && order && (
+      <CloseSellOrderDialog
+        orderId={order.id}
+        currentStatus={order.status}
+        onCancel={() => setShowCloseDialog(false)}
+        onClosed={() => {
+          setShowCloseDialog(false);
+          // Close is the off-ramp — same pattern as Archive: re-load list +
+          // navigate away. The list chip flips to Closed; the user can
+          // re-open the order from there if they need to Reopen.
+          onSaved();
+        }}
+      />
+    )}
+    {showReopenDialog && order && (
+      <ReopenSellOrderDialog
+        orderId={order.id}
+        onCancel={() => setShowReopenDialog(false)}
+        onReopened={() => {
+          setShowReopenDialog(false);
+          // Stay on the order so the user can continue editing the now-Draft
+          // SO. refreshKey re-runs the GET so status/locked/header-strip flip.
+          setRefreshKey(k => k + 1);
+        }}
       />
     )}
     </>
