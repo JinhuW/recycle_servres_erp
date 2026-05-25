@@ -848,20 +848,18 @@ function SellOrderDetail({
                   <Icon name="box" size={14} /> {unarchiving ? 'Unarchiving…' : 'Unarchive'}
                 </button>
               )}
-              {!editable && (
-                <button className="btn" onClick={onClose}>Close</button>
-              )}
-              {/* Close as off-ramp: available everywhere except Done (terminal)
-                  and Closed (already closed → use Reopen instead). Manager-only
-                  surface is enforced at the page level so no extra role check. */}
-              {!locked && order.status !== 'Done' && (
+              {/* Close as off-ramp: available in edit mode, everywhere except
+                  Done (terminal) and Closed (already closed → use Reopen
+                  instead). Manager-only surface is enforced at the page level
+                  so no extra role check. */}
+              {editable && order.status !== 'Done' && (
                 <button
                   className="btn"
                   onClick={() => setShowCloseDialog(true)}
-                  title="Close this sell order"
+                  title="Discard this sell order"
                   style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
                 >
-                  <Icon name="x" size={14} /> Close…
+                  Discard
                 </button>
               )}
               {order.status === 'Closed' && (

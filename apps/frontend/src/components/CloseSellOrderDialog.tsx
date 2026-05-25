@@ -69,7 +69,7 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
             <Icon name="x" size={18} />
           </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Close sell order</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Discard sell order</div>
             <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 2 }}>
               Stops the deal and releases any soft-committed inventory.
             </div>
@@ -132,7 +132,7 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
             disabled={!canSubmit}
             style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
           >
-            {submitting ? 'Closing…' : 'Close order'}
+            {submitting ? 'Discarding…' : 'Discard order'}
           </button>
         </div>
       </div>
