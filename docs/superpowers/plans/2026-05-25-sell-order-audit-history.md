@@ -6,6 +6,20 @@
 `sell_order_events`, and the sell-order detail page surfaces a chronological
 History panel.
 
+**Reconciliation note (2026-05-25):** The Close + Reopen feature
+landed on main in parallel (commits `4dc9c7e`..`4118092`). It already
+added:
+- `closed` and `reopened` to `SellOrderEventKind`
+- `closed` and `reopened` event writes inside `POST /:id/status` for
+  those specific transitions
+- The `ALLOWED_TRANSITIONS` map + `KNOWN_STATUSES` set that replaced
+  the old `SELL_ORDER_FLOW` array
+- Migrations 0053 + 0054 for the Closed status and structured close
+  reasons.
+
+Tasks 2, 6, 9, and 10 below carry "**Reconciliation:**" callouts
+describing the resulting deltas. The overall shape is unchanged.
+
 **Architecture:** Mirror the existing PO audit module
 (`services/orderAudit.ts` + `components/OrderActivityLog.tsx`). Extend
 `services/sellOrderAudit.ts` with new event kinds, lift the shared `diff()`
@@ -113,6 +127,10 @@ git commit -m "refactor(be): lift diff helper into services/auditDiff.ts"
 
 ## Task 2: Extend `services/sellOrderAudit.ts` with kinds + field lists
 
+**Reconciliation:** The union now starts at `archived | unarchived |
+closed | reopened` (the close/reopen feature already added the latter
+two). Keep all four — this task only *adds* the new kinds below.
+
 **Files:**
 - Modify: `apps/backend/src/services/sellOrderAudit.ts`
 
@@ -141,7 +159,9 @@ export type SellOrderEventKind =
   | 'meta_changed'
   | 'status_meta_changed'
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'closed'
+  | 'reopened';
 
 // Header fields PATCH /api/sell-orders/:id may touch on the sell_orders row.
 // Status is intentionally excluded — it moves through POST /:id/status which
@@ -184,8 +204,9 @@ export async function writeSellOrderEvent(
 - [ ] **Step 2: Typecheck**
 
 Run: `pnpm --filter recycle-erp-backend typecheck`
-Expected: PASS — the only existing caller (`routes/sellOrders.ts:657`)
-passes `'archived' | 'unarchived'`, both of which are still in the union.
+Expected: PASS — existing callers in `routes/sellOrders.ts` already
+pass `'archived' | 'unarchived' | 'closed' | 'reopened'`; all remain
+in the union.
 
 - [ ] **Step 3: Commit**
 
@@ -759,8 +780,18 @@ git commit -m "feat(be): emit meta_changed + line events on PATCH /api/sell-orde
 
 ## Task 6: Wire `status_changed` event into POST /api/sell-orders/:id/status
 
+**Reconciliation:** The handler already emits `closed` (for any
+transition into `Closed`) and `reopened` (for `Closed → Draft`). To
+avoid double-events for those two transitions, this task emits
+`status_changed` only when neither dedicated kind applies — i.e., for
+transitions like `Draft → Shipped`, `Shipped → Awaiting payment`,
+`Awaiting payment → Done`. Close + reopen continue to be the
+exclusive carriers of their own structured detail.
+
 **Files:**
-- Modify: `apps/backend/src/routes/sellOrders.ts:512-620`
+- Modify: `apps/backend/src/routes/sellOrders.ts` (inside the `sql.begin`
+  closure in the `POST /:id/status` handler — function starts around
+  line 531; the closure starts at `await sql.begin(...)` around line 579)
 - Modify: `apps/backend/tests/sellOrders.events.test.ts` (add case)
 
 - [ ] **Step 1: Add failing test case**
@@ -791,6 +822,35 @@ Append to the events test file:
     expect(events[0].detail).toMatchObject({ from: 'Draft', to: 'Shipped' });
   });
 
+  it('Close transition emits `closed`, not `status_changed`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    // Pick any active close reason from the seed.
+    const reason = (await getTestDb()`
+      SELECT id FROM sell_order_close_reasons WHERE active = TRUE LIMIT 1
+    `)[0] as { id: string } | undefined;
+    if (!reason) throw new Error('seed lacks active close reason');
+
+    const r = await api('POST', `/api/sell-orders/${id}/status`, {
+      token,
+      body: { to: 'Closed', note: 'customer dropped', closeReasonId: reason.id },
+    });
+    expect(r.status).toBe(200);
+
+    const events = await eventsOf(id);
+    expect(events.map(e => e.kind)).toEqual(['created', 'closed']);
+  });
+
   it('idempotent status transition (same status twice) emits only one event', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
@@ -819,21 +879,38 @@ Expected: FAIL — `status_changed` events not emitted yet.
 
 - [ ] **Step 3: Wire the event**
 
-Modify `apps/backend/src/routes/sellOrders.ts`. Inside the `sql.begin`
-closure at line 542-614, after the `tx`UPDATE sell_orders SET status =
-...`` (line 549) and BEFORE the `if (NEEDS_EVIDENCE.has(body.to)) {`
-block (line 550), insert:
+Modify `apps/backend/src/routes/sellOrders.ts`. Inside the `POST
+/:id/status` handler's `sql.begin` closure, find the existing
+`closed`/`reopened` event-emission block (the one that currently
+reads `if (body.to === 'Closed') { await writeSellOrderEvent(... 'closed' ...)`
+followed by `else if (cur.status === 'Closed' && body.to === 'Draft')`).
+Add a final `else` branch that handles all other transitions:
 
 ```ts
-    await writeSellOrderEvent(tx, id, u.id, 'status_changed', {
-      from: cur.status,
-      to: body.to,
-    });
+    if (body.to === 'Closed') {
+      await writeSellOrderEvent(tx, id, u.id, 'closed', {
+        reasonId: body.closeReasonId!,
+        note: body.note ?? null,
+        fromStatus: cur.status,
+      });
+    } else if (cur.status === 'Closed' && body.to === 'Draft') {
+      await writeSellOrderEvent(tx, id, u.id, 'reopened', {
+        note: body.note ?? null,
+        fromStatus: 'Closed',
+      });
+    } else {
+      await writeSellOrderEvent(tx, id, u.id, 'status_changed', {
+        from: cur.status,
+        to: body.to,
+      });
+    }
 ```
 
-This sits inside the path that already early-returns on
-`{ kind: 'idempotent' }` (line 548) — so a no-op same-status call writes
-no event, satisfying the idempotency test.
+Idempotent same-status calls already early-return with
+`{ kind: 'idempotent' }` BEFORE entering this branch, so no event
+fires for no-op transitions. The illegal-transition branch returns
+`{ kind: 'illegal' }` earlier as well, so this code is reached only
+for accepted, real transitions.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1278,7 +1355,9 @@ export type SellOrderEventKind =
   | 'meta_changed'
   | 'status_meta_changed'
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'closed'
+  | 'reopened';
 
 export type SellOrderEvent = {
   id: string;
@@ -1337,6 +1416,8 @@ const KIND_ICON: Record<SellOrderEvent['kind'], IconName> = {
   status_meta_changed: 'paperclip',
   archived:            'box',
   unarchived:          'rotate',
+  closed:              'x',
+  reopened:            'rotate',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -1350,6 +1431,8 @@ const KIND_TONE: Record<SellOrderEvent['kind'], Tone> = {
   status_meta_changed: 'muted',
   archived:            'muted',
   unarchived:          'info',
+  closed:              'warn',
+  reopened:            'info',
 };
 
 const TONE_BG: Record<Tone, string> = {
@@ -1370,6 +1453,7 @@ const LIFECYCLE_LABEL: Record<string, string> = {
   Shipped:             'Shipped',
   'Awaiting payment':  'Awaiting payment',
   Done:                'Done',
+  Closed:              'Closed',
 };
 
 const FIELD_LABEL: Record<string, string> = {
@@ -1471,6 +1555,14 @@ function summarize(event: SellOrderEvent, locale: string): React.ReactNode {
     }
     case 'archived':   return <>Archived</>;
     case 'unarchived': return <>Unarchived</>;
+    case 'closed': {
+      const note = d.note ? <> · "{String(d.note)}"</> : null;
+      return <>Closed (reason: <code>{String(d.reasonId ?? '')}</code>){note}</>;
+    }
+    case 'reopened': {
+      const note = d.note ? <> · "{String(d.note)}"</> : null;
+      return <>Reopened{note}</>;
+    }
   }
 }
 
