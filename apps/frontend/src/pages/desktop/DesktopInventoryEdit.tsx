@@ -311,7 +311,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           <div style={{ minWidth: 0 }}>
             <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span>{itemTitle}</span>
-              {dirty && <span className="chip warn" style={{ fontSize: 10.5 }}>Unsaved</span>}
+              {dirty && <span className="chip warn" style={{ fontSize: 10.5 }}>{t('ieUnsaved')}</span>}
             </h1>
             <div className="page-sub" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className="mono">{item.id.slice(0, 8)}</span>
@@ -403,8 +403,8 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
       {dirty && (
         <div className="save-bar">
           <div className="save-bar-msg">
-            <span className="chip warn" style={{ fontSize: 10.5 }}>Unsaved</span>
-            <span>You have unsaved changes to <strong>{itemTitle || item.id.slice(0, 8)}</strong>.</span>
+            <span className="chip warn" style={{ fontSize: 10.5 }}>{t('ieUnsaved')}</span>
+            <span>{t('ieUnsavedChangesPre')} <strong>{itemTitle || item.id.slice(0, 8)}</strong>{t('ieUnsavedChangesPost')}</span>
           </div>
           <div className="save-bar-actions">
             <button className="btn" onClick={onCancel}>{t('cancel')}</button>
@@ -432,7 +432,7 @@ function DetailsPanel({
   currentWhId: string | null;
   linkedSellOrders: LinkedSellOrder[];
 }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const cat = item.category;
   return (
@@ -440,10 +440,9 @@ function DetailsPanel({
       <div className="card">
         <div className="card-head">
           <div>
-            <div className="card-title">{cat} specifications</div>
+            <div className="card-title">{t('ieSpecsTitle', { cat })}</div>
             <div className="card-sub">
-              Captured by the submitter when this item entered the warehouse.
-              Spec fields are immutable — adjust qty, cost or status on the Pricing tab.
+              {t('ieSpecsSub')}
             </div>
           </div>
           <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
@@ -451,41 +450,41 @@ function DetailsPanel({
         <div className="card-body">
           {cat === 'RAM' && (
             <div className="grid-2">
-              <Row label="Brand"          value={item.brand} />
-              <Row label="Capacity"       value={item.capacity} />
-              <Row label="Generation"      value={item.generation} />
-              <Row label="Type"           value={item.type} />
-              <Row label="Classification" value={item.classification} />
-              <Row label="Rank"           value={item.rank} />
-              <Row label="Speed"          value={item.speed ? `${item.speed} MHz` : null} />
+              <Row label={t('brand')}     value={item.brand} />
+              <Row label={t('capacity')}  value={item.capacity} />
+              <Row label={t('generation')} value={item.generation} />
+              <Row label={t('type')}      value={item.type} />
+              <Row label={t('klass')}     value={item.classification} />
+              <Row label={t('rank')}      value={item.rank} />
+              <Row label={t('ieSpeed')}   value={item.speed ? `${item.speed} MHz` : null} />
             </div>
           )}
           {cat === 'SSD' && (
             <div className="grid-2">
-              <Row label="Brand"        value={item.brand} />
-              <Row label="Capacity"     value={item.capacity} />
-              <Row label="Interface"    value={item.interface} />
-              <Row label="Form factor"  value={item.form_factor} />
+              <Row label={t('brand')}      value={item.brand} />
+              <Row label={t('capacity')}   value={item.capacity} />
+              <Row label={t('interfaceLbl')} value={item.interface} />
+              <Row label={t('formFactor')} value={item.form_factor} />
             </div>
           )}
           {cat === 'HDD' && (
             <div className="grid-2">
-              <Row label="Brand"        value={item.brand} />
-              <Row label="Capacity"     value={item.capacity} />
-              <Row label="Interface"    value={item.interface} />
-              <Row label="Form factor"  value={item.form_factor} />
-              <Row label="RPM"          value={item.rpm != null ? String(item.rpm) : null} />
+              <Row label={t('brand')}      value={item.brand} />
+              <Row label={t('capacity')}   value={item.capacity} />
+              <Row label={t('interfaceLbl')} value={item.interface} />
+              <Row label={t('formFactor')} value={item.form_factor} />
+              <Row label={t('rpm')}        value={item.rpm != null ? String(item.rpm) : null} />
             </div>
           )}
           {cat === 'Other' && (
-            <Row label="Description" value={item.description} />
+            <Row label={t('description')} value={item.description} />
           )}
 
           <div className="divider" />
 
           <div className="grid-2">
             <div className="field">
-              <label className="label">Part number</label>
+              <label className="label">{t('partNumber')}</label>
               <input
                 className="input mono"
                 value={draft.partNumber}
@@ -494,7 +493,7 @@ function DetailsPanel({
               />
             </div>
             <div className="field">
-              <label className="label">Condition</label>
+              <label className="label">{t('condition')}</label>
               <select
                 className="select"
                 value={draft.condition}
@@ -505,7 +504,7 @@ function DetailsPanel({
             </div>
             {(cat === 'SSD' || cat === 'HDD') && (
               <div className="field">
-                <label className="label">Health (%)</label>
+                <label className="label">{t('healthPct')}</label>
                 <input
                   type="number" min={0} max={100} step={0.1}
                   className="input"
@@ -524,19 +523,19 @@ function DetailsPanel({
           <div className="card-head">
             <div>
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                Stock across warehouses
+                {t('ieStockAcrossWh')}
                 <span className="chip muted" style={{ fontSize: 10.5 }}>
                   <span className="mono">{draft.partNumber || '—'}</span>
                 </span>
               </div>
               <div className="card-sub">
-                Aggregated by part number across {stock.peerCount} {stock.peerCount === 1 ? 'line' : 'lines'}.
+                {t('ieStockAggregatedBy', { n: stock.peerCount })}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-              <StockTotal label="On hand"    value={stock.onHandTotal}    tone="var(--pos)"  icon="warehouse" />
+              <StockTotal label={t('ieOnHand')}    value={stock.onHandTotal}    tone="var(--pos)"  icon="warehouse" />
               <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
-              <StockTotal label="In transit" value={stock.inTransitTotal} tone="var(--info)" icon="truck" />
+              <StockTotal label={t('ieInTransit')} value={stock.inTransitTotal} tone="var(--info)" icon="truck" />
             </div>
           </div>
           <div style={{ padding: '6px 6px 12px' }}>
@@ -544,10 +543,10 @@ function DetailsPanel({
               <thead>
                 <tr>
                   <th style={{ width: 32 }}></th>
-                  <th>Warehouse</th>
-                  <th style={{ textAlign: 'right' }}>On hand</th>
-                  <th style={{ textAlign: 'right' }}>In transit</th>
-                  <th style={{ textAlign: 'right', width: 90 }}>Lines</th>
+                  <th>{t('warehouse')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('ieOnHand')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('ieInTransit')}</th>
+                  <th style={{ textAlign: 'right', width: 90 }}>{t('lines')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -574,7 +573,7 @@ function DetailsPanel({
                               marginLeft: 8, fontSize: 10,
                               background: 'var(--accent-soft)', color: 'var(--accent-strong)',
                               borderColor: 'color-mix(in oklch, var(--accent) 35%, transparent)',
-                            }}>This item</span>
+                            }}>{t('ieThisItem')}</span>
                           )}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{r.whRegion}</div>
@@ -585,7 +584,7 @@ function DetailsPanel({
                         </span>
                         {r.reviewing > 0 && (
                           <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                            {r.reviewing} reviewing
+                            {t('ieReviewingN', { n: r.reviewing })}
                           </div>
                         )}
                       </td>
@@ -612,10 +611,10 @@ function DetailsPanel({
             }}>
               <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="info" size={11} />
-                Counts include Done and Reviewing items. In-transit shipments are tracked separately.
+                {t('ieCountsInclude')}
               </div>
-              <button className="btn sm" disabled title="Backend endpoint not yet wired">
-                <Icon name="arrow" size={12} /> Request transfer
+              <button className="btn sm" disabled title={t('ieRequestTransferTooltip')}>
+                <Icon name="arrow" size={12} /> {t('ieRequestTransfer')}
               </button>
             </div>
           </div>
@@ -626,27 +625,27 @@ function DetailsPanel({
         <div className="card-head">
           <div>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              Linked sell orders
+              {t('ieLinkedSellOrders')}
               <span className="chip muted" style={{ fontSize: 10.5 }}>{linkedSellOrders.length}</span>
             </div>
-            <div className="card-sub">Orders that include this inventory line.</div>
+            <div className="card-sub">{t('ieLinkedSellOrdersSub')}</div>
           </div>
         </div>
         {linkedSellOrders.length === 0 ? (
           <div className="card-body" style={{ padding: 24, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-            No sell orders reference this inventory line yet.
+            {t('ieNoSellOrdersRef')}
           </div>
         ) : (
           <div style={{ padding: '4px 6px 10px' }}>
             <table className="table" style={{ width: '100%' }}>
               <thead>
                 <tr>
-                  <th>Sell order</th>
-                  <th>Customer</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Qty</th>
-                  <th style={{ textAlign: 'right' }}>Unit price</th>
-                  <th style={{ textAlign: 'right' }}>Date</th>
+                  <th>{t('sellOrders')}</th>
+                  <th>{t('fieldCustomer')}</th>
+                  <th>{t('status')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('qty')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('fieldUnitPrice')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('date')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -724,22 +723,22 @@ function PricingPanel({
   lossy: boolean;
   refMatch: RefMatch | null;
 }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   return (
     <>
       <div className="card">
         <div className="card-head">
           <div>
-            <div className="card-title">Pricing & quantity</div>
-            <div className="card-sub">Quantity and unit cost stay editable while the line is open. Sell price drives margin once the item is reviewed.</div>
+            <div className="card-title">{t('iePricingQty')}</div>
+            <div className="card-sub">{t('iePricingQtySub')}</div>
           </div>
           <span className={'chip dot ' + statusTone(draft.status)}>{draft.status}</span>
         </div>
         <div className="card-body">
           <div className="grid-2">
             <div className="field">
-              <label className="label">Quantity</label>
+              <label className="label">{t('quantity')}</label>
               <input
                 className="input mono"
                 type="number"
@@ -749,13 +748,13 @@ function PricingPanel({
               />
             </div>
             <div className="field">
-              <label className="label">Status</label>
+              <label className="label">{t('status')}</label>
               <select className="select" value={draft.status} onChange={e => set({ status: e.target.value })}>
                 {ORDER_STATUSES.map(s => <option key={s}>{s}</option>)}
               </select>
             </div>
             <div className="field">
-              <label className="label">Unit cost</label>
+              <label className="label">{t('unitCost')}</label>
               <input
                 className="input mono"
                 type="number"
@@ -766,7 +765,7 @@ function PricingPanel({
               />
             </div>
             <div className="field">
-              <label className="label">Sell price <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>(unit)</span></label>
+              <label className="label">{t('sellPrice')} <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>({t('unit')})</span></label>
               <input
                 className="input mono"
                 type="number"
@@ -787,16 +786,16 @@ function PricingPanel({
               border: '1px solid color-mix(in oklch, var(--warn) 30%, transparent)',
             }}>
               <Icon name="alert" size={13} />
-              Sell price is below unit cost — this line would book at a loss.
+              {t('ieLossyBanner')}
             </div>
           )}
 
           <div className="divider" />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-            <Stat label="Revenue" value={fmtUSD(revenue, locale)} />
-            <Stat label="Profit"  value={fmtUSD(profit, locale)}  tone={profit >= 0 ? 'pos' : 'neg'} />
-            <Stat label="Margin"  value={margin.toFixed(1) + '%'} tone={margin >= 25 ? 'pos' : margin >= 10 ? 'muted' : 'neg'} />
+            <Stat label={t('revenue')} value={fmtUSD(revenue, locale)} />
+            <Stat label={t('profit')}  value={fmtUSD(profit, locale)}  tone={profit >= 0 ? 'pos' : 'neg'} />
+            <Stat label={t('margin')}  value={margin.toFixed(1) + '%'} tone={margin >= 25 ? 'pos' : margin >= 10 ? 'muted' : 'neg'} />
           </div>
         </div>
       </div>
@@ -806,45 +805,45 @@ function PricingPanel({
           <div className="card-head">
             <div>
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                Market reference
+                {t('ieMarketReference')}
                 {refMatch.source && (
                   <span className="chip muted" style={{ fontSize: 10.5 }}>{refMatch.source}</span>
                 )}
               </div>
-              <div className="card-sub">Recent benchmarks for {refMatch.label}.</div>
+              <div className="card-sub">{t('ieMarketRefSub', { label: refMatch.label })}</div>
             </div>
             <span className="chip" style={{ fontSize: 11 }}>
               <Icon name={refMatch.demand === 'high' ? 'trending' : refMatch.demand === 'low' ? 'trendDown' : 'minus'} size={11} />
-              {' '}{refMatch.demand} demand
+              {' '}{refMatch.demand === 'high' ? t('ieDemandHigh') : refMatch.demand === 'low' ? t('ieDemandLow') : t('ieDemandSteady')}
             </span>
           </div>
           <div className="card-body" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Target cost</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('ieTargetCost')}</div>
               <div className="mono" style={{ fontSize: 18, fontWeight: 600, marginTop: 4 }}>{fmtUSD(refMatch.target, locale)}</div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                Range {fmtUSD0(refMatch.low, locale)}–{fmtUSD0(refMatch.high, locale)}
+                {t('ieRangeIs', { low: fmtUSD0(refMatch.low, locale), high: fmtUSD0(refMatch.high, locale) })}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Avg sell</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('ieAvgSell')}</div>
               <div className="mono" style={{ fontSize: 18, fontWeight: 600, marginTop: 4, color: 'var(--pos)' }}>{fmtUSD(refMatch.avgSell, locale)}</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>{refMatch.samples} sample lines</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('ieSampleLines', { n: refMatch.samples })}</div>
             </div>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Suggested price</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('ieSuggestedPrice')}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                 <span className="mono" style={{ fontSize: 18, fontWeight: 600 }}>{fmtUSD(refMatch.avgSell, locale)}</span>
                 {refMatch.avgSell != null && (
                   <button
                     className="btn sm"
                     onClick={() => set({ sellPrice: refMatch.avgSell!.toFixed(2) })}
-                    title="Apply suggested sell price"
-                  >Apply</button>
+                    title={t('ieApplySuggested')}
+                  >{t('apply')}</button>
                 )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                Updated {fmtDate(refMatch.updatedAt, locale)}
+                {t('ieUpdatedOn', { date: fmtDate(refMatch.updatedAt, locale) })}
               </div>
             </div>
           </div>
@@ -854,12 +853,12 @@ function PricingPanel({
       {/* Warehouse / origin (read-only — backend doesn't expose move-warehouse yet) */}
       <div className="card">
         <div className="card-head">
-          <div className="card-title">Location</div>
+          <div className="card-title">{t('ieLocation')}</div>
         </div>
         <div className="card-body">
           <div className="grid-2">
-            <Row label="Warehouse" value={item.warehouse_short ? `${item.warehouse_short} · ${item.warehouse_region ?? ''}` : null} />
-            <Row label="Order"     value={item.order_id} />
+            <Row label={t('warehouse')} value={item.warehouse_short ? `${item.warehouse_short} · ${item.warehouse_region ?? ''}` : null} />
+            <Row label={t('ieOrder')}     value={item.order_id} />
           </div>
         </div>
       </div>
@@ -882,21 +881,21 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'po
 
 // ─── Activity log ────────────────────────────────────────────────────────────
 function HistoryPanel({ events }: { events: Event[] }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   return (
     <div className="card">
       <div className="card-head">
         <div>
-          <div className="card-title">Activity log</div>
-          <div className="card-sub">Append-only — every status change and edit is logged with the actor and timestamp.</div>
+          <div className="card-title">{t('ieActivityLog')}</div>
+          <div className="card-sub">{t('ieActivityLogSub')}</div>
         </div>
-        <span className="chip muted">{events.length} {events.length === 1 ? 'event' : 'events'}</span>
+        <span className="chip muted">{t('ieEventCount', { n: events.length })}</span>
       </div>
       <div className="card-body" style={{ padding: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {events.length === 0 && (
-            <div style={{ padding: 18, color: 'var(--fg-subtle)', fontSize: 12 }}>No history yet.</div>
+            <div style={{ padding: 18, color: 'var(--fg-subtle)', fontSize: 12 }}>{t('ieNoHistoryYet')}</div>
           )}
           {events.map((e, i) => (
             <div key={e.id} style={{ display: 'flex', gap: 12, padding: '12px 18px', borderBottom: i < events.length - 1 ? '1px solid var(--border)' : 'none' }}>
@@ -940,37 +939,37 @@ function SummaryColumn({
   internalNotes: string;
   setInternalNotes: (v: string) => void;
 }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const sellable = draft.status === 'Reviewing' || draft.status === 'Done';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 16 }}>
       <div className="card">
         <div className="card-head">
-          <div className="card-title">At a glance</div>
+          <div className="card-title">{t('ieAtAGlance')}</div>
         </div>
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SummaryRow label="Status" value={<span className={'chip dot ' + statusTone(draft.status)}>{draft.status}</span>} />
-          <SummaryRow label="Quantity" value={<span className="mono">{draft.qty}</span>} />
-          <SummaryRow label="Unit cost" value={<span className="mono">{fmtUSD(Number(draft.unitCost) || 0, locale)}</span>} />
-          <SummaryRow label="Sell price" value={
+          <SummaryRow label={t('status')} value={<span className={'chip dot ' + statusTone(draft.status)}>{draft.status}</span>} />
+          <SummaryRow label={t('quantity')} value={<span className="mono">{draft.qty}</span>} />
+          <SummaryRow label={t('unitCost')} value={<span className="mono">{fmtUSD(Number(draft.unitCost) || 0, locale)}</span>} />
+          <SummaryRow label={t('sellPrice')} value={
             <span className="mono">{draft.sellPrice ? fmtUSD(Number(draft.sellPrice), locale) : '—'}</span>
           } />
           <div className="divider" style={{ margin: '4px 0' }} />
-          <SummaryRow label="Revenue" value={<span className="mono">{fmtUSD(revenue, locale)}</span>} />
-          <SummaryRow label="Profit" value={<span className={'mono ' + (profit >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{fmtUSD(profit, locale)}</span>} />
-          <SummaryRow label="Margin" value={<span className="mono">{margin.toFixed(1)}%</span>} />
+          <SummaryRow label={t('revenue')} value={<span className="mono">{fmtUSD(revenue, locale)}</span>} />
+          <SummaryRow label={t('profit')} value={<span className={'mono ' + (profit >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{fmtUSD(profit, locale)}</span>} />
+          <SummaryRow label={t('margin')} value={<span className="mono">{margin.toFixed(1)}%</span>} />
         </div>
       </div>
 
       <div className="card">
         <div className="card-head">
-          <div className="card-title">Internal notes</div>
+          <div className="card-title">{t('ieInternalNotes')}</div>
         </div>
         <div className="card-body">
           <textarea
             className="textarea"
-            placeholder="Notes only visible to managers (RMA codes, defect details, etc.)…"
+            placeholder={t('ieInternalNotesPh')}
             value={internalNotes}
             onChange={(e) => setInternalNotes(e.target.value)}
             rows={4}
@@ -981,39 +980,39 @@ function SummaryColumn({
 
       <div className="card">
         <div className="card-head">
-          <div className="card-title">Submitted by</div>
+          <div className="card-title">{t('submittedBy')}</div>
         </div>
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SummaryRow label="Order" value={<span className="mono">{item.order_id}</span>} />
-          <SummaryRow label="Warehouse" value={item.warehouse_short ?? '—'} />
-          <SummaryRow label="Submitter" value={
+          <SummaryRow label={t('ieOrder')} value={<span className="mono">{item.order_id}</span>} />
+          <SummaryRow label={t('warehouse')} value={item.warehouse_short ?? '—'} />
+          <SummaryRow label={t('submitter')} value={
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span className="avatar sm">{item.user_initials}</span>
               {item.user_name.split(' ')[0]}
             </span>
           } />
-          <SummaryRow label="Submitted" value={fmtDate(item.created_at, locale)} />
+          <SummaryRow label={t('ieSubmittedDate')} value={fmtDate(item.created_at, locale)} />
         </div>
       </div>
 
       <div className="card danger-card">
         <div className="card-head">
-          <div className="card-title" style={{ color: 'var(--neg)' }}>Danger zone</div>
+          <div className="card-title" style={{ color: 'var(--neg)' }}>{t('ieDangerZone')}</div>
         </div>
         <div className="card-body">
           <div className="danger-row">
             <div>
-              <div style={{ fontWeight: 500, fontSize: 13 }}>Archive item</div>
+              <div style={{ fontWeight: 500, fontSize: 13 }}>{t('ieArchiveItem')}</div>
               <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                Hidden from inventory; preserved in history.
+                {t('ieArchiveItemSub')}
               </div>
             </div>
             <button
               className="btn"
               style={{ color: 'var(--neg)', borderColor: 'color-mix(in oklch, var(--neg) 30%, var(--border))' }}
-              onClick={() => showErrorToast('Archive flow not yet implemented')}
+              onClick={() => showErrorToast(t('ieArchiveNotImpl'))}
             >
-              Archive
+              {t('archive')}
             </button>
           </div>
         </div>
@@ -1023,8 +1022,7 @@ function SummaryColumn({
         <div className="so-tip">
           <Icon name="info" size={13} />
           <div>
-            This item is <strong>{draft.status === 'Reviewing' ? 'ready to sell' : 'closed'}</strong> —
-            select it from Inventory to add to a sell order.
+            {t('ieSellableTipPre')}<strong>{draft.status === 'Reviewing' ? t('ieReadyToSell') : t('ieClosed')}</strong>{t('ieSellableTipPost')}
           </div>
         </div>
       )}
@@ -1052,6 +1050,7 @@ function BlockedByOpenOrdersBanner({
   itemId: string;
   onDismiss: () => void;
 }) {
+  const { t } = useT();
   const ALL_FIELDS = ['qty', 'status', 'price', 'cost', 'condition', 'part number', 'health', 'rpm'];
   const lockedSet = new Set(fields.length ? fields : ['qty', 'status']);
   const allowed = ALL_FIELDS.filter(f => f !== 'qty' && f !== 'status').join(' · ');
@@ -1079,17 +1078,16 @@ function BlockedByOpenOrdersBanner({
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, color: 'var(--neg)', fontSize: 14 }}>
-            Line locked by open sell orders
+            {t('ieBlockedTitle')}
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-            This inventory line is committed to a sell order that isn't Done yet.
-            Save was rejected so the order totals stay consistent.
+            {t('ieBlockedBody')}
           </div>
         </div>
         <button
           className="btn icon sm"
           onClick={onDismiss}
-          title="Dismiss"
+          title={t('dismiss')}
           style={{ flexShrink: 0 }}
         >
           <Icon name="x" size={12} />
@@ -1110,7 +1108,7 @@ function BlockedByOpenOrdersBanner({
         }}>
           <Icon name="box" size={14} style={{ color: 'var(--fg-subtle)' }} />
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600 }}>Inventory line</div>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>{t('ieInventoryLineLabel')}</div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemId.slice(0, 8)}</div>
           </div>
         </div>
@@ -1120,14 +1118,14 @@ function BlockedByOpenOrdersBanner({
           color: 'var(--neg)', fontSize: 10.5, fontWeight: 600,
           textTransform: 'uppercase', letterSpacing: 0.4,
         }}>
-          <span>committed to</span>
+          <span>{t('ieCommittedTo')}</span>
           <Icon name="arrow" size={16} />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
           {orders.length === 0 ? (
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)', fontStyle: 'italic' }}>
-              An open sell order references this line. Refresh to reload the list.
+              {t('ieBlockedRefreshHint')}
             </div>
           ) : (
             orders.map(so => (
@@ -1161,17 +1159,16 @@ function BlockedByOpenOrdersBanner({
       {/* Fields detail + resolution */}
       <div style={{ display: 'grid', gap: 6, fontSize: 12.5 }}>
         <div>
-          <span style={{ color: 'var(--fg-subtle)' }}>Locked fields: </span>
+          <span style={{ color: 'var(--fg-subtle)' }}>{t('ieLockedFieldsLabel')} </span>
           {[...lockedSet].map((f, i) => (
             <span key={f} style={{ fontWeight: 600, color: 'var(--neg)' }}>
               {i > 0 ? ' · ' : ''}{f}
             </span>
           ))}
-          <span style={{ color: 'var(--fg-subtle)' }}>   ·   Allowed: {allowed}</span>
+          <span style={{ color: 'var(--fg-subtle)' }}>   ·   {t('ieAllowedFieldsLabel', { fields: allowed })}</span>
         </div>
         <div style={{ color: 'var(--fg-subtle)' }}>
-          <strong style={{ color: 'var(--fg)' }}>Resolution:</strong> mark the sell order(s) Done,
-          or unlink this line from the sell order, before changing qty or status.
+          <strong style={{ color: 'var(--fg)' }}>{t('ieResolutionLabel')}</strong> {t('ieResolutionBody')}
         </div>
       </div>
     </div>

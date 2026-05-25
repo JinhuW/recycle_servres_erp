@@ -303,7 +303,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </span>
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
-            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length} line{lines.length === 1 ? '' : 's'} · {t('editOrderSub')}
+            {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap' }}>
@@ -317,23 +317,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   setArchiving(true);
                   try {
                     await unarchiveOrder(order.id);
-                    onSaved('Order restored');
+                    onSaved(t('orderRestoredToast'));
                   } catch (e) {
                     handleFetchError(e);
                     setArchiving(false);
                   }
                 }}
-                title="Restore this order to the active list"
+                title={t('eoUnarchiveTooltip')}
               >
-                <Icon name="rotate" size={13} /> {archiving ? '…' : 'Unarchive'}
+                <Icon name="rotate" size={13} /> {archiving ? '…' : t('eoUnarchive')}
               </button>
             ) : (
               <button
                 className="btn"
                 onClick={() => setShowArchive(true)}
-                title="Hide from default list (reversible)"
+                title={t('eoArchiveTooltip')}
               >
-                <Icon name="box" size={13} /> Archive order
+                <Icon name="box" size={13} /> {t('archiveOrder')}
               </button>
             )
           )}
@@ -343,7 +343,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
               onClick={() => { setTypedId(''); setShowDelete(true); }}
             >
-              <Icon name="trash" size={13} /> Delete order
+              <Icon name="trash" size={13} /> {t('deleteOrder')}
             </button>
           )}
         </div>
@@ -361,8 +361,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             <Icon name="box" size={14} />
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
-            <strong style={{ color: 'var(--fg)' }}>Archived</strong> · hidden from the default order list.
-            Toggle <em>Show archived</em> on the list page to find it, or click <em>Unarchive</em> above to restore.
+            <strong style={{ color: 'var(--fg)' }}>{t('historyArchived')}</strong> · {t('eoArchivedBannerBody')}
           </div>
         </div>
       )}
@@ -375,11 +374,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             <div className="card-sub">{t('orderContainsMultiple', { cat: order.category })}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span className="chip mono">{totals.qty} units · {fmtUSD(totals.cost, locale)}</span>
-            <span className="chip mono">{order.id} · Editing</span>
+            <span className="chip mono">{t('subUnitsCost', { n: totals.qty, cost: fmtUSD(totals.cost, locale) })}</span>
+            <span className="chip mono">{order.id} · {t('subStatusEditing')}</span>
             {canEditOrder && (
               <button className="btn accent" style={{ marginLeft: 'auto' }} onClick={addLine}>
-                <Icon name="plus" size={13} /> Add {order.category} line
+                <Icon name="plus" size={13} /> {t('subAddLine', { cat: order.category })}
               </button>
             )}
           </div>
@@ -389,7 +388,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             <thead>
               <tr>
                 <th style={{ width: 28 }}>#</th>
-                <th>Item</th>
+                <th>{t('item')}</th>
                 <th>{t('partNumber')}</th>
                 <th className="num">{t('qty')}</th>
                 <th className="num">{t('unitCost')}</th>
@@ -447,7 +446,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                             </>
                           ) : (
                             <span className="muted" style={{ fontStyle: 'italic' }}>
-                              {isActive ? 'Editing — fill in below' : 'Not filled in'}
+                              {isActive ? t('subEditingFill') : t('subNotFilled')}
                             </span>
                           )}
                         </div>
@@ -467,7 +466,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                         <button
                           className="btn icon sm"
                           onClick={e => { e.stopPropagation(); removeLine(i); }}
-                          title="Remove line"
+                          title={t('soRemoveLineTooltip')}
                           disabled={lines.length <= 1}
                           style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         >
@@ -487,22 +486,22 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           fontSize: 13, background: 'var(--bg-soft)',
         }}>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            Revenue <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue, locale)}</span>
+            {t('revenue')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue, locale)}</span>
           </span>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            Cost <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.cost, locale)}</span>
+            {t('eoCost')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.cost, locale)}</span>
           </span>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            Profit <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.profit, locale)}</span>
+            {t('profit')} <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.profit, locale)}</span>
           </span>
         </div>
       </div>
 
       <aside className="oe-side">
         <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Payment detail</div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('eoPaymentDetail')}</div>
           <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-            What {order.userName.split(' ')[0]} earns on this PO
+            {t('eoWhatEarnsOnPO', { name: order.userName.split(' ')[0] })}
           </div>
 
           <div style={{ marginTop: 10 }}>
@@ -510,7 +509,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               className={'chip ' + (payment === 'self' ? 'info' : 'pos')}
               style={{ fontSize: 11 }}
             >
-              {payment === 'self' ? 'Self pay' : 'Company pay'}
+              {payment === 'self' ? t('eoSelfPay') : t('eoCompanyPay')}
             </span>
           </div>
 
@@ -518,7 +517,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             marginTop: 14, fontSize: 10.5, color: 'var(--fg-subtle)',
             textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600,
           }}>
-            Purchaser earns
+            {t('eoPurchaserEarns')}
           </div>
           <div
             className="mono"
@@ -539,10 +538,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             borderRadius: 6, fontSize: 11.5, lineHeight: 1.55,
           }}>
             <div style={{ color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, fontSize: 10 }}>
-              Formula
+              {t('eoFormula')}
             </div>
             <div style={{ marginTop: 4 }}>
-              {payment === 'self' ? 'Self pay + (Revenue − Cost) × Rate' : '(Revenue − Cost) × Rate'}
+              {payment === 'self' ? t('eoFormulaSelf') : t('eoFormulaCompany')}
             </div>
             <div className="mono" style={{ marginTop: 4, color: 'var(--fg)' }}>
               {payment === 'self' ? `${fmtUSD(effectiveTotalCost, locale)} + ` : ''}
@@ -559,28 +558,28 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           }}>
             {payment === 'self' && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--fg-subtle)' }}>Self pay</span>
+                <span style={{ color: 'var(--fg-subtle)' }}>{t('eoSelfPay')}</span>
                 <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>Revenue</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('revenue')}</span>
               <span className="mono">{fmtUSD(totals.revenue, locale)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>Cost</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoCost')}</span>
               <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>Profit</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('profit')}</span>
               <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>Rate</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoRate')}</span>
               <span className="mono">{(commissionRateApplied * 100).toFixed(2)}%</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>Commission on profit</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoCommissionOnProfit')}</span>
               <span className="mono">{fmtUSD(commissionOnProfit, locale)}</span>
             </div>
             <div style={{
@@ -588,14 +587,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               paddingTop: 6, borderTop: '1px dashed var(--border)',
               fontWeight: 600,
             }}>
-              <span>Total</span>
+              <span>{t('eoTotal')}</span>
               <span className="mono">{fmtUSD(purchaserEarn, locale)}</span>
             </div>
           </div>
 
           {totals.pricedCount < lines.length && (
             <div style={{ marginTop: 12, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-              {lines.length - totals.pricedCount} line{lines.length - totals.pricedCount === 1 ? '' : 's'} without a sell price drag profit down until priced.
+              {t('eoUnpricedLinesHint', { n: lines.length - totals.pricedCount })}
             </div>
           )}
         </div>
@@ -633,8 +632,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     onClick={() => { if (!locked && !orderLocked) setStatus(s); }}
                     disabled={locked || orderLocked}
                     title={locked
-                      ? 'Manager-only — purchasers can only hand off Draft → In Transit'
-                      : `Set status to ${s}`}
+                      ? t('eoStepLockedTooltip')
+                      : t('eoSetStatusTo', { s })}
                   >
                     <span className="so-step-dot">
                       {locked ? <Icon name="lock" size={10} /> : (i + 1)}
@@ -656,7 +655,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               border: '1px solid var(--border)',
             }}>
               <Icon name="lock" size={13} />
-              This order is being reviewed by the manager — pricing happens during review. You can view but not edit.
+              {t('eoReviewedByMgr')}
             </div>
           )}
           {isPurchaser && purchaserCanEdit && effectiveStatus === 'Draft' && (
@@ -686,7 +685,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="info" size={13} />
-              Status will change from <strong>{effectiveStatus}</strong> to <strong>{status}</strong> when you save.
+              {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {t('eoStatusChangePost')}
             </div>
           )}
           {statusDirty && isPurchaser && (
@@ -696,7 +695,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="info" size={13} />
-              Status will change from <strong>{effectiveStatus}</strong> to <strong>{status}</strong> when you save — this hands the order off to the manager.
+              {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {t('eoStatusChangePurchPost')}
             </div>
           )}
         </div>
@@ -764,7 +763,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 step="0.1"
                 disabled={isPurchaser}
                 value={commissionPct}
-                placeholder={isPurchaser ? '—' : 'Set rate'}
+                placeholder={isPurchaser ? '—' : t('eoSetRate')}
                 onChange={e => setCommissionPct(e.target.value)}
               />
             </div>
@@ -778,8 +777,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       setTotalCostInput(totals.cost.toFixed(2));
                     }}
                     style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-strong)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                    title={`Auto-sum is ${fmtUSD(totals.cost, locale)}`}
-                  >reset</button>
+                    title={t('subAutoSumIs', { cost: fmtUSD(totals.cost, locale) })}
+                  >{t('reset')}</button>
                 )}
               </label>
               <div style={{ position: 'relative' }}>
@@ -823,17 +822,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           gap: 18, alignItems: 'center',
         }}>
           <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Lines</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
           </div>
           <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Total units</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('subTotalUnits')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{totals.qty}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              Total cost {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > 0.01 && (
-                <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · override</span>
+              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > 0.01 && (
+                <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
@@ -892,9 +891,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   <Icon name="trash" size={18} />
                 </div>
                 <div>
-                  <div className="modal-title">Delete order {order.id}?</div>
+                  <div className="modal-title">{t('deleteOrderTitle', { id: order.id })}</div>
                   <div className="modal-sub">
-                    This permanently deletes the Draft and all its lines. Type the order ID to confirm.
+                    {t('eoDeleteSubFull')}
                   </div>
                 </div>
               </div>
@@ -902,7 +901,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             <div className="modal-body">
               <div className="field">
                 <label className="label">
-                  Type <span className="mono">{order.id}</span> to confirm
+                  {t('dangerTypeToConfirmPrefix')} <span className="mono">{order.id}</span> {t('dangerTypeToConfirmSuffix')}
                 </label>
                 <input
                   className="input mono"
@@ -920,7 +919,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 onClick={() => setShowDelete(false)}
                 disabled={deleting}
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 className="btn"
@@ -940,7 +939,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   }
                 }}
               >
-                {deleting ? '…' : 'Delete order'}
+                {deleting ? '…' : t('deleteOrder')}
               </button>
             </div>
           </div>
@@ -963,16 +962,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   <Icon name="box" size={18} />
                 </div>
                 <div>
-                  <div className="modal-title">Archive order {order.id}?</div>
+                  <div className="modal-title">{t('eoArchiveModalTitle', { id: order.id })}</div>
                   <div className="modal-sub">
-                    Hides it from the default list. Lines, audit trail and any commission stay intact, and you can unarchive at any time.
+                    {t('eoArchiveModalBody')}
                   </div>
                 </div>
               </div>
             </div>
             <div className="modal-foot">
               <button className="btn" onClick={() => setShowArchive(false)} disabled={archiving}>
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 className="btn accent"
@@ -981,7 +980,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   setArchiving(true);
                   try {
                     await archiveOrder(order.id);
-                    onSaved('Order archived');
+                    onSaved(t('orderArchivedToast'));
                   } catch (e) {
                     handleFetchError(e);
                     setArchiving(false);
@@ -989,7 +988,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   }
                 }}
               >
-                {archiving ? '…' : 'Archive order'}
+                {archiving ? '…' : t('archiveOrder')}
               </button>
             </div>
           </div>
