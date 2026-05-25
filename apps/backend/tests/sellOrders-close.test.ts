@@ -58,6 +58,14 @@ describe('POST /api/sell-orders/:id/status — Close', () => {
     expect(ev.detail.reasonId).toBe('customer_cancelled');
     expect(ev.detail.note).toBe('changed mind');
     expect(ev.detail.fromStatus).toBe('Draft');
+
+    // Spec: the per-status evidence panel must render for Closed.
+    const meta = (await sql`
+      SELECT note FROM sell_order_status_meta
+      WHERE sell_order_id = ${id} AND status = 'Closed'
+    `)[0];
+    expect(meta).toBeDefined();
+    expect(meta.note).toBe('changed mind');
   });
 
   it('Shipped → Closed releases the soft-committed inventory line', async () => {

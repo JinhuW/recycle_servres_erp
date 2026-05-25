@@ -526,10 +526,6 @@ const KNOWN_STATUSES = new Set<string>([
 // uploads (those routes look it up dynamically); this set governs the
 // transition-time evidence gate.
 const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']);
-// Subset of NEEDS_EVIDENCE whose evidence is persisted to sell_order_status_meta.
-// The meta table's CHECK constraint (migration 0003) caps it at the three
-// in-flight statuses; Closed/Draft evidence is captured in sell_order_events.
-const META_PERSIST_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done']);
 
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;
@@ -621,12 +617,12 @@ sellOrders.post('/:id/status', async (c) => {
       await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
     }
 
-    // Evidence persistence (status_meta upsert). The meta table's CHECK
-    // constraint (migration 0003) only accepts Shipped/Awaiting payment/Done
-    // — those are the statuses the frontend renders evidence for. The
-    // Closed-entry / Closed→Draft-reopen evidence lives in sell_order_events
-    // instead (richer payload — reasonId, fromStatus — anyway).
-    if ((hasNote || NEEDS_EVIDENCE.has(body.to)) && META_PERSIST_STATUSES.has(body.to)) {
+    // Evidence persistence (status_meta upsert). Fires for any transition
+    // INTO a meta-tracked status (Shipped / Awaiting payment / Done / Closed).
+    // Draft is intentionally excluded: reopen-to-Draft notes live in
+    // sell_order_events so successive reopen cycles don't overwrite each
+    // other (status_meta PK is sell_order_id + status, single row per pair).
+    if (NEEDS_EVIDENCE.has(body.to) && body.to !== 'Draft') {
       await tx`
         INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_at, set_by)
         VALUES (${id}, ${body.to}, ${body.note ?? null}, NOW(), ${u.id})
