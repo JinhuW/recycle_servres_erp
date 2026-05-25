@@ -848,7 +848,9 @@ function SellOrderDetail({
                   <Icon name="box" size={14} /> {unarchiving ? 'Unarchiving…' : 'Unarchive'}
                 </button>
               )}
-              <button className="btn" onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
+              {!editable && (
+                <button className="btn" onClick={onClose}>Close</button>
+              )}
               {/* Close as off-ramp: available everywhere except Done (terminal)
                   and Closed (already closed → use Reopen instead). Manager-only
                   surface is enforced at the page level so no extra role check. */}
