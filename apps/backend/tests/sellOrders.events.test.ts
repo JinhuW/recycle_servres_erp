@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { resetDb, getTestDb } from './helpers/db';
-import { api } from './helpers/app';
+import { api, multipart } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { eventsOf } from './helpers/sellOrderEvents';
+
+const pdf = join(__dirname, 'fixtures', 'invoice.pdf');
 
 async function firstCustomerId(token: string): Promise<string> {
   const r = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
@@ -218,5 +222,57 @@ describe('sell-order audit events', () => {
 
     const events = (await eventsOf(id)).filter(e => e.kind === 'status_changed');
     expect(events).toHaveLength(1);
+  });
+
+  it('PUT status-meta note emits `status_meta_changed`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const r = await api('PUT', `/api/sell-orders/${id}/status-meta/Shipped`, {
+      token, body: { note: 'tracking 1Z999' },
+    });
+    expect(r.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind === 'status_meta_changed');
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toMatchObject({
+      status: 'Shipped',
+      field: 'note',
+    });
+  });
+
+  it('POST status-meta attachment emits `status_meta_changed`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const file = new File([readFileSync(pdf)], 'invoice.pdf', { type: 'application/pdf' });
+    const r = await multipart(`/api/sell-orders/${id}/status-meta/Shipped/attachments`, { file }, { token });
+    expect(r.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind === 'status_meta_changed');
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toMatchObject({
+      status: 'Shipped',
+      field: 'attachment_added',
+      filename: 'invoice.pdf',
+    });
   });
 });

@@ -467,12 +467,24 @@ sellOrders.put('/:id/status-meta/:status', async (c) => {
   if (!exists) return c.json({ error: 'Not found' }, 404);
 
   const note = (body.note ?? '').trim() || null;
-  await sql`
-    INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_by)
-    VALUES (${id}, ${status}, ${note}, ${u.id})
-    ON CONFLICT (sell_order_id, status)
-    DO UPDATE SET note = EXCLUDED.note, set_at = NOW(), set_by = EXCLUDED.set_by
-  `;
+  await sql.begin(async (tx) => {
+    const before = (await tx<{ note: string | null }[]>`
+      SELECT note FROM sell_order_status_meta
+      WHERE sell_order_id = ${id} AND status = ${status} LIMIT 1
+    `)[0];
+    await tx`
+      INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_by)
+      VALUES (${id}, ${status}, ${note}, ${u.id})
+      ON CONFLICT (sell_order_id, status)
+      DO UPDATE SET note = EXCLUDED.note, set_at = NOW(), set_by = EXCLUDED.set_by
+    `;
+    const fromNote = before?.note ?? null;
+    if (fromNote !== note) {
+      await writeSellOrderEvent(tx, id, u.id, 'status_meta_changed', {
+        status, field: 'note', from: fromNote, to: note,
+      });
+    }
+  });
   return c.json({ ok: true });
 });
 
@@ -505,19 +517,30 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
+  // R2 upload happens outside the transaction — it's the slow part. A tx open
+  // across it would hold a row lock for the whole upload. If the DB INSERT
+  // below fails the uploaded object is orphaned in R2; r2.ts treats orphans
+  // as a separate concern.
   const uploaded = await uploadAttachment(c.env, file, `sell-orders/${id}/${status}`)
     .catch(e => { console.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
-  const row = (await sql`
-    INSERT INTO sell_order_status_attachments
-      (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
-    VALUES
-      (${id}, ${status}, ${file.name}, ${file.size},
-       ${file.type || 'application/octet-stream'},
-       ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
-    RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
-  `)[0];
+  const row = await sql.begin(async (tx) => {
+    const r = (await tx`
+      INSERT INTO sell_order_status_attachments
+        (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
+      VALUES
+        (${id}, ${status}, ${file.name}, ${file.size},
+         ${file.type || 'application/octet-stream'},
+         ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
+      RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+    `)[0];
+    await writeSellOrderEvent(tx, id, u.id, 'status_meta_changed', {
+      status, field: 'attachment_added',
+      attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+    });
+    return r;
+  });
 
   return c.json({
     attachment: {
@@ -542,15 +565,26 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
   const sql = getDb(c.env);
   const metaStatusSet = await loadMetaStatuses(sql);
   if (!metaStatusSet.has(status)) return c.json({ error: 'invalid status' }, 400);
-  const row = (await sql`
-    SELECT storage_key FROM sell_order_status_attachments
-    WHERE id = ${attachmentId} AND sell_order_id = ${id} AND status = ${status}
-    LIMIT 1
-  `)[0] as { storage_key: string } | undefined;
-  if (!row) return c.json({ error: 'Not found' }, 404);
 
-  await deleteAttachment(c.env, row.storage_key).catch(e => console.error('r2 delete', e));
-  await sql`DELETE FROM sell_order_status_attachments WHERE id = ${attachmentId}`;
+  const removed = await sql.begin(async (tx) => {
+    const row = (await tx`
+      SELECT storage_key, filename FROM sell_order_status_attachments
+      WHERE id = ${attachmentId} AND sell_order_id = ${id} AND status = ${status}
+      LIMIT 1
+    `)[0] as { storage_key: string; filename: string } | undefined;
+    if (!row) return null;
+    await tx`DELETE FROM sell_order_status_attachments WHERE id = ${attachmentId}`;
+    await writeSellOrderEvent(tx, id, u.id, 'status_meta_changed', {
+      status, field: 'attachment_removed',
+      attachmentId, filename: row.filename,
+    });
+    return row;
+  });
+
+  if (!removed) return c.json({ error: 'Not found' }, 404);
+  // R2 delete happens outside the tx — same rationale as upload: slow side
+  // effect, kept out of the lock window. Best-effort.
+  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
   return c.json({ ok: true });
 });
 
