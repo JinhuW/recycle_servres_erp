@@ -158,7 +158,7 @@ vendorBids.post('/:id/promote', async (c) => {
   let sellId!: string;
 
   await sql.begin(async (tx) => {
-    sellId = await nextHumanId(tx, 'SL', 'SL');
+    sellId = await nextHumanId(tx, 'SO', 'SO');
     const head = (await tx<{ customer_id: string }[]>`
       SELECT customer_id FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
     if (!head) { outcome = { code: 400, msg: 'bid not found' }; return; }

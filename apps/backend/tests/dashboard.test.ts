@@ -49,12 +49,12 @@ describe('GET /api/dashboard', () => {
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
     await db`
       INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-      VALUES ('SL-TEST-DASH-3', ${customerId}, 'Done',
+      VALUES ('SO-TEST-DASH-3', ${customerId}, 'Done',
               (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW())
     `;
     await db`
       INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
-      VALUES ('SL-TEST-DASH-3', ${line.id}, ${line.category}, 'x', 1, 500.00, 0)
+      VALUES ('SO-TEST-DASH-3', ${line.id}, ${line.category}, 'x', 1, 500.00, 0)
     `;
 
     const { token, user } = await loginAs(MARCUS);
@@ -99,13 +99,13 @@ describe('GET /api/dashboard', () => {
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
     await db`
       INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-      VALUES ('SL-TEST-ROUND', ${customerId}, 'Done',
+      VALUES ('SO-TEST-ROUND', ${customerId}, 'Done',
               (SELECT id FROM users LIMIT 1), NOW(), NOW())
     `;
     // unit_price=1.005 so revenue = 1.005 (rounds to 1.01 or 1.00 depending on impl)
     await db`
       INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
-      VALUES ('SL-TEST-ROUND', ${line.id}, ${line.category}, 'x', 1, 1.005, 0)
+      VALUES ('SO-TEST-ROUND', ${line.id}, ${line.category}, 'x', 1, 1.005, 0)
     `;
 
     const { token } = await loginAs(ALEX);

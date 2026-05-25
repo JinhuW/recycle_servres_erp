@@ -633,7 +633,7 @@ try {
     cursor += s.count;
     if (lines.length === 0) continue;
     const cust = customerRows[s.custIdx];
-    const id = 'SL-' + (++soId);
+    const id = 'SO-' + (++soId);
     const created = new Date(Date.now() - s.ago * 86400000);
     await sql`
       INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
@@ -693,8 +693,8 @@ try {
     INSERT INTO id_counters (name, value) VALUES
       ('PO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1288)
                 FROM orders WHERE id ~ '^PO-[0-9]+$')),
-      ('SL', (SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int), 4000)
-                FROM sell_orders)),
+      ('SO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 4000)
+                FROM sell_orders WHERE id ~ '^SO-[0-9]+$')),
       ('TO', (SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)), 1000)
                 FROM transfer_orders WHERE id ~ '^TO-[0-9]+$'))
     ON CONFLICT (name) DO UPDATE SET value = GREATEST(id_counters.value, EXCLUDED.value)

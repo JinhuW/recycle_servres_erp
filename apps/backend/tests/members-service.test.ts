@@ -104,7 +104,7 @@ describe('GET /api/members — lifetime_profit is realized (not projected)', () 
 
     const UNIT_PRICE = 1234.00;
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
-    const soId = 'SL-MEMBERS-PROFIT-1';
+    const soId = 'SO-MEMBERS-PROFIT-1';
     await db`
       INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
       VALUES (${soId}, ${customerId}, 'Done',

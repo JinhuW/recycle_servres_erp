@@ -28,12 +28,12 @@ async function setupOneDoneSale(opts: { rate: number; unitPrice: number; soldQty
   const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
   await db`
     INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
-    VALUES ('SL-TEST-DASH-1', ${customerId}, 'Done',
+    VALUES ('SO-TEST-DASH-1', ${customerId}, 'Done',
             (SELECT id FROM users WHERE email = ${MARCUS}), NOW(), NOW())
   `;
   await db`
     INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
-    VALUES ('SL-TEST-DASH-1', ${line.id}, ${line.category}, 'x', ${opts.soldQty}, ${opts.unitPrice}, 0)
+    VALUES ('SO-TEST-DASH-1', ${line.id}, ${line.category}, 'x', ${opts.soldQty}, ${opts.unitPrice}, 0)
   `;
   return { unitCost: Number(line.unit_cost), category: line.category };
 }
@@ -99,7 +99,7 @@ describe('GET /api/dashboard — realized financials', () => {
     const { unitCost } = await setupOneDoneSale({ rate: 0.10, unitPrice: 200, soldQty: 1 });
     // Backdate the Done transition into the previous 30d window (45 days ago).
     const db = getTestDb();
-    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '45 days' WHERE id = 'SL-TEST-DASH-1'`;
+    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '45 days' WHERE id = 'SO-TEST-DASH-1'`;
 
     const { token } = await loginAs(MARCUS);
     const r = await api<{
@@ -116,7 +116,7 @@ describe('GET /api/dashboard — realized financials', () => {
     await setupOneDoneSale({ rate: 0.1, unitPrice: 100, soldQty: 1 });
     // Backdate the Done transition beyond the 7d window.
     const db = getTestDb();
-    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '30 days' WHERE id = 'SL-TEST-DASH-1'`;
+    await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '30 days' WHERE id = 'SO-TEST-DASH-1'`;
 
     const { token } = await loginAs(MARCUS);
     const inside  = await api<{ kpis: { revenue: number } }>('GET', '/api/dashboard?range=90d', { token });

@@ -1,7 +1,7 @@
 /**
  * Wave 2B backend fix tests.
  * Fix 1: sell_price can be explicitly cleared to null in PATCH
- * Fix 2: Human-IDs (SL-/PO-) allocated inside their transaction
+ * Fix 2: Human-IDs (SO-/PO-) allocated inside their transaction
  * Fix 3: Backward-advance guard on committed inventory
  * Fix 4: Vendor-bid decide N+1 collapse (behavior unchanged)
  *
@@ -204,8 +204,8 @@ describe('Wave 2B backend fixes', () => {
     const id2 = good2.body.id;
 
     // IDs should be consecutive (no gap from the rolled-back failed create)
-    const n1 = parseInt(id1.replace('SL-', ''), 10);
-    const n2 = parseInt(id2.replace('SL-', ''), 10);
+    const n1 = parseInt(id1.replace('SO-', ''), 10);
+    const n2 = parseInt(id2.replace('SO-', ''), 10);
     expect(n2).toBe(n1 + 1);
   });
 

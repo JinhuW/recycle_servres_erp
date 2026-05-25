@@ -12,11 +12,11 @@ import { freeSellableLine } from './helpers/inventory';
 describe('Sell orders: no discount, total === subtotal', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('the seeded SL-4006 reports total === subtotal', async () => {
+  it('the seeded SO-4006 reports total === subtotal', async () => {
     const { token } = await loginAs(ALEX);
     const r = await api<{
       order: { subtotal: number; total: number; discount?: number; discountPct?: number };
-    }>('GET', '/api/sell-orders/SL-4006', { token });
+    }>('GET', '/api/sell-orders/SO-4006', { token });
     expect(r.status).toBe(200);
     expect(r.body.order.total).toBeCloseTo(r.body.order.subtotal, 2);
     expect(r.body.order.discount ?? 0).toBe(0);

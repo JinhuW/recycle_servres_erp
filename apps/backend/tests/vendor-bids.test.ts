@@ -145,7 +145,7 @@ describe('vendor-bids manager route', () => {
     });
     const p1 = await api<{ sellOrderId: string }>('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
     expect(p1.status).toBe(201);
-    expect(p1.body.sellOrderId).toMatch(/^SL-\d+$/);
+    expect(p1.body.sellOrderId).toMatch(/^SO-\d+$/);
     const so = await api<{ order: { lines: unknown[] } }>(
       'GET', `/api/sell-orders/${p1.body.sellOrderId}`, { token: mgr });
     expect(so.status).toBe(200);
@@ -174,7 +174,7 @@ describe('vendor-bids manager route', () => {
     expect(dec.status).toBe(200);
     const p = await api<{ sellOrderId: string }>('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
     expect(p.status).toBe(201);
-    expect(p.body.sellOrderId).toMatch(/^SL-\d+$/);
+    expect(p.body.sellOrderId).toMatch(/^SO-\d+$/);
     const so = await api<{ order: { lines: unknown[] } }>(
       'GET', `/api/sell-orders/${p.body.sellOrderId}`, { token: mgr });
     expect(so.status).toBe(200);

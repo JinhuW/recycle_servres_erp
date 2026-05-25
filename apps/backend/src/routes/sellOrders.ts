@@ -244,7 +244,7 @@ sellOrders.post('/', async (c) => {
     }
   }
 
-  // Human-friendly id like SL-4001, allocated atomically (see id-seq.ts).
+  // Human-friendly id like SO-4001, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let nextId!: string;
   // Sellability is validated *inside* the tx (source rows locked FOR UPDATE)
@@ -252,7 +252,7 @@ sellOrders.post('/', async (c) => {
   type Outcome = { code: 400; msg: string } | { code: 201 };
   let outcome: Outcome = { code: 201 };
   await sql.begin(async (tx) => {
-    nextId = await nextHumanId(tx, 'SL', 'SL');
+    nextId = await nextHumanId(tx, 'SO', 'SO');
     const err = await validateSellLines(tx, body.lines, null);
     if (err) { outcome = { code: 400, msg: err }; return; } // roll back — nothing written
     await tx`

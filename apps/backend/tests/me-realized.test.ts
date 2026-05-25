@@ -37,7 +37,7 @@ describe('GET /api/me — realized lifetime stats', () => {
     await db`UPDATE orders SET commission_rate = ${RATE} WHERE id = ${line.po_id}`;
 
     const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
-    const soId = 'SL-TEST-REALIZED-1';
+    const soId = 'SO-TEST-REALIZED-1';
     await db`
       INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
       VALUES (${soId}, ${customerId}, 'Done',
