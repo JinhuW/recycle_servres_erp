@@ -69,4 +69,82 @@ describe('sell-order audit events', () => {
       vendorBidId: bidRow.bid_id,
     });
   });
+
+  it('PATCH that changes only `notes` emits one `meta_changed`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId, notes: 'before',
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const r = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { notes: 'after' },
+    });
+    expect(r.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind !== 'created');
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe('meta_changed');
+    expect(events[0].detail).toMatchObject({
+      changes: [{ field: 'notes', from: 'before', to: 'after' }],
+    });
+  });
+
+  it('PATCH with identical values emits zero events', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId, notes: 'same',
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const r = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { notes: 'same' },
+    });
+    expect(r.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind !== 'created');
+    expect(events).toHaveLength(0);
+  });
+
+  it('PATCH editing an inventory-backed line qty emits `line_edited`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token, 3); // need qty >= 3 so we can bump from 1 to 2
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const r = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: {
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 2, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    expect(r.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind !== 'created');
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe('line_edited');
+    expect(events[0].detail).toMatchObject({
+      inventoryId: line.id,
+      changes: [{ field: 'qty', from: 1, to: 2 }],
+    });
+  });
 });

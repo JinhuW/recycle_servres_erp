@@ -7,7 +7,10 @@ import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
-import { writeSellOrderEvent } from '../services/sellOrderAudit';
+import {
+  writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
+} from '../services/sellOrderAudit';
+import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -355,6 +358,20 @@ sellOrders.patch('/:id', async (c) => {
   type Outcome = { code: 400; msg: string } | { code: 200 };
   let outcome: Outcome = { code: 200 };
   await sql.begin(async (tx) => {
+    // Snapshot BEFORE state for diffing. Lock the header row so a concurrent
+    // edit can't slip an event we'd then miss; lines are read consistently
+    // inside the same tx so no extra lock is needed.
+    const beforeHead = (await tx<{ notes: string | null; customer_id: string }[]>`
+      SELECT notes, customer_id FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0];
+    const beforeLines = body.lines !== undefined
+      ? await tx<SOLineSnap[]>`
+          SELECT inventory_id, qty, unit_price::float AS unit_price, condition,
+                 category, label, sub_label, part_number, warehouse_id
+          FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY position
+        `
+      : [];
+
     if (body.lines !== undefined) {
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
@@ -383,6 +400,40 @@ sellOrders.patch('/:id', async (c) => {
              ${l.qty}, ${l.unitPrice},
              ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i})
         `;
+      }
+    }
+
+    // Diff events — emitted only when something actually changed.
+    const afterHead = (await tx<{ notes: string | null; customer_id: string }[]>`
+      SELECT notes, customer_id FROM sell_orders WHERE id = ${id} LIMIT 1
+    `)[0];
+    const metaChanges: AuditChange[] = diff(
+      beforeHead as unknown as Record<string, unknown>,
+      afterHead as unknown as Record<string, unknown>,
+      META_FIELDS_SO,
+    );
+    if (metaChanges.length > 0) {
+      await writeSellOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
+    }
+
+    if (body.lines !== undefined) {
+      const afterLines = await tx<SOLineSnap[]>`
+        SELECT inventory_id, qty, unit_price::float AS unit_price, condition,
+               category, label, sub_label, part_number, warehouse_id
+        FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY position
+      `;
+      const lineDiff = diffSellOrderLines(beforeLines as unknown as SOLineSnap[],
+                                          afterLines as unknown as SOLineSnap[]);
+      for (const snap of lineDiff.added) {
+        await writeSellOrderEvent(tx, id, u.id, 'line_added', { snapshot: snap });
+      }
+      for (const snap of lineDiff.removed) {
+        await writeSellOrderEvent(tx, id, u.id, 'line_removed', { snapshot: snap });
+      }
+      for (const e of lineDiff.edited) {
+        await writeSellOrderEvent(tx, id, u.id, 'line_edited', {
+          inventoryId: e.inventoryId, changes: e.changes, snapshot: e.snapshot,
+        });
       }
     }
   });
