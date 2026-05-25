@@ -55,7 +55,7 @@ type Props = {
 };
 
 export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<string>('');
@@ -188,7 +188,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
               {lines.length} {lines.length === 1 ? 'item' : 'items'} from inventory
             </h2>
           </div>
-          <button className="btn icon" onClick={onClose} title="Close">
+          <button className="btn icon" onClick={onClose} title={t('closeBtn')}>
             <Icon name="x" size={16} />
           </button>
         </div>
@@ -292,7 +292,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                             <td>
                               <button
                                 className="btn icon sm"
-                                title="Remove"
+                                title={t('remove')}
                                 onClick={() => removeLine(idx)}
                               >
                                 <Icon name="x" size={12} />

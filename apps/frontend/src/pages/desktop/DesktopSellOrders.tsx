@@ -242,7 +242,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
             }} />
             <input
               className="input"
-              placeholder="Search order, customer…"
+              placeholder={t('soSearchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 260 }}
@@ -251,7 +251,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           <button
             className="btn"
             onClick={() => setShowArchived(v => !v)}
-            title={showArchived ? 'Hide archived sell orders' : 'Show archived sell orders'}
+            title={showArchived ? t('hideArchivedSOs') : t('showArchivedSOs')}
             style={{
               height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
               background: showArchived ? 'var(--bg-soft)' : undefined,
@@ -260,7 +260,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
             }}
           >
             <Icon name="box" size={12} />
-            {showArchived ? 'Hide archived' : 'Show archived'}
+            {showArchived ? t('hideArchivedBtn') : t('showArchivedBtn')}
           </button>
         </div>
 
@@ -330,7 +330,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button
                         className="btn icon sm"
-                        title="View"
+                        title={t('soViewTooltip')}
                         onClick={() => navigate('/sell-orders/' + o.id)}
                       >
                         <Icon name="eye" size={12} />
@@ -387,7 +387,7 @@ function SellOrderDetail({
   onSaved: () => void;
   onSwitchToEdit: () => void;
 }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
   const [draft, setDraft] = useState<{
@@ -640,7 +640,7 @@ function SellOrderDetail({
                               {s}
                               {hasMeta && (
                                 <span
-                                  title="Tracking info recorded"
+                                  title={t('soTrackingRecorded')}
                                   style={{
                                     marginLeft: 6, display: 'inline-flex',
                                     alignItems: 'center', color: 'var(--accent-strong)',
@@ -757,7 +757,7 @@ function SellOrderDetail({
                       <td>
                         <button
                           className="btn icon sm"
-                          title="Remove line"
+                          title={t('soRemoveLineTooltip')}
                           disabled={draft.lines.length === 1}
                           onClick={() => removeLine(idx)}
                         >
@@ -789,7 +789,7 @@ function SellOrderDetail({
                     rows={3}
                     value={draft.notes}
                     onChange={e => setDraft({ ...draft, notes: e.target.value })}
-                    placeholder="Tracking number, shipping carrier, payment reference…"
+                    placeholder={t('soTrackingPlaceholder')}
                   />
                 </div>
               )}
@@ -822,7 +822,7 @@ function SellOrderDetail({
                 <button
                   className="btn"
                   onClick={() => setConfirmArchive(true)}
-                  title="Archive this sell order"
+                  title={t('soArchiveTooltip')}
                   style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--neg, #c0392b)' }}
                 >
                   <Icon name="box" size={14} /> Archive
@@ -856,7 +856,7 @@ function SellOrderDetail({
                 <button
                   className="btn"
                   onClick={() => setShowCloseDialog(true)}
-                  title="Discard this sell order"
+                  title={t('soDiscardTooltip')}
                   style={{ color: 'var(--neg, #c0392b)', borderColor: 'var(--border-strong)' }}
                 >
                   Discard
@@ -866,7 +866,7 @@ function SellOrderDetail({
                 <button
                   className="btn accent"
                   onClick={() => setShowReopenDialog(true)}
-                  title="Reopen this sell order"
+                  title={t('soReopenTooltip')}
                 >
                   <Icon name="edit" size={14} /> Reopen
                 </button>

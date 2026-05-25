@@ -40,7 +40,7 @@ const ACTION_META: Record<string, { icon: IconName; label: string; dot: string }
 };
 
 export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<Event[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -124,7 +124,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
               Append-only record of every change made to inventory. Entries cannot be edited or deleted.
             </div>
           </div>
-          <button className="btn icon" onClick={onClose} aria-label="Close">
+          <button className="btn icon" onClick={onClose} aria-label={t('closeBtn')}>
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -157,7 +157,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
             }} />
             <input
               className="input"
-              placeholder="Search by item, user, part #…"
+              placeholder={t('activitySearchPlaceholder')}
               style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: '100%' }}
               value={search}
               onChange={e => setSearch(e.target.value)}

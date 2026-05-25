@@ -601,9 +601,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div className="seg inv-view-toggle" role="group" aria-label="Inventory view">
-              <button type="button" className={view === 'grouped' ? 'active' : ''} onClick={() => setView('grouped')}>Grouped</button>
-              <button type="button" className={view === 'flat' ? 'active' : ''} onClick={() => setView('flat')}>Flat</button>
+            <div className="seg inv-view-toggle" role="group" aria-label={t('invViewToggleAriaLabel')}>
+              <button type="button" className={view === 'grouped' ? 'active' : ''} onClick={() => setView('grouped')}>{t('invGroupedView')}</button>
+              <button type="button" className={view === 'flat' ? 'active' : ''} onClick={() => setView('flat')}>{t('invFlatView')}</button>
             </div>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
@@ -612,7 +612,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               }} />
               <input
                 className="input"
-                placeholder="Search part #, brand, ID…"
+                placeholder={t('invSearchPlaceholder')}
                 style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 240 }}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -623,10 +623,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 className="btn"
                 onClick={() => setColsMenuOpen(o => !o)}
                 style={{ height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                title="Choose columns to show"
+                title={t('invChooseColumnsTooltip')}
               >
                 <Icon name="settings" size={13} />
-                Columns
+                {t('columns')}
                 <span className="mono" style={{
                   fontSize: 10.5, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
                   background: 'var(--bg-soft)', color: 'var(--fg-subtle)', border: '1px solid var(--border)',
@@ -842,7 +842,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                       checked={allSelectableChecked}
                       ref={el => { if (el) el.indeterminate = someSelectableChecked && !allSelectableChecked; }}
                       onChange={toggleAll}
-                      title="Select all sellable items"
+                      title={t('invSelectAllSellableTitle')}
                     />
                   </th>
                 )}
@@ -964,7 +964,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                       <div style={{ display: 'inline-flex', gap: 4 }}>
                         <button
                           className="btn icon sm"
-                          title="Quick view"
+                          title={t('invQuickViewTooltip')}
                           onClick={() => setQuickView(r)}
                         >
                           <Icon name="eye" size={12} />
@@ -1082,7 +1082,7 @@ function InventoryQuickView({
   onClose: () => void;
   onEdit: () => void;
 }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   useEscapeKey(onClose);
 
@@ -1159,7 +1159,7 @@ function InventoryQuickView({
             <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{sub}</div>
           </div>
-          <button className="btn icon sm" onClick={onClose} title="Close"><Icon name="x" size={12} /></button>
+          <button className="btn icon sm" onClick={onClose} title={t('closeBtn')}><Icon name="x" size={12} /></button>
         </div>
 
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>

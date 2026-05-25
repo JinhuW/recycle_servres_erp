@@ -28,19 +28,21 @@ const TONE_VAR: Record<string, string> = {
 const commissionFor = (o: OrderSummary) => +(o.profit * (o.commissionRate ?? 0)).toFixed(2);
 
 // Toggleable columns (matches design's TOGGLEABLE_COLS). Order chevron,
-// Submitter, and Actions are always shown — the rest can be hidden.
+// Submitter, and Actions are always shown — the rest can be hidden. The
+// `tKey` is looked up against the dictionary in i18n.tsx so the picker
+// menu localises with the rest of the UI.
 const TOGGLEABLE_COLS = [
-  { id: 'id',         label: 'Order ID' },
-  { id: 'date',       label: 'Date' },
-  { id: 'category',   label: 'Category' },
-  { id: 'warehouse',  label: 'Warehouse' },
-  { id: 'lines',      label: 'Lines' },
-  { id: 'qty',        label: 'Qty' },
-  { id: 'revenue',    label: 'Revenue' },
-  { id: 'profit',     label: 'Profit' },
-  { id: 'commission', label: 'Commission' },
-  { id: 'payment',    label: 'Payment' },
-  { id: 'status',     label: 'Status' },
+  { id: 'id',         tKey: 'orderId' },
+  { id: 'date',       tKey: 'date' },
+  { id: 'category',   tKey: 'category' },
+  { id: 'warehouse',  tKey: 'warehouse' },
+  { id: 'lines',      tKey: 'lines' },
+  { id: 'qty',        tKey: 'qty' },
+  { id: 'revenue',    tKey: 'revenue' },
+  { id: 'profit',     tKey: 'profit' },
+  { id: 'commission', tKey: 'commission' },
+  { id: 'payment',    tKey: 'payment' },
+  { id: 'status',     tKey: 'status' },
 ] as const;
 type ColId = typeof TOGGLEABLE_COLS[number]['id'];
 const DEFAULT_ORDERS_COLS: ColId[] = TOGGLEABLE_COLS.map(c => c.id);
@@ -354,7 +356,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             <button
               className="btn"
               onClick={() => setShowArchived(v => !v)}
-              title={showArchived ? 'Hide archived purchase orders' : 'Show archived purchase orders'}
+              title={showArchived ? t('hideArchivedPOs') : t('showArchivedPOs')}
               style={{
                 height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
                 background: showArchived ? 'var(--bg-soft)' : undefined,
@@ -363,7 +365,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
               }}
             >
               <Icon name="box" size={12} />
-              {showArchived ? 'Hide archived' : 'Show archived'}
+              {showArchived ? t('hideArchivedBtn') : t('showArchivedBtn')}
             </button>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
@@ -447,7 +449,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           }}>
                             {on && <Icon name="check" size={10} style={{ color: 'white' }} />}
                           </span>
-                          <span>{c.label}</span>
+                          <span>{t(c.tKey)}</span>
                         </button>
                       );
                     })}
@@ -532,7 +534,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           {o.archivedAt && (
                             <span className="chip muted" style={{ fontSize: 10, padding: '1px 6px' }}>
                               <Icon name="box" size={9} style={{ marginRight: 3 }} />
-                              archived
+                              {t('archivedLowercaseChip')}
                             </span>
                           )}
                         </span>

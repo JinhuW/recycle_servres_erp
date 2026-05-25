@@ -98,7 +98,7 @@ export function PhLanguageSheet({ onClose }: Props) {
           <button
             onClick={() => setFollowSystem(!followSystem)}
             className={'ph-switch ' + (followSystem ? 'on' : '')}
-            aria-label="Follow system"
+            aria-label={t('langSystem')}
           >
             <span className="ph-switch-knob" />
           </button>

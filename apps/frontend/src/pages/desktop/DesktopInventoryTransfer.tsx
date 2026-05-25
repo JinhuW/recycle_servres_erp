@@ -133,7 +133,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
               {t('transferSubtitle')}
             </div>
           </div>
-          <button className="btn icon sm" onClick={onClose} disabled={submitting} title="Close">
+          <button className="btn icon sm" onClick={onClose} disabled={submitting} title={t('closeBtn')}>
             <Icon name="x" size={12} />
           </button>
         </div>
