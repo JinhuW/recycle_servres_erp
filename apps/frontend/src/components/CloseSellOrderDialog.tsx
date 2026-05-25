@@ -126,7 +126,6 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
           padding: '14px 24px', borderTop: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
         }}>
-          <button className="btn" onClick={onCancel} disabled={submitting}>Cancel</button>
           <button
             className="btn"
             onClick={submit}
@@ -237,7 +236,6 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
           padding: '14px 24px', borderTop: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
         }}>
-          <button className="btn" onClick={onCancel} disabled={submitting}>Cancel</button>
           <button
             className="btn accent"
             onClick={submit}
