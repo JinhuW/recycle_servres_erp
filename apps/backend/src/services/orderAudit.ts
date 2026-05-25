@@ -9,9 +9,9 @@
 
 import type { Sql, TransactionSql } from 'postgres';
 
-export type SqlLike = Sql | TransactionSql;
+export { diff, type AuditChange } from './auditDiff';
 
-export type AuditChange = { field: string; from: unknown; to: unknown };
+export type SqlLike = Sql | TransactionSql;
 
 export type EventKind =
   | 'submitted'
@@ -56,25 +56,6 @@ export const LINE_FIELDS = [
   'rpm',
 ] as const;
 export type LineField = typeof LINE_FIELDS[number];
-
-// Computes a list of {field, from, to} entries for the named fields. Uses a
-// JSON-stable inequality so e.g. Date|null and number|null compare correctly
-// without coercing 0 to null.
-export function diff<T extends Record<string, unknown>>(
-  before: T,
-  after: T,
-  fields: readonly (keyof T)[],
-): AuditChange[] {
-  const changes: AuditChange[] = [];
-  for (const f of fields) {
-    const a = before[f] ?? null;
-    const b = after[f] ?? null;
-    if (JSON.stringify(a) !== JSON.stringify(b)) {
-      changes.push({ field: f as string, from: a, to: b });
-    }
-  }
-  return changes;
-}
 
 export async function writeOrderEvent(
   tx: SqlLike,
