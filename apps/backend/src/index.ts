@@ -8,6 +8,7 @@ import { logger } from 'hono/logger';
 import { bodyLimit } from 'hono/body-limit';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
+import { appendErrorRecord } from './lib/error-log';
 
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
@@ -220,13 +221,36 @@ app.onError((err, c) => {
   // table/column/constraint names and SQL fragments that aid schema
   // reconnaissance.
   const requestId = c.var.requestId ?? 'unknown';
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
   console.error(JSON.stringify({
     level: 'error',
     requestId,
     message: 'Unhandled error',
-    error: err instanceof Error ? err.message : String(err),
-    stack: err instanceof Error ? err.stack : undefined,
+    error: message,
+    stack,
   }));
+
+  // Also persist to the dedicated error-log file (separate from Docker's
+  // stdout stream). Mounted via ERROR_LOG_DIR so an operator can grep
+  // weeks of 500s without paging through container logs.
+  const dir = process.env.ERROR_LOG_DIR;
+  if (dir) {
+    const user = c.var.user;
+    const url = new URL(c.req.url);
+    void appendErrorRecord(dir, {
+      ts: new Date().toISOString(),
+      requestId,
+      method: c.req.method,
+      path: url.pathname,
+      query: url.search || undefined,
+      userId: user?.id,
+      userEmail: user?.email,
+      message,
+      stack,
+    });
+  }
+
   return c.json({ error: 'Internal error' }, 500);
 });
 

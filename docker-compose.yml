@@ -93,6 +93,16 @@ services:
       # `pnpm dev`; this override flips it onto the compose network.
       DATABASE_URL: postgres://recycle:${POSTGRES_PASSWORD:-recycle}@postgres:5432/recycle_erp
       PORT: "8787"
+      # Persist unhandled-500 records to a bind-mounted file so operators can
+      # grep weeks of errors without paging through Docker's stdout buffer.
+      # The lib rotates errors.jsonl at ~10MB and prunes the oldest beyond 10.
+      ERROR_LOG_DIR: /var/log/recycle-erp
+    # Bind-mount the error log dir so the JSONL records survive container
+    # rebuilds. The dir must be writable by UID 1000 (the `node` user the
+    # backend runs as) — pre-create with: `mkdir -p data/errors && chown
+    # 1000:1000 data/errors`.
+    volumes:
+      - ./data/errors:/var/log/recycle-erp
     # No host-port publish — the only consumer is Caddy, which reaches the
     # backend as `backend:8787` over the internal compose network. Skipping
     # the host bind also avoids clashing with a parallel `pnpm dev` that
