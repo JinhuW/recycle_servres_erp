@@ -84,7 +84,7 @@ type StockRow = {
 // "Linked sell orders" card.
 type LinkedSellOrder = {
   id: string;
-  status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done';
+  status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
   created_at: string;
   customer_name: string | null;
   qty: number;

@@ -29,7 +29,7 @@ type StatusMetaMap = Record<MetaStatus, StatusMetaEntry>;
 
 type SellOrderSummary = {
   id: string;
-  status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done';
+  status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
   notes: string | null;
   createdAt: string;
   archivedAt: string | null;

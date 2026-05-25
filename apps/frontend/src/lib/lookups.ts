@@ -33,7 +33,7 @@ export const catalog = {
 export type PriceSource = { id: string; label: string };
 export const priceSources: PriceSource[] = [];
 
-export type SellOrderStatus = 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done';
+export type SellOrderStatus = 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
 export type SellOrderStatusInfo = {
   id: SellOrderStatus;
   label: string;
@@ -43,6 +43,9 @@ export type SellOrderStatusInfo = {
   position: number;
 };
 export const sellOrderStatuses: SellOrderStatusInfo[] = [];
+
+export type CloseReason = { id: string; label: string };
+export const closeReasons: CloseReason[] = [];
 
 // ── Order/inventory categories (RAM/SSD/HDD/… ) ─────────────────────────────
 // Backed by the `categories` table; replaces the list the UI used to hardcode
@@ -69,6 +72,7 @@ type LookupsResponse = {
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
   categories: CategoryInfo[];
+  closeReasons: CloseReason[];
 };
 
 let loaded = false;
@@ -88,6 +92,7 @@ export function loadLookups(): Promise<void> {
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
       categories.splice(0, categories.length, ...data.categories);
+      closeReasons.splice(0, closeReasons.length, ...data.closeReasons);
       loaded = true;
     } finally {
       inflight = null;
@@ -106,4 +111,5 @@ export function resetLookups(): void {
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
   categories.length = 0;
+  closeReasons.length = 0;
 }
