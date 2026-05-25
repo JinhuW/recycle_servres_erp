@@ -71,10 +71,13 @@ type Props = {
   // Called once the user confirms — parent stages the status change and
   // commits on Save. The dialog has already persisted note + attachments.
   onConfirm: (next: { note: string; attachments: StatusAttachment[] }) => void;
+  // Fires after any internal mutation (attachment add/remove, note PUT) so
+  // the parent can refresh views that depend on backend-emitted audit events.
+  onMutated?: () => void;
 };
 
 export function StatusChangeDialog({
-  orderId, to, currentStatus, initialNote, initialAttachments, onCancel, onConfirm,
+  orderId, to, currentStatus, initialNote, initialAttachments, onCancel, onConfirm, onMutated,
 }: Props) {
   const [note, setNote] = useState(initialNote);
   const [attachments, setAttachments] = useState<StatusAttachment[]>(initialAttachments);
@@ -105,6 +108,7 @@ export function StatusChangeDialog({
           form,
         );
         setAttachments(prev => [...prev, r.attachment]);
+        onMutated?.();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed');
@@ -120,6 +124,7 @@ export function StatusChangeDialog({
         `/api/sell-orders/${orderId}/status-meta/${encodeURIComponent(to)}/attachments/${att.id}`,
       );
       setAttachments(prev => prev.filter(a => a.id !== att.id));
+      onMutated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Delete failed');
     }
@@ -134,6 +139,7 @@ export function StatusChangeDialog({
         `/api/sell-orders/${orderId}/status-meta/${encodeURIComponent(to)}`,
         { note: note.trim() },
       );
+      onMutated?.();
       onConfirm({ note: note.trim(), attachments });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');

@@ -906,6 +906,7 @@ function SellOrderDetail({
           setDraft({ ...draft, status: pending });
           setPending(null);
         }}
+        onMutated={() => setHistoryKey(k => k + 1)}
       />
     )}
     {confirmArchive && order && (
