@@ -4,6 +4,7 @@ import {
   HDD_BRANDS, HDD_INTERFACE, HDD_FORM, HDD_CAP, HDD_RPM,
   CONDITIONS,
 } from '../../../lib/catalog';
+import { useT } from '../../../lib/i18n';
 import type { Line } from '../DesktopSubmit';
 
 // ─── Field groups ────────────────────────────────────────────────────────────
@@ -14,11 +15,12 @@ type FieldsProps = { line: Line; set: (patch: Partial<Line>) => void };
 // edit (renamed/removed option), include it as a one-off option so the
 // user still sees what was actually saved instead of an empty select.
 function CatSelect({ value, options, onChange }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void }) {
+  const { t } = useT();
   const hasValue = value != null && value !== '';
   const orphan = hasValue && !options.includes(value);
   return (
     <select className="select" value={value ?? ''} onChange={e => onChange(e.target.value)}>
-      <option value="">Select…</option>
+      <option value="">{t('selectPlaceholder')}</option>
       {orphan && <option value={value}>{value}</option>}
       {options.map(o => <option key={o}>{o}</option>)}
     </select>
@@ -26,38 +28,39 @@ function CatSelect({ value, options, onChange }: { value: string | undefined; op
 }
 
 export function RamFields({ line, set }: FieldsProps) {
+  const { t } = useT();
   return (
     <div className="grid-2">
       <div className="field">
-        <label className="label">Brand <span className="req">*</span></label>
+        <label className="label">{t('brand')} <span className="req">*</span></label>
         <CatSelect value={line.brand} options={RAM_BRANDS} onChange={v => set({ brand: v })} />
       </div>
       <div className="field">
-        <label className="label">Capacity <span className="req">*</span></label>
+        <label className="label">{t('capacity')} <span className="req">*</span></label>
         <CatSelect value={line.capacity} options={RAM_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
-        <label className="label">Generation</label>
+        <label className="label">{t('generation')}</label>
         <CatSelect value={line.generation} options={RAM_GENERATIONS} onChange={v => set({ generation: v })} />
       </div>
       <div className="field">
-        <label className="label">Device Type</label>
+        <label className="label">{t('type')}</label>
         <CatSelect value={line.type} options={RAM_DEVICE_TYPES} onChange={v => set({ type: v })} />
       </div>
       <div className="field">
-        <label className="label">Classification</label>
+        <label className="label">{t('klass')}</label>
         <CatSelect value={line.classification} options={RAM_CLASS} onChange={v => set({ classification: v })} />
       </div>
       <div className="field">
-        <label className="label">Rank</label>
+        <label className="label">{t('rank')}</label>
         <CatSelect value={line.rank} options={RAM_RANK} onChange={v => set({ rank: v })} />
       </div>
       <div className="field">
-        <label className="label">Speed (MHz)</label>
+        <label className="label">{t('speedMhz')}</label>
         <CatSelect value={line.speed} options={RAM_SPEED} onChange={v => set({ speed: v })} />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">Part number</label>
+        <label className="label">{t('partNumber')}</label>
         <input
           className="input mono"
           value={line.partNumber ?? ''}
@@ -66,7 +69,7 @@ export function RamFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">Condition <span className="req">*</span></label>
+        <label className="label">{t('condition')} <span className="req">*</span></label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>
@@ -74,26 +77,27 @@ export function RamFields({ line, set }: FieldsProps) {
 }
 
 export function SsdFields({ line, set }: FieldsProps) {
+  const { t } = useT();
   return (
     <div className="grid-2">
       <div className="field">
-        <label className="label">Brand <span className="req">*</span></label>
+        <label className="label">{t('brand')} <span className="req">*</span></label>
         <CatSelect value={line.brand} options={SSD_BRANDS} onChange={v => set({ brand: v })} />
       </div>
       <div className="field">
-        <label className="label">Capacity <span className="req">*</span></label>
+        <label className="label">{t('capacity')} <span className="req">*</span></label>
         <CatSelect value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
-        <label className="label">Interface <span className="req">*</span></label>
+        <label className="label">{t('interfaceLbl')} <span className="req">*</span></label>
         <CatSelect value={line.interface} options={SSD_INTERFACE} onChange={v => set({ interface: v })} />
       </div>
       <div className="field">
-        <label className="label">Form factor</label>
+        <label className="label">{t('formFactor')}</label>
         <CatSelect value={line.formFactor} options={SSD_FORM} onChange={v => set({ formFactor: v })} />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">Part number</label>
+        <label className="label">{t('partNumber')}</label>
         <input
           className="input mono"
           value={line.partNumber ?? ''}
@@ -101,7 +105,7 @@ export function SsdFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">Health (%)</label>
+        <label className="label">{t('healthPct')}</label>
         <input
           type="number" min={0} max={100} step={0.1}
           className="input"
@@ -110,7 +114,7 @@ export function SsdFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">Condition <span className="req">*</span></label>
+        <label className="label">{t('condition')} <span className="req">*</span></label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>
@@ -118,26 +122,27 @@ export function SsdFields({ line, set }: FieldsProps) {
 }
 
 export function HddFields({ line, set }: FieldsProps) {
+  const { t } = useT();
   return (
     <div className="grid-2">
       <div className="field">
-        <label className="label">Brand <span className="req">*</span></label>
+        <label className="label">{t('brand')} <span className="req">*</span></label>
         <CatSelect value={line.brand} options={HDD_BRANDS} onChange={v => set({ brand: v })} />
       </div>
       <div className="field">
-        <label className="label">Capacity <span className="req">*</span></label>
+        <label className="label">{t('capacity')} <span className="req">*</span></label>
         <CatSelect value={line.capacity} options={HDD_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
-        <label className="label">Interface <span className="req">*</span></label>
+        <label className="label">{t('interfaceLbl')} <span className="req">*</span></label>
         <CatSelect value={line.interface} options={HDD_INTERFACE} onChange={v => set({ interface: v })} />
       </div>
       <div className="field">
-        <label className="label">Form factor</label>
+        <label className="label">{t('formFactor')}</label>
         <CatSelect value={line.formFactor} options={HDD_FORM} onChange={v => set({ formFactor: v })} />
       </div>
       <div className="field">
-        <label className="label">RPM <span className="req">*</span></label>
+        <label className="label">{t('rpm')} <span className="req">*</span></label>
         <CatSelect
           value={line.rpm == null ? undefined : String(line.rpm)}
           options={HDD_RPM}
@@ -145,7 +150,7 @@ export function HddFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">Health (%)</label>
+        <label className="label">{t('healthPct')}</label>
         <input
           type="number" min={0} max={100} step={0.1}
           className="input"
@@ -154,7 +159,7 @@ export function HddFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">Part number</label>
+        <label className="label">{t('partNumber')}</label>
         <input
           className="input mono"
           value={line.partNumber ?? ''}
@@ -162,7 +167,7 @@ export function HddFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">Condition <span className="req">*</span></label>
+        <label className="label">{t('condition')} <span className="req">*</span></label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>
@@ -170,19 +175,20 @@ export function HddFields({ line, set }: FieldsProps) {
 }
 
 export function OtherFields({ line, set }: FieldsProps) {
+  const { t } = useT();
   return (
     <div className="grid-2">
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">Item description <span className="req">*</span></label>
+        <label className="label">{t('lfItemDescription')} <span className="req">*</span></label>
         <input
           className="input"
           value={line.description ?? ''}
           onChange={e => set({ description: e.target.value })}
-          placeholder="e.g. Xeon Gold 6248"
+          placeholder={t('lfItemDescriptionPh')}
         />
       </div>
       <div className="field">
-        <label className="label">Part / SKU</label>
+        <label className="label">{t('lfPartSku')}</label>
         <input
           className="input mono"
           value={line.partNumber ?? ''}
@@ -190,7 +196,7 @@ export function OtherFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">Condition <span className="req">*</span></label>
+        <label className="label">{t('condition')} <span className="req">*</span></label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>
     </div>

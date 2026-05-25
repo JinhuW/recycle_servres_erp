@@ -386,14 +386,15 @@ function OrderForm({
   // order: still submitting → draft creation → warehouse pick → per-line completeness.
   const submitDisabledReason: string | null =
     submitting              ? null
-  : !draftId                ? 'Starting draft order…'
-  : warehouses.length === 0 ? 'Warehouses haven\'t loaded — refresh the page.'
-  : !meta.warehouseId       ? 'Pick a warehouse before submitting.'
+  : !draftId                ? t('subStartingDraft')
+  : warehouses.length === 0 ? t('subWarehousesNotLoaded')
+  : !meta.warehouseId       ? t('reviewPickWarehouseHint')
   : !canSubmit              ? (() => {
       const bad = lines.findIndex(l => !lineReady(l));
       if (bad < 0) return null;
-      const which = lines.length === 1 ? 'this line' : `line ${bad + 1}`;
-      return `Fill in brand/description, quantity and unit cost on ${which} before submitting.`;
+      return lines.length === 1
+        ? t('subFillThisLine')
+        : t('subFillLineN', { n: bad + 1 });
     })()
   : null;
 
@@ -402,11 +403,11 @@ function OrderForm({
       <div className="card">
         <div className="card-head">
           <div>
-            <div className="card-title">Order details</div>
-            <div className="card-sub">An order contains multiple line items of the same category ({category}).</div>
+            <div className="card-title">{t('orderDetails')}</div>
+            <div className="card-sub">{t('subOrderContainsMultiple', { cat: category })}</div>
           </div>
           <span className="chip mono">
-            {(draftId ?? 'Drafting…')} · Draft
+            {(draftId ?? t('subDrafting'))} · {t('lifecycleDraft')}
           </span>
         </div>
 
@@ -418,14 +419,14 @@ function OrderForm({
         }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: 14 }}>
-              Items in this order <span style={{ fontWeight: 500, color: 'var(--fg-subtle)', marginLeft: 4 }}>({lines.length})</span>
+              {t('subItemsInOrder')} <span style={{ fontWeight: 500, color: 'var(--fg-subtle)', marginLeft: 4 }}>({lines.length})</span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              Click a row to edit it. Use "Add {category} line" to add another item.
+              {t('subItemsClickRow', { cat: category })}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="chip mono">{totals.units} units · {fmtUSD(totals.cost, locale)}</span>
+            <span className="chip mono">{t('subUnitsCost', { n: totals.units, cost: fmtUSD(totals.cost, locale) })}</span>
             {category === 'RAM' && (
               <button
                 className="btn"
@@ -438,7 +439,7 @@ function OrderForm({
               </button>
             )}
             <button className="btn" onClick={addLine} disabled={aiBusy}>
-              <Icon name="plus" size={13} /> Add {category} line
+              <Icon name="plus" size={13} /> {t('subAddLine', { cat: category })}
             </button>
           </div>
         </div>
@@ -462,7 +463,7 @@ function OrderForm({
             <button
               className="btn icon sm"
               onClick={() => setAiError(null)}
-              title="Dismiss"
+              title={t('dismiss')}
             >
               <Icon name="x" size={12} />
             </button>
@@ -494,7 +495,7 @@ function OrderForm({
             <button
               className="btn icon sm"
               onClick={() => setAiNotice(null)}
-              title="Dismiss"
+              title={t('dismiss')}
             >
               <Icon name="x" size={12} />
             </button>
@@ -505,12 +506,12 @@ function OrderForm({
           <thead>
             <tr>
               <th style={{ width: 40 }}>#</th>
-              <th>Item</th>
-              <th>Part #</th>
-              <th className="num">Qty</th>
-              <th className="num">Unit cost</th>
-              <th className="num">Total cost</th>
-              <th>Status</th>
+              <th>{t('item')}</th>
+              <th>{t('partNumber')}</th>
+              <th className="num">{t('qty')}</th>
+              <th className="num">{t('unitCost')}</th>
+              <th className="num">{t('totalCost')}</th>
+              <th>{t('status')}</th>
               <th style={{ width: 40 }}></th>
             </tr>
           </thead>
@@ -544,22 +545,22 @@ function OrderForm({
                           {l.category === 'Other' && l.condition}
                         </div>
                       </div>
-                    ) : <span className="muted" style={{ fontStyle: 'italic' }}>{isActive ? 'Editing — fill in below' : 'Not filled in'}</span>}
+                    ) : <span className="muted" style={{ fontStyle: 'italic' }}>{isActive ? t('subEditingFill') : t('subNotFilled')}</span>}
                   </td>
                   <td className="mono muted" style={{ fontSize: 11 }}>{l.partNumber || '—'}</td>
                   <td className="num mono">{lQty}</td>
                   <td className="num mono">{lCost ? fmtUSD(lCost, locale) : '—'}</td>
                   <td className="num mono">{lQty && lCost ? fmtUSD(lQty * lCost, locale) : '—'}</td>
                   <td>
-                    {isActive && <span className="chip info"><Icon name="edit" size={10} /> Editing</span>}
-                    {!isActive && filled && <span className="chip pos">Ready</span>}
-                    {!isActive && !filled && <span className="chip warn">Needs info</span>}
+                    {isActive && <span className="chip info"><Icon name="edit" size={10} /> {t('subStatusEditing')}</span>}
+                    {!isActive && filled && <span className="chip pos">{t('subStatusReady')}</span>}
+                    {!isActive && !filled && <span className="chip warn">{t('subStatusNeedsInfo')}</span>}
                   </td>
                   <td>
                     <button
                       className="btn icon sm"
                       onClick={e => { e.stopPropagation(); removeLine(i); }}
-                      title="Remove line"
+                      title={t('soRemoveLineTooltip')}
                       disabled={lines.length <= 1}
                       style={lines.length <= 1 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                     >
@@ -578,42 +579,42 @@ function OrderForm({
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">Warehouse <span className="req">*</span></label>
+              <label className="label">{t('warehouse')} <span className="req">*</span></label>
               <select
                 className="select"
                 value={meta.warehouseId}
                 onChange={e => setMeta(m => ({ ...m, warehouseId: e.target.value }))}
               >
-                {warehouses.length === 0 && <option value="">Loading…</option>}
+                {warehouses.length === 0 && <option value="">{t('loadingApp')}</option>}
                 {warehouses.map(w => (
                   <option key={w.id} value={w.id}>{w.name ?? w.short}</option>
                 ))}
               </select>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">Payment <span className="req">*</span></label>
+              <label className="label">{t('payment')} <span className="req">*</span></label>
               <div className="seg" style={{ width: '100%' }}>
                 <button
                   className={meta.payment === 'Company' ? 'active' : ''}
                   style={{ flex: 1, whiteSpace: 'nowrap' }}
                   onClick={() => setMeta(m => ({ ...m, payment: 'Company' }))}
-                >Company</button>
+                >{t('payCompanyShort')}</button>
                 <button
                   className={meta.payment === 'Self' ? 'active' : ''}
                   style={{ flex: 1, whiteSpace: 'nowrap' }}
                   onClick={() => setMeta(m => ({ ...m, payment: 'Self' }))}
-                >Self-paid</button>
+                >{t('paySelfShort')}</button>
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <span>Total cost</span>
+                <span>{t('totalCost')}</span>
                 {meta.totalCostOverride !== null && (
                   <button
                     onClick={() => setMeta(m => ({ ...m, totalCostOverride: null }))}
                     style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-strong)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                    title={`Auto-sum is ${fmtUSD(totals.cost, locale)}`}
-                  >reset</button>
+                    title={t('subAutoSumIs', { cost: fmtUSD(totals.cost, locale) })}
+                  >{t('reset')}</button>
                 )}
               </label>
               <div style={{ position: 'relative' }}>
@@ -630,12 +631,12 @@ function OrderForm({
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">Notes</label>
+              <label className="label">{t('orderNotes')}</label>
               <input
                 className="input"
                 value={meta.notes}
                 onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
-                placeholder="Optional"
+                placeholder={t('subOptional')}
               />
             </div>
           </div>
@@ -643,18 +644,18 @@ function OrderForm({
 
         <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 18, alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Lines</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
           </div>
           <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>Total units</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('subTotalUnits')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{totals.units}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              Total cost
+              {t('totalCost')}
               {meta.totalCostOverride !== null && Math.abs((Number(meta.totalCostOverride) || 0) - totals.cost) > 0.01 && (
-                <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · override</span>
+                <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
@@ -663,13 +664,13 @@ function OrderForm({
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onCancel}>Cancel</button>
+              <button className="btn" onClick={onCancel}>{t('cancel')}</button>
               <button
                 className="btn accent"
                 disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
                 title={submitDisabledReason ?? undefined}
                 onClick={async () => {
-                  if (!draftId) { setAiError('No draft order — refresh and try again.'); return; }
+                  if (!draftId) { setAiError(t('subNoDraftErr')); return; }
                   const totalCost = meta.totalCostOverride != null
                     ? (Number(meta.totalCostOverride) || 0)
                     : totals.cost;
@@ -683,15 +684,15 @@ function OrderForm({
                       totalCost,
                       ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
                     });
-                    onDone({ msg: 'Order submitted — added to inventory', kind: 'success' });
+                    onDone({ msg: t('orderSubmitted'), kind: 'success' });
                   } catch (e) {
-                    setAiError(e instanceof Error ? e.message : 'Submit failed');
+                    setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
                   } finally {
                     setSubmitting(false);
                   }
                 }}
               >
-                Submit order <Icon name="check" size={14} />
+                {t('submitOrder')} <Icon name="check" size={14} />
               </button>
             </div>
             {submitDisabledReason && (

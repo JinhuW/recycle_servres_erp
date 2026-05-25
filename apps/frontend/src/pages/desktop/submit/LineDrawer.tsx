@@ -25,7 +25,7 @@ export function LineDrawer({
   onConfirmLine?: () => Promise<void>;
   onConfirmError?: (msg: string) => void;
 }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [confirming, setConfirming] = useState(false);
   const cat = line.category;
@@ -88,7 +88,7 @@ export function LineDrawer({
               <button
                 type="button"
                 onClick={() => setLightbox(true)}
-                title="View AI photo"
+                title={t('drawerViewAiPhoto')}
                 style={{
                   width: 56, height: 56, borderRadius: 8,
                   border: '1px solid var(--border)', overflow: 'hidden',
@@ -98,7 +98,7 @@ export function LineDrawer({
               >
                 <img
                   src={scanUrl!}
-                  alt="AI photo"
+                  alt={t('aiPhotoLabel')}
                   onError={() => setThumbBroken(true)}
                   style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                 />
@@ -111,17 +111,17 @@ export function LineDrawer({
                   {cat === 'RAM' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.generation ?? ''}`.trim()}
                   {cat === 'SSD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.interface ?? ''}`.trim()}
                   {cat === 'HDD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.rpm ? line.rpm + 'rpm' : ''}`.trim()}
-                  {cat === 'Other' && (line.description ?? 'Untitled item')}
+                  {cat === 'Other' && (line.description ?? t('drawerUntitledItem'))}
                 </span>
               </div>
               {(line.brand || line.description) && (
                 <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
-                  {line.partNumber || '—'} · qty {line.qty} · cost {fmtUSD(qty * cost, locale)}
+                  {line.partNumber || '—'} · {t('qtyShort', { n: line.qty })} · {t('drawerCostSummary', { cost: fmtUSD(qty * cost, locale) })}
                 </div>
               )}
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
-              <button className="btn icon sm" onClick={onClose} title="Close edit">
+              <button className="btn icon sm" onClick={onClose} title={t('drawerCloseEdit')}>
                 <Icon name="x" size={14} />
               </button>
             </div>
@@ -131,7 +131,7 @@ export function LineDrawer({
             {!editing && line.scanImageUrl && (
               <img
                 src={line.scanImageUrl}
-                alt="Captured label"
+                alt={t('drawerCapturedLabel')}
                 style={{ maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)', marginBottom: 12 }}
               />
             )}
@@ -147,7 +147,7 @@ export function LineDrawer({
               padding: 14, background: 'var(--bg-soft)', borderRadius: 10,
             }}>
               <div className="field">
-                <label className="label">Qty <span className="req">*</span></label>
+                <label className="label">{t('qty')} <span className="req">*</span></label>
                 <input
                   className="input"
                   type="number"
@@ -157,7 +157,7 @@ export function LineDrawer({
                 />
               </div>
               <div className="field">
-                <label className="label">Unit cost <span className="req">*</span></label>
+                <label className="label">{t('unitCost')} <span className="req">*</span></label>
                 <input
                   className="input mono"
                   type="number"
@@ -168,7 +168,7 @@ export function LineDrawer({
                 />
               </div>
               <div className="field">
-                <label className="label">Total cost</label>
+                <label className="label">{t('totalCost')}</label>
                 <input
                   className="input mono"
                   type="number"
@@ -185,7 +185,7 @@ export function LineDrawer({
               </div>
               {editing && (
                 <div className="field">
-                  <label className="label">Sell / unit</label>
+                  <label className="label">{t('sellUnit')}</label>
                   <input
                     className="input mono"
                     type="number"
@@ -203,10 +203,10 @@ export function LineDrawer({
                 display: 'flex', gap: 18, fontSize: 12, color: 'var(--fg-subtle)',
                 padding: '0 4px', flexWrap: 'wrap',
               }}>
-                <span>Revenue <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(revenue, locale)}</span></span>
-                <span>Profit <span className="mono" style={{ color: profit >= 0 ? 'var(--pos)' : 'var(--warn)', fontWeight: 600 }}>{fmtUSD(profit, locale)}</span></span>
-                <span>Margin <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{margin.toFixed(1)}%</span></span>
-                {lossy && <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠ Sell price below unit cost</span>}
+                <span>{t('revenue')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(revenue, locale)}</span></span>
+                <span>{t('profit')} <span className="mono" style={{ color: profit >= 0 ? 'var(--pos)' : 'var(--warn)', fontWeight: 600 }}>{fmtUSD(profit, locale)}</span></span>
+                <span>{t('margin')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{margin.toFixed(1)}%</span></span>
+                {lossy && <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠ {t('drawerLossyWarn')}</span>}
               </div>
             )}
           </div>
@@ -222,15 +222,15 @@ export function LineDrawer({
               disabled={!canRemove}
               style={canRemove ? { color: 'var(--neg)' } : undefined}
             >
-              <Icon name="trash" size={13} /> Remove line
+              <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
             </button>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {line._confirmed && (
                 <span className="chip pos" style={{ fontSize: 11 }}>
-                  <Icon name="check" size={10} /> Confirmed
+                  <Icon name="check" size={10} /> {t('drawerConfirmed')}
                 </span>
               )}
-              <button className="btn" onClick={onClose}>Cancel</button>
+              <button className="btn" onClick={onClose}>{t('cancel')}</button>
               <button
                 className="btn accent"
                 disabled={confirming || line._confirmed}
@@ -242,20 +242,20 @@ export function LineDrawer({
                     await onConfirmLine();
                     onClose();
                   } catch (e) {
-                    onConfirmError?.(e instanceof Error ? e.message : 'Failed to confirm line');
+                    onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
                   } finally {
                     setConfirming(false);
                   }
                 }}
               >
-                <Icon name="check" size={13} /> {confirming ? 'Confirming…' : 'Confirm line'}
+                <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
               </button>
             </div>
           </div>
         </div>
       </div>
       {lightbox && scanUrl && (
-        <ImageLightbox url={scanUrl} alt="AI photo" onClose={() => setLightbox(false)} />
+        <ImageLightbox url={scanUrl} alt={t('aiPhotoLabel')} onClose={() => setLightbox(false)} />
       )}
     </div>
   );
