@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
@@ -121,6 +121,10 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const [refMatch, setRefMatch] = useState<RefMatch | null>(null);
   const [linkedSellOrders, setLinkedSellOrders] = useState<LinkedSellOrder[]>([]);
   const [internalNotes, setInternalNotes] = useState('');
+  // When the backend rejects a qty/status change because the line is committed
+  // to an open sell order, render an inline workflow banner that names the
+  // blocking orders. Cleared at the start of each save attempt.
+  const [blocked, setBlocked] = useState<{ orders: LinkedSellOrder[]; fields: string[] } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -246,6 +250,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
 
   const save = async () => {
     setSaving(true);
+    setBlocked(null);
     try {
       await api.patch(`/api/inventory/${itemId}`, {
         status: draft.status,
@@ -258,6 +263,19 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         rpm: draft.rpm === '' ? null : Number(draft.rpm),
       });
       onSaved();
+    } catch (err) {
+      // 409 with the committed-to-open-sell-order message is structured: a
+      // sell order is locking this line. Render the workflow banner with the
+      // open orders called out by name. Any other failure goes to the toast.
+      if (err instanceof ApiError && err.status === 409 && /committed to an open sell order/.test(err.message)) {
+        const openOrders = linkedSellOrders.filter(so => so.status !== 'Done');
+        const fields: string[] = [];
+        if (Number(draft.qty) !== item.qty) fields.push('qty');
+        if (draft.status !== item.status) fields.push('status');
+        setBlocked({ orders: openOrders, fields });
+      } else {
+        showErrorToast(err instanceof Error ? err.message : 'Save failed');
+      }
     } finally {
       setSaving(false);
     }
@@ -331,6 +349,15 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           </button>
         ))}
       </div>
+
+      {blocked && (
+        <BlockedByOpenOrdersBanner
+          orders={blocked.orders}
+          fields={blocked.fields}
+          itemId={item.id}
+          onDismiss={() => setBlocked(null)}
+        />
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 18, alignItems: 'flex-start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
@@ -1010,6 +1037,143 @@ function SummaryRow({ label, value }: { label: string; value: React.ReactNode })
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5 }}>
       <span style={{ color: 'var(--fg-subtle)' }}>{label}</span>
       <span>{value}</span>
+    </div>
+  );
+}
+
+// Surfaced when PATCH /inventory/:id returns 409 — qty/status can't change
+// while a non-Done sell order references the line. The diagram names the
+// blocking orders so the user can act on them directly.
+function BlockedByOpenOrdersBanner({
+  orders, fields, itemId, onDismiss,
+}: {
+  orders: LinkedSellOrder[];
+  fields: string[];
+  itemId: string;
+  onDismiss: () => void;
+}) {
+  const ALL_FIELDS = ['qty', 'status', 'price', 'cost', 'condition', 'part number', 'health', 'rpm'];
+  const lockedSet = new Set(fields.length ? fields : ['qty', 'status']);
+  const allowed = ALL_FIELDS.filter(f => f !== 'qty' && f !== 'status').join(' · ');
+
+  return (
+    <div
+      role="alert"
+      style={{
+        margin: '0 0 14px',
+        border: '1px solid color-mix(in oklch, var(--neg) 35%, var(--border))',
+        background: 'var(--neg-soft)',
+        borderRadius: 12,
+        padding: 16,
+        display: 'grid',
+        gap: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span style={{
+          width: 28, height: 28, borderRadius: 8,
+          background: 'var(--neg)', color: '#fff',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <Icon name="alert" size={15} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, color: 'var(--neg)', fontSize: 14 }}>
+            Line locked by open sell orders
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
+            This inventory line is committed to a sell order that isn't Done yet.
+            Save was rejected so the order totals stay consistent.
+          </div>
+        </div>
+        <button
+          className="btn icon sm"
+          onClick={onDismiss}
+          title="Dismiss"
+          style={{ flexShrink: 0 }}
+        >
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+
+      {/* Workflow diagram */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 14,
+        padding: '12px 14px', borderRadius: 10,
+        background: 'var(--bg)', border: '1px solid var(--border)',
+        flexWrap: 'wrap',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 12px', borderRadius: 8,
+          border: '1px solid var(--border-strong)', background: 'var(--bg-soft)',
+        }}>
+          <Icon name="box" size={14} style={{ color: 'var(--fg-subtle)' }} />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>Inventory line</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemId.slice(0, 8)}</div>
+          </div>
+        </div>
+
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          color: 'var(--neg)', fontSize: 10.5, fontWeight: 600,
+          textTransform: 'uppercase', letterSpacing: 0.4,
+        }}>
+          <span>committed to</span>
+          <Icon name="arrow" size={16} />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
+          {orders.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--fg-subtle)', fontStyle: 'italic' }}>
+              An open sell order references this line. Refresh to reload the list.
+            </div>
+          ) : (
+            orders.map(so => (
+              <div
+                key={so.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 10px', borderRadius: 8,
+                  border: '1px solid var(--border-strong)', background: 'var(--bg-soft)',
+                }}
+              >
+                <Icon name="invoice" size={13} style={{ color: 'var(--fg-subtle)' }} />
+                <span className="mono" style={{ fontSize: 12 }}>{so.id.slice(0, 8)}</span>
+                <span className={'chip ' + (so.status === 'Draft' ? 'muted' : 'accent')} style={{ fontSize: 10.5 }}>
+                  {so.status}
+                </span>
+                {so.customer_name && (
+                  <span style={{
+                    fontSize: 11.5, color: 'var(--fg-subtle)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+                  }}>
+                    {so.customer_name}
+                  </span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Fields detail + resolution */}
+      <div style={{ display: 'grid', gap: 6, fontSize: 12.5 }}>
+        <div>
+          <span style={{ color: 'var(--fg-subtle)' }}>Locked fields: </span>
+          {[...lockedSet].map((f, i) => (
+            <span key={f} style={{ fontWeight: 600, color: 'var(--neg)' }}>
+              {i > 0 ? ' · ' : ''}{f}
+            </span>
+          ))}
+          <span style={{ color: 'var(--fg-subtle)' }}>   ·   Allowed: {allowed}</span>
+        </div>
+        <div style={{ color: 'var(--fg-subtle)' }}>
+          <strong style={{ color: 'var(--fg)' }}>Resolution:</strong> mark the sell order(s) Done,
+          or unlink this line from the sell order, before changing qty or status.
+        </div>
+      </div>
     </div>
   );
 }
