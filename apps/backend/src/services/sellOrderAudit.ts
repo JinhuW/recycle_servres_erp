@@ -12,7 +12,9 @@ export type SqlLike = Sql | TransactionSql;
 
 export type SellOrderEventKind =
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'closed'
+  | 'reopened';
 
 export async function writeSellOrderEvent(
   tx: SqlLike,
