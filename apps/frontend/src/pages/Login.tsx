@@ -10,6 +10,24 @@ type DemoAccount = { id: string; email: string; name: string; initials: string; 
 
 type Props = { initialPicking?: boolean; variant?: 'mobile' | 'desktop' };
 
+// Browser-local memory of the last email that signed in successfully on this
+// device. Pre-fills the email field so returning users don't retype it.
+const LAST_LOGIN_EMAIL_KEY = 'rs.lastLoginEmail';
+const DEFAULT_LOGIN_EMAIL = 'user@recycleservers.com';
+
+function readLastLoginEmail(): string {
+  try {
+    return window.localStorage.getItem(LAST_LOGIN_EMAIL_KEY) || DEFAULT_LOGIN_EMAIL;
+  } catch {
+    return DEFAULT_LOGIN_EMAIL;
+  }
+}
+
+function rememberLoginEmail(email: string): void {
+  try { window.localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); }
+  catch { /* private mode / quota — best-effort */ }
+}
+
 // Compact EN/中 toggle pinned to the top-right of the desktop login screen,
 // matching design/login.jsx (the desktop shell has no sidebar at sign-in).
 function DesktopLanguageToggle() {
@@ -56,7 +74,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
   const { t } = useT();
   const { login } = useAuth();
   const [picking, setPicking] = useState(initialPicking);
-  const [email, setEmail] = useState('user@recycleservers.com');
+  const [email, setEmail] = useState(readLastLoginEmail);
   const [password, setPassword] = useState('demo');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -86,6 +104,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
     setSubmitting(true);
     try {
       await login(email, password);
+      rememberLoginEmail(email);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
       setSubmitting(false);
@@ -97,6 +116,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
     setSubmitting(true);
     try {
       await login(account.email, 'demo');
+      rememberLoginEmail(account.email);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
       setSubmitting(false);
