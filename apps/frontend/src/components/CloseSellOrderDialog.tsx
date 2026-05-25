@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { Icon } from './Icon';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useT } from '../lib/i18n';
 import { closeReasons } from '../lib/lookups';
 
 type Props = {
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClosed }: Props) {
+  const { t } = useT();
   const [reasonId, setReasonId] = useState<string>(closeReasons[0]?.id ?? '');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -42,7 +44,7 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
       });
       onClosed();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Close failed');
+      setError(e instanceof Error ? e.message : t('discardSoError'));
       setSubmitting(false);
     }
   };
@@ -69,17 +71,17 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
             <Icon name="x" size={18} />
           </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Discard sell order</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{t('discardSoTitle')}</div>
             <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              Stops the deal and releases any soft-committed inventory.
+              {t('discardSoSub')}
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span className="chip" style={{ fontSize: 11 }}>{currentStatus}</span>
               <Icon name="arrow" size={10} />
-              <span className="chip muted" style={{ fontSize: 11 }}>Closed</span>
+              <span className="chip muted" style={{ fontSize: 11 }}>{t('discardSoStatusClosed')}</span>
             </div>
           </div>
-          <button className="btn icon sm" onClick={onCancel} title="Cancel">
+          <button className="btn icon sm" onClick={onCancel} title={t('cancel')}>
             <Icon name="x" size={13} />
           </button>
         </div>
@@ -87,14 +89,14 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
         {/* Body */}
         <div style={{ padding: 24, display: 'grid', gap: 18 }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">Reason</label>
+            <label className="label">{t('discardSoReasonLabel')}</label>
             <select
               className="select"
               value={reasonId}
               onChange={e => setReasonId(e.target.value)}
               autoFocus
             >
-              {closeReasons.length === 0 && <option value="">No reasons configured</option>}
+              {closeReasons.length === 0 && <option value="">{t('discardSoNoReasons')}</option>}
               {closeReasons.map(r => (
                 <option key={r.id} value={r.id}>{r.label}</option>
               ))}
@@ -102,13 +104,13 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
           </div>
 
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">Note</label>
+            <label className="label">{t('discardSoNoteLabel')}</label>
             <textarea
               className="input"
               rows={4}
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder="Why is this deal being closed?"
+              placeholder={t('discardSoNoteReasonPlaceholder')}
               style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
             />
           </div>
@@ -132,7 +134,7 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
             disabled={!canSubmit}
             style={{ background: 'var(--neg, #c0392b)', color: '#fff', borderColor: 'transparent' }}
           >
-            {submitting ? 'Discarding…' : 'Discard order'}
+            {submitting ? t('discardSoSubmitting') : t('discardSoSubmit')}
           </button>
         </div>
       </div>
@@ -150,6 +152,7 @@ type ReopenProps = {
 };
 
 export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenProps) {
+  const { t } = useT();
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +172,7 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
       });
       onReopened();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Reopen failed');
+      setError(e instanceof Error ? e.message : t('reopenSoError'));
       setSubmitting(false);
     }
   };
@@ -195,30 +198,30 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
             <Icon name="edit" size={18} />
           </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Reopen sell order</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{t('reopenSoTitle')}</div>
             <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              Moves the order back to Draft so it can be edited and re-progressed.
+              {t('reopenSoSub')}
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--fg-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span className="chip muted" style={{ fontSize: 11 }}>Closed</span>
+              <span className="chip muted" style={{ fontSize: 11 }}>{t('discardSoStatusClosed')}</span>
               <Icon name="arrow" size={10} />
-              <span className="chip" style={{ fontSize: 11 }}>Draft</span>
+              <span className="chip" style={{ fontSize: 11 }}>{t('reopenSoStatusDraft')}</span>
             </div>
           </div>
-          <button className="btn icon sm" onClick={onCancel} title="Cancel">
+          <button className="btn icon sm" onClick={onCancel} title={t('cancel')}>
             <Icon name="x" size={13} />
           </button>
         </div>
 
         <div style={{ padding: 24, display: 'grid', gap: 18 }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">Note</label>
+            <label className="label">{t('discardSoNoteLabel')}</label>
             <textarea
               className="input"
               rows={3}
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder="Why is this deal being reopened?"
+              placeholder={t('reopenSoNotePlaceholder')}
               style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
               autoFocus
             />
@@ -241,7 +244,7 @@ export function ReopenSellOrderDialog({ orderId, onCancel, onReopened }: ReopenP
             onClick={submit}
             disabled={!canSubmit}
           >
-            {submitting ? 'Reopening…' : 'Reopen order'}
+            {submitting ? t('reopenSoSubmitting') : t('reopenSoSubmit')}
           </button>
         </div>
       </div>

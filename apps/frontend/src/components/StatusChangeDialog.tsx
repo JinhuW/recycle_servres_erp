@@ -8,6 +8,7 @@ import { useRef, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useT } from '../lib/i18n';
 
 export type StatusAttachment = {
   id: string;
@@ -28,32 +29,36 @@ type Preset = {
   acceptHint: string;
 };
 
-const PRESETS: Record<MetaStatus, Preset> = {
-  'Shipped': {
-    title: 'Mark as Shipped',
-    sub: 'Capture the tracking info so the customer can be notified.',
-    icon: 'truck',
-    tone: 'info',
-    placeholder: 'Tracking number, carrier, ship date, who packed it — anything the customer or warehouse may need.',
-    acceptHint: 'Packing slip, BOL, label, photo of the pallet (PDF / JPG / PNG)',
-  },
-  'Awaiting payment': {
-    title: 'Mark as Awaiting payment',
-    sub: 'Attach the invoice and note any payment instructions.',
-    icon: 'invoice',
-    tone: 'warn',
-    placeholder: 'Invoice #, amount, due date, payment terms reminder, who it was sent to.',
-    acceptHint: 'Invoice, signed PO (PDF / JPG / PNG)',
-  },
-  'Done': {
-    title: 'Mark as Done',
-    sub: 'Attach proof of payment and any closing notes.',
-    icon: 'check',
-    tone: 'pos',
-    placeholder: 'Date paid, reference / wire #, who confirmed, anything to remember next quarter.',
-    acceptHint: 'Receipt, bank confirmation, signed delivery slip (PDF / JPG / PNG)',
-  },
-};
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function presetsFor(t: TFn): Record<MetaStatus, Preset> {
+  return {
+    'Shipped': {
+      title: t('statusShippedTitle'),
+      sub: t('statusShippedSub'),
+      icon: 'truck',
+      tone: 'info',
+      placeholder: t('statusShippedPlaceholder'),
+      acceptHint: t('statusShippedAcceptHint'),
+    },
+    'Awaiting payment': {
+      title: t('statusAwaitingTitle'),
+      sub: t('statusAwaitingSub'),
+      icon: 'invoice',
+      tone: 'warn',
+      placeholder: t('statusAwaitingPlaceholder'),
+      acceptHint: t('statusAwaitingAcceptHint'),
+    },
+    'Done': {
+      title: t('statusDoneTitle'),
+      sub: t('statusDoneSub'),
+      icon: 'check',
+      tone: 'pos',
+      placeholder: t('statusDonePlaceholder'),
+      acceptHint: t('statusDoneAcceptHint'),
+    },
+  };
+}
 
 function fmtSize(n: number) {
   if (n < 1024) return n + ' B';
@@ -79,13 +84,14 @@ type Props = {
 export function StatusChangeDialog({
   orderId, to, currentStatus, initialNote, initialAttachments, onCancel, onConfirm, onMutated,
 }: Props) {
+  const { t } = useT();
   const [note, setNote] = useState(initialNote);
   const [attachments, setAttachments] = useState<StatusAttachment[]>(initialAttachments);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const cfg = PRESETS[to];
+  const cfg = presetsFor(t)[to];
 
   // Escape closes the dialog.
   useEscapeKey(onCancel);
@@ -98,7 +104,7 @@ export function StatusChangeDialog({
     try {
       for (const f of files) {
         if (f.size > 10 * 1024 * 1024) {
-          setError(`${f.name} exceeds 10 MB`);
+          setError(t('fileTooLarge', { name: f.name }));
           continue;
         }
         const form = new FormData();
@@ -111,7 +117,7 @@ export function StatusChangeDialog({
         onMutated?.();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed');
+      setError(e instanceof Error ? e.message : t('uploadFailed'));
     } finally {
       setUploading(false);
     }
@@ -126,7 +132,7 @@ export function StatusChangeDialog({
       setAttachments(prev => prev.filter(a => a.id !== att.id));
       onMutated?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
+      setError(e instanceof Error ? e.message : t('deleteFailed'));
     }
   };
 
@@ -142,7 +148,7 @@ export function StatusChangeDialog({
       onMutated?.();
       onConfirm({ note: note.trim(), attachments });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      setError(e instanceof Error ? e.message : t('saveFailed'));
     }
   };
 
@@ -176,7 +182,7 @@ export function StatusChangeDialog({
               <span className={'chip ' + cfg.tone} style={{ fontSize: 11 }}>{to}</span>
             </div>
           </div>
-          <button className="btn icon sm" onClick={onCancel} title="Cancel">
+          <button className="btn icon sm" onClick={onCancel} title={t('cancel')}>
             <Icon name="x" size={13} />
           </button>
         </div>
@@ -184,7 +190,7 @@ export function StatusChangeDialog({
         {/* Body */}
         <div style={{ padding: 24, display: 'grid', gap: 18 }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">Tracking note</label>
+            <label className="label">{t('trackingNote')}</label>
             <textarea
               className="input"
               rows={4}
@@ -201,7 +207,7 @@ export function StatusChangeDialog({
               className="label"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
             >
-              <span>Attachments</span>
+              <span>{t('attachmentsLabel')}</span>
               <span style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>{cfg.acceptHint}</span>
             </label>
             <div
@@ -223,11 +229,11 @@ export function StatusChangeDialog({
               <Icon name="upload" size={20} style={{ color: 'var(--fg-subtle)' }} />
               <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg)' }}>
                 <strong style={{ color: 'var(--accent-strong)' }}>
-                  {uploading ? 'Uploading…' : 'Click to upload'}
-                </strong> {!uploading && 'or drag & drop'}
+                  {uploading ? t('uploadingLabel') : t('clickToUpload')}
+                </strong> {!uploading && t('orDragDrop')}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                PDF, PNG, JPG · up to 10 MB each
+                {t('uploadHint')}
               </div>
               <input
                 ref={fileInputRef}
@@ -261,7 +267,7 @@ export function StatusChangeDialog({
                           color: 'var(--fg-subtle)', flexShrink: 0, textDecoration: 'none',
                         }}
                         onClick={e => e.stopPropagation()}
-                        title="Open attachment"
+                        title={t('openAttachment')}
                       >
                         <Icon name={isImg ? 'image' : 'file'} size={14} />
                       </a>
@@ -284,7 +290,7 @@ export function StatusChangeDialog({
                       <button
                         className="btn icon sm"
                         onClick={e => { e.stopPropagation(); removeAttachment(a); }}
-                        title="Remove"
+                        title={t('remove')}
                       >
                         <Icon name="x" size={12} />
                       </button>
@@ -309,12 +315,12 @@ export function StatusChangeDialog({
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
           <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-            You can edit this later by clicking the step again.
+            {t('editLaterHint')}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
+            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
             <button className="btn accent" onClick={confirm} disabled={uploading}>
-              Confirm &amp; advance <Icon name="check" size={13} />
+              {t('confirmAdvance')} <Icon name="check" size={13} />
             </button>
           </div>
         </div>

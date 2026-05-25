@@ -213,11 +213,11 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
 
   if (notFound) {
     return <StateScreen isPhone={isPhone} icon="lock"
-      title="Link unavailable" body="This link is invalid or has expired." />;
+      title={t('vendorLinkUnavailableTitle')} body={t('vendorLinkUnavailableBody')} />;
   }
   if (errored) {
     return <StateScreen isPhone={isPhone} icon="alert"
-      title={t('vendorLoadError')} body="Couldn’t reach the server."
+      title={t('vendorLoadError')} body={t('vendorServerErrorBody')}
       action={<button className="btn accent" onClick={reload}>{t('vendorRetry')}</button>} />;
   }
 
@@ -262,11 +262,11 @@ function VendorMobile({ vm }: { vm: VM }) {
       background: 'var(--bg)', color: 'var(--fg)', overflow: 'hidden',
     }}>
       <PhHeader
-        title="Recycle Servers"
+        title={t('appBrand')}
         sub={me ? `${t('vendorSharedWith')} · ${me.customer.name}` : '…'}
         scrolled={scrolled}
         leading={review
-          ? <button className="ph-icon-btn" onClick={() => setReview(false)} aria-label="Back">
+          ? <button className="ph-icon-btn" onClick={() => setReview(false)} aria-label={t('vendorBack')}>
               <Icon name="chevronLeft" size={16} />
             </button>
           : undefined}
@@ -385,7 +385,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
         <div className="ph-action-bar">
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.25 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>
-              {basket.length} {basket.length === 1 ? 'item' : 'items'}
+              {basket.length} {basket.length === 1 ? t('vendorItemOne') : t('vendorItemMany')}
             </span>
             <span className="mono" style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
               ${basketTotal(basket).toFixed(2)}
@@ -594,7 +594,7 @@ function VendorDesktop({ vm }: { vm: VM }) {
             <Icon name="inventory" size={18} />
           </div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>Recycle Servers</div>
+            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('appBrand')}</div>
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
               {me ? `${t('vendorSharedWith')} · ${me.customer.name}` : '…'}
             </div>
@@ -648,7 +648,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
             ))}
           </div>
           <span style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>
-            {rows.length} {rows.length === 1 ? 'item' : 'items'}
+            {rows.length} {rows.length === 1 ? t('vendorItemOne') : t('vendorItemMany')}
           </span>
         </div>
 
@@ -663,9 +663,9 @@ function DesktopBrowse({ vm }: { vm: VM }) {
             <table className="table" style={{ minWidth: 880 }}>
               <thead>
                 <tr>
-                  <th>Item</th>
-                  <th>Category</th>
-                  <th className="num">Available</th>
+                  <th>{t('vendorTableItem')}</th>
+                  <th>{t('vendorTableCategory')}</th>
+                  <th className="num">{t('vendorTableAvailable')}</th>
                   <th className="num">{t('vendorQty')}</th>
                   <th className="num">{t('vendorYourOffer')}</th>
                   <th />
@@ -689,14 +689,14 @@ function DesktopBrowse({ vm }: { vm: VM }) {
         <div className="sel-bar">
           <div className="sel-bar-info">
             <div className="sel-bar-pill">
-              {basket.length} {basket.length === 1 ? 'item' : 'items'}
+              {basket.length} {basket.length === 1 ? t('vendorItemOne') : t('vendorItemMany')}
             </div>
             <span className="sel-bar-divider" />
             <div>
               <span className="sel-bar-num">
                 {basket.reduce((a, l) => a + l.qty, 0)}
               </span>{' '}
-              <span className="sel-bar-label">units</span>
+              <span className="sel-bar-label">{t('vendorUnits')}</span>
             </div>
             <span className="sel-bar-divider" />
             <div>
@@ -705,7 +705,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn ghost" onClick={clearBasket}>Clear</button>
+            <button className="btn ghost" onClick={clearBasket}>{t('vendorClear')}</button>
             <button className="btn accent" onClick={() => setReviewOpen(true)}>
               {t('vendorReview')} <Icon name="chevronRight" size={14} />
             </button>
@@ -759,13 +759,13 @@ function DesktopBrowseRow({ it, t, existing, onAdd, onRemove, onZoom }: {
       <td className="num">
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           {added && (
-            <button className="btn ghost sm" onClick={onRemove} aria-label="Remove">
+            <button className="btn ghost sm" onClick={onRemove} aria-label={t('remove')}>
               <Icon name="trash" size={13} />
             </button>
           )}
           <button className="btn accent sm" disabled={!price || +price <= 0}
             onClick={() => onAdd(qty, +price)}>
-            {added ? <><Icon name="check" size={13} /> Update</> : t('vendorAddOffer')}
+            {added ? <><Icon name="check" size={13} /> {t('update')}</> : t('vendorAddOffer')}
           </button>
         </div>
       </td>
@@ -796,7 +796,7 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
             <div className="modal-title">{t('vendorReview')}</div>
             <div className="modal-sub">{t('vendorNonBinding')}</div>
           </div>
-          <button className="btn ghost icon-only sm" onClick={onClose} aria-label="Close">
+          <button className="btn ghost icon-only sm" onClick={onClose} aria-label={t('closeBtn')}>
             <Icon name="x" size={15} />
           </button>
         </div>
@@ -806,10 +806,10 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Item</th>
+                  <th>{t('vendorTableItem')}</th>
                   <th className="num">{t('vendorQty')}</th>
-                  <th className="num">Unit</th>
-                  <th className="num">Total</th>
+                  <th className="num">{t('vendorTableUnit')}</th>
+                  <th className="num">{t('vendorTableTotal')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -917,11 +917,11 @@ function DesktopMyOffers({ vm }: { vm: VM }) {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Item</th>
+                  <th>{t('vendorTableItem')}</th>
                   <th className="num">{t('vendorQty')}</th>
-                  <th className="num">Offered</th>
-                  <th className="num">Accepted</th>
-                  <th>Status</th>
+                  <th className="num">{t('vendorTableOffered')}</th>
+                  <th className="num">{t('vendorTableAccepted')}</th>
+                  <th>{t('vendorTableStatus')}</th>
                 </tr>
               </thead>
               <tbody>

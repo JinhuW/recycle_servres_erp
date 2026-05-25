@@ -5,6 +5,7 @@ import { Topbar } from './components/Topbar';
 import { RolePreviewBanner } from './components/RolePreviewBanner';
 import { TweaksPanel } from './components/TweaksPanel';
 import { useAuth } from './lib/auth';
+import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, navigate,
@@ -35,6 +36,7 @@ type Toast = { msg: string; kind: 'success' | 'error' };
 export function DesktopApp() {
   const { loading, user: realUser, pendingRoleChoice } = useAuth();
   const user = useEffectiveUser();
+  const { t } = useT();
   const [toast, setToast] = useState<Toast | null>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
@@ -94,7 +96,7 @@ export function DesktopApp() {
   }, []);
 
   if (loading) {
-    return <div style={{ padding: 60, color: 'var(--fg-subtle)' }}>Loading…</div>;
+    return <div style={{ padding: 60, color: 'var(--fg-subtle)' }}>{t('loadingApp')}</div>;
   }
   if (!user) return <Login variant="desktop" />;
   // Fresh manager login: gate the app until they pick a role to enter as.

@@ -57,32 +57,42 @@ const TONE_FG: Record<Tone, string> = {
   muted: 'var(--fg-subtle)',
 };
 
-const LIFECYCLE_LABEL: Record<string, string> = {
-  Draft:               'Draft',
-  Shipped:             'Shipped',
-  'Awaiting payment':  'Awaiting payment',
-  Done:                'Done',
-  Closed:              'Closed',
-};
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
-// Friendly labels for the fields we surface on line_edited / meta_changed /
-// status_meta_changed events. Anything not listed falls back to the raw key.
-const FIELD_LABEL: Record<string, string> = {
-  notes:              'Notes',
-  customer_id:        'Customer',
-  qty:                'Qty',
-  unit_price:         'Unit price',
-  condition:          'Condition',
-  category:           'Category',
-  label:              'Label',
-  sub_label:          'Sub-label',
-  part_number:        'Part number',
-  warehouse_id:       'Warehouse',
-  inventory_id:       'Inventory line',
-  note:               'Status note',
-  attachment_added:   'Attachment added',
-  attachment_removed: 'Attachment removed',
+// Translate backend lifecycle enum values to user-facing labels. Unknown
+// values fall through to the raw string so a new backend state still renders.
+const LIFECYCLE_KEY: Record<string, string> = {
+  Draft:              'lifecycleDraft',
+  Shipped:            'lifecycleShipped',
+  'Awaiting payment': 'lifecycleAwaiting',
+  Done:               'lifecycleDone',
+  Closed:             'lifecycleClosed',
 };
+function lifecycleLabel(t: TFn, raw: string): string {
+  const k = LIFECYCLE_KEY[raw];
+  return k ? t(k) : raw;
+}
+
+const FIELD_KEY: Record<string, string> = {
+  notes:              'fieldNotes',
+  customer_id:        'fieldCustomer',
+  qty:                'fieldQty',
+  unit_price:         'fieldUnitPrice',
+  condition:          'fieldCondition',
+  category:           'fieldCategory',
+  label:              'fieldLabel',
+  sub_label:          'fieldSubLabel',
+  part_number:        'fieldPartNumber',
+  warehouse_id:       'fieldWarehouse',
+  inventory_id:       'fieldInventoryLine',
+  note:               'fieldStatusNote',
+  attachment_added:   'fieldAttachmentAdded',
+  attachment_removed: 'fieldAttachmentRemoved',
+};
+function fieldLabel(t: TFn, raw: string): string {
+  const k = FIELD_KEY[raw];
+  return k ? t(k) : raw;
+}
 
 const MONEY_FIELDS = new Set(['unit_price']);
 
@@ -94,23 +104,27 @@ function renderValue(field: string, v: unknown, locale: string): string {
   return JSON.stringify(v);
 }
 
-function summarize(event: SellOrderEvent, locale: string): React.ReactNode {
+function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNode {
   const d = event.detail as Record<string, unknown>;
   switch (event.kind) {
     case 'created':
       return (
         <>
-          Created (
+          {t('historyCreatedPrefix')} (
           {(d.source === 'vendor_bid')
-            ? <>from vendor bid <b>{String(d.vendorBidId ?? '')}</b></>
-            : <>by {event.actor?.name ?? 'manager'}</>}
-          ){typeof d.lineCount === 'number' ? <> · {d.lineCount} line{d.lineCount === 1 ? '' : 's'}</> : null}
+            ? <>{t('historyFromVendorBid', { id: String(d.vendorBidId ?? '') })}</>
+            : <>{t('historyByActor', { name: event.actor?.name ?? t('historyDefaultManager') })}</>}
+          ){typeof d.lineCount === 'number'
+              ? <> · {d.lineCount === 1
+                  ? t('historyLineCountOne', { n: d.lineCount })
+                  : t('historyLineCountMany', { n: d.lineCount })}</>
+              : null}
         </>
       );
     case 'status_changed': {
-      const from = LIFECYCLE_LABEL[String(d.from)] ?? String(d.from);
-      const to   = LIFECYCLE_LABEL[String(d.to)]   ?? String(d.to);
-      return <>Status: <b>{from}</b> → <b>{to}</b></>;
+      const from = lifecycleLabel(t, String(d.from));
+      const to   = lifecycleLabel(t, String(d.to));
+      return <>{t('historyStatusLabel')}: <b>{from}</b> → <b>{to}</b></>;
     }
     case 'meta_changed': {
       const changes = (d.changes as Array<{ field: string; from: unknown; to: unknown }>) ?? [];
@@ -118,7 +132,7 @@ function summarize(event: SellOrderEvent, locale: string): React.ReactNode {
         <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
           {changes.map((c, i) => (
             <li key={i}>
-              <b>{FIELD_LABEL[c.field] ?? c.field}</b>: {renderValue(c.field, c.from, locale)} → {renderValue(c.field, c.to, locale)}
+              <b>{fieldLabel(t, c.field)}</b>: {renderValue(c.field, c.from, locale)} → {renderValue(c.field, c.to, locale)}
             </li>
           ))}
         </ul>
@@ -127,11 +141,11 @@ function summarize(event: SellOrderEvent, locale: string): React.ReactNode {
     case 'line_added':
     case 'line_removed': {
       const snap = (d.snapshot as Record<string, unknown>) ?? {};
-      const verb = event.kind === 'line_added' ? 'Added line' : 'Removed line';
+      const verb = event.kind === 'line_added' ? t('historyAddedLine') : t('historyRemovedLine');
       return (
         <>
           {verb}: <b>{String(snap.label ?? '—')}</b>
-          {snap.qty != null ? <> · qty {String(snap.qty)}</> : null}
+          {snap.qty != null ? <> · {t('qtyShort', { n: String(snap.qty) })}</> : null}
           {snap.unit_price != null && typeof snap.unit_price === 'number'
             ? <> · {fmtUSD(snap.unit_price, locale)}</>
             : null}
@@ -143,11 +157,11 @@ function summarize(event: SellOrderEvent, locale: string): React.ReactNode {
       const invId = String(d.inventoryId ?? '');
       return (
         <>
-          <div>Edited line {invId ? <code>{invId}</code> : null}</div>
+          <div>{t('historyEditedLine')} {invId ? <code>{invId}</code> : null}</div>
           <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
             {changes.map((c, i) => (
               <li key={i}>
-                <b>{FIELD_LABEL[c.field] ?? c.field}</b>: {renderValue(c.field, c.from, locale)} → {renderValue(c.field, c.to, locale)}
+                <b>{fieldLabel(t, c.field)}</b>: {renderValue(c.field, c.from, locale)} → {renderValue(c.field, c.to, locale)}
               </li>
             ))}
           </ul>
@@ -155,29 +169,29 @@ function summarize(event: SellOrderEvent, locale: string): React.ReactNode {
       );
     }
     case 'status_meta_changed': {
-      const status = LIFECYCLE_LABEL[String(d.status)] ?? String(d.status);
+      const status = lifecycleLabel(t, String(d.status));
       const field  = String(d.field);
-      const label  = FIELD_LABEL[field] ?? field;
+      const label  = fieldLabel(t, field);
       if (field === 'note') {
-        return <>{label} on <b>{status}</b>: {renderValue('note', d.to, locale)}</>;
+        return <>{label} {t('historyStatusMetaOn')} <b>{status}</b>: {renderValue('note', d.to, locale)}</>;
       }
-      return <>{label} on <b>{status}</b>: {String(d.filename ?? '')}</>;
+      return <>{label} {t('historyStatusMetaOn')} <b>{status}</b>: {String(d.filename ?? '')}</>;
     }
-    case 'archived':   return <>Archived</>;
-    case 'unarchived': return <>Unarchived</>;
+    case 'archived':   return <>{t('historyArchived')}</>;
+    case 'unarchived': return <>{t('historyUnarchived')}</>;
     case 'closed': {
       const note = d.note ? <> · "{String(d.note)}"</> : null;
-      return <>Closed (reason: <code>{String(d.reasonId ?? '')}</code>){note}</>;
+      return <>{t('historyClosedReason', { id: String(d.reasonId ?? '') })}{note}</>;
     }
     case 'reopened': {
       const note = d.note ? <> · "{String(d.note)}"</> : null;
-      return <>Reopened{note}</>;
+      return <>{t('historyReopened')}{note}</>;
     }
   }
 }
 
 export function SellOrderHistory({ sellOrderId, refreshKey }: Props) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<SellOrderEvent[] | null>(null);
 
@@ -189,8 +203,8 @@ export function SellOrderHistory({ sellOrderId, refreshKey }: Props) {
     return () => { cancelled = true; };
   }, [sellOrderId, refreshKey]);
 
-  if (events === null) return <div style={{ color: 'var(--fg-subtle)' }}>Loading…</div>;
-  if (events.length === 0) return <div style={{ color: 'var(--fg-subtle)' }}>No activity yet.</div>;
+  if (events === null) return <div style={{ color: 'var(--fg-subtle)' }}>{t('historyLoading')}</div>;
+  if (events.length === 0) return <div style={{ color: 'var(--fg-subtle)' }}>{t('historyEmpty')}</div>;
 
   return (
     <ol style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
@@ -206,10 +220,10 @@ export function SellOrderHistory({ sellOrderId, refreshKey }: Props) {
               <Icon name={KIND_ICON[e.kind]} />
             </span>
             <div style={{ minWidth: 0 }}>
-              <div>{summarize(e, locale)}</div>
+              <div>{summarize(e, locale, t)}</div>
               {e.actor ? (
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                  by {e.actor.name}
+                  {t('historyByActorLine', { name: e.actor.name })}
                 </div>
               ) : null}
             </div>

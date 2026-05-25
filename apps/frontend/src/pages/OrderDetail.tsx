@@ -198,7 +198,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
               <Icon name="box" size={13} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.4 }}>
-              <strong style={{ color: 'var(--fg)' }}>Archived.</strong> Tap the restore button below to bring it back.
+              <strong style={{ color: 'var(--fg)' }}>{t('orderArchivedBadge')}</strong> {t('orderArchivedRestoreHint')}
             </div>
           </div>
         )}
@@ -472,7 +472,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                 setArchiving(true);
                 try {
                   await unarchiveOrder(order.id);
-                  onSaved('Order restored');
+                  onSaved(t('orderRestoredToast'));
                 } catch (e) {
                   handleFetchError(e);
                   setArchiving(false);
@@ -482,7 +482,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
               }
             }}
             disabled={archiving}
-            aria-label={isArchived ? 'Unarchive order' : 'Archive order'}
+            aria-label={isArchived ? t('unarchiveOrder') : t('archiveOrder')}
             style={{
               width: 50, height: 50, borderRadius: 14,
               border: '1px solid var(--border-strong)',
@@ -584,9 +584,9 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   <Icon name="box" size={18} />
                 </div>
                 <div>
-                  <div className="modal-title">Archive {order.id}?</div>
+                  <div className="modal-title">{t('archivePromptTitle', { id: order.id })}</div>
                   <div className="modal-sub">
-                    Hides from the default list. Reversible — unarchive any time.
+                    {t('archivePromptSub')}
                   </div>
                 </div>
               </div>
@@ -602,7 +602,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   setArchiving(true);
                   try {
                     await archiveOrder(order.id);
-                    onSaved('Order archived');
+                    onSaved(t('orderArchivedToast'));
                   } catch (e) {
                     handleFetchError(e);
                     setArchiving(false);
@@ -610,7 +610,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   }
                 }}
               >
-                {archiving ? '…' : 'Archive'}
+                {archiving ? '…' : t('archive')}
               </button>
             </div>
           </div>

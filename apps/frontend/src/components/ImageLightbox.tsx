@@ -1,5 +1,6 @@
 import { Icon } from './Icon';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { useT } from '../lib/i18n';
 
 type Props = {
   url: string;
@@ -10,6 +11,7 @@ type Props = {
 // Full-screen read-only image viewer. Sits above the desktop LineDrawer
 // (z-index 80) and the mobile shell. Close via X button, backdrop click, or Esc.
 export function ImageLightbox({ url, alt, onClose }: Props) {
+  const { t } = useT();
   useEscapeKey(onClose);
 
   return (
@@ -27,7 +29,7 @@ export function ImageLightbox({ url, alt, onClose }: Props) {
     >
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
-        title="Close"
+        title={t('closeBtn')}
         style={{
           position: 'absolute',
           top: 16,
@@ -47,7 +49,7 @@ export function ImageLightbox({ url, alt, onClose }: Props) {
       </button>
       <img
         src={url}
-        alt={alt ?? 'AI scan'}
+        alt={alt ?? t('aiScanAlt')}
         onClick={(e) => e.stopPropagation()}
         onError={onClose}
         style={{

@@ -352,7 +352,7 @@ function Shell() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   if (loading) {
-    return <div className="phone-app" style={{ display: 'grid', placeItems: 'center', color: 'var(--fg-subtle)' }}>Loading…</div>;
+    return <div className="phone-app" style={{ display: 'grid', placeItems: 'center', color: 'var(--fg-subtle)' }}>{t('loadingApp')}</div>;
   }
 
   if (!user) return <Login />;

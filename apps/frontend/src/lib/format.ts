@@ -37,12 +37,26 @@ export const canonicalPartNumber = (pn: string | null | undefined): string =>
     .replace(/\s+/g, '')
     .toUpperCase();
 
+// Built-in Intl.RelativeTimeFormat localises "just now / 5m ago / 2d ago" into
+// every browser locale we care about, so we don't need to ship dictionary
+// entries for each unit. `numeric: 'auto'` produces "now" / "刚刚" for 0s.
+const RTF_CACHE = new Map<string, Intl.RelativeTimeFormat>();
+function getRtf(locale: string): Intl.RelativeTimeFormat {
+  let rtf = RTF_CACHE.get(locale);
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
+    RTF_CACHE.set(locale, rtf);
+  }
+  return rtf;
+}
+
 export const relTime = (d: Date | string, locale = 'en-US'): string => {
   const date = new Date(d);
   const diff = (Date.now() - date.getTime()) / 1000;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-  if (diff < 86400 * 7) return Math.floor(diff / 86400) + 'd ago';
+  const rtf = getRtf(locale);
+  if (diff < 60) return rtf.format(0, 'second');
+  if (diff < 3600) return rtf.format(-Math.floor(diff / 60), 'minute');
+  if (diff < 86400) return rtf.format(-Math.floor(diff / 3600), 'hour');
+  if (diff < 86400 * 7) return rtf.format(-Math.floor(diff / 86400), 'day');
   return fmtDateShort(date, locale);
 };

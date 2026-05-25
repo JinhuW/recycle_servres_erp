@@ -139,11 +139,11 @@ export function Orders({ onEdit, onToast }: Props) {
           <button
             className={'ph-chip-btn ' + (showArchived ? 'active' : '')}
             onClick={() => setShowArchived(v => !v)}
-            title="Include archived orders"
+            title={t('includeArchivedHint')}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
             <Icon name="box" size={11} />
-            Archived
+            {t('archivedChip')}
           </button>
         </div>
         {!loadedOnce && <PhoneListSkeleton rows={5} variant="order" />}

@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { useT } from '../lib/i18n';
 
 type SkeletonProps = {
   width?: number | string;
@@ -30,9 +31,11 @@ type TableSkeletonProps = {
 };
 
 export function TableSkeleton({ rows = 8, cols = 6, withCheckbox = false }: TableSkeletonProps) {
+  const { t } = useT();
+  const loadingAria = t('loadingAria');
   const totalCols = withCheckbox ? cols + 1 : cols;
   return (
-    <div className="skeleton-table" role="status" aria-label="Loading">
+    <div className="skeleton-table" role="status" aria-label={loadingAria}>
       {Array.from({ length: rows }).map((_, r) => (
         <div className="skeleton-tr" key={r}>
           {Array.from({ length: totalCols }).map((_, c) => {
@@ -64,8 +67,10 @@ type FormSkeletonProps = {
 };
 
 export function FormSkeleton({ fields = 6, withHeader = true }: FormSkeletonProps) {
+  const { t } = useT();
+  const loadingAria = t('loadingAria');
   return (
-    <div className="skeleton-form" role="status" aria-label="Loading">
+    <div className="skeleton-form" role="status" aria-label={loadingAria}>
       {withHeader && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
           <Skeleton width={180} height={20} radius={6} />
@@ -83,8 +88,10 @@ export function FormSkeleton({ fields = 6, withHeader = true }: FormSkeletonProp
 }
 
 export function DashboardSkeleton() {
+  const { t } = useT();
+  const loadingAria = t('loadingAria');
   return (
-    <div className="skeleton-dashboard" role="status" aria-label="Loading">
+    <div className="skeleton-dashboard" role="status" aria-label={loadingAria}>
       <div className="skeleton-tiles">
         {Array.from({ length: 4 }).map((_, i) => (
           <div className="skeleton-tile" key={i}>
@@ -122,9 +129,11 @@ type PhoneListSkeletonProps = {
 };
 
 export function PhoneListSkeleton({ rows = 5, variant = 'row' }: PhoneListSkeletonProps) {
+  const { t } = useT();
+  const loadingAria = t('loadingAria');
   if (variant === 'order') {
     return (
-      <div className="skeleton-phone-orders" role="status" aria-label="Loading">
+      <div className="skeleton-phone-orders" role="status" aria-label={loadingAria}>
         {Array.from({ length: rows }).map((_, i) => (
           <div className="skeleton-phone-order" key={i}>
             <div className="skeleton-phone-order-head">
@@ -141,7 +150,7 @@ export function PhoneListSkeleton({ rows = 5, variant = 'row' }: PhoneListSkelet
     );
   }
   return (
-    <div className="skeleton-phone-rows" role="status" aria-label="Loading">
+    <div className="skeleton-phone-rows" role="status" aria-label={loadingAria}>
       {Array.from({ length: rows }).map((_, i) => (
         <div className="skeleton-phone-row" key={i}>
           <Skeleton width={36} height={36} radius={10} />
@@ -157,8 +166,10 @@ export function PhoneListSkeleton({ rows = 5, variant = 'row' }: PhoneListSkelet
 }
 
 export function PhoneKpiSkeleton({ tiles = 2 }: { tiles?: number }) {
+  const { t } = useT();
+  const loadingAria = t('loadingAria');
   return (
-    <div className="skeleton-phone-kpis" role="status" aria-label="Loading">
+    <div className="skeleton-phone-kpis" role="status" aria-label={loadingAria}>
       {Array.from({ length: tiles }).map((_, i) => (
         <div className="skeleton-phone-kpi" key={i}>
           <Skeleton width={70} height={10} />
@@ -175,8 +186,10 @@ type ListSkeletonProps = {
 };
 
 export function ListSkeleton({ rows = 6 }: ListSkeletonProps) {
+  const { t } = useT();
+  const loadingAria = t('loadingAria');
   return (
-    <div className="skeleton-list" role="status" aria-label="Loading">
+    <div className="skeleton-list" role="status" aria-label={loadingAria}>
       {Array.from({ length: rows }).map((_, i) => (
         <div className="skeleton-list-row" key={i}>
           <Skeleton width={28} height={28} radius={999} />
