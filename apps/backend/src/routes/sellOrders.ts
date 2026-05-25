@@ -272,6 +272,12 @@ sellOrders.post('/', async (c) => {
            ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i})
       `;
     }
+    await writeSellOrderEvent(tx, nextId, u.id, 'created', {
+      source: 'manager',
+      status: 'Draft',
+      lineCount: body.lines.length,
+      customerId: body.customerId,
+    });
   });
   if (outcome.code !== 201) {
     const e = outcome as { code: 400; msg: string };
