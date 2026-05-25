@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
+import { useT } from '../../../lib/i18n';
 import type { Warehouse } from '../../../lib/types';
 import { SettingsHeader, Toggle, type Member, type ToastFn } from './_shared';
 
@@ -22,6 +23,7 @@ function listTimezones(): string[] {
 }
 
 export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
+  const { t } = useT();
   const [whs, setWhs] = useState<WarehouseRow[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [modalWh, setModalWh] = useState<Warehouse | null>(null);
@@ -50,10 +52,10 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
     updateRow(id, { active }); // optimistic
     try {
       await api.patch(`/api/warehouses/${id}`, { active });
-      showToast?.(active ? 'Warehouse reactivated' : 'Warehouse archived');
+      showToast?.(active ? t('whReactivated') : t('whArchived'));
       reload();
     } catch (e) {
-      showToast?.((e as { message?: string })?.message ?? 'Failed to update warehouse', 'error');
+      showToast?.((e as { message?: string })?.message ?? t('whUpdateFailed'), 'error');
       reload();
     }
   };
@@ -61,10 +63,10 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
   return (
     <>
       <SettingsHeader
-        title="Warehouses"
+        title={t('whPanelTitle')}
         actions={
           <button className="btn accent" onClick={() => setCreating(true)}>
-            <Icon name="plus" size={14} /> Add warehouse
+            <Icon name="plus" size={14} /> {t('whAddBtn')}
           </button>
         }
       />
@@ -103,7 +105,7 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
                   <button
                     className="btn icon sm ghost"
                     onClick={() => setModalWh(w)}
-                    title="Open full editor"
+                    title={t('whOpenEditor')}
                     style={{ color: 'var(--fg-subtle)' }}
                   >
                     <Icon name="settings" size={13} />
@@ -114,19 +116,19 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
               <div className="wh-card-body">
                 {w.address && (
                   <div className="wh-row">
-                    <span className="wh-row-label">Address</span>
+                    <span className="wh-row-label">{t('whAddress')}</span>
                     <span className="wh-row-val">{w.address}</span>
                   </div>
                 )}
                 {w.manager && (
                   <div className="wh-row">
-                    <span className="wh-row-label">Manager</span>
+                    <span className="wh-row-label">{t('whManager')}</span>
                     <span className="wh-row-val">{w.manager}</span>
                   </div>
                 )}
                 {w.timezone && (
                   <div className="wh-row">
-                    <span className="wh-row-label">Timezone</span>
+                    <span className="wh-row-label">{t('whTimezone')}</span>
                     <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{w.timezone}</span>
                   </div>
                 )}
@@ -134,11 +136,11 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
 
               <div className="wh-card-foot">
                 <div className="toggle-row">
-                  <span>Active</span>
+                  <span>{t('whActive')}</span>
                   <Toggle checked={w.active} onChange={(v) => setActive(w.id, v)} />
                 </div>
-                <div className="toggle-row" title="Not configurable yet — receiving status is derived, not stored.">
-                  <span>Accepting receipts</span>
+                <div className="toggle-row" title={t('whReceivingNote')}>
+                  <span>{t('whAcceptingReceipts')}</span>
                   <Toggle
                     checked={w.receiving}
                     onChange={() => { /* not persisted: no backend field yet */ }}
@@ -153,8 +155,8 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
         <button type="button" className="card wh-add" onClick={() => setCreating(true)}>
           <div className="wh-add-icon"><Icon name="plus" size={20} /></div>
           <div className="wh-add-text">
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Add warehouse</div>
-            <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>New location for receiving inventory</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{t('whAddBtn')}</div>
+            <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('whAddSub')}</div>
           </div>
         </button>
       </div>
@@ -181,6 +183,7 @@ function WarehouseEditModal({
   onSaved: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useT();
   const isNew = !warehouse;
   type Draft = {
     name: string; short: string; region: string;
@@ -231,9 +234,9 @@ function WarehouseEditModal({
       };
       if (isNew) await api.post('/api/warehouses', body);
       else       await api.patch(`/api/warehouses/${warehouse!.id}`, body);
-      onSaved(isNew ? 'Warehouse created' : 'Warehouse saved');
+      onSaved(isNew ? t('whCreated') : t('whSaved'));
     } catch (e) {
-      onError((e as { message?: string })?.message ?? 'Save failed');
+      onError((e as { message?: string })?.message ?? t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -245,9 +248,9 @@ function WarehouseEditModal({
     try {
       const qs = transferTo ? `?transferTo=${encodeURIComponent(transferTo)}` : '';
       await api.delete(`/api/warehouses/${warehouse.id}${qs}`);
-      onSaved('Warehouse deleted');
+      onSaved(t('whDeleted'));
     } catch (e) {
-      onError((e as { message?: string })?.message ?? 'Delete failed');
+      onError((e as { message?: string })?.message ?? t('deleteFailed'));
     } finally {
       setDeleting(false);
     }
@@ -257,58 +260,58 @@ function WarehouseEditModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-shell" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <div className="modal-title">{isNew ? 'New warehouse' : 'Edit warehouse'}</div>
+          <div className="modal-title">{isNew ? t('whNewTitle') : t('whEditTitle')}</div>
           <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
         </div>
         <div className="modal-body">
           <div className="field-row">
             <div className="field">
-              <label className="label">Name</label>
+              <label className="label">{t('whFieldName')}</label>
               <input className="input" value={draft.name} onChange={e => set('name', e.target.value)} />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
-              <label className="label">Short code</label>
+              <label className="label">{t('whFieldShortCode')}</label>
               <input
                 className="input mono"
                 value={draft.short}
                 onChange={e => set('short', e.target.value.toUpperCase())}
-                placeholder="e.g. LA1"
+                placeholder={t('whShortCodePh')}
               />
             </div>
             <div className="field">
-              <label className="label">Region</label>
-              <input className="input" value={draft.region} onChange={e => set('region', e.target.value)} placeholder="e.g. US-West" />
+              <label className="label">{t('whFieldRegion')}</label>
+              <input className="input" value={draft.region} onChange={e => set('region', e.target.value)} placeholder={t('whRegionPh')} />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
-              <label className="label">Address</label>
+              <label className="label">{t('whAddress')}</label>
               <textarea
                 className="input"
                 rows={3}
                 value={draft.address}
                 onChange={e => set('address', e.target.value)}
-                placeholder="Street, city, postal code…"
+                placeholder={t('whAddressPh')}
               />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
-              <label className="label">Manager</label>
+              <label className="label">{t('whManager')}</label>
               <select
                 className="input"
                 value={draft.managerUserId}
                 onChange={e => set('managerUserId', e.target.value)}
               >
-                <option value="">— No manager —</option>
+                <option value="">{t('whNoManager')}</option>
                 {managers.map(m => (
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
                 {draft.managerUserId && !managers.some(m => m.id === draft.managerUserId) && (
                   <option value={draft.managerUserId}>
-                    {warehouse?.manager ?? 'Current manager'}
+                    {warehouse?.manager ?? t('whCurrentManager')}
                   </option>
                 )}
               </select>
@@ -318,23 +321,23 @@ function WarehouseEditModal({
               record — read-only, single source of truth in the DB. */}
           <div className="field-row">
             <div className="field">
-              <label className="label">Manager phone</label>
+              <label className="label">{t('whManagerPhone')}</label>
               <input className="input" value={selectedMgr?.phone ?? '—'} readOnly disabled />
             </div>
             <div className="field">
-              <label className="label">Manager email</label>
+              <label className="label">{t('whManagerEmail')}</label>
               <input className="input" value={selectedMgr?.email ?? '—'} readOnly disabled />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
-              <label className="label">Timezone</label>
+              <label className="label">{t('whTimezone')}</label>
               <select
                 className="input"
                 value={draft.timezone}
                 onChange={e => set('timezone', e.target.value)}
               >
-                <option value="">(none)</option>
+                <option value="">{t('whNone')}</option>
                 {timezones.map(tz => (
                   <option key={tz} value={tz}>{tz}</option>
                 ))}
@@ -344,7 +347,7 @@ function WarehouseEditModal({
           {!isNew && (
             <div className="field-row">
               <div className="field">
-                <label className="label">ID</label>
+                <label className="label">{t('whFieldId')}</label>
                 <input className="input mono" value={warehouse!.id} disabled />
               </div>
             </div>
@@ -357,19 +360,19 @@ function WarehouseEditModal({
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Delete warehouse "{warehouse!.name ?? warehouse!.short}"?
+                {t('whDeleteConfirmTitle', { name: warehouse!.name ?? warehouse!.short })}
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginBottom: 10 }}>
-                Existing orders and sell-orders referencing this warehouse will be moved to the warehouse you pick below. This cannot be undone.
+                {t('whDeleteConfirmSub')}
               </div>
               <div className="field">
-                <label className="label">Move inventory to</label>
+                <label className="label">{t('whMoveInventoryTo')}</label>
                 <select
                   className="input"
                   value={transferTo}
                   onChange={(e) => setTransferTo(e.target.value)}
                 >
-                  <option value="">(none — clear warehouse from records)</option>
+                  <option value="">{t('whMoveInventoryClear')}</option>
                   {others.map(w => (
                     <option key={w.id} value={w.id}>
                       {w.name ?? w.short} · {w.region}
@@ -389,7 +392,7 @@ function WarehouseEditModal({
                 disabled={deleting || saving}
                 style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
               >
-                Delete
+                {t('delete')}
               </button>
             )}
             {!isNew && confirmingDelete && (
@@ -398,7 +401,7 @@ function WarehouseEditModal({
                 onClick={() => { setConfirmingDelete(false); setTransferTo(''); }}
                 disabled={deleting}
               >
-                Back
+                {t('back')}
               </button>
             )}
           </div>
@@ -410,13 +413,13 @@ function WarehouseEditModal({
                 disabled={deleting}
                 style={{ background: 'var(--neg)', borderColor: 'var(--neg)' }}
               >
-                {deleting ? '…' : 'Confirm delete'}
+                {deleting ? '…' : t('whConfirmDelete')}
               </button>
             ) : (
               <>
-                <button className="btn" onClick={onClose}>Cancel</button>
+                <button className="btn" onClick={onClose}>{t('cancel')}</button>
                 <button className="btn primary" onClick={save} disabled={saving || deleting || !canSave}>
-                  {saving ? '…' : 'Save'}
+                  {saving ? '…' : t('save')}
                 </button>
               </>
             )}

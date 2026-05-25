@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon, type IconName } from '../../../components/Icon';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
+import { useT } from '../../../lib/i18n';
 import { SettingsHeader, Toggle } from './_shared';
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ type CategoryApi = {
 };
 
 export function CategoriesPanel() {
+  const { t } = useT();
   const [cats, setCats] = useState<CategoryRow[]>([]);
 
   const reload = () =>
@@ -48,9 +50,9 @@ export function CategoriesPanel() {
   return (
     <>
       <SettingsHeader
-        title="Categories & SKUs"
-        sub="Item categories your team submits and sells. Toggle to make available in submissions."
-        actions={<button className="btn"><Icon name="plus" size={14} /> Add category</button>}
+        title={t('catPanelTitle')}
+        sub={t('catPanelSub')}
+        actions={<button className="btn"><Icon name="plus" size={14} /> {t('catAddBtn')}</button>}
       />
 
       <div className="cat-list">
@@ -62,7 +64,7 @@ export function CategoriesPanel() {
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 15 }}>{c.label}</div>
                   <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                    {c.enabled ? 'Available in submissions' : 'Hidden — not selectable'}
+                    {c.enabled ? t('catAvailable') : t('catHidden')}
                   </div>
                 </div>
               </div>
@@ -72,22 +74,22 @@ export function CategoriesPanel() {
             <div className="cat-row-body">
               <div className="cat-opt">
                 <div>
-                  <div className="cat-opt-label">AI label capture</div>
-                  <div className="cat-opt-sub">Photograph the part — vision model reads brand, capacity, speed.</div>
+                  <div className="cat-opt-label">{t('aiLabelCapture')}</div>
+                  <div className="cat-opt-sub">{t('catAiCaptureDesc')}</div>
                 </div>
                 <Toggle checked={c.aiCapture} onChange={(v) => { upd(c.id, { aiCapture: v }); persist(c.id, { aiCapture: v }); }} disabled={!c.enabled} />
               </div>
               <div className="cat-opt">
                 <div>
-                  <div className="cat-opt-label">Require part number</div>
-                  <div className="cat-opt-sub">Block submission until manufacturer PN is entered.</div>
+                  <div className="cat-opt-label">{t('catRequirePN')}</div>
+                  <div className="cat-opt-sub">{t('catRequirePNDesc')}</div>
                 </div>
                 <Toggle checked={c.requiresPN} onChange={(v) => { upd(c.id, { requiresPN: v }); persist(c.id, { requiresPn: v }); }} disabled={!c.enabled} />
               </div>
               <div className="cat-opt">
                 <div>
-                  <div className="cat-opt-label">Default margin target</div>
-                  <div className="cat-opt-sub">Target gross margin used as the default for this category.</div>
+                  <div className="cat-opt-label">{t('catDefaultMargin')}</div>
+                  <div className="cat-opt-sub">{t('catDefaultMarginDesc')}</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input

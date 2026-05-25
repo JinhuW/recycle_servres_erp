@@ -14,13 +14,16 @@ import { DesktopSettingsConnectors } from './DesktopSettingsConnectors';
 // ─── Shell ────────────────────────────────────────────────────────────────────
 type SectionId = 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'connectors';
 
-const SECTIONS: { id: SectionId; label: string; sub: string; icon: IconName; managerOnly?: boolean }[] = [
-  { id: 'members',    label: 'Members',    sub: 'People & roles',     icon: 'user' },
-  { id: 'warehouses', label: 'Warehouses', sub: 'Locations',          icon: 'warehouse' },
-  { id: 'customers',  label: 'Customers',  sub: 'Buyers & accounts',  icon: 'shield' },
-  { id: 'categories', label: 'Categories', sub: 'Items & SKUs',       icon: 'box' },
-  { id: 'general',    label: 'General',    sub: 'Workspace',          icon: 'settings' },
-  { id: 'connectors', label: 'Connectors', sub: 'OAuth & scraper',    icon: 'chip', managerOnly: true },
+// Section labels are looked up via t() at render time — id ↔ tKey is the
+// only declarative mapping we need; pluralization / casing belongs to the
+// dictionary.
+const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconName; managerOnly?: boolean }[] = [
+  { id: 'members',    labelKey: 'settingsNavMembers',    subKey: 'settingsNavMembersSub',    icon: 'user' },
+  { id: 'warehouses', labelKey: 'settingsNavWarehouses', subKey: 'settingsNavWarehousesSub', icon: 'warehouse' },
+  { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield' },
+  { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box' },
+  { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings' },
+  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip', managerOnly: true },
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
@@ -39,7 +42,7 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
       </div>
 
       <div className="settings-shell">
-        <nav className="settings-nav" aria-label="Settings sections">
+        <nav className="settings-nav" aria-label={t('settingsNavAriaLabel')}>
           {sections.map(s => (
             <button
               key={s.id}
@@ -48,8 +51,8 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             >
               <span className="settings-nav-icon"><Icon name={s.icon} size={14} /></span>
               <span className="settings-nav-text">
-                <span className="settings-nav-label">{s.id === 'connectors' ? t('connectorsTab') : s.label}</span>
-                <span className="settings-nav-sub">{s.sub}</span>
+                <span className="settings-nav-label">{t(s.labelKey)}</span>
+                <span className="settings-nav-sub">{t(s.subKey)}</span>
               </span>
             </button>
           ))}

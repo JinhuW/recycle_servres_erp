@@ -12,7 +12,7 @@ import { useT } from '../../../lib/i18n';
 
 // ─── Members ──────────────────────────────────────────────────────────────────
 export function MembersPanel({ showToast }: { showToast: ToastFn }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [members, setMembers] = useState<Member[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -39,9 +39,9 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
       await api.delete(`/api/members/${m.id}`);
       setRemoving(null);
       reload();
-      showToast?.(`Removed ${m.name} from workspace`);
+      showToast?.(t('memRemovedToast', { name: m.name }));
     } catch (e) {
-      showToast?.(e instanceof Error ? e.message : 'Failed to remove member', 'error');
+      showToast?.(e instanceof Error ? e.message : t('memRemoveFailed'), 'error');
     }
   };
 
@@ -69,11 +69,15 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
   return (
     <>
       <SettingsHeader
-        title="Members"
-        sub={`${members.length - archivedCount} active${archivedCount ? ` · ${archivedCount} archived` : ''} · ${pending.length} pending invite${pending.length === 1 ? '' : 's'}`}
+        title={t('memPanelTitle')}
+        sub={t('memPanelSub', {
+          active: members.length - archivedCount,
+          archived: archivedCount,
+          pending: pending.length,
+        })}
         actions={
           <button className="btn accent" onClick={() => setInviting(true)}>
-            <Icon name="plus" size={14} /> Invite member
+            <Icon name="plus" size={14} /> {t('memInviteBtn')}
           </button>
         }
       />
@@ -81,9 +85,9 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
       <div className="settings-row">
         <div className="seg">
           {([
-            { v: 'all', label: 'All', count: counts.all },
-            { v: 'manager', label: 'Managers', count: counts.manager },
-            { v: 'purchaser', label: 'Purchasers', count: counts.purchaser },
+            { v: 'all', label: t('all'), count: counts.all },
+            { v: 'manager', label: t('memManagers'), count: counts.manager },
+            { v: 'purchaser', label: t('memPurchasers'), count: counts.purchaser },
           ] as const).map(o => (
             <button key={o.v} className={roleFilter === o.v ? 'active' : ''} onClick={() => setRoleFilter(o.v)}>
               {o.label} <span style={{ opacity: 0.55, marginLeft: 4 }}>{o.count}</span>
@@ -103,7 +107,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
               checked={showArchived}
               onChange={e => setShowArchived(e.target.checked)}
             />
-            Show archived
+            {t('showArchivedBtn')}
             {archivedCount > 0 && (
               <span style={{ opacity: 0.55, marginLeft: 2 }}>{archivedCount}</span>
             )}
@@ -112,7 +116,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
             <Icon name="search" size={13} />
             <input
               type="text"
-              placeholder="Search name or email…"
+              placeholder={t('memSearchPlaceholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -124,8 +128,8 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
         <div className="card pending-card">
           <div className="card-head">
             <div>
-              <div className="card-title">Pending invites</div>
-              <div className="card-sub">Resend or revoke if someone hasn't accepted.</div>
+              <div className="card-title">{t('memPendingTitle')}</div>
+              <div className="card-sub">{t('memPendingSub')}</div>
             </div>
           </div>
           <div className="invite-list">
@@ -135,21 +139,21 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 500, fontSize: 13.5 }}>{inv.email}</div>
                   <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-                    {inv.role === 'manager' ? 'Manager' : 'Purchaser'} · added {relTime(inv.created_at, locale)} · not yet signed in
+                    {inv.role === 'manager' ? t('role_manager') : t('role_purchaser')} · {t('memAddedNotSignedIn', { rel: relTime(inv.created_at, locale) })}
                   </div>
                 </div>
                 <button
                   className="btn sm ghost"
-                  onClick={() => showToast?.('Resending invites isn’t available yet', 'error')}
+                  onClick={() => showToast?.(t('memResendNotImpl'), 'error')}
                 >
-                  Resend
+                  {t('memResend')}
                 </button>
                 <button
                   className="btn sm ghost"
                   style={{ color: 'var(--neg)' }}
                   onClick={() => removeMember(inv)}
                 >
-                  Revoke
+                  {t('memRevoke')}
                 </button>
               </div>
             ))}
@@ -164,9 +168,9 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
         <table className="data-table members-table">
           <thead>
             <tr>
-              <th>Member</th>
-              <th>Role</th>
-              <th>Last active</th>
+              <th>{t('memColMember')}</th>
+              <th>{t('role')}</th>
+              <th>{t('memColLastActive')}</th>
               <th></th>
             </tr>
           </thead>
@@ -181,8 +185,8 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                       <div>
                         <div style={{ fontWeight: 500, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
                           {m.name}
-                          {isMe && <span className="chip muted" style={{ fontSize: 10 }}>You</span>}
-                          {!m.active && <span className="chip muted" style={{ fontSize: 10 }}>Inactive</span>}
+                          {isMe && <span className="chip muted" style={{ fontSize: 10 }}>{t('memYouChip')}</span>}
+                          {!m.active && <span className="chip muted" style={{ fontSize: 10 }}>{t('memInactiveChip')}</span>}
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{m.email}</div>
                       </div>
@@ -190,7 +194,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                   </td>
                   <td>
                     <span className={'chip ' + (m.role === 'manager' ? 'accent' : 'muted')}>
-                      {m.role === 'manager' ? 'Manager' : 'Purchaser'}
+                      {m.role === 'manager' ? t('role_manager') : t('role_purchaser')}
                     </span>
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{lastSeenLabel(m, locale)}</td>
@@ -198,7 +202,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                     <div style={{ display: 'inline-flex', gap: 4 }}>
                       <button
                         className="btn icon sm ghost"
-                        title="Edit member"
+                        title={t('memEditMember')}
                         onClick={() => setEditing(m)}
                       >
                         <Icon name="edit" size={13} />
@@ -206,7 +210,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
                       {!isMe && m.active && (
                         <button
                           className="btn icon sm ghost"
-                          title="Remove from workspace"
+                          title={t('memRemoveFromWorkspace')}
                           onClick={() => setRemoving(m)}
                           style={{ color: 'var(--neg)' }}
                         >
@@ -223,7 +227,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
         )}
         {loadedOnce && filtered.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-            No members match your filters.
+            {t('memNoMatch')}
           </div>
         )}
 
@@ -231,7 +235,7 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
           <MemberEditModal
             member={editing}
             onClose={() => setEditing(null)}
-            onSaved={() => { setEditing(null); reload(); showToast?.('Member updated'); }}
+            onSaved={() => { setEditing(null); reload(); showToast?.(t('memUpdatedToast')); }}
           />
         )}
 
@@ -239,16 +243,16 @@ export function MembersPanel({ showToast }: { showToast: ToastFn }) {
           <InviteMemberModal
             existing={members}
             onClose={() => setInviting(false)}
-            onInvited={(name) => { setInviting(false); reload(); showToast?.(`${name} added to workspace`); }}
+            onInvited={(name) => { setInviting(false); reload(); showToast?.(t('memAddedToast', { name })); }}
             onError={(msg) => showToast?.(msg, 'error')}
           />
         )}
 
         {removing && (
           <ConfirmDialog
-            title={`Remove ${removing.name} from workspace?`}
-            message="They will lose access immediately. Their past orders and audit trail are preserved."
-            confirmLabel="Remove"
+            title={t('memRemoveTitle', { name: removing.name })}
+            message={t('memRemoveBody')}
+            confirmLabel={t('memRemoveBtn')}
             danger
             onCancel={() => setRemoving(null)}
             onConfirm={() => removeMember(removing)}
@@ -270,6 +274,7 @@ function InviteMemberModal({
   onInvited: (name: string) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useT();
   const [draft, setDraft] = useState({
     name: '', email: '', role: 'purchaser' as 'manager' | 'purchaser',
     phone: '',
@@ -282,18 +287,18 @@ function InviteMemberModal({
   const emailTrimmed = draft.email.trim().toLowerCase();
   const emailCheck = useMemo<{ state: 'empty' | 'invalid' | 'duplicate' | 'ok'; msg?: string }>(() => {
     if (!emailTrimmed) return { state: 'empty' };
-    if (!EMAIL_RE.test(emailTrimmed)) return { state: 'invalid', msg: 'Enter a valid email address.' };
+    if (!EMAIL_RE.test(emailTrimmed)) return { state: 'invalid', msg: t('memEmailInvalid') };
     const dup = existing.find(m => m.email.toLowerCase() === emailTrimmed);
     if (dup) {
       return {
         state: 'duplicate',
         msg: dup.active
-          ? `${dup.name} is already a member.`
-          : `${dup.name} was archived — restore from the members list instead.`,
+          ? t('memEmailDupActive', { name: dup.name })
+          : t('memEmailDupArchived', { name: dup.name }),
       };
     }
-    return { state: 'ok', msg: 'Looks good.' };
-  }, [emailTrimmed, existing]);
+    return { state: 'ok', msg: t('memEmailOk') };
+  }, [emailTrimmed, existing, t]);
 
   const canSave = draft.name.trim() && emailCheck.state === 'ok' && !saving;
 
@@ -309,7 +314,7 @@ function InviteMemberModal({
       setTempPassword(res.password);
       setCreatedName(draft.name.trim());
     } catch (e) {
-      onError(e instanceof Error ? e.message : 'Invite failed');
+      onError(e instanceof Error ? e.message : t('memInviteFailed'));
     } finally {
       setSaving(false);
     }
@@ -331,28 +336,28 @@ function InviteMemberModal({
                 <Icon name="check" size={18} />
               </div>
               <div>
-                <div className="modal-title">{createdName} added</div>
-                <div className="modal-sub">Share this temporary password — they'll be prompted to change it on first sign-in.</div>
+                <div className="modal-title">{t('memAddedModalTitle', { name: createdName })}</div>
+                <div className="modal-sub">{t('memTempPwSub')}</div>
               </div>
             </div>
           </div>
           <div className="modal-body">
             <div className="field">
-              <label className="label">Temporary password</label>
+              <label className="label">{t('memTempPwLabel')}</label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input className="input mono" readOnly value={tempPassword} style={{ flex: 1 }} />
                 <button
                   className="btn"
                   onClick={() => { navigator.clipboard?.writeText(tempPassword); }}
-                  title="Copy to clipboard"
+                  title={t('memCopyToClipboard')}
                 >
-                  <Icon name="paperclip" size={13} /> Copy
+                  <Icon name="paperclip" size={13} /> {t('connectorsCopy')}
                 </button>
               </div>
             </div>
           </div>
           <div className="modal-foot">
-            <button className="btn primary" onClick={() => onInvited(createdName)}>Done</button>
+            <button className="btn primary" onClick={() => onInvited(createdName)}>{t('done')}</button>
           </div>
         </div>
       </div>
@@ -363,13 +368,13 @@ function InviteMemberModal({
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-shell" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <div className="modal-title">Invite member</div>
+          <div className="modal-title">{t('memInviteBtn')}</div>
           <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
         </div>
         <div className="modal-body">
           <div className="field-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div className="field">
-              <label className="label">Full name *</label>
+              <label className="label">{t('memFieldFullName')}</label>
               <input
                 className="input"
                 value={draft.name}
@@ -378,7 +383,7 @@ function InviteMemberModal({
               />
             </div>
             <div className="field">
-              <label className="label">Phone</label>
+              <label className="label">{t('custFieldContactPhone')}</label>
               <input
                 className="input"
                 value={draft.phone}
@@ -387,15 +392,15 @@ function InviteMemberModal({
             </div>
             <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label className="label">
-                Email *
+                {t('memFieldEmail')}
                 {emailCheck.state === 'ok' && (
                   <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--pos)', fontWeight: 500 }}>
-                    <Icon name="check" size={12} /> Valid
+                    <Icon name="check" size={12} /> {t('memEmailValid')}
                   </span>
                 )}
                 {(emailCheck.state === 'invalid' || emailCheck.state === 'duplicate') && (
                   <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--neg)', fontWeight: 500 }}>
-                    <Icon name="x" size={12} /> {emailCheck.state === 'duplicate' ? 'Already used' : 'Invalid'}
+                    <Icon name="x" size={12} /> {emailCheck.state === 'duplicate' ? t('memEmailAlreadyUsed') : t('memEmailInvalidBadge')}
                   </span>
                 )}
               </label>
@@ -440,11 +445,9 @@ function InviteMemberModal({
                   onChange={() => set('role', r)}
                 />
                 <div className="role-card-body">
-                  <div className="role-card-title">{r === 'manager' ? 'Manager' : 'Purchaser'}</div>
+                  <div className="role-card-title">{r === 'manager' ? t('role_manager') : t('role_purchaser')}</div>
                   <div className="role-card-desc">
-                    {r === 'manager'
-                      ? 'Full access — manages team, prices items, edits any order.'
-                      : 'Submits buy orders; sees own activity only. No cost/profit visibility.'}
+                    {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
                   </div>
                 </div>
               </label>
@@ -452,9 +455,9 @@ function InviteMemberModal({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={onClose}>{t('cancel')}</button>
           <button className="btn primary" onClick={submit} disabled={!canSave}>
-            {saving ? '…' : 'Send invite'}
+            {saving ? '…' : t('memSendInvite')}
           </button>
         </div>
       </div>
@@ -463,7 +466,7 @@ function InviteMemberModal({
 }
 
 function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose: () => void; onSaved: () => void }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [draft, setDraft] = useState<Partial<Member>>({});
   const [password, setPassword] = useState('');
@@ -490,7 +493,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
     } catch (e) {
       // Keep the modal open and surface the failure instead of silently
       // resetting the button as if the save succeeded.
-      setSaveError(e instanceof Error ? e.message : 'Failed to save member');
+      setSaveError(e instanceof Error ? e.message : t('memSaveFailed'));
     } finally { setSaving(false); }
   };
 
@@ -501,7 +504,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
       <div className="modal-shell member-edit-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head member-edit-head">
           <div>
-            <div className="modal-title">Edit member</div>
+            <div className="modal-title">{t('memEditMember')}</div>
             <div className="modal-sub">{member.email}</div>
           </div>
           <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
@@ -509,13 +512,13 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
 
         <div className="member-edit-tabs">
           <button className={'member-edit-tab ' + (tab === 'profile' ? 'active' : '')} onClick={() => setTab('profile')}>
-            <Icon name="user" size={12} /> Profile
+            <Icon name="user" size={12} /> {t('memTabProfile')}
           </button>
           <button className={'member-edit-tab ' + (tab === 'role' ? 'active' : '')} onClick={() => setTab('role')}>
-            <Icon name="shield" size={12} /> Role
+            <Icon name="shield" size={12} /> {t('role')}
           </button>
           <button className={'member-edit-tab ' + (tab === 'security' ? 'active' : '')} onClick={() => setTab('security')}>
-            <Icon name="lock" size={12} /> Security
+            <Icon name="lock" size={12} /> {t('memTabSecurity')}
           </button>
         </div>
 
@@ -524,24 +527,24 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
             <>
               <div className="field-row">
                 <div className="field">
-                  <label className="label">Name</label>
+                  <label className="label">{t('whFieldName')}</label>
                   <input className="input" value={String(v('name'))} onChange={e => set('name', e.target.value)} />
                 </div>
                 <div className="field">
-                  <label className="label">Title</label>
+                  <label className="label">{t('memFieldTitle')}</label>
                   <input className="input" value={String(v('title') ?? '')} onChange={e => set('title', e.target.value)} />
                 </div>
                 <div className="field">
-                  <label className="label">Team</label>
+                  <label className="label">{t('memFieldTeam')}</label>
                   <input className="input" value={String(v('team') ?? '')} onChange={e => set('team', e.target.value)} />
                 </div>
                 <div className="field">
-                  <label className="label">Phone</label>
+                  <label className="label">{t('custFieldContactPhone')}</label>
                   <input className="input" value={String(v('phone') ?? '')} onChange={e => set('phone', e.target.value)} />
                 </div>
               </div>
               <div className="toggle-row">
-                <span>Account active</span>
+                <span>{t('memAccountActive')}</span>
                 <label className="toggle">
                   <input type="checkbox" checked={Boolean(v('active'))} onChange={e => set('active', e.target.checked)} />
                   <span className="toggle-track"><span className="toggle-thumb" /></span>
@@ -564,13 +567,11 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                     />
                     <div className="role-card-body">
                       <div className="role-card-title">
-                        {r === 'manager' ? 'Manager' : 'Purchaser'}
-                        {role === r && <span className="chip accent" style={{ fontSize: 10 }}>Current</span>}
+                        {r === 'manager' ? t('role_manager') : t('role_purchaser')}
+                        {role === r && <span className="chip accent" style={{ fontSize: 10 }}>{t('memCurrentRole')}</span>}
                       </div>
                       <div className="role-card-desc">
-                        {r === 'manager'
-                          ? 'Full access — manages team, prices items, edits any order.'
-                          : 'Submits new buy orders; sees own activity only. No cost/profit visibility.'}
+                        {r === 'manager' ? t('memRoleMgrDesc') : t('memRolePurchDesc')}
                       </div>
                     </div>
                   </label>
@@ -584,18 +585,18 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
               <div className="security-card">
                 <div className="security-card-head">
                   <div>
-                    <div className="security-card-title">Password reset</div>
-                    <div className="security-card-sub">Enter a new password to force re-authentication on next sign-in.</div>
+                    <div className="security-card-title">{t('memSecPwTitle')}</div>
+                    <div className="security-card-sub">{t('memSecPwSub')}</div>
                   </div>
                 </div>
                 <div className="field">
-                  <label className="label">New password</label>
+                  <label className="label">{t('memSecNewPw')}</label>
                   <div className="pw-input">
                     <input
                       className="input"
                       type={showPw ? 'text' : 'password'}
                       value={password}
-                      placeholder="Leave blank to keep current"
+                      placeholder={t('memSecPwPlaceholder')}
                       onChange={e => setPassword(e.target.value)}
                     />
                     <button
@@ -605,27 +606,27 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                       tabIndex={-1}
                     >
                       <Icon name={showPw ? 'eye' : 'eye'} size={12} />
-                      {showPw ? 'Hide' : 'Show'}
+                      {showPw ? t('memSecHide') : t('memSecShow')}
                     </button>
                   </div>
                   <PasswordMeter password={password} />
-                  <div className="help">Leave empty to skip — saving without a value will not touch the password.</div>
+                  <div className="help">{t('memSecPwHelp')}</div>
                 </div>
               </div>
 
               <div className="security-card">
                 <div className="security-card-head">
                   <div>
-                    <div className="security-card-title">Last activity</div>
-                    <div className="security-card-sub">Most recent sign-in recorded for this member.</div>
+                    <div className="security-card-title">{t('memLastActivityTitle')}</div>
+                    <div className="security-card-sub">{t('memLastActivitySub')}</div>
                   </div>
                 </div>
                 <div className="security-detail">
                   <Icon name="check" size={13} />
                   <span>
                     {member.last_seen_at
-                      ? <>Last signed in <strong>{lastSeenLabel(member, locale)}</strong>.</>
-                      : <>No sign-in recorded yet.</>}
+                      ? <>{t('memLastSignedInLead')} <strong>{lastSeenLabel(member, locale)}</strong>.</>
+                      : <>{t('memNoSignIn')}</>}
                   </span>
                 </div>
               </div>
@@ -639,8 +640,8 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
               {saveError}
             </span>
           )}
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : 'Save'}</button>
+          <button className="btn" onClick={onClose}>{t('cancel')}</button>
+          <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : t('save')}</button>
         </div>
       </div>
     </div>

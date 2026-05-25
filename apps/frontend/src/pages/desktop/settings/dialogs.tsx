@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { useEscapeKey } from '../../../lib/useEscapeKey';
+import { useT } from '../../../lib/i18n';
 
 // ─── Danger zone confirm dialog ──────────────────────────────────────────────
 export function DangerConfirmDialog({
@@ -10,6 +11,10 @@ export function DangerConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useT();
+  // The phrase the user must type is intentionally NOT translated — the dialog
+  // is a force-disambiguator and the input matches case-sensitively against
+  // the literal English copy shown via the mono span below.
   const PHRASE = kind === 'delete' ? 'DELETE WORKSPACE' : 'TRANSFER';
   const [phrase, setPhrase] = useState('');
   const matches = phrase.trim() === PHRASE;
@@ -30,12 +35,10 @@ export function DangerConfirmDialog({
             </div>
             <div>
               <div className="modal-title">
-                {kind === 'delete' ? 'Delete this workspace?' : 'Transfer workspace ownership?'}
+                {kind === 'delete' ? t('dangerDeleteWsTitle') : t('dangerTransferTitle')}
               </div>
               <div className="modal-sub">
-                {kind === 'delete'
-                  ? 'All orders, inventory, sell orders and audit logs will be permanently deleted. This cannot be undone.'
-                  : 'You will be demoted to purchaser. Only the new owner can change roles, billing, or workspace settings.'}
+                {kind === 'delete' ? t('dangerDeleteWsBody') : t('dangerTransferBody')}
               </div>
             </div>
           </div>
@@ -43,7 +46,7 @@ export function DangerConfirmDialog({
         <div className="modal-body">
           <div className="field">
             <label className="label">
-              Type <span className="mono">{PHRASE}</span> to confirm
+              {t('dangerTypeToConfirmPrefix')} <span className="mono">{PHRASE}</span> {t('dangerTypeToConfirmSuffix')}
             </label>
             <input
               className="input mono"
@@ -54,7 +57,7 @@ export function DangerConfirmDialog({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onCancel}>Cancel</button>
+          <button className="btn" onClick={onCancel}>{t('cancel')}</button>
           <button
             className="btn"
             style={{
@@ -65,7 +68,7 @@ export function DangerConfirmDialog({
             disabled={!matches}
             onClick={onConfirm}
           >
-            {kind === 'delete' ? 'Delete workspace' : 'Transfer ownership'}
+            {kind === 'delete' ? t('dangerDeleteWsBtn') : t('dangerTransferBtn')}
           </button>
         </div>
       </div>
@@ -83,6 +86,7 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useT();
   useEscapeKey(onCancel);
 
   return (
@@ -105,7 +109,7 @@ export function ConfirmDialog({
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onCancel}>Cancel</button>
+          <button className="btn" onClick={onCancel}>{t('cancel')}</button>
           <button
             className="btn"
             style={danger

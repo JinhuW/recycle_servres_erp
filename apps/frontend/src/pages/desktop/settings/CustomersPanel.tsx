@@ -25,7 +25,7 @@ function deriveCustomerSeed(c: Customer) {
 }
 
 export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -46,9 +46,9 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
       await api.patch(`/api/customers/${c.id}`, { active: !c.active });
       setArchiving(null);
       reload();
-      showToast?.(c.active ? `Archived ${c.name}` : `Restored ${c.name}`);
+      showToast?.(c.active ? t('custArchivedToast', { name: c.name }) : t('custRestoredToast', { name: c.name }));
     } catch (e) {
-      showToast?.(e instanceof Error ? e.message : 'Failed to update customer', 'error');
+      showToast?.(e instanceof Error ? e.message : t('custUpdateFailed'), 'error');
     }
   };
 
@@ -80,33 +80,33 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
   return (
     <>
       <SettingsHeader
-        title="Customers"
-        sub={`${counts.Active} active · ${enriched.length} total · $${totalLtv.toLocaleString()} lifetime revenue`}
+        title={t('custPanelTitle')}
+        sub={t('custPanelSub', { active: counts.Active, total: enriched.length, ltv: totalLtv.toLocaleString() })}
         actions={
           <button className="btn accent" onClick={() => setCreating(true)}>
-            <Icon name="plus" size={14} /> Add customer
+            <Icon name="plus" size={14} /> {t('custAddBtn')}
           </button>
         }
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 'var(--gap)' }}>
         <StatTile
-          label="Active accounts"
+          label={t('custStatActive')}
           value={counts.Active}
-          sub={`${counts.Archived} archived · ${enriched.length} total`}
+          sub={t('custStatActiveSub', { archived: counts.Archived, total: enriched.length })}
           icon="user"
         />
         <StatTile
-          label="Lifetime revenue"
+          label={t('custStatLifetime')}
           value={`$${(totalLtv / 1000).toFixed(0)}k`}
-          sub="All customers"
+          sub={t('custStatAllCustomers')}
           icon="dollar"
           tone="pos"
         />
         <StatTile
-          label="Outstanding A/R"
+          label={t('custStatOutstanding')}
           value={`$${totalOutstanding.toLocaleString()}`}
-          sub={`${enriched.filter(c => c.outstanding > 0).length} accounts with balance`}
+          sub={t('custStatOutstandingSub', { n: enriched.filter(c => c.outstanding > 0).length })}
           icon="cash"
           tone={totalOutstanding > 20000 ? 'warn' : 'muted'}
         />
@@ -115,9 +115,9 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
       <div className="settings-row">
         <div className="seg">
           {([
-            { v: 'Active',   label: 'Active',   count: counts.Active },
-            { v: 'Archived', label: 'Archived', count: counts.Archived },
-            { v: 'all',      label: 'All',      count: counts.all },
+            { v: 'Active',   label: t('custFilterActive'),   count: counts.Active },
+            { v: 'Archived', label: t('custFilterArchived'), count: counts.Archived },
+            { v: 'all',      label: t('all'),                count: counts.all },
           ] as const).map(o => (
             <button key={o.v} className={statusFilter === o.v ? 'active' : ''} onClick={() => setStatusFilter(o.v)}>
               {o.label} <span style={{ opacity: 0.55, marginLeft: 4 }}>{o.count}</span>
@@ -128,7 +128,7 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
           <Icon name="search" size={13} />
           <input
             type="text"
-            placeholder="Search company or contact…"
+            placeholder={t('custSearchPlaceholder')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -142,12 +142,12 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
         <table className="data-table members-table">
           <thead>
             <tr>
-              <th>Customer</th>
-              <th>Region</th>
-              <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Lifetime</th>
-              <th style={{ textAlign: 'right' }}>Outstanding</th>
-              <th>Last order</th>
+              <th>{t('fieldCustomer')}</th>
+              <th>{t('custColRegion')}</th>
+              <th>{t('status')}</th>
+              <th style={{ textAlign: 'right' }}>{t('custColLifetime')}</th>
+              <th style={{ textAlign: 'right' }}>{t('custColOutstanding')}</th>
+              <th>{t('custColLastOrder')}</th>
               <th></th>
             </tr>
           </thead>
@@ -178,7 +178,7 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
                     </div>
                   </td>
                   <td><span className="chip muted">{c.region ?? '—'}</span></td>
-                  <td><span className={'chip ' + STATUS_CHIP[c.status]}>{c.status}</span></td>
+                  <td><span className={'chip ' + STATUS_CHIP[c.status]}>{c.status === 'Active' ? t('custFilterActive') : t('custFilterArchived')}</span></td>
                   <td className="mono" style={{ textAlign: 'right' }}>{fmtUSD0(c.lifetime_revenue || 0, locale)}</td>
                   <td className="mono" style={{ textAlign: 'right' }}>
                     {c.outstanding > 0
@@ -187,17 +187,17 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                     {c.order_count > 0
-                      ? `${c.lastDays != null ? `${c.lastDays}d ago · ` : ''}${c.order_count} orders`
-                      : <span style={{ color: 'var(--fg-subtle)' }}>No orders</span>}
+                      ? `${c.lastDays != null ? t('custDaysAgoOrders', { d: c.lastDays, n: c.order_count }) : t('custOrders', { n: c.order_count })}`
+                      : <span style={{ color: 'var(--fg-subtle)' }}>{t('custNoOrders')}</span>}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'inline-flex', gap: 4 }}>
-                      <button className="btn icon sm ghost" title="Edit" onClick={() => setEditing(c)}>
+                      <button className="btn icon sm ghost" title={t('edit')} onClick={() => setEditing(c)}>
                         <Icon name="edit" size={13} />
                       </button>
                       <button
                         className="btn icon sm ghost"
-                        title={c.active ? 'Archive' : 'Restore'}
+                        title={c.active ? t('archive') : t('custRestore')}
                         style={{ color: c.active ? 'var(--neg)' : 'var(--fg-muted)' }}
                         onClick={() => setArchiving(c)}
                       >
@@ -213,7 +213,7 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
         )}
         {loadedOnce && filtered.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-            No customers match your filters.
+            {t('custNoMatch')}
           </div>
         )}
       </div>
@@ -223,17 +223,15 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
           customer={editing}
           showToast={showToast}
           onClose={() => { setEditing(null); setCreating(false); }}
-          onSaved={() => { setEditing(null); setCreating(false); reload(); showToast?.('Customer saved'); }}
+          onSaved={() => { setEditing(null); setCreating(false); reload(); showToast?.(t('custSaved')); }}
         />
       )}
 
       {archiving && (
         <ConfirmDialog
-          title={archiving.active ? `Archive ${archiving.name}?` : `Restore ${archiving.name}?`}
-          message={archiving.active
-            ? 'They will be hidden from new sell-order pickers but their history is preserved.'
-            : 'They will appear in the customer picker again.'}
-          confirmLabel={archiving.active ? 'Archive' : 'Restore'}
+          title={archiving.active ? t('custArchiveTitle', { name: archiving.name }) : t('custRestoreTitle', { name: archiving.name })}
+          message={archiving.active ? t('custArchiveBody') : t('custRestoreBody')}
+          confirmLabel={archiving.active ? t('archive') : t('custRestore')}
           danger={archiving.active}
           onCancel={() => setArchiving(null)}
           onConfirm={() => archive(archiving)}
@@ -244,6 +242,7 @@ export function CustomersPanel({ showToast }: { showToast: ToastFn }) {
 }
 
 function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer: Customer | null; showToast: ToastFn; onClose: () => void; onSaved: () => void }) {
+  const { t } = useT();
   const isNew = !customer;
   const [draft, setDraft] = useState<Partial<Customer>>(customer ?? { active: true, tags: [] });
   const [saving, setSaving] = useState(false);
@@ -264,7 +263,7 @@ function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer
       else       await api.patch(`/api/customers/${customer!.id}`, body);
       onSaved();
     } catch (e) {
-      showToast?.(e instanceof Error ? e.message : 'Failed to save customer', 'error');
+      showToast?.(e instanceof Error ? e.message : t('custSaveFailed'), 'error');
     } finally { setSaving(false); }
   };
 
@@ -272,50 +271,50 @@ function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-shell" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <div className="modal-title">{isNew ? 'New customer' : 'Edit customer'}</div>
+          <div className="modal-title">{isNew ? t('custNewTitle') : t('custEditTitle')}</div>
           <button className="btn icon" onClick={onClose}><Icon name="x" size={14} /></button>
         </div>
         <div className="modal-body">
           <div className="field-row">
             <div className="field">
-              <label className="label">Name</label>
+              <label className="label">{t('whFieldName')}</label>
               <input className="input" value={String(draft.name ?? '')} onChange={e => set('name', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Short name</label>
+              <label className="label">{t('custFieldShortName')}</label>
               <input className="input" value={String(draft.short_name ?? '')} onChange={e => set('short_name', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Region</label>
+              <label className="label">{t('whFieldRegion')}</label>
               <input className="input" value={String(draft.region ?? '')} onChange={e => set('region', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Country</label>
+              <label className="label">{t('custFieldCountry')}</label>
               <input className="input" value={String(draft.country ?? '')} onChange={e => set('country', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Contact name</label>
+              <label className="label">{t('custFieldContactName')}</label>
               <input className="input" value={String(draft.contact_name ?? '')} onChange={e => set('contact_name', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Contact email</label>
+              <label className="label">{t('custFieldContactEmail')}</label>
               <input className="input" value={String(draft.contact_email ?? '')} onChange={e => set('contact_email', e.target.value)} />
             </div>
             <div className="field">
-              <label className="label">Contact phone</label>
+              <label className="label">{t('custFieldContactPhone')}</label>
               <input className="input" value={String(draft.contact_phone ?? '')} onChange={e => set('contact_phone', e.target.value)} />
             </div>
           </div>
           <div className="field">
-            <label className="label">Address</label>
+            <label className="label">{t('whAddress')}</label>
             <textarea className="input" rows={2} value={String(draft.address ?? '')} onChange={e => set('address', e.target.value)} />
           </div>
           <div className="field">
-            <label className="label">Notes</label>
+            <label className="label">{t('custFieldNotes')}</label>
             <textarea className="input" rows={3} value={String(draft.notes ?? '')} onChange={e => set('notes', e.target.value)} />
           </div>
           <div className="toggle-row">
-            <span>Active</span>
+            <span>{t('whActive')}</span>
             <label className="toggle">
               <input type="checkbox" checked={Boolean(draft.active ?? true)} onChange={e => set('active', e.target.checked)} />
               <span className="toggle-track"><span className="toggle-thumb" /></span>
@@ -323,8 +322,8 @@ function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer
           </div>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={save} disabled={saving || !draft.name}>{saving ? '…' : 'Save'}</button>
+          <button className="btn" onClick={onClose}>{t('cancel')}</button>
+          <button className="btn primary" onClick={save} disabled={saving || !draft.name}>{saving ? '…' : t('save')}</button>
         </div>
       </div>
     </div>
