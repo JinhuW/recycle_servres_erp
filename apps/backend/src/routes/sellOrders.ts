@@ -704,6 +704,11 @@ sellOrders.post('/:id/status', async (c) => {
         note: body.note ?? null,
         fromStatus: 'Closed',
       });
+    } else {
+      await writeSellOrderEvent(tx, id, u.id, 'status_changed', {
+        from: cur.status,
+        to: body.to,
+      });
     }
 
     if (body.to === 'Done') {

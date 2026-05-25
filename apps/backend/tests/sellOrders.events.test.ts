@@ -147,4 +147,76 @@ describe('sell-order audit events', () => {
       changes: [{ field: 'qty', from: 1, to: 2 }],
     });
   });
+
+  it('status transition emits `status_changed` with from/to', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const r = await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Shipped', note: 'shipped via UPS' },
+    });
+    expect(r.status).toBe(200);
+
+    const events = (await eventsOf(id)).filter(e => e.kind === 'status_changed');
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toMatchObject({ from: 'Draft', to: 'Shipped' });
+  });
+
+  it('Close transition emits `closed`, not `status_changed`', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const sql = getTestDb();
+    const reason = (await sql`
+      SELECT id FROM sell_order_close_reasons WHERE active = TRUE LIMIT 1
+    `)[0] as { id: string } | undefined;
+    if (!reason) throw new Error('seed lacks active close reason');
+
+    const r = await api('POST', `/api/sell-orders/${id}/status`, {
+      token,
+      body: { to: 'Closed', note: 'customer dropped', closeReasonId: reason.id },
+    });
+    expect(r.status).toBe(200);
+
+    const events = await eventsOf(id);
+    expect(events.map(e => e.kind)).toEqual(['created', 'closed']);
+  });
+
+  it('idempotent status transition (same status twice) emits only one event', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Shipped', note: 's' } });
+    await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Shipped', note: 's' } });
+
+    const events = (await eventsOf(id)).filter(e => e.kind === 'status_changed');
+    expect(events).toHaveLength(1);
+  });
 });
