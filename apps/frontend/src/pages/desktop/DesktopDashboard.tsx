@@ -198,10 +198,7 @@ export function DesktopDashboard() {
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div className="avatar">{row.initials}</div>
-                        <div>
-                          <div style={{ fontWeight: 500 }}>{row.name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{row.email}</div>
-                        </div>
+                        <div style={{ fontWeight: 500 }}>{row.name}</div>
                       </div>
                     </td>
                     <td className="num mono">{row.count}</td>
