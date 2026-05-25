@@ -96,6 +96,10 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
   the lock.
 - Frontend tests are sparse (~6 files).  Add coverage when you add a
   non-trivial pure helper; UI behavior is mostly validated by visiting it.
+- **To run a single backend test file**, `cd apps/backend && npx vitest run
+  tests/foo.test.ts` — `pnpm --filter recycle-erp-backend test -- tests/foo.test.ts`
+  silently drops the path and runs the full ~400-test suite (which then
+  trips the known shared-DB flakiness in `test_harness_resetdb`).
 
 ## Storage & OCR
 
@@ -133,6 +137,12 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
   See [docker_compose_ops][3].
 - `CORS_ALLOWED_ORIGINS` is required in production — the backend throws on
   startup if `NODE_ENV=production` and it's unset.
+- **Unhandled-500 sink.** `app.onError` writes a JSONL record to
+  `ERROR_LOG_DIR/errors.jsonl` (compose mounts `./data/errors:/var/log/recycle-erp`).
+  Rotates at 10 MB, keeps last 10.  Pre-create the host dir with
+  `mkdir -p data/errors && sudo chown 1000:1000 data/errors` — without it
+  the backend (UID 1000) can't write and the sink silently degrades to
+  stdout-only.  See `apps/backend/src/lib/error-log.ts`.
 
 ## Infrastructure (Terraform)
 
