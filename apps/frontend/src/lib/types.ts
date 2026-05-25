@@ -99,6 +99,27 @@ export type OrderEvent = {
   createdAt: string;
 };
 
+export type SellOrderEventKind =
+  | 'created'
+  | 'status_changed'
+  | 'line_added'
+  | 'line_removed'
+  | 'line_edited'
+  | 'meta_changed'
+  | 'status_meta_changed'
+  | 'archived'
+  | 'unarchived'
+  | 'closed'
+  | 'reopened';
+
+export type SellOrderEvent = {
+  id: string;
+  kind: SellOrderEventKind;
+  detail: Record<string, unknown>;
+  createdAt: string;
+  actor: { id: string; name: string; initials: string } | null;
+};
+
 export type DraftLine = {
   id?: string;
   /** Stable client-side key for React lists; never sent to the API. */
