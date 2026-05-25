@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
-import { loginAs, ALEX } from './helpers/auth';
+import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 import { eventsOf } from './helpers/sellOrderEvents';
 
@@ -317,5 +317,52 @@ describe('sell-order audit events', () => {
       filename: 'invoice.pdf',
       attachmentId,
     });
+  });
+
+  it('GET /:id/events returns events in chronological order', async () => {
+    const { token, user } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId, notes: 'first',
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+    await api('PATCH', `/api/sell-orders/${id}`, { token, body: { notes: 'second' } });
+    await api('POST', `/api/sell-orders/${id}/status`, { token, body: { to: 'Shipped', note: 's' } });
+
+    const r = await api<{ events: Array<{ kind: string; actor: { id: string } | null; createdAt: string }> }>(
+      'GET', `/api/sell-orders/${id}/events`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.events.map(e => e.kind)).toEqual([
+      'created', 'meta_changed', 'status_changed',
+    ]);
+    expect(r.body.events[0].actor?.id).toBe(user.id);
+  });
+
+  it('GET /:id/events is forbidden for non-manager', async () => {
+    const { token: managerTok } = await loginAs(ALEX);
+    const line = await freeSellableLine(managerTok);
+    const customerId = await firstCustomerId(managerTok);
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token: managerTok,
+      body: {
+        customerId,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+
+    const { token: purchaserTok } = await loginAs(MARCUS);
+    const r = await api('GET', `/api/sell-orders/${create.body.id}/events`, { token: purchaserTok });
+    expect(r.status).toBe(403);
+  });
+
+  it('GET /:id/events returns 404 for missing order', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/sell-orders/SO-99999/events', { token });
+    expect(r.status).toBe(404);
   });
 });

@@ -862,4 +862,45 @@ async function setSellOrderArchived(c: SOCtx, archive: boolean) {
 sellOrders.post('/:id/archive',   c => setSellOrderArchived(c, true));
 sellOrders.post('/:id/unarchive', c => setSellOrderArchived(c, false));
 
+// ── Audit timeline for a single sell order. Manager-only (sell-orders is
+// manager-only throughout the route file).
+sellOrders.get('/:id/events', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const exists = (await sql`SELECT 1 FROM sell_orders WHERE id = ${id} LIMIT 1`)[0];
+  if (!exists) return c.json({ error: 'Not found' }, 404);
+
+  const rows = await sql`
+    SELECT e.id, e.kind, e.detail, e.created_at,
+           act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
+    FROM sell_order_events e
+    LEFT JOIN users act ON act.id = e.actor_id
+    WHERE e.sell_order_id = ${id}
+    ORDER BY e.created_at ASC, e.id ASC
+  ` as Array<{
+    id: string;
+    kind: string;
+    detail: Record<string, unknown>;
+    created_at: string;
+    actor_id: string | null;
+    actor_name: string | null;
+    actor_initials: string | null;
+  }>;
+
+  return c.json({
+    events: rows.map(r => ({
+      id: r.id,
+      kind: r.kind,
+      detail: r.detail,
+      createdAt: r.created_at,
+      actor: r.actor_id
+        ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
+        : null,
+    })),
+  });
+});
+
 export default sellOrders;
