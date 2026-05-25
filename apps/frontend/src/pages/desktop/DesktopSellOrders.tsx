@@ -16,6 +16,7 @@ import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
 import { sellOrderStatuses, closeReasons } from '../../lib/lookups';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
+import { SellOrderHistory } from '../../components/SellOrderHistory';
 import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 
 // Statuses that capture per-status evidence (text note + attachments). The
@@ -414,6 +415,8 @@ function SellOrderDetail({
   // Bumped after a Close/Reopen succeeds so the order effect re-fetches —
   // simpler than pulling a stale callback through the dialog props.
   const [refreshKey, setRefreshKey] = useState(0);
+  // Bumped after every successful mutation so <SellOrderHistory> re-fetches.
+  const [historyKey, setHistoryKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -491,6 +494,7 @@ function SellOrderDetail({
           note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
             ?.[draft.status]?.note ?? undefined,
         });
+        setHistoryKey(k => k + 1);
       }
       // Structural / notes edits go through PATCH. Skip the call entirely if
       // only status changed — saves a round trip and avoids touching
@@ -513,6 +517,7 @@ function SellOrderDetail({
       }
       if (Object.keys(patchBody).length > 0) {
         await api.patch(`/api/sell-orders/${order.id}`, patchBody);
+        setHistoryKey(k => k + 1);
       }
       onSaved();
     } catch (e) {
@@ -788,6 +793,15 @@ function SellOrderDetail({
                   />
                 </div>
               )}
+
+              <details open style={{ marginTop: 24 }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '8px 0' }}>
+                  History
+                </summary>
+                <div style={{ marginTop: 12 }}>
+                  <SellOrderHistory sellOrderId={order.id} refreshKey={historyKey} />
+                </div>
+              </details>
             </>
           ) : null}
         </div>
@@ -822,6 +836,7 @@ function SellOrderDetail({
                     setUnarchiving(true);
                     try {
                       await unarchiveSellOrder(order.id);
+                      setHistoryKey(k => k + 1);
                       onSaved();
                       onClose();
                     } catch (e) {
@@ -923,6 +938,7 @@ function SellOrderDetail({
           // Stay on the order so the user can continue editing the now-Draft
           // SO. refreshKey re-runs the GET so status/locked/header-strip flip.
           setRefreshKey(k => k + 1);
+          setHistoryKey(k => k + 1);
         }}
       />
     )}
