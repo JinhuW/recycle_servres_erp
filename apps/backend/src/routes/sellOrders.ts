@@ -50,7 +50,7 @@ async function validateSellLines(
       FROM sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
       WHERE sol.inventory_id = ${l.inventoryId}
-        AND so.status <> 'Done'
+        AND so.status NOT IN ('Done', 'Closed')
         AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
     `)[0];
     if (taken.n > 0) return `inventory line ${l.inventoryId} is already on an open sell order`;
@@ -506,50 +506,127 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
 // note/set_at/set_by); file evidence lives in its own table and is uploaded
 // via the status-meta attachments endpoints above. `attachmentIds` here
 // (generic /api/attachments rows) only needs to satisfy the evidence gate.
-const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done']);
-const SELL_ORDER_FLOW = ['Draft', 'Shipped', 'Awaiting payment', 'Done'];
+// Transition map is the single source of truth for what status changes
+// are legal. Done has no outgoing edges (terminal happy path). Closed has
+// exactly one outgoing edge (reopen → Draft). Adding a new status means
+// editing this map + the CHECK constraint + the seed — no parallel guards
+// elsewhere (see CLAUDE.md "Status guards").
+const ALLOWED_TRANSITIONS: Record<string, Set<string>> = {
+  Draft:               new Set(['Shipped', 'Closed']),
+  Shipped:             new Set(['Awaiting payment', 'Closed']),
+  'Awaiting payment':  new Set(['Done', 'Closed']),
+  Done:                new Set([]),
+  Closed:              new Set(['Draft']),
+};
+const KNOWN_STATUSES = new Set<string>([
+  'Draft', 'Shipped', 'Awaiting payment', 'Done', 'Closed',
+]);
+// Statuses whose entry-edge requires a note OR attachments. The DB row
+// sell_order_statuses.needs_meta tracks the same idea for per-status meta
+// uploads (those routes look it up dynamically); this set governs the
+// transition-time evidence gate.
+const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']);
+// Subset of NEEDS_EVIDENCE whose evidence is persisted to sell_order_status_meta.
+// The meta table's CHECK constraint (migration 0003) caps it at the three
+// in-flight statuses; Closed/Draft evidence is captured in sell_order_events.
+const META_PERSIST_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done']);
 
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
-    | { to: string; note?: string; attachmentIds?: string[] }
+    | { to: string; note?: string; attachmentIds?: string[]; closeReasonId?: string }
     | null;
   if (!body?.to) return c.json({ error: 'to is required' }, 400);
-  if (!SELL_ORDER_FLOW.includes(body.to)) return c.json({ error: `unknown status: ${body.to}` }, 400);
+  if (!KNOWN_STATUSES.has(body.to)) {
+    return c.json({ error: `unknown status: ${body.to}` }, 400);
+  }
 
-  if (NEEDS_EVIDENCE.has(body.to)) {
-    const hasNote = typeof body.note === 'string' && body.note.trim().length > 0;
-    const hasFiles = Array.isArray(body.attachmentIds) && body.attachmentIds.length > 0;
-    if (!hasNote && !hasFiles) {
-      return c.json({ error: 'note or attachments required for this status' }, 400);
-    }
+  const hasNote = typeof body.note === 'string' && body.note.trim().length > 0;
+  const hasFiles = Array.isArray(body.attachmentIds) && body.attachmentIds.length > 0;
+
+  // Static evidence gate (Shipped / Awaiting payment / Done / Closed).
+  if (NEEDS_EVIDENCE.has(body.to) && !hasNote && !hasFiles) {
+    return c.json({ error: 'note or attachments required for this status' }, 400);
+  }
+  // Close requires a structured reason in addition to evidence.
+  if (body.to === 'Closed' && !body.closeReasonId) {
+    return c.json({ error: 'closeReasonId is required to close' }, 400);
   }
 
   const sql = getDb(c.env);
-  // The current-status read, the lock check and the idempotency guard MUST
-  // run inside the transaction under `FOR UPDATE`. Reading status outside the
-  // tx let two concurrent Done submits (double-click / network retry) both
-  // pass the guard and both consume stock. With the row locked, the second
-  // request blocks until the first commits, then sees status='Done' and the
-  // idempotency guard turns it into a true no-op.
+
+  // Validate the close reason (active lookup row) outside the tx — it's a
+  // read-only check against a slow-changing table; no need to hold the row
+  // lock while the network resolves the lookup.
+  if (body.to === 'Closed') {
+    const r = await sql<{ ok: boolean }[]>`
+      SELECT TRUE AS ok FROM sell_order_close_reasons
+      WHERE id = ${body.closeReasonId!} AND active = TRUE LIMIT 1
+    `;
+    if (r.length === 0) return c.json({ error: 'invalid closeReasonId' }, 400);
+  }
+
+  // Current-status read, lock check, transition guard, and conditional
+  // reopen-note gate MUST all run inside the transaction under FOR UPDATE.
+  // Reading status outside the tx let two concurrent Done submits (double
+  // click / network retry) both pass and both consume stock.
   type Outcome =
     | { kind: 'notFound' }
-    | { kind: 'locked' }
+    | { kind: 'illegal'; from: string; to: string }
     | { kind: 'idempotent'; status: string }
+    | { kind: 'reopenNeedsNote' }
     | { kind: 'done' };
+
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const cur = (await tx<{ status: string }[]>`
       SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!cur) return { kind: 'notFound' };
-    if (cur.status === 'Done' && body.to !== 'Done') return { kind: 'locked' };
     if (cur.status === body.to) return { kind: 'idempotent', status: cur.status };
-    await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
-    if (NEEDS_EVIDENCE.has(body.to)) {
-      // Upsert the text note onto the split-schema meta row. PK is
-      // (sell_order_id, status); attachments are a separate table.
+
+    const allowed = ALLOWED_TRANSITIONS[cur.status] ?? new Set<string>();
+    if (!allowed.has(body.to)) {
+      return { kind: 'illegal', from: cur.status, to: body.to };
+    }
+
+    // Reopen (Closed → Draft) needs a note. We deliberately keep this
+    // *out* of the global NEEDS_EVIDENCE set: a fresh Draft creation
+    // doesn't need a note, so the rule is "transitions *into* Draft from
+    // Closed need a note", not "Draft is a needs-evidence status".
+    if (cur.status === 'Closed' && body.to === 'Draft' && !hasNote) {
+      return { kind: 'reopenNeedsNote' };
+    }
+
+    // Apply the status update + (for close) the denormalized reason; (for
+    // reopen) clear the reason.
+    if (body.to === 'Closed') {
+      await tx`
+        UPDATE sell_orders
+           SET status = 'Closed',
+               close_reason_id = ${body.closeReasonId!},
+               updated_at = NOW()
+         WHERE id = ${id}
+      `;
+    } else if (cur.status === 'Closed' && body.to === 'Draft') {
+      await tx`
+        UPDATE sell_orders
+           SET status = 'Draft',
+               close_reason_id = NULL,
+               updated_at = NOW()
+         WHERE id = ${id}
+      `;
+    } else {
+      await tx`UPDATE sell_orders SET status = ${body.to}, updated_at = NOW() WHERE id = ${id}`;
+    }
+
+    // Evidence persistence (status_meta upsert). The meta table's CHECK
+    // constraint (migration 0003) only accepts Shipped/Awaiting payment/Done
+    // — those are the statuses the frontend renders evidence for. The
+    // Closed-entry / Closed→Draft-reopen evidence lives in sell_order_events
+    // instead (richer payload — reasonId, fromStatus — anyway).
+    if ((hasNote || NEEDS_EVIDENCE.has(body.to)) && META_PERSIST_STATUSES.has(body.to)) {
       await tx`
         INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_at, set_by)
         VALUES (${id}, ${body.to}, ${body.note ?? null}, NOW(), ${u.id})
@@ -559,14 +636,29 @@ sellOrders.post('/:id/status', async (c) => {
           set_by = EXCLUDED.set_by
       `;
     }
+
+    // Audit-event writes for close + reopen. Done's audit story is the
+    // inventory_events rows below; archive lives in its own handler.
+    if (body.to === 'Closed') {
+      await writeSellOrderEvent(tx, id, u.id, 'closed', {
+        reasonId: body.closeReasonId!,
+        note: body.note ?? null,
+        fromStatus: cur.status,
+      });
+    } else if (cur.status === 'Closed' && body.to === 'Draft') {
+      await writeSellOrderEvent(tx, id, u.id, 'reopened', {
+        note: body.note ?? null,
+        fromStatus: 'Closed',
+      });
+    }
+
     if (body.to === 'Done') {
-      // Closing the deal consumes stock. order_lines.qty carries a
-      // CHECK (qty > 0) constraint, so a sold-out line can't drop to 0 —
-      // instead it flips to status 'Sold' (the in-stock aggregates key off
-      // status, so a Sold line falls out regardless of its retained qty).
-      // Partially-sold lines just lose the sold qty and stay sellable.
-      // Aggregated by inventory_id so multiple lines hitting the same source
-      // net out; <= 0 covers exact and (defensively) over-consumption.
+      // Done consumes stock. order_lines.qty carries CHECK (qty > 0) so a
+      // sold-out line can't drop to 0 — instead it flips to status 'Sold'.
+      // In-stock aggregates key off status, so a Sold line falls out
+      // regardless of its retained qty. Partially-sold lines lose qty and
+      // stay sellable. Aggregated by inventory_id so multiple lines hitting
+      // the same source net out.
       const sold = await tx<{ line_id: string; remaining: number; sold: number }[]>`
         UPDATE order_lines ol
            SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
@@ -589,9 +681,6 @@ sellOrders.post('/:id/status', async (c) => {
                   ${tx.json({ soldQty: r.sold, remainingQty: r.remaining, sellOrder: id })})
         `;
       }
-      // Tell each purchaser whose lines just closed that a commission is ready.
-      // DISTINCT because one purchaser may have supplied multiple lines on the
-      // same sell order — we only want one notification per submitter.
       const submitters = await tx<{ user_id: string }[]>`
         SELECT DISTINCT o.user_id
         FROM sell_order_lines sol
@@ -614,8 +703,13 @@ sellOrders.post('/:id/status', async (c) => {
   });
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
-  if (outcome.kind === 'locked') return c.json({ error: 'order is locked' }, 409);
+  if (outcome.kind === 'illegal') {
+    return c.json({ error: `illegal transition: ${outcome.from} → ${outcome.to}` }, 409);
+  }
   if (outcome.kind === 'idempotent') return c.json({ ok: true, status: outcome.status });
+  if (outcome.kind === 'reopenNeedsNote') {
+    return c.json({ error: 'note required to reopen' }, 400);
+  }
   return c.json({ ok: true, status: body.to });
 });
 
