@@ -197,7 +197,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
       </div>
 
       {/* Status pipeline tiles — click to filter, matches design's so-stat */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sellOrderStatuses.length || 4}, 1fr)`, gap: 12 }}>
         {sellOrderStatuses.map(({ id: s }) => {
           const active = statusFilter === s;
           return (
