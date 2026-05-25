@@ -661,6 +661,52 @@ try {
     }
   }
 
+  console.log('· Seeding vendor bid (promotable)…');
+  // Tests exercising POST /api/vendor-bids/:id/promote need at least one bid
+  // with an accepted line and sell_order_id IS NULL. Build the minimal shape:
+  // a vendor_link for one customer, one bid, one accepted line pointing at a
+  // Done inventory row that the bid hasn't already promoted.
+  await sql`DELETE FROM vendor_bid_lines`;
+  await sql`DELETE FROM vendor_bids`;
+  await sql`DELETE FROM vendor_links`;
+  const bidCust = customerRows[0];
+  const promotableInv = (await sql`
+    SELECT l.id, l.category, l.brand, l.capacity, l.type, l.part_number
+    FROM order_lines l
+    WHERE l.status = 'Done' AND l.qty > 0
+    ORDER BY l.id LIMIT 1
+  `)[0];
+  if (promotableInv) {
+    const linkRow = (await sql`
+      INSERT INTO vendor_links (customer_id, token, label, created_by)
+      VALUES (${bidCust.id}, ${'seed-vendor-link-' + bidCust.id.slice(0, 8)},
+              'Seed link', ${protoToUuid['u1']})
+      RETURNING id
+    `)[0];
+    const bidId = 'VB-1001';
+    await sql`
+      INSERT INTO vendor_bids (id, vendor_link_id, customer_id, contact_name, note, status)
+      VALUES (${bidId}, ${linkRow.id}, ${bidCust.id}, 'Seed Contact',
+              'Seeded promotable bid', 'decided')
+    `;
+    const label = [promotableInv.brand, promotableInv.capacity, promotableInv.type]
+      .filter(Boolean).join(' ') || promotableInv.category;
+    await sql`
+      INSERT INTO vendor_bid_lines
+        (bid_id, inventory_id, category, label, sub_label, part_number,
+         offered_qty, offered_unit_price, line_status,
+         accepted_qty, accepted_unit_price, decided_at, decided_by, position)
+      VALUES
+        (${bidId}, ${promotableInv.id}, ${promotableInv.category}, ${label},
+         ${promotableInv.part_number}, ${promotableInv.part_number},
+         1, 5.00, 'accepted', 1, 4.00, NOW(), ${protoToUuid['u1']}, 0)
+    `;
+    await sql`
+      INSERT INTO id_counters (name, value) VALUES ('VB', 1001)
+      ON CONFLICT (name) DO UPDATE SET value = GREATEST(id_counters.value, EXCLUDED.value)
+    `;
+  }
+
   console.log('· Seeding inventory audit events…');
   const allLines = await sql`
     SELECT l.id, o.user_id, o.created_at, l.status

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { nextHumanId } from '../lib/id-seq';
+import { writeSellOrderEvent } from '../services/sellOrderAudit';
 import type { Env, User } from '../types';
 
 const vendorBids = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -213,6 +214,13 @@ vendorBids.post('/:id/promote', async (c) => {
       `;
       await tx`UPDATE vendor_bid_lines SET sell_order_id=${sellId} WHERE id=${l.id}`;
     }
+    await writeSellOrderEvent(tx, sellId, u.id, 'created', {
+      source: 'vendor_bid',
+      vendorBidId: id,
+      status: 'Draft',
+      lineCount: lines.length,
+      customerId: head.customer_id,
+    });
     outcome = { code: 201, sellId };
   });
 
