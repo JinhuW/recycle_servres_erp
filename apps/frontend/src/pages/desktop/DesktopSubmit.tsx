@@ -170,6 +170,27 @@ export function blankLine(cat: Category): Line {
   };
 }
 
+export type DuplicatePartGroup = { partNumber: string; lineNums: number[] };
+
+// Two lines sharing a part number on the same PO is almost always a paste-error
+// or a forgotten-already-added — surface it so the user can merge or confirm.
+// Comparison is case-insensitive and trims whitespace; blanks are ignored. The
+// returned `partNumber` carries the first-seen casing for display.
+export function findDuplicatePartNumbers(
+  lines: ReadonlyArray<{ partNumber?: string | null }>,
+): DuplicatePartGroup[] {
+  const groups = new Map<string, DuplicatePartGroup>();
+  lines.forEach((l, i) => {
+    const raw = (l.partNumber ?? '').trim();
+    if (!raw) return;
+    const key = raw.toLowerCase();
+    const g = groups.get(key);
+    if (g) g.lineNums.push(i + 1);
+    else groups.set(key, { partNumber: raw, lineNums: [i + 1] });
+  });
+  return [...groups.values()].filter(g => g.lineNums.length >= 2);
+}
+
 // Build a Line from an AI scan response — mirrors the mobile aiDefaults in
 // SubmitForm.tsx so both flows share the same field-mapping.
 // Low-confidence extractions are still prefilled (a rough draft beats an empty
@@ -311,6 +332,18 @@ function OrderForm({
     return { units, cost };
   }, [lines]);
 
+  const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
+  const dupByIdx = useMemo(() => {
+    const m = new Map<number, number[]>();
+    for (const g of dupGroups) {
+      for (const ln of g.lineNums) {
+        m.set(ln - 1, g.lineNums.filter(n => n !== ln));
+      }
+    }
+    return m;
+  }, [dupGroups]);
+  const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
+
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
@@ -380,6 +413,29 @@ function OrderForm({
 
   // Escape closes the drawer.
   useEscapeKey(useCallback(() => setActiveIdx(null), []), activeIdx !== null);
+
+  const doSubmit = async () => {
+    if (!draftId) { setAiError(t('subNoDraftErr')); return; }
+    const totalCost = meta.totalCostOverride != null
+      ? (Number(meta.totalCostOverride) || 0)
+      : totals.cost;
+    const unconfirmedLines = lines.filter(l => !l._confirmed);
+    setSubmitting(true);
+    try {
+      await api.patch('/api/orders/' + draftId, {
+        warehouseId: meta.warehouseId,
+        payment: meta.payment === 'Company' ? 'company' : 'self',
+        notes: meta.notes || null,
+        totalCost,
+        ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
+      });
+      onDone({ msg: t('orderSubmitted'), kind: 'success' });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // Reason the Submit button is disabled, surfaced inline so the user isn't
   // staring at a dead button wondering what's wrong. Checked in priority
@@ -669,27 +725,12 @@ function OrderForm({
                 className="btn accent"
                 disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
                 title={submitDisabledReason ?? undefined}
-                onClick={async () => {
-                  if (!draftId) { setAiError(t('subNoDraftErr')); return; }
-                  const totalCost = meta.totalCostOverride != null
-                    ? (Number(meta.totalCostOverride) || 0)
-                    : totals.cost;
-                  const unconfirmedLines = lines.filter(l => !l._confirmed);
-                  setSubmitting(true);
-                  try {
-                    await api.patch('/api/orders/' + draftId, {
-                      warehouseId: meta.warehouseId,
-                      payment: meta.payment === 'Company' ? 'company' : 'self',
-                      notes: meta.notes || null,
-                      totalCost,
-                      ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
-                    });
-                    onDone({ msg: t('orderSubmitted'), kind: 'success' });
-                  } catch (e) {
-                    setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
-                  } finally {
-                    setSubmitting(false);
+                onClick={() => {
+                  if (dupGroups.length > 0) {
+                    setDupConfirm(dupGroups);
+                    return;
                   }
+                  void doSubmit();
                 }}
               >
                 {t('submitOrder')} <Icon name="check" size={14} />
@@ -714,7 +755,53 @@ function OrderForm({
           canRemove={lines.length > 1}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={setAiError}
+          duplicateOnLines={dupByIdx.get(activeIdx)}
         />
+      )}
+
+      {dupConfirm && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !submitting) setDupConfirm(null); }}>
+          <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="alert" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">{t('dupPartModalTitle')}</div>
+                  <div className="modal-sub">{t('dupPartModalSub')}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-body">
+              <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
+                {dupConfirm.map(g => (
+                  <li key={g.partNumber.toLowerCase()}>
+                    {(g.lineNums.length === 1 ? t('dupPartModalRowOne') : t('dupPartModalRowMany'))
+                      .replace('{pn}', g.partNumber)
+                      .replace('{nums}', g.lineNums.join(', '))}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setDupConfirm(null)} disabled={submitting}>
+                {t('dupPartReview')}
+              </button>
+              <button
+                className="btn accent"
+                disabled={submitting}
+                onClick={async () => { setDupConfirm(null); await doSubmit(); }}
+              >
+                {submitting ? '…' : t('dupPartSubmitAnyway')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

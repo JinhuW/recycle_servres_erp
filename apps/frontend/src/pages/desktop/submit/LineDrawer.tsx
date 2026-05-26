@@ -13,7 +13,7 @@ import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
-  onConfirmLine, onConfirmError,
+  onConfirmLine, onConfirmError, duplicateOnLines,
 }: {
   line: Line;
   idx: number;
@@ -24,6 +24,8 @@ export function LineDrawer({
   editing?: boolean;
   onConfirmLine?: () => Promise<void>;
   onConfirmError?: (msg: string) => void;
+  // 1-based line numbers (excluding this one) that share this line's part #.
+  duplicateOnLines?: number[];
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -128,6 +130,25 @@ export function LineDrawer({
           </div>
 
           <div style={{ padding: 16, display: 'grid', gap: 14 }}>
+            {duplicateOnLines && duplicateOnLines.length > 0 && (
+              <div
+                role="status"
+                style={{
+                  padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+                  background: 'var(--warn-soft, #fef3c7)',
+                  border: '1px solid var(--warn, #f59e0b)',
+                  color: 'var(--warn-strong, #92400e)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                <Icon name="alert" size={13} />
+                <span>
+                  {duplicateOnLines.length === 1
+                    ? t('dupPartDrawerOne', { line: duplicateOnLines[0] })
+                    : t('dupPartDrawerMany', { lines: duplicateOnLines.join(', ') })}
+                </span>
+              </div>
+            )}
             {!editing && line.scanImageUrl && (
               <img
                 src={line.scanImageUrl}

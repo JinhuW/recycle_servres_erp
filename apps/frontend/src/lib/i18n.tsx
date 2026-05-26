@@ -891,6 +891,17 @@ export const I18N: Record<Lang, Record<string, string>> = {
     drawerConfirmLine: 'Confirm line',
     drawerConfirmFailed: 'Failed to confirm line',
 
+    // Duplicate part-number guard (inline drawer warning + save-time modal).
+    dupPartDrawerOne: 'This Part # already appears on line {line}.',
+    dupPartDrawerMany: 'This Part # already appears on lines {lines}.',
+    dupPartModalTitle: 'Duplicate part numbers',
+    dupPartModalSub: 'The same Part # appears on more than one line of this PO. Review the lines below or save anyway if this was intentional.',
+    dupPartModalRowOne: 'Part {pn} — line {nums}',
+    dupPartModalRowMany: 'Part {pn} — lines {nums}',
+    dupPartReview: 'Review lines',
+    dupPartSaveAnyway: 'Save anyway',
+    dupPartSubmitAnyway: 'Submit anyway',
+
     // LineFields
     selectPlaceholder: 'Select…',
     healthPct: 'Health (%)',
@@ -1856,6 +1867,15 @@ export const I18N: Record<Lang, Record<string, string>> = {
     drawerCloseEdit: '关闭编辑',
     drawerCapturedLabel: '采集的标签',
     drawerLossyWarn: '售价低于单位成本',
+    dupPartDrawerOne: '此零件号已出现在第 {line} 行。',
+    dupPartDrawerMany: '此零件号已出现在第 {lines} 行。',
+    dupPartModalTitle: '零件号重复',
+    dupPartModalSub: '此采购单中有多行使用了相同的零件号。请检查下列各行,或在确认无误时仍可保存。',
+    dupPartModalRowOne: '零件 {pn} — 第 {nums} 行',
+    dupPartModalRowMany: '零件 {pn} — 第 {nums} 行',
+    dupPartReview: '返回检查',
+    dupPartSaveAnyway: '仍然保存',
+    dupPartSubmitAnyway: '仍然提交',
     drawerConfirmed: '已确认',
     drawerConfirming: '正在确认…',
     drawerConfirmLine: '确认明细',

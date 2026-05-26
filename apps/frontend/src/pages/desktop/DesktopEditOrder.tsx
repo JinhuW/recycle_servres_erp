@@ -7,7 +7,10 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
-import { LineDrawer, blankLine, type Line } from './DesktopSubmit';
+import {
+  LineDrawer, blankLine, findDuplicatePartNumbers,
+  type Line, type DuplicatePartGroup,
+} from './DesktopSubmit';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 
@@ -99,6 +102,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  // Filled when save() detects duplicate part numbers; the modal then drives a
+  // "Save anyway" path that bypasses the check.
+  const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -146,6 +152,19 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       return idx;
     });
   };
+
+  const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
+  // Lookup table keyed by line index → other 1-based line numbers sharing its
+  // part #. Drives the inline drawer warning.
+  const dupByIdx = useMemo(() => {
+    const m = new Map<number, number[]>();
+    for (const g of dupGroups) {
+      for (const ln of g.lineNums) {
+        m.set(ln - 1, g.lineNums.filter(n => n !== ln));
+      }
+    }
+    return m;
+  }, [dupGroups]);
 
   const totals = useMemo(() => {
     let qty = 0, cost = 0, revenue = 0, profit = 0;
@@ -233,7 +252,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       return `Fill in brand/description, quantity and unit cost on ${which} before saving.`;
     })();
 
-  const save = async () => {
+  const doSave = async () => {
     setSaving(true);
     setSaveError(null);
     try {
@@ -263,6 +282,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const save = async () => {
+    if (dupGroups.length > 0) {
+      setDupConfirm(dupGroups);
+      return;
+    }
+    await doSave();
   };
 
   const itemLabel = (l: EditLine) =>
@@ -875,6 +902,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
+          duplicateOnLines={dupByIdx.get(activeIdx)}
         />
       )}
 
@@ -989,6 +1017,51 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 }}
               >
                 {archiving ? '…' : t('archiveOrder')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dupConfirm && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !saving) setDupConfirm(null); }}>
+          <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="alert" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">{t('dupPartModalTitle')}</div>
+                  <div className="modal-sub">{t('dupPartModalSub')}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-body">
+              <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
+                {dupConfirm.map(g => (
+                  <li key={g.partNumber.toLowerCase()}>
+                    {(g.lineNums.length === 1 ? t('dupPartModalRowOne') : t('dupPartModalRowMany'))
+                      .replace('{pn}', g.partNumber)
+                      .replace('{nums}', g.lineNums.join(', '))}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setDupConfirm(null)} disabled={saving}>
+                {t('dupPartReview')}
+              </button>
+              <button
+                className="btn primary"
+                disabled={saving}
+                onClick={async () => { setDupConfirm(null); await doSave(); }}
+              >
+                {saving ? '…' : t('dupPartSaveAnyway')}
               </button>
             </div>
           </div>
