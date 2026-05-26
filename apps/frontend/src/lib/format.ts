@@ -19,6 +19,18 @@ export const fmt0 = (n: number | null | undefined, locale = 'en-US') =>
 export const fmtUSD0 = (n: number | null | undefined, locale = 'en-US') =>
   n == null ? '—' : '$' + fmt0(n, locale);
 
+const CURRENCY_SYMBOL: Record<string, string> = { USD: '$', CNY: '¥' };
+
+export const fmtMoney = (
+  n: number | null | undefined,
+  currency: string,
+  locale = 'en-US',
+) => {
+  if (n == null) return '—';
+  const sym = CURRENCY_SYMBOL[currency];
+  return sym ? sym + fmt(n, locale) : `${currency} ${fmt(n, locale)}`;
+};
+
 export const fmtDate = (d: Date | string, locale = 'en-US') =>
   new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
 
