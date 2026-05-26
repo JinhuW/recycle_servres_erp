@@ -8,9 +8,11 @@ import { usePhScrolled } from './lib/usePhScrolled';
 import {
   type CatalogItem, type BasketLine, itemLabel, basketTotal, previewUrl,
 } from './lib/vendor';
+import { fmtMoney } from './lib/format';
 
 type Tab = 'browse' | 'mine';
 type T = (k: string, p?: Record<string, string | number>) => string;
+type Currency = 'USD' | 'CNY';
 
 type BidLine = {
   bid_line_id?: string;
@@ -73,12 +75,13 @@ function offerTone(status: string): string {
 }
 
 async function postBid(
-  base: string, basket: BasketLine[], name: string, note: string, t: T,
+  base: string, basket: BasketLine[], name: string, note: string,
+  currency: Currency, t: T,
 ): Promise<{ ok: true } | { ok: false; msg: string }> {
   const r = await fetch(`${base}/bids`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contactName: name, note,
+      contactName: name, note, currency,
       lines: basket.map(l => ({ inventoryId: l.inventoryId, qty: l.qty, unitPrice: l.unitPrice })),
     }),
   });
@@ -141,6 +144,10 @@ type VM = {
   review: boolean;
   setReview: (v: boolean) => void;
   clearBasket: () => void;
+  currency: Currency;
+  setCurrency: (c: Currency) => void;
+  fxUsdCny: number | null;
+  fxFetchedAt: string | null;
 };
 
 export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean }) {
@@ -155,6 +162,9 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
   const [reloadKey, setReloadKey] = useState(0);
   const [review, setReview] = useState(false);
   const [catFilter, setCatFilter] = useState('all');
+  const [currency, setCurrency] = useState<Currency>('USD');
+  const [fxUsdCny, setFxUsdCny] = useState<number | null>(null);
+  const [fxFetchedAt, setFxFetchedAt] = useState<string | null>(null);
 
   const base = `/api/public/vendor/${encodeURIComponent(token)}`;
 
@@ -179,6 +189,26 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
     return () => { cancelled = true; };
   }, [base, reloadKey]);
 
+  // Cache the USD→CNY rate per session: only fetch when the picker first
+  // flips to CNY, and never re-fetch after that within this mount.
+  useEffect(() => {
+    if (currency === 'USD') return;
+    if (fxUsdCny != null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${base}/fx`);
+        if (cancelled || !r.ok) return;
+        const j: { USD_CNY: number; fetchedAt: string } = await r.json();
+        setFxUsdCny(j.USD_CNY);
+        setFxFetchedAt(j.fetchedAt);
+      } catch {
+        // Backend has its own boot-time fetch; leaving null hides the line.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currency, fxUsdCny, base]);
+
   const categories = useMemo(
     () => Array.from(new Set(groups.map(g => g.category))), [groups]);
   const filteredGroups = useMemo(
@@ -198,6 +228,7 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
   const vm: VM = {
     t, base, me, groups, filteredGroups, categories, catFilter, setCatFilter,
     itemCount, loadedOnce, basket, byId, tab, setTab, review, setReview,
+    currency, setCurrency, fxUsdCny, fxFetchedAt,
     addToBasket(it, qty, unitPrice) {
       setBasket(b => {
         const rest = b.filter(x => x.inventoryId !== it.id);
@@ -295,6 +326,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
   const {
     t, filteredGroups, categories, catFilter, setCatFilter,
     itemCount, loadedOnce, basket, byId, addToBasket, removeFromBasket, setReview,
+    currency,
   } = vm;
   const [openId, setOpenId] = useState<string | null>(null);
   const [zoomUrl, setZoomUrl] = useState<string | null>(null);
@@ -358,7 +390,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     {inBasket ? (
                       <span className="chip pos dot" style={{ fontSize: 10 }}>
-                        {inBasket.qty} × ${inBasket.unitPrice}
+                        {inBasket.qty} × {fmtMoney(inBasket.unitPrice, currency)}
                       </span>
                     ) : (
                       <span className="chip accent" style={{ fontSize: 10 }}>
@@ -371,7 +403,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
                   </div>
                 </button>
                 {open && (
-                  <OfferEditor it={it} t={t} existing={inBasket}
+                  <OfferEditor it={it} t={t} existing={inBasket} currency={currency}
                     onSave={(q, p) => { addToBasket(it, q, p); setOpenId(null); }}
                     onRemove={() => { removeFromBasket(it.id); setOpenId(null); }} />
                 )}
@@ -388,7 +420,7 @@ function MobileBrowse({ vm }: { vm: VM }) {
               {basket.length} {basket.length === 1 ? t('vendorItemOne') : t('vendorItemMany')}
             </span>
             <span className="mono" style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-              ${basketTotal(basket).toFixed(2)}
+              {fmtMoney(basketTotal(basket), currency)}
             </span>
           </div>
           <button className="ph-btn accent" style={{ flex: '0 0 auto', padding: '0 22px' }}
@@ -405,8 +437,9 @@ function MobileBrowse({ vm }: { vm: VM }) {
   );
 }
 
-function OfferEditor({ it, t, existing, onSave, onRemove }: {
+function OfferEditor({ it, t, existing, currency, onSave, onRemove }: {
   it: CatalogItem; existing: BasketLine | undefined; t: T;
+  currency: Currency;
   onSave: (qty: number, price: number) => void; onRemove: () => void;
 }) {
   const [qty, setQty] = useState(existing?.qty ?? 1);
@@ -425,7 +458,8 @@ function OfferEditor({ it, t, existing, onSave, onRemove }: {
         <div className="ph-field" style={{ marginTop: 0 }}>
           <label>{t('vendorYourOffer')}</label>
           <input type="number" min={0} step="0.01" value={price} className="input"
-            placeholder="$" style={{ borderColor: 'var(--accent)' }}
+            placeholder={currency === 'USD' ? '$' : '¥'}
+            style={{ borderColor: 'var(--accent)' }}
             onChange={e => setPrice(e.target.value)} />
         </div>
       </div>
@@ -445,7 +479,10 @@ function OfferEditor({ it, t, existing, onSave, onRemove }: {
 }
 
 function MobileReview({ vm }: { vm: VM }) {
-  const { t, base, basket, setReview, setTab, clearBasket } = vm;
+  const {
+    t, base, basket, setReview, setTab, clearBasket,
+    currency, setCurrency, fxUsdCny, fxFetchedAt,
+  } = vm;
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -453,15 +490,34 @@ function MobileReview({ vm }: { vm: VM }) {
 
   async function submit() {
     setBusy(true); setErr('');
-    const res = await postBid(base, basket, name, note, t);
+    const res = await postBid(base, basket, name, note, currency, t);
     setBusy(false);
     if (res.ok) { clearBasket(); setReview(false); setTab('mine'); return; }
     setErr(res.msg);
   }
 
+  const subtotal = basketTotal(basket);
+
   return (
     <>
       <div className="ph-section-h">{t('vendorReview')}</div>
+
+      <div className="ph-field" style={{ marginTop: 8 }}>
+        <label>{t('currency.label')}</label>
+        <div role="radiogroup" style={{ display: 'flex', gap: 18, marginTop: 4 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <input type="radio" name="bid-currency" value="USD"
+              checked={currency === 'USD'} onChange={() => setCurrency('USD')} />
+            {t('currency.usd')}
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <input type="radio" name="bid-currency" value="CNY"
+              checked={currency === 'CNY'} onChange={() => setCurrency('CNY')} />
+            {t('currency.cny')}
+          </label>
+        </div>
+      </div>
+
       {basket.map(l => (
         <div key={l.inventoryId} className="ph-inv-card">
           <div className="ph-inv-thumb"><Icon name={catThumb(l.category)} size={18} /></div>
@@ -470,11 +526,11 @@ function MobileReview({ vm }: { vm: VM }) {
               {l.label}
             </div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {l.qty} × ${l.unitPrice}
+              {l.qty} × {fmtMoney(l.unitPrice, currency)}
             </div>
           </div>
           <b className="mono" style={{ fontSize: 13, flexShrink: 0 }}>
-            ${(l.qty * l.unitPrice).toFixed(2)}
+            {fmtMoney(l.qty * l.unitPrice, currency)}
           </b>
         </div>
       ))}
@@ -484,9 +540,19 @@ function MobileReview({ vm }: { vm: VM }) {
         padding: 14, marginTop: 8, borderRadius: 12,
         background: 'var(--accent-soft)', color: 'var(--accent-strong)', fontWeight: 700,
       }}>
-        <span>{t('vendorTotalOffered')}</span>
-        <span className="mono" style={{ fontSize: 15 }}>${basketTotal(basket).toFixed(2)}</span>
+        <span>{t('bid.in_currency', { currency })}</span>
+        <span className="mono" style={{ fontSize: 15 }}>{fmtMoney(subtotal, currency)}</span>
       </div>
+
+      {currency === 'CNY' && fxUsdCny != null && (
+        <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 6, padding: '0 4px' }}>
+          {t('bid.usd_equivalent', {
+            usd: fmtMoney(subtotal / fxUsdCny, 'USD'),
+            rate: fxUsdCny.toFixed(4),
+            date: (fxFetchedAt ?? new Date().toISOString()).slice(0, 10),
+          })}
+        </div>
+      )}
 
       <div className="ph-field">
         <label>{t('vendorContactName')}</label>
@@ -623,6 +689,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
   const {
     t, filteredGroups, categories, catFilter, setCatFilter,
     loadedOnce, basket, byId, addToBasket, removeFromBasket, clearBasket,
+    currency,
   } = vm;
   const [reviewOpen, setReviewOpen] = useState(false);
   const [zoomUrl, setZoomUrl] = useState<string | null>(null);
@@ -675,6 +742,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
                 {rows.map(it => (
                   <DesktopBrowseRow key={it.id} it={it} t={t}
                     existing={byId.get(it.id)}
+                    currency={currency}
                     onZoom={setZoomUrl}
                     onAdd={(q, p) => addToBasket(it, q, p)}
                     onRemove={() => removeFromBasket(it.id)} />
@@ -700,7 +768,7 @@ function DesktopBrowse({ vm }: { vm: VM }) {
             </div>
             <span className="sel-bar-divider" />
             <div>
-              <span className="sel-bar-num">${basketTotal(basket).toFixed(2)}</span>{' '}
+              <span className="sel-bar-num">{fmtMoney(basketTotal(basket), currency)}</span>{' '}
               <span className="sel-bar-label">{t('vendorTotalOffered')}</span>
             </div>
           </div>
@@ -724,8 +792,9 @@ function DesktopBrowse({ vm }: { vm: VM }) {
   );
 }
 
-function DesktopBrowseRow({ it, t, existing, onAdd, onRemove, onZoom }: {
+function DesktopBrowseRow({ it, t, existing, currency, onAdd, onRemove, onZoom }: {
   it: CatalogItem; existing: BasketLine | undefined; t: T;
+  currency: Currency;
   onAdd: (qty: number, price: number) => void;
   onRemove: () => void;
   onZoom: (url: string) => void;
@@ -754,7 +823,8 @@ function DesktopBrowseRow({ it, t, existing, onAdd, onRemove, onZoom }: {
       </td>
       <td className="num">
         <input type="number" min={0} step="0.01" value={price} className="so-mini-input"
-          placeholder="$" onChange={e => setPrice(e.target.value)} />
+          placeholder={currency === 'USD' ? '$' : '¥'}
+          onChange={e => setPrice(e.target.value)} />
       </td>
       <td className="num">
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
@@ -774,7 +844,10 @@ function DesktopBrowseRow({ it, t, existing, onAdd, onRemove, onZoom }: {
 }
 
 function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
-  const { t, base, basket, setTab, clearBasket } = vm;
+  const {
+    t, base, basket, setTab, clearBasket,
+    currency, setCurrency, fxUsdCny, fxFetchedAt,
+  } = vm;
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -782,11 +855,13 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
 
   async function submit() {
     setBusy(true); setErr('');
-    const res = await postBid(base, basket, name, note, t);
+    const res = await postBid(base, basket, name, note, currency, t);
     setBusy(false);
     if (res.ok) { clearBasket(); onClose(); setTab('mine'); return; }
     setErr(res.msg);
   }
+
+  const subtotal = basketTotal(basket);
 
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -802,6 +877,24 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
         </div>
 
         <div className="modal-body" style={{ padding: 20, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 14 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-muted)' }}>
+              {t('currency.label')}
+            </span>
+            <div role="radiogroup" style={{ display: 'flex', gap: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input type="radio" name="bid-currency-desktop" value="USD"
+                  checked={currency === 'USD'} onChange={() => setCurrency('USD')} />
+                {t('currency.usd')}
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input type="radio" name="bid-currency-desktop" value="CNY"
+                  checked={currency === 'CNY'} onChange={() => setCurrency('CNY')} />
+                {t('currency.cny')}
+              </label>
+            </div>
+          </div>
+
           <div className="table-scroll">
             <table className="table">
               <thead>
@@ -817,18 +910,32 @@ function DesktopReviewModal({ vm, onClose }: { vm: VM; onClose: () => void }) {
                   <tr key={l.inventoryId}>
                     <td>{l.label}</td>
                     <td className="num mono">{l.qty}</td>
-                    <td className="num mono">${l.unitPrice}</td>
-                    <td className="num mono">${(l.qty * l.unitPrice).toFixed(2)}</td>
+                    <td className="num mono">{fmtMoney(l.unitPrice, currency)}</td>
+                    <td className="num mono">{fmtMoney(l.qty * l.unitPrice, currency)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={3} style={{ fontWeight: 700 }}>{t('vendorTotalOffered')}</td>
+                  <td colSpan={3} style={{ fontWeight: 700 }}>
+                    {t('bid.in_currency', { currency })}
+                  </td>
                   <td className="num mono" style={{ fontWeight: 700 }}>
-                    ${basketTotal(basket).toFixed(2)}
+                    {fmtMoney(subtotal, currency)}
                   </td>
                 </tr>
+                {currency === 'CNY' && fxUsdCny != null && (
+                  <tr>
+                    <td colSpan={4} className="num mono"
+                      style={{ fontSize: 12, color: 'var(--fg-muted)', fontWeight: 400 }}>
+                      {t('bid.usd_equivalent', {
+                        usd: fmtMoney(subtotal / fxUsdCny, 'USD'),
+                        rate: fxUsdCny.toFixed(4),
+                        date: (fxFetchedAt ?? new Date().toISOString()).slice(0, 10),
+                      })}
+                    </td>
+                  </tr>
+                )}
               </tfoot>
             </table>
           </div>
