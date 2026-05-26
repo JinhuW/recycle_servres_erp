@@ -30,6 +30,7 @@ import lookupsRoutes from './routes/lookups';
 import categoriesRoutes from './routes/categories';
 import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
+import { fxRates as fxRatesRoutes } from './routes/fxRates';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
@@ -209,6 +210,7 @@ app.route('/api/lookups', lookupsRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/attachments', attachmentsRoutes);
 app.route('/api/workspace', workspaceRoutes);
+app.route('/api/workspace', fxRatesRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
 // /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
