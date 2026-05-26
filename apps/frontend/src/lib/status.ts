@@ -43,9 +43,13 @@ export const isCompleted = (s: string) => s === 'Done';
 // completed. Draft / In Transit items aren't ready to sell yet.
 export const isSellable = (s: string) => s === 'Reviewing' || s === 'Done';
 
-// Keep in sync with backend ai.ts CONFIDENCE_FLOOR.
-export const AI_CONFIDENCE_FLOOR = 0.6;
+// Keep in sync with backend ai.ts CONFIDENCE_FLOOR. Lowered from 0.6 → 0.5
+// alongside the prompt rubric recalibration in ai/prompts.ts so that clean
+// scans with one inferred field don't trip the amber "please verify" banner.
+export const AI_CONFIDENCE_FLOOR = 0.5;
 // Below this we treat the extraction as "couldn't read the label" — fields are
 // still shown (a rough draft beats an empty form) but the banner is escalated
-// from amber "please verify" to red "re-shoot or enter manually".
-export const AI_UNREADABLE_FLOOR = 0.3;
+// from amber "please verify" to red "re-shoot or enter manually". Lowered
+// 0.3 → 0.25 in tandem with the verify floor; with the new rubric the model
+// only reaches the 0.25-0.3 band when the label is genuinely illegible.
+export const AI_UNREADABLE_FLOOR = 0.25;

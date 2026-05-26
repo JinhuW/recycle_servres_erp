@@ -77,14 +77,17 @@ describe('openRouterScan', () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","capacity":"32GB","_confidence":0.72}' } }] });
     const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
     expect(r.provider).toBe('openrouter');
+    // Self-rated 0.72 exceeds the coverage floor (2/8 fields → 0.2), so it wins.
     expect(r.confidence).toBe(0.72);
     expect(r.fields).toEqual({ brand: 'Samsung', capacity: '32GB' });
   });
 
-  it('defaults confidence to 0.5 when the model omits _confidence', async () => {
+  it('defaults confidence to 0.45 when the model omits _confidence', async () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung"}' } }] });
     const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
-    expect(r.confidence).toBe(0.5);
+    // 1/8 RAM fields → coverage floor 0.1, default 0.45 wins. Sits just below
+    // CONFIDENCE_FLOOR so the UI still surfaces a "please verify" banner.
+    expect(r.confidence).toBe(0.45);
     expect(r.fields).toEqual({ brand: 'Samsung' });
   });
 
@@ -95,11 +98,32 @@ describe('openRouterScan', () => {
     expect(r.fields._confidence).toBeUndefined();
   });
 
-  it('treats a non-numeric _confidence as missing (default 0.5)', async () => {
+  it('treats a non-numeric _confidence as missing (default 0.45)', async () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","_confidence":"high"}' } }] });
     const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
-    expect(r.confidence).toBe(0.5);
+    expect(r.confidence).toBe(0.45);
     expect(r.fields._confidence).toBeUndefined();
+  });
+
+  it('lifts a harsh self-rating when field coverage is high', async () => {
+    // Model returned all 8 expected RAM fields but rated itself a pessimistic
+    // 0.4. The coverage floor (8/8 * 0.8 = 0.8) overrides, since the prompt
+    // tells the model to omit fields it can't read — a full set IS evidence.
+    mockFetch(200, { choices: [{ message: { content: JSON.stringify({
+      brand: 'Samsung', capacity: '32GB', generation: 'DDR4', type: 'Server',
+      classification: 'RDIMM', rank: '2Rx4', speed: '3200', partNumber: 'M393A4K40CB2',
+      _confidence: 0.4,
+    }) } }] });
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.confidence).toBe(0.8);
+  });
+
+  it('coverage floor never drops a strong self-rating', async () => {
+    // Model returned only 1 of 8 RAM fields but rated itself 0.92. Self-rated
+    // wins — the coverage floor only acts as a lower bound.
+    mockFetch(200, { choices: [{ message: { content: '{"partNumber":"M393A4K40CB2","_confidence":0.92}' } }] });
+    const r = await openRouterScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    expect(r.confidence).toBe(0.92);
   });
 
   it('parses fenced JSON content', async () => {

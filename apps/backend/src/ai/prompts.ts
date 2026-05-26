@@ -2,12 +2,33 @@
 import type { LineCategory } from '../types';
 
 // Every prompt asks the model to emit `_confidence` (0..1) alongside the
-// extracted fields — that is the value the UI surfaces and gates autofill on.
-// Without an explicit instruction the field was effectively a fiction:
-// previously the backend stamped 0.85 on every result regardless of how the
-// model actually read the label.
+// extracted fields — that is the value the UI surfaces.
+// The rubric is tiered with explicit mid-range anchors. The earlier version
+// only anchored 0.95+ and ≤0.5, which pushed the model to a bimodal
+// distribution (perfect or "guessing"); a single slightly-inferred field on
+// an otherwise clean scan would land below the 0.5 anchor and trip the UI's
+// "please verify every field" warning. The middle bands give the model
+// somewhere honest to land for "good scan with one ambiguity".
 const CONFIDENCE_INSTRUCTION =
-  '_CONFIDENCE — also emit "_confidence": a number 0..1 representing how sure you are the extracted values match the label. Be honest: emit 0.95+ only when every field above is unambiguous; emit 0.5 or below when the image is blurry, glare-obscured, partially out-of-frame, or you had to guess any field.';
+  '_CONFIDENCE — emit "_confidence": a number 0..1 reflecting how cleanly the label could be read. Use these anchors:\n' +
+  '  0.9-1.0: every emitted field read unambiguously; sticker fully in-frame and crisp.\n' +
+  '  0.7-0.9: every emitted field read clearly; some values derived from standard conventions (form-factor→type, PC-code→generation).\n' +
+  '  0.5-0.7: most fields read cleanly; one field slightly ambiguous (partial glare, small focus drift, ink wear) but still legible.\n' +
+  '  0.3-0.5: multiple fields visually ambiguous; label angled, partially out of frame, or noticeably blurry.\n' +
+  '  <0.3: image is largely illegible — most fields unreadable.\n' +
+  'Use the full 0..1 range honestly. Most clean shots should land at 0.75-0.9, not 0.95+. Omit any field you cannot read; do NOT guess.';
+
+// Number of fields each category's JSON schema asks for (excluding the
+// _confidence sentinel). The OCR layer uses this to derive a coverage-based
+// floor on confidence: the prompt tells the model to omit unsure fields, so a
+// high field count is itself evidence the label was readable. See
+// `openRouterScan` in ./openrouter.ts.
+export const EXPECTED_FIELD_COUNT: Record<LineCategory, number> = {
+  RAM: 8,    // brand, capacity, generation, type, classification, rank, speed, partNumber
+  SSD: 5,    // brand, capacity, interface, formFactor, partNumber
+  HDD: 6,    // brand, capacity, interface, formFactor, rpm, partNumber
+  Other: 2,  // description, partNumber
+};
 
 export const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
   RAM: `You are reading a server/desktop/laptop RAM module label. Respond with a single minified JSON object and nothing else — no markdown, no code fences, no prose:

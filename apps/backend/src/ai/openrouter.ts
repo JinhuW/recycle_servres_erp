@@ -1,7 +1,12 @@
 // src/ai/openrouter.ts
 import type { Env, LineCategory } from '../types';
 import type { ScanResult } from './types';
-import { PROMPT_BY_CATEGORY, parseModelJson } from './prompts';
+import { PROMPT_BY_CATEGORY, parseModelJson, EXPECTED_FIELD_COUNT } from './prompts';
+
+// Cap on the coverage-derived confidence floor: even when the model returns
+// every expected field, observable coverage alone shouldn't claim more than
+// "good scan" — final ceiling stays with the model's self-rated score.
+const COVERAGE_FLOOR_MAX = 0.8;
 
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
@@ -89,17 +94,30 @@ export async function openRouterScan(
   if (!json) throw new Error('OpenRouter: could not parse JSON from response');
 
   // Pull the model's self-rated confidence out of the JSON. If it's missing or
-  // not a finite number, default to 0.5 — high enough to autofill (above
-  // CONFIDENCE_FLOOR) but low enough to trip the UI's "please verify" banner,
-  // so a silently-omitted confidence never reads as "85% sure".
+  // not a finite number, default to 0.45 — just below the verify floor so a
+  // silently-omitted score still trips the UI's "please verify" banner without
+  // escalating to the "unreadable" red banner.
   const { _confidence, ...rest } = json as Record<string, unknown>;
   const raw = typeof _confidence === 'number' && Number.isFinite(_confidence) ? _confidence : null;
-  const confidence = raw === null ? 0.5 : Math.max(0, Math.min(1, raw));
+  const selfRated = raw === null ? 0.45 : Math.max(0, Math.min(1, raw));
+
+  // Coverage-derived floor. The prompt tells the model to omit fields it can't
+  // read, so the number of returned non-empty fields is itself a confidence
+  // signal grounded in observable behaviour. This guards against the model
+  // being unduly harsh on itself: if it filled 7 of 8 expected RAM fields, the
+  // label was clearly readable even if its self-rating is mid-range.
+  const fields = rest as Record<string, string>;
+  const filled = Object.values(fields).filter((v) => typeof v === 'string' && v.trim() !== '').length;
+  const expected = EXPECTED_FIELD_COUNT[category];
+  const coverageFloor = expected > 0
+    ? Math.min(COVERAGE_FLOOR_MAX, (filled / expected) * COVERAGE_FLOOR_MAX)
+    : 0;
+  const confidence = Math.max(selfRated, coverageFloor);
 
   return {
     category,
     confidence,
-    fields: rest as Record<string, string>,
+    fields,
     provider: 'openrouter',
   };
 }
