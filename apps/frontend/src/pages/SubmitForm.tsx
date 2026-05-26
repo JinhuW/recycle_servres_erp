@@ -5,6 +5,8 @@ import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../lib/status';
 import { validateScan, stripUnmatched } from '../lib/scanValidation';
+import { CONDITIONS } from '../lib/catalog';
+import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -91,7 +93,8 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
 };
 
 export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const isEditing = editingLineIdx != null;
   const aiFilled = !!detected;
   const isFirst = lineCount === 0 && !isEditing;
@@ -292,21 +295,47 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('quantity')}</label>
+            <label>{t('quantity')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
             <input className="input" type="number" min={1} value={line.qty} onChange={e => set('qty', parseInt(e.target.value, 10) || 0)} />
           </div>
           <div className="ph-field">
-            <label>{t('condition')}</label>
+            <label>{t('condition')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
             <select className="select" value={line.condition ?? 'Pulled — Tested'} onChange={e => set('condition', e.target.value)}>
-              <option>New</option><option>Pulled — Tested</option><option>Pulled — Untested</option><option>Used</option>
+              {/* Orphan-safe: if the stored value isn't in the live catalog
+                  (renamed or removed), render it as a one-off option so the
+                  user still sees what was saved instead of an empty select. */}
+              {line.condition && !CONDITIONS.includes(line.condition) && (
+                <option value={line.condition}>{line.condition}</option>
+              )}
+              {CONDITIONS.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
         </div>
 
-        <div className={isEditing ? 'ph-field-row' : undefined}>
+        {/* Pricing row mirrors desktop LineDrawer: qty → unit → total
+            (always shown so a purchaser can enter the negotiated bulk total
+            instead of computing per-unit). Sell price only appears in edit
+            mode, matching the desktop drawer. */}
+        <div className="ph-field-row" style={{ gridTemplateColumns: isEditing ? '1fr 1fr 1fr' : '1fr 1fr' }}>
           <div className="ph-field">
-            <label>{t('unitCost')}</label>
+            <label>{t('unitCost')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
             <input className="input mono" type="number" step="0.01" min={0} value={line.unitCost} onChange={e => set('unitCost', parseFloat(e.target.value) || 0)} />
+          </div>
+          <div className="ph-field">
+            <label>{t('totalCost')}</label>
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              value={(line.qty * line.unitCost).toFixed(2)}
+              onChange={e => {
+                const newTotal = parseFloat(e.target.value);
+                if (!Number.isFinite(newTotal) || line.qty <= 0) return;
+                set('unitCost', +(newTotal / line.qty).toFixed(2));
+              }}
+            />
           </div>
           {isEditing && (
             <div className="ph-field">
@@ -323,6 +352,31 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             </div>
           )}
         </div>
+
+        {isEditing && (() => {
+          const qty = line.qty || 0;
+          const cost = line.unitCost || 0;
+          const sell = line.sellPrice ?? 0;
+          const revenue = qty * sell;
+          const profit = qty * (sell - cost);
+          const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+          const lossy = sell > 0 && sell < cost;
+          return (
+            <div
+              style={{
+                display: 'flex', flexWrap: 'wrap', gap: 14, rowGap: 6,
+                padding: '10px 12px', marginTop: 8,
+                background: 'var(--bg-soft)', border: '1px solid var(--border)',
+                borderRadius: 10, fontSize: 12, color: 'var(--fg-subtle)',
+              }}
+            >
+              <span>{t('revenue')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(revenue, locale)}</span></span>
+              <span>{t('profit')} <span className="mono" style={{ color: profit >= 0 ? 'var(--pos)' : 'var(--warn)', fontWeight: 600 }}>{fmtUSD(profit, locale)}</span></span>
+              <span>{t('margin')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600 }}>{margin.toFixed(1)}%</span></span>
+              {lossy && <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠ {t('drawerLossyWarn')}</span>}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="ph-action-bar">

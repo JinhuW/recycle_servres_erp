@@ -1,5 +1,10 @@
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
+import {
+  RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
+  SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
+  HDD_BRANDS, HDD_INTERFACE, HDD_FORM, HDD_CAP, HDD_RPM,
+} from '../lib/catalog';
 
 type Props = {
   category: Category;
@@ -7,6 +12,35 @@ type Props = {
   onChange: <K extends keyof DraftLine>(key: K, v: DraftLine[K]) => void;
   aiFilled?: boolean;
 };
+
+// Mark required fields with the same color token used on desktop (.label .req).
+const Req = () => <span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span>;
+
+/**
+ * Catalog-backed select that survives the value not appearing in the
+ * catalog yet — same orphan-safe pattern as desktop's `CatSelect`. Without
+ * this, a stored value that's no longer (or not yet) in the catalog
+ * silently renders as blank.
+ */
+function PhCatSelect({
+  value, options, onChange, className,
+}: {
+  value: string | null | undefined;
+  options: readonly string[];
+  onChange: (v: string) => void;
+  className: string;
+}) {
+  const { t } = useT();
+  const hasValue = value != null && value !== '';
+  const orphan = hasValue && !options.includes(value as string);
+  return (
+    <select className={className} value={value ?? ''} onChange={e => onChange(e.target.value)}>
+      <option value="">{t('selectPlaceholder')}</option>
+      {orphan && <option value={value as string}>{value}</option>}
+      {options.map(o => <option key={o}>{o}</option>)}
+    </select>
+  );
+}
 
 /**
  * Per-category form fields (brand, capacity, type, etc.). Used by SubmitForm
@@ -23,47 +57,37 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
       <>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('brand')}</label>
-            <input className={inputCls} value={value.brand ?? ''} onChange={e => onChange('brand', e.target.value)} />
+            <label>{t('brand')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.brand} options={RAM_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('generation')}</label>
-            <select className={selectCls} value={value.generation ?? 'DDR4'} onChange={e => onChange('generation', e.target.value)}>
-              <option>DDR3</option><option>DDR4</option><option>DDR5</option>
-            </select>
+            <PhCatSelect className={selectCls} value={value.generation} options={RAM_GENERATIONS} onChange={v => onChange('generation', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('capacity')}</label>
-            <select className={selectCls} value={value.capacity ?? '32GB'} onChange={e => onChange('capacity', e.target.value)}>
-              <option>4GB</option><option>8GB</option><option>16GB</option><option>32GB</option><option>64GB</option><option>128GB</option>
-            </select>
+            <label>{t('capacity')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.capacity} options={RAM_CAP} onChange={v => onChange('capacity', v)} />
           </div>
           <div className="ph-field">
             <label>{t('speedMhz')}</label>
-            <input className={inputCls} value={value.speed ?? ''} onChange={e => onChange('speed', e.target.value)} />
+            <PhCatSelect className={selectCls} value={value.speed} options={RAM_SPEED} onChange={v => onChange('speed', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('klass')}</label>
-            <select className={selectCls} value={value.classification ?? 'RDIMM'} onChange={e => onChange('classification', e.target.value)}>
-              <option>UDIMM</option><option>RDIMM</option><option>LRDIMM</option><option>SODIMM</option>
-            </select>
+            <PhCatSelect className={selectCls} value={value.classification} options={RAM_CLASS} onChange={v => onChange('classification', v)} />
           </div>
           <div className="ph-field">
             <label>{t('rank')}</label>
-            <select className={selectCls} value={value.rank ?? '2Rx4'} onChange={e => onChange('rank', e.target.value)}>
-              <option>1Rx4</option><option>1Rx8</option><option>2Rx4</option><option>2Rx8</option><option>4Rx4</option>
-            </select>
+            <PhCatSelect className={selectCls} value={value.rank} options={RAM_RANK} onChange={v => onChange('rank', v)} />
           </div>
         </div>
         <div className="ph-field">
           <label>{t('type')}</label>
-          <select className={selectCls} value={value.type ?? 'Server'} onChange={e => onChange('type', e.target.value)}>
-            <option>Desktop</option><option>Server</option><option>Laptop</option>
-          </select>
+          <PhCatSelect className={selectCls} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
@@ -78,26 +102,22 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
       <>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('brand')}</label>
-            <input className={inputCls} value={value.brand ?? ''} onChange={e => onChange('brand', e.target.value)} />
+            <label>{t('brand')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('capacity')}</label>
-            <input className={inputCls} value={value.capacity ?? ''} onChange={e => onChange('capacity', e.target.value)} />
+            <label>{t('capacity')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('interfaceLbl')}</label>
-            <select className={selectCls} value={value.interface ?? 'NVMe'} onChange={e => onChange('interface', e.target.value)}>
-              <option>SATA</option><option>SAS</option><option>NVMe</option><option>U.2</option>
-            </select>
+            <label>{t('interfaceLbl')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.interface} options={SSD_INTERFACE} onChange={v => onChange('interface', v)} />
           </div>
           <div className="ph-field">
             <label>{t('formFactor')}</label>
-            <select className={selectCls} value={value.formFactor ?? 'M.2 2280'} onChange={e => onChange('formFactor', e.target.value)}>
-              <option>2.5"</option><option>M.2 2280</option><option>M.2 22110</option><option>U.2</option><option>AIC</option>
-            </select>
+            <PhCatSelect className={selectCls} value={value.formFactor} options={SSD_FORM} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
         <div className="ph-field-row">
@@ -127,37 +147,33 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
       <>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('brand')}</label>
-            <input className={inputCls} value={value.brand ?? ''} onChange={e => onChange('brand', e.target.value)} />
+            <label>{t('brand')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('capacity')}</label>
-            <input className={inputCls} value={value.capacity ?? ''} onChange={e => onChange('capacity', e.target.value)} />
+            <label>{t('capacity')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('interfaceLbl')}</label>
-            <select className={selectCls} value={value.interface ?? 'SAS'} onChange={e => onChange('interface', e.target.value)}>
-              <option>SATA</option><option>SAS</option>
-            </select>
+            <label>{t('interfaceLbl')}<Req /></label>
+            <PhCatSelect className={selectCls} value={value.interface} options={HDD_INTERFACE} onChange={v => onChange('interface', v)} />
           </div>
           <div className="ph-field">
             <label>{t('formFactor')}</label>
-            <select className={selectCls} value={value.formFactor ?? '3.5"'} onChange={e => onChange('formFactor', e.target.value)}>
-              <option>2.5"</option><option>3.5"</option>
-            </select>
+            <PhCatSelect className={selectCls} value={value.formFactor} options={HDD_FORM} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('rpm')}</label>
-            <select className={selectCls} value={value.rpm ?? 7200} onChange={e => onChange('rpm', Number(e.target.value))}>
-              <option value={5400}>5400</option>
-              <option value={7200}>7200</option>
-              <option value={10000}>10000</option>
-              <option value={15000}>15000</option>
-            </select>
+            <label>{t('rpm')}<Req /></label>
+            <PhCatSelect
+              className={selectCls}
+              value={value.rpm == null ? undefined : String(value.rpm)}
+              options={HDD_RPM}
+              onChange={v => onChange('rpm', v === '' ? null : Number(v))}
+            />
           </div>
           <div className="ph-field">
             <label>{t('health')} (%)</label>
@@ -184,7 +200,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
   return (
     <>
       <div className="ph-field">
-        <label>{t('description')}</label>
+        <label>{t('description')}<Req /></label>
         <input className={inputCls} value={value.description ?? ''} onChange={e => onChange('description', e.target.value)} />
       </div>
       <div className="ph-field">
