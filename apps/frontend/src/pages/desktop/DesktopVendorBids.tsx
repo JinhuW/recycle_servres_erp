@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort, relTime } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, relTime } from '../../lib/format';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 
@@ -29,6 +29,10 @@ type VbSummary = {
   customer_short: string | null;
   line_count: number;
   total_offered: number;
+  currency: 'USD' | 'CNY';
+  fxRateToUsd: number;
+  fxSource: 'frankfurter' | 'manual' | 'fixed';
+  totalOfferedUsd: number;
 };
 
 type VbLine = {
@@ -44,6 +48,7 @@ type VbLine = {
   accepted_unit_price: number | null;
   sell_order_id: string | null;
   available: number;
+  unitPriceUsd: number;
 };
 
 type VbDetail = {
@@ -54,6 +59,9 @@ type VbDetail = {
   created_at: string;
   customer_id: string;
   customer_name: string;
+  currency: 'USD' | 'CNY';
+  fxRateToUsd: number;
+  fxSource: 'frankfurter' | 'manual' | 'fixed';
   lines: VbLine[];
 };
 
@@ -70,6 +78,7 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
   const [bids, setBids] = useState<VbSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | VbStatus>('all');
+  const [currencyFilter, setCurrencyFilter] = useState<'All' | 'USD' | 'CNY'>('All');
   const [linksOpen, setLinksOpen] = useState(false);
   const { path } = useRoute();
   const openMatch = match('/vendor-bids/:id', path);
@@ -91,10 +100,17 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
+  const visibleBids = useMemo(
+    () => currencyFilter === 'All' ? bids : bids.filter(b => b.currency === currencyFilter),
+    [bids, currencyFilter],
+  );
+
+  // Stats aggregate per-status — switch to USD-equivalent so mixed-currency
+  // pipelines roll up apples-to-apples (matches the column swap below).
   const stats = useMemo(() => {
     const m: Record<string, { count: number; offered: number }> = {};
     for (const s of STATUSES) m[s.id] = { count: 0, offered: 0 };
-    bids.forEach(b => { m[b.status].count++; m[b.status].offered += b.total_offered; });
+    bids.forEach(b => { m[b.status].count++; m[b.status].offered += b.totalOfferedUsd; });
     return m;
   }, [bids]);
 
@@ -149,18 +165,29 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
               <option value="all">{t('vbColStatus')}</option>
               {STATUSES.map(s => <option key={s.id} value={s.id}>{t(s.tKey)}</option>)}
             </select>
+            <select
+              className="select"
+              style={{ width: 140, height: 32, fontSize: 12.5, padding: '0 12px' }}
+              value={currencyFilter}
+              onChange={e => setCurrencyFilter(e.target.value as 'All' | 'USD' | 'CNY')}
+            >
+              <option value="All">{t('vb.filter.currency_all')}</option>
+              <option value="USD">USD</option>
+              <option value="CNY">CNY</option>
+            </select>
           </div>
         </div>
 
         <div className="table-scroll">
           {!loadedOnce ? (
-            <TableSkeleton rows={8} cols={6} />
+            <TableSkeleton rows={8} cols={7} />
           ) : (
           <table className="table">
             <thead>
               <tr>
                 <th>{t('vbColCustomer')}</th>
                 <th>{t('vbColContact')}</th>
+                <th>{t('vb.col.currency')}</th>
                 <th className="num">{t('vbColLines')}</th>
                 <th className="num">{t('vbColOffered')}</th>
                 <th>{t('vbColSubmitted')}</th>
@@ -168,7 +195,7 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
               </tr>
             </thead>
             <tbody>
-              {bids.map(b => (
+              {visibleBids.map(b => (
                 <tr
                   key={b.id}
                   className="row-hover"
@@ -189,15 +216,23 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
                       </div>
                     )}
                   </td>
+                  <td>{b.currency}</td>
                   <td className="num mono">{b.line_count}</td>
-                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(b.total_offered, locale)}</td>
+                  <td className="num">
+                    <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(b.totalOfferedUsd, locale)}</span>
+                    {b.currency !== 'USD' && (
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                        {fmtMoney(b.total_offered, b.currency, locale)}
+                      </div>
+                    )}
+                  </td>
                   <td className="muted">{fmtDateShort(b.created_at, locale)}</td>
                   <td><span className={'chip dot ' + toneFor(b.status)}>{t(STATUSES.find(s => s.id === b.status)?.tKey ?? 'vbColStatus')}</span></td>
                 </tr>
               ))}
-              {bids.length === 0 && (
+              {visibleBids.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+                  <td colSpan={7} style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)' }}>
                     {t('vbEmpty')}
                   </td>
                 </tr>
@@ -319,6 +354,15 @@ function VendorBidDetail({
     return accepted.length > 0 && accepted.every(l => l.sell_order_id != null);
   }, [bid]);
 
+  // USD-equivalent of what the Promote click will actually consume: persisted
+  // accepted lines not yet promoted, valued at this bid's frozen FX rate.
+  const promoteTotalUsd = useMemo(() => {
+    if (!bid) return 0;
+    return bid.lines
+      .filter(l => l.line_status === 'accepted' && !l.sell_order_id)
+      .reduce((s, l) => s + (l.accepted_unit_price ?? 0) * (l.accepted_qty ?? 0) * bid.fxRateToUsd, 0);
+  }, [bid]);
+
   const save = async () => {
     if (!bid) return;
     setSaving(true);
@@ -380,6 +424,20 @@ function VendorBidDetail({
                   <span className={'chip dot ' + toneFor(bid.status)}>
                     {t(STATUSES.find(s => s.id === bid.status)?.tKey ?? 'vbColStatus')}
                   </span>
+                  {bid.currency !== 'USD' && (
+                    <span className="chip dot muted" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      {t('vb.detail.fx_badge', {
+                        currency: bid.currency,
+                        rate: (1 / bid.fxRateToUsd).toFixed(4),
+                        date: bid.created_at.slice(0, 10),
+                        source: bid.fxSource === 'frankfurter'
+                          ? t('fx.source.frankfurter')
+                          : bid.fxSource === 'manual'
+                            ? t('fx.source.manual')
+                            : bid.fxSource,
+                      })}
+                    </span>
+                  )}
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{bid.customer_name}</h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
@@ -415,6 +473,7 @@ function VendorBidDetail({
                     <th>{t('vbColItem')}</th>
                     <th className="num">{t('vbColOfferedQty')}</th>
                     <th className="num">{t('vbColOfferedPrice')}</th>
+                    <th className="num">USD</th>
                     <th className="num">{t('vbColAvailable')}</th>
                     <th>{t('vbColDecision')}</th>
                     <th className="num">{t('vbColAcceptQty')}</th>
@@ -442,7 +501,10 @@ function VendorBidDetail({
                           )}
                         </td>
                         <td className="num mono">{l.offered_qty}</td>
-                        <td className="num mono">{fmtUSD(l.offered_unit_price, locale)}</td>
+                        <td className="num mono">{fmtMoney(l.offered_unit_price, bid.currency, locale)}</td>
+                        <td className="num mono" style={{ color: 'var(--fg-subtle)' }}>
+                          {bid.currency === 'USD' ? '' : fmtUSD(l.unitPriceUsd, locale)}
+                        </td>
                         <td
                           className="num mono"
                           style={over ? { color: 'var(--warn-strong, var(--danger))', fontWeight: 600 } : undefined}
@@ -496,6 +558,11 @@ function VendorBidDetail({
                             onChange={e => setLine(l.id, { acceptedUnitPrice: Math.max(0, Number(e.target.value) || 0) })}
                             style={{ width: 90 }}
                           />
+                          {bid.currency !== 'USD' && d.acceptedUnitPrice > 0 && (
+                            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                              {t('vb.detail.accepted_usd_hint', { usd: fmtUSD(d.acceptedUnitPrice * bid.fxRateToUsd, locale) })}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -528,7 +595,11 @@ function VendorBidDetail({
                 title={dirty ? t('vbSaveFirst') : persistedPromotable === 0 ? t('vbAllPromoted') : undefined}
               >
                 <Icon name="invoice" size={14} />{' '}
-                {promoting ? t('vbPromoting') : t('vbPromote', { n: persistedPromotable })}
+                {promoting
+                  ? t('vbPromoting')
+                  : bid.currency !== 'USD'
+                    ? t('vb.detail.promote_with_usd', { usd: fmtUSD(promoteTotalUsd, locale) })
+                    : t('vbPromote', { n: persistedPromotable })}
               </button>
             </div>
           </div>
