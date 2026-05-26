@@ -9,7 +9,9 @@
 // (base, quote, effective_date) so the loop is safe to call repeatedly
 // within the same UTC day.
 
-import type { Sql } from 'postgres';
+import type { Sql, TransactionSql } from 'postgres';
+
+type SqlLike = Sql<{}> | TransactionSql<{}>;
 
 export const SUPPORTED_CURRENCIES = ['USD', 'CNY'] as const;
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
@@ -42,7 +44,7 @@ function todayIso(): string {
 }
 
 export async function getLatestRateToUsd(
-  sql: Sql<{}>,
+  sql: SqlLike,
   quote: SupportedCurrency,
 ): Promise<FxLookup> {
   if (quote === 'USD') {
@@ -68,7 +70,7 @@ export async function getLatestRateToUsd(
 }
 
 export async function fetchAndStoreLatest(
-  sql: Sql<{}>,
+  sql: SqlLike,
   quote: SupportedCurrency,
 ): Promise<FxLookup> {
   if (quote === 'USD') return getLatestRateToUsd(sql, 'USD');

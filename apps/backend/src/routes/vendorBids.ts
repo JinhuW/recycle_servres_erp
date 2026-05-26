@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { nextHumanId } from '../lib/id-seq';
 import { writeSellOrderEvent } from '../services/sellOrderAudit';
+import { getLatestRateToUsd, type SupportedCurrency } from '../lib/fx';
 import type { Env, User } from '../types';
 
 const vendorBids = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -160,9 +161,13 @@ vendorBids.post('/:id/promote', async (c) => {
 
   await sql.begin(async (tx) => {
     sellId = await nextHumanId(tx, 'SO', 'SO');
-    const head = (await tx<{ customer_id: string }[]>`
-      SELECT customer_id FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
+    const head = (await tx<{ customer_id: string; currency_code: SupportedCurrency }[]>`
+      SELECT customer_id, currency_code FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
     if (!head) { outcome = { code: 400, msg: 'bid not found' }; return; }
+
+    const fx = await getLatestRateToUsd(tx, head.currency_code);
+    const isNonUsd = head.currency_code !== 'USD';
+
     const lines = await tx<{ id: string; inventory_id: string | null; category: string;
       label: string; sub_label: string | null; part_number: string | null;
       accepted_qty: number; accepted_unit_price: number }[]>`
@@ -203,14 +208,21 @@ vendorBids.post('/:id/promote', async (c) => {
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
+      const unitPriceUsd = isNonUsd
+        ? Math.round(l.accepted_unit_price * fx.rate * 100) / 100
+        : l.accepted_unit_price;
       await tx`
         INSERT INTO sell_order_lines
           (sell_order_id, inventory_id, category, label, sub_label, part_number,
-           qty, unit_price, warehouse_id, condition, position)
+           qty, unit_price, warehouse_id, condition, position,
+           source_currency, source_unit_price, source_fx_rate_to_usd)
         VALUES
           (${sellId}, ${l.inventory_id}, ${l.category}, ${l.label}, ${l.sub_label},
-           ${l.part_number}, ${l.accepted_qty}, ${l.accepted_unit_price},
-           NULL, NULL, ${i})
+           ${l.part_number}, ${l.accepted_qty}, ${unitPriceUsd},
+           NULL, NULL, ${i},
+           ${isNonUsd ? head.currency_code : null},
+           ${isNonUsd ? l.accepted_unit_price : null},
+           ${isNonUsd ? fx.rate : null})
       `;
       await tx`UPDATE vendor_bid_lines SET sell_order_id=${sellId} WHERE id=${l.id}`;
     }
@@ -220,6 +232,10 @@ vendorBids.post('/:id/promote', async (c) => {
       status: 'Draft',
       lineCount: lines.length,
       customerId: head.customer_id,
+      currency: head.currency_code,
+      fxRateToUsd: fx.rate,
+      fxSource: fx.source,
+      fxEffectiveDate: fx.effectiveDate,
     });
     outcome = { code: 201, sellId };
   });
