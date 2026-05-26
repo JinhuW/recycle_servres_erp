@@ -13,11 +13,17 @@ vendorBids.get('/', async (c) => {
   const sql = getDb(c.env);
   const status = c.req.query('status');
   const statusFrag = status ? sql`b.status = ${status}` : sql`TRUE`;
-  const rows = await sql`
+  const rows = await sql<{ id: string; contact_name: string; note: string | null;
+    status: string; created_at: string; customer_name: string; customer_short: string | null;
+    line_count: number; total_offered: number;
+    currency_code: string; fx_rate_to_usd: number; fx_source: string }[]>`
     SELECT b.id, b.contact_name, b.note, b.status, b.created_at,
            cu.name AS customer_name, cu.short_name AS customer_short,
            COUNT(bl.id)::int AS line_count,
-           COALESCE(SUM(bl.offered_qty * bl.offered_unit_price), 0)::float AS total_offered
+           COALESCE(SUM(bl.offered_qty * bl.offered_unit_price), 0)::float AS total_offered,
+           b.currency_code,
+           b.fx_rate_to_usd::float AS fx_rate_to_usd,
+           b.fx_source
     FROM vendor_bids b
     JOIN customers cu ON cu.id = b.customer_id
     LEFT JOIN vendor_bid_lines bl ON bl.bid_id = b.id
@@ -25,7 +31,18 @@ vendorBids.get('/', async (c) => {
     GROUP BY b.id, cu.id
     ORDER BY b.created_at DESC
   `;
-  return c.json({ items: rows });
+  // The stored fx_rate_to_usd is already multiplier-to-USD (vendorPublic
+  // freezes 1/frankfurter at submit time, USD bids get 1). Apply per-bid as
+  // a flat multiplier instead of aggregating in SQL — keeps the join shape
+  // unchanged and avoids a second round-trip.
+  const items = rows.map(r => ({
+    ...r,
+    currency: r.currency_code,
+    fxRateToUsd: r.fx_rate_to_usd,
+    fxSource: r.fx_source,
+    totalOfferedUsd: Math.round(r.total_offered * r.fx_rate_to_usd * 100) / 100,
+  }));
+  return c.json({ items });
 });
 
 vendorBids.get('/:id', async (c) => {
@@ -33,9 +50,14 @@ vendorBids.get('/:id', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const id = c.req.param('id');
-  const head = (await sql`
+  const head = (await sql<{ id: string; contact_name: string; note: string | null;
+    status: string; created_at: string; customer_id: string; customer_name: string;
+    currency_code: string; fx_rate_to_usd: number; fx_source: string }[]>`
     SELECT b.id, b.contact_name, b.note, b.status, b.created_at,
-           cu.id AS customer_id, cu.name AS customer_name
+           cu.id AS customer_id, cu.name AS customer_name,
+           b.currency_code,
+           b.fx_rate_to_usd::float AS fx_rate_to_usd,
+           b.fx_source
     FROM vendor_bids b JOIN customers cu ON cu.id = b.customer_id
     WHERE b.id = ${id} LIMIT 1
   `)[0];
@@ -54,7 +76,19 @@ vendorBids.get('/:id', async (c) => {
                      WHERE ol.id = bl.inventory_id AND ol.status = 'Done'), 0) AS available
     FROM vendor_bid_lines bl WHERE bl.bid_id = ${id} ORDER BY bl.position
   `;
-  return c.json({ bid: { ...head, lines } });
+  const linesOut = lines.map(l => ({
+    ...l,
+    unitPriceUsd: Math.round(l.offered_unit_price * head.fx_rate_to_usd * 100) / 100,
+  }));
+  return c.json({
+    bid: {
+      ...head,
+      currency: head.currency_code,
+      fxRateToUsd: head.fx_rate_to_usd,
+      fxSource: head.fx_source,
+      lines: linesOut,
+    },
+  });
 });
 
 vendorBids.post('/:id/decide', async (c) => {
