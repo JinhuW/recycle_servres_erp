@@ -3,6 +3,7 @@ import { getDb } from '../db';
 import type { Env } from '../types';
 import { nextHumanId } from '../lib/id-seq';
 import { notifyManagers } from '../lib/notify';
+import { getLatestRateToUsd, isSupportedCurrency, type SupportedCurrency } from '../lib/fx';
 
 const vendorPublic = new Hono<{ Bindings: Env }>();
 
@@ -94,7 +95,7 @@ vendorPublic.post('/:token/bids', async (c) => {
   if (!link) return c.json({ error: 'Not found' }, 404);
 
   const body = (await c.req.json().catch(() => null)) as
-    | { contactName?: string; note?: string; lines?: BidLineIn[] }
+    | { contactName?: string; note?: string; currency?: string; lines?: BidLineIn[] }
     | null;
   const contactName = (body?.contactName ?? '').trim();
   const lines = Array.isArray(body?.lines) ? body!.lines : [];
@@ -111,6 +112,20 @@ vendorPublic.post('/:token/bids', async (c) => {
       return c.json({ error: 'each line needs inventoryId, qty>0, unitPrice>=0' }, 400);
     }
   }
+
+  const rawCurrency = (body?.currency ?? 'USD').toUpperCase();
+  if (!isSupportedCurrency(rawCurrency)) {
+    return c.json({ error: 'unsupported currency' }, 400);
+  }
+  const currency = rawCurrency as SupportedCurrency;
+  const fxLookup = await getLatestRateToUsd(sql, currency);
+  const fxRateToUsd = fxLookup.rate;
+  // The vendor_bids.fx_source column has no CHECK, but 'fixed' is a
+  // synthetic source emitted only for USD. Normalise to 'manual' there so
+  // downstream readers see one of {'frankfurter','manual'} (matching the
+  // fx_rates.source CHECK), which is exactly what "no automatic rate; 1 by
+  // convention" means.
+  const fxSource = currency === 'USD' ? 'manual' : fxLookup.source;
 
   // Per-link flood throttle: count this link's recent bids in a sliding
   // window (same windowed-COUNT idiom as auth.ts's login_attempts gate).
@@ -159,8 +174,12 @@ vendorPublic.post('/:token/bids', async (c) => {
     if (bad.length) { outcome = { code: 409, bad }; return; } // roll back
 
     await tx`
-      INSERT INTO vendor_bids (id, vendor_link_id, customer_id, contact_name, note)
-      VALUES (${bidId}, ${link.id}, ${link.customer_id}, ${contactName}, ${note})
+      INSERT INTO vendor_bids
+        (id, vendor_link_id, customer_id, contact_name, note,
+         currency_code, fx_rate_to_usd, fx_source)
+      VALUES
+        (${bidId}, ${link.id}, ${link.customer_id}, ${contactName}, ${note},
+         ${currency}, ${fxRateToUsd}, ${fxSource})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i]; const s = snap[l.inventoryId];
@@ -197,8 +216,10 @@ vendorPublic.get('/:token/bids', async (c) => {
   if (!link) return c.json({ error: 'Not found' }, 404);
 
   const bids = await sql<{ id: string; contact_name: string; note: string | null;
-    status: string; created_at: string }[]>`
-    SELECT id, contact_name, note, status, created_at
+    status: string; created_at: string; currency_code: string;
+    fx_rate_to_usd: number; fx_source: string }[]>`
+    SELECT id, contact_name, note, status, created_at,
+           currency_code, fx_rate_to_usd::float AS fx_rate_to_usd, fx_source
     FROM vendor_bids WHERE vendor_link_id = ${link.id}
     ORDER BY created_at DESC
     LIMIT 500
@@ -214,14 +235,37 @@ vendorPublic.get('/:token/bids', async (c) => {
     LIMIT 5000
   `;
   return c.json({
-    bids: bids.map(b => ({
-      id: b.id, contactName: b.contact_name, note: b.note,
-      status: b.status, createdAt: b.created_at,
-      lines: lines.filter(l => l.bid_id === b.id).map(l => ({
-        label: l.label, offeredQty: l.offered_qty, offeredUnitPrice: l.offered_unit_price,
-        status: l.line_status, acceptedQty: l.accepted_qty, acceptedUnitPrice: l.accepted_unit_price,
-      })),
-    })),
+    bids: bids.map(b => {
+      const bidLines = lines.filter(l => l.bid_id === b.id);
+      const totalSource = bidLines.reduce(
+        (acc, l) => acc + l.offered_unit_price * l.offered_qty, 0);
+      const usdEquivalent = Math.round(totalSource * b.fx_rate_to_usd * 100) / 100;
+      return {
+        id: b.id, contactName: b.contact_name, note: b.note,
+        status: b.status, createdAt: b.created_at,
+        currency: b.currency_code,
+        fxRateToUsd: b.fx_rate_to_usd,
+        fxSource: b.fx_source,
+        usdEquivalent,
+        lines: bidLines.map(l => ({
+          label: l.label, offeredQty: l.offered_qty, offeredUnitPrice: l.offered_unit_price,
+          status: l.line_status, acceptedQty: l.accepted_qty, acceptedUnitPrice: l.accepted_unit_price,
+        })),
+      };
+    }),
+  });
+});
+
+vendorPublic.get('/:token/fx', async (c) => {
+  const sql = getDb(c.env);
+  const link = await loadLink(sql, c.req.param('token'));
+  if (!link) return c.json({ error: 'Not found' }, 404);
+  const cny = await getLatestRateToUsd(sql, 'CNY');
+  return c.json({
+    USD_CNY: 1 / cny.rate,
+    source: cny.source,
+    fetchedAt: cny.fetchedAt.toISOString(),
+    effectiveDate: cny.effectiveDate,
   });
 });
 
