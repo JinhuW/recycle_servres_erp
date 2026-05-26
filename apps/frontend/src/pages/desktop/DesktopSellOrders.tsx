@@ -13,7 +13,8 @@ import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
-import { sellOrderStatuses, closeReasons } from '../../lib/lookups';
+import { sellOrderStatuses } from '../../lib/lookups';
+import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
@@ -536,7 +537,7 @@ function SellOrderDetail({
   const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
   const editable = mode === 'edit' && !locked;
   const closeReasonLabel = order?.closeReasonId
-    ? closeReasons.find(r => r.id === order.closeReasonId)?.label ?? order.closeReasonId
+    ? t(closeReasonLabelKey(order.closeReasonId))
     : null;
   // statusMeta is typed as Record<MetaStatus,…> (Shipped/Awaiting/Done) but
   // the backend now also emits a 'Closed' entry (needs_meta=TRUE on the row);

@@ -1147,6 +1147,13 @@ export const I18N: Record<Lang, Record<string, string>> = {
     'vb.detail.fx_badge': '{currency} · {rate} @ {date} ({source})',
     'vb.detail.accepted_usd_hint': '≈ {usd} USD',
     'vb.detail.promote_with_usd': 'Promote → SO ({usd} USD equivalent)',
+
+    // ── Sell-order close reasons ──
+    soCloseReason_customer_cancelled: 'Customer cancelled',
+    soCloseReason_lost_deal:          'Lost deal',
+    soCloseReason_returned:           'Returned',
+    soCloseReason_duplicate:          'Duplicate',
+    soCloseReason_other:              'Other',
   },
   zh: {
     tabHome: '首页', tabOrders: '订单', tabCapture: '扫描', tabMarket: '市场',
@@ -2098,6 +2105,13 @@ export const I18N: Record<Lang, Record<string, string>> = {
     'vb.detail.fx_badge': '{currency} · {rate} @ {date}（{source}）',
     'vb.detail.accepted_usd_hint': '≈ {usd} 美元',
     'vb.detail.promote_with_usd': '转入销售单（折合 {usd} 美元）',
+
+    // ── Sell-order close reasons ──
+    soCloseReason_customer_cancelled: '客户取消',
+    soCloseReason_lost_deal:          '失单',
+    soCloseReason_returned:           '已退货',
+    soCloseReason_duplicate:          '重复订单',
+    soCloseReason_other:              '其他',
   },
 };
 

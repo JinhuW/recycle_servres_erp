@@ -485,28 +485,6 @@ try {
     `;
   }
 
-  // Close-reason taxonomy. Surfaced in the CloseSellOrderDialog reason
-  // dropdown. Lookup table so adding a reason is a seed change.
-  {
-    const reasons = [
-      { id: 'customer_cancelled', label: 'Customer cancelled', position: 1 },
-      { id: 'lost_deal',          label: 'Lost deal',          position: 2 },
-      { id: 'returned',           label: 'Returned',           position: 3 },
-      { id: 'duplicate',          label: 'Duplicate',          position: 4 },
-      { id: 'other',              label: 'Other',              position: 5 },
-    ];
-    for (const r of reasons) {
-      await sql`
-        INSERT INTO sell_order_close_reasons (id, label, position, active)
-        VALUES (${r.id}, ${r.label}, ${r.position}, TRUE)
-        ON CONFLICT (id) DO UPDATE SET
-          label    = EXCLUDED.label,
-          position = EXCLUDED.position,
-          active   = TRUE
-      `;
-    }
-  }
-
   console.log('· Seeding ref_prices…');
   await sql`DELETE FROM ref_price_events`;
   await sql`DELETE FROM ref_prices`;

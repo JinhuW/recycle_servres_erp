@@ -5,8 +5,10 @@
 --
 -- Run:
 --   psql "$DATABASE_URL" -f apps/backend/scripts/legacy-ram-po.sql
--- The script opens a transaction; sanity-check the trailing SELECTs, then
--- run COMMIT (or ROLLBACK) at the prompt.
+-- Wrapped in BEGIN/COMMIT so the whole thing applies atomically (or rolls
+-- back on any error). To dry-run, load it interactively instead:
+--   psql "$DATABASE_URL"
+--   \i apps/backend/scripts/legacy-ram-po.sql   -- then ROLLBACK; at the prompt
 
 BEGIN;
 
@@ -89,7 +91,7 @@ BEGIN
     v_po_id, v_lifecycle, v_warehouse_id;
 END $$;
 
--- Sanity-check before committing.
+-- Sanity-check rows (printed in the same transaction, before COMMIT).
 SELECT id, lifecycle, total_cost, warehouse_id, created_at
   FROM orders ORDER BY created_at DESC LIMIT 1;
 
@@ -97,5 +99,4 @@ SELECT COUNT(*) AS lines, SUM(qty) AS total_qty
   FROM order_lines
  WHERE order_id = (SELECT id FROM orders ORDER BY created_at DESC LIMIT 1);
 
--- COMMIT;   -- run after verifying the two SELECTs above
--- ROLLBACK; -- abort instead
+COMMIT;

@@ -188,15 +188,9 @@ describe('sell-order audit events', () => {
     });
     const id = create.body.id;
 
-    const sql = getTestDb();
-    const reason = (await sql`
-      SELECT id FROM sell_order_close_reasons WHERE active = TRUE LIMIT 1
-    `)[0] as { id: string } | undefined;
-    if (!reason) throw new Error('seed lacks active close reason');
-
     const r = await api('POST', `/api/sell-orders/${id}/status`, {
       token,
-      body: { to: 'Closed', note: 'customer dropped', closeReasonId: reason.id },
+      body: { to: 'Closed', note: 'customer dropped', closeReasonId: 'customer_cancelled' },
     });
     expect(r.status).toBe(200);
 

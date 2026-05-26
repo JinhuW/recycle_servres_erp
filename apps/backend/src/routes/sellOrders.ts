@@ -619,6 +619,14 @@ const KNOWN_STATUSES = new Set<string>([
 // transition-time evidence gate.
 const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']);
 
+// Fixed close-reason taxonomy. Mirrors the CHECK constraint on
+// sell_orders.close_reason_id (migration 0056) and the frontend i18n keys
+// in lib/closeReasons.ts. Adding a reason means: extend this set, extend
+// the CHECK constraint in a new migration, add the i18n label.
+const CLOSE_REASONS = new Set([
+  'customer_cancelled', 'lost_deal', 'returned', 'duplicate', 'other',
+]);
+
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -643,18 +651,11 @@ sellOrders.post('/:id/status', async (c) => {
     return c.json({ error: 'closeReasonId is required to close' }, 400);
   }
 
-  const sql = getDb(c.env);
-
-  // Validate the close reason (active lookup row) outside the tx — it's a
-  // read-only check against a slow-changing table; no need to hold the row
-  // lock while the network resolves the lookup.
-  if (body.to === 'Closed') {
-    const r = await sql<{ ok: boolean }[]>`
-      SELECT TRUE AS ok FROM sell_order_close_reasons
-      WHERE id = ${body.closeReasonId!} AND active = TRUE LIMIT 1
-    `;
-    if (r.length === 0) return c.json({ error: 'invalid closeReasonId' }, 400);
+  if (body.to === 'Closed' && !CLOSE_REASONS.has(body.closeReasonId!)) {
+    return c.json({ error: 'invalid closeReasonId' }, 400);
   }
+
+  const sql = getDb(c.env);
 
   // Current-status read, lock check, transition guard, and conditional
   // reopen-note gate MUST all run inside the transaction under FOR UPDATE.

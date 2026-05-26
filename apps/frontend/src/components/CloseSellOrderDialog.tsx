@@ -1,6 +1,6 @@
 // Off-ramp dialog: marks a Sell Order Closed with a structured reason +
 // freeform note. Backend POST /api/sell-orders/:id/status validates both
-// (closeReasonId must be active in sell_order_close_reasons; note satisfies
+// (closeReasonId must be in the fixed set CLOSE_REASON_IDS; note satisfies
 // the evidence gate). Mirrors StatusChangeDialog scaffolding (modal-backdrop
 // + modal-shell, useEscapeKey, inline error banner) so users get the same
 // modal feel across all status transitions.
@@ -9,8 +9,8 @@ import { useState } from 'react';
 import { Icon } from './Icon';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { CLOSE_REASON_IDS, closeReasonLabelKey } from '../lib/closeReasons';
 import { useT } from '../lib/i18n';
-import { closeReasons } from '../lib/lookups';
 
 type Props = {
   orderId: string;
@@ -23,7 +23,7 @@ type Props = {
 
 export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClosed }: Props) {
   const { t } = useT();
-  const [reasonId, setReasonId] = useState<string>(closeReasons[0]?.id ?? '');
+  const [reasonId, setReasonId] = useState<string>(CLOSE_REASON_IDS[0]);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,9 +96,8 @@ export function CloseSellOrderDialog({ orderId, currentStatus, onCancel, onClose
               onChange={e => setReasonId(e.target.value)}
               autoFocus
             >
-              {closeReasons.length === 0 && <option value="">{t('discardSoNoReasons')}</option>}
-              {closeReasons.map(r => (
-                <option key={r.id} value={r.id}>{r.label}</option>
+              {CLOSE_REASON_IDS.map(id => (
+                <option key={id} value={id}>{t(closeReasonLabelKey(id))}</option>
               ))}
             </select>
           </div>

@@ -164,8 +164,8 @@ type OrderMeta = {
 export function blankLine(cat: Category): Line {
   return {
     _cid: crypto.randomUUID(),
-    category: cat, qty: 1, unitCost: '',
-    condition: 'Pulled — Tested',
+    category: cat, qty: '', unitCost: '',
+    condition: '',
     scanImageUrl: null,
   };
 }
