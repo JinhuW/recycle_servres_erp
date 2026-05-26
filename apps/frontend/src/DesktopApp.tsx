@@ -11,7 +11,8 @@ import {
   useRoute, match, navigate,
   DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath,
 } from './lib/route';
-import { api } from './lib/api';
+import { api, ApiError } from './lib/api';
+import { showErrorToast } from './lib/errorToast';
 
 import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
 import { DesktopOrders } from './pages/desktop/DesktopOrders';
@@ -62,7 +63,19 @@ export function DesktopApp() {
     setLoadingOrderId(m.id);
     api.get<{ order: Order }>(`/api/orders/${m.id}`)
       .then(r => { if (alive) setEditingOrder(r.order); })
-      .catch(() => {/* ignore — order may have been deleted */})
+      .catch((err) => {
+        if (!alive) return;
+        // Clear the unreachable URL so the failing fetch doesn't re-fire on
+        // every re-render, and tell the user why nothing opened. Common case:
+        // a manager in role-preview mode follows a link to a PO they don't own.
+        navigate('/purchase-orders');
+        const status = err instanceof ApiError ? err.status : 0;
+        showErrorToast(
+          status === 403 ? "You don't have access to this purchase order."
+          : status === 404 ? 'That purchase order no longer exists.'
+          : 'Could not open that purchase order.',
+        );
+      })
       .finally(() => { if (alive) setLoadingOrderId(null); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

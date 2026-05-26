@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
-import { useAuth } from '../../lib/auth';
+import { useEffectiveUser } from '../../lib/tweaks';
 import { usePreference } from '../../lib/preferences';
 import { usePersisted, useScrollMemory } from '../../lib/listMemory';
 import { api } from '../../lib/api';
@@ -107,7 +107,10 @@ type Props = {
 export function DesktopOrders({ onEdit, onToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const { user } = useAuth();
+  // Effective user honours the manager's role-preview tweak — toggling
+  // "view as purchaser" flips isManager so the list, pipeline, and KPIs
+  // match what the backend will scope to.
+  const user = useEffectiveUser();
   const isManager = user?.role === 'manager';
 
   // Persisted across the open-order → back round-trip (see lib/listMemory).
@@ -175,7 +178,9 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [filter, showArchived]);
+    // isManager depends on the role-preview tweak; refetch so the list
+    // re-scopes (to all POs / to the user's own) when preview toggles.
+  }, [filter, showArchived, isManager]);
 
   useEffect(() => {
     if (!openId) { setOpenLines(null); return; }

@@ -4,6 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
+import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
@@ -25,6 +26,9 @@ type Props = {
 export function Orders({ onEdit, onToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  // Backend scopes the list by effectiveRole; track it here so toggling the
+  // manager's role-preview tweak re-fetches instead of leaving stale rows.
+  const effRole = useEffectiveUser()?.role;
   const [filter, setFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
   const [showArchived, setShowArchived] = useState(false);
@@ -52,7 +56,7 @@ export function Orders({ onEdit, onToast }: Props) {
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [filter, statusFilter, showArchived]);
+  }, [filter, statusFilter, showArchived, effRole]);
 
   // When a row is expanded, fetch its lines lazily.
   useEffect(() => {

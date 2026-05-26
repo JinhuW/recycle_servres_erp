@@ -21,8 +21,8 @@ import { Profile } from './pages/Profile';
 
 import { useAuth } from './lib/auth';
 import { useT, I18N } from './lib/i18n';
-import { api, createDraftOrder, deleteOrder } from './lib/api';
-import { handleFetchError } from './lib/errorToast';
+import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
+import { handleFetchError, showErrorToast } from './lib/errorToast';
 import {
   navigate, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView,
@@ -89,7 +89,19 @@ function Shell() {
     let alive = true;
     api.get<{ order: Order }>(`/api/orders/${orderDetailMatch.id}`)
       .then(r => { if (alive) setDetailOrder(r.order); })
-      .catch(() => {/* order may have been deleted — let Orders handle it */});
+      .catch((err) => {
+        if (!alive) return;
+        // Clear the unreachable URL so the failing fetch doesn't re-fire on
+        // every re-render, and tell the user why nothing opened. Common case:
+        // a manager in role-preview mode follows a link to a PO they don't own.
+        navigate('/purchase-orders');
+        const status = err instanceof ApiError ? err.status : 0;
+        showErrorToast(
+          status === 403 ? "You don't have access to this purchase order."
+          : status === 404 ? 'That purchase order no longer exists.'
+          : 'Could not open that purchase order.',
+        );
+      });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, capture.phase]);
