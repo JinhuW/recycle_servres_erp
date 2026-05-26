@@ -11,6 +11,10 @@ type Props = {
   value: DraftLine;
   onChange: <K extends keyof DraftLine>(key: K, v: DraftLine[K]) => void;
   aiFilled?: boolean;
+  // Field keys whose AI-extracted value is suspect (overall confidence below
+  // the verify threshold) AND not yet edited by the user. Red-bordered until
+  // the user touches them, signalling "verify this".
+  aiLowConfFields?: ReadonlySet<keyof DraftLine>;
 };
 
 // Mark required fields with the same color token used on desktop (.label .req).
@@ -47,10 +51,13 @@ function PhCatSelect({
  * in both "new line" and "edit line" modes — the wrapping page provides the
  * header, AI banner, action bar, and any other category-agnostic surrounding.
  */
-export function PhCategoryFields({ category, value, onChange, aiFilled }: Props) {
+export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowConfFields }: Props) {
   const { t } = useT();
-  const inputCls = 'input' + (aiFilled ? ' ai-filled' : '');
-  const selectCls = 'select' + (aiFilled ? ' ai-filled' : '');
+  const baseInputCls = 'input' + (aiFilled ? ' ai-filled' : '');
+  const baseSelectCls = 'select' + (aiFilled ? ' ai-filled' : '');
+  const lowConf = (k: keyof DraftLine) => !!aiLowConfFields && aiLowConfFields.has(k);
+  const inputClsFor = (k: keyof DraftLine) => baseInputCls + (lowConf(k) ? ' ai-low-conf' : '');
+  const selectClsFor = (k: keyof DraftLine) => baseSelectCls + (lowConf(k) ? ' ai-low-conf' : '');
 
   if (category === 'RAM') {
     return (
@@ -58,40 +65,40 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.brand} options={RAM_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={RAM_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('generation')}</label>
-            <PhCatSelect className={selectCls} value={value.generation} options={RAM_GENERATIONS} onChange={v => onChange('generation', v)} />
+            <PhCatSelect className={selectClsFor('generation')} value={value.generation} options={RAM_GENERATIONS} onChange={v => onChange('generation', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.capacity} options={RAM_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={RAM_CAP} onChange={v => onChange('capacity', v)} />
           </div>
           <div className="ph-field">
             <label>{t('speedMhz')}</label>
-            <PhCatSelect className={selectCls} value={value.speed} options={RAM_SPEED} onChange={v => onChange('speed', v)} />
+            <PhCatSelect className={selectClsFor('speed')} value={value.speed} options={RAM_SPEED} onChange={v => onChange('speed', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('klass')}</label>
-            <PhCatSelect className={selectCls} value={value.classification} options={RAM_CLASS} onChange={v => onChange('classification', v)} />
+            <PhCatSelect className={selectClsFor('classification')} value={value.classification} options={RAM_CLASS} onChange={v => onChange('classification', v)} />
           </div>
           <div className="ph-field">
             <label>{t('rank')}</label>
-            <PhCatSelect className={selectCls} value={value.rank} options={RAM_RANK} onChange={v => onChange('rank', v)} />
+            <PhCatSelect className={selectClsFor('rank')} value={value.rank} options={RAM_RANK} onChange={v => onChange('rank', v)} />
           </div>
         </div>
         <div className="ph-field">
           <label>{t('type')}</label>
-          <PhCatSelect className={selectCls} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
+          <PhCatSelect className={selectClsFor('type')} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
-          <input className={inputCls + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
         </div>
       </>
     );
@@ -103,27 +110,27 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('interfaceLbl')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.interface} options={SSD_INTERFACE} onChange={v => onChange('interface', v)} />
+            <PhCatSelect className={selectClsFor('interface')} value={value.interface} options={SSD_INTERFACE} onChange={v => onChange('interface', v)} />
           </div>
           <div className="ph-field">
             <label>{t('formFactor')}</label>
-            <PhCatSelect className={selectCls} value={value.formFactor} options={SSD_FORM} onChange={v => onChange('formFactor', v)} />
+            <PhCatSelect className={selectClsFor('formFactor')} value={value.formFactor} options={SSD_FORM} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('partNumber')}</label>
-            <input className={inputCls + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+            <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
           </div>
           <div className="ph-field">
             <label>{t('health')} (%)</label>
@@ -132,7 +139,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
               min={0}
               max={100}
               step={0.1}
-              className={inputCls}
+              className={inputClsFor('health')}
               value={value.health ?? ''}
               onChange={e => onChange('health', e.target.value === '' ? null : Number(e.target.value))}
             />
@@ -148,28 +155,28 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('interfaceLbl')}<Req /></label>
-            <PhCatSelect className={selectCls} value={value.interface} options={HDD_INTERFACE} onChange={v => onChange('interface', v)} />
+            <PhCatSelect className={selectClsFor('interface')} value={value.interface} options={HDD_INTERFACE} onChange={v => onChange('interface', v)} />
           </div>
           <div className="ph-field">
             <label>{t('formFactor')}</label>
-            <PhCatSelect className={selectCls} value={value.formFactor} options={HDD_FORM} onChange={v => onChange('formFactor', v)} />
+            <PhCatSelect className={selectClsFor('formFactor')} value={value.formFactor} options={HDD_FORM} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('rpm')}<Req /></label>
             <PhCatSelect
-              className={selectCls}
+              className={selectClsFor('rpm')}
               value={value.rpm == null ? undefined : String(value.rpm)}
               options={HDD_RPM}
               onChange={v => onChange('rpm', v === '' ? null : Number(v))}
@@ -182,7 +189,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
               min={0}
               max={100}
               step={0.1}
-              className={inputCls}
+              className={inputClsFor('health')}
               value={value.health ?? ''}
               onChange={e => onChange('health', e.target.value === '' ? null : Number(e.target.value))}
             />
@@ -190,7 +197,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
-          <input className={inputCls + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
         </div>
       </>
     );
@@ -201,11 +208,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled }: Props)
     <>
       <div className="ph-field">
         <label>{t('description')}<Req /></label>
-        <input className={inputCls} value={value.description ?? ''} onChange={e => onChange('description', e.target.value)} />
+        <input className={inputClsFor('description')} value={value.description ?? ''} onChange={e => onChange('description', e.target.value)} />
       </div>
       <div className="ph-field">
         <label>{t('partNumber')}</label>
-        <input className={inputCls + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+        <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
       </div>
     </>
   );

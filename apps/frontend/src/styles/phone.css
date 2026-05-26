@@ -354,9 +354,15 @@
   width: 100%;
   outline: none;
 }
-.ph-field .input.ai-filled {
+.ph-field .input.ai-filled,
+.ph-field .select.ai-filled {
   background: color-mix(in oklch, var(--accent-soft) 60%, white);
   border-color: var(--accent);
+}
+.ph-field .input.ai-low-conf,
+.ph-field .select.ai-low-conf {
+  background: color-mix(in oklch, var(--neg-soft, #fee2e2) 70%, white);
+  border-color: var(--neg, #dc2626);
 }
 .ph-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 

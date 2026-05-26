@@ -126,6 +126,13 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [line, setLine] = useState<DraftLine>(initial);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
+  // Tracks which fields the user has touched since the AI populated them.
+  // An AI-filled field stays red-bordered (low-confidence cue) until the user
+  // edits it, at which point the red clears — "you've verified this one".
+  const [edited, setEdited] = useState<ReadonlySet<keyof DraftLine>>(() => new Set());
+  // Cleared by tapping "Enter manually" in the unreadable banner so the user
+  // can type values without the warning hovering over them.
+  const [unreadableDismissed, setUnreadableDismissed] = useState(false);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -135,7 +142,29 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
 
-  const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => setLine(prev => ({ ...prev, [k]: v }));
+  const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
+    setLine(prev => ({ ...prev, [k]: v }));
+    setEdited(prev => {
+      if (prev.has(k)) return prev;
+      const next = new Set(prev);
+      next.add(k);
+      return next;
+    });
+  };
+
+  // Per-field red-border set for "AI low confidence — please verify".
+  // Active when overall confidence falls below the verify threshold (covers
+  // both the amber 0.3–0.6 band and the red <0.3 unreadable band). Only fields
+  // the AI actually populated get red; user-edited fields are cleared.
+  const detectedConf = detected?.confidence ?? 1;
+  const detectedIsStub = detected?.provider === 'stub';
+  const showLowConfBorders = !!detected && !detectedIsStub && detectedConf < AI_CONFIDENCE_FLOOR;
+  const aiPopulatedKeys: (keyof DraftLine)[] = Object.entries(cleanDetected?.extracted ?? {})
+    .filter(([, v]) => v != null && v !== '')
+    .map(([k]) => k as keyof DraftLine);
+  const aiLowConfFields: ReadonlySet<keyof DraftLine> | undefined = showLowConfBorders
+    ? new Set(aiPopulatedKeys.filter(k => !edited.has(k)))
+    : undefined;
 
   const buildLabel = (): string => {
     if (line.category === 'RAM') return [line.brand, line.capacity, line.generation].filter(Boolean).join(' ');
@@ -182,7 +211,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         {aiFilled && (() => {
           // Banner has four severities, escalating:
           //   stub      → demo data, not a real reading        (amber)
-          //   unreadable → conf < 0.3 or no fields returned    (red, alert role)
+          //   unreadable → conf < 0.3 or no fields returned    (red, alert role) + Retake/Manual CTAs
           //   lowConf    → 0.3 ≤ conf < 0.6                    (amber, alert role)
           //   ok         → conf ≥ 0.6                          (neutral)
           const conf = detected!.confidence;
@@ -191,6 +220,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           const noFields = Object.keys(detected!.extracted ?? {}).length === 0;
           const unreadable = !isStub && (conf < AI_UNREADABLE_FLOOR || noFields);
           const lowConf = !isStub && !unreadable && conf < AI_CONFIDENCE_FLOOR;
+          if (unreadable && unreadableDismissed) return null;
           const severe = unreadable;
           const warn = isStub || lowConf;
           return (
@@ -204,6 +234,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
                       background: 'var(--neg-soft, #fee2e2)',
                       color: 'var(--neg-strong, #991b1b)',
                       border: '1px solid var(--neg, #dc2626)',
+                      display: 'block', padding: '10px 12px',
                     }
                   : warn
                     ? {
@@ -214,17 +245,45 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
                     : {}),
               }}
             >
-              <span className="pill-ai">AI</span>
-              <span>
-                {isStub
-                  ? t('stubScanWarn')
-                  : unreadable
-                    ? t('unreadableLabel')
-                    : lowConf
-                      ? t('lowConfVerify', { pct })
-                      : t('extractedConf', { pct })}
-              </span>
-              <Icon name={severe || warn ? 'alert' : 'sparkles'} size={13} style={{ marginLeft: 'auto' }} />
+              {severe ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="pill-ai">AI</span>
+                    <span style={{ flex: 1 }}>{t('unreadableLabel')}</span>
+                    <Icon name="alert" size={13} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                      type="button"
+                      className="ph-btn dark"
+                      style={{ flex: 1, padding: '10px 12px', fontSize: 13 }}
+                      onClick={() => onRescan(line)}
+                    >
+                      <Icon name="camera" size={14} /> {t('retakePhoto')}
+                    </button>
+                    <button
+                      type="button"
+                      className="ph-btn ghost"
+                      style={{ flex: 1, padding: '10px 12px', fontSize: 13 }}
+                      onClick={() => setUnreadableDismissed(true)}
+                    >
+                      {t('enterManually')}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="pill-ai">AI</span>
+                  <span>
+                    {isStub
+                      ? t('stubScanWarn')
+                      : lowConf
+                        ? t('lowConfVerify', { pct })
+                        : t('extractedConf', { pct })}
+                  </span>
+                  <Icon name={warn ? 'alert' : 'sparkles'} size={13} style={{ marginLeft: 'auto' }} />
+                </>
+              )}
             </div>
           );
         })()}
@@ -291,7 +350,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </div>
         )}
 
-        <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} />
+        <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 
         <div className="ph-field-row">
           <div className="ph-field">

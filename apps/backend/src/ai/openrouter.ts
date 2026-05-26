@@ -3,7 +3,7 @@ import type { Env, LineCategory } from '../types';
 import type { ScanResult } from './types';
 import { PROMPT_BY_CATEGORY, parseModelJson } from './prompts';
 
-const DEFAULT_MODEL = 'google/gemma-3-27b-it';
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 // Cap each OpenRouter call so a hung/slow model can't hold a request (and a
 // server worker) open indefinitely. On timeout fetch throws an AbortError,

@@ -105,6 +105,14 @@ button { font-family: inherit; cursor: pointer; }
   background: color-mix(in oklch, var(--accent-soft) 30%, white);
   border-color: var(--accent);
 }
+.input.ai-low-conf, .select.ai-low-conf {
+  background: color-mix(in oklch, var(--neg-soft, #fee2e2) 50%, white);
+  border-color: var(--neg, #dc2626);
+}
+.input.ai-low-conf:focus, .select.ai-low-conf:focus {
+  border-color: var(--neg, #dc2626);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--neg, #dc2626) 25%, transparent);
+}
 .input.mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
 
 /* ===== Segmented control ===== */
