@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { PhTabBar, type View } from './components/PhTabBar';
 import { PhCategorySheet } from './components/PhCategorySheet';
+import { PhDraftPickerSheet } from './components/PhDraftPickerSheet';
 import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
 import { PhAboutSheet } from './components/PhAboutSheet';
@@ -26,7 +27,7 @@ import {
   navigate, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView,
 } from './lib/route';
-import type { Category, DraftLine, Notification, Order, ScanResponse } from './lib/types';
+import type { Category, DraftLine, Notification, Order, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit } from './lib/orderSubmit';
 
 type ReturnTo = 'idle' | 'review';
@@ -34,6 +35,7 @@ type ReturnTo = 'idle' | 'review';
 type CaptureState =
   | { phase: 'idle' }
   | { phase: 'category' }
+  | { phase: 'draftPicker'; category: Category; drafts: OrderSummary[] }
   | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; draftId?: string };
@@ -132,11 +134,43 @@ function Shell() {
     }
   };
 
-  const pickCategory = (cat: Category) => {
+  // Probe for in-progress drafts in this category before silently spawning a
+  // fresh one. Without this gate every scan session piles up another empty
+  // draft on the server.
+  const pickCategory = async (cat: Category) => {
+    try {
+      const r = await api.get<{ orders: OrderSummary[] }>(
+        `/api/orders?category=${encodeURIComponent(cat)}&status=Draft&limit=20`,
+      );
+      if (r.orders.length > 0) {
+        setCapture({ phase: 'draftPicker', category: cat, drafts: r.orders });
+        return;
+      }
+    } catch {
+      // Fall through to a new draft — better to let them work than block on a
+      // probe failure.
+    }
+    startNewDraft(cat);
+  };
+
+  const startNewDraft = (cat: Category) => {
     setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
     createDraftOrder(cat)
       .then(r => setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id }))
       .catch(() => showToast('Could not start a draft order — retry.', 'error'));
+  };
+
+  // Reopen an existing draft on the review screen so the user sees the lines
+  // they've already accumulated; "Add another item" then routes them back into
+  // the scan/form path with the draft id carried through, so new lines merge
+  // into the same PO instead of a fresh one.
+  const resumeDraft = async (summary: OrderSummary) => {
+    try {
+      const r = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
+      startEdit(r.order);
+    } catch {
+      showToast('Could not open draft — retry.', 'error');
+    }
   };
 
   const onDetected = (s: ScanResponse) => {
@@ -439,6 +473,16 @@ function Shell() {
 
       {capture.phase === 'category' && (
         <PhCategorySheet onPick={pickCategory} onClose={cancelCapture} />
+      )}
+
+      {capture.phase === 'draftPicker' && (
+        <PhDraftPickerSheet
+          category={capture.category}
+          drafts={capture.drafts}
+          onResume={resumeDraft}
+          onStartNew={() => startNewDraft(capture.category)}
+          onClose={cancelCapture}
+        />
       )}
 
       {notifSheet && (
