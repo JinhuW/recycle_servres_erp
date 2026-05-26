@@ -30,6 +30,19 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { speed: '3200MHz' }).speed).toBe('3200');
   });
 
+  it('resolves speed from DDRx-NNNN notation', () => {
+    expect(normalizeFields('RAM', { speed: 'DDR4-3200' }).speed).toBe('3200');
+    expect(normalizeFields('RAM', { speed: 'DDR5-4800' }).speed).toBe('4800');
+  });
+
+  it('derives speed from PCx-NNNNN code (divide by 8, snap to catalog)', () => {
+    expect(normalizeFields('RAM', { speed: 'PC4-25600' }).speed).toBe('3200');
+    expect(normalizeFields('RAM', { speed: 'PC4-21300' }).speed).toBe('2666'); // 21300/8 = 2662.5
+    expect(normalizeFields('RAM', { speed: 'PC4-17000' }).speed).toBe('2133'); // 17000/8 = 2125
+    expect(normalizeFields('RAM', { speed: 'PC3L-12800' }).speed).toBe('1600');
+    expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('4800');
+  });
+
   it('normalises rank casing/spacing and strips PN: prefix', () => {
     const f = normalizeFields('RAM', { rank: '2RX4', partNumber: 'PN:HMCG84AEBRA115N BB' });
     expect(f.rank).toBe('2Rx4');
