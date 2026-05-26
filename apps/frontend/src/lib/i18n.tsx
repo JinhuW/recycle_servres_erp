@@ -1097,6 +1097,22 @@ export const I18N: Record<Lang, Record<string, string>> = {
     sodAdd: 'Add',
     sodAddNewCustomer: 'Add new customer',
 
+    // DesktopInventory remaining
+    invAllWarehouses: 'All warehouses',
+    invReadOnlyAccess: 'Read-only access.',
+    invReadOnlyBody: 'Purchasers can view their own orders only. Cost, profit and team data are visible to managers.',
+    invAllStatuses: 'All statuses',
+    invRefinePre: 'Refine',
+    invFiltersActive: '{n} filter(s) active',
+    invClearAll: 'Clear all',
+    invNoProductsMatch: 'No products match these filters.',
+    invNoMatching: 'No matching inventory.',
+
+    // DesktopSellOrders remaining
+    soColOrder: 'Order',
+    soColCreated: 'Created',
+    soEditReplacesHint: "Editing replaces the order's line set. Inventory-backed quantities are capped at what's on the shelf.",
+
     // Danger dialog
     dangerDeleteWsTitle: 'Delete this workspace?',
     dangerDeleteWsBody: 'All orders, inventory, sell orders and audit logs will be permanently deleted. This cannot be undone.',
@@ -2009,6 +2025,20 @@ export const I18N: Record<Lang, Record<string, string>> = {
     sodNewCustomerName: '新客户名称',
     sodAdd: '添加',
     sodAddNewCustomer: '添加新客户',
+
+    invAllWarehouses: '所有仓库',
+    invReadOnlyAccess: '只读访问。',
+    invReadOnlyBody: '采购员仅可查看本人订单。成本、利润和团队数据对经理可见。',
+    invAllStatuses: '所有状态',
+    invRefinePre: '细化',
+    invFiltersActive: '已启用 {n} 项筛选',
+    invClearAll: '清除全部',
+    invNoProductsMatch: '没有符合筛选的产品。',
+    invNoMatching: '没有匹配的库存。',
+
+    soColOrder: '订单',
+    soColCreated: '创建时间',
+    soEditReplacesHint: '编辑将替换该订单的明细集。库存支持的数量受限于实际现货。',
 
     dangerDeleteWsTitle: '删除此工作区?',
     dangerDeleteWsBody: '所有订单、库存、销售订单和审计日志将被永久删除。此操作无法撤销。',

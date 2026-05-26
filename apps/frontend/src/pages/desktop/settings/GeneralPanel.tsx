@@ -71,8 +71,18 @@ const WS_NOTIFY_KEY = {
   lowMargin: 'notify_low_margin', capacityAlert: 'notify_capacity',
 } as const;
 
+// The fiscal-start dropdown stores its value as an English month name (the
+// backend's persisted enum). Render the localized name as the option label
+// while keeping the value attribute English so saves keep working unchanged.
+function monthLabel(month: string, lang: 'en' | 'zh'): string {
+  const idx = ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(month);
+  if (idx < 0) return month;
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  return new Intl.DateTimeFormat(locale, { month: 'long' }).format(new Date(2024, idx, 1));
+}
+
 export function GeneralPanel() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [data, setData] = useState({
     workspace: 'Recycle Servers',
     domain: 'recycleservers.io',
@@ -174,7 +184,9 @@ export function GeneralPanel() {
           <div className="field">
             <label className="label">{t('genFiscalStart')}</label>
             <select className="select" value={data.fiscalStart} onChange={e => { upd('fiscalStart', e.target.value); save('fiscalStart', e.target.value); }}>
-              <option>January</option><option>April</option><option>July</option><option>October</option>
+              {['January', 'April', 'July', 'October'].map(m => (
+                <option key={m} value={m}>{monthLabel(m, lang)}</option>
+              ))}
             </select>
           </div>
           <div className="field">

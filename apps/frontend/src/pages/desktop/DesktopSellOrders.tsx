@@ -231,7 +231,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
             >
-              <option value="all">All statuses</option>
+              <option value="all">{t('invAllStatuses')}</option>
               {sellOrderStatuses.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
           </div>
@@ -271,13 +271,13 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           <table className="table">
             <thead>
               <tr>
-                <th>Order</th>
-                <th>Customer</th>
-                <th>Created</th>
-                <th className="num">Lines</th>
-                <th className="num">Units</th>
-                <th className="num">Total</th>
-                <th>Status</th>
+                <th>{t('soColOrder')}</th>
+                <th>{t('fieldCustomer')}</th>
+                <th>{t('soColCreated')}</th>
+                <th className="num">{t('lines')}</th>
+                <th className="num">{t('sodUnits')}</th>
+                <th className="num">{t('eoTotal')}</th>
+                <th>{t('status')}</th>
                 <th>{t('actions')}</th>
               </tr>
             </thead>
@@ -697,11 +697,11 @@ function SellOrderDetail({
               <table className="so-line-table">
                 <thead>
                   <tr>
-                    <th>Item</th>
-                    <th>Warehouse</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Unit</th>
-                    <th className="num">Total</th>
+                    <th>{t('item')}</th>
+                    <th>{t('warehouse')}</th>
+                    <th className="num">{t('qty')}</th>
+                    <th className="num">{t('vendorTableUnit')}</th>
+                    <th className="num">{t('eoTotal')}</th>
                     {editable && <th style={{ width: 36 }}></th>}
                   </tr>
                 </thead>
@@ -770,20 +770,20 @@ function SellOrderDetail({
               </table>
               {editable && (
                 <div className="help" style={{ marginTop: 8 }}>
-                  Editing replaces the order's line set. Inventory-backed quantities are capped at what's on the shelf.
+                  {t('soEditReplacesHint')}
                 </div>
               )}
 
               <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
                 <div className="so-row total">
-                  <span>Total</span>
+                  <span>{t('eoTotal')}</span>
                   <span className="mono">{fmtUSD(editable && editTotals ? editTotals.total : order.total, locale)}</span>
                 </div>
               </div>
 
               {editable && (
                 <div className="field" style={{ marginTop: 20 }}>
-                  <label className="label">Internal notes</label>
+                  <label className="label">{t('ieInternalNotes')}</label>
                   <textarea
                     className="input"
                     rows={3}

@@ -546,7 +546,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             onClick={() => setWarehouseFilter('all')}
           >
             <Icon name="globe" size={13} />
-            <span>All warehouses</span>
+            <span>{t('invAllWarehouses')}</span>
             <span className="wh-count">{allWarehousesCount}</span>
           </button>
           {whs.map(w => (
@@ -574,8 +574,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         }}>
           <Icon name="info" size={16} style={{ color: 'var(--info)', marginTop: 2 }} />
           <div>
-            <strong>Read-only access.</strong> Purchasers can view their own orders only.
-            Cost, profit and team data are visible to managers.
+            <strong>{t('invReadOnlyAccess')}</strong> {t('invReadOnlyBody')}
           </div>
         </div>
       )}
@@ -586,7 +585,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             <div className="seg">
               {categoryFilterOptions().map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
-                  {f === 'all' ? 'All categories' : f}
+                  {f === 'all' ? t('filterAllCats') : f}
                 </button>
               ))}
             </div>
@@ -596,7 +595,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
             >
-              <option value="all">All statuses</option>
+              <option value="all">{t('invAllStatuses')}</option>
               {[...ORDER_STATUSES, 'Sold'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
@@ -646,20 +645,20 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     <span style={{
                       fontSize: 11, color: 'var(--fg-subtle)',
                       textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600,
-                    }}>Columns</span>
+                    }}>{t('columns')}</span>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button className="btn sm ghost" style={{ fontSize: 11, padding: '2px 6px' }}
                         onClick={() => {
                           const next = new Set(visibleCols);
                           menuCols.forEach(c => next.add(c.id));
                           setColsList([...next]);
-                        }}>All</button>
+                        }}>{t('all')}</button>
                       <button className="btn sm ghost" style={{ fontSize: 11, padding: '2px 6px' }}
                         onClick={() => {
                           const next = new Set(visibleCols);
                           menuCols.forEach(c => next.delete(c.id));
                           setColsList([...next]);
-                        }}>None</button>
+                        }}>{t('none')}</button>
                     </div>
                   </div>
                   <div style={{ maxHeight: 320, overflowY: 'auto', padding: 4 }}>
@@ -710,11 +709,11 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 <Icon name="chevronDown" size={13} />
               </span>
               <span className="inv-subfilter__title">
-                Refine <strong>{filter}</strong>
+                {t('invRefinePre')} <strong>{filter}</strong>
               </span>
               {activeAttrCount > 0 && (
                 <span className="inv-subfilter__badge">
-                  {activeAttrCount} filter{activeAttrCount === 1 ? '' : 's'} active
+                  {t('invFiltersActive', { n: activeAttrCount })}
                 </span>
               )}
               <span className="inv-subfilter__spacer" />
@@ -732,11 +731,11 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     }
                   }}
                 >
-                  Clear all
+                  {t('invClearAll')}
                 </span>
               )}
               <span className="inv-subfilter__hint">
-                {attrPanelOpen ? 'Hide' : 'Show'}
+                {attrPanelOpen ? t('memSecHide') : t('memSecShow')}
               </span>
             </button>
             <div
@@ -825,7 +824,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               )}
               {productsLoaded && products.length === 0 && (
                 <div style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
-                  No products match these filters.
+                  {t('invNoProductsMatch')}
                 </div>
               )}
             </>
@@ -846,20 +845,20 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                     />
                   </th>
                 )}
-                {isVis('id')         && <th>ID</th>}
-                {isVis('date')       && <th>Date</th>}
-                {isVis('category')   && <th>Category</th>}
-                <th>Item / Spec</th>
-                {isVis('partNumber') && <th>Part #</th>}
-                {isVis('warehouse')  && <th>Warehouse</th>}
-                {isVis('condition')  && <th>Condition</th>}
-                {isVis('qty')        && <th className="num">Qty</th>}
-                {isManager && isVis('unitCost')  && <th className="num">Unit cost</th>}
-                {isVis('sellPrice')  && <th className="num">Sell price</th>}
-                {isManager && isVis('profit')    && <th className="num">Profit</th>}
-                {isManager && isVis('margin')    && <th className="num">Margin</th>}
-                {isVis('submitter')  && <th>Submitted by</th>}
-                <th>Status</th>
+                {isVis('id')         && <th>{t('whFieldId')}</th>}
+                {isVis('date')       && <th>{t('date')}</th>}
+                {isVis('category')   && <th>{t('category')}</th>}
+                <th>{t('mktColItemSpec')}</th>
+                {isVis('partNumber') && <th>{t('partNumber')}</th>}
+                {isVis('warehouse')  && <th>{t('warehouse')}</th>}
+                {isVis('condition')  && <th>{t('condition')}</th>}
+                {isVis('qty')        && <th className="num">{t('qty')}</th>}
+                {isManager && isVis('unitCost')  && <th className="num">{t('unitCost')}</th>}
+                {isVis('sellPrice')  && <th className="num">{t('sellPrice')}</th>}
+                {isManager && isVis('profit')    && <th className="num">{t('profit')}</th>}
+                {isManager && isVis('margin')    && <th className="num">{t('margin')}</th>}
+                {isVis('submitter')  && <th>{t('submittedBy')}</th>}
+                <th>{t('status')}</th>
                 <th>{isManager ? '' : t('actions')}</th>
               </tr>
             </thead>
@@ -867,7 +866,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={20} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
-                    No matching inventory.
+                    {t('invNoMatching')}
                   </td>
                 </tr>
               )}
