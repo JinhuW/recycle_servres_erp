@@ -35,10 +35,11 @@ function Sparkline({
 }
 
 function TrendBadge({ value }: { value: number }) {
+  const { t } = useT();
   if (Math.abs(value) < 0.005) {
     return (
       <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-        <Icon name="minus" size={11} /> Flat
+        <Icon name="minus" size={11} /> {t('invFlatView')}
       </span>
     );
   }
@@ -53,10 +54,11 @@ function TrendBadge({ value }: { value: number }) {
 }
 
 function DemandPill({ level }: { level: 'high' | 'medium' | 'low' }) {
+  const { t } = useT();
   const map: Record<string, { label: string; cls: string; icon: IconName }> = {
-    high:   { label: 'High demand', cls: 'pos',  icon: 'zap' },
-    medium: { label: 'Steady',      cls: 'info', icon: 'minus' },
-    low:    { label: 'Slow',        cls: 'warn', icon: 'clock' },
+    high:   { label: t('mktDemandHigh'),   cls: 'pos',  icon: 'zap' },
+    medium: { label: t('mktDemandSteady'), cls: 'info', icon: 'minus' },
+    low:    { label: t('mktDemandSlow'),   cls: 'warn', icon: 'clock' },
   };
   const m = map[level] || map.medium;
   return <span className={'chip ' + m.cls} style={{ fontSize: 10.5 }}><Icon name={m.icon} size={10} /> {m.label}</span>;
@@ -139,7 +141,7 @@ export function DesktopMarket() {
         <div>
           <h1 className="page-title">{t('marketValue')}</h1>
           <div className="page-sub">
-            Latest <strong style={{ color: 'var(--accent-strong)' }}>sell prices</strong> our team is achieving — use them to decide what you can afford to pay. Stay below the recommended max buy and you'll hit our 30% margin target.
+            {t('mktSubPre')}<strong style={{ color: 'var(--accent-strong)' }}>{t('mktSubEmphasis')}</strong>{t('mktSubPost')}
           </div>
         </div>
       </div>
@@ -160,9 +162,9 @@ export function DesktopMarket() {
           <Icon name="zap" size={18} />
         </div>
         <div style={{ flex: 1, fontSize: 13, lineHeight: 1.55 }}>
-          <strong>How to use this page</strong>
+          <strong>{t('mktHowToTitle')}</strong>
           <div style={{ color: 'var(--fg-muted)', marginTop: 2 }}>
-            For each part, look at the <strong style={{ color: 'var(--pos)' }}>avg sell price</strong> we're getting, then aim to <strong>buy under the green ceiling</strong>. Rising sell trends mean more buying headroom; falling trends mean tighter discipline. Always note the demand badge — slow-moving parts shouldn't be stocked deep.
+            {t('mktHowToBody')}
           </div>
         </div>
       </div>
@@ -183,11 +185,11 @@ export function DesktopMarket() {
               value={sort}
               onChange={e => setSort(e.target.value as Sort)}
             >
-              <option value="recent">Sort: most recent</option>
-              <option value="sell-high">Sort: sell price (high → low)</option>
-              <option value="rising">Sort: sell rising fastest</option>
-              <option value="falling">Sort: sell falling fastest</option>
-              <option value="samples">Sort: most data points</option>
+              <option value="recent">{t('mktSortRecent')}</option>
+              <option value="sell-high">{t('mktSortSellHigh')}</option>
+              <option value="rising">{t('mktSortRising')}</option>
+              <option value="falling">{t('mktSortFalling')}</option>
+              <option value="samples">{t('mktSortSamples')}</option>
             </select>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)', cursor: 'pointer' }}>
               <input
@@ -220,13 +222,13 @@ export function DesktopMarket() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ minWidth: 240 }}>Item / Spec</th>
+                <th style={{ minWidth: 240 }}>{t('mktColItemSpec')}</th>
                 <th>{t('partNumber')}</th>
-                <th className="num" style={{ color: 'var(--pos)' }}>Last sell price</th>
-                <th>12-week sell trend</th>
-                <th className="num" style={{ color: 'var(--accent-strong)' }}>Max buy (target)</th>
-                <th className="num">Last paid</th>
-                <th>Updated</th>
+                <th className="num" style={{ color: 'var(--pos)' }}>{t('mktColLastSell')}</th>
+                <th>{t('mktCol12wTrend')}</th>
+                <th className="num" style={{ color: 'var(--accent-strong)' }}>{t('mktColMaxBuy')}</th>
+                <th className="num">{t('lastPaid')}</th>
+                <th>{t('mktColUpdated')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -287,7 +289,7 @@ export function DesktopMarket() {
                                     ? 'color-mix(in oklch, var(--neg) 8%, transparent)'
                                     : 'transparent',
                                 }}
-                                title={stale.isStale ? `No update in the last ${STALE_DAYS} days — manually refresh` : undefined}
+                                title={stale.isStale ? t('mktStaleTooltip', { d: STALE_DAYS }) : undefined}
                               >
                                 {stale.isStale && (
                                   <Icon name="alert" size={11} style={{ color: 'var(--neg)' }} />
@@ -303,8 +305,8 @@ export function DesktopMarket() {
                             )}
                             <div style={{ fontSize: 10.5, color: stale.isStale ? 'var(--neg)' : 'var(--fg-subtle)' }}>
                               {r.lastPriceAt
-                                ? `${relTime(r.lastPriceAt, locale)}${stale.isStale ? ' · stale' : ''}`
-                                : `no data · stale`}
+                                ? `${relTime(r.lastPriceAt, locale)}${stale.isStale ? ` · ${t('mktStaleSuffix')}` : ''}`
+                                : t('mktNoDataStale')}
                             </div>
                           </div>
                           {isManager && (
@@ -352,7 +354,7 @@ export function DesktopMarket() {
                         </div>
                         {hasTarget && (
                           <div style={{ fontSize: 10.5, color: onTarget ? 'var(--pos)' : 'var(--neg)' }}>
-                            {onTarget ? '✓ on target' : 'over ceiling'}
+                            {onTarget ? `✓ ${t('mktOnTarget')}` : t('mktOverCeiling')}
                           </div>
                         )}
                       </td>
@@ -378,7 +380,7 @@ export function DesktopMarket() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)' }}>
-                    No matching prices.
+                    {t('mktNoMatching')}
                   </td>
                 </tr>
               )}
@@ -392,10 +394,10 @@ export function DesktopMarket() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           fontSize: 12, color: 'var(--fg-subtle)',
         }}>
-          <div>Showing {Math.min(40, rows.length)} of {rows.length} tracked SKUs</div>
+          <div>{t('mktShowingOf', { n: Math.min(40, rows.length), total: rows.length })}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="info" size={11} />
-            Max buy = last sell × (1 − {(targetMargin * 100).toFixed(0)}% target margin) · stale = no update in {STALE_DAYS}+ days
+            {t('mktMaxBuyExplain', { pct: (targetMargin * 100).toFixed(0), d: STALE_DAYS })}
           </div>
         </div>
 
@@ -421,7 +423,7 @@ export function DesktopMarket() {
 function DetailExpand({
   row, sellHistory, targetMargin,
 }: { row: RefPrice; sellHistory: number[]; targetMargin: number }) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   // Cost series is still synthetic — out of scope for this slice.
   const buyHistory = (row.recentPrices ?? []).map(p => +(p.price * 0.7).toFixed(2));
@@ -431,18 +433,18 @@ function DetailExpand({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
           <div>
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-              Sell vs cost — 12 weeks
+              {t('mktSellVsCost')}
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 4 }}>
-              The gap between the lines is your margin headroom.
+              {t('mktSellVsCostSub')}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 12, fontSize: 11 }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 2, background: 'var(--pos)', display: 'inline-block' }} /> Sell
+              <span style={{ width: 10, height: 2, background: 'var(--pos)', display: 'inline-block' }} /> {t('mktLegendSell')}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 10, height: 2, background: 'var(--fg-muted)', display: 'inline-block' }} /> Cost
+              <span style={{ width: 10, height: 2, background: 'var(--fg-muted)', display: 'inline-block' }} /> {t('eoCost')}
             </span>
           </div>
         </div>
@@ -451,25 +453,25 @@ function DetailExpand({
 
       <div className="card" style={{ padding: 16, background: 'var(--bg-elev)' }}>
         <div style={{ fontSize: 12, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 12 }}>
-          Your buying guide
+          {t('mktBuyingGuide')}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <GuideRow label="Avg sell price"        value={fmtUSD(row.avgSell, locale)} tone="pos" emphasis />
-          <GuideRow label="Recommended max buy"   value={fmtUSD(row.maxBuy, locale)}  tone="accent" emphasis sub={`${(targetMargin * 100).toFixed(0)}% margin floor`} />
-          <GuideRow label="Last paid (this team)" value={fmtUSD(row.target, locale)}  sub={row.target == null || row.maxBuy == null ? 'no buys yet' : row.target <= row.maxBuy ? 'within target' : 'above ceiling — push back'} />
-          <GuideRow label="Range seen"            value={`${fmtUSD0(row.low, locale)} — ${fmtUSD0(row.high, locale)}`} sub="Recent broker quotes" />
+          <GuideRow label={t('mktAvgSellPrice')}    value={fmtUSD(row.avgSell, locale)} tone="pos" emphasis />
+          <GuideRow label={t('mktRecMaxBuy')}       value={fmtUSD(row.maxBuy, locale)}  tone="accent" emphasis sub={t('mktMarginFloor', { pct: (targetMargin * 100).toFixed(0) })} />
+          <GuideRow label={t('mktLastPaidTeam')}    value={fmtUSD(row.target, locale)}  sub={row.target == null || row.maxBuy == null ? t('mktNoBuysYet') : row.target <= row.maxBuy ? t('mktWithinTarget') : t('mktAboveCeiling')} />
+          <GuideRow label={t('rangeSeen')}          value={`${fmtUSD0(row.low, locale)} — ${fmtUSD0(row.high, locale)}`} sub={t('mktBrokerQuotes')} />
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
           <GuideRow
-            label="Current stock"
-            value={`${row.stock} units`}
-            sub={row.stock > 30 ? 'well-stocked — go light' : row.stock < 8 ? 'low — replenish' : 'normal'}
+            label={t('mktCurrentStock')}
+            value={t('units', { n: row.stock })}
+            sub={row.stock > 30 ? t('mktStockHigh') : row.stock < 8 ? t('mktStockLow') : t('mktStockNormal')}
           />
         </div>
       </div>
 
       <div className="card" style={{ padding: 16, background: 'var(--bg-elev)' }}>
         <div style={{ fontSize: 12, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 12 }}>
-          Price sources
+          {t('mktPriceSources')}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {priceSources.map((s, i) => {
@@ -482,7 +484,7 @@ function DetailExpand({
               ? row.internalSales.avgPrice
               : (row.avgSell == null ? null : row.avgSell * (1 + offset));
             const sub = isInternal && row.internalSales.samples > 0
-              ? `n = ${row.internalSales.samples}`
+              ? t('mktSourceSamples', { n: row.internalSales.samples })
               : null;
             return (
               <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5 }}>
@@ -498,15 +500,15 @@ function DetailExpand({
         {(() => {
           const stale = staleness(row.lastPriceAt);
           const label = stale.isStale
-            ? 'Stale'
-            : row.samples > 20 ? 'High' : row.samples > 10 ? 'Medium' : 'Low';
+            ? t('mktConfStale')
+            : row.samples > 20 ? t('mktConfHigh') : row.samples > 10 ? t('mktConfMedium') : t('mktConfLow');
           const color = stale.isStale
             ? 'var(--neg)'
             : row.samples > 20 ? 'var(--pos)' : row.samples > 10 ? 'var(--warn)' : 'var(--neg)';
           return (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--fg-subtle)' }}>
-              Confidence: <strong style={{ color }}>{label}</strong>{' '}
-              — based on {row.samples} data points across {priceSources.length} sources.
+              {t('mktConfidenceLabel')} <strong style={{ color }}>{label}</strong>{' '}
+              {t('mktConfBasedOn', { n: row.samples, sources: priceSources.length })}
             </div>
           );
         })()}

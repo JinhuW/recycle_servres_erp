@@ -182,10 +182,10 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
               fontSize: 11, color: 'var(--fg-subtle)',
               textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4,
             }}>
-              New sell order · Draft
+              {t('sodNewDraftOverline')}
             </div>
             <h2 style={{ fontSize: 19, fontWeight: 600, letterSpacing: '-0.01em', margin: 0 }}>
-              {lines.length} {lines.length === 1 ? 'item' : 'items'} from inventory
+              {t('sodItemsFromInventory', { n: lines.length })}
             </h2>
           </div>
           <button className="btn icon" onClick={onClose} title={t('closeBtn')}>
@@ -199,10 +199,10 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
             {/* Customer */}
             <div className="so-section">
               <div className="so-section-head">
-                <Icon name="user" size={14} /> Customer
+                <Icon name="user" size={14} /> {t('fieldCustomer')}
               </div>
               <div>
-                <label className="so-label">Customer</label>
+                <label className="so-label">{t('fieldCustomer')}</label>
                 <CustomerPicker
                   customers={customers}
                   value={customerId}
@@ -219,9 +219,9 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
             {/* Line items */}
             <div className="so-section">
               <div className="so-section-head">
-                <Icon name="inventory" size={14} /> Line items
+                <Icon name="inventory" size={14} /> {t('sodLineItems')}
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>
-                  {totals.units} units · {lines.length} lines · across {grouped.length} {grouped.length === 1 ? 'warehouse' : 'warehouses'}
+                  {t('sodLineSummary', { units: totals.units, lines: lines.length, whs: grouped.length })}
                 </span>
               </div>
 
@@ -229,16 +229,16 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                 <div key={(g.warehouseShort ?? '__none') + gi} style={{ marginBottom: 14 }}>
                   <div className="so-wh-head">
                     <Icon name="warehouse" size={12} />
-                    <span>{g.warehouseShort ?? 'No warehouse'}</span>
+                    <span>{g.warehouseShort ?? t('sodNoWarehouse')}</span>
                     <span className="so-wh-count">{g.items.length}</span>
                   </div>
                   <table className="so-line-table">
                     <thead>
                       <tr>
-                        <th style={{ width: '44%' }}>Item</th>
-                        <th className="num" style={{ width: 110 }}>Qty</th>
-                        <th className="num" style={{ width: 130 }}>Unit price</th>
-                        <th className="num" style={{ width: 110 }}>Line total</th>
+                        <th style={{ width: '44%' }}>{t('item')}</th>
+                        <th className="num" style={{ width: 110 }}>{t('qty')}</th>
+                        <th className="num" style={{ width: 130 }}>{t('fieldUnitPrice')}</th>
+                        <th className="num" style={{ width: 110 }}>{t('sodLineTotal')}</th>
                         <th style={{ width: 36 }}></th>
                       </tr>
                     </thead>
@@ -283,7 +283,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                                 value={l.unitPrice}
                                 onChange={e => setLine(idx, { unitPrice: Number(e.target.value) || 0 })}
                                 style={adjusted ? { borderColor: 'var(--warn)', background: 'var(--warn-soft)' } : undefined}
-                                title={adjusted ? `List price: ${fmtUSD(l.listPrice, locale)}` : undefined}
+                                title={adjusted ? t('sodListPriceTooltip', { price: fmtUSD(l.listPrice, locale) }) : undefined}
                               />
                             </td>
                             <td className="num mono" style={{ fontWeight: 500 }}>
@@ -308,17 +308,17 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
 
               {lines.length === 0 && (
                 <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-                  All items removed. Close and re-select from Inventory.
+                  {t('sodAllItemsRemoved')}
                 </div>
               )}
             </div>
 
             {/* Notes */}
             <div className="so-section">
-              <div className="so-section-head"><Icon name="edit" size={14} /> Internal notes</div>
+              <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
               <textarea
                 className="input"
-                placeholder="Optional — visible to managers only. e.g. 'Customer requested staggered shipment, batch 1 ships LA1 first.'"
+                placeholder={t('sodInternalNotesPh')}
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 rows={3}
@@ -337,30 +337,29 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           {/* Right column — totals */}
           <aside className="so-aside">
             <div className="so-summary">
-              <div className="so-summary-head">Order summary</div>
+              <div className="so-summary-head">{t('sodOrderSummary')}</div>
 
-              <div className="so-row muted"><span>Units</span><span className="mono">{totals.units}</span></div>
+              <div className="so-row muted"><span>{t('sodUnits')}</span><span className="mono">{totals.units}</span></div>
 
               <div className="so-row total">
-                <span>Customer total</span>
+                <span>{t('sodCustomerTotal')}</span>
                 <span className="mono">{fmtUSD(totals.subtotal, locale)}</span>
               </div>
 
               <div className="so-divider" />
 
-              <div className="so-row muted"><span>Cost basis</span><span className="mono">{fmtUSD(totals.cost, locale)}</span></div>
+              <div className="so-row muted"><span>{t('sodCostBasis')}</span><span className="mono">{fmtUSD(totals.cost, locale)}</span></div>
               <div className="so-row" style={{ color: 'var(--pos)' }}>
-                <span>Profit</span>
+                <span>{t('profit')}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(totals.profit, locale)}</span>
               </div>
-              <div className="so-row muted"><span>Margin</span><span className="mono">{totals.margin.toFixed(1)}%</span></div>
+              <div className="so-row muted"><span>{t('margin')}</span><span className="mono">{totals.margin.toFixed(1)}%</span></div>
             </div>
 
             <div className="so-tip">
               <Icon name="info" size={13} />
               <div>
-                Saving as <strong>Draft</strong> keeps items reserved. Advance the order through
-                Shipped → Awaiting payment → Done as the deal progresses.
+                {t('sodDraftTipPre')}<strong>{t('lifecycleDraft')}</strong>{t('sodDraftTipPost')}
               </div>
             </div>
           </aside>
@@ -369,18 +368,18 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         {/* Footer */}
         <div className="so-footer">
           <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-            Draft · {fmtDate(new Date(), locale)}
+            {t('lifecycleDraft')} · {fmtDate(new Date(), locale)}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onClose}>Cancel</button>
+              <button className="btn" onClick={onClose}>{t('cancel')}</button>
               <button
                 className="btn accent"
                 disabled={!canSubmit || saving}
                 title={saveDisabledReason ?? undefined}
                 onClick={save}
               >
-                <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save draft'}
+                <Icon name="check2" size={14} /> {saving ? t('vbSaving') : t('sodSaveDraft')}
               </button>
             </div>
             {saveDisabledReason && (
@@ -404,6 +403,7 @@ export function CustomerPicker({
   onChange: (id: string) => void;
   onCreated?: (c: Customer) => void;
 }) {
+  const { t } = useT();
   const selected = customers.find(c => c.id === value);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -467,7 +467,7 @@ export function CustomerPicker({
               {selected.name}
             </span>
           ) : (
-            <span style={{ color: 'var(--fg-subtle)' }}>Select customer…</span>
+            <span style={{ color: 'var(--fg-subtle)' }}>{t('sodSelectCustomer')}</span>
           )}
         </span>
         <Icon name="chevronDown" size={13} style={{ color: 'var(--fg-subtle)', flexShrink: 0 }} />
@@ -488,7 +488,7 @@ export function CustomerPicker({
               className="input"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search customers…"
+              placeholder={t('sodSearchCustomers')}
               style={{ paddingLeft: 30, height: 32, fontSize: 13 }}
             />
           </div>
@@ -518,7 +518,7 @@ export function CustomerPicker({
             ))}
             {filtered.length === 0 && !creating && (
               <div style={{ padding: 16, fontSize: 12.5, color: 'var(--fg-subtle)', textAlign: 'center' }}>
-                No matches.
+                {t('sodNoMatches')}
               </div>
             )}
           </div>
@@ -528,14 +528,14 @@ export function CustomerPicker({
                 autoFocus
                 className="input"
                 value={newName}
-                placeholder="New customer name"
+                placeholder={t('sodNewCustomerName')}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && createCustomer()}
                 style={{ height: 32, fontSize: 13 }}
               />
-              <button type="button" className="btn sm" onClick={() => { setCreating(false); setNewName(''); }}>Cancel</button>
+              <button type="button" className="btn sm" onClick={() => { setCreating(false); setNewName(''); }}>{t('cancel')}</button>
               <button type="button" className="btn accent sm" disabled={!newName.trim() || savingNew} onClick={createCustomer}>
-                {savingNew ? '…' : 'Add'}
+                {savingNew ? '…' : t('sodAdd')}
               </button>
             </div>
           ) : (
@@ -550,7 +550,7 @@ export function CustomerPicker({
                 fontSize: 12.5, fontWeight: 500,
               }}
             >
-              <Icon name="plus" size={13} /> Add new customer
+              <Icon name="plus" size={13} /> {t('sodAddNewCustomer')}
             </button>
           )}
         </div>

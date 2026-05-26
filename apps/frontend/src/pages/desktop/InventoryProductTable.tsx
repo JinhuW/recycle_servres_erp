@@ -103,7 +103,7 @@ function productSpec(g: ProductGroup): string {
 export function InventoryProductTable({
   groups, isManager, cols, selected, onToggleLot, onToggleGroup, onQuickView, onEditLot,
 }: Props) {
-  const { lang } = useT();
+  const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const showCost = isManager && cols.unitCost;
   const [open, setOpen] = useState<Set<string>>(() => new Set());
@@ -129,13 +129,13 @@ export function InventoryProductTable({
       <thead>
         <tr>
           <th style={{ width: 56 }} />
-          <th>Product</th>
-          {cols.partNumber && <th>Part #</th>}
-          {cols.qty && <th className="num">Qty</th>}
-          <th>Lots</th>
-          {cols.warehouse && <th>Warehouses</th>}
-          {showCost && <th className="num">Cost</th>}
-          {cols.sellPrice && <th className="num">Sell</th>}
+          <th>{t('iptProduct')}</th>
+          {cols.partNumber && <th>{t('partNumber')}</th>}
+          {cols.qty && <th className="num">{t('qty')}</th>}
+          <th>{t('iptLots')}</th>
+          {cols.warehouse && <th>{t('iptWarehouses')}</th>}
+          {showCost && <th className="num">{t('eoCost')}</th>}
+          {cols.sellPrice && <th className="num">{t('mktLegendSell')}</th>}
         </tr>
       </thead>
       <tbody>
@@ -159,10 +159,10 @@ export function InventoryProductTable({
                     }} />
                     <input
                       type="checkbox"
-                      aria-label="Select all sellable lots in this product"
+                      aria-label={t('iptSelectAllLots')}
                       checked={allSelected}
                       disabled={sellableLots.length === 0}
-                      title={sellableLots.length === 0 ? 'No sellable lots' : 'Select all sellable lots'}
+                      title={sellableLots.length === 0 ? t('iptNoSellableLots') : t('iptSelectAllSellable')}
                       onClick={(e) => e.stopPropagation()}
                       onChange={() => onToggleGroup(g)}
                     />
@@ -177,8 +177,8 @@ export function InventoryProductTable({
                     )}
                     {productLabel(g)}
                     {g.mixed_spec && (
-                      <span className="chip warn" title="Specs vary across lots" style={{ fontSize: 10 }}>
-                        mixed
+                      <span className="chip warn" title={t('iptSpecsVary')} style={{ fontSize: 10 }}>
+                        {t('iptMixed')}
                       </span>
                     )}
                   </div>
@@ -195,13 +195,13 @@ export function InventoryProductTable({
                   <td className="num">
                     <div className="mono" style={{ fontWeight: 600 }}>{g.qty}</div>
                     <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                      {g.qty_in_stock} in stock · {g.qty_in_transit} in transit
-                      {g.qty_reviewing ? ` · ${g.qty_reviewing} reviewing` : ''}
+                      {t('iptQtyBreakdown', { stock: g.qty_in_stock, transit: g.qty_in_transit })}
+                      {g.qty_reviewing ? ` · ${t('iptReviewingN', { n: g.qty_reviewing })}` : ''}
                     </div>
                   </td>
                 )}
                 <td className="muted" style={{ fontSize: 12 }}>
-                  {g.lot_count} lot{g.lot_count === 1 ? '' : 's'} · {g.po_count} PO{g.po_count === 1 ? '' : 's'}
+                  {t('iptLotPoSummary', { lots: g.lot_count, pos: g.po_count })}
                 </td>
                 {cols.warehouse && (
                   <td className="muted" style={{ fontSize: 12 }}>
@@ -229,7 +229,7 @@ export function InventoryProductTable({
                       fontSize: 11.5, color: 'var(--fg-subtle)', textTransform: 'uppercase',
                       letterSpacing: '0.06em', fontWeight: 600, marginBottom: 8,
                     }}>
-                      Lots in {productLabel(g)}
+                      {t('iptLotsIn', { name: productLabel(g) })}
                     </div>
                     <table className="table" style={{
                       background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 8,
@@ -237,15 +237,15 @@ export function InventoryProductTable({
                       <thead>
                         <tr>
                           <th style={{ width: 36 }} />
-                          <th>PO</th>
-                          <th>Date</th>
-                          <th>By</th>
-                          {showCost && <th className="num">Cost</th>}
-                          {cols.condition && <th>Condition</th>}
-                          {cols.warehouse && <th>Warehouse</th>}
-                          {cols.qty && <th className="num">Qty</th>}
-                          <th>Status</th>
-                          <th style={{ width: 90 }}>Actions</th>
+                          <th>{t('iptPO')}</th>
+                          <th>{t('date')}</th>
+                          <th>{t('iptBy')}</th>
+                          {showCost && <th className="num">{t('eoCost')}</th>}
+                          {cols.condition && <th>{t('condition')}</th>}
+                          {cols.warehouse && <th>{t('warehouse')}</th>}
+                          {cols.qty && <th className="num">{t('qty')}</th>}
+                          <th>{t('status')}</th>
+                          <th style={{ width: 90 }}>{t('actions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -257,10 +257,10 @@ export function InventoryProductTable({
                               <td>
                                 <input
                                   type="checkbox"
-                                  aria-label="Select lot"
+                                  aria-label={t('iptSelectLot')}
                                   checked={lotSelected}
                                   disabled={!lotSellable}
-                                  title={lotSellable ? 'Add to sell order' : `Cannot sell — status is ${l.status}`}
+                                  title={lotSellable ? t('iptAddToSellOrder') : t('iptCannotSell', { status: l.status })}
                                   onChange={() => onToggleLot(l.id)}
                                 />
                               </td>
@@ -301,14 +301,14 @@ export function InventoryProductTable({
                                 <div style={{ display: 'inline-flex', gap: 4 }}>
                                   <button
                                     className="btn icon sm"
-                                    title="Quick view"
+                                    title={t('invQuickViewTooltip')}
                                     onClick={() => onQuickView(l.id)}
                                   >
                                     <Icon name="eye" size={12} />
                                   </button>
                                   <button
                                     className="btn icon sm"
-                                    title="Edit"
+                                    title={t('edit')}
                                     onClick={() => onEditLot(l.id)}
                                   >
                                     <Icon name="edit" size={12} />

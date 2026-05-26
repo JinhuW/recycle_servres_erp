@@ -60,7 +60,7 @@ export function DesktopDashboard() {
           </div>
         </div>
         <div className="page-actions">
-          <div className="seg" role="tablist" aria-label="Range">
+          <div className="seg" role="tablist" aria-label={t('dashRangeAriaLabel')}>
             {(['7d', '30d', '90d', 'ytd'] as const).map(r => (
               <button
                 key={r}
@@ -140,7 +140,7 @@ export function DesktopDashboard() {
               {t('rankedByProfit')} · {lbCategory === 'all' ? t('allItemTypes') : `${lbCategory} only`}
             </div>
           </div>
-          <div className="seg" role="tablist" aria-label="Filter by item type">
+          <div className="seg" role="tablist" aria-label={t('dashFilterItemTypeAriaLabel')}>
             {categoryFilterOptions().map(c => (
               <button
                 key={c}
@@ -169,7 +169,7 @@ export function DesktopDashboard() {
                 {leaderboard.length === 0 && (
                   <tr>
                     <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-                      No contributors have logged any {lbCategory === 'all' ? '' : `${lbCategory} `}sales yet.
+                      {lbCategory === 'all' ? t('dashNoContributorsAll') : t('dashNoContributorsCat', { cat: lbCategory })}
                       {lbCategory !== 'all' && (
                         <>
                           {' '}
@@ -181,7 +181,7 @@ export function DesktopDashboard() {
                               fontFamily: 'inherit', fontSize: 13, padding: 0,
                             }}
                           >
-                            Show all item types
+                            {t('dashShowAllItemTypes')}
                           </button>
                         </>
                       )}
@@ -283,8 +283,11 @@ function TrendChip({ current, prev, label }: { current: number; prev: number; la
 }
 
 function TrendChart({ weeks, locale = 'en-US' }: { weeks: { label: string; profit: number }[]; locale?: string }) {
+  // Sub-component — re-pull t() since props pre-date the i18n migration and
+  // adding an explicit translator prop would ripple through every caller.
+  const { t } = useT();
   if (weeks.length === 0) {
-    return <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)' }}>No data yet.</div>;
+    return <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)' }}>{t('dashNoDataYet')}</div>;
   }
   const max = Math.max(1, ...weeks.map(w => w.profit));
   const min = 0;

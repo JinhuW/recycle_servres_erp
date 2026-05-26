@@ -111,17 +111,17 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <Icon name="history" size={16} style={{ color: 'var(--fg-subtle)' }} />
-              <span style={{ fontSize: 15, fontWeight: 600 }}>Inventory activity log</span>
+              <span style={{ fontSize: 15, fontWeight: 600 }}>{t('actInventoryActivityLog')}</span>
               <span className="chip info" style={{
                 fontSize: 10.5,
                 textTransform: 'uppercase', letterSpacing: '0.05em',
                 fontWeight: 600,
               }}>
-                <Icon name="lock" size={10} /> Immutable
+                <Icon name="lock" size={10} /> {t('actImmutable')}
               </span>
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>
-              Append-only record of every change made to inventory. Entries cannot be edited or deleted.
+              {t('actAppendOnlyHint')}
             </div>
           </div>
           <button className="btn icon" onClick={onClose} aria-label={t('closeBtn')}>
@@ -141,7 +141,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
                 className={filter === f ? 'active' : ''}
                 onClick={() => setFilter(f)}
               >
-                {f === 'all' ? 'All' : ACTION_META[f]?.label ?? f}
+                {f === 'all' ? t('all') : ACTION_META[f]?.label ?? f}
                 <span style={{
                   marginLeft: 6, fontSize: 10.5, padding: '1px 6px',
                   borderRadius: 999, background: 'var(--bg-soft)',
@@ -171,7 +171,7 @@ export function DesktopActivityDrawer({ onClose }: { onClose: () => void }) {
           {events !== null && groups.length === 0 && (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
               <Icon name="history" size={28} style={{ opacity: 0.4, marginBottom: 8 }} />
-              <div>No events match these filters.</div>
+              <div>{t('actNoEventsMatch')}</div>
             </div>
           )}
           {groups.map((g, gi) => (
