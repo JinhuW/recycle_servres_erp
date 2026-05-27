@@ -5,6 +5,7 @@ import { api, createDraftOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { findDuplicateLine } from '../../lib/dupParts';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../lib/status';
 import { LineDrawer } from './submit/LineDrawer';
@@ -301,6 +302,13 @@ function OrderForm({
       } else if (conf < AI_CONFIDENCE_FLOOR) {
         setAiNotice(t('lowConfVerify', { pct: Math.round(conf * 100) }));
         setAiNoticeSeverity('warn');
+      }
+      // Re-scan of an already-added module — override any confidence/stub
+      // notice since this is the more actionable signal.
+      const dupLine = findDuplicateLine(lines, newLine.partNumber);
+      if (dupLine != null && newLine.partNumber) {
+        setAiNotice(t('dupPartScanWarn', { pn: newLine.partNumber, line: dupLine }));
+        setAiNoticeSeverity('severe');
       }
       setLines(ls => {
         const next = [...ls, newLine];

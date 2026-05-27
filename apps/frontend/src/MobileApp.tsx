@@ -29,6 +29,7 @@ import {
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit } from './lib/orderSubmit';
+import { findDuplicateLine } from './lib/dupParts';
 
 type ReturnTo = 'idle' | 'review';
 
@@ -186,6 +187,15 @@ function Shell() {
   };
 
   const onDetected = (s: ScanResponse) => {
+    if (capture.phase === 'camera') {
+      const pn = (s.extracted?.partNumber as string | undefined) ?? '';
+      const dupLine = findDuplicateLine(capture.lines, pn);
+      if (dupLine != null && pn) {
+        // Surface the alert immediately. The form still opens so the user
+        // can compare against the existing line and decide whether to save.
+        showToast(t('dupPartScanWarn', { pn, line: dupLine }), 'error');
+      }
+    }
     setCapture(c => c.phase === 'camera' ? { ...c, phase: 'form', detected: s } : c);
   };
 

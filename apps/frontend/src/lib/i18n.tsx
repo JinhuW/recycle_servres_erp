@@ -901,6 +901,10 @@ export const I18N: Record<Lang, Record<string, string>> = {
     dupPartReview: 'Review lines',
     dupPartSaveAnyway: 'Save anyway',
     dupPartSubmitAnyway: 'Submit anyway',
+    // Fires at scan time when the AI-extracted Part # matches a line already
+    // on the PO — a stronger signal than the passive per-line drawer banner
+    // because it means the user likely re-shot the same module.
+    dupPartScanWarn: 'Part {pn} is already added as line {line} — please verify before saving.',
 
     // LineFields
     selectPlaceholder: 'Select…',
@@ -1876,6 +1880,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     dupPartReview: '返回检查',
     dupPartSaveAnyway: '仍然保存',
     dupPartSubmitAnyway: '仍然提交',
+    dupPartScanWarn: '零件 {pn} 已添加为第 {line} 行 — 请在保存前核对。',
     drawerConfirmed: '已确认',
     drawerConfirming: '正在确认…',
     drawerConfirmLine: '确认明细',
