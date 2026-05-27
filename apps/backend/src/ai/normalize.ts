@@ -42,16 +42,13 @@ function digitsOnly(v: string): string {
   return m ? m[0] : '';
 }
 
-// Pass through whatever number the label prints after DDRx-/PCx-/MT-s.
-// Both conventions in the wild — modern "PC4-3200" (MT/s) and legacy
-// "PC4-25600" / "PC3-12800" (bandwidth in MB/s) — print the speed in their
-// own form; trying to translate between them silently drops fields when the
-// math disagrees with the model's reading. Keep the literal number.
+// Trust the label. Whatever number is printed after DDRx-/PCx-/MT-s is what
+// goes in. Both encodings appear in the wild (modern "PC4-3200" = MT/s, legacy
+// "PC3-12800" = bandwidth in MB/s); converting between them is a guess that
+// drops the field when the math doesn't match the OCR. Keep the literal.
 function normSpeed(v: string): string {
   const up = v.toUpperCase().replace(/\s+/g, '');
-  let m = up.match(/DDR[2345]-(\d{3,5})/);
-  if (m) return m[1]!;
-  m = up.match(/PC[2345]L?-(\d{4,5})/);
+  const m = up.match(/(?:DDR|PC)[2345]L?-(\d{3,5})/);
   if (m) return m[1]!;
   return digitsOnly(v);
 }

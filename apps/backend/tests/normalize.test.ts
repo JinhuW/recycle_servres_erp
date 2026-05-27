@@ -35,17 +35,16 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { speed: 'DDR5-4800' }).speed).toBe('4800');
   });
 
-  it('passes the PCx-NNNN number through verbatim — the label printed it', () => {
-    // Modern MT/s form (SK Hynix / Samsung / Micron SODIMM stock).
+  it('passes the PCx/DDRx number through verbatim — both label conventions', () => {
+    // Modern speed-grade form: number IS the MT/s.
     expect(normalizeFields('RAM', { speed: 'PC4-3200AA' }).speed).toBe('3200');
     expect(normalizeFields('RAM', { speed: 'PC4-2666V' }).speed).toBe('2666');
-    // Legacy bandwidth form — kept as-is, no division.
+    expect(normalizeFields('RAM', { speed: 'PC4-3200AA-UC0-12' }).speed).toBe('3200');
+    expect(normalizeFields('RAM', { speed: 'PC4-2666V-SA1-11' }).speed).toBe('2666');
+    // Legacy bandwidth form: store the bandwidth number as printed, no division.
     expect(normalizeFields('RAM', { speed: 'PC4-25600' }).speed).toBe('25600');
     expect(normalizeFields('RAM', { speed: 'PC3L-12800' }).speed).toBe('12800');
     expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('38400');
-    // Full label-style strings with trailing codes — strip the suffix.
-    expect(normalizeFields('RAM', { speed: 'PC4-3200AA-UC0-12' }).speed).toBe('3200');
-    expect(normalizeFields('RAM', { speed: 'PC4-2666V-SA1-11' }).speed).toBe('2666');
   });
 
   it('normalises rank casing/spacing and strips PN: prefix', () => {
