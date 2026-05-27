@@ -47,10 +47,25 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('38400');
   });
 
-  it('normalises rank casing/spacing and strips PN: prefix', () => {
+  it('normalises rank casing/spacing and reduces part number to the core SKU', () => {
     const f = normalizeFields('RAM', { rank: '2RX4', partNumber: 'PN:HMCG84AEBRA115N BB' });
     expect(f.rank).toBe('2Rx4');
-    expect(f.partNumber).toBe('HMCG84AEBRA115N BB');
+    // Strip "PN:" prefix AND drop the trailing " BB" lot marker.
+    expect(f.partNumber).toBe('HMCG84AEBRA115N');
+  });
+
+  it('reduces part number to the core SKU (strip suffix after first hyphen + trailing tokens)', () => {
+    // Real-world SK Hynix / Samsung / Micron labels with speed-grade suffix + lot.
+    expect(normalizeFields('RAM', { partNumber: 'HMAA1GU6CJR6N-XN NO AD' }).partNumber).toBe('HMAA1GU6CJR6N');
+    expect(normalizeFields('RAM', { partNumber: 'M471A1K43DB1-CTD' }).partNumber).toBe('M471A1K43DB1');
+    expect(normalizeFields('RAM', { partNumber: 'HMT84GL7AMR4C-RD MC AD 1420' }).partNumber).toBe('HMT84GL7AMR4C');
+    expect(normalizeFields('RAM', { partNumber: 'M393A4K40DB3-CWE' }).partNumber).toBe('M393A4K40DB3');
+    // No hyphen → leave alone.
+    expect(normalizeFields('RAM', { partNumber: 'KCP318SD8/16' }).partNumber).toBe('KCP318SD8/16');
+    expect(normalizeFields('RAM', { partNumber: 'CT16G4DFD832A' }).partNumber).toBe('CT16G4DFD832A');
+    // Same rule applies cross-category.
+    expect(normalizeFields('SSD', { partNumber: 'MZ7LH960HAJR-00005' }).partNumber).toBe('MZ7LH960HAJR');
+    expect(normalizeFields('HDD', { partNumber: 'ST4000NM0023-1MA107' }).partNumber).toBe('ST4000NM0023');
   });
 
   it('drops blank/whitespace-only fields', () => {
@@ -62,7 +77,7 @@ describe('normalizeFields — RAM', () => {
   it('is idempotent on already-clean catalog values (stub data)', () => {
     const clean = {
       brand: 'Samsung', capacity: '32GB', generation: 'DDR4', type: 'Server',
-      classification: 'RDIMM', rank: '2Rx4', speed: '3200', partNumber: 'M393A4K40DB3-CWE',
+      classification: 'RDIMM', rank: '2Rx4', speed: '3200', partNumber: 'M393A4K40DB3',
     };
     expect(normalizeFields('RAM', clean)).toEqual(clean);
   });
