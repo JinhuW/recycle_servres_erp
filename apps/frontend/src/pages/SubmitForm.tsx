@@ -201,13 +201,32 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             <Icon name="chevronLeft" size={16} />
           </button>
         }
-        trailing={category === 'RAM' && (
-          <button className="ph-icon-btn" onClick={() => onRescan(line)} title={t('rescanWithAi')}>
-            <Icon name="camera" size={16} />
-          </button>
-        )}
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
+        {category === 'RAM' && (
+          <button
+            type="button"
+            className="ph-ai-capture"
+            onClick={() => onRescan(line)}
+            aria-label={t('aiLabelCapture')}
+          >
+            <span className="ph-ai-capture-badge">
+              <Icon name="camera" size={20} />
+            </span>
+            <span className="ph-ai-capture-body">
+              <span className="ph-ai-capture-title-row">
+                <span className="ph-ai-capture-title">{t('aiLabelCapture')}</span>
+                <span className="ph-ai-capture-tag">{t('aiDropzoneTag')}</span>
+              </span>
+              <span className="ph-ai-capture-sub">
+                {aiFilled ? t('aiCaptureRetake') : t('aiCaptureTapToScan')}
+              </span>
+            </span>
+            <span className="ph-ai-capture-arrow">
+              <Icon name="chevronRight" size={14} />
+            </span>
+          </button>
+        )}
         {aiFilled && (() => {
           // Banner has four severities, escalating:
           //   stub      → demo data, not a real reading        (amber)
