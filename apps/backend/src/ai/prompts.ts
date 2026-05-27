@@ -18,16 +18,25 @@ const CONFIDENCE_INSTRUCTION =
   '  <0.3: image is largely illegible — most fields unreadable.\n' +
   'Use the full 0..1 range honestly. Most clean shots should land at 0.75-0.9, not 0.95+. Omit any field you cannot read; do NOT guess.';
 
-// Number of fields each category's JSON schema asks for (excluding the
-// _confidence sentinel). The OCR layer uses this to derive a coverage-based
-// floor on confidence: the prompt tells the model to omit unsure fields, so a
-// high field count is itself evidence the label was readable. See
-// `openRouterScan` in ./openrouter.ts.
+// Fields each category's JSON schema asks for (excluding the _confidence
+// sentinel). The OCR layer uses the count to derive a coverage-based floor
+// on confidence — the prompt tells the model to omit unsure fields, so a
+// high field count is itself evidence the label was readable. The full
+// field list also drives the partial-fill warning logged from scan.ts: any
+// expected field missing after normalization is the "AI couldn't fill the
+// form" signal we surface to errors.jsonl.
+export const EXPECTED_FIELDS_BY_CATEGORY: Record<LineCategory, readonly string[]> = {
+  RAM: ['brand', 'capacity', 'generation', 'type', 'classification', 'rank', 'speed', 'partNumber'],
+  SSD: ['brand', 'capacity', 'interface', 'formFactor', 'partNumber'],
+  HDD: ['brand', 'capacity', 'interface', 'formFactor', 'rpm', 'partNumber'],
+  Other: ['description', 'partNumber'],
+};
+
 export const EXPECTED_FIELD_COUNT: Record<LineCategory, number> = {
-  RAM: 8,    // brand, capacity, generation, type, classification, rank, speed, partNumber
-  SSD: 5,    // brand, capacity, interface, formFactor, partNumber
-  HDD: 6,    // brand, capacity, interface, formFactor, rpm, partNumber
-  Other: 2,  // description, partNumber
+  RAM: EXPECTED_FIELDS_BY_CATEGORY.RAM.length,
+  SSD: EXPECTED_FIELDS_BY_CATEGORY.SSD.length,
+  HDD: EXPECTED_FIELDS_BY_CATEGORY.HDD.length,
+  Other: EXPECTED_FIELDS_BY_CATEGORY.Other.length,
 };
 
 export const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {

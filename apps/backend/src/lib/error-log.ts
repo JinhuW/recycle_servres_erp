@@ -11,6 +11,9 @@ import { join } from 'node:path';
 export interface ErrorRecord {
   ts: string;
   requestId: string;
+  // 'error' for unhandled 500s (default); 'warn' for non-fatal events worth
+  // grepping later (e.g. scans where the AI didn't fill the form).
+  level?: 'error' | 'warn';
   method?: string;
   path?: string;
   query?: string;
@@ -18,6 +21,9 @@ export interface ErrorRecord {
   userEmail?: string;
   message: string;
   stack?: string;
+  // Optional structured context. Kept opaque so callers can attach domain
+  // payload without bloating the interface (scan results, validation diffs).
+  context?: Record<string, unknown>;
 }
 
 export interface AppendOptions {

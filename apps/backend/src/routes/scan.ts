@@ -3,10 +3,12 @@ import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { scanLabel } from '../ai';
 import { normalizeFields } from '../ai/normalize';
+import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
+import { appendErrorRecord } from '../lib/error-log';
 import { getUploadLimits } from '../lib/settings';
 import type { Env, LineCategory, User } from '../types';
 
-const scan = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+const scan = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string } }>();
 
 // Per-user sliding-window rate limit: max 20 scans per 60-second window.
 // Keys are user IDs; values are arrays of timestamps (ms) for recent calls.
@@ -92,6 +94,39 @@ scan.post('/label', async (c) => {
   // otherwise near-miss values ("32 GB", "4800 MT/s", generation-in-`type`)
   // never match a UI dropdown and silently vanish from the form.
   result.fields = normalizeFields(category, result.fields);
+
+  // Partial-fill detection. If the model skipped any expected field for this
+  // category, log a warn record to errors.jsonl so an operator can grep for
+  // "scan partial fill" and pull the matching image + extraction to see what
+  // the OCR struggled with (e.g. speed missing on a SK Hynix SODIMM).
+  const expected = EXPECTED_FIELDS_BY_CATEGORY[category];
+  const missing = expected.filter((f) => !result.fields[f] || result.fields[f].trim() === '');
+  if (missing.length > 0) {
+    const dir = process.env.ERROR_LOG_DIR;
+    if (dir) {
+      const requestId = c.var.requestId ?? 'unknown';
+      const url = new URL(c.req.url);
+      void appendErrorRecord(dir, {
+        ts: new Date().toISOString(),
+        requestId,
+        level: 'warn',
+        method: c.req.method,
+        path: url.pathname,
+        userId: u.id,
+        userEmail: u.email,
+        message: `scan partial fill: ${missing.length}/${expected.length} field(s) missing (${missing.join(', ')})`,
+        context: {
+          category,
+          missing,
+          extracted: result.fields,
+          confidence: result.confidence,
+          provider: result.provider,
+          storageKey: uploaded.storageKey,
+          deliveryUrl,
+        },
+      });
+    }
+  }
 
   await sql`
     INSERT INTO label_scans (user_id, cf_image_id, delivery_url, category, extracted, confidence, provider)
