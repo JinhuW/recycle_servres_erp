@@ -235,6 +235,120 @@ button { font-family: inherit; cursor: pointer; }
   100% { top: 100%; opacity: 0; }
 }
 
+/* ===== AI dropzone — inline drag/click surface for label scanning =====
+   Sibling of .ai-banner but interactive: a dashed accent zone that brightens
+   on drag-over and overlays a .scan-line during OCR. Designed to live inside
+   a form card, between the toolbar and the table. */
+.ai-dropzone {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background:
+    radial-gradient(120% 140% at 0% 0%,
+      color-mix(in oklch, var(--accent-soft) 90%, transparent) 0%,
+      color-mix(in oklch, var(--accent-soft) 35%, var(--bg-elev)) 60%,
+      var(--bg-elev) 100%);
+  border: 1.5px dashed color-mix(in oklch, var(--accent) 45%, transparent);
+  font: inherit; color: inherit; text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.16s ease, background 0.16s ease,
+              transform 0.16s ease, box-shadow 0.16s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-dropzone:hover {
+  border-color: color-mix(in oklch, var(--accent) 70%, transparent);
+  background:
+    radial-gradient(120% 140% at 0% 0%,
+      var(--accent-soft) 0%,
+      color-mix(in oklch, var(--accent-soft) 55%, var(--bg-elev)) 65%,
+      var(--bg-elev) 100%);
+}
+.ai-dropzone:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 28%, transparent);
+}
+.ai-dropzone.is-dragover {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: scale(1.004);
+  box-shadow:
+    0 0 0 4px color-mix(in oklch, var(--accent) 14%, transparent),
+    0 12px 28px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+.ai-dropzone.is-busy { cursor: progress; }
+.ai-dropzone.is-busy .ai-dropzone-badge { animation: pulse 1.4s ease-in-out infinite; }
+.ai-dropzone[disabled] { cursor: not-allowed; opacity: 0.85; }
+.ai-dropzone > * { pointer-events: none; }   /* children inherit the click target; avoids dragleave flicker */
+
+.ai-dropzone-badge {
+  width: 44px; height: 44px;
+  border-radius: 11px;
+  background:
+    linear-gradient(140deg,
+      color-mix(in oklch, var(--accent) 92%, white) 0%,
+      var(--accent-strong) 100%);
+  color: white;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 35%, transparent),
+    0 4px 12px color-mix(in oklch, var(--accent) 32%, transparent);
+}
+.ai-dropzone-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ai-dropzone-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ai-dropzone-title { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; color: var(--fg); }
+.ai-dropzone-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700;
+  color: var(--accent-strong);
+  background: color-mix(in oklch, var(--accent-soft) 70%, white);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
+  padding: 2px 7px; border-radius: 4px;
+  line-height: 1.2;
+}
+.ai-dropzone-sub {
+  font-size: 12.5px; color: var(--fg-muted); line-height: 1.45;
+}
+.ai-dropzone-sub .accent { color: var(--accent-strong); font-weight: 600; }
+.ai-dropzone-sub kbd {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  padding: 0 5px; border-radius: 4px;
+  font-size: 10.5px; color: var(--fg);
+}
+.ai-dropzone-status {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+  padding-left: 10px;
+}
+.ai-dropzone-status .progress-track {
+  width: 76px; height: 4px; border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 18%, transparent);
+  overflow: hidden;
+}
+.ai-dropzone-status .progress-fill {
+  height: 100%; border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-dropzone { transition: border-color 0.16s ease, background 0.16s ease; }
+  .ai-dropzone.is-dragover { transform: none; }
+  .ai-dropzone.is-busy .ai-dropzone-badge { animation: none; }
+}
+
 /* ===== Camera viewfinder + RAM stick illustration ===== */
 .cam-viewfinder {
   background:
