@@ -70,6 +70,45 @@ function DesktopLanguageToggle() {
   );
 }
 
+// Dev-only login hint — gated on Vite's static `import.meta.env.DEV` so the
+// whole branch is constant-folded out in `vite build` (the docker image runs
+// the production build, so demo credentials never ship to the container).
+function DevDemoHint() {
+  if (!import.meta.env.DEV) return null;
+  return (
+    <div
+      style={{
+        marginTop: 14, padding: '9px 12px',
+        background: 'var(--bg-soft)',
+        border: '1px dashed var(--border-strong)',
+        borderRadius: 10,
+        fontSize: 11.5, color: 'var(--fg-muted)',
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+      }}
+    >
+      <span
+        style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 9.5, letterSpacing: '0.12em', fontWeight: 700,
+          textTransform: 'uppercase', color: 'var(--accent-strong)',
+          background: 'var(--accent-soft)',
+          border: '1px solid color-mix(in oklch, var(--accent) 22%, transparent)',
+          padding: '1px 6px', borderRadius: 4,
+        }}
+      >
+        Dev
+      </span>
+      <span>Sign in as</span>
+      <span className="mono" style={{ color: 'var(--fg)' }}>alex@recycleservers.io</span>
+      <span>· password</span>
+      <span className="mono" style={{ color: 'var(--fg)' }}>demo</span>
+      <span style={{ width: '100%', fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
+        Other seed users: marcus, priya, sofia, diego, yuki, lina, omar, ingrid @recycleservers.io
+      </span>
+    </div>
+  );
+}
+
 export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
   const { t } = useT();
   const { login } = useAuth();
@@ -199,6 +238,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
               <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--fg-subtle)', marginTop: 18 }}>
                 {t('ssoNote')}
               </div>
+              <DevDemoHint />
             </>
           ) : (
             <>
@@ -307,6 +347,7 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
               <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--fg-subtle)', marginTop: 18 }}>
                 {t('ssoNote')}
               </div>
+              <DevDemoHint />
             </>
           ) : (
             <>
