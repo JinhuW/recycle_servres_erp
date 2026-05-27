@@ -403,7 +403,10 @@ function OrderForm({
     scanConfidence: l.scanConfidence ?? null,
   });
 
-  // Confirms a single line by PATCHing it into the draft order as a product.
+  // Confirms a single line AND auto-saves the current order metadata in the
+  // same PATCH. The user doesn't need to click "Submit Order" to keep their
+  // work safe — closing the tab after confirming a line leaves nothing
+  // unsaved. (Submit Order remains as the navigate-away trigger.)
   const handleConfirmLine = async (idx: number): Promise<void> => {
     if (!draftId) {
       setAiError('Could not start a draft order — retry.');
@@ -415,7 +418,16 @@ function OrderForm({
       setAiError('Fill in brand/description, quantity and unit cost before confirming this line.');
       return;
     }
-    await api.patch('/api/orders/' + draftId, { addLines: [toWireLine(l)] });
+    const totalCost = meta.totalCostOverride != null
+      ? (Number(meta.totalCostOverride) || 0)
+      : totals.cost;
+    await api.patch('/api/orders/' + draftId, {
+      addLines: [toWireLine(l)],
+      ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
+      payment: meta.payment === 'Company' ? 'company' : 'self',
+      notes: meta.notes || null,
+      totalCost,
+    });
     updateLine(idx, { _confirmed: true });
   };
 
