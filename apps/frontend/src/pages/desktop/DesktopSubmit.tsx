@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api, createDraftOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import { findDuplicateLine } from '../../lib/dupParts';
 import type { Category, ScanResponse, Warehouse } from '../../lib/types';
-import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../lib/status';
 import { LineDrawer } from './submit/LineDrawer';
 
 // ─── Public component ────────────────────────────────────────────────────────
@@ -16,8 +14,8 @@ import { LineDrawer } from './submit/LineDrawer';
 //   2. OrderForm — line-item table + right-side drawer for editing one line,
 //      plus a sticky bottom card with order meta + totals + submit action.
 //
-// RAM orders also get an "Auto-fill from image" upload button that hits the
-// same /api/scan/label endpoint as the mobile camera flow.
+// RAM lines get an AI label drop zone at the top of the right-side drawer
+// (LineDrawer): drop or click a photo, the scan patches the current line.
 
 type Props = {
   onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
@@ -192,21 +190,18 @@ export function findDuplicatePartNumbers(
   return [...groups.values()].filter(g => g.lineNums.length >= 2);
 }
 
-// Build a Line from an AI scan response — mirrors the mobile aiDefaults in
-// SubmitForm.tsx so both flows share the same field-mapping.
+// Build a Line patch from an AI scan response — mirrors the mobile aiDefaults
+// in SubmitForm.tsx so all flows share the same field-mapping. Returned as a
+// Partial so callers can either spread it onto blankLine() (new line) or pass
+// it through onChange() (live edit in the drawer).
 // Low-confidence extractions are still prefilled (a rough draft beats an empty
 // form); scanConfidence rides along so the drawer can flag it for review.
-function lineFromScan(category: Category, scan: ScanResponse): Line {
-  const base: Line = {
-    ...blankLine(category),
+export function scanToLinePatch(scan: ScanResponse): Partial<Line> {
+  const f = scan.extracted ?? {};
+  return {
     scanImageId: scan.imageId ?? null,
     scanConfidence: scan.confidence ?? null,
     scanImageUrl: scan.deliveryUrl ?? null,
-  };
-
-  const f = scan.extracted ?? {};
-  return {
-    ...base,
     ...(f.brand        ? { brand: f.brand }               : {}),
     ...(f.capacity     ? { capacity: f.capacity }         : {}),
     ...(f.generation   ? { generation: f.generation }     : {}),
@@ -248,17 +243,10 @@ function OrderForm({
     totalCostOverride: null,
   });
 
-  // AI auto-fill (RAM only) — the inline drop zone below the toolbar uploads
-  // each RAM-label image to /api/scan/label and appends a line per file.
-  // Mirrors the mobile Camera/SubmitForm flow but bypasses the live camera
-  // and supports batching multiple labels in a single drop.
-  const aiFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiDragOver, setAiDragOver] = useState(false);
-  const [aiBatch, setAiBatch] = useState<{ current: number; total: number } | null>(null);
+  // Order-level error banner — populated by submit/confirm failures and the
+  // draft-creation guard below. AI scan failures live inside the LineDrawer,
+  // alongside the dropzone that produces them.
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiNotice, setAiNotice] = useState<string | null>(null);
-  const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
   const [submitting, setSubmitting] = useState(false);
 
   // Create a server-side draft order as soon as the form mounts so that
@@ -274,92 +262,6 @@ function OrderForm({
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
-
-  // Scan a batch of label images sequentially. The dropzone is disabled while
-  // running, so concurrent line edits can't race the index math; we snapshot
-  // the line count up front and place activeIdx on the last successful add.
-  // Notices/errors from individual scans collapse to the most recent so the
-  // single inline alert isn't churned for every file.
-  const handleAiFiles = useCallback(async (files: FileList | File[]) => {
-    if (aiBusy) return;
-    const arr = Array.from(files);
-    const images = arr.filter(f => f.type.startsWith('image/'));
-    if (!images.length) {
-      if (arr.length) {
-        setAiError(t('aiOnlyImages'));
-      }
-      return;
-    }
-    setAiBusy(true);
-    setAiError(null);
-    setAiNotice(null);
-    setAiBatch({ current: 0, total: images.length });
-    const startLen = lines.length;
-    // Tracks lines (existing + just-scanned) so dup detection fires inside a
-    // batch — e.g. dropping two photos of the same module flags the second.
-    const runningLines: { partNumber?: string | null }[] = lines.map(l => ({ partNumber: l.partNumber }));
-    let added = 0;
-    let lastNotice: { text: string; sev: 'info' | 'warn' | 'severe' } | null = null;
-    let lastErr: string | null = null;
-    try {
-      for (let i = 0; i < images.length; i++) {
-        setAiBatch({ current: i + 1, total: images.length });
-        try {
-          const file = images[i];
-          const form = new FormData();
-          form.append('file', file, file.name);
-          form.append('category', category);
-          const scan = await api.upload<ScanResponse>('/api/scan/label', form);
-          const newLine = lineFromScan(category, scan);
-          const conf = scan.confidence ?? 0;
-          const noFields = Object.keys(scan.extracted ?? {}).length === 0;
-          if (scan.provider === 'stub') {
-            lastNotice = { text: t('stubScanWarn'), sev: 'warn' };
-          } else if (conf < AI_UNREADABLE_FLOOR || noFields) {
-            lastNotice = { text: t('unreadableLabel'), sev: 'severe' };
-          } else if (conf < AI_CONFIDENCE_FLOOR) {
-            lastNotice = { text: t('lowConfVerify', { pct: Math.round(conf * 100) }), sev: 'warn' };
-          }
-          // Re-scan of an already-added module — override the confidence/stub
-          // notice with the more actionable dup signal.
-          const dupLine = findDuplicateLine(runningLines, newLine.partNumber);
-          if (dupLine != null && newLine.partNumber) {
-            lastNotice = { text: t('dupPartScanWarn', { pn: newLine.partNumber, line: dupLine }), sev: 'severe' };
-          }
-          setLines(ls => [...ls, newLine]);
-          runningLines.push({ partNumber: newLine.partNumber });
-          added++;
-        } catch (err) {
-          lastErr = err instanceof Error ? err.message : 'AI scan failed';
-        }
-      }
-    } finally {
-      setAiBatch(null);
-      setAiBusy(false);
-      if (added > 0) setActiveIdx(startLen + added - 1);
-      if (lastNotice) {
-        setAiNotice(lastNotice.text);
-        setAiNoticeSeverity(lastNotice.sev);
-      }
-      if (lastErr) setAiError(lastErr);
-    }
-  }, [aiBusy, category, lines.length, t]);
-
-  const onAiUpload = () => {
-    if (aiBusy) return;
-    setAiError(null);
-    aiFileInputRef.current?.click();
-  };
-
-  const onAiFileChosen: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const files = e.target.files;
-    e.target.value = '';
-    if (files && files.length) void handleAiFiles(files);
-  };
-
-  const onAiKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAiUpload(); }
-  };
 
   // Default the warehouse to the first one once they load.
   useEffect(() => {
@@ -542,107 +444,14 @@ function OrderForm({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="chip mono">{t('subUnitsCost', { n: totals.units, cost: fmtUSD(totals.cost, locale) })}</span>
-            <button className="btn" onClick={addLine} disabled={aiBusy}>
+            <button className="btn" onClick={addLine}>
               <Icon name="plus" size={13} /> {t('subAddLine', { cat: category })}
             </button>
           </div>
         </div>
-        {category === 'RAM' && (
-          <>
-            <input
-              ref={aiFileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={onAiFileChosen}
-            />
-            <div style={{ padding: '4px 18px 14px' }}>
-              <div
-                role="button"
-                tabIndex={aiBusy ? -1 : 0}
-                aria-label={t('aiLabelCapture')}
-                aria-disabled={aiBusy || undefined}
-                className={
-                  'ai-dropzone'
-                  + (aiDragOver ? ' is-dragover' : '')
-                  + (aiBusy ? ' is-busy' : '')
-                }
-                onClick={onAiUpload}
-                onKeyDown={onAiKeyDown}
-                onDragEnter={e => { if (aiBusy) return; e.preventDefault(); setAiDragOver(true); }}
-                onDragOver={e => {
-                  if (aiBusy) return;
-                  e.preventDefault();
-                  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-                  if (!aiDragOver) setAiDragOver(true);
-                }}
-                onDragLeave={e => {
-                  if (aiBusy) return;
-                  // Only reset when leaving the zone itself, not when crossing
-                  // an inner child (children have pointer-events: none, but
-                  // some browsers still fire dragleave on entry).
-                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-                  setAiDragOver(false);
-                }}
-                onDrop={e => {
-                  e.preventDefault();
-                  setAiDragOver(false);
-                  if (aiBusy) return;
-                  if (e.dataTransfer?.files?.length) void handleAiFiles(e.dataTransfer.files);
-                }}
-              >
-                {aiBusy && <span className="scan-line" />}
-                <div className="ai-dropzone-badge">
-                  <Icon name="sparkles" size={22} />
-                </div>
-                <div className="ai-dropzone-body">
-                  <div className="ai-dropzone-title-row">
-                    <span className="ai-dropzone-title">{t('aiLabelCapture')}</span>
-                    <span className="ai-dropzone-tag">{t('aiDropzoneTag')}</span>
-                  </div>
-                  <div className="ai-dropzone-sub">
-                    {aiBusy && aiBatch ? (
-                      <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}>
-                        {aiBatch.total > 1
-                          ? t('aiReadingBatch', { n: aiBatch.current, total: aiBatch.total })
-                          : t('readingLabel')}
-                      </span>
-                    ) : (
-                      <>
-                        {t('aiDropzoneSubLead')}{' '}
-                        <span className="accent">{t('aiDropzoneSubCta')}</span>{' '}
-                        {t('aiDropzoneSubTail')}
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="ai-dropzone-status">
-                  {aiBusy && aiBatch && aiBatch.total > 1 ? (
-                    <>
-                      <span>{aiBatch.current}/{aiBatch.total}</span>
-                      <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{ width: ((aiBatch.current - 1) / aiBatch.total * 100) + '%' }}
-                        />
-                      </div>
-                    </>
-                  ) : aiBusy ? (
-                    <span className="ai-dot" />
-                  ) : (
-                    <span style={{ color: 'var(--fg-subtle)', fontFamily: 'inherit' }}>
-                      {t('aiDropzoneHint')}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
         {aiError && (
           <div style={{
-            margin: '0 18px 12px', padding: '10px 12px',
+            margin: '12px 18px 12px', padding: '10px 12px',
             background: 'rgba(220,40,40,0.08)', border: '1px solid rgba(220,40,40,0.25)',
             borderRadius: 8, fontSize: 12, color: 'var(--neg, #b22)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
@@ -651,38 +460,6 @@ function OrderForm({
             <button
               className="btn icon sm"
               onClick={() => setAiError(null)}
-              title={t('dismiss')}
-            >
-              <Icon name="x" size={12} />
-            </button>
-          </div>
-        )}
-        {aiNotice && (
-          <div
-            role="alert"
-            style={{
-              margin: '0 18px 12px', padding: '8px 12px',
-              borderRadius: 8, fontSize: 12,
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-              ...(aiNoticeSeverity === 'severe'
-                ? {
-                    background: 'rgba(220,40,40,0.08)',
-                    border: '1px solid rgba(220,40,40,0.25)',
-                    color: 'var(--neg, #b22)',
-                  }
-                : aiNoticeSeverity === 'warn'
-                  ? {
-                      background: 'var(--warn-soft, #fef3c7)',
-                      border: '1px solid var(--warn, #f59e0b)',
-                      color: 'var(--warn-strong, #92400e)',
-                    }
-                  : { color: 'var(--fg-subtle)' }),
-            }}
-          >
-            <span>{aiNotice}</span>
-            <button
-              className="btn icon sm"
-              onClick={() => setAiNotice(null)}
               title={t('dismiss')}
             >
               <Icon name="x" size={12} />

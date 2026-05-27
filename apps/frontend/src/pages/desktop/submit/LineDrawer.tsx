@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { ImageLightbox } from '../../../components/ImageLightbox';
+import { api } from '../../../lib/api';
 import { fmtUSD } from '../../../lib/format';
+import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
+import type { ScanResponse } from '../../../lib/types';
 import type { Line } from '../DesktopSubmit';
+import { scanToLinePatch } from '../DesktopSubmit';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
 
@@ -40,6 +44,70 @@ export function LineDrawer({
     !!scanUrl &&
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
+
+  // AI label dropzone — RAM submit only. The editing variant already shows a
+  // captured-image thumb in the drawer header, so re-scanning there would be
+  // a confusing flow; keep the dropzone scoped to the new-order path.
+  const showDropzone = cat === 'RAM' && !editing;
+  const aiFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiDragOver, setAiDragOver] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
+
+  // Single-file scan: the drawer represents one line, so a drop with multiple
+  // images takes only the first. The scan response is merged into the current
+  // line via onChange(scanToLinePatch(scan)) — only present fields overwrite,
+  // anything the model didn't extract leaves the existing value alone.
+  const handleAiFile = useCallback(async (files: FileList | File[]) => {
+    if (aiBusy) return;
+    const file = Array.from(files).find(f => f.type.startsWith('image/'));
+    if (!file) {
+      if (files.length) setAiError(t('aiOnlyImages'));
+      return;
+    }
+    setAiBusy(true);
+    setAiError(null);
+    setAiNotice(null);
+    try {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('category', cat);
+      const scan = await api.upload<ScanResponse>('/api/scan/label', form);
+      onChange(scanToLinePatch(scan));
+      const conf = scan.confidence ?? 0;
+      const noFields = Object.keys(scan.extracted ?? {}).length === 0;
+      if (scan.provider === 'stub') {
+        setAiNotice(t('stubScanWarn'));
+        setAiNoticeSeverity('warn');
+      } else if (conf < AI_UNREADABLE_FLOOR || noFields) {
+        setAiNotice(t('unreadableLabel'));
+        setAiNoticeSeverity('severe');
+      } else if (conf < AI_CONFIDENCE_FLOOR) {
+        setAiNotice(t('lowConfVerify', { pct: Math.round(conf * 100) }));
+        setAiNoticeSeverity('warn');
+      }
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'AI scan failed');
+    } finally {
+      setAiBusy(false);
+    }
+  }, [aiBusy, cat, onChange, t]);
+
+  const onAiUpload = () => {
+    if (aiBusy) return;
+    setAiError(null);
+    aiFileInputRef.current?.click();
+  };
+  const onAiFileChosen: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+    const files = e.target.files;
+    e.target.value = '';
+    if (files && files.length) void handleAiFile(files);
+  };
+  const onAiKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAiUpload(); }
+  };
 
   const qty = Number(line.qty) || 0;
   const cost = Number(line.unitCost) || 0;
@@ -130,6 +198,113 @@ export function LineDrawer({
           </div>
 
           <div style={{ padding: 16, display: 'grid', gap: 14 }}>
+            {showDropzone && (
+              <>
+                <input
+                  ref={aiFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={onAiFileChosen}
+                />
+                <div
+                  role="button"
+                  tabIndex={aiBusy ? -1 : 0}
+                  aria-label={t('aiLabelCapture')}
+                  aria-disabled={aiBusy || undefined}
+                  className={'ai-dropzone' + (aiDragOver ? ' is-dragover' : '') + (aiBusy ? ' is-busy' : '')}
+                  onClick={onAiUpload}
+                  onKeyDown={onAiKeyDown}
+                  onDragEnter={e => { if (aiBusy) return; e.preventDefault(); setAiDragOver(true); }}
+                  onDragOver={e => {
+                    if (aiBusy) return;
+                    e.preventDefault();
+                    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+                    if (!aiDragOver) setAiDragOver(true);
+                  }}
+                  onDragLeave={e => {
+                    if (aiBusy) return;
+                    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                    setAiDragOver(false);
+                  }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setAiDragOver(false);
+                    if (aiBusy) return;
+                    if (e.dataTransfer?.files?.length) void handleAiFile(e.dataTransfer.files);
+                  }}
+                >
+                  {aiBusy && <span className="scan-line" />}
+                  <div className="ai-dropzone-badge">
+                    <Icon name="sparkles" size={22} />
+                  </div>
+                  <div className="ai-dropzone-body">
+                    <div className="ai-dropzone-title-row">
+                      <span className="ai-dropzone-title">{t('aiLabelCapture')}</span>
+                      <span className="ai-dropzone-tag">{t('aiDropzoneTag')}</span>
+                    </div>
+                    <div className="ai-dropzone-sub">
+                      {aiBusy ? (
+                        <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}>
+                          {t('readingLabel')}
+                        </span>
+                      ) : (
+                        <>
+                          {t('aiDropzoneSubLead')}{' '}
+                          <span className="accent">{t('aiDropzoneSubCta')}</span>{' '}
+                          {t('aiDropzoneSubTail')}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="ai-dropzone-status">
+                    {aiBusy ? (
+                      <span className="ai-dot" />
+                    ) : (
+                      <span style={{ color: 'var(--fg-subtle)', fontFamily: 'inherit' }}>
+                        {t('aiDropzoneHint')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {aiError && (
+                  <div
+                    role="alert"
+                    style={{
+                      padding: '10px 12px',
+                      background: 'rgba(220,40,40,0.08)',
+                      border: '1px solid rgba(220,40,40,0.25)',
+                      borderRadius: 8, fontSize: 12, color: 'var(--neg, #b22)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    }}
+                  >
+                    <span>{aiError}</span>
+                    <button className="btn icon sm" onClick={() => setAiError(null)} title={t('dismiss')}>
+                      <Icon name="x" size={12} />
+                    </button>
+                  </div>
+                )}
+                {aiNotice && (
+                  <div
+                    role="alert"
+                    style={{
+                      padding: '8px 12px', borderRadius: 8, fontSize: 12,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                      ...(aiNoticeSeverity === 'severe'
+                        ? { background: 'rgba(220,40,40,0.08)', border: '1px solid rgba(220,40,40,0.25)', color: 'var(--neg, #b22)' }
+                        : aiNoticeSeverity === 'warn'
+                          ? { background: 'var(--warn-soft, #fef3c7)', border: '1px solid var(--warn, #f59e0b)', color: 'var(--warn-strong, #92400e)' }
+                          : { color: 'var(--fg-subtle)' }),
+                    }}
+                  >
+                    <span>{aiNotice}</span>
+                    <button className="btn icon sm" onClick={() => setAiNotice(null)} title={t('dismiss')}>
+                      <Icon name="x" size={12} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
             {duplicateOnLines && duplicateOnLines.length > 0 && (
               <div
                 role="status"
