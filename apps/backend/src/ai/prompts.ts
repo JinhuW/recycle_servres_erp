@@ -42,9 +42,9 @@ CLASSIFICATION — the module form factor: SODIMM, UDIMM, RDIMM, or LRDIMM.
 TYPE — derive from the form factor: SODIMM = Laptop, UDIMM = Desktop, RDIMM/LRDIMM/ECC = Server. Always emit BOTH generation and type when the form factor is readable.
 SPEED — digits only, no "MHz"/"MT/s" suffix. Use the number printed on the label as-is — do NOT divide, multiply, or convert. The label tells you the speed; trust it.
   - "NNNN MT/s" or "NNNN MHz" → NNNN.
-  - "DDRx-NNNN" (e.g. "DDR4-3200", "DDR5-4800") → NNNN.
-  - "PCx-NNNN" or "PCx-NNNNN" (e.g. "PC4-3200", "PC4-2666", "PC3-12800", "PC4-25600") → emit the number after the dash verbatim. Both the modern MT/s form (PC4-3200) and the older bandwidth form (PC4-25600 / PC3-12800) print the speed for you in their own convention; passing it through unchanged is correct in both cases.
-Omit speed only if NONE of these notations are visible.
+  - "DDRx-NNNN..." → emit the first 4-digit run after the dash (e.g. "DDR4-3200" → 3200, "DDR5-4800B" → 4800).
+  - "PCx-N..." → emit the first run of digits after the dash, ignoring any trailing letters or codes. Examples: "PC4-3200AA-UC0-12" → 3200, "PC4-2666V-SA1-11" → 2666, "PC3L-12800S-13-13-D3" → 12800, "PC4-25600" → 25600. This rule applies to BOTH the modern MT/s form (PC4-3200) and the older bandwidth form (PC4-25600 / PC3-12800) — both are correct as printed.
+This is not guessing — virtually every server/desktop/laptop RAM label carries one of these notations. If you can read the part number and brand off the sticker, you can read this too. Emit speed whenever you see "DDRx-" or "PCx-" followed by digits anywhere on the label.
 PARTNUMBER — the part number value only; drop any "PN:" / "P/N" / "S/N" label.
 ${CONFIDENCE_INSTRUCTION}
 Only include a field if you can read or derive it confidently. Omit any field you are unsure about — do NOT guess.`,

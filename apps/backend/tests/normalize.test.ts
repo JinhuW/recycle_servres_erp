@@ -43,6 +43,9 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { speed: 'PC4-25600' }).speed).toBe('25600');
     expect(normalizeFields('RAM', { speed: 'PC3L-12800' }).speed).toBe('12800');
     expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('38400');
+    // Full label-style strings with trailing codes — strip the suffix.
+    expect(normalizeFields('RAM', { speed: 'PC4-3200AA-UC0-12' }).speed).toBe('3200');
+    expect(normalizeFields('RAM', { speed: 'PC4-2666V-SA1-11' }).speed).toBe('2666');
   });
 
   it('normalises rank casing/spacing and strips PN: prefix', () => {
