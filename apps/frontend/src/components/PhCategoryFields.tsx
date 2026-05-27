@@ -1,7 +1,7 @@
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import {
-  RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
+  RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
   HDD_BRANDS, HDD_INTERFACE, HDD_FORM, HDD_CAP, HDD_RPM,
 } from '../lib/catalog';
@@ -79,7 +79,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           </div>
           <div className="ph-field">
             <label>{t('speedMhz')}</label>
-            <PhCatSelect className={selectClsFor('speed')} value={value.speed} options={RAM_SPEED} onChange={v => onChange('speed', v)} />
+            <input
+              className={inputClsFor('speed')}
+              value={value.speed ?? ''}
+              onChange={e => onChange('speed', e.target.value)}
+            />
           </div>
         </div>
         <div className="ph-field-row">

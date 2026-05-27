@@ -17,8 +17,9 @@ import { catalog } from './lookups';
 
 // Maps each extracted-field name to the catalog group whose values must contain
 // the extracted value. Fields not listed here are free-text (partNumber,
-// description, etc.) or hardcoded enums not in the DB catalog (RAM device
-// type — Desktop|Server|Laptop is fixed in code).
+// description, speed — which is now a literal pass-through from the label,
+// so non-catalog numbers like 2666 / 12800 must survive prefill) or hardcoded
+// enums not in the DB catalog (RAM device type — Desktop|Server|Laptop).
 const CATALOG_GROUPS: Record<Category, Partial<Record<string, keyof typeof catalog>>> = {
   RAM: {
     brand:          'RAM_BRAND',
@@ -26,7 +27,6 @@ const CATALOG_GROUPS: Record<Category, Partial<Record<string, keyof typeof catal
     generation:     'RAM_TYPE',   // legacy catalog name; values are DDR3/DDR4/DDR5
     classification: 'RAM_CLASS',
     rank:           'RAM_RANK',
-    speed:          'RAM_SPEED',
   },
   SSD: {
     brand:      'SSD_BRAND',

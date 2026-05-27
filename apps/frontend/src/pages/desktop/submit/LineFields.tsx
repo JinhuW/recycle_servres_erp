@@ -1,5 +1,5 @@
 import {
-  RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP, RAM_SPEED,
+  RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
   HDD_BRANDS, HDD_INTERFACE, HDD_FORM, HDD_CAP, HDD_RPM,
   CONDITIONS,
@@ -57,7 +57,11 @@ export function RamFields({ line, set }: FieldsProps) {
       </div>
       <div className="field">
         <label className="label">{t('speedMhz')}</label>
-        <CatSelect value={line.speed} options={RAM_SPEED} onChange={v => set({ speed: v })} />
+        <input
+          className="input"
+          value={line.speed ?? ''}
+          onChange={e => set({ speed: e.target.value })}
+        />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')}</label>
