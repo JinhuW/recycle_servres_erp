@@ -35,12 +35,14 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { speed: 'DDR5-4800' }).speed).toBe('4800');
   });
 
-  it('derives speed from PCx-NNNNN code (divide by 8, snap to catalog)', () => {
-    expect(normalizeFields('RAM', { speed: 'PC4-25600' }).speed).toBe('3200');
-    expect(normalizeFields('RAM', { speed: 'PC4-21300' }).speed).toBe('2666'); // 21300/8 = 2662.5
-    expect(normalizeFields('RAM', { speed: 'PC4-17000' }).speed).toBe('2133'); // 17000/8 = 2125
-    expect(normalizeFields('RAM', { speed: 'PC3L-12800' }).speed).toBe('1600');
-    expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('4800');
+  it('passes the PCx-NNNN number through verbatim — the label printed it', () => {
+    // Modern MT/s form (SK Hynix / Samsung / Micron SODIMM stock).
+    expect(normalizeFields('RAM', { speed: 'PC4-3200AA' }).speed).toBe('3200');
+    expect(normalizeFields('RAM', { speed: 'PC4-2666V' }).speed).toBe('2666');
+    // Legacy bandwidth form — kept as-is, no division.
+    expect(normalizeFields('RAM', { speed: 'PC4-25600' }).speed).toBe('25600');
+    expect(normalizeFields('RAM', { speed: 'PC3L-12800' }).speed).toBe('12800');
+    expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('38400');
   });
 
   it('normalises rank casing/spacing and strips PN: prefix', () => {

@@ -40,10 +40,10 @@ GENERATION and TYPE are SEPARATE fields — never put a DDR value in "type".
   type = the machine the module goes in: Desktop, Server, or Laptop.
 CLASSIFICATION — the module form factor: SODIMM, UDIMM, RDIMM, or LRDIMM.
 TYPE — derive from the form factor: SODIMM = Laptop, UDIMM = Desktop, RDIMM/LRDIMM/ECC = Server. Always emit BOTH generation and type when the form factor is readable.
-SPEED — digits only, no "MHz"/"MT/s" suffix. The MT/s rating is printed on virtually every label; emit it whenever readable. Accept any of these forms as a direct read (not a guess):
-  - explicit "NNNN MT/s" or "NNNN MHz" → use NNNN.
-  - "DDRx-NNNN" notation (e.g. "DDR4-3200", "DDR5-4800") → NNNN is the speed.
-  - "PCx-NNNNN" code → divide the numeric part by 8 and snap to the nearest standard speed. Common pairs: PC3-12800=1600, PC3-14900=1866, PC4-17000=2133, PC4-19200=2400, PC4-21300=2666, PC4-23400=2933, PC4-25600=3200, PC5-38400=4800, PC5-44800=5600, PC5-51200=6400. Treat this as a direct read, not inference.
+SPEED — digits only, no "MHz"/"MT/s" suffix. Use the number printed on the label as-is — do NOT divide, multiply, or convert. The label tells you the speed; trust it.
+  - "NNNN MT/s" or "NNNN MHz" → NNNN.
+  - "DDRx-NNNN" (e.g. "DDR4-3200", "DDR5-4800") → NNNN.
+  - "PCx-NNNN" or "PCx-NNNNN" (e.g. "PC4-3200", "PC4-2666", "PC3-12800", "PC4-25600") → emit the number after the dash verbatim. Both the modern MT/s form (PC4-3200) and the older bandwidth form (PC4-25600 / PC3-12800) print the speed for you in their own convention; passing it through unchanged is correct in both cases.
 Omit speed only if NONE of these notations are visible.
 PARTNUMBER — the part number value only; drop any "PN:" / "P/N" / "S/N" label.
 ${CONFIDENCE_INSTRUCTION}

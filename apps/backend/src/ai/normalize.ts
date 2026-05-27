@@ -42,37 +42,17 @@ function digitsOnly(v: string): string {
   return m ? m[0] : '';
 }
 
-// JEDEC standard RAM speeds (matches the RAM_SPEED catalog). Used to snap a
-// PC-code-derived speed: PC4-21300 / 8 = 2662.5, which should round to 2666.
-const RAM_SPEEDS = [
-  800, 1066, 1333, 1600, 1866, 2133, 2400, 2666, 2933,
-  3200, 3600, 4000, 4400, 4800, 5200, 5600, 6000, 6400, 6800, 7200, 7600, 8000,
-];
-
-function snapToCatalog(n: number): string {
-  let best = RAM_SPEEDS[0]!;
-  let bestDist = Math.abs(n - best);
-  for (const s of RAM_SPEEDS) {
-    const d = Math.abs(n - s);
-    if (d < bestDist) { best = s; bestDist = d; }
-  }
-  // If the candidate is wildly off-spec (>5%), prefer the raw digits over a
-  // dishonest snap — the model probably misread the label.
-  return bestDist / best > 0.05 ? String(n) : String(best);
-}
-
-// "4800 MT/s" / "DDR4-3200" / "PC4-25600" → "3200". The model is asked to
-// derive speed from the PC code (prompts.ts), but vendors print it in several
-// forms; resolve each to bare MT/s deterministically.
+// Pass through whatever number the label prints after DDRx-/PCx-/MT-s.
+// Both conventions in the wild — modern "PC4-3200" (MT/s) and legacy
+// "PC4-25600" / "PC3-12800" (bandwidth in MB/s) — print the speed in their
+// own form; trying to translate between them silently drops fields when the
+// math disagrees with the model's reading. Keep the literal number.
 function normSpeed(v: string): string {
   const up = v.toUpperCase().replace(/\s+/g, '');
-  // "DDRx-NNNN" → NNNN.
   let m = up.match(/DDR[2345]-(\d{3,5})/);
   if (m) return m[1]!;
-  // "PCx-NNNNN" → NNNNN/8 snapped to a JEDEC standard speed.
   m = up.match(/PC[2345]L?-(\d{4,5})/);
-  if (m) return snapToCatalog(Math.round(parseInt(m[1]!, 10) / 8));
-  // Fallback: first run of digits ("4800 MT/s" → "4800").
+  if (m) return m[1]!;
   return digitsOnly(v);
 }
 
