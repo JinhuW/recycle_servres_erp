@@ -100,8 +100,7 @@ orders.get('/', async (c) => {
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
       COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float         AS revenue,
       COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
-      COUNT(l.id)::int                                                              AS line_count,
-      array_agg(DISTINCT l.status)                                                  AS line_statuses
+      COUNT(l.id)::int                                                              AS line_count
     FROM orders o
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
@@ -136,7 +135,10 @@ orders.get('/', async (c) => {
       revenue: r.revenue,
       profit: r.profit,
       lineCount: r.line_count,
-      status: (r.line_statuses?.length === 1 ? r.line_statuses[0] : 'Mixed') as string,
+      // PO status is authoritative — derive from o.lifecycle, not from line
+      // aggregation. Per-line `Sold` (set when inventory ships out via a sell
+      // order) is intentional divergence and must not surface as "Mixed".
+      status: LINE_STATUS_FOR_LIFECYCLE[r.lifecycle as string] ?? r.lifecycle,
     })),
     nextCursor,
   });
@@ -179,8 +181,7 @@ orders.get('/:id', async (c) => {
     ORDER BY ol.position ASC
   `;
 
-  const lineStatuses = Array.from(new Set(lines.map(l => l.status as string)));
-  const status = lineStatuses.length === 1 ? lineStatuses[0] : 'Mixed';
+  const status = LINE_STATUS_FOR_LIFECYCLE[order.lifecycle as string] ?? order.lifecycle as string;
 
   return c.json({
     order: {
@@ -454,6 +455,11 @@ orders.patch('/:id', async (c) => {
   // commits (R2 isn't transactional; never delete on a rolled-back change).
   const removedScanKeys: string[] = [];
 
+  // Surfaced so the mobile autosave path can capture the new DB id of each
+  // appended line; aligns 1:1 with the request's `addLines` ordering. Populated
+  // inside the tx and only read after the tx commits.
+  const addedLineIds: string[] = [];
+
   try {
     await sql.begin(async (tx) => {
       // Lock the order + read fields we need for audit-diffing. The lock keeps
@@ -596,6 +602,7 @@ orders.patch('/:id', async (c) => {
             RETURNING id, part_number, qty, unit_cost::float AS unit_cost
           ` as { id: string; part_number: string | null; qty: number; unit_cost: number }[];
           addedRows.push(inserted[0]);
+          addedLineIds.push(inserted[0].id);
         }
         await autoTrackParts(tx, body.addLines.map(l => ({
           category: l.category ?? (existing.category as string),
@@ -700,7 +707,7 @@ orders.patch('/:id', async (c) => {
     await deleteAttachment(c.env, key).catch(e => console.error('r2 delete (line removed)', e));
   }
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, addedLineIds });
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as
