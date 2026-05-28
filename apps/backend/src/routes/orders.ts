@@ -59,10 +59,9 @@ orders.get('/', async (c) => {
   // either narrows the result set or evaluates to TRUE so the AND chain
   // composes cleanly regardless of which params are present.
   //
-  // Managers don't see drafts — purchasers' in-progress work shouldn't clutter
-  // the manager review queue. Purchasers still see their own drafts.
+  // Managers see every PO across the org; purchasers are scoped to their own.
   const scopeFrag    = isManager
-    ? sql`o.lifecycle <> 'draft'`
+    ? sql`TRUE`
     : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`o.category = ${category}` : sql`TRUE`;
   // The mobile filter chip sends the order's stage label — map to lifecycle.

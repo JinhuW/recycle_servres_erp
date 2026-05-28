@@ -157,15 +157,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
     return { col: 'date', dir: 'desc' };
   });
 
-  // Managers don't see drafts (purchasers' in-progress work). The pipeline
-  // cards and the persisted stage filter both need to drop 'draft' for them.
-  const stages = useMemo(
-    () => isManager ? WORKFLOW_STAGES.filter(s => s.id !== 'draft') : WORKFLOW_STAGES,
-    [isManager],
-  );
-  useEffect(() => {
-    if (isManager && stageFilter === 'draft') setStageFilter('all');
-  }, [isManager, stageFilter, setStageFilter]);
+  const stages = WORKFLOW_STAGES;
 
 
   useEffect(() => {
