@@ -408,7 +408,7 @@ orders.patch('/:id', async (c) => {
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
 
-  const existing = (await sql`SELECT user_id, category FROM orders WHERE id = ${id} LIMIT 1`)[0];
+  const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
   if (body.commissionRate !== undefined && u.role !== 'manager') {
@@ -595,7 +595,8 @@ orders.patch('/:id', async (c) => {
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
               ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
-              ${l.unitCost ?? 0}, ${l.sellPrice ?? null}, ${l.status ?? 'In Transit'},
+              ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
+              ${l.status ?? LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
             )
