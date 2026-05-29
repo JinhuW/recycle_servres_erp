@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../../lib/api';
+import { api, discardTransferOrder } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
-import { discardTransferOrder } from '../../lib/api';
 import { statusTone } from '../../lib/status';
 import { TransferManifest, printManifest } from './TransferManifest';
 
