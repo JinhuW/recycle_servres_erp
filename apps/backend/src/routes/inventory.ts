@@ -1202,6 +1202,9 @@ inventory.delete('/transfer-orders/:id', async (c) => {
     for (const l of lines) {
       const detail = evByLine.get(l.id) ?? {};
       const fromDetail = typeof detail.from === 'string' && detail.from ? detail.from : null;
+      // Mixed-source lines whose origin was inherited (no explicit override) resolve to a null
+      // origin; setting warehouse_id = NULL is intentional, so the line re-inherits its order's
+      // warehouse and the pre-transfer state is restored.
       const origin = ord.from_warehouse_id ?? fromDetail;
       const priorStatus = typeof detail.prior_status === 'string' ? detail.prior_status : 'Done';
       const peerLineId = typeof detail.peer_line_id === 'string' ? detail.peer_line_id : null;

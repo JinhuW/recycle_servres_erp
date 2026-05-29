@@ -377,6 +377,49 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     expect(ev.detail.transfer_order_id).toBe(orderId);
   });
 
+  it('mixed-source full move: each line returns to its own origin, TO deleted', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const sellable = (await db`
+      SELECT l.id, l.status, l.qty, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done')
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+    `) as unknown as Array<{ id: string; status: string; qty: number; wh: string }>;
+    const a = sellable[0];
+    const b = sellable.find((l) => l.wh !== a?.wh);
+    if (!a || !b) return; // seed lacked two distinct-source sellable lines — nothing to assert
+    const to = WAREHOUSES.find((w) => w !== a.wh && w !== b.wh)!;
+    const tr = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [
+        { id: a.id, qty: a.qty }, { id: b.id, qty: b.qty },
+      ] } },
+    );
+    expect(tr.status).toBe(200);
+    const orderId = tr.body.transferOrderId;
+    const ord = (await db`SELECT from_warehouse_id FROM transfer_orders WHERE id = ${orderId}`)[0] as
+      { from_warehouse_id: string | null };
+    expect(ord.from_warehouse_id).toBeNull(); // genuinely mixed-source
+
+    const r = await api<{ ok: true; id: string }>(
+      'DELETE', `/api/inventory/transfer-orders/${orderId}`, { token },
+    );
+    expect(r.status).toBe(200);
+
+    const lnA = (await db`SELECT warehouse_id, transfer_order_id FROM order_lines WHERE id = ${a.id}`)[0] as
+      { warehouse_id: string | null; transfer_order_id: string | null };
+    const lnB = (await db`SELECT warehouse_id, transfer_order_id FROM order_lines WHERE id = ${b.id}`)[0] as
+      { warehouse_id: string | null; transfer_order_id: string | null };
+    expect(lnA.warehouse_id).toBe(a.wh);
+    expect(lnB.warehouse_id).toBe(b.wh);
+    expect(lnA.transfer_order_id).toBeNull();
+    expect(lnB.transfer_order_id).toBeNull();
+    const gone = await db`SELECT id FROM transfer_orders WHERE id = ${orderId}`;
+    expect(gone.length).toBe(0);
+  });
+
   it('partial move: source qty restored, clone deleted, TO deleted', async () => {
     const { token } = await loginAs(ALEX);
     const db = getTestDb();
