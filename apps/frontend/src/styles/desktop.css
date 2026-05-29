@@ -277,16 +277,25 @@ html.desktop, body.desktop, .desktop #root {
      ├───────────────────┤   +      │
      │ action-card       │ activity │
      └───────────────────┴──────────┘
-   The side column spans both grid rows, so its height = items + action and
-   the right column always matches the left visually. Payment is fixed-height
-   at the top of the side; Activity grows to fill the remaining side height
-   and scrolls internally (scrollbar hidden) when overflow occurs. */
+   The side column spans both rows. The items-card hugs its content
+   (align-self: start) so it can NEVER grow a dead gap below its totals footer;
+   the items row flexes so the action-card (a floating bottom bar) pins to the
+   bottom. Payment is fixed-height at the top of the side; Activity fills the
+   remaining side height and scrolls internally (scrollbar hidden). Both the
+   items table and the activity log are capped to the same 10-row budget so a
+   long activity history scrolls instead of stretching the layout. */
 .page.page-order-edit {
   padding-bottom: 8px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   scrollbar-width: none;
+  /* Shared height budget: the items table caps at the sticky header + 10 line
+     rows, and the activity log caps to the same so a long history scrolls
+     instead of stretching the layout. --oe-row-h is one line row (40px scan
+     thumb + 12px vertical cell padding ×2). */
+  --oe-row-h: 64px;
+  --oe-table-max: calc(40px + var(--oe-row-h) * 10);
 }
 .page.page-order-edit::-webkit-scrollbar { display: none; }
 
@@ -304,6 +313,9 @@ html.desktop, body.desktop, .desktop #root {
   grid-area: items;
   min-width: 0;
   min-height: 0;
+  /* Hug content so the card can never grow a dead gap below its totals footer,
+     even if the grid row is stretched by a taller side column. */
+  align-self: start;
   display: flex;
   flex-direction: column;
 }
@@ -327,6 +339,9 @@ html.desktop, body.desktop, .desktop #root {
 .page.page-order-edit > .oe-body > .oe-side > :nth-child(2) {
   flex: 1;
   min-height: 0;
+  /* Cap to the same budget as a full 10-row item table so a long activity
+     history scrolls internally rather than stretching the whole side column. */
+  max-height: var(--oe-table-max);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -348,8 +363,9 @@ html.desktop, body.desktop, .desktop #root {
   flex-shrink: 0;
 }
 .page.page-order-edit .oe-items-card > .table-scroll {
-  min-height: 320px;
-  max-height: 60vh;
+  /* Cap the body at the sticky header + 10 rows, then scroll. */
+  min-height: 180px;
+  max-height: var(--oe-table-max);
   overflow-y: auto;
   scrollbar-width: none;
 }
