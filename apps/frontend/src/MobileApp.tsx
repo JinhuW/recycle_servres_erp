@@ -268,12 +268,37 @@ function Shell() {
       draftId,
     });
 
-    // If the line was already confirmed (re-edit), nothing to persist again.
-    if (line._confirmed) return;
+    // A line that already exists in the DB carries an id — an existing-order
+    // line opened for edit, or a draft line we autosaved earlier. Re-saving it
+    // must UPDATE that row so the edit syncs now, instead of sitting
+    // browser-only until final submit (or being dropped as a "confirmed" line).
+    if (line.id) {
+      const blocked = lineSyncBlock(line);
+      if (blocked) {
+        showToast(blocked, 'error');
+        return;
+      }
+      const orderId = editingId ?? draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+      if (!orderId) {
+        showToast(t('syncNoDraft'), 'error');
+        return;
+      }
+      try {
+        // Omit status: the backend COALESCEs it, so leaving it out preserves
+        // the line's lifecycle (Done, etc.) instead of forcing In Transit.
+        const { status, ...fields } = toWireLine(line);
+        void status;
+        await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields }] });
+      } catch {
+        showToast(t('syncFailed'), 'error');
+      }
+      return;
+    }
 
-    // Editing an existing order appends new lines on final submit (they carry
-    // no draft id), so there's nothing to autosave per-line in that flow.
-    if (editingId) return;
+    // Brand-new line (no DB id yet). Autosave it whether this is a fresh draft
+    // or an existing order opened for edit — both append via addLines. Without
+    // targeting editingId here, a line added to an existing order sat
+    // browser-only until final submit (the reported "Add item doesn't sync").
 
     // Never skip silently: if the line isn't complete enough to persist, tell
     // the user exactly which field is missing.
@@ -283,22 +308,29 @@ function Shell() {
       return;
     }
 
-    // The draft is created asynchronously when the flow starts, so on a fast
-    // Save draftId may not be in state yet — await the in-flight creation
-    // instead of dropping the line to local-only.
-    const did = draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
-    if (!did) {
+    // The existing order being edited, or the new draft — whose creation is
+    // async, so on a fast Save await the in-flight POST instead of dropping the
+    // line to local-only.
+    const targetId = editingId ?? draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+    if (!targetId) {
       showToast(t('syncNoDraft'), 'error');
       return;
     }
 
     try {
-      await api.patch('/api/orders/' + did, { addLines: [toWireLine(line)] });
+      // Capture the inserted row's id so a later re-edit UPDATEs it in place
+      // (and the final submit updates rather than inserting a duplicate).
+      const res = await api.patch<{ addedLineIds?: string[] }>(
+        '/api/orders/' + targetId, { addLines: [toWireLine(line)] },
+      );
+      const newId = res.addedLineIds?.[0];
       // Match by stable client id, not array index: the user may have added,
       // removed, or navigated past this line before the PATCH resolved.
       setCapture(c => {
         if (c.phase === 'idle' || c.phase === 'category' || c.phase === 'draftPicker') return c;
-        const updated = c.lines.map(l => l._cid === line._cid ? { ...l, _confirmed: true } : l);
+        const updated = c.lines.map(l =>
+          l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id } : l,
+        );
         return { ...c, lines: updated };
       });
     } catch {
@@ -579,13 +611,7 @@ function Shell() {
 
       <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={user.role} />
 
-      {toast && (
-        <div className="ph-toast-wrap" style={{ position: 'absolute', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
-          <div className={'ph-toast ' + (toast.kind || '')}>
-            <Icon name="check2" size={14} /><span>{toast.msg}</span>
-          </div>
-        </div>
-      )}
+      {toastEl}
     </div>
   );
 }

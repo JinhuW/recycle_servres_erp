@@ -29,6 +29,26 @@ describe('buildOrderSubmit — editing an existing order', () => {
     expect(r.body).not.toHaveProperty('addLines');
   });
 
+  it('a line added then autosaved (has an id, absent from originals) updates in place — never re-inserts', () => {
+    // Mobile "Add item" autosaves the new line and adopts its DB id. On final
+    // submit it must go to `lines` (update), not `addLines` (insert), or the
+    // line would be duplicated. It is not in originalLineIds, so it must also
+    // not be treated as removed.
+    const r = buildOrderSubmit(
+      {
+        editingId: 'PO-1290',
+        category: 'RAM',
+        lines: [line({ id: 'orig1' }), line({ id: 'added-autosaved', brand: 'Crucial' })],
+        originalLineIds: ['orig1'],
+      },
+      meta,
+    );
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect((r.body.lines as Array<Record<string, unknown>>).map(l => l.id)).toEqual(['orig1', 'added-autosaved']);
+    expect(r.body).not.toHaveProperty('addLines');
+    expect(r.body).not.toHaveProperty('removeLineIds');
+  });
+
   it('adds lines with no id and removes originals the user deleted', () => {
     const r = buildOrderSubmit(
       {
