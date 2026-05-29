@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
-import { api, createDraftOrder } from '../../lib/api';
+import { api, createDraftOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtUSD } from '../../lib/format';
+import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
-import type { Category, ScanResponse, Warehouse } from '../../lib/types';
+import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
+import { eligibleDraftTargets } from './submit/eligibleTargets';
+import { useAuth } from '../../lib/auth';
 
 // ─── Public component ────────────────────────────────────────────────────────
 // Two-step submit flow lifted from design/submit.jsx + design/app.jsx#SubmitView:
@@ -226,6 +228,7 @@ function OrderForm({
   onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
 }) {
   const { t, lang } = useT();
+  const { user } = useAuth();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
@@ -263,6 +266,24 @@ function OrderForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
 
+  // Existing same-category Draft POs the user can append to instead of creating
+  // a fresh PO. Fetched once; re-filtered when draftId resolves so the throwaway
+  // draft this form just created never appears as its own merge target.
+  const [allDrafts, setAllDrafts] = useState<OrderSummary[]>([]);
+  useEffect(() => {
+    let alive = true;
+    api.get<{ orders: OrderSummary[] }>(`/api/orders?category=${category}&status=Draft`)
+      .then(r => { if (alive) setAllDrafts(r.orders); })
+      .catch(() => { /* non-fatal: just means no "add to existing" option */ });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
+
+  const targets = useMemo(
+    () => eligibleDraftTargets(allDrafts, { category, meId: user?.id, excludeId: draftId }),
+    [allDrafts, category, user?.id, draftId],
+  );
+
   // Default the warehouse to the first one once they load.
   useEffect(() => {
     if (warehouses.length && !meta.warehouseId) {
@@ -292,6 +313,10 @@ function OrderForm({
     return m;
   }, [dupGroups]);
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
+  // When the dup-part warning is reached via "add to existing", remember which
+  // target to merge into so confirming the warning doesn't fall back to new-PO.
+  const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
+  const [choice, setChoice] = useState<{ selectedId: string | null } | null>(null);
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -410,6 +435,28 @@ function OrderForm({
         ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
       });
       onDone({ msg: t('orderSubmitted'), kind: 'success' });
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Append all local lines to an existing Draft PO, then remove the throwaway
+  // draft this session created. Target meta (warehouse/payment/notes) is
+  // inherited — we send only lines + a refreshed total.
+  const doSubmitToExisting = async (target: OrderSummary) => {
+    if (!draftId) { setAiError(t('subNoDraftErr')); return; }
+    setSubmitting(true);
+    try {
+      await api.patch('/api/orders/' + target.id, {
+        addLines: lines.map(toWireLine),
+        totalCost: (target.totalCost ?? 0) + totals.cost,
+      });
+      // Best-effort cleanup of the now-empty throwaway draft — the merge already
+      // succeeded, so a failure here must not fail the submit.
+      try { await deleteOrder(draftId); } catch { /* leaves an empty draft; harmless */ }
+      onDone({ msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
     } finally {
@@ -654,6 +701,10 @@ function OrderForm({
                 disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
                 title={submitDisabledReason ?? undefined}
                 onClick={() => {
+                  if (targets.length > 0) {
+                    setChoice({ selectedId: null });
+                    return;
+                  }
                   if (dupGroups.length > 0) {
                     setDupConfirm(dupGroups);
                     return;
@@ -685,6 +736,83 @@ function OrderForm({
           onConfirmError={setAiError}
           duplicateOnLines={dupByIdx.get(activeIdx)}
         />
+      )}
+
+      {choice && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !submitting) setChoice(null); }}>
+          <div className="modal-shell" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="modal-title">{t('subSubmitChoiceTitle')}</div>
+                <div className="modal-sub">{t('subSubmitChoiceSub')}</div>
+              </div>
+            </div>
+            <div className="modal-body" style={{ display: 'grid', gap: 12 }}>
+              <button
+                className="card"
+                disabled={submitting}
+                style={{
+                  padding: 14, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg-elev)',
+                }}
+                onClick={() => {
+                  setChoice(null);
+                  if (dupGroups.length > 0) { setPendingTargetId(null); setDupConfirm(dupGroups); return; }
+                  void doSubmit();
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{t('subChoiceNewPo')}</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('subChoiceNewPoSub')}</div>
+              </button>
+
+              <div className="card" style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{t('subChoiceExistingPo')}</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2, marginBottom: 10 }}>
+                  {t('subChoiceExistingPoSub', { cat: category })}
+                </div>
+                <div style={{ display: 'grid', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                  {targets.map(o => {
+                    const sel = choice.selectedId === o.id;
+                    return (
+                      <button
+                        key={o.id}
+                        disabled={submitting}
+                        onClick={() => setChoice({ selectedId: o.id })}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                          padding: '8px 10px', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                          borderRadius: 8, background: sel ? 'var(--accent-soft)' : 'transparent',
+                          border: '1px solid ' + (sel ? 'var(--accent)' : 'var(--border)'),
+                        }}
+                      >
+                        <span className="mono" style={{ fontWeight: sel ? 600 : 500, color: sel ? 'var(--accent-strong)' : undefined }}>{o.id}</span>
+                        <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                          {(o.warehouse?.short ?? '—') + ' · ' + t('subTargetMeta', { n: o.lineCount, cost: fmtUSD(o.totalCost ?? 0, locale) }) + ' · ' + fmtDateShort(o.createdAt, locale)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setChoice(null)} disabled={submitting}>{t('cancel')}</button>
+              <button
+                className="btn accent"
+                disabled={submitting || !choice.selectedId}
+                onClick={() => {
+                  const target = targets.find(o => o.id === choice.selectedId);
+                  if (!target) return;
+                  setChoice(null);
+                  if (dupGroups.length > 0) { setPendingTargetId(target.id); setDupConfirm(dupGroups); return; }
+                  void doSubmitToExisting(target);
+                }}
+              >
+                {submitting ? '…' : t('subChoicePickTarget')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {dupConfirm && (
@@ -723,7 +851,13 @@ function OrderForm({
               <button
                 className="btn accent"
                 disabled={submitting}
-                onClick={async () => { setDupConfirm(null); await doSubmit(); }}
+                onClick={async () => {
+                  setDupConfirm(null);
+                  const target = pendingTargetId ? targets.find(o => o.id === pendingTargetId) : null;
+                  setPendingTargetId(null);
+                  if (target) await doSubmitToExisting(target);
+                  else await doSubmit();
+                }}
               >
                 {submitting ? '…' : t('dupPartSubmitAnyway')}
               </button>
