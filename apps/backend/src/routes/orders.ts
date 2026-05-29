@@ -9,6 +9,8 @@ import {
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
+import { getWorkspaceSetting } from '../lib/settings';
+import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -270,6 +272,100 @@ orders.get('/:id/events', async (c) => {
         : null,
     })),
   });
+});
+
+// ── PO document (PDF). Same access rules as GET /:id: owner + manager. Builds
+// a printable purchase-order document — header, warehouse address, line items
+// with costs, and a payment summary. Registered before any broader route.
+const LIFECYCLE_LABEL: Record<string, string> = {
+  draft: 'Draft', in_transit: 'In Transit', reviewing: 'Reviewing', done: 'Done',
+};
+
+function poLineLabel(l: Record<string, unknown>): string {
+  const s = (v: unknown) => (v == null ? '' : String(v));
+  switch (l.category) {
+    case 'RAM': return [s(l.brand), s(l.capacity), s(l.generation), l.speed ? `${l.speed}MHz` : '', s(l.rank)].filter(Boolean).join(' ');
+    case 'SSD': return [s(l.brand), s(l.capacity), s(l.interface), s(l.form_factor)].filter(Boolean).join(' ');
+    case 'HDD': return [s(l.brand), s(l.capacity), l.rpm ? `${l.rpm}rpm` : '', s(l.interface)].filter(Boolean).join(' ');
+    default: return s(l.description);
+  }
+}
+
+const fmtTs = (v: unknown): string =>
+  v ? new Date(v as string).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+
+orders.get('/:id/invoice', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const order = (await sql`
+    SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+           u.name AS user_name,
+           w.name AS warehouse_name, w.region AS warehouse_region, w.address AS warehouse_address
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+    LEFT JOIN warehouses w ON w.id = o.warehouse_id
+    WHERE o.id = ${id}
+    LIMIT 1
+  `)[0] as Record<string, unknown> | undefined;
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+
+  const lines = await sql`
+    SELECT category, brand, capacity, generation, type, classification, rank, speed,
+           interface, form_factor, description, part_number, condition, qty,
+           unit_cost::float AS unit_cost
+    FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
+  ` as Record<string, unknown>[];
+
+  const [company, companyDomain] = await Promise.all([
+    getWorkspaceSetting<string>(sql, 'workspace_name', 'Recycle Servers'),
+    getWorkspaceSetting<string>(sql, 'domain', ''),
+  ]);
+
+  // Payment summary. Subtotal is the sum of line costs; the order may carry a
+  // manual total_cost override (e.g. a negotiated lot price) — surface both when
+  // they differ. Commission is a manager-set rate on the PO; the dollar amount
+  // depends on realized profit (sell side), which this document doesn't carry,
+  // so we show the rate only.
+  const subtotal = lines.reduce((s, l) => s + Number(l.qty ?? 0) * Number(l.unit_cost ?? 0), 0);
+  const totalQty = lines.reduce((s, l) => s + Number(l.qty ?? 0), 0);
+  const totalCost = order.total_cost != null ? Number(order.total_cost) : subtotal;
+  const commissionRate = order.commission_rate != null ? Number(order.commission_rate) : null;
+
+  const buf = await buildPoInvoicePdf({
+    company,
+    companyDomain,
+    poId: String(order.id),
+    date: fmtTs(order.created_at).slice(0, 10),
+    status: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle),
+    buyer: String(order.user_name ?? ''),
+    category: String(order.category ?? ''),
+    notes: String(order.notes ?? ''),
+    warehouseName: String(order.warehouse_name ?? ''),
+    warehouseAddress: String(order.warehouse_address ?? ''),
+    warehouseRegion: String(order.warehouse_region ?? ''),
+    lines: lines.map((l) => ({
+      label: poLineLabel(l),
+      partNumber: String(l.part_number ?? ''),
+      condition: String(l.condition ?? ''),
+      qty: Number(l.qty ?? 0),
+      unitCost: Number(l.unit_cost ?? 0),
+    })),
+    payment: {
+      method: order.payment === 'self' ? 'Self pay' : 'Company pay',
+      totalQty,
+      subtotal,
+      totalCost,
+      commissionRate,
+      commissionAmount: null,
+    },
+    logoPng: loadInvoiceLogo(),
+    generatedAt: fmtTs(new Date().toISOString()),
+  });
+
+  return pdfResponse(buf, `${order.id}.pdf`);
 });
 
 // ── Create a new order with its lines (purchaser submits from phone).

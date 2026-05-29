@@ -46,6 +46,9 @@ describe('GET /api/inventory/export', () => {
     const { ws, cells } = await loadSheet(res);
     expect(cells).toContain('Item');       // header row present
     expect(cells).toContain('Unit cost');  // manager-only column present
+    expect(cells).toContain('Rank');       // dedicated RAM attribute columns
+    expect(cells).toContain('Speed');
+    expect(cells).toContain('Image URL');  // label-scan delivery URL column
     expect(ws.rowCount).toBeGreaterThan(1); // header + seeded lines
   });
 

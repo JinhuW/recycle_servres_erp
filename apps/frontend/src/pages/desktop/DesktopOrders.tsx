@@ -569,17 +569,29 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                         <span className={'chip dot ' + statusTone(o.status)}>{o.status}</span>
                       </td>
                       <td>
-                        <button
-                          className="btn icon sm"
-                          title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (openLines && openLines.id === o.id) onEdit(openLines);
-                            else api.get<{ order: Order }>(`/api/orders/${o.id}`).then(r => onEdit(r.order));
-                          }}
-                        >
-                          <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={12} />
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: 4 }}>
+                          <button
+                            className="btn icon sm"
+                            title={t('downloadPo')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              api.download(`/api/orders/${o.id}/invoice`, `${o.id}.pdf`).catch(handleFetchError);
+                            }}
+                          >
+                            <Icon name="download" size={12} />
+                          </button>
+                          <button
+                            className="btn icon sm"
+                            title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (openLines && openLines.id === o.id) onEdit(openLines);
+                              else api.get<{ order: Order }>(`/api/orders/${o.id}`).then(r => onEdit(r.order));
+                            }}
+                          >
+                            <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={12} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {isOpen && openLines && openLines.id === o.id && (

@@ -123,6 +123,8 @@ const INV_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Category',     key: 'category',  width: 10 },
   { header: 'Item',         key: 'item',      width: 30 },
   { header: 'Spec',         key: 'spec',      width: 26 },
+  { header: 'Rank',         key: 'rank',      width: 10 },
+  { header: 'Speed',        key: 'speed',     width: 10 },
   { header: 'Part #',       key: 'part',      width: 22 },
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Condition',    key: 'condition', width: 12 },
@@ -133,6 +135,7 @@ const INV_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Margin %',     key: 'margin',    width: 10, numFmt: '#,##0.0' },
   { header: 'Submitted by', key: 'submitter', width: 18 },
   { header: 'Status',       key: 'status',    width: 14 },
+  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
 function invLabel(r: Record<string, unknown>): string {
@@ -165,11 +168,21 @@ inventory.get('/export', async (c) => {
            l.interface, l.form_factor, l.description, l.part_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.health::float AS health, l.rpm,
-           u.name AS user_name, w.short AS warehouse_short
+           u.name AS user_name, w.short AS warehouse_short,
+           img.delivery_url AS image_url
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+    -- One representative scan per line (LATERAL + LIMIT 1 keeps the join from
+    -- multiplying inventory rows). delivery_url is null for stub-provider scans.
+    LEFT JOIN LATERAL (
+      SELECT ls.delivery_url
+      FROM label_scans ls
+      WHERE ls.cf_image_id = l.scan_image_id
+      ORDER BY ls.created_at ASC
+      LIMIT 1
+    ) img ON TRUE
     WHERE ${whereFrag}
     ORDER BY l.created_at DESC
   `;
@@ -186,6 +199,8 @@ inventory.get('/export', async (c) => {
       category: r.category ?? '',
       item: invLabel(r),
       spec: invSpec(r),
+      rank: r.rank ?? '',
+      speed: r.speed ?? '',
       part: r.part_number ?? '',
       warehouse: r.warehouse_short ?? '',
       condition: r.condition ?? '',
@@ -196,6 +211,7 @@ inventory.get('/export', async (c) => {
       margin,
       submitter: r.user_name ?? '',
       status: r.status ?? '',
+      imageUrl: r.image_url ?? '',
     };
   });
 
