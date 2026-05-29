@@ -281,20 +281,24 @@ html.desktop, body.desktop, .desktop #root {
    (align-self: start) so it can NEVER grow a dead gap below its totals footer;
    the items row flexes so the action-card (a floating bottom bar) pins to the
    bottom. Payment is fixed-height at the top of the side; Activity fills the
-   remaining side height and scrolls internally (scrollbar hidden). Both the
-   items table and the activity log are capped to the same 10-row budget so a
-   long activity history scrolls instead of stretching the layout. */
+   remaining side height and scrolls internally (scrollbar hidden). The items
+   table caps at a 10-row budget, then scrolls. The activity log's max height
+   TRACKS the visible row count (--oe-rows, set by the component, capped at 10)
+   so a short table gives a short log and a 10-row table gives the tallest log —
+   either way it scrolls instead of stretching the layout. */
 .page.page-order-edit {
   padding-bottom: 8px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   scrollbar-width: none;
-  /* Shared height budget: the items table caps at the sticky header + 10 line
-     rows, and the activity log caps to the same so a long history scrolls
-     instead of stretching the layout. --oe-row-h is one line row (40px scan
-     thumb + 12px vertical cell padding ×2). */
+  /* Shared height budget. --oe-row-h is one line row (40px scan thumb + 12px
+     vertical cell padding ×2); 40px is the sticky header. The item table caps
+     at 10 rows (--oe-table-max). --oe-rows mirrors the live row count (set by
+     the component, clamped 0–10) and drives the activity log's max height so it
+     tracks the table; the default keeps the CSS valid if it isn't supplied. */
   --oe-row-h: 64px;
+  --oe-rows: 10;
   --oe-table-max: calc(40px + var(--oe-row-h) * 10);
 }
 .page.page-order-edit::-webkit-scrollbar { display: none; }
@@ -339,9 +343,10 @@ html.desktop, body.desktop, .desktop #root {
 .page.page-order-edit > .oe-body > .oe-side > :nth-child(2) {
   flex: 1;
   min-height: 0;
-  /* Cap to the same budget as a full 10-row item table so a long activity
-     history scrolls internally rather than stretching the whole side column. */
-  max-height: var(--oe-table-max);
+  /* Track the item table's height: header + current row count, floored at the
+     table's own min-height and capped at 10 rows (--oe-rows is clamped to 10).
+     A long history then scrolls internally instead of stretching the side. */
+  max-height: max(180px, calc(40px + var(--oe-row-h) * var(--oe-rows)));
   display: flex;
   flex-direction: column;
   overflow: hidden;

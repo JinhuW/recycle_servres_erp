@@ -393,7 +393,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         </div>
       )}
 
-      <div className="oe-body">
+      {/* --oe-rows mirrors the visible line count (capped at 10) so the activity
+          log's max height tracks the item table — short table, short log. */}
+      <div className="oe-body" style={{ ['--oe-rows' as string]: String(Math.min(lines.length, 10)) }}>
       <div className={'card oe-items-card' + (!canEditOrder ? ' order-readonly' : '')}>
         <div className="card-head">
           <div>
