@@ -1,17 +1,15 @@
 import { useState } from 'react';
 import { useT } from '../lib/i18n';
-import { useAuth } from '../lib/auth';
 import { useTweaks } from '../lib/tweaks';
 import { Icon } from './Icon';
 
-// Floating developer/admin affordance to toggle density, role-preview, and
-// language. Mirrors the design's TweaksPanelMount (app.jsx:312-350) but as a
+// Floating developer/admin affordance to toggle density and language.
+// Mirrors the design's TweaksPanelMount (app.jsx:312-350) but as a
 // compact popover anchored to the bottom-right of the desktop shell.
 export function TweaksPanel() {
   const [open, setOpen] = useState(false);
   const { t, lang, setLang } = useT();
-  const { user } = useAuth();
-  const { density, setDensity, rolePreview, setRolePreview } = useTweaks();
+  const { density, setDensity } = useTweaks();
 
   return (
     <>
@@ -51,18 +49,6 @@ export function TweaksPanel() {
               { value: 'compact', label: t('compact') },
             ]}
           />
-
-          {user?.role === 'manager' && (
-            <TweakRadio
-              label={t('previewAs')}
-              value={rolePreview}
-              onChange={(v) => setRolePreview(v as 'actual' | 'as_purchaser')}
-              options={[
-                { value: 'actual', label: t('managerYou') },
-                { value: 'as_purchaser', label: t('role_purchaser') },
-              ]}
-            />
-          )}
         </div>
       )}
     </>
