@@ -316,3 +316,144 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
     expect(ord.status).toBe('Received'); // unchanged — no writes
   });
 });
+
+describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('403 for non-manager', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('DELETE', '/api/inventory/transfer-orders/TO-1', { token });
+    expect(r.status).toBe(403);
+  });
+
+  it('404 for unknown order', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('DELETE', '/api/inventory/transfer-orders/TO-999999', { token });
+    expect(r.status).toBe(404);
+  });
+
+  it('400 when the order is not Pending', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${moved.orderId}`, { token });
+    expect(r.status).toBe(400);
+  });
+
+  it('full move: line returns to origin at its prior status, TO deleted', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const before = (await db`
+      SELECT l.id, l.status, l.qty, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done')
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+      LIMIT 1
+    `)[0] as { id: string; status: string; qty: number; wh: string };
+    const to = WAREHOUSES.find((w) => w !== before.wh)!;
+    const tr = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [{ id: before.id, qty: before.qty }] } },
+    );
+    const orderId = tr.body.transferOrderId;
+
+    const r = await api<{ ok: true; id: string }>(
+      'DELETE', `/api/inventory/transfer-orders/${orderId}`, { token },
+    );
+    expect(r.status).toBe(200);
+
+    const ln = (await db`SELECT status, warehouse_id, transfer_order_id FROM order_lines WHERE id = ${before.id}`)[0] as
+      { status: string; warehouse_id: string | null; transfer_order_id: string | null };
+    expect(ln.status).toBe(before.status);
+    expect(ln.warehouse_id).toBe(before.wh);
+    expect(ln.transfer_order_id).toBeNull();
+    const gone = await db`SELECT id FROM transfer_orders WHERE id = ${orderId}`;
+    expect(gone.length).toBe(0);
+    const ev = (await db`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${before.id} AND kind = 'transfer_discarded' ORDER BY created_at DESC LIMIT 1
+    `)[0] as { detail: Record<string, unknown> };
+    expect(ev.detail.transfer_order_id).toBe(orderId);
+  });
+
+  it('partial move: source qty restored, clone deleted, TO deleted', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const src = (await db`
+      SELECT l.id, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done')
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+      LIMIT 1
+    `)[0] as { id: string; wh: string };
+    await db`UPDATE order_lines SET qty = 5 WHERE id = ${src.id}`;
+    const to = WAREHOUSES.find((w) => w !== src.wh)!;
+    const tr = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
+    );
+    const orderId = tr.body.transferOrderId;
+    const clone = (await db`SELECT id FROM order_lines WHERE transfer_order_id = ${orderId}`)[0] as { id: string };
+    expect(clone).toBeDefined();
+
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${orderId}`, { token });
+    expect(r.status).toBe(200);
+
+    const srcRow = (await db`SELECT qty FROM order_lines WHERE id = ${src.id}`)[0] as { qty: number };
+    expect(srcRow.qty).toBe(5);
+    const cloneGone = await db`SELECT id FROM order_lines WHERE id = ${clone.id}`;
+    expect(cloneGone.length).toBe(0);
+    const toGone = await db`SELECT id FROM transfer_orders WHERE id = ${orderId}`;
+    expect(toGone.length).toBe(0);
+  });
+
+  it('partial move with consumed source: clone reverts standalone (fallback)', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const src = (await db`
+      SELECT l.id, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done')
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+      LIMIT 1
+    `)[0] as { id: string; wh: string };
+    await db`UPDATE order_lines SET qty = 5 WHERE id = ${src.id}`;
+    const to = WAREHOUSES.find((w) => w !== src.wh)!;
+    const tr = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [{ id: src.id, qty: 2 }] } },
+    );
+    const orderId = tr.body.transferOrderId;
+    const clone = (await db`SELECT id FROM order_lines WHERE transfer_order_id = ${orderId}`)[0] as { id: string };
+    const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as { id: string };
+    await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
+             VALUES (${so.id}, ${src.id}, 'RAM', 'x', 1, 1)`;
+
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${orderId}`, { token });
+    expect(r.status).toBe(200);
+
+    const cloneRow = (await db`SELECT warehouse_id, transfer_order_id, status FROM order_lines WHERE id = ${clone.id}`)[0] as
+      { warehouse_id: string | null; transfer_order_id: string | null; status: string };
+    expect(cloneRow.transfer_order_id).toBeNull();
+    expect(cloneRow.warehouse_id).toBe(src.wh);
+    expect(['Reviewing', 'Done']).toContain(cloneRow.status);
+    const toGone = await db`SELECT id FROM transfer_orders WHERE id = ${orderId}`;
+    expect(toGone.length).toBe(0);
+  });
+
+  it('409 (no writes) when a line is committed to a sell order', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const db = getTestDb();
+    const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as { id: string };
+    await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
+             VALUES (${so.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${moved.orderId}`, { token });
+    expect(r.status).toBe(409);
+    const ord = (await db`SELECT status FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as { status: string };
+    expect(ord.status).toBe('Pending'); // unchanged — no writes
+  });
+});

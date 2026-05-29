@@ -1150,4 +1150,103 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
   return c.json({ ok: true, id });
 });
 
+// Discard a Pending transfer order: undo the move and delete the TO. Full-move
+// lines flip back to their origin warehouse at their pre-transfer status;
+// partial-clone lines (their transferred event carries a peer_line_id) merge
+// their qty back into the source remainder and are deleted. Manager-only.
+// Mirrors the PO "draft-only delete" rule — a Received order must be reopened
+// first. Guard: every line must still be In Transit and uncommitted to a sell
+// order, else 409 with no writes (matches reopen).
+inventory.delete('/transfer-orders/:id', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  type Outcome = { code: 404 | 400 | 409; msg: string } | { code: 200 };
+  let outcome: Outcome = { code: 200 };
+
+  await sql.begin(async (tx) => {
+    const ord = (await tx`
+      SELECT id, status, from_warehouse_id FROM transfer_orders WHERE id = ${id} FOR UPDATE
+    `)[0] as { id: string; status: string; from_warehouse_id: string | null } | undefined;
+    if (!ord) { outcome = { code: 404, msg: `transfer order ${id} not found` }; return; }
+    if (ord.status !== 'Pending') {
+      outcome = { code: 400, msg: `transfer order ${id} is ${ord.status}; reopen it before discarding` };
+      return;
+    }
+
+    const lines = (await tx`
+      SELECT l.id, l.status, l.qty,
+             (SELECT COUNT(*)::int FROM sell_order_lines sl WHERE sl.inventory_id = l.id) AS sell_count
+      FROM order_lines l
+      WHERE l.transfer_order_id = ${id}
+      FOR UPDATE OF l
+    `) as unknown as Array<{ id: string; status: string; qty: number; sell_count: number }>;
+
+    const bad = lines.filter((l) => l.status !== 'In Transit' || l.sell_count > 0);
+    if (bad.length > 0) {
+      outcome = { code: 409, msg: `cannot discard: line(s) ${bad.map((l) => l.id).join(', ')} have moved on` };
+      return;
+    }
+
+    const lineIds = lines.map((l) => l.id);
+    const evs = lineIds.length === 0 ? [] : (await tx`
+      SELECT order_line_id, detail FROM inventory_events
+      WHERE order_line_id = ANY(${lineIds}::uuid[])
+        AND kind = 'transferred'
+        AND detail->>'transfer_order_id' = ${id}
+    `) as unknown as Array<{ order_line_id: string; detail: Record<string, unknown> }>;
+    const evByLine = new Map(evs.map((e) => [e.order_line_id, e.detail]));
+
+    for (const l of lines) {
+      const detail = evByLine.get(l.id) ?? {};
+      const fromDetail = typeof detail.from === 'string' && detail.from ? detail.from : null;
+      const origin = ord.from_warehouse_id ?? fromDetail;
+      const priorStatus = typeof detail.prior_status === 'string' ? detail.prior_status : 'Done';
+      const peerLineId = typeof detail.peer_line_id === 'string' ? detail.peer_line_id : null;
+
+      let merged = false;
+      if (peerLineId) {
+        const peer = (await tx`
+          SELECT id FROM order_lines
+          WHERE id = ${peerLineId} AND transfer_order_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = order_lines.id)
+          FOR UPDATE
+        `)[0] as { id: string } | undefined;
+        if (peer) {
+          await tx`UPDATE order_lines SET qty = qty + ${l.qty} WHERE id = ${peer.id}`;
+          await tx`
+            INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+            VALUES (${peer.id}, ${u.id}, 'transfer_discarded',
+                    ${tx.json({ transfer_order_id: id, returned_to: origin, qty: l.qty })})
+          `;
+          await tx`DELETE FROM order_lines WHERE id = ${l.id}`;
+          merged = true;
+        }
+      }
+      if (!merged) {
+        await tx`
+          UPDATE order_lines
+             SET warehouse_id = ${origin}, status = ${priorStatus}, transfer_order_id = NULL
+           WHERE id = ${l.id}
+        `;
+        await tx`
+          INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+          VALUES (${l.id}, ${u.id}, 'transfer_discarded',
+                  ${tx.json({ transfer_order_id: id, returned_to: origin, qty: l.qty })})
+        `;
+      }
+    }
+
+    await tx`DELETE FROM transfer_orders WHERE id = ${id}`;
+  });
+
+  if (outcome.code !== 200) {
+    const err = outcome as { code: 404 | 400 | 409; msg: string };
+    return c.json({ error: err.msg }, err.code);
+  }
+  return c.json({ ok: true, id });
+});
+
 export default inventory;
