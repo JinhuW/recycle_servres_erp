@@ -61,6 +61,11 @@ function Shell() {
     return () => { document.body.classList.remove('phone-mode'); };
   }, []);
   const [capture, setCapture] = useState<CaptureState>({ phase: 'idle' });
+  // The draft order is created asynchronously when the flow starts, so the form
+  // is shown before its id lands in `capture`. Hold the in-flight creation here
+  // so a fast Save can await the id instead of silently dropping the line to
+  // local-only (it would then only reach the DB on final submit).
+  const draftIdPromise = useRef<Promise<string | null> | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
@@ -168,9 +173,15 @@ function Shell() {
 
   const startNewDraft = (cat: Category) => {
     setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
-    createDraftOrder(cat)
-      .then(r => setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id }))
-      .catch(() => showToast('Could not start a draft order — retry.', 'error'));
+    draftIdPromise.current = createDraftOrder(cat)
+      .then(r => {
+        setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id });
+        return r.id;
+      })
+      .catch(() => {
+        showToast('Could not start a draft order — retry.', 'error');
+        return null;
+      });
   };
 
   // Reopen an existing draft on the review screen so the user sees the lines
@@ -223,16 +234,19 @@ function Shell() {
     scanConfidence: l.scanConfidence ?? null,
   });
 
-  // A line is ready to persist once it has identity (brand or description for
-  // Other), a positive qty, and a non-negative unit cost.
-  const lineReady = (l: DraftLine) => {
-    const qty = Number(l.qty) || 0;
-    const cost = Number(l.unitCost);
+  // Returns the reason a line can't be auto-saved to the server yet, or null
+  // when it's ready (identity — brand, or description for Other — a positive
+  // qty, and a non-negative unit cost). Surfaced to the user so a line never
+  // fails to sync silently.
+  const lineSyncBlock = (l: DraftLine): string | null => {
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
-    return qty > 0 && cost >= 0 && hasIdentity;
+    if (!hasIdentity) return l.category === 'Other' ? t('syncNeedDescription') : t('syncNeedBrand');
+    if (!((Number(l.qty) || 0) > 0)) return t('syncNeedQty');
+    if (!(Number(l.unitCost) >= 0)) return t('syncNeedCost');
+    return null;
   };
 
-  const onSaveLine = (line: DraftLine) => {
+  const onSaveLine = async (line: DraftLine) => {
     // Capture current state synchronously so we can read draftId and compute
     // the new lines array before the async PATCH.
     if (capture.phase !== 'form') return;
@@ -242,9 +256,6 @@ function Shell() {
     const newLines = (editingLineIdx != null)
       ? capture.lines.map((l, i) => i === editingLineIdx ? line : l)
       : [...capture.lines, line];
-
-    // Index of the newly saved line in the newLines array.
-    const savedIdx = editingLineIdx != null ? editingLineIdx : newLines.length - 1;
 
     // Move to review immediately (optimistic UI).
     setCapture({
@@ -257,27 +268,43 @@ function Shell() {
       draftId,
     });
 
-    // If the line was already confirmed (re-edit), skip re-persisting.
+    // If the line was already confirmed (re-edit), nothing to persist again.
     if (line._confirmed) return;
 
-    // Only persist valid lines; silently skip invalid ones (they stay locally
-    // unconfirmed and will be sent on final submit).
-    if (!lineReady(line) || !draftId) return;
+    // Editing an existing order appends new lines on final submit (they carry
+    // no draft id), so there's nothing to autosave per-line in that flow.
+    if (editingId) return;
 
-    api.patch('/api/orders/' + draftId, { addLines: [toWireLine(line)] })
-      .then(() => {
-        setCapture(c => {
-          if (c.phase !== 'review') return c;
-          const updated = c.lines.map((l, i) =>
-            i === savedIdx ? { ...l, _confirmed: true } : l,
-          );
-          return { ...c, lines: updated };
-        });
-      })
-      .catch(() => {
-        // Keep the line locally unconfirmed; it will be sent on final submit.
-        showToast('Line saved locally — could not sync to server.', 'error');
+    // Never skip silently: if the line isn't complete enough to persist, tell
+    // the user exactly which field is missing.
+    const blocked = lineSyncBlock(line);
+    if (blocked) {
+      showToast(blocked, 'error');
+      return;
+    }
+
+    // The draft is created asynchronously when the flow starts, so on a fast
+    // Save draftId may not be in state yet — await the in-flight creation
+    // instead of dropping the line to local-only.
+    const did = draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+    if (!did) {
+      showToast(t('syncNoDraft'), 'error');
+      return;
+    }
+
+    try {
+      await api.patch('/api/orders/' + did, { addLines: [toWireLine(line)] });
+      // Match by stable client id, not array index: the user may have added,
+      // removed, or navigated past this line before the PATCH resolved.
+      setCapture(c => {
+        if (c.phase === 'idle' || c.phase === 'category' || c.phase === 'draftPicker') return c;
+        const updated = c.lines.map(l => l._cid === line._cid ? { ...l, _confirmed: true } : l);
+        return { ...c, lines: updated };
       });
+    } catch {
+      // Keep the line locally unconfirmed; it will be sent on final submit.
+      showToast(t('syncFailed'), 'error');
+    }
   };
 
   const addAnotherItem = () => {
@@ -416,45 +443,68 @@ function Shell() {
   if (pendingRoleChoice && user.role === 'manager') return <RolePicker variant="mobile" />;
 
   // Full-screen camera/form/review intercept the normal tab UI
+  // The capture-flow screens (camera/form/review) are early returns, so the
+  // toast block in the main shell below never mounts while they're on screen —
+  // every error raised during scan / line-save / submit was set into state but
+  // rendered nowhere, leaving buttons that look like they did nothing. Render
+  // the toast alongside each of these screens too. Fixed positioning anchors
+  // it to the viewport regardless of which screen's root is mounted.
+  const toastEl = toast && (
+    <div className="ph-toast-wrap" style={{ position: 'fixed', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
+      <div className={'ph-toast ' + (toast.kind || '')}>
+        <Icon name="check2" size={14} /><span>{toast.msg}</span>
+      </div>
+    </div>
+  );
+
   if (capture.phase === 'camera') {
     return (
-      <Camera
-        category={capture.category}
-        onDetected={onDetected}
-        onClose={cancelCapture}
-        onBack={goBack}
-      />
+      <>
+        <Camera
+          category={capture.category}
+          onDetected={onDetected}
+          onClose={cancelCapture}
+          onBack={goBack}
+        />
+        {toastEl}
+      </>
     );
   }
   if (capture.phase === 'form') {
     const existing = capture.editingLineIdx != null ? capture.lines[capture.editingLineIdx] : undefined;
     return (
-      <SubmitForm
-        category={capture.category}
-        detected={capture.detected}
-        lineCount={capture.lines.length}
-        editingLineIdx={capture.editingLineIdx ?? null}
-        existingLine={existing}
-        onSaveLine={onSaveLine}
-        onCancel={cancelCapture}
-        onBack={goBack}
-        onRescan={rescanRam}
-        rescanDraft={capture.rescanDraft ?? null}
-      />
+      <>
+        <SubmitForm
+          category={capture.category}
+          detected={capture.detected}
+          lineCount={capture.lines.length}
+          editingLineIdx={capture.editingLineIdx ?? null}
+          existingLine={existing}
+          onSaveLine={onSaveLine}
+          onCancel={cancelCapture}
+          onBack={goBack}
+          onRescan={rescanRam}
+          rescanDraft={capture.rescanDraft ?? null}
+        />
+        {toastEl}
+      </>
     );
   }
   if (capture.phase === 'review') {
     return (
-      <OrderReview
-        category={capture.category}
-        lines={capture.lines}
-        editingId={capture.editingId}
-        onAddItem={addAnotherItem}
-        onEditLine={editLine}
-        onRemoveLine={removeLine}
-        onSubmit={submitOrder}
-        onCancel={cancelCapture}
-      />
+      <>
+        <OrderReview
+          category={capture.category}
+          lines={capture.lines}
+          editingId={capture.editingId}
+          onAddItem={addAnotherItem}
+          onEditLine={editLine}
+          onRemoveLine={removeLine}
+          onSubmit={submitOrder}
+          onCancel={cancelCapture}
+        />
+        {toastEl}
+      </>
     );
   }
 

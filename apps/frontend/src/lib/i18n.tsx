@@ -886,6 +886,15 @@ export const I18N: Record<Lang, Record<string, string>> = {
     subFillLineN: 'Fill in brand/description, quantity and unit cost on line {n} before submitting.',
     subNoDraftErr: 'No draft order — refresh and try again.',
     subSubmitFailed: 'Submit failed',
+    // Per-line autosave (mobile): every reason a line can't sync to the server
+    // is surfaced — the row never fails silently. It stays local and is re-sent
+    // on final submit.
+    syncNeedBrand: 'Brand is required before this line can save to the server. Kept locally — it will be sent when you submit.',
+    syncNeedDescription: 'Description is required before this line can save to the server. Kept locally — it will be sent when you submit.',
+    syncNeedQty: 'Quantity must be at least 1 before this line can save to the server. Kept locally — it will be sent when you submit.',
+    syncNeedCost: 'Unit cost must be 0 or more before this line can save to the server. Kept locally — it will be sent when you submit.',
+    syncNoDraft: "Couldn't reach the draft order — this line wasn't saved. It will be sent when you submit.",
+    syncFailed: "Couldn't save this line to the server. It will be sent when you submit.",
 
     // LineDrawer
     drawerViewAiPhoto: 'View AI photo',
@@ -1880,6 +1889,12 @@ export const I18N: Record<Lang, Record<string, string>> = {
     subFillLineN: '提交前请填写第 {n} 项的品牌/描述、数量与单位成本。',
     subNoDraftErr: '没有草稿订单 —— 请刷新后重试。',
     subSubmitFailed: '提交失败',
+    syncNeedBrand: '保存到服务器前必须填写品牌。已暂存本地 —— 将在提交时发送。',
+    syncNeedDescription: '保存到服务器前必须填写描述。已暂存本地 —— 将在提交时发送。',
+    syncNeedQty: '保存到服务器前数量至少为 1。已暂存本地 —— 将在提交时发送。',
+    syncNeedCost: '保存到服务器前单位成本须为 0 或以上。已暂存本地 —— 将在提交时发送。',
+    syncNoDraft: '无法连接草稿订单 —— 此项未保存。将在提交时发送。',
+    syncFailed: '无法将此项保存到服务器。将在提交时发送。',
 
     drawerViewAiPhoto: '查看 AI 照片',
     drawerUntitledItem: '未命名项目',
