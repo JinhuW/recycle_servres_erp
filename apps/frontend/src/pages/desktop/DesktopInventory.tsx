@@ -424,6 +424,21 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [transferItems, setTransferItems] = useState<TransferItem[] | null>(null);
   const [showActivity, setShowActivity] = useState(false);
   const [quickView, setQuickView] = useState<InventoryRow | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  // Export the FULL filtered set (the backend drops the 200-row list cap for
+  // the xlsx). Reuses the live filterQuery so the file matches what's on screen.
+  const runExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await api.download(`/api/inventory/export?${filterQuery}`, 'inventory.xlsx');
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const buildDraftItems = (rows: InventoryRow[]): DraftItem[] => rows.map(r => ({
     id: r.id,
@@ -491,8 +506,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         </div>
         <div className="page-actions">
           {isManager && (
-            <button className="btn" onClick={() => showToast?.('Export queued', 'success')}>
-              <Icon name="download" size={14} /> Export
+            <button className="btn" onClick={runExport} disabled={exporting}>
+              <Icon name="download" size={14} /> {exporting ? `${t('export')}…` : t('export')}
             </button>
           )}
           <button className="btn" onClick={() => setShowActivity(true)}>

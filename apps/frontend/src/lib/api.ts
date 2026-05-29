@@ -101,6 +101,36 @@ function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+// Binary download (xlsx export, etc.). GET is CSRF-exempt so no header needed;
+// we still ride the cookie + the single-flight 401→refresh→retry path. Pulls
+// the filename from Content-Disposition, falling back to `fallbackName`.
+async function download(path: string, fallbackName: string): Promise<void> {
+  let res = await fetch(path, { method: 'GET', credentials: 'include' });
+  if (res.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) res = await fetch(path, { method: 'GET', credentials: 'include' });
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:unauthorized'));
+      throw new ApiError(401, errMsg(null, 401));
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status));
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('Content-Disposition');
+  const match = cd ? /filename="?([^"]+)"?/.exec(cd) : null;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = match ? match[1] : fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const api = {
   get:    <T,>(path: string)              => request<T>('GET', path),
   post:   <T,>(path: string, body: unknown) => request<T>('POST', path, body),
@@ -108,6 +138,7 @@ export const api = {
   patch:  <T,>(path: string, body: unknown) => request<T>('PATCH', path, body),
   delete: <T,>(path: string)              => request<T>('DELETE', path),
   upload: <T,>(path: string, form: FormData) => request<T>('POST', path, form, { isForm: true }),
+  download,
 };
 
 // Raw fetch helper for the OAuth consent screen. The consent endpoint lives

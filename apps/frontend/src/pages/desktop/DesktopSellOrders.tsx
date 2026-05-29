@@ -129,7 +129,23 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.sellOrders.showArchived', false);
+  const [exporting, setExporting] = useState(false);
   const { path } = useRoute();
+
+  const runExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const p = new URLSearchParams();
+      if (statusFilter !== 'all') p.set('status', statusFilter);
+      if (showArchived) p.set('includeArchived', 'true');
+      await api.download(`/api/sell-orders/export?${p}`, 'sell-orders.xlsx');
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setExporting(false);
+    }
+  };
   const editMatch = match('/sell-orders/:id/edit', path);
   const viewMatch = match('/sell-orders/:id', path);
   const open: { id: string; mode: 'view' | 'edit' } | null =
@@ -189,7 +205,9 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           <div className="page-sub">{t('sellOrdersSub')}</div>
         </div>
         <div className="page-actions">
-          <button className="btn"><Icon name="download" size={14} /> {t('export')}</button>
+          <button className="btn" onClick={runExport} disabled={exporting}>
+            <Icon name="download" size={14} /> {exporting ? `${t('export')}…` : t('export')}
+          </button>
           {onNewFromInventory && (
             <button className="btn accent" onClick={onNewFromInventory}>
               <Icon name="plus" size={14} /> New from inventory

@@ -4,6 +4,7 @@ import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
+import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -45,10 +46,14 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
   `;
 }
 
-// List inventory with the same filters as the desktop screen.
-inventory.get('/', async (c) => {
-  const u = c.var.user;
-  const sql = getDb(c.env);
+// Combined WHERE fragment for the inventory list — shared by the JSON list and
+// the xlsx export so the two always filter identically. Purchasers are scoped
+// to their own lines; managers see the whole workspace.
+function inventoryWhereFrag(
+  c: { req: { query: (k: string) => string | undefined } },
+  sql: ReturnType<typeof getDb>,
+  u: User,
+) {
   const isManager = u.role === 'manager';
   const category = c.req.query('category');
   const status = c.req.query('status');
@@ -68,6 +73,16 @@ inventory.get('/', async (c) => {
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
 
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag}`;
+}
+
+// List inventory with the same filters as the desktop screen.
+inventory.get('/', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const isManager = u.role === 'manager';
+  const whereFrag = inventoryWhereFrag(c, sql, u);
+
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
            l.interface, l.form_factor, l.description, l.part_number, l.condition,
@@ -82,7 +97,7 @@ inventory.get('/', async (c) => {
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag}
+    WHERE ${whereFrag}
     ORDER BY l.created_at DESC
     LIMIT 200
   `;
@@ -96,6 +111,96 @@ inventory.get('/', async (c) => {
     return c.json({ items: filtered });
   }
   return c.json({ items: rows });
+});
+
+// Excel export of the inventory list. Manager-only — the workbook carries
+// cost/profit/margin, which purchasers may never see. Reuses the exact list
+// filters but drops the 200-row UI cap so the file is the full filtered set.
+// Registered before '/:id' so the literal path wins over the param route.
+const INV_EXPORT_COLS: XlsxColumn[] = [
+  { header: 'ID',           key: 'id',        width: 12 },
+  { header: 'Date',         key: 'date',      width: 12 },
+  { header: 'Category',     key: 'category',  width: 10 },
+  { header: 'Item',         key: 'item',      width: 30 },
+  { header: 'Spec',         key: 'spec',      width: 26 },
+  { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Warehouse',    key: 'warehouse', width: 12 },
+  { header: 'Condition',    key: 'condition', width: 12 },
+  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
+  { header: 'Unit cost',    key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
+  { header: 'Sell price',   key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
+  { header: 'Profit',       key: 'profit',    width: 12, numFmt: '#,##0.00' },
+  { header: 'Margin %',     key: 'margin',    width: 10, numFmt: '#,##0.0' },
+  { header: 'Submitted by', key: 'submitter', width: 18 },
+  { header: 'Status',       key: 'status',    width: 14 },
+];
+
+function invLabel(r: Record<string, unknown>): string {
+  const s = (v: unknown) => (v == null ? '' : String(v));
+  switch (r.category) {
+    case 'RAM': return [s(r.brand), s(r.capacity), s(r.generation)].filter(Boolean).join(' ');
+    case 'SSD':
+    case 'HDD': return [s(r.brand), s(r.capacity)].filter(Boolean).join(' ');
+    default:    return s(r.description);
+  }
+}
+function invSpec(r: Record<string, unknown>): string {
+  const s = (v: unknown) => (v == null ? '' : String(v));
+  switch (r.category) {
+    case 'RAM': return [s(r.classification), s(r.rank), r.speed ? `${r.speed}MHz` : ''].filter(Boolean).join(' · ');
+    case 'SSD': return [s(r.interface), s(r.form_factor), r.health != null ? `${r.health}%` : ''].filter(Boolean).join(' · ');
+    case 'HDD': return [s(r.interface), s(r.form_factor), r.rpm ? `${r.rpm}rpm` : '', r.health != null ? `${r.health}%` : ''].filter(Boolean).join(' · ');
+    default:    return s(r.condition);
+  }
+}
+
+inventory.get('/export', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const whereFrag = inventoryWhereFrag(c, sql, u);
+
+  const rows = await sql`
+    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
+           l.interface, l.form_factor, l.description, l.part_number, l.condition,
+           l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
+           l.status, l.created_at, l.health::float AS health, l.rpm,
+           u.name AS user_name, w.short AS warehouse_short
+    FROM order_lines l
+    JOIN orders o ON o.id = l.order_id
+    JOIN users  u ON u.id = o.user_id
+    LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+    WHERE ${whereFrag}
+    ORDER BY l.created_at DESC
+  `;
+
+  const data = (rows as Record<string, unknown>[]).map((r) => {
+    const unitCost = Number(r.unit_cost ?? 0);
+    const sellPrice = r.sell_price == null ? null : Number(r.sell_price);
+    const qty = Number(r.qty ?? 0);
+    const profit = sellPrice == null ? null : (sellPrice - unitCost) * qty;
+    const margin = sellPrice != null && sellPrice > 0 ? ((sellPrice - unitCost) / sellPrice) * 100 : null;
+    return {
+      id: String(r.id).slice(0, 8),
+      date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
+      category: r.category ?? '',
+      item: invLabel(r),
+      spec: invSpec(r),
+      part: r.part_number ?? '',
+      warehouse: r.warehouse_short ?? '',
+      condition: r.condition ?? '',
+      qty,
+      unitCost,
+      sellPrice,
+      profit,
+      margin,
+      submitter: r.user_name ?? '',
+      status: r.status ?? '',
+    };
+  });
+
+  const buf = await buildXlsxBuffer('Inventory', INV_EXPORT_COLS, data);
+  return xlsxResponse(buf, datedFilename('inventory'));
 });
 
 // Workspace-wide audit log. Drives the "Activity log" drawer on the desktop

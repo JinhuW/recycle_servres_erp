@@ -11,6 +11,7 @@ import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
+import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -122,6 +123,59 @@ sellOrders.get('/', async (c) => {
     // current sell-orders inbox UI doesn't go blank while it migrates.
     items: shaped,
   });
+});
+
+// Excel export of the sell-order list. Manager-only (every route here is).
+// Reuses the same status / includeArchived filters as the JSON list but drops
+// the keyset page cap so the file is the full filtered set. Registered before
+// '/:id' so the literal path wins over the param route.
+const SO_EXPORT_COLS: XlsxColumn[] = [
+  { header: 'Order ID', key: 'id',       width: 16 },
+  { header: 'Customer', key: 'customer', width: 28 },
+  { header: 'Region',   key: 'region',   width: 14 },
+  { header: 'Created',  key: 'created',  width: 12 },
+  { header: 'Lines',    key: 'lines',    width: 8,  numFmt: '#,##0' },
+  { header: 'Units',    key: 'qty',      width: 8,  numFmt: '#,##0' },
+  { header: 'Total',    key: 'total',    width: 14, numFmt: '#,##0.00' },
+  { header: 'Status',   key: 'status',   width: 16 },
+  { header: 'Notes',    key: 'notes',    width: 40 },
+];
+
+sellOrders.get('/export', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const status = c.req.query('status');
+  const includeArchived = c.req.query('includeArchived') === 'true';
+  const statusFrag = status ? sql`so.status = ${status}` : sql`TRUE`;
+  const archivedFrag = includeArchived ? sql`TRUE` : sql`so.archived_at IS NULL`;
+  const rows = await sql`
+    SELECT
+      so.id, so.status, so.notes, so.created_at,
+      c.name AS customer_name, c.region AS customer_region,
+      COUNT(sol.id)::int                                AS line_count,
+      COALESCE(SUM(sol.qty), 0)::int                    AS qty,
+      COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS total
+    FROM sell_orders so
+    JOIN customers c ON c.id = so.customer_id
+    LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+    WHERE ${statusFrag} AND ${archivedFrag}
+    GROUP BY so.id, c.id
+    ORDER BY so.created_at DESC
+  `;
+  const data = (rows as Record<string, unknown>[]).map((r) => ({
+    id: r.id ?? '',
+    customer: r.customer_name ?? '',
+    region: r.customer_region ?? '',
+    created: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
+    lines: Number(r.line_count ?? 0),
+    qty: Number(r.qty ?? 0),
+    total: Number(r.total ?? 0),
+    status: r.status ?? '',
+    notes: r.notes ?? '',
+  }));
+  const buf = await buildXlsxBuffer('Sell orders', SO_EXPORT_COLS, data);
+  return xlsxResponse(buf, datedFilename('sell-orders'));
 });
 
 sellOrders.get('/:id', async (c) => {
