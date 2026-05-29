@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Icon } from '../../components/Icon';
+import { Modal } from '../../components/Modal';
+import { discardTransferOrder } from '../../lib/api';
 import { statusTone } from '../../lib/status';
 import { TransferManifest, printManifest } from './TransferManifest';
 
@@ -83,6 +85,7 @@ export function DesktopTransfers({ onToast }: Props = {}) {
   const [filter, setFilter] = useState<StatusFilter>('pending');
   const [busy, setBusy] = useState<string | null>(null);
   const [printing, setPrinting] = useState<TransferOrder | null>(null);
+  const [discardId, setDiscardId] = useState<string | null>(null);
 
   const filterRef = useRef(filter);
   filterRef.current = filter;
@@ -103,6 +106,20 @@ export function DesktopTransfers({ onToast }: Props = {}) {
         `/api/inventory/transfer-orders/${order.id}/${kind}`, {},
       );
       onToast?.(t(kind === 'receive' ? 'transfersReceived' : 'transfersReopened', { id: order.id }));
+      load(filterRef.current);
+    } catch (e) {
+      onToast?.(t('transfersActionError') + ': ' + errMsg(e), 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const discard = async (id: string) => {
+    setBusy(id);
+    try {
+      await discardTransferOrder(id);
+      onToast?.(t('transfersDiscarded', { id }));
+      setDiscardId(null);
       load(filterRef.current);
     } catch (e) {
       onToast?.(t('transfersActionError') + ': ' + errMsg(e), 'error');
@@ -168,10 +185,17 @@ export function DesktopTransfers({ onToast }: Props = {}) {
                   <Icon name="download" size={13} /> {t('transfersExport')}
                 </button>
                 {o.status === 'Pending' && (
-                  <button className="btn accent" disabled={busy === o.id}
-                          onClick={() => act(o, 'receive')}>
-                    <Icon name="check" size={13} /> {t('transfersConfirm')}
-                  </button>
+                  <>
+                    <button className="btn accent" disabled={busy === o.id}
+                            onClick={() => act(o, 'receive')}>
+                      <Icon name="check" size={13} /> {t('transfersConfirm')}
+                    </button>
+                    <button className="btn" disabled={busy === o.id}
+                            style={{ color: 'var(--neg)', borderColor: 'var(--neg)' }}
+                            onClick={() => setDiscardId(o.id)}>
+                      <Icon name="trash" size={13} /> {t('transfersDiscard')}
+                    </button>
+                  </>
                 )}
                 {o.status === 'Received' && (
                   <button className="btn" disabled={busy === o.id}
@@ -214,6 +238,28 @@ export function DesktopTransfers({ onToast }: Props = {}) {
           onClose={closeManifest}
           onReady={printManifest}
         />
+      )}
+
+      {discardId && (
+        <Modal onClose={() => { if (busy !== discardId) setDiscardId(null); }} shellStyle={{ maxWidth: 420 }}>
+          <div className="modal-head">
+            <div className="modal-title">{t('transfersDiscardConfirmTitle', { id: discardId })}</div>
+            <div className="modal-sub">{t('transfersDiscardConfirmBody')}</div>
+          </div>
+          <div className="modal-foot">
+            <button className="btn" disabled={busy === discardId} onClick={() => setDiscardId(null)}>
+              {t('cancel')}
+            </button>
+            <button
+              className="btn"
+              style={{ background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)' }}
+              disabled={busy === discardId}
+              onClick={() => discard(discardId)}
+            >
+              {busy === discardId ? '…' : t('transfersDiscard')}
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   );
