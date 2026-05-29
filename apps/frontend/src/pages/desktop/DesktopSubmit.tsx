@@ -296,7 +296,26 @@ function OrderForm({
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
-  const addLine = () => {
+  // Adding the next line first auto-saves the line the user was filling out,
+  // so they don't lose work by forgetting to press Confirm. If the active line
+  // isn't ready yet, surface the reason and don't append — otherwise the user
+  // ends up with a silent half-saved row.
+  const addLine = async () => {
+    if (activeIdx != null) {
+      const cur = lines[activeIdx];
+      if (cur && !cur._confirmed) {
+        if (!lineReady(cur)) {
+          setAiError(t('subFillThisLine'));
+          return;
+        }
+        try {
+          await handleConfirmLine(activeIdx);
+        } catch (e) {
+          setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
+          return;
+        }
+      }
+    }
     setLines(ls => [...ls, blankLine(category)]);
     setActiveIdx(lines.length);
   };
