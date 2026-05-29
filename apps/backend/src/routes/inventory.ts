@@ -1189,6 +1189,8 @@ inventory.delete('/transfer-orders/:id', async (c) => {
       outcome = { code: 409, msg: `cannot discard: line(s) ${bad.map((l) => l.id).join(', ')} have moved on` };
       return;
     }
+    // Unlike reopen (which 409s on an empty order), an empty Pending TO — every
+    // line re-transferred away — has nothing to reverse and is just deleted.
 
     const lineIds = lines.map((l) => l.id);
     const evs = lineIds.length === 0 ? [] : (await tx`
