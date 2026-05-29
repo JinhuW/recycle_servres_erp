@@ -73,6 +73,28 @@ describe('POST /api/inventory/transfer — creates a transfer order', () => {
     expect(ev.detail.transfer_order_id).toBe(moved.orderId);
   });
 
+  it('records prior_status on the transferred event', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+    const before = (await db`
+      SELECT l.id, l.status, l.qty, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done') AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+      LIMIT 1
+    `)[0] as { id: string; status: string; qty: number; wh: string };
+    const to = WAREHOUSES.find((w) => w !== before.wh)!;
+    const r = await api<{ ok: true; transferOrderId: string }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [{ id: before.id, qty: before.qty }] } },
+    );
+    expect(r.status).toBe(200);
+    const ev = (await db`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${before.id} AND kind = 'transferred' ORDER BY created_at DESC LIMIT 1
+    `)[0] as { detail: Record<string, unknown> };
+    expect(ev.detail.prior_status).toBe(before.status);
+  });
+
   it('uses NULL from_warehouse_id when sources differ', async () => {
     const { token } = await loginAs(ALEX);
     const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });

@@ -974,7 +974,7 @@ inventory.post('/transfer', async (c) => {
         await tx`
           INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
           VALUES (${r.id}, ${u.id}, 'transferred',
-                  ${tx.json({ from: fromWh, to: toWarehouseId, qty: r.qty, transfer_order_id: transferOrderId, ...(note ? { note } : {}) })})
+                  ${tx.json({ from: fromWh, to: toWarehouseId, qty: r.qty, transfer_order_id: transferOrderId, prior_status: s.status, ...(note ? { note } : {}) })})
         `;
         result.push({ sourceId: r.id, destId: r.id, qty: r.qty });
       } else {
@@ -1003,7 +1003,7 @@ inventory.post('/transfer', async (c) => {
           RETURNING id
         `) as unknown as Array<{ id: string }>;
         const destId = inserted[0].id;
-        const detail = { from: fromWh, to: toWarehouseId, qty: r.qty, transfer_order_id: transferOrderId, ...(note ? { note } : {}) };
+        const detail = { from: fromWh, to: toWarehouseId, qty: r.qty, transfer_order_id: transferOrderId, prior_status: s.status, ...(note ? { note } : {}) };
         await tx`
           INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
           VALUES (${r.id}, ${u.id}, 'transferred', ${tx.json({ ...detail, peer_line_id: destId })})
