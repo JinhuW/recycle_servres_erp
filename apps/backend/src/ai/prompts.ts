@@ -54,24 +54,23 @@ SPEED — emit the digits printed on the label, no conversion. The label gives y
   - "DDRx-NNNN…" → the digits after the dash (ignore any trailing letters).
   - "PCx-NNNN…" or "PCx-NNNNN…" → the digits after the dash, ignoring any trailing letters/codes. Both 4-digit ("PC4-3200AA-UC0-12" → 3200) and 5-digit ("PC3-12800" → 12800, "PC4-25600" → 25600) forms are emitted as-printed — the label is the source of truth, do not translate between them.
 Every DDR module label carries one of these notations. If you can read brand and part number, you can read this. Omit speed only when no such notation is visible.
-PARTNUMBER — emit only the CORE part number. Drop any "PN:" / "P/N" / "S/N" label prefix, drop everything from the first hyphen onward (speed-grade / rev suffix), and drop any trailing tokens (date codes, lot markers like "NO AD", country codes). Examples:
-  - "HMAA1GU6CJR6N-XN NO AD" → "HMAA1GU6CJR6N"
-  - "M471A1K43DB1-CTD" → "M471A1K43DB1"
-  - "HMT84GL7AMR4C-RD MC AD 1420" → "HMT84GL7AMR4C"
-  - "M393A4K40DB3-CWE" → "M393A4K40DB3"
-  - "KCP318SD8/16" (no hyphen) → "KCP318SD8/16"
+PARTNUMBER — emit the part number including any speed-grade / rev suffix after a hyphen, but drop anything after the first space (date codes, lot markers like "NO AD", country codes) and a leading "PN:" / "P/N" / "S/N" label prefix. Examples:
+  - "PN: HMAA1GU6CJR6N-XN NO AD" → "HMAA1GU6CJR6N-XN"
+  - "M471A1K43DB1-CTD" → "M471A1K43DB1-CTD"
+  - "HMT84GL7AMR4C-RD MC AD 1420" → "HMT84GL7AMR4C-RD"
+  - "KCP318SD8/16" → "KCP318SD8/16"
 ${CONFIDENCE_INSTRUCTION}
 Only include a field if you can read or derive it confidently. Omit any field you are unsure about — do NOT guess.`,
   SSD: `You are reading an enterprise SSD label. Respond as compact JSON only:
-{"brand":"…","capacity":"number+GB or TB, NO space e.g. 960GB or 1.92TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|M.2 2280|M.2 22110|U.2|AIC","partNumber":"CORE only: drop PN:/S/N label, drop everything after first hyphen, drop trailing date/lot tokens (MZ7LH960HAJR-00005 → MZ7LH960HAJR)","_confidence":0.0}
+{"brand":"…","capacity":"number+GB or TB, NO space e.g. 960GB or 1.92TB","interface":"SATA|SAS|NVMe|U.2","formFactor":"2.5\\"|M.2 2280|M.2 22110|U.2|AIC","partNumber":"part number with hyphen suffix; drop a PN:/S/N prefix and anything after the first space (PN: MZ7LH960HAJR-00005 LOT → MZ7LH960HAJR-00005)","_confidence":0.0}
 ${CONFIDENCE_INSTRUCTION}
 Omit unknown fields. No prose.`,
   HDD: `You are reading an enterprise HDD label. Respond as compact JSON only:
-{"brand":"…","capacity":"number+TB, NO space e.g. 4TB","interface":"SATA|SAS","formFactor":"2.5\\"|3.5\\"","rpm":"digits only: 5400|7200|10000|15000","partNumber":"CORE only: drop PN:/S/N label, drop everything after first hyphen, drop trailing date/lot tokens (ST4000NM0023-1MA107 → ST4000NM0023)","_confidence":0.0}
+{"brand":"…","capacity":"number+TB, NO space e.g. 4TB","interface":"SATA|SAS","formFactor":"2.5\\"|3.5\\"","rpm":"digits only: 5400|7200|10000|15000","partNumber":"part number with hyphen suffix; drop a PN:/S/N prefix and anything after the first space (PN: ST4000NM0023-1MA107 LOT → ST4000NM0023-1MA107)","_confidence":0.0}
 ${CONFIDENCE_INSTRUCTION}
 Omit unknown fields. No prose.`,
   Other: `You are reading a server-component label (CPU, NIC, PSU, GPU, etc). Respond as compact JSON only:
-{"description":"human-readable name","partNumber":"CORE only: drop everything after first hyphen and any trailing date/lot tokens","_confidence":0.0}
+{"description":"human-readable name","partNumber":"part number with hyphen suffix; drop a PN:/S/N prefix and anything after the first space","_confidence":0.0}
 ${CONFIDENCE_INSTRUCTION}
 No prose.`,
 };

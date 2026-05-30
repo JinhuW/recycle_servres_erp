@@ -47,25 +47,23 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('RAM', { speed: 'PC5-38400' }).speed).toBe('38400');
   });
 
-  it('normalises rank casing/spacing and reduces part number to the core SKU', () => {
+  it('normalises rank casing/spacing and strips the PN: prefix + trailing tokens from the part number', () => {
     const f = normalizeFields('RAM', { rank: '2RX4', partNumber: 'PN:HMCG84AEBRA115N BB' });
     expect(f.rank).toBe('2Rx4');
-    // Strip "PN:" prefix AND drop the trailing " BB" lot marker.
+    // Strip "PN:" prefix and drop the trailing " BB" lot marker.
     expect(f.partNumber).toBe('HMCG84AEBRA115N');
   });
 
-  it('reduces part number to the core SKU (strip suffix after first hyphen + trailing tokens)', () => {
+  it('keeps the hyphen suffix but drops a PN:/S/N prefix and anything after the first space', () => {
     // Real-world SK Hynix / Samsung / Micron labels with speed-grade suffix + lot.
-    expect(normalizeFields('RAM', { partNumber: 'HMAA1GU6CJR6N-XN NO AD' }).partNumber).toBe('HMAA1GU6CJR6N');
-    expect(normalizeFields('RAM', { partNumber: 'M471A1K43DB1-CTD' }).partNumber).toBe('M471A1K43DB1');
-    expect(normalizeFields('RAM', { partNumber: 'HMT84GL7AMR4C-RD MC AD 1420' }).partNumber).toBe('HMT84GL7AMR4C');
-    expect(normalizeFields('RAM', { partNumber: 'M393A4K40DB3-CWE' }).partNumber).toBe('M393A4K40DB3');
-    // No hyphen → leave alone.
+    expect(normalizeFields('RAM', { partNumber: 'HMAA1GU6CJR6N-XN NO AD' }).partNumber).toBe('HMAA1GU6CJR6N-XN');
+    expect(normalizeFields('RAM', { partNumber: 'M471A1K43DB1-CTD' }).partNumber).toBe('M471A1K43DB1-CTD');
+    expect(normalizeFields('RAM', { partNumber: 'HMT84GL7AMR4C-RD MC AD 1420' }).partNumber).toBe('HMT84GL7AMR4C-RD');
     expect(normalizeFields('RAM', { partNumber: 'KCP318SD8/16' }).partNumber).toBe('KCP318SD8/16');
     expect(normalizeFields('RAM', { partNumber: 'CT16G4DFD832A' }).partNumber).toBe('CT16G4DFD832A');
-    // Same rule applies cross-category.
-    expect(normalizeFields('SSD', { partNumber: 'MZ7LH960HAJR-00005' }).partNumber).toBe('MZ7LH960HAJR');
-    expect(normalizeFields('HDD', { partNumber: 'ST4000NM0023-1MA107' }).partNumber).toBe('ST4000NM0023');
+    // Prefix stripping + trailing-token drop still apply cross-category; the hyphen suffix is retained.
+    expect(normalizeFields('SSD', { partNumber: 'PN: MZ7LH960HAJR-00005 LOT' }).partNumber).toBe('MZ7LH960HAJR-00005');
+    expect(normalizeFields('HDD', { partNumber: 'ST4000NM0023-1MA107' }).partNumber).toBe('ST4000NM0023-1MA107');
   });
 
   it('drops blank/whitespace-only fields', () => {

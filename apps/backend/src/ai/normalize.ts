@@ -76,15 +76,10 @@ function stripPartPrefix(v: string): string {
   return v.replace(/^\s*(?:P\s*\/?\s*N|S\s*\/?\s*N|PART\s*(?:NO|NUMBER)?)\s*[:#]?\s*/i, '').trim();
 }
 
-// "HMAA1GU6CJR6N-XN NO AD" → "HMAA1GU6CJR6N". Drop the first hyphen and
-// everything after it (speed-grade / rev suffix), plus any trailing
-// whitespace-separated tokens (date codes, lot markers). Leaves untouched
-// part numbers without a hyphen (Crucial "CT16G4DFD832A") or with non-hyphen
-// separators that ARE part of the core SKU (Kingston "KCP318SD8/16").
-function coreOnly(v: string): string {
-  const first = v.split(/\s+/)[0] ?? '';
-  const dash = first.indexOf('-');
-  return dash >= 0 ? first.slice(0, dash) : first;
+// Keep the part number token but drop anything after the first space
+// (date codes, lot markers). "HMAA1GU6CJR6N-XN NO AD" → "HMAA1GU6CJR6N-XN".
+function firstToken(v: string): string {
+  return v.split(/\s+/)[0] ?? '';
 }
 
 /**
@@ -104,7 +99,7 @@ export function normalizeFields(
   }
 
   if (f.capacity) f.capacity = normCapacity(f.capacity);
-  if (f.partNumber) f.partNumber = coreOnly(stripPartPrefix(f.partNumber));
+  if (f.partNumber) f.partNumber = firstToken(stripPartPrefix(f.partNumber));
 
   if (category === 'RAM') {
     // The model frequently puts "DDR5" in `type` and leaves `generation`
