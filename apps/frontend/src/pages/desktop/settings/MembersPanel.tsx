@@ -6,7 +6,9 @@ import { handleFetchError } from '../../../lib/errorToast';
 import { useEscapeKey } from '../../../lib/useEscapeKey';
 import { relTime } from '../../../lib/format';
 import { TableSkeleton } from '../../../components/Skeleton';
-import { SettingsHeader, PasswordMeter, lastSeenLabel, type Member, type ToastFn } from './_shared';
+import { SettingsHeader, lastSeenLabel, type Member, type ToastFn } from './_shared';
+import { PasswordMeter } from '../../../components/PasswordMeter';
+import { pwStrengthLabels } from '../../../lib/passwordI18n';
 import { ConfirmDialog } from './dialogs';
 import { useT } from '../../../lib/i18n';
 
@@ -609,7 +611,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
                       {showPw ? t('memSecHide') : t('memSecShow')}
                     </button>
                   </div>
-                  <PasswordMeter password={password} />
+                  <PasswordMeter password={password} labels={pwStrengthLabels(t)} />
                   <div className="help">{t('memSecPwHelp')}</div>
                 </div>
               </div>

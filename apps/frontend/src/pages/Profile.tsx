@@ -37,7 +37,7 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
   type Item = { id: string; icon: IconName; label: string; sub: string; trailing?: JSX.Element; onClick?: () => void };
   const items: Item[] = [
     { id: 'notif', icon: 'bell', label: t('notifications'), sub: t('notificationsSub'), onClick: onOpenNotifications },
-    { id: 'sec',   icon: 'lock', label: t('security'),      sub: t('securitySub'),      onClick: onOpenSecurity },
+    { id: 'sec',   icon: 'lock', label: t('pwMobileItemLabel'), sub: t('pwMobileItemSub'),  onClick: onOpenSecurity },
     {
       id: 'lang',  icon: 'globe', label: t('language'),     sub: lang === 'zh' ? '简体中文' : 'English',
       trailing: (

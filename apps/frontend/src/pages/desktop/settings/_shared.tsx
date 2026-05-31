@@ -91,35 +91,6 @@ export function lastSeenLabel(m: Member, locale = 'en-US'): string {
   return m.last_seen_at ? relTime(m.last_seen_at, locale) : 'Never';
 }
 
-// ─── Password meter ──────────────────────────────────────────────────────────
-// Lightweight strength heuristic: counts length, mixed case, digits, symbols.
-// Renders 4 segments + a label that lights up as the password grows stronger.
-export function PasswordMeter({ password }: { password: string }) {
-  if (!password) return null;
-  const checks = [
-    password.length >= 8,
-    /[A-Z]/.test(password) && /[a-z]/.test(password),
-    /\d/.test(password),
-    /[^A-Za-z0-9]/.test(password),
-  ];
-  const score = checks.filter(Boolean).length;
-  const labels = ['Too short', 'Weak', 'Fair', 'Strong', 'Excellent'];
-  const colors = ['var(--neg)', 'var(--neg)', 'var(--warn)', 'var(--accent)', 'var(--pos)'];
-  const label = password.length < 6 ? labels[0] : labels[score];
-  const color = password.length < 6 ? colors[0] : colors[score];
-
-  return (
-    <div className="pw-meter">
-      <div className="pw-meter-track">
-        {[0, 1, 2, 3].map(i => (
-          <div
-            key={i}
-            className="pw-meter-seg"
-            style={{ background: i < score ? color : 'var(--border)' }}
-          />
-        ))}
-      </div>
-      <span className="pw-meter-label" style={{ color }}>{label}</span>
-    </div>
-  );
-}
+// PasswordMeter moved to `components/PasswordMeter.tsx` — the desktop
+// MembersPanel and the new mobile password sheet both render it, so it lives
+// outside the desktop-settings tree now.

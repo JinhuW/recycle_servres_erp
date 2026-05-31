@@ -6,6 +6,7 @@ import { PhDraftPickerSheet } from './components/PhDraftPickerSheet';
 import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
 import { PhAboutSheet } from './components/PhAboutSheet';
+import { PhPasswordSheet } from './components/PhPasswordSheet';
 
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
@@ -70,6 +71,7 @@ function Shell() {
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
   const [aboutSheet, setAboutSheet] = useState(false);
+  const [pwSheet, setPwSheet] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const orderDetailMatch = match('/purchase-orders/:id', path);
@@ -571,7 +573,7 @@ function Shell() {
           onOpenLanguage={() => setLangSheet(true)}
           onOpenNotifications={() => setNotifSheet(true)}
           onOpenAbout={() => setAboutSheet(true)}
-          onOpenSecurity={() => showToast(t('securityNoticeBody'))}
+          onOpenSecurity={() => setPwSheet(true)}
         />
       )}
 
@@ -601,6 +603,13 @@ function Shell() {
       )}
 
       {aboutSheet && <PhAboutSheet onClose={() => setAboutSheet(false)} />}
+
+      {pwSheet && (
+        <PhPasswordSheet
+          onClose={() => setPwSheet(false)}
+          onSuccess={(msg) => showToast(msg, 'success')}
+        />
+      )}
 
       {langSheet && (
         <PhLanguageSheet onClose={(picked) => {

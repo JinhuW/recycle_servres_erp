@@ -9,15 +9,17 @@ import { WarehousesPanel } from './settings/WarehousesPanel';
 import { CustomersPanel } from './settings/CustomersPanel';
 import { CategoriesPanel } from './settings/CategoriesPanel';
 import { GeneralPanel } from './settings/GeneralPanel';
+import { AccountPanel } from './settings/AccountPanel';
 import { DesktopSettingsConnectors } from './DesktopSettingsConnectors';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'connectors';
+type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'connectors';
 
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
 // dictionary.
 const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconName; managerOnly?: boolean }[] = [
+  { id: 'account',    labelKey: 'settingsNavAccount',    subKey: 'settingsNavAccountSub',    icon: 'lock' },
   { id: 'members',    labelKey: 'settingsNavMembers',    subKey: 'settingsNavMembersSub',    icon: 'user' },
   { id: 'warehouses', labelKey: 'settingsNavWarehouses', subKey: 'settingsNavWarehousesSub', icon: 'warehouse' },
   { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield' },
@@ -29,7 +31,7 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
   const { t } = useT();
   const { user } = useAuth();
-  const [section, setSection] = useState<SectionId>('members');
+  const [section, setSection] = useState<SectionId>('account');
   const sections = SECTIONS.filter(s => !s.managerOnly || user?.role === 'manager');
 
   return (
@@ -59,6 +61,7 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
         </nav>
 
         <div className="settings-body">
+          {section === 'account'    && <AccountPanel    showToast={showToast} />}
           {section === 'members'    && <MembersPanel    showToast={showToast} />}
           {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
           {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
