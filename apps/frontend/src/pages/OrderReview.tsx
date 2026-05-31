@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
+import { LineSpecChips } from '../components/LineSpecChips';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError, showErrorToast } from '../lib/errorToast';
@@ -104,6 +105,7 @@ export function OrderReview({
                     {l.label || '—'}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>{l.partNumber || '—'}</div>
+                  <LineSpecChips line={l} />
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); onEditLine(i); }}
@@ -123,7 +125,7 @@ export function OrderReview({
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>Qty {l.qty} · unit {fmtUSD(l.unitCost, locale)}</span>
+                <span>Qty <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · unit {fmtUSD(l.unitCost, locale)}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.unitCost * l.qty, locale)}</span>
               </div>
             </div>

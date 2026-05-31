@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
+import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
@@ -160,11 +161,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
     : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
     : (l.description ?? '—');
-  const itemSpec = (l: OrderLine) =>
-      l.category === 'RAM' ? [l.classification, l.rank, l.speed && (l.speed + 'MHz')].filter(Boolean).join(' · ')
-    : l.category === 'SSD' ? [l.formFactor, l.health != null && (l.health + '%'), l.condition].filter(Boolean).join(' · ')
-    : l.category === 'HDD' ? [l.interface, l.formFactor, l.health != null && (l.health + '%'), l.condition].filter(Boolean).join(' · ')
-    : (l.condition ?? '');
 
   const headerTitle = orderLocked ? t('viewOrder') : t('editOrderId', { id: order.id });
   const headerSub = `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
@@ -325,13 +321,17 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {itemLabel(l) || '—'}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {itemSpec(l) || (l.partNumber ?? '—')}
-                  </div>
+                  {lineHasSpecChips(l)
+                    ? <LineSpecChips line={l} />
+                    : (
+                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {l.partNumber ?? '—'}
+                      </div>
+                    )}
                 </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>Qty {l.qty} · {fmtUSD(l.unitCost, locale)}</span>
+                <span>Qty <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.qty * l.unitCost, locale)}</span>
               </div>
             </div>
