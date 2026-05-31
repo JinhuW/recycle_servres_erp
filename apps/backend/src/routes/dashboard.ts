@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
+import { effectiveRole } from '../lib/role';
 import type { Env, User } from '../types';
 
 const dashboard = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -9,7 +10,11 @@ const RANGE_DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, 'ytd
 dashboard.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
-  const isManager = u.role === 'manager';
+  // A manager previewing as a purchaser (tweaks.rolePreview) is scoped to their
+  // own work, matching the orders list — every KPI, the leaderboard financials,
+  // and the recent-activity feed key off this so the two layers can't disagree.
+  const role = effectiveRole(u);
+  const isManager = role === 'manager';
   const range = c.req.query('range') ?? '30d';
   const days = RANGE_DAYS[range] ?? 30;
 
@@ -186,7 +191,7 @@ dashboard.get('/', async (c) => {
   });
 
   return c.json({
-    role: u.role,
+    role,
     kpis: { count: cnt, cost, revenue, profit, commission, prev },
     weeks: weeks.map(w => ({ ...w, profit: r2dp(w.profit) })),
     leaderboard, byCat, recent,

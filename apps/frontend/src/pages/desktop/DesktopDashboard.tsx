@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
-import { useAuth } from '../../lib/auth';
+import { useEffectiveUser } from '../../lib/tweaks';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD0, relTime } from '../../lib/format';
@@ -21,16 +21,20 @@ type Range = '7d' | '30d' | '90d' | 'ytd';
 export function DesktopDashboard() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const { user } = useAuth();
+  const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
   const [lbCategory, setLbCategory] = useState<string>('all');
   const [range, setRange] = useState<Range>('30d');
 
+  // The role-preview tweak flips `user.role`; refetch so the dashboard
+  // re-scopes (own work vs. team-wide) when a manager toggles preview, matching
+  // the backend's effectiveRole scoping.
+  const effRole = user?.role;
   useEffect(() => {
     const params = new URLSearchParams();
     if (range !== '30d') params.set('range', range);
     api.get<DashboardData>(`/api/dashboard?${params}`).then(setData).catch(handleFetchError);
-  }, [range]);
+  }, [range, effRole]);
 
   if (!user) return null;
   const isManager = user.role === 'manager';

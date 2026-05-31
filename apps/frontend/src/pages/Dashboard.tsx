@@ -3,7 +3,7 @@ import { Icon } from '../components/Icon';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { PhSparkline } from '../components/PhSparkline';
 import { useT } from '../lib/i18n';
-import { useAuth } from '../lib/auth';
+import { useEffectiveUser } from '../lib/tweaks';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
@@ -21,14 +21,18 @@ type Props = {
 export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCount }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const { user } = useAuth();
+  const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
 
+  // The role-preview tweak flips `user.role`; refetch so the dashboard
+  // re-scopes (own work vs. team-wide) when a manager toggles preview, matching
+  // the backend's effectiveRole scoping.
+  const effRole = user?.role;
   useEffect(() => {
     let alive = true;
     api.get<DashboardData>('/api/dashboard').then(r => { if (alive) setData(r); }).catch(handleFetchError);
     return () => { alive = false; };
-  }, []);
+  }, [effRole]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
