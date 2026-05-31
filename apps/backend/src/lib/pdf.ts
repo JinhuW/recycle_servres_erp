@@ -1,4 +1,3 @@
-import PDFDocument from 'pdfkit';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +25,10 @@ export function loadInvoiceLogo(): Buffer | null {
 // mirrors a classic commercial-invoice template: colored header band, ship-to /
 // bill-to blocks, a zebra line table, and a totals box with the amount in words.
 
-function renderPdfToBuffer(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
+async function renderPdfToBuffer(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
+  // pdfkit (with its embedded font data) is loaded lazily so its init cost is
+  // paid on the first invoice render, not on every process boot / test fork.
+  const { default: PDFDocument } = await import('pdfkit');
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 40 });
     const chunks: Buffer[] = [];

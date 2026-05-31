@@ -2,6 +2,7 @@
 // `services/members.ts`; this file owns the HTTP shape only.
 
 import { Hono } from 'hono';
+import { MIN_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import {
   listMembers,
@@ -20,7 +21,6 @@ const members = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 const VALID_ROLES: MemberRole[] = ['manager', 'purchaser'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD_LEN = 8;
 
 // Shared field validation for create/update. Returns an error string for the
 // first invalid field, or null when every supplied field is acceptable.

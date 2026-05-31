@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Icon } from './Icon';
-import { ApiError, api } from '../lib/api';
+import { api } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { PasswordMeter } from './PasswordMeter';
 import { pwStrengthLabels } from '../lib/passwordI18n';
+import { validatePasswordChange, passwordChangeErrorKey } from '../lib/passwordPolicy';
 
 type Props = {
   onClose: () => void;
@@ -25,15 +26,9 @@ export function PhPasswordSheet({ onClose, onSuccess }: Props) {
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState<string | null>(null);
 
-  const newTooShort     = next.length > 0 && next.length < 8;
-  const sameAsCurrent   = next.length > 0 && current.length > 0 && next === current;
-  const confirmMismatch = confirm.length > 0 && confirm !== next;
-  const canSubmit =
-    current.length > 0 &&
-    next.length >= 8 &&
-    next === confirm &&
-    next !== current &&
-    !saving;
+  const { newTooShort, sameAsCurrent, confirmMismatch, canSubmit: valid } =
+    validatePasswordChange(current, next, confirm);
+  const canSubmit = valid && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -44,11 +39,7 @@ export function PhPasswordSheet({ onClose, onSuccess }: Props) {
       onSuccess(t('pwSuccess'));
       onClose();
     } catch (err) {
-      const msg =
-        err instanceof ApiError && err.status === 403 ? t('pwErrorWrongCurrent')
-        : err instanceof ApiError && err.status === 429 ? t('pwErrorTooManyAttempts')
-        : t('pwErrorGeneric');
-      setError(msg);
+      setError(t(passwordChangeErrorKey(err)));
     } finally {
       setSaving(false);
     }

@@ -301,6 +301,7 @@ orders.get('/:id/invoice', async (c) => {
 
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+           o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
            u.name AS user_name,
            w.name AS warehouse_name, w.region AS warehouse_region, w.address AS warehouse_address
     FROM orders o
@@ -312,14 +313,13 @@ orders.get('/:id/invoice', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
-  const lines = await sql`
-    SELECT category, brand, capacity, generation, type, classification, rank, speed,
-           interface, form_factor, description, part_number, condition, qty,
-           unit_cost::float AS unit_cost
-    FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
-  ` as Record<string, unknown>[];
-
-  const [company, companyDomain] = await Promise.all([
+  const [lines, company, companyDomain] = await Promise.all([
+    sql`
+      SELECT category, brand, capacity, generation, type, classification, rank, speed,
+             interface, form_factor, description, part_number, condition, qty,
+             unit_cost::float AS unit_cost
+      FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
+    ` as unknown as Promise<Record<string, unknown>[]>,
     getWorkspaceSetting<string>(sql, 'workspace_name', 'Recycle Servers'),
     getWorkspaceSetting<string>(sql, 'domain', ''),
   ]);

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ApiError, api } from '../../../lib/api';
+import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
 import { useT } from '../../../lib/i18n';
 import { Icon } from '../../../components/Icon';
 import { PasswordMeter } from '../../../components/PasswordMeter';
 import { pwStrengthLabels } from '../../../lib/passwordI18n';
+import { validatePasswordChange, passwordChangeErrorKey } from '../../../lib/passwordPolicy';
 import { SettingsHeader, type ToastFn } from './_shared';
 
 // The desktop "Account" panel: identity card + password-change form +
@@ -26,15 +27,9 @@ export function AccountPanel({ showToast }: { showToast?: ToastFn }) {
 
   if (!user) return null;
 
-  const newTooShort   = next.length > 0 && next.length < 8;
-  const sameAsCurrent = next.length > 0 && current.length > 0 && next === current;
-  const confirmMismatch = confirm.length > 0 && confirm !== next;
-  const canSubmit =
-    current.length > 0 &&
-    next.length >= 8 &&
-    next === confirm &&
-    next !== current &&
-    !saving;
+  const { newTooShort, sameAsCurrent, confirmMismatch, canSubmit: valid } =
+    validatePasswordChange(current, next, confirm);
+  const canSubmit = valid && !saving;
 
   const reset = () => { setCurrent(''); setNext(''); setConfirm(''); setError(null); };
 
@@ -48,10 +43,7 @@ export function AccountPanel({ showToast }: { showToast?: ToastFn }) {
       showToast?.(t('pwSuccess'), 'success');
       reset();
     } catch (err) {
-      const msg =
-        err instanceof ApiError && err.status === 403 ? t('pwErrorWrongCurrent')
-        : err instanceof ApiError && err.status === 429 ? t('pwErrorTooManyAttempts')
-        : t('pwErrorGeneric');
+      const msg = t(passwordChangeErrorKey(err));
       setError(msg);
       showToast?.(msg, 'error');
     } finally {

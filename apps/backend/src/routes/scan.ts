@@ -99,9 +99,12 @@ scan.post('/label', async (c) => {
   // category, log a warn record to errors.jsonl so an operator can grep for
   // "scan partial fill" and pull the matching image + extraction to see what
   // the OCR struggled with (e.g. speed missing on a SK Hynix SODIMM).
+  // Skip the stub provider: it fills almost nothing by design, so on a deploy
+  // missing OPENROUTER_API_KEY it would log on every scan and rotate genuine
+  // 500 records out of the shared sink.
   const expected = EXPECTED_FIELDS_BY_CATEGORY[category];
   const missing = expected.filter((f) => !result.fields[f] || result.fields[f].trim() === '');
-  if (missing.length > 0) {
+  if (missing.length > 0 && result.provider !== 'stub') {
     const dir = process.env.ERROR_LOG_DIR;
     if (dir) {
       const requestId = c.var.requestId ?? 'unknown';

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { hashPassword, verifyPassword } from '../auth';
 import { validatePreferencePatch } from '../preferences';
@@ -96,14 +97,12 @@ me.patch('/preferences', async (c) => {
 // POST /api/me/password — change the signed-in user's own password.
 // Verifies currentPassword against the live hash, writes the new hash, and
 // revokes every OTHER refresh-token family (this session stays alive so the
-// user doesn't get bounced to login). Per-user in-memory throttle on failed
-// currentPassword attempts mirrors the login-side brute-force defence.
+// user doesn't get bounced to login). Failed currentPassword attempts are
+// throttled through the same durable login_attempts table the login route
+// uses, so the defence survives restarts and is shared across replicas
+// (an in-memory map would be per-process and reset on every deploy).
 
-const pwChangeFails = new Map<string, number[]>();
-const PW_WINDOW_MS = 10 * 60_000;
 const PW_MAX_FAILS = 5;
-const MIN_PW_LEN = 8;
-const MAX_PW_LEN = 200;
 
 me.post('/password', async (c) => {
   const u = c.var.user;
@@ -115,37 +114,53 @@ me.post('/password', async (c) => {
   }
 
   const { currentPassword, newPassword } = body;
-  if (newPassword.length < MIN_PW_LEN || newPassword.length > MAX_PW_LEN) {
-    return c.json({ error: `New password must be ${MIN_PW_LEN}–${MAX_PW_LEN} characters` }, 400);
+  if (newPassword.length < MIN_PASSWORD_LEN || newPassword.length > MAX_PASSWORD_LEN) {
+    return c.json({ error: `New password must be ${MIN_PASSWORD_LEN}–${MAX_PASSWORD_LEN} characters` }, 400);
   }
   if (newPassword === currentPassword) {
     return c.json({ error: 'New password must differ from the current one' }, 400);
   }
 
-  // Throttle check before any bcrypt work — keeps it un-timeable.
-  const now = Date.now();
-  const cutoff = now - PW_WINDOW_MS;
-  const prev = (pwChangeFails.get(u.id) ?? []).filter((t) => t > cutoff);
-  if (prev.length >= PW_MAX_FAILS) {
-    c.header('Retry-After', String(Math.ceil((prev[0]! - cutoff) / 1000)));
+  const sql = getDb(c.env);
+  const ip =
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    null;
+
+  // Throttle check before any bcrypt work — keeps it un-timeable. Counts
+  // failed attempts on this account since its last success, in a 15-min
+  // window, sharing the login route's table and semantics.
+  const recentFails = (await sql<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM login_attempts
+    WHERE email = ${u.email} AND success = FALSE
+      AND attempted_at > NOW() - INTERVAL '15 minutes'
+      AND attempted_at > COALESCE(
+        (SELECT MAX(attempted_at) FROM login_attempts
+          WHERE email = ${u.email} AND success = TRUE),
+        'epoch'::timestamptz)
+  `)[0].n;
+  if (recentFails >= PW_MAX_FAILS) {
+    c.header('Retry-After', '900');
     return c.json({ error: 'Too many failed attempts; try again later' }, 429);
   }
 
-  const sql = getDb(c.env);
+  const recordAttempt = (success: boolean) =>
+    sql`INSERT INTO login_attempts (email, ip, success) VALUES (${u.email}, ${ip}, ${success})`
+      .catch((e) => console.error('login_attempts write failed', e));
+
   const row = (await sql<{ password_hash: string }[]>`
     SELECT password_hash FROM users WHERE id = ${u.id} AND active = TRUE LIMIT 1
   `)[0];
   if (!row) return c.json({ error: 'User not found' }, 404);
 
   if (!(await verifyPassword(currentPassword, row.password_hash))) {
-    prev.push(now);
-    pwChangeFails.set(u.id, prev);
+    await recordAttempt(false);
     // 403 (not 401) — the JWT is still valid, only this specific action
     // failed. The frontend treats 401 as session-expired and would bounce
     // the user to the login screen on a mistyped current password.
     return c.json({ error: 'Current password is incorrect' }, 403);
   }
-  pwChangeFails.delete(u.id);
+  await recordAttempt(true);
 
   const newHash = await hashPassword(newPassword);
   const rtRaw = getCookie(c, 'rt');

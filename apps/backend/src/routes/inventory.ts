@@ -1208,7 +1208,13 @@ inventory.delete('/transfer-orders/:id', async (c) => {
       // origin; setting warehouse_id = NULL is intentional, so the line re-inherits its order's
       // warehouse and the pre-transfer state is restored.
       const origin = ord.from_warehouse_id ?? fromDetail;
-      const priorStatus = typeof detail.prior_status === 'string' ? detail.prior_status : 'Done';
+      // prior_status is stamped on the 'transferred' event by current code.
+      // Events predating that field have no record of the pre-transfer status;
+      // since transfer is only ever allowed from 'Reviewing' or 'Done', restore
+      // legacy lines to 'Reviewing' — the conservative direction (a human
+      // re-confirms before it counts as fully stocked) rather than wrongly
+      // promoting a once-'Reviewing' line to 'Done'.
+      const priorStatus = typeof detail.prior_status === 'string' ? detail.prior_status : 'Reviewing';
       const peerLineId = typeof detail.peer_line_id === 'string' ? detail.peer_line_id : null;
 
       let merged = false;

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
 import type postgres from 'postgres';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
@@ -673,13 +674,11 @@ const KNOWN_STATUSES = new Set<string>([
 // transition-time evidence gate.
 const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']);
 
-// Fixed close-reason taxonomy. Mirrors the CHECK constraint on
-// sell_orders.close_reason_id (migration 0056) and the frontend i18n keys
-// in lib/closeReasons.ts. Adding a reason means: extend this set, extend
-// the CHECK constraint in a new migration, add the i18n label.
-const CLOSE_REASONS = new Set([
-  'customer_cancelled', 'lost_deal', 'returned', 'duplicate', 'other',
-]);
+// Fixed close-reason taxonomy from @recycle-erp/shared (single source of
+// truth, shared with the frontend picker). The SQL CHECK on
+// sell_orders.close_reason_id (migration 0057) must list the same values;
+// adding a reason means extending CLOSE_REASON_IDS and widening the CHECK.
+const CLOSE_REASONS = new Set<string>(CLOSE_REASON_IDS);
 
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;

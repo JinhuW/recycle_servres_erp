@@ -1,5 +1,3 @@
-import ExcelJS from 'exceljs';
-
 // Shared workbook builder for the desktop "Export" buttons. Generation lives on
 // the backend because the list endpoints cap their JSON payloads (inventory is
 // LIMIT 200) — a browser-side export off the visible rows would silently
@@ -17,6 +15,9 @@ export async function buildXlsxBuffer(
   columns: XlsxColumn[],
   rows: Record<string, unknown>[],
 ): Promise<Buffer> {
+  // exceljs is a heavy dependency only needed by the rarely-hit export
+  // endpoints — load it lazily so its cost isn't paid on every process boot.
+  const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(sheetName);
   ws.columns = columns.map((col) => ({
