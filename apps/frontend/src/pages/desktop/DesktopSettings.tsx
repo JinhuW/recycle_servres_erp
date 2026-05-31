@@ -10,10 +10,11 @@ import { CustomersPanel } from './settings/CustomersPanel';
 import { CategoriesPanel } from './settings/CategoriesPanel';
 import { GeneralPanel } from './settings/GeneralPanel';
 import { AccountPanel } from './settings/AccountPanel';
+import { FxRatesPanel } from '../../components/FxRatesPanel';
 import { DesktopSettingsConnectors } from './DesktopSettingsConnectors';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'connectors';
+type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'connectors';
 
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
@@ -25,6 +26,7 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
   { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield' },
   { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box' },
   { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings' },
+  { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
   { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip', managerOnly: true },
 ];
 
@@ -67,6 +69,7 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
           {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
           {section === 'categories' && <CategoriesPanel />}
           {section === 'general'    && <GeneralPanel />}
+          {section === 'fx'         && <FxRatesPanel />}
           {section === 'connectors' && <DesktopSettingsConnectors />}
         </div>
       </div>

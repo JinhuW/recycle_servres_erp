@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
-import { useAuth } from '../../../lib/auth';
 import { handleFetchError } from '../../../lib/errorToast';
-import { FxRatesPanel } from '../../../components/FxRatesPanel';
 import type { Lang } from '../../../lib/types';
 
 // ─── Language radio (used inside the General tab) ─────────────────────────────
@@ -85,7 +83,6 @@ function monthLabel(month: string, lang: 'en' | 'zh'): string {
 
 export function GeneralPanel() {
   const { t, lang } = useT();
-  const { user } = useAuth();
   const [data, setData] = useState({
     workspace: 'Recycle Servers',
     domain: 'recycleservers.io',
@@ -245,8 +242,6 @@ export function GeneralPanel() {
           ))}
         </div>
       </div>
-
-      {user?.role === 'manager' && <FxRatesPanel />}
     </>
   );
 }
