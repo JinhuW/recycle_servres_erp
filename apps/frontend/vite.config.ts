@@ -17,6 +17,23 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/v\//, /^\/api\//, /^\/oauth\//, /^\/\.well-known\//],
         runtimeCaching: [
           {
+            // Background-sync only for attachment uploads; the queue retries when
+            // connectivity returns. Other mutations (status changes, etc.) must NOT
+            // be auto-replayed — they could race with what the user did since.
+            urlPattern: ({ url, request }) =>
+              url.pathname === '/api/attachments' && request.method === 'POST',
+            method: 'POST',
+            handler: 'NetworkOnly',
+            options: {
+              backgroundSync: {
+                name: 'recycle-erp-attachments',
+                options: {
+                  maxRetentionTime: 60 * 24, // minutes — drop after 24h
+                },
+              },
+            },
+          },
+          {
             // API: never cache responses — auth is cookie-based and data changes.
             urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
             handler: 'NetworkOnly',
