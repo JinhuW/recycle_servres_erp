@@ -61,21 +61,17 @@ export default defineConfig({
         shortcuts: [
           { name: 'Submit',    short_name: 'Submit',    url: '/submit',    icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
           { name: 'Inventory', short_name: 'Inventory', url: '/inventory', icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
-          { name: 'Orders',    short_name: 'Orders',    url: '/orders',    icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
+          { name: 'Sell orders', short_name: 'Sell orders', url: '/sell-orders',
+            icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
         ],
-        share_target: {
-          action: '/share-target',
-          method: 'POST',
-          enctype: 'multipart/form-data',
-          params: {
-            title: 'title',
-            text: 'text',
-            files: [{ name: 'files', accept: ['image/*'] }],
-          },
-        },
       },
     }),
   ],
+  // @jsquash/jpeg ships a WASM module it fetches at runtime; pre-bundling it
+  // breaks that fetch, so exclude it from Vite's dep optimizer.
+  optimizeDeps: {
+    exclude: ['@jsquash/jpeg', '@jsquash/jpeg/encode'],
+  },
   server: {
     host: '0.0.0.0',                  // bind on all interfaces, not just IPv6 loopback
     port: 5173,
