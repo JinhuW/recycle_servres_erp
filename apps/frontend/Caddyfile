@@ -13,6 +13,21 @@
 	handle /.well-known/* {
 		reverse_proxy backend:8787
 	}
+	# Service Worker: must not be cached by browsers — updates land within one reload.
+	@sw path /sw.js
+	header @sw {
+		Cache-Control "no-cache"
+		Service-Worker-Allowed "/"
+	}
+
+	# Web manifest: revalidate so manifest edits propagate quickly.
+	@manifest path /manifest.webmanifest
+	header @manifest Cache-Control "no-cache"
+
+	# Workbox runtime + precache JS: content-hashed, safe to cache hard.
+	@workbox path_regexp ^/workbox-[a-f0-9]+\.js$
+	header @workbox Cache-Control "public, max-age=31536000, immutable"
+
 	# SPA static assets with history-API fallback.
 	handle {
 		root * /srv
