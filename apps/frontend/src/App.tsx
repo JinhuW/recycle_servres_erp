@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { LangProvider } from './lib/i18n';
 import { vendorTokenFromPath } from './lib/vendor';
+import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 
 import './styles/desktop.css';
 
@@ -39,6 +40,7 @@ export default function App() {
       <Suspense fallback={<div className="app-loading" />}>
         {isPhone ? <MobileApp /> : <DesktopApp />}
       </Suspense>
+      <PwaInstallPrompt />
     </LangProvider>
   );
 }

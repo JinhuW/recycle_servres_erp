@@ -1346,6 +1346,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     pwSheetSub:              'Update the password used to sign in.',
     pwMobileItemLabel:       'Password',
     pwMobileItemSub:         'Change your sign-in password',
+    'pwa.install.cta':       'Install app',
+    'pwa.install.dismiss':   'Not now',
+    'pwa.install.iosHint':   'Tap the Share icon, then "Add to Home Screen" to install.',
   },
   zh: {
     tabHome: '首页', tabOrders: '订单', tabCapture: '扫描', tabMarket: '市场',
@@ -2485,6 +2488,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     pwSheetSub:              '更新登录所用的密码。',
     pwMobileItemLabel:       '密码',
     pwMobileItemSub:         '修改登录密码',
+    'pwa.install.cta':       '安装应用',
+    'pwa.install.dismiss':   '稍后',
+    'pwa.install.iosHint':   '点击分享按钮，选择"添加到主屏幕"以安装。',
   },
 };
 

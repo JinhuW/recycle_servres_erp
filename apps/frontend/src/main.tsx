@@ -8,6 +8,7 @@ import { registerPwa } from './lib/pwa';
 
 import './styles/tokens.css';
 import './styles/phone.css';
+import './styles/pwa.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element missing');
