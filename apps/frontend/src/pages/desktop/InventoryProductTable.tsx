@@ -1,5 +1,6 @@
 import { Fragment, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { ImageLightbox } from '../../components/ImageLightbox';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { useT } from '../../lib/i18n';
@@ -18,6 +19,7 @@ export type ProductLot = {
   warehouse_short: string | null;
   qty: number;
   status: string;
+  image_url: string | null;
 };
 
 export type ProductGroup = {
@@ -107,6 +109,7 @@ export function InventoryProductTable({
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const showCost = isManager && cols.unitCost;
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const toggleOpen = (key: string) => {
     setOpen((prev) => {
       const next = new Set(prev);
@@ -125,6 +128,7 @@ export function InventoryProductTable({
     + (cols.sellPrice ? 1 : 0);
 
   return (
+    <>
     <table className="table">
       <thead>
         <tr>
@@ -264,7 +268,23 @@ export function InventoryProductTable({
                                   onChange={() => onToggleLot(l.id)}
                                 />
                               </td>
-                              <td className="mono" style={{ fontSize: 11.5 }}>{l.order_id}</td>
+                              <td className="mono" style={{ fontSize: 11.5 }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                  {l.image_url && (
+                                    <img
+                                      src={l.image_url}
+                                      alt={productLabel(g)}
+                                      title={t('invQuickViewTooltip')}
+                                      onClick={() => setLightbox(l.image_url)}
+                                      style={{
+                                        width: 32, height: 32, borderRadius: 6, objectFit: 'cover',
+                                        border: '1px solid var(--border)', cursor: 'zoom-in', flexShrink: 0,
+                                      }}
+                                    />
+                                  )}
+                                  {l.order_id}
+                                </span>
+                              </td>
                               <td className="muted">{fmtDateShort(l.created_at, locale)}</td>
                               <td>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -328,5 +348,7 @@ export function InventoryProductTable({
         })}
       </tbody>
     </table>
+    {lightbox && <ImageLightbox url={lightbox} onClose={() => setLightbox(null)} />}
+    </>
   );
 }

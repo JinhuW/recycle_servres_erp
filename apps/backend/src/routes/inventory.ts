@@ -655,7 +655,7 @@ inventory.get('/products', async (c) => {
     condition: string; qty: number; unit_cost: number; sell_price: number | null;
     status: string; health: number | null; created_at: string;
     warehouse_id: string | null; warehouse_short: string | null;
-    user_name: string; user_initials: string;
+    user_name: string; user_initials: string; image_url: string | null;
   };
 
   const rows = (await sql`
@@ -668,11 +668,21 @@ inventory.get('/products', async (c) => {
            l.created_at,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
            w.short AS warehouse_short,
-           u.name AS user_name, u.initials AS user_initials
+           u.name AS user_name, u.initials AS user_initials,
+           img.delivery_url AS image_url
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     JOIN users  u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+    -- One representative scan per line (LATERAL + LIMIT 1 keeps the join from
+    -- multiplying inventory rows). delivery_url is null for stub-provider scans.
+    LEFT JOIN LATERAL (
+      SELECT ls.delivery_url
+      FROM label_scans ls
+      WHERE ls.cf_image_id = l.scan_image_id
+      ORDER BY ls.created_at ASC
+      LIMIT 1
+    ) img ON TRUE
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${searchFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
@@ -788,7 +798,7 @@ inventory.get('/products', async (c) => {
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
         warehouse_id: l.warehouse_id, warehouse_short: l.warehouse_short,
-        qty: l.qty, status: l.status,
+        qty: l.qty, status: l.status, image_url: l.image_url,
         ...(isManager ? { unit_cost: l.unit_cost } : {}),
       })),
     };
