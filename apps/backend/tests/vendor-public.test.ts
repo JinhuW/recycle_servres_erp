@@ -233,6 +233,36 @@ describe('vendor public — me & catalog', () => {
     expect(r.status).toBe(400);
   });
 
+  // Reviewing lines are sellable (status.ts isSellable, sellOrders.ts) but were
+  // historically hidden from the vendor catalog, which filtered to Done-only.
+  async function aReviewingLine(mgr: string): Promise<{ id: string; qty: number } | null> {
+    const inv = await api<{ items: Array<{ id: string; qty: number }> }>(
+      'GET', '/api/inventory?status=Reviewing', { token: mgr });
+    const row = inv.body.items.find(i => i.qty > 0);
+    return row ? { id: row.id, qty: row.qty } : null;
+  }
+
+  it('catalog surfaces Reviewing (sellable) lines, not only Done', async () => {
+    const { token, mgr } = await seedLink();
+    const rev = await aReviewingLine(mgr);
+    expect(rev).not.toBeNull(); // seed carries Reviewing inventory
+    const r = await api<{ groups: { items: Array<{ id: string }> }[] }>(
+      'GET', `/api/public/vendor/${token}/catalog`);
+    expect(r.status).toBe(200);
+    const ids = r.body.groups.flatMap(g => g.items.map(i => i.id));
+    expect(ids).toContain(rev!.id);
+  });
+
+  it('accepts a bid against a Reviewing line', async () => {
+    const { token, mgr } = await seedLink();
+    const rev = await aReviewingLine(mgr);
+    expect(rev).not.toBeNull();
+    const r = await api<{ bidId: string }>('POST', `/api/public/vendor/${token}/bids`, {
+      body: { contactName: 'Lin', lines: [{ inventoryId: rev!.id, qty: 1, unitPrice: 5 }] },
+    });
+    expect(r.status).toBe(201);
+  });
+
   it('rate-limits a flood of bids from one link (429)', async () => {
     const { token, mgr } = await seedLink();
     const line = await anInStockLine(mgr);

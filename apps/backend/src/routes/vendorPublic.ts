@@ -57,7 +57,7 @@ vendorPublic.get('/:token/catalog', async (c) => {
              ls.delivery_url AS own_scan_url
       FROM order_lines l
       LEFT JOIN label_scans ls ON ls.cf_image_id = l.scan_image_id
-      WHERE l.status = 'Done' AND l.qty > 0
+      WHERE l.status IN ('Reviewing', 'Done') AND l.qty > 0
     ),
     sib AS (
       SELECT part_number,
@@ -163,7 +163,8 @@ vendorPublic.post('/:token/bids', async (c) => {
         SELECT category, brand, capacity, type, part_number, qty, status
         FROM order_lines WHERE id = ${inventoryId} FOR UPDATE
       `)[0];
-      if (!row || row.status !== 'Done' || row.qty < totalQty) { bad.push(inventoryId); continue; }
+      const sellable = row && (row.status === 'Reviewing' || row.status === 'Done');
+      if (!sellable || row.qty < totalQty) { bad.push(inventoryId); continue; }
       snap[inventoryId] = {
         category: row.category,
         label: [row.brand, row.capacity, row.type].filter(Boolean).join(' ') || row.category,
