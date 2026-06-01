@@ -6,10 +6,12 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // Filled in by Task 3 — keep disabled until manifest + icons exist.
+      // Off until the web manifest and icon set exist; enabling earlier would
+      // ship a service worker that fails install.
       disable: true,
       registerType: 'prompt',
-      injectRegister: false, // We register manually in src/lib/pwa.ts (Task 4).
+      // SW registration is owned by src/lib/pwa.ts so we can gate on user consent.
+      injectRegister: false,
       manifest: false,
       workbox: { globPatterns: ['**/*.{js,css,html,svg,png,webp,woff,woff2}'] },
     }),
