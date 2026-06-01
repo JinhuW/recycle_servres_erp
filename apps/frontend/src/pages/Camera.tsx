@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
+import { compressForUpload } from '../lib/image-compress';
 import type { Category, ScanResponse } from '../lib/types';
 
 type Props = {
@@ -51,7 +52,19 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
       if (!navigator.mediaDevices?.getUserMedia) return;
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode } },
+          // Request the camera's highest practical resolution. Without a
+          // width/height hint browsers hand back a ~640×480 stream, which
+          // turns small label text into illegible pixels and tanks OCR — the
+          // native file-picker path gets a full-res photo, so the two paths
+          // recognised at very different quality. `ideal` caps to whatever the
+          // hardware actually supports, so weaker cameras still succeed.
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 3840 },
+            height: { ideal: 2160 },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            advanced: [{ focusMode: 'continuous' } as any],
+          },
           audio: false,
         });
         if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
@@ -127,8 +140,10 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     // Real frame only when the live camera produced pixels; otherwise
     // captureFrame returns a tiny placeholder we don't want to preview.
     const live = !!videoRef.current?.videoWidth;
-    const blob = await captureFrame();
-    if (!blob) { setPhase('framing'); setError('Camera unavailable'); return; }
+    const raw = await captureFrame();
+    if (!raw) { setPhase('framing'); setError('Camera unavailable'); return; }
+    // Compress the real frame; the no-camera placeholder PNG is left as-is.
+    const blob = live ? await compressForUpload(raw) : raw;
     setCaptured(live ? await blobToDataUrl(blob) : null);
     await runScan(blob);
   };
@@ -138,8 +153,9 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    setCaptured(await blobToDataUrl(f));
-    runScan(f, f.name);
+    const blob = await compressForUpload(f);
+    setCaptured(await blobToDataUrl(blob));
+    runScan(blob, 'label.jpg');
   };
 
   const liveCamera = !!stream;
