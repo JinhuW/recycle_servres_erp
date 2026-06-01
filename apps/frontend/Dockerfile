@@ -11,6 +11,15 @@ COPY apps/frontend apps/frontend
 RUN pnpm --filter recycle-erp-frontend build
 
 FROM caddy:2-alpine
+# Build provenance (see scripts/release.sh). Re-declared here because ARGs
+# don't cross stage boundaries; defaults keep a plain `docker build` working.
+# The footer reads the version at runtime from /api/health, so the static
+# bundle needs no version baked in — these are just OCI labels for `docker
+# inspect`.
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.revision=$GIT_SHA
 COPY apps/frontend/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/apps/frontend/dist /srv
 EXPOSE 80

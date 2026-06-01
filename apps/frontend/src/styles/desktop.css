@@ -964,6 +964,13 @@ html.desktop, body.desktop, .desktop #root {
   flex-direction: column;
   gap: 2px;
 }
+.settings-nav-version {
+  margin-top: 10px;
+  padding: 8px 11px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  border-top: 1px solid var(--border);
+}
 .settings-nav-item {
   display: flex;
   align-items: center;

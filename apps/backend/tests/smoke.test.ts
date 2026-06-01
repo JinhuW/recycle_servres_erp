@@ -18,6 +18,38 @@ describe('smoke', () => {
     expect((r.body as { status: string }).status).toBe('ok');
   });
 
+  it('GET /api/health reports the build version and commit from env', async () => {
+    const prev = { v: process.env.APP_VERSION, c: process.env.GIT_SHA };
+    process.env.APP_VERSION = '9.9.9';
+    process.env.GIT_SHA = 'deadbee';
+    try {
+      const r = await api('GET', '/api/health');
+      expect(r.status).toBe(200);
+      const body = r.body as { status: string; version: string; commit: string };
+      expect(body.status).toBe('ok');
+      expect(body.version).toBe('9.9.9');
+      expect(body.commit).toBe('deadbee');
+    } finally {
+      process.env.APP_VERSION = prev.v;
+      process.env.GIT_SHA = prev.c;
+    }
+  });
+
+  it('GET /api/health falls back to dev/unknown when build env is absent', async () => {
+    const prev = { v: process.env.APP_VERSION, c: process.env.GIT_SHA };
+    delete process.env.APP_VERSION;
+    delete process.env.GIT_SHA;
+    try {
+      const r = await api('GET', '/api/health');
+      const body = r.body as { version: string; commit: string };
+      expect(body.version).toBe('dev');
+      expect(body.commit).toBe('unknown');
+    } finally {
+      process.env.APP_VERSION = prev.v;
+      process.env.GIT_SHA = prev.c;
+    }
+  });
+
   it('GET /api/health returns 503 when the DB is unreachable', async () => {
     const r = await api('GET', '/api/health', {
       env: { DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/none' },

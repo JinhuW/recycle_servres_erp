@@ -97,12 +97,18 @@ app.get('/', (c) =>
 // catch-all, which 200s every path even when the backend is dead and so
 // hides outages from the load balancer. Unauthenticated by design.
 app.get('/api/health', async (c) => {
+  // Build provenance, stamped into the image at release time (see
+  // scripts/release.sh + Dockerfile build args). 'dev'/'unknown' on an
+  // un-versioned local build. Read from process.env, not c.env: these are
+  // image-baked, not per-request.
+  const version = process.env.APP_VERSION ?? 'dev';
+  const commit = process.env.GIT_SHA ?? 'unknown';
   try {
     await getDb(c.env)`SELECT 1`;
-    return c.json({ status: 'ok' });
+    return c.json({ status: 'ok', version, commit });
   } catch (e) {
     console.error('health check failed', e);
-    return c.json({ status: 'error', error: 'database unreachable' }, 503);
+    return c.json({ status: 'error', error: 'database unreachable', version, commit }, 503);
   }
 });
 

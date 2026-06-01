@@ -70,9 +70,17 @@ services:
         max-file: "5"
 
   backend:
+    # Versioned image is opt-in: with APP_VERSION unset this is :latest, which
+    # `up -d --build` builds and runs exactly as before — the git-pull refresh
+    # flow is unchanged. scripts/release.sh exports APP_VERSION to build/run a
+    # tagged image instead.
+    image: recycle-erp-backend:${APP_VERSION:-latest}
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: recycle_backend
     restart: unless-stopped
     depends_on:
@@ -121,9 +129,13 @@ services:
         max-file: "5"
 
   web:
+    image: recycle-erp-web:${APP_VERSION:-latest}
     build:
       context: .
       dockerfile: apps/frontend/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: recycle_web
     restart: unless-stopped
     depends_on:

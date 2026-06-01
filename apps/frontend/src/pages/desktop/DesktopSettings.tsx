@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
+import { useAppVersion } from '../../lib/useAppVersion';
 // The settings panels + their modals/dialogs/shared primitives were extracted
 // verbatim into ./settings/* — pure code-motion, no logic or JSX changes.
 import { MembersPanel } from './settings/MembersPanel';
@@ -35,6 +36,7 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
   const { user } = useAuth();
   const [section, setSection] = useState<SectionId>('account');
   const sections = SECTIONS.filter(s => !s.managerOnly || user?.role === 'manager');
+  const build = useAppVersion();
 
   return (
     <>
@@ -60,6 +62,11 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
               </span>
             </button>
           ))}
+          {build && (
+            <div className="settings-nav-version mono" title={build.commit}>
+              v{build.version} · {build.commit}
+            </div>
+          )}
         </nav>
 
         <div className="settings-body">

@@ -15,6 +15,14 @@ COPY packages/shared packages/shared
 COPY apps/backend apps/backend
 
 WORKDIR /app/apps/backend
+# Build provenance, supplied by scripts/release.sh via --build-arg. Default to
+# dev/unknown so a plain `docker build` with no args still succeeds; the
+# release path overrides them and they surface at /api/health and as OCI
+# image labels.
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.revision=$GIT_SHA
 # Image defaults: lowest precedence in Compose env merge order — anything in
 # the repo-root .env (env_file) or compose `environment:` overrides them.
 # These exist so `docker compose up` works on a fresh clone with no .env at
@@ -26,7 +34,9 @@ ENV NODE_ENV=development \
     ADMIN_EMAIL=admin@recycle.local \
     ADMIN_PASSWORD=admin \
     ADMIN_NAME=Admin \
-    ADMIN_ROLE=manager
+    ADMIN_ROLE=manager \
+    APP_VERSION=$APP_VERSION \
+    GIT_SHA=$GIT_SHA
 
 # Drop root: node:22-slim ships a non-root `node` user. Deps were installed as
 # root above (needed for corepack/global store); hand the app tree to `node`
