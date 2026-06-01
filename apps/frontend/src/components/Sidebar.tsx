@@ -6,7 +6,7 @@ import type { Role } from '../lib/types';
 
 export type DesktopView =
   | 'dashboard' | 'submit' | 'history' | 'market'
-  | 'inventory' | 'sellorders' | 'vendorbids' | 'transfers' | 'settings';
+  | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers' | 'settings';
 
 const NAV: { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string }[] = [
   { id: 'dashboard',  tKey: 'nav_dashboard',  icon: 'dashboard',  roles: ['manager', 'purchaser'] },
@@ -14,6 +14,7 @@ const NAV: { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge
   { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
   { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
   { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
+  { id: 'analysis',   tKey: 'nav_analysis',   icon: 'analytics',  roles: ['manager'] },
   { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
   { id: 'vendorbids', tKey: 'nav_vendorbids', icon: 'invoice',    roles: ['manager'] },
   { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },

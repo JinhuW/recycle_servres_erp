@@ -383,6 +383,126 @@ inventory.get('/aggregate/by-part', async (c) => {
   return c.json({ partNumber: pn, inTransit, inStock, lines: lineCount });
 });
 
+// ───────────────────────────────────────────────────────────────────────────
+// Inventory Analysis snapshot — powers the desktop Analysis page. Manager-only
+// and whole-workspace (inventory is never role-preview scoped — see
+// role_preview_scope). One round trip: the page applies the category/warehouse
+// *view* filters client-side off this payload, so we return the full picture
+// rather than re-querying per filter.
+//
+// Per-type "sub-analysis" dimensions differ by category (RAM ranks & speeds,
+// HDD spindle RPM & SMART health, …). The backend emits dimension KEYS + unit
+// counts; the frontend owns the labels (i18n) and the chart choice.
+const SUBTYPE_DIMS: Record<string, string[]> = {
+  RAM:   ['generation', 'classification', 'capacity', 'type', 'rank', 'speed'],
+  HDD:   ['capacity', 'interface', 'rpm', 'health', 'brand'],
+  SSD:   ['capacity', 'interface', 'brand', 'health'],
+  Other: [],
+};
+
+inventory.get('/analysis', async (c) => {
+  if (c.var.user.role !== 'manager') return c.json({ error: 'forbidden' }, 403);
+  const sql = getDb(c.env);
+
+  // Effective warehouse = line override else the parent order's. Mirrors list.
+  const effWh = sql`COALESCE(l.warehouse_id, o.warehouse_id)`;
+
+  // Grouped unit-count over a whitelisted column, scoped to one category. The
+  // column set is the fixed SUBTYPE_DIMS whitelist, and identifiers go through
+  // sql(col) so they're escaped. `health` buckets a numeric; `rpm` is an int.
+  const dimQuery = (category: string, col: string) => {
+    if (col === 'health') {
+      return sql<{ k: string; u: number }[]>`
+        SELECT CASE
+                 WHEN health IS NULL  THEN '?'
+                 WHEN health >= 95    THEN '95-100%'
+                 WHEN health >= 85    THEN '85-94%'
+                 WHEN health >= 70    THEN '70-84%'
+                 ELSE '<70%'
+               END AS k,
+               COALESCE(SUM(qty), 0)::int AS u
+        FROM order_lines WHERE category = ${category}
+        GROUP BY 1 ORDER BY 1`;
+    }
+    const colFrag = col === 'rpm' ? sql`rpm::text` : sql`${sql(col)}::text`;
+    return sql<{ k: string; u: number }[]>`
+      SELECT COALESCE(NULLIF(${colFrag}, ''), '?') AS k,
+             COALESCE(SUM(qty), 0)::int AS u
+      FROM order_lines WHERE category = ${category}
+      GROUP BY 1 ORDER BY u DESC, k LIMIT 16`;
+  };
+
+  const [overall, byCategory, byStatus, whTotals, whMatrix, brands] = await Promise.all([
+    sql<{ lines: number; units: number; cost: number; sell: number }[]>`
+      SELECT COUNT(*)::int AS lines, COALESCE(SUM(qty),0)::int AS units,
+             COALESCE(ROUND(SUM(qty*unit_cost)),0)::float AS cost,
+             COALESCE(ROUND(SUM(qty*sell_price)),0)::float AS sell
+      FROM order_lines`,
+    sql<{ category: string; lines: number; units: number; cost: number; sell: number }[]>`
+      SELECT category, COUNT(*)::int AS lines, COALESCE(SUM(qty),0)::int AS units,
+             COALESCE(ROUND(SUM(qty*unit_cost)),0)::float AS cost,
+             COALESCE(ROUND(SUM(qty*sell_price)),0)::float AS sell
+      FROM order_lines GROUP BY category ORDER BY units DESC`,
+    sql<{ status: string; units: number }[]>`
+      SELECT status, COALESCE(SUM(qty),0)::int AS units
+      FROM order_lines GROUP BY status ORDER BY units DESC`,
+    sql<{ id: string; short: string; region: string; units: number; value: number }[]>`
+      SELECT w.id, w.short, w.region,
+             COALESCE(SUM(l.qty),0)::int AS units,
+             COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS value
+      FROM order_lines l
+      JOIN orders o     ON o.id = l.order_id
+      JOIN warehouses w ON w.id = ${effWh}
+      GROUP BY w.id, w.short, w.region ORDER BY units DESC`,
+    sql<{ warehouse_id: string; category: string; units: number }[]>`
+      SELECT w.id AS warehouse_id, l.category, COALESCE(SUM(l.qty),0)::int AS units
+      FROM order_lines l
+      JOIN orders o     ON o.id = l.order_id
+      JOIN warehouses w ON w.id = ${effWh}
+      GROUP BY w.id, l.category`,
+    sql<{ k: string; u: number }[]>`
+      SELECT COALESCE(NULLIF(brand,''),'?') AS k, COALESCE(SUM(qty),0)::int AS u
+      FROM order_lines WHERE brand IS NOT NULL AND brand <> '' AND brand <> '?'
+      GROUP BY 1 ORDER BY u DESC, k LIMIT 10`,
+  ]);
+
+  const matrixByWh: Record<string, Record<string, number>> = {};
+  for (const r of whMatrix) (matrixByWh[r.warehouse_id] ??= {})[r.category] = r.units;
+  const byWarehouse = whTotals.map(w => ({
+    id: w.id, short: w.short, region: w.region, units: w.units, value: w.value,
+    matrix: matrixByWh[w.id] ?? {},
+  }));
+
+  const subtypes: Record<string, unknown> = {};
+  for (const [cat, dims] of Object.entries(SUBTYPE_DIMS)) {
+    const catRow = byCategory.find(r => r.category === cat);
+    const [dimResults, conditionRows] = await Promise.all([
+      Promise.all(dims.map(col =>
+        dimQuery(cat, col).then(rows => ({ key: col, data: rows.map(r => [r.k, r.u] as [string, number]) })))),
+      sql<{ k: string; u: number }[]>`
+        SELECT COALESCE(NULLIF(condition,''),'?') AS k, COALESCE(SUM(qty),0)::int AS u
+        FROM order_lines WHERE category = ${cat} GROUP BY 1 ORDER BY u DESC, k`,
+    ]);
+    subtypes[cat] = {
+      units: catRow?.units ?? 0, cost: catRow?.cost ?? 0, sell: catRow?.sell ?? 0, lines: catRow?.lines ?? 0,
+      dims: dimResults,
+      condition: conditionRows.map(r => [r.k, r.u] as [string, number]),
+      sparse: dims.length === 0,
+    };
+  }
+
+  return c.json({
+    totals: { lines: overall[0]!.lines, units: overall[0]!.units },
+    value: { cost: overall[0]!.cost, sell: overall[0]!.sell },
+    byCategory,
+    byStatus,
+    byWarehouse,
+    categories: byCategory.map(r => r.category),
+    brands: brands.map(r => [r.k, r.u] as [string, number]),
+    subtypes,
+  });
+});
+
 // Product-level change log: the UNION of inventory_events across every line
 // that shares a part number. PO lines are never merged into a real product
 // row, so "the product's history" is the merged history of its peer lines.

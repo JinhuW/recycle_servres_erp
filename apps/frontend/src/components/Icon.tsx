@@ -16,7 +16,7 @@ export type IconName =
   | 'settings' | 'bell' | 'tag' | 'trendDown' | 'minus'
   | 'book' | 'star' | 'zap' | 'globe' | 'mail' | 'grip'
   | 'truck' | 'cash' | 'refresh'
-  | 'paperclip' | 'file' | 'image' | 'invoice';
+  | 'paperclip' | 'file' | 'image' | 'invoice' | 'analytics';
 
 type Props = {
   name: IconName;
@@ -28,6 +28,7 @@ type Props = {
 
 const PATHS: Record<IconName, JSX.Element> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></>,
+  analytics: <><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6" rx="0.6"/><rect x="12" y="7" width="3" height="10" rx="0.6"/><rect x="17" y="13" width="3" height="4" rx="0.6"/></>,
   submit: <><path d="M12 5v14M5 12h14"/></>,
   history: <><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></>,
   inventory: <><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/></>,

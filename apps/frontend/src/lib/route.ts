@@ -64,6 +64,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   history:    '/purchase-orders',
   market:     '/market',
   inventory:  '/inventory',
+  analysis:   '/analysis',
   sellorders: '/sell-orders',
   vendorbids: '/vendor-bids',
   transfers:  '/transfers',
@@ -78,6 +79,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
   if (path === '/market') return 'market';
   if (path === '/inventory' || match('/inventory/:id', path)) return 'inventory';
+  if (path === '/analysis') return 'analysis';
   if (path === '/sell-orders' || match('/sell-orders/:id', path) || match('/sell-orders/:id/edit', path)) return 'sellorders';
   if (path === '/vendor-bids' || match('/vendor-bids/:id', path)) return 'vendorbids';
   if (path === '/transfers') return 'transfers';

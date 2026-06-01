@@ -19,6 +19,7 @@ import { DesktopOrders } from './pages/desktop/DesktopOrders';
 import { DesktopEditOrder } from './pages/desktop/DesktopEditOrder';
 import { DesktopInventory } from './pages/desktop/DesktopInventory';
 import { DesktopInventoryEdit } from './pages/desktop/DesktopInventoryEdit';
+import { DesktopAnalysis } from './pages/desktop/DesktopAnalysis';
 import { DesktopMarket } from './pages/desktop/DesktopMarket';
 import { DesktopSellOrders } from './pages/desktop/DesktopSellOrders';
 import { DesktopVendorBids } from './pages/desktop/DesktopVendorBids';
@@ -121,7 +122,7 @@ export function DesktopApp() {
   if (isAuthorizePath(path)) return <Authorize />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')
     ? 'dashboard'
     : view;
 
@@ -157,6 +158,7 @@ export function DesktopApp() {
           + (view2 === 'history' && editingOrder ? ' page-order-edit' : '')
           + (view2 === 'market' ? ' page-market' : '')
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
+          + (view2 === 'analysis' ? ' page-analysis' : '')
           + (view2 === 'dashboard' ? ' page-dashboard' : '')}>
           {view2 === 'dashboard'  && <DesktopDashboard />}
           {view2 === 'submit'     && (
@@ -170,6 +172,7 @@ export function DesktopApp() {
           {view2 === 'history'    && ordersOrEdit}
           {view2 === 'market'     && <DesktopMarket />}
           {view2 === 'inventory'  && inventoryOrEdit}
+          {view2 === 'analysis'   && <DesktopAnalysis />}
           {view2 === 'sellorders' && (
             <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
           )}
