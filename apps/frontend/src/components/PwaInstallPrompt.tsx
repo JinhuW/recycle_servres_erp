@@ -64,7 +64,7 @@ export function PwaInstallPrompt() {
 
   if (evt) {
     return (
-      <div className="pwa-install-prompt" role="dialog" aria-live="polite">
+      <div className="pwa-install-prompt" role="dialog" aria-label={t('pwa.install.cta')}>
         <button type="button" className="pwa-install-cta" onClick={accept}>
           {t('pwa.install.cta')}
         </button>

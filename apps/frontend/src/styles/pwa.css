@@ -4,11 +4,28 @@
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 10px 14px;
   border-radius: 999px;
-  background: var(--surface, #fff);
+  background: var(--bg-elev);
+  color: var(--fg);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   z-index: 9999;
 }
-.pwa-install-cta { font-weight: 600; }
+.pwa-install-prompt button {
+  border: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+}
+.pwa-install-cta {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.pwa-install-dismiss {
+  background: transparent;
+  color: var(--fg-muted);
+}
