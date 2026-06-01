@@ -105,6 +105,13 @@ export function RolePicker({ variant = 'mobile' }: Props) {
   }
 
   function renderMobile() {
+    // Mobile is purchaser-first: lead with 'Continue as Purchaser' so it reads
+    // as the default. Managers still tap 'Continue as Manager' to enter with
+    // full access — the gate is never skipped.
+    const mobileOrder = [
+      options.find(o => o.mode === 'as_purchaser')!,
+      options.find(o => o.mode === 'actual')!,
+    ];
     return (
       <div className="phone-app">
         <div className="ph-login-shell">
@@ -124,8 +131,10 @@ export function RolePicker({ variant = 'mobile' }: Props) {
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {options.map(o => {
-              const active = o.mode === rolePreview;
+            {mobileOrder.map(o => {
+              // Purchaser is the highlighted default on mobile regardless of any
+              // previously stored preview, matching the purchaser-first intent.
+              const active = o.mode === 'as_purchaser';
               return (
                 <button
                   key={o.mode}

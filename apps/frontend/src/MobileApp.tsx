@@ -21,6 +21,7 @@ import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
 
 import { useAuth } from './lib/auth';
+import { useEffectiveUser } from './lib/tweaks';
 import { useT, I18N } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorToast } from './lib/errorToast';
@@ -46,6 +47,10 @@ type Toast = { msg: string; kind: 'success' | 'error' };
 
 function Shell() {
   const { user, loading, logout, pendingRoleChoice } = useAuth();
+  // The tab bar follows the effective role so a manager who picked "Continue as
+  // Purchaser" sees the purchaser tabs (Market, not Inventory), matching the
+  // desktop sidebar and the purchaser-scoped data.
+  const effUser = useEffectiveUser();
   const { t } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
@@ -618,7 +623,7 @@ function Shell() {
         }} />
       )}
 
-      <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={user.role} />
+      <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={effUser?.role ?? user.role} />
 
       {toastEl}
     </div>
