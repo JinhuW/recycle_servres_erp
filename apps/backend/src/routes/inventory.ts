@@ -122,6 +122,9 @@ const INV_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Date',         key: 'date',      width: 12 },
   { header: 'Category',     key: 'category',  width: 10 },
   { header: 'Item',         key: 'item',      width: 30 },
+  // RAM device type (Desktop/Server/Laptop) — its own column, like Rank/Speed.
+  // Blank for non-RAM categories, which don't carry a device type.
+  { header: 'Type',         key: 'type',      width: 10 },
   { header: 'Spec',         key: 'spec',      width: 26 },
   { header: 'Rank',         key: 'rank',      width: 10 },
   { header: 'Speed',        key: 'speed',     width: 10 },
@@ -157,11 +160,113 @@ function invSpec(r: Record<string, unknown>): string {
   }
 }
 
+// Grouped export (?view=grouped): one row per product — lines sharing a
+// canonical part number collapse together, mirroring the desktop grouped view.
+// Aggregates qty by status, counts POs/lots, and spreads cost min/avg/max.
+// Manager-only like the flat export, so cost columns are always present.
+const INV_EXPORT_COLS_GROUPED: XlsxColumn[] = [
+  { header: 'Part #',       key: 'part',       width: 22 },
+  { header: 'Category',     key: 'category',   width: 10 },
+  { header: 'Item',         key: 'item',       width: 30 },
+  { header: 'Type',         key: 'type',       width: 10 },
+  { header: 'Spec',         key: 'spec',       width: 26 },
+  { header: 'Warehouses',   key: 'warehouses', width: 18 },
+  { header: 'Qty',          key: 'qty',        width: 8,  numFmt: '#,##0' },
+  { header: 'In stock',     key: 'inStock',    width: 10, numFmt: '#,##0' },
+  { header: 'In transit',   key: 'inTransit',  width: 11, numFmt: '#,##0' },
+  { header: 'Reviewing',    key: 'reviewing',  width: 10, numFmt: '#,##0' },
+  { header: 'POs',          key: 'poCount',    width: 7,  numFmt: '#,##0' },
+  { header: 'Lots',         key: 'lotCount',   width: 7,  numFmt: '#,##0' },
+  { header: 'Cost min',     key: 'costMin',    width: 11, numFmt: '#,##0.00' },
+  { header: 'Cost avg',     key: 'costAvg',    width: 11, numFmt: '#,##0.00' },
+  { header: 'Cost max',     key: 'costMax',    width: 11, numFmt: '#,##0.00' },
+  { header: 'Sell price',   key: 'sellPrice',  width: 12, numFmt: '#,##0.00' },
+  { header: 'Submitted by', key: 'submitter',  width: 22 },
+];
+
 inventory.get('/export', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const whereFrag = inventoryWhereFrag(c, sql, u);
+
+  // Grouped mode collapses lines by canonical part number into one row each,
+  // matching the desktop grouped view. Same filters/cap-drop as the flat path.
+  if (c.req.query('view') === 'grouped') {
+    const canonCol = canonPartCol(sql, sql`l.part_number`);
+    const rows = (await sql`
+      SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
+             l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
+             l.part_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
+             l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
+             l.status, l.health::float AS health, l.created_at,
+             w.short AS warehouse_short, u.name AS user_name
+      FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
+      JOIN users  u ON u.id = o.user_id
+      LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
+      WHERE ${whereFrag}
+      ORDER BY l.created_at DESC
+    `) as unknown as Record<string, unknown>[];
+
+    // Lines with no part number can't be merged — each is its own singleton.
+    const groups = new Map<string, Record<string, unknown>[]>();
+    const order: string[] = [];
+    for (const r of rows) {
+      const canon = typeof r.canon === 'string' ? r.canon : '';
+      const key = canon.length > 0 ? canon : `line:${r.id}`;
+      const b = groups.get(key);
+      if (b) b.push(r); else { groups.set(key, [r]); order.push(key); }
+    }
+
+    const grouped = order.map((key) => {
+      const lots = groups.get(key)!;
+      const head = lots[0];
+      let qty = 0, inTransit = 0, inStock = 0, reviewing = 0;
+      let costMin = Infinity, costMax = -Infinity, costWeighted = 0;
+      const whs = new Set<string>();
+      const submitters = new Set<string>();
+      const pos = new Set<string>();
+      let repPn: string | null = null;
+      for (const l of lots) {
+        const lqty = Number(l.qty ?? 0);
+        const cost = Number(l.unit_cost ?? 0);
+        qty += lqty;
+        if (l.status === 'In Transit') inTransit += lqty;
+        else if (l.status === 'Done') inStock += lqty;
+        else if (l.status === 'Reviewing') reviewing += lqty;
+        costMin = Math.min(costMin, cost);
+        costMax = Math.max(costMax, cost);
+        costWeighted += cost * lqty;
+        if (l.warehouse_short) whs.add(String(l.warehouse_short));
+        if (l.user_name) submitters.add(String(l.user_name));
+        pos.add(String(l.order_id));
+        if (repPn === null && l.part_number) repPn = String(l.part_number);
+      }
+      return {
+        part: repPn ?? '',
+        category: head.category ?? '',
+        item: invLabel(head),
+        type: head.category === 'RAM' ? (head.type ?? '') : '',
+        spec: invSpec(head),
+        warehouses: [...whs].join(', '),
+        qty,
+        inStock,
+        inTransit,
+        reviewing,
+        poCount: pos.size,
+        lotCount: lots.length,
+        costMin: costMin === Infinity ? 0 : costMin,
+        costAvg: qty > 0 ? costWeighted / qty : 0,
+        costMax: costMax === -Infinity ? 0 : costMax,
+        sellPrice: head.sell_price == null ? null : Number(head.sell_price),
+        submitter: [...submitters].join(', '),
+      };
+    });
+
+    const buf = await buildXlsxBuffer('Inventory', INV_EXPORT_COLS_GROUPED, grouped);
+    return xlsxResponse(buf, datedFilename('inventory-grouped'));
+  }
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
@@ -198,6 +303,7 @@ inventory.get('/export', async (c) => {
       date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
       category: r.category ?? '',
       item: invLabel(r),
+      type: r.category === 'RAM' ? (r.type ?? '') : '',
       spec: invSpec(r),
       rank: r.rank ?? '',
       speed: r.speed ?? '',

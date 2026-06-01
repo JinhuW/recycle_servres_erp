@@ -427,12 +427,16 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [exporting, setExporting] = useState(false);
 
   // Export the FULL filtered set (the backend drops the 200-row list cap for
-  // the xlsx). Reuses the live filterQuery so the file matches what's on screen.
+  // the xlsx). Reuses the live filterQuery so the file matches what's on screen,
+  // and forwards the view so the grouped view exports one row per product while
+  // the flat view keeps the per-line file.
   const runExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
-      await api.download(`/api/inventory/export?${filterQuery}`, 'inventory.xlsx');
+      const params = new URLSearchParams(filterQuery);
+      if (view === 'grouped') params.set('view', 'grouped');
+      await api.download(`/api/inventory/export?${params.toString()}`, 'inventory.xlsx');
     } catch (e) {
       handleFetchError(e);
     } finally {
