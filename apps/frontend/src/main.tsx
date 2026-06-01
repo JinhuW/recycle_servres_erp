@@ -4,6 +4,7 @@ import App from './App';
 import { AuthProvider } from './lib/auth';
 import { PreferencesProvider } from './lib/preferences';
 import { TweaksProvider } from './lib/tweaks';
+import { registerPwa } from './lib/pwa';
 
 import './styles/tokens.css';
 import './styles/phone.css';
@@ -22,3 +23,5 @@ createRoot(root).render(
     </AuthProvider>
   </React.StrictMode>,
 );
+
+registerPwa();
