@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pre-commit — fast secret scan over staged changes. Heavier checks (dependency
+# audit, static security, changelog) run at pre-push. Bypass once with
+# `git commit --no-verify`; mark a false positive with a trailing
+# `# pragma: allowlist secret`.
+set -u
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$DIR/lib/scan.sh"
+
+echo "▸ pre-commit: scanning staged changes for secrets"
+if ! emit_added --cached | scan_secrets; then
+  c_red "✗ Potential secret(s) in staged changes — commit blocked."
+  c_yel "  False positive? append '# pragma: allowlist secret' to the line,"
+  c_yel "  or bypass once with: git commit --no-verify"
+  exit 1
+fi
+c_grn "✓ no secrets detected"
+exit 0
