@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { LangProvider } from './lib/i18n';
 import { vendorTokenFromPath } from './lib/vendor';
 import { PwaInstallPrompt } from './components/PwaInstallPrompt';
+import { PwaUpdateToast } from './components/PwaUpdateToast';
 
 import './styles/desktop.css';
 
@@ -41,6 +42,7 @@ export default function App() {
         {isPhone ? <MobileApp /> : <DesktopApp />}
       </Suspense>
       <PwaInstallPrompt />
+      <PwaUpdateToast />
     </LangProvider>
   );
 }

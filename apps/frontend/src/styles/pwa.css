@@ -29,3 +29,35 @@
   background: transparent;
   color: var(--fg-muted);
 }
+
+.pwa-update-toast {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 9999;
+}
+.pwa-update-toast button {
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.pwa-update-cta {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.pwa-update-dismiss {
+  background: transparent;
+  color: var(--fg-muted);
+}

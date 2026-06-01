@@ -1349,6 +1349,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     'pwa.install.cta':       'Install app',
     'pwa.install.dismiss':   'Not now',
     'pwa.install.iosHint':   'Tap the Share icon, then "Add to Home Screen" to install.',
+    'pwa.update.title':      'A new version is available',
+    'pwa.update.cta':        'Reload',
+    'pwa.update.dismiss':    'Later',
   },
   zh: {
     tabHome: '首页', tabOrders: '订单', tabCapture: '扫描', tabMarket: '市场',
@@ -2491,6 +2494,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     'pwa.install.cta':       '安装应用',
     'pwa.install.dismiss':   '稍后',
     'pwa.install.iosHint':   '点击分享按钮，选择"添加到主屏幕"以安装。',
+    'pwa.update.title':      '有可用的新版本',
+    'pwa.update.cta':        '刷新',
+    'pwa.update.dismiss':    '稍后',
   },
 };
 
