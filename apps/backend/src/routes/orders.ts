@@ -11,9 +11,25 @@ import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
 import { getWorkspaceSetting } from '../lib/settings';
 import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
+import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+
+// A typed/OCR part number always wins; otherwise fall back to a synthetic one
+// (e.g. Mixed-brand SSDs the user left blank) so grouping/pricing has a stable
+// key. Applied only at line creation — edits never rewrite an existing part
+// number. Returns null when neither applies.
+function resolvePartNumber(
+  category: string | undefined,
+  l: { partNumber?: string | null; brand?: string | null; capacity?: string | null;
+       interface?: string | null; formFactor?: string | null; generation?: string | null;
+       speed?: string | null; rpm?: string | number | null },
+): string | null {
+  const typed = l.partNumber?.trim();
+  if (typed) return typed;
+  return synthesizePartNumber(category ?? '', l);
+}
 
 type LineInput = {
   category?: LineCategory;
@@ -424,7 +440,7 @@ orders.post('/', async (c) => {
           ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
-          ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
+          ${resolvePartNumber(l.category ?? body.category, l)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
           ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
@@ -433,7 +449,7 @@ orders.post('/', async (c) => {
     }
     await autoTrackParts(tx, body.lines.map(l => ({
       category: l.category ?? body.category,
-      partNumber: l.partNumber,
+      partNumber: resolvePartNumber(l.category ?? body.category, l),
       brand: l.brand,
       capacity: l.capacity,
       type: l.type,
@@ -689,7 +705,7 @@ orders.patch('/:id', async (c) => {
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
-              ${l.partNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
               ${l.status ?? LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
@@ -702,7 +718,7 @@ orders.patch('/:id', async (c) => {
         }
         await autoTrackParts(tx, body.addLines.map(l => ({
           category: l.category ?? (existing.category as string),
-          partNumber: l.partNumber,
+          partNumber: resolvePartNumber(l.category ?? (existing.category as string), l),
           brand: l.brand,
           capacity: l.capacity,
           type: l.type,

@@ -1,5 +1,6 @@
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
+import { synthesizePartNumber } from '@recycle-erp/shared';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -134,7 +135,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('partNumber')}</label>
-            <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+            <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={e => onChange('partNumber', e.target.value)} />
           </div>
           <div className="ph-field">
             <label>{t('health')} (%)</label>

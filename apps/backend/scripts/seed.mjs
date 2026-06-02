@@ -433,7 +433,7 @@ try {
     RAM_RANK:      RAM_RANK,
     RAM_CAP:       RAM_CAP,
     RAM_SPEED:     RAM_SPEED,
-    SSD_BRAND:     SSD_BRANDS,
+    SSD_BRAND:     [...SSD_BRANDS, 'Mixed'],
     SSD_INTERFACE: SSD_IFACE,
     SSD_FORM:      SSD_FORM,
     SSD_CAP:       SSD_CAP,

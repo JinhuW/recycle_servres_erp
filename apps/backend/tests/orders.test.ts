@@ -50,6 +50,65 @@ describe('POST /api/orders defaults', () => {
   });
 });
 
+describe('POST /api/orders — synthetic part number', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('derives MIXED_<cap>_<iface>_<form> for a Mixed-brand SSD with no part number', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'SSD', warehouseId: 'WH-LA1',
+        lines: [{
+          category: 'SSD', brand: 'Mixed', capacity: '512GB',
+          interface: 'NVMe', formFactor: 'M.2', condition: 'Pulled — Tested',
+          qty: 10, unitCost: 12,
+        }],
+      },
+    });
+    expect(r.status).toBe(201);
+    const got = await api<{ order: { lines: { partNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + r.body.id, { token });
+    expect(got.body.order.lines[0].partNumber).toBe('MIXED_512GB_NVMe_M.2');
+  });
+
+  it('leaves a user-supplied part number untouched', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'SSD', warehouseId: 'WH-LA1',
+        lines: [{
+          category: 'SSD', brand: 'Mixed', capacity: '512GB',
+          interface: 'NVMe', formFactor: 'M.2', partNumber: 'MZ-V8P1T0BW',
+          condition: 'Pulled — Tested', qty: 1, unitCost: 12,
+        }],
+      },
+    });
+    const got = await api<{ order: { lines: { partNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + r.body.id, { token });
+    expect(got.body.order.lines[0].partNumber).toBe('MZ-V8P1T0BW');
+  });
+
+  it('does not synthesize for a non-Mixed SSD left blank', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'SSD', warehouseId: 'WH-LA1',
+        lines: [{
+          category: 'SSD', brand: 'Samsung', capacity: '512GB',
+          interface: 'NVMe', formFactor: 'M.2', condition: 'Pulled — Tested',
+          qty: 1, unitCost: 12,
+        }],
+      },
+    });
+    const got = await api<{ order: { lines: { partNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + r.body.id, { token });
+    expect(got.body.order.lines[0].partNumber).toBeNull();
+  });
+});
+
 describe('POST /api/orders/:id/advance', () => {
   beforeEach(async () => { await resetDb(); });
 

@@ -5,6 +5,7 @@ import {
   CONDITIONS,
 } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
+import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Line } from '../DesktopSubmit';
 
 // ─── Field groups ────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ export function SsdFields({ line, set }: FieldsProps) {
         <input
           className="input mono"
           value={line.partNumber ?? ''}
+          placeholder={synthesizePartNumber('SSD', line) ?? undefined}
           onChange={e => set({ partNumber: e.target.value })}
         />
       </div>
