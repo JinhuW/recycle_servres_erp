@@ -9,6 +9,8 @@ import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { showErrorToast } from '../lib/errorToast';
+import { synthesizePartNumber } from '@recycle-erp/shared';
 
 type Props = {
   category: Category;
@@ -133,6 +135,8 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // Cleared by tapping "Enter manually" in the unreadable banner so the user
   // can type values without the warning hovering over them.
   const [unreadableDismissed, setUnreadableDismissed] = useState(false);
+  // Holds the auto-generated part # awaiting the user's confirm (blank-PN save).
+  const [pnGen, setPnGen] = useState<string | null>(null);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -173,7 +177,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     return line.description ?? 'Item';
   };
 
-  const save = () => onSaveLine({ ...line, label: buildLabel(), partNumber: line.partNumber || '—' });
+  const persist = (partNumber: string) => onSaveLine({ ...line, label: buildLabel(), partNumber });
+
+  // Part # is required. A typed value saves directly; a blank we can auto-fill
+  // (e.g. a Mixed-brand SSD) prompts the confirm sheet; an un-fillable blank is
+  // a hard stop.
+  const attemptSave = () => {
+    const typed = (line.partNumber ?? '').trim();
+    if (typed) { persist(typed); return; }
+    const gen = synthesizePartNumber(line.category, line);
+    if (gen) { setPnGen(gen); return; }
+    showErrorToast(t('pnRequiredThis'));
+  };
 
   // Header text:
   //   - Edit mode:  "Edit RAM item" / sub = existing label
@@ -459,10 +474,27 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
       <div className="ph-action-bar">
         <button className="ph-btn ghost" onClick={onBack ?? onCancel}>{t('cancel')}</button>
-        <button className="ph-btn dark" onClick={save}>
+        <button className="ph-btn dark" onClick={attemptSave}>
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>
       </div>
+      {pnGen && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setPnGen(null); }}>
+          <div className="modal-shell" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div className="modal-title">{t('pnConfirmTitle')}</div>
+              <div className="modal-sub">{t('pnConfirmSubOne')}</div>
+            </div>
+            <div className="modal-body">
+              <div className="mono" style={{ fontWeight: 600, fontSize: 15, textAlign: 'center', padding: '4px 0' }}>{pnGen}</div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setPnGen(null)}>{t('pnConfirmEdit')}</button>
+              <button className="btn accent" onClick={() => { persist(pnGen); setPnGen(null); }}>{t('pnConfirmUse')}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {lightbox && scanUrl && (
         <ImageLightbox url={scanUrl} alt={t('aiPhotoLabel')} onClose={() => setLightbox(false)} />
       )}

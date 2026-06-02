@@ -9,6 +9,7 @@ import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/
 import { LineDrawer } from './submit/LineDrawer';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { useAuth } from '../../lib/auth';
+import { synthesizePartNumber } from '@recycle-erp/shared';
 
 // ─── Public component ────────────────────────────────────────────────────────
 // Two-step submit flow lifted from design/submit.jsx + design/app.jsx#SubmitView:
@@ -317,6 +318,9 @@ function OrderForm({
   // target to merge into so confirming the warning doesn't fall back to new-PO.
   const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
   const [choice, setChoice] = useState<{ selectedId: string | null } | null>(null);
+  // Lines submitted with a blank part number that can be auto-filled (e.g.
+  // Mixed-brand SSDs). Holds the proposed value per line for the confirm modal.
+  const [pnConfirm, setPnConfirm] = useState<{ idx: number; value: string }[] | null>(null);
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -462,6 +466,30 @@ function OrderForm({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Part # is required on every line. Clicking Submit first checks for blanks:
+  // a line we can auto-fill (synthesizePartNumber returns a value, e.g. a
+  // Mixed-brand SSD) is offered in a confirm modal; a blank we can't fill is a
+  // hard stop. Only once all lines have (or accept) a part # do we proceed into
+  // the existing target/duplicate flow.
+  const proceedSubmit = () => {
+    if (targets.length > 0) { setChoice({ selectedId: null }); return; }
+    if (dupGroups.length > 0) { setDupConfirm(dupGroups); return; }
+    void doSubmit();
+  };
+
+  const attemptSubmit = () => {
+    const blanks = lines
+      .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
+      .filter(x => !(x.l.partNumber ?? '').trim());
+    const blocking = blanks.find(x => !x.gen);
+    if (blocking) { setAiError(t('pnRequiredLine', { n: blocking.idx + 1 })); return; }
+    if (blanks.length > 0) {
+      setPnConfirm(blanks.map(x => ({ idx: x.idx, value: x.gen! })));
+      return;
+    }
+    proceedSubmit();
   };
 
   // Reason the Submit button is disabled, surfaced inline so the user isn't
@@ -700,17 +728,7 @@ function OrderForm({
                 className="btn accent"
                 disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
                 title={submitDisabledReason ?? undefined}
-                onClick={() => {
-                  if (targets.length > 0) {
-                    setChoice({ selectedId: null });
-                    return;
-                  }
-                  if (dupGroups.length > 0) {
-                    setDupConfirm(dupGroups);
-                    return;
-                  }
-                  void doSubmit();
-                }}
+                onClick={attemptSubmit}
               >
                 {t('submitOrder')} <Icon name="check" size={14} />
               </button>
@@ -860,6 +878,50 @@ function OrderForm({
                 }}
               >
                 {submitting ? '…' : t('dupPartSubmitAnyway')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pnConfirm && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setPnConfirm(null); }}>
+          <div className="modal-shell" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="hash" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">{t('pnConfirmTitle')}</div>
+                  <div className="modal-sub">{pnConfirm.length === 1 ? t('pnConfirmSubOne') : t('pnConfirmSubMany')}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-body">
+              <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'grid', gap: 6, fontSize: 13 }}>
+                {pnConfirm.map(p => (
+                  <li key={p.idx}>
+                    {t('pnConfirmRow', { n: p.idx + 1 })} <span className="mono" style={{ fontWeight: 600 }}>{p.value}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setPnConfirm(null)}>{t('pnConfirmEdit')}</button>
+              <button
+                className="btn accent"
+                onClick={() => {
+                  pnConfirm.forEach(p => updateLine(p.idx, { partNumber: p.value }));
+                  setPnConfirm(null);
+                  proceedSubmit();
+                }}
+              >
+                {t('pnConfirmUse')}
               </button>
             </div>
           </div>

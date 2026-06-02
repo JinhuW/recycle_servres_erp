@@ -1020,6 +1020,16 @@ export const I18N: Record<Lang, Record<string, string>> = {
     // because it means the user likely re-shot the same module.
     dupPartScanWarn: 'Part {pn} is already added as line {line} — please verify before saving.',
 
+    // Required part # + auto-generate confirmation (fires at submit/save when blank).
+    pnRequiredLine: 'Part # is required on line {n}.',
+    pnRequiredThis: 'Part # is required — enter one before saving.',
+    pnConfirmTitle: 'Use auto-generated part #?',
+    pnConfirmSubMany: 'These lines have no part #. Use the value generated from their specs, or go back and enter one.',
+    pnConfirmSubOne: 'This line has no part #. Use the value generated from its specs, or go back and enter one.',
+    pnConfirmRow: 'Line {n} — {pn}',
+    pnConfirmUse: 'Use generated',
+    pnConfirmEdit: 'Go back & edit',
+
     // LineFields
     selectPlaceholder: 'Select…',
     healthPct: 'Health (%)',
@@ -2172,6 +2182,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     dupPartSaveAnyway: '仍然保存',
     dupPartSubmitAnyway: '仍然提交',
     dupPartScanWarn: '零件 {pn} 已添加为第 {line} 行 — 请在保存前核对。',
+    pnRequiredLine: '第 {n} 行需要填写零件号。',
+    pnRequiredThis: '需要填写零件号 — 请在保存前输入。',
+    pnConfirmTitle: '使用自动生成的零件号?',
+    pnConfirmSubMany: '以下明细未填写零件号。可根据规格自动生成,或返回手动输入。',
+    pnConfirmSubOne: '此明细未填写零件号。可根据规格自动生成,或返回手动输入。',
+    pnConfirmRow: '第 {n} 行 — {pn}',
+    pnConfirmUse: '使用生成值',
+    pnConfirmEdit: '返回编辑',
     drawerConfirmed: '已确认',
     drawerConfirming: '正在确认…',
     drawerConfirmLine: '确认明细',
