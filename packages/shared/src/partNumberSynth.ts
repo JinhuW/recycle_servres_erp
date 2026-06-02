@@ -33,13 +33,13 @@ const isMixedBrand = (l: SynthLine) => (l.brand ?? '').trim().toLowerCase() === 
 
 // A part number is a single token: no spaces, no quotes. Component values from
 // the catalog carry both (e.g. `2.5"`, `M.2 2280`), so drop quote/prime marks
-// and fold any internal whitespace into underscores. "2.5\"" → "2.5",
-// "M.2 2280" → "M.2_2280".
+// and fold any internal whitespace into hyphens (underscore is the segment
+// separator). "2.5\"" → "2.5", "M.2 2280" → "M.2-2280".
 function sanitizeSegment(v: string): string {
   return v
     .replace(/["'′″]/g, '')
     .trim()
-    .replace(/\s+/g, '_');
+    .replace(/\s+/g, '-');
 }
 
 export const SYNTH_PN_RULES: Partial<Record<string, SynthRule>> = {

@@ -32,12 +32,12 @@ describe('synthesizePartNumber — SSD Mixed brand', () => {
     ).toBe('MIXED_960GB_SATA_2.5');
   });
 
-  it('replaces spaces in a component with underscores ("M.2 2280" → "M.2_2280")', () => {
+  it('replaces spaces in a component with hyphens ("M.2 2280" → "M.2-2280")', () => {
     expect(
       synthesizePartNumber('SSD', {
         brand: 'Mixed', capacity: '1.92TB', interface: 'NVMe', formFactor: 'M.2 2280',
       }),
-    ).toBe('MIXED_1.92TB_NVMe_M.2_2280');
+    ).toBe('MIXED_1.92TB_NVMe_M.2-2280');
   });
 
   it('matches the Mixed brand case-insensitively', () => {
