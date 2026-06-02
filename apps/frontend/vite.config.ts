@@ -18,6 +18,7 @@ export default defineConfig({
       filename: 'sw.ts',
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,webp,woff,woff2}'],
+        globIgnores: ['**/apple-splash-*.png'],
       },
       manifest: {
         name: 'Recycle Servers Inventory',
