@@ -31,6 +31,17 @@ export type SynthRule = {
 
 const isMixedBrand = (l: SynthLine) => (l.brand ?? '').trim().toLowerCase() === 'mixed';
 
+// A part number is a single token: no spaces, no quotes. Component values from
+// the catalog carry both (e.g. `2.5"`, `M.2 2280`), so drop quote/prime marks
+// and fold any internal whitespace into underscores. "2.5\"" → "2.5",
+// "M.2 2280" → "M.2_2280".
+function sanitizeSegment(v: string): string {
+  return v
+    .replace(/["'′″]/g, '')
+    .trim()
+    .replace(/\s+/g, '_');
+}
+
 export const SYNTH_PN_RULES: Partial<Record<string, SynthRule>> = {
   SSD: { guard: isMixedBrand, prefix: 'MIXED', parts: ['capacity', 'interface', 'formFactor'] },
   // Future: HDD → ['capacity','interface','formFactor'], RAM → ['capacity','generation','speed'], …
@@ -43,6 +54,6 @@ export const SYNTH_PN_RULES: Partial<Record<string, SynthRule>> = {
 export function synthesizePartNumber(category: string, line: SynthLine): string | null {
   const rule = SYNTH_PN_RULES[category];
   if (!rule || !rule.guard(line)) return null;
-  const segs = rule.parts.map((k) => String(line[k] ?? '').trim()).filter(Boolean);
+  const segs = rule.parts.map((k) => sanitizeSegment(String(line[k] ?? ''))).filter(Boolean);
   return segs.length ? [rule.prefix, ...segs].join('_') : null;
 }

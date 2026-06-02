@@ -24,6 +24,22 @@ describe('synthesizePartNumber — SSD Mixed brand', () => {
     ).toBe('MIXED_512GB_NVMe');
   });
 
+  it('strips quotes from form factor ("2.5\\"" → "2.5")', () => {
+    expect(
+      synthesizePartNumber('SSD', {
+        brand: 'Mixed', capacity: '960GB', interface: 'SATA', formFactor: '2.5"',
+      }),
+    ).toBe('MIXED_960GB_SATA_2.5');
+  });
+
+  it('replaces spaces in a component with underscores ("M.2 2280" → "M.2_2280")', () => {
+    expect(
+      synthesizePartNumber('SSD', {
+        brand: 'Mixed', capacity: '1.92TB', interface: 'NVMe', formFactor: 'M.2 2280',
+      }),
+    ).toBe('MIXED_1.92TB_NVMe_M.2_2280');
+  });
+
   it('matches the Mixed brand case-insensitively', () => {
     expect(
       synthesizePartNumber('SSD', { brand: 'mixed', capacity: '1TB', interface: 'SATA' }),
