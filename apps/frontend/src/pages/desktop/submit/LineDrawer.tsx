@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { ImageLightbox } from '../../../components/ImageLightbox';
 import { api } from '../../../lib/api';
@@ -94,29 +94,6 @@ export function LineDrawer({
       setAiBusy(false);
     }
   }, [aiBusy, cat, onChange, t]);
-
-  // Hydrate the dropzone from a Web Share Target hand-off. ShareTarget stashes
-  // the OS-shared image as a data URL in sessionStorage; the first RAM drawer
-  // that mounts after navigation picks it up and pushes it through the same
-  // /api/scan/label path as a drag-drop. Gated on the same conditions that
-  // render the dropzone — re-scanning into an edit drawer would be confusing.
-  useEffect(() => {
-    if (!showDropzone) return;
-    const SHARED_FILE_KEY = 'pwa:sharedFile';
-    let dataUrl: string | null;
-    try { dataUrl = sessionStorage.getItem(SHARED_FILE_KEY); } catch { return; }
-    if (!dataUrl) return;
-    try { sessionStorage.removeItem(SHARED_FILE_KEY); } catch { /* ignore */ }
-    fetch(dataUrl)
-      .then((r) => r.blob())
-      .then((blob) => {
-        const file = new File([blob], 'shared.jpg', { type: blob.type || 'image/jpeg' });
-        void handleAiFile([file]);
-      })
-      .catch(() => { /* ignore */ });
-    // Run once on mount. handleAiFile is useCallback-stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const onAiUpload = () => {
     if (aiBusy) return;

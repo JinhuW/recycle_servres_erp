@@ -4,17 +4,19 @@ Run this matrix before each release that touches `vite.config.ts`,
 `Caddyfile`, `apps/frontend/index.html`, `apps/frontend/public/icons/*`,
 or anything under `apps/frontend/src/lib/pwa.ts`.
 
+> **Scope:** PWA is mobile-only. The Desktop Chrome column is kept for table symmetry and marked n/a throughout.
+
 | Check                                                       | Android Chrome | iOS Safari | Desktop Chrome |
 |-------------------------------------------------------------|----------------|------------|----------------|
-| Lighthouse PWA "Installable" passes                         | n/a            | n/a        |                |
-| Install prompt / Add-to-Home-Screen works                   |                |            |                |
-| Launches in standalone (no browser chrome)                  |                |            |                |
-| Home-screen icon is the correct (maskable / apple-touch)    |                |            |                |
-| Reload after deploy picks up new SW within one refresh      |                |            |                |
-| Offline reload of `/` shows the SPA shell (not browser err) |                |            |                |
-| Vendor portal `/v/<token>` is NOT SW-controlled             |                |            |                |
-| Background upload retries on flaky network (Task 10)        |                |            |                |
-| Share-from-Camera-Roll opens the AI label flow (Task 11)    |                |            |                |
+| Lighthouse PWA "Installable" passes                         | n/a            | n/a        | n/a            |
+| Install prompt / Add-to-Home-Screen works                   |                |            | n/a            |
+| Launches in standalone (no browser chrome)                  |                |            | n/a            |
+| Home-screen icon is the correct (maskable / apple-touch)    |                |            | n/a            |
+| Reload after deploy picks up new SW within one refresh      |                |            | n/a            |
+| Offline reload of `/` shows the SPA shell (not browser err) |                |            | n/a            |
+| Vendor portal `/v/<token>` is NOT SW-controlled             |                |            | n/a            |
+| Background upload retries on flaky network (Task 10)        |                |            | n/a            |
+| Share-from-Camera-Roll opens the AI label flow (Task 11)    |                |            | n/a            |
 
 All matrix rows above are **pending real-device verification** as of the
 last automatable check. None of them can be exercised without an Android
@@ -61,10 +63,10 @@ run on 2026-06-01 (commit `5d05b3e`):
 
 ### Deferred steps
 
-The following steps from the M5 plan require hardware or a browser the
+Desktop checks deferred / not applicable; the only audit target is the
+mobile shell. The following steps from the M5 plan require hardware the
 dev environment does not have and must be run by a human before release
 cut:
 
-- Lighthouse PWA audit on desktop Chrome (Step 7.2).
 - Android Chrome install + standalone launch (Step 7.3).
 - iOS Safari Add-to-Home-Screen + standalone launch (Step 7.4).

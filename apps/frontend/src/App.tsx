@@ -41,8 +41,12 @@ export default function App() {
       <Suspense fallback={<div className="app-loading" />}>
         {isPhone ? <MobileApp /> : <DesktopApp />}
       </Suspense>
-      <PwaInstallPrompt />
-      <PwaUpdateToast />
+      {isPhone && (
+        <>
+          <PwaInstallPrompt />
+          <PwaUpdateToast />
+        </>
+      )}
     </LangProvider>
   );
 }
