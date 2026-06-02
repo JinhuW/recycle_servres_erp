@@ -9,55 +9,15 @@ export default defineConfig({
       registerType: 'prompt',
       // SW registration is owned by src/lib/pwa.ts so we can gate on user consent.
       injectRegister: false,
-      // Don't touch the vendor portal: those URLs are short-lived per-vendor
-      // tokens and shouldn't be SW-handled or cached at all.
-      workbox: {
+      // injectManifest: the Web Share Target POST handler needs custom SW code
+      // (intercept multipart, stash file in SW memory, redirect, postMessage to
+      // the page) — declarative runtimeCaching can't express that, so the
+      // equivalent routes are wired up in src/sw.ts via registerRoute().
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,webp,woff,woff2}'],
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/v\//, /^\/api\//, /^\/oauth\//, /^\/\.well-known\//],
-        runtimeCaching: [
-          {
-            // Background-sync only for attachment uploads; the queue retries when
-            // connectivity returns. Other mutations (status changes, etc.) must NOT
-            // be auto-replayed — they could race with what the user did since.
-            urlPattern: ({ url, request }) =>
-              url.pathname === '/api/attachments' && request.method === 'POST',
-            method: 'POST',
-            handler: 'NetworkOnly',
-            options: {
-              backgroundSync: {
-                name: 'recycle-erp-attachments',
-                options: {
-                  maxRetentionTime: 60 * 24, // minutes — drop after 24h
-                },
-              },
-            },
-          },
-          {
-            // API: never cache responses — auth is cookie-based and data changes.
-            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
-            handler: 'NetworkOnly',
-          },
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith('/oauth/')
-              || url.pathname.startsWith('/.well-known/'),
-            handler: 'NetworkOnly',
-          },
-          {
-            // Google Fonts CSS — stale-while-revalidate keeps the app readable offline.
-            urlPattern: ({ url }) => url.origin === 'https://fonts.googleapis.com',
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'google-fonts-stylesheets' },
-          },
-          {
-            urlPattern: ({ url }) => url.origin === 'https://fonts.gstatic.com',
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-webfonts',
-              expiration: { maxEntries: 16, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-        ],
       },
       manifest: {
         name: 'Recycle Servers Inventory',
@@ -81,6 +41,19 @@ export default defineConfig({
           { name: 'Sell orders', short_name: 'Sell orders', url: '/sell-orders',
             icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }] },
         ],
+        // Receive images shared from the OS into the AI label flow. The SW's
+        // POST handler stashes the file and 303-redirects to ShareTarget,
+        // which forwards it to the desktop dropzone via sessionStorage.
+        share_target: {
+          action: '/share-target',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: {
+            title: 'title',
+            text: 'text',
+            files: [{ name: 'files', accept: ['image/*'] }],
+          },
+        },
       },
     }),
   ],

@@ -19,6 +19,7 @@ import { OrderDetail } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
+import { ShareTarget } from './pages/ShareTarget';
 
 import { useAuth } from './lib/auth';
 import { useEffectiveUser } from './lib/tweaks';
@@ -480,6 +481,11 @@ function Shell() {
   if (!user) return <Login />;
   // Fresh manager login: gate the app until they pick a role to enter as.
   if (pendingRoleChoice && user.role === 'manager') return <RolePicker variant="mobile" />;
+  // Web Share Target landing — the SW redirects POST /share-target here so
+  // the page can claim the stashed file and forward it into the AI flow.
+  // Placed after the auth gate so the downstream /api/scan/label call has a
+  // session; unauth users bounce through Login first.
+  if (path === '/share-target' || path.startsWith('/share-target?')) return <ShareTarget />;
 
   // Full-screen camera/form/review intercept the normal tab UI
   // The capture-flow screens (camera/form/review) are early returns, so the

@@ -29,6 +29,7 @@ import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
 import { Authorize } from './pages/Authorize';
+import { ShareTarget } from './pages/ShareTarget';
 import { FormSkeleton } from './components/Skeleton';
 
 import type { Order } from './lib/types';
@@ -120,6 +121,9 @@ export function DesktopApp() {
   // OAuth consent screen — render standalone (no sidebar/topbar). Reached via
   // the backend's `/oauth/authorize` 302 to `/authorize?req=…`.
   if (isAuthorizePath(path)) return <Authorize />;
+  // Web Share Target landing — the SW redirects POST /share-target here so
+  // the page can claim the stashed file and forward it into the AI flow.
+  if (path === '/share-target' || path.startsWith('/share-target?')) return <ShareTarget />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
   const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')
