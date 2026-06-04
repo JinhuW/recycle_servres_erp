@@ -83,4 +83,27 @@ describe('vendor general (customer-less) links', () => {
     `)[0];
     expect(bid.customer_id).toBeNull();
   });
+
+  it('bid list and detail return null customer for a general-link bid', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const gen = await api<{ token: string }>(
+      'POST', '/api/customers/vendor-links', { token: mgr });
+    const inv = await api<{ items: { id: string; qty: number }[] }>(
+      'GET', '/api/inventory?status=Done', { token: mgr });
+    const line = inv.body.items.find(i => i.qty >= 1)!;
+    const submit = await api<{ bidId: string }>(
+      'POST', `/api/public/vendor/${gen.body.token}/bids`, {
+        body: { contactName: 'Anon', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+      });
+
+    const list = await api<{ items: { id: string; customer_name: string | null }[] }>(
+      'GET', '/api/vendor-bids', { token: mgr });
+    const listed = list.body.items.find(b => b.id === submit.body.bidId)!;
+    expect(listed.customer_name).toBeNull();
+
+    const detail = await api<{ bid: { customer_id: string | null; customer_name: string | null } }>(
+      'GET', `/api/vendor-bids/${submit.body.bidId}`, { token: mgr });
+    expect(detail.body.bid.customer_id).toBeNull();
+    expect(detail.body.bid.customer_name).toBeNull();
+  });
 });

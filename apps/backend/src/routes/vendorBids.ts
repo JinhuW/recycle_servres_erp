@@ -14,7 +14,7 @@ vendorBids.get('/', async (c) => {
   const status = c.req.query('status');
   const statusFrag = status ? sql`b.status = ${status}` : sql`TRUE`;
   const rows = await sql<{ id: string; contact_name: string; note: string | null;
-    status: string; created_at: string; customer_name: string; customer_short: string | null;
+    status: string; created_at: string; customer_name: string | null; customer_short: string | null;
     line_count: number; total_offered: number;
     currency_code: string; fx_rate_to_usd: number; fx_source: string }[]>`
     SELECT b.id, b.contact_name, b.note, b.status, b.created_at,
@@ -25,7 +25,7 @@ vendorBids.get('/', async (c) => {
            b.fx_rate_to_usd::float AS fx_rate_to_usd,
            b.fx_source
     FROM vendor_bids b
-    JOIN customers cu ON cu.id = b.customer_id
+    LEFT JOIN customers cu ON cu.id = b.customer_id
     LEFT JOIN vendor_bid_lines bl ON bl.bid_id = b.id
     WHERE ${statusFrag}
     GROUP BY b.id, cu.id
@@ -51,14 +51,14 @@ vendorBids.get('/:id', async (c) => {
   const sql = getDb(c.env);
   const id = c.req.param('id');
   const head = (await sql<{ id: string; contact_name: string; note: string | null;
-    status: string; created_at: string; customer_id: string; customer_name: string;
+    status: string; created_at: string; customer_id: string | null; customer_name: string | null;
     currency_code: string; fx_rate_to_usd: number; fx_source: string }[]>`
     SELECT b.id, b.contact_name, b.note, b.status, b.created_at,
            cu.id AS customer_id, cu.name AS customer_name,
            b.currency_code,
            b.fx_rate_to_usd::float AS fx_rate_to_usd,
            b.fx_source
-    FROM vendor_bids b JOIN customers cu ON cu.id = b.customer_id
+    FROM vendor_bids b LEFT JOIN customers cu ON cu.id = b.customer_id
     WHERE b.id = ${id} LIMIT 1
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
