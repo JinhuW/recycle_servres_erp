@@ -140,6 +140,36 @@ customers.get('/vendor-links', async (c) => {
   });
 });
 
+// Mint (or rotate) the single active GENERAL vendor link — a public bid URL
+// not bound to any customer. Regenerating deactivates the prior general link
+// so a leaked token can be rotated (mirrors the per-customer endpoint).
+customers.post('/vendor-links', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const token = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  // Deactivate-then-insert in one transaction. A single data-modifying CTE
+  // can't satisfy the partial unique index here — the INSERT is checked against
+  // the pre-statement snapshot where the prior row is still active — so the two
+  // writes must be separate statements.
+  const row = await sql.begin(async (tx) => {
+    await tx`
+      UPDATE vendor_links SET active = FALSE
+      WHERE customer_id IS NULL AND active = TRUE
+    `;
+    return (await tx<{ id: string; token: string }[]>`
+      INSERT INTO vendor_links (customer_id, token, created_by)
+      VALUES (NULL, ${token}, ${u.id})
+      RETURNING id, token
+    `)[0];
+  });
+  return c.json({ id: row.id, token: row.token }, 201);
+});
+
 // Generate (or regenerate) the active vendor link for a customer. Regenerating
 // deactivates any prior link so a leaked token can be rotated.
 customers.post('/:id/vendor-link', async (c) => {
