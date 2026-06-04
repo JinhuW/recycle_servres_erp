@@ -34,4 +34,25 @@ describe('vendor general (customer-less) links', () => {
     expect(activeGeneral.length).toBe(1);
     expect(activeGeneral[0].id).toBe(second.body.id);
   });
+
+  it('returns the general link under `general`, absent from per-customer items', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const cust = await api<{ id: string }>('POST', '/api/customers', {
+      token: mgr, body: { name: 'Per-Cust Co' },
+    });
+    await api('POST', `/api/customers/${cust.body.id}/vendor-link`, { token: mgr });
+    const gen = await api<{ id: string }>(
+      'POST', '/api/customers/vendor-links', { token: mgr });
+
+    const list = await api<{
+      items: { customerId: string; link: { id: string } | null }[];
+      general: { id: string; token: string; bidCount: number } | null;
+    }>('GET', '/api/customers/vendor-links', { token: mgr });
+
+    expect(list.body.general).not.toBeNull();
+    expect(list.body.general!.id).toBe(gen.body.id);
+    expect(list.body.general!.bidCount).toBe(0);
+    // The general link must not appear as a per-customer row.
+    expect(list.body.items.some(i => i.link?.id === gen.body.id)).toBe(false);
+  });
 });

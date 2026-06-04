@@ -124,6 +124,18 @@ customers.get('/vendor-links', async (c) => {
      WHERE c.active = TRUE
      ORDER BY (vl.id IS NULL), c.name
   `;
+  const general = (await sql<{
+    id: string; token: string; created_at: string;
+    last_seen_at: string | null; bid_count: number;
+  }[]>`
+    SELECT vl.id, vl.token, vl.created_at, vl.last_seen_at,
+           COALESCE((SELECT COUNT(*)::int FROM vendor_bids vb
+                       WHERE vb.vendor_link_id = vl.id), 0) AS bid_count
+      FROM vendor_links vl
+     WHERE vl.customer_id IS NULL AND vl.active = TRUE
+     ORDER BY vl.created_at DESC
+     LIMIT 1
+  `)[0];
   return c.json({
     items: rows.map(r => ({
       customerId: r.customer_id,
@@ -137,6 +149,11 @@ customers.get('/vendor-links', async (c) => {
         bidCount: r.bid_count,
       } : null,
     })),
+    general: general ? {
+      id: general.id, token: general.token,
+      createdAt: general.created_at, lastSeenAt: general.last_seen_at,
+      bidCount: general.bid_count,
+    } : null,
   });
 });
 
