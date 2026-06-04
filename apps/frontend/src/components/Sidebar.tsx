@@ -14,7 +14,6 @@ const NAV: { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge
   { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
   { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
   { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
-  { id: 'analysis',   tKey: 'nav_analysis',   icon: 'analytics',  roles: ['manager'] },
   { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
   { id: 'vendorbids', tKey: 'nav_vendorbids', icon: 'invoice',    roles: ['manager'] },
   { id: 'transfers',  tKey: 'nav_transfers',  icon: 'truck',      roles: ['manager'] },
@@ -42,17 +41,21 @@ export function Sidebar({ view, setView }: Props) {
       </div>
 
       <div className="nav-section">{t('workspace')}</div>
-      {NAV.filter(n => n.roles.includes(user.role)).map(n => (
+      {/* Analysis lives as a tab under Inventory — keep Inventory lit there. */}
+      {NAV.filter(n => n.roles.includes(user.role)).map(n => {
+        const active = view === n.id || (n.id === 'inventory' && view === 'analysis');
+        return (
         <button
           key={n.id}
-          className={'nav-item ' + (view === n.id ? 'active' : '')}
+          className={'nav-item ' + (active ? 'active' : '')}
           onClick={() => setView(n.id)}
         >
           <Icon name={n.icon} size={15} className="nav-icon" />
           <span>{t(n.tKey)}</span>
           {n.badge && <span className="badge">{n.badge}</span>}
         </button>
-      ))}
+        );
+      })}
 
       <div className="sidebar-foot">
         <div className="avatar">{user.initials}</div>

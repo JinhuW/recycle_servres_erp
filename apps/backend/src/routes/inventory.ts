@@ -384,11 +384,17 @@ inventory.get('/aggregate/by-part', async (c) => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// Inventory Analysis snapshot — powers the desktop Analysis page. Manager-only
-// and whole-workspace (inventory is never role-preview scoped — see
-// role_preview_scope). One round trip: the page applies the category/warehouse
-// *view* filters client-side off this payload, so we return the full picture
-// rather than re-querying per filter.
+// Inventory Analysis snapshot — powers the Inventory ▸ Analysis tab. Manager-
+// only and whole-workspace (inventory is never role-preview scoped — see
+// role_preview_scope).
+//
+// Filter-aware: `?category=RAM` and/or `?warehouse=<id>` scope the metrics so
+// every section reflects the active selection (the page re-queries on change).
+// The control lists (`categories`, `warehouses`) are always returned UNFILTERED
+// so the dropdowns stay stable. The two comparison breakdowns each ignore their
+// "own" axis — `byCategory` (the composition chart) is scoped by warehouse
+// only, `byWarehouse` (the location table) by category only — otherwise each
+// would collapse to a single row under its matching filter.
 //
 // Per-type "sub-analysis" dimensions differ by category (RAM ranks & speeds,
 // HDD spindle RPM & SMART health, …). The backend emits dimension KEYS + unit
@@ -404,84 +410,112 @@ inventory.get('/analysis', async (c) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'forbidden' }, 403);
   const sql = getDb(c.env);
 
+  const category = c.req.query('category')?.trim() || null;
+  const warehouse = c.req.query('warehouse')?.trim() || null;
+
   // Effective warehouse = line override else the parent order's. Mirrors list.
   const effWh = sql`COALESCE(l.warehouse_id, o.warehouse_id)`;
+  // Composable scope conditions — `TRUE` when an axis isn't filtered, so each
+  // section drops in only the axes it honours (see the header note).
+  const catCond = category  ? sql`l.category = ${category}` : sql`TRUE`;
+  const whCond  = warehouse ? sql`${effWh} = ${warehouse}`  : sql`TRUE`;
 
-  // Grouped unit-count over a whitelisted column, scoped to one category. The
-  // column set is the fixed SUBTYPE_DIMS whitelist, and identifiers go through
-  // sql(col) so they're escaped. `health` buckets a numeric; `rpm` is an int.
-  const dimQuery = (category: string, col: string) => {
+  // Grouped unit-count over a whitelisted column for one category, honouring
+  // the warehouse scope. The column set is the fixed SUBTYPE_DIMS whitelist, and
+  // identifiers go through sql(col) so they're escaped. `health` buckets a
+  // numeric; `rpm` is an int.
+  const dimQuery = (cat: string, col: string) => {
     if (col === 'health') {
       return sql<{ k: string; u: number }[]>`
         SELECT CASE
-                 WHEN health IS NULL  THEN '?'
-                 WHEN health >= 95    THEN '95-100%'
-                 WHEN health >= 85    THEN '85-94%'
-                 WHEN health >= 70    THEN '70-84%'
+                 WHEN l.health IS NULL THEN '?'
+                 WHEN l.health >= 95   THEN '95-100%'
+                 WHEN l.health >= 85   THEN '85-94%'
+                 WHEN l.health >= 70   THEN '70-84%'
                  ELSE '<70%'
                END AS k,
-               COALESCE(SUM(qty), 0)::int AS u
-        FROM order_lines WHERE category = ${category}
+               COALESCE(SUM(l.qty), 0)::int AS u
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE l.category = ${cat} AND ${whCond}
         GROUP BY 1 ORDER BY 1`;
     }
-    const colFrag = col === 'rpm' ? sql`rpm::text` : sql`${sql(col)}::text`;
+    const colFrag = col === 'rpm' ? sql`l.rpm::text` : sql`l.${sql(col)}::text`;
     return sql<{ k: string; u: number }[]>`
       SELECT COALESCE(NULLIF(${colFrag}, ''), '?') AS k,
-             COALESCE(SUM(qty), 0)::int AS u
-      FROM order_lines WHERE category = ${category}
+             COALESCE(SUM(l.qty), 0)::int AS u
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.category = ${cat} AND ${whCond}
       GROUP BY 1 ORDER BY u DESC, k LIMIT 16`;
   };
 
-  const [overall, byCategory, byStatus, whTotals, whMatrix, brands] = await Promise.all([
-    sql<{ lines: number; units: number; cost: number; sell: number }[]>`
-      SELECT COUNT(*)::int AS lines, COALESCE(SUM(qty),0)::int AS units,
-             COALESCE(ROUND(SUM(qty*unit_cost)),0)::float AS cost,
-             COALESCE(ROUND(SUM(qty*sell_price)),0)::float AS sell
-      FROM order_lines`,
-    sql<{ category: string; lines: number; units: number; cost: number; sell: number }[]>`
-      SELECT category, COUNT(*)::int AS lines, COALESCE(SUM(qty),0)::int AS units,
-             COALESCE(ROUND(SUM(qty*unit_cost)),0)::float AS cost,
-             COALESCE(ROUND(SUM(qty*sell_price)),0)::float AS sell
-      FROM order_lines GROUP BY category ORDER BY units DESC`,
-    sql<{ status: string; units: number }[]>`
-      SELECT status, COALESCE(SUM(qty),0)::int AS units
-      FROM order_lines GROUP BY status ORDER BY units DESC`,
-    sql<{ id: string; short: string; region: string; units: number; value: number }[]>`
-      SELECT w.id, w.short, w.region,
-             COALESCE(SUM(l.qty),0)::int AS units,
-             COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS value
-      FROM order_lines l
-      JOIN orders o     ON o.id = l.order_id
-      JOIN warehouses w ON w.id = ${effWh}
-      GROUP BY w.id, w.short, w.region ORDER BY units DESC`,
-    sql<{ warehouse_id: string; category: string; units: number }[]>`
-      SELECT w.id AS warehouse_id, l.category, COALESCE(SUM(l.qty),0)::int AS units
-      FROM order_lines l
-      JOIN orders o     ON o.id = l.order_id
-      JOIN warehouses w ON w.id = ${effWh}
-      GROUP BY w.id, l.category`,
-    sql<{ k: string; u: number }[]>`
-      SELECT COALESCE(NULLIF(brand,''),'?') AS k, COALESCE(SUM(qty),0)::int AS u
-      FROM order_lines WHERE brand IS NOT NULL AND brand <> '' AND brand <> '?'
-      GROUP BY 1 ORDER BY u DESC, k LIMIT 10`,
-  ]);
+  const [overall, allCategories, byCategory, byStatus, allWarehouses, byWarehouse, brands] =
+    await Promise.all([
+      // KPI roll-up — scoped by both axes.
+      sql<{ lines: number; units: number; cost: number; sell: number }[]>`
+        SELECT COUNT(*)::int AS lines, COALESCE(SUM(l.qty),0)::int AS units,
+               COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS cost,
+               COALESCE(ROUND(SUM(l.qty*l.sell_price)),0)::float AS sell
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE ${catCond} AND ${whCond}`,
+      // Control list: every category, unfiltered, busiest first.
+      sql<{ category: string }[]>`
+        SELECT category FROM order_lines
+        GROUP BY category ORDER BY COALESCE(SUM(qty),0) DESC`,
+      // Composition — all categories, scoped by warehouse only.
+      sql<{ category: string; lines: number; units: number; cost: number; sell: number }[]>`
+        SELECT l.category, COUNT(*)::int AS lines, COALESCE(SUM(l.qty),0)::int AS units,
+               COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS cost,
+               COALESCE(ROUND(SUM(l.qty*l.sell_price)),0)::float AS sell
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE ${whCond}
+        GROUP BY l.category ORDER BY units DESC`,
+      // Status pipeline — scoped by both axes.
+      sql<{ status: string; units: number }[]>`
+        SELECT l.status, COALESCE(SUM(l.qty),0)::int AS units
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE ${catCond} AND ${whCond}
+        GROUP BY l.status ORDER BY units DESC`,
+      // Control list: every warehouse, unfiltered.
+      sql<{ id: string; short: string; region: string }[]>`
+        SELECT id, short, region FROM warehouses ORDER BY short`,
+      // Location table — all warehouses, scoped by category only.
+      sql<{ id: string; short: string; region: string; units: number; value: number }[]>`
+        SELECT w.id, w.short, w.region,
+               COALESCE(SUM(l.qty),0)::int AS units,
+               COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS value
+        FROM order_lines l
+        JOIN orders o     ON o.id = l.order_id
+        JOIN warehouses w ON w.id = ${effWh}
+        WHERE ${catCond}
+        GROUP BY w.id, w.short, w.region ORDER BY units DESC`,
+      // Top brands — scoped by both axes.
+      sql<{ k: string; u: number }[]>`
+        SELECT COALESCE(NULLIF(l.brand,''),'?') AS k, COALESCE(SUM(l.qty),0)::int AS u
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE l.brand IS NOT NULL AND l.brand <> '' AND l.brand <> '?'
+          AND ${catCond} AND ${whCond}
+        GROUP BY 1 ORDER BY u DESC, k LIMIT 10`,
+    ]);
 
-  const matrixByWh: Record<string, Record<string, number>> = {};
-  for (const r of whMatrix) (matrixByWh[r.warehouse_id] ??= {})[r.category] = r.units;
-  const byWarehouse = whTotals.map(w => ({
-    id: w.id, short: w.short, region: w.region, units: w.units, value: w.value,
-    matrix: matrixByWh[w.id] ?? {},
-  }));
+  // Detail only the focused category, or all of them. The per-type roll-up
+  // (units/cost/sell/lines) reuses byCategory, which is already warehouse-scoped
+  // and holds every category, so no extra round trip is needed.
+  const subtypeCats = category
+    ? (SUBTYPE_DIMS[category] ? [category] : [])
+    : Object.keys(SUBTYPE_DIMS);
 
   const subtypes: Record<string, unknown> = {};
-  for (const [cat, dims] of Object.entries(SUBTYPE_DIMS)) {
+  for (const cat of subtypeCats) {
+    const dims = SUBTYPE_DIMS[cat]!;
     const catRow = byCategory.find(r => r.category === cat);
     const [dimResults, conditionRows] = await Promise.all([
       Promise.all(dims.map(col =>
         dimQuery(cat, col).then(rows => ({ key: col, data: rows.map(r => [r.k, r.u] as [string, number]) })))),
       sql<{ k: string; u: number }[]>`
-        SELECT COALESCE(NULLIF(condition,''),'?') AS k, COALESCE(SUM(qty),0)::int AS u
-        FROM order_lines WHERE category = ${cat} GROUP BY 1 ORDER BY u DESC, k`,
+        SELECT COALESCE(NULLIF(l.condition,''),'?') AS k, COALESCE(SUM(l.qty),0)::int AS u
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE l.category = ${cat} AND ${whCond}
+        GROUP BY 1 ORDER BY u DESC, k`,
     ]);
     subtypes[cat] = {
       units: catRow?.units ?? 0, cost: catRow?.cost ?? 0, sell: catRow?.sell ?? 0, lines: catRow?.lines ?? 0,
@@ -492,12 +526,14 @@ inventory.get('/analysis', async (c) => {
   }
 
   return c.json({
+    scope: { category, warehouse },
     totals: { lines: overall[0]!.lines, units: overall[0]!.units },
     value: { cost: overall[0]!.cost, sell: overall[0]!.sell },
+    categories: allCategories.map(r => r.category),
+    warehouses: allWarehouses,
     byCategory,
     byStatus,
     byWarehouse,
-    categories: byCategory.map(r => r.category),
     brands: brands.map(r => [r.k, r.u] as [string, number]),
     subtypes,
   });

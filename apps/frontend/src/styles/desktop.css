@@ -1813,11 +1813,16 @@ html.desktop, body.desktop, .desktop #root {
 .an-pi .an-ct { font-family: 'JetBrains Mono', monospace; color: var(--fg-muted); }
 .an-pi .an-pc { font-family: 'JetBrains Mono', monospace; color: var(--fg-subtle); width: 34px; text-align: right; }
 
+/* Inventory ▸ Analysis tab strip (reuses .seg) */
+.inv-tabs { margin-bottom: 18px; }
+
 .an-wt { width: 100%; border-collapse: collapse; }
 .an-wt th { font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-subtle); text-align: left; padding: 0 10px 8px; border-bottom: 1px solid var(--border); }
 .an-wt th.n, .an-wt td.n { text-align: right; }
 .an-wt td { padding: 10px; border-bottom: 1px solid var(--border); }
 .an-wt tr:last-child td { border-bottom: 0; }
+.an-wt tr.an-wt-sel td { background: var(--bg-soft); }
+.an-wt tr.an-wt-sel .an-whn { color: var(--accent-strong); }
 .an-wt td.n { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .an-whn { font-weight: 600; }
 .an-whr { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--fg-subtle); }

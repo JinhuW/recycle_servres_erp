@@ -47,7 +47,8 @@ export function DesktopApp() {
   const view: DesktopView = pathToDesktopView(path);
   const setView = (v: DesktopView) => navigate(DESKTOP_VIEW_TO_PATH[v]);
   // /inventory/:id opens the edit page; otherwise no item is being edited.
-  const editingItemId = match('/inventory/:id', path)?.id ?? null;
+  // /inventory/analysis is the Analysis tab, not an item id — exclude it.
+  const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
 
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
@@ -160,6 +161,22 @@ export function DesktopApp() {
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'analysis' ? ' page-analysis' : '')
           + (view2 === 'dashboard' ? ' page-dashboard' : '')}>
+          {/* Inventory ▸ Analysis tab strip — shown on the list and the
+              analysis tab, but not while editing a single item. */}
+          {((view2 === 'inventory' && !editingItemId) || view2 === 'analysis') && (
+            <div className="seg inv-tabs" role="tablist" aria-label={t('nav_inventory')}>
+              <button
+                type="button" role="tab" aria-selected={view2 === 'inventory'}
+                className={view2 === 'inventory' ? 'active' : ''}
+                onClick={() => navigate('/inventory')}
+              >{t('nav_inventory')}</button>
+              <button
+                type="button" role="tab" aria-selected={view2 === 'analysis'}
+                className={view2 === 'analysis' ? 'active' : ''}
+                onClick={() => navigate('/inventory/analysis')}
+              >{t('nav_analysis')}</button>
+            </div>
+          )}
           {view2 === 'dashboard'  && <DesktopDashboard />}
           {view2 === 'submit'     && (
             <DesktopSubmit
