@@ -135,7 +135,7 @@ function useMyOffers(base: string) {
 type VM = {
   t: T;
   base: string;
-  me: { customer: { name: string }; label: string | null } | null;
+  me: { customer: { name: string } | null; label: string | null } | null;
   groups: { category: string; items: CatalogItem[] }[];
   filteredGroups: { category: string; items: CatalogItem[] }[];
   categories: string[];
@@ -460,7 +460,11 @@ function VendorMobile({ vm }: { vm: VM }) {
     }}>
       <PhHeader
         title={t('appBrand')}
-        sub={me ? `${t('vendorSharedWith')} · ${me.customer.name}` : '…'}
+        sub={me
+          ? (me.customer
+              ? `${t('vendorSharedWith')} · ${me.customer.name}`
+              : (me.label ?? t('vendorPortal')))
+          : '…'}
         scrolled={scrolled}
         leading={review
           ? <button className="ph-icon-btn" onClick={() => setReview(false)} aria-label={t('vendorBack')}>
@@ -841,7 +845,11 @@ function VendorDesktop({ vm }: { vm: VM }) {
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('appBrand')}</div>
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
-              {me ? `${t('vendorSharedWith')} · ${me.customer.name}` : '…'}
+              {me
+                ? (me.customer
+                    ? `${t('vendorSharedWith')} · ${me.customer.name}`
+                    : (me.label ?? t('vendorPortal')))
+                : '…'}
             </div>
           </div>
         </div>
