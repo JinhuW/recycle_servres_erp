@@ -106,4 +106,60 @@ describe('vendor general (customer-less) links', () => {
     expect(detail.body.bid.customer_id).toBeNull();
     expect(detail.body.bid.customer_name).toBeNull();
   });
+
+  async function generalBidReadyToPromote(mgr: string): Promise<string> {
+    const gen = await api<{ token: string }>(
+      'POST', '/api/customers/vendor-links', { token: mgr });
+    const inv = await api<{ items: { id: string; qty: number }[] }>(
+      'GET', '/api/inventory?status=Done', { token: mgr });
+    const line = inv.body.items.find(i => i.qty >= 1)!;
+    const submit = await api<{ bidId: string }>(
+      'POST', `/api/public/vendor/${gen.body.token}/bids`, {
+        body: { contactName: 'Anon', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+      });
+    const detail = await api<{ bid: { lines: { id: string }[] } }>(
+      'GET', `/api/vendor-bids/${submit.body.bidId}`, { token: mgr });
+    await api('POST', `/api/vendor-bids/${submit.body.bidId}/decide`, {
+      token: mgr,
+      body: { lines: [{ lineId: detail.body.bid.lines[0].id, decision: 'accepted' }] },
+    });
+    return submit.body.bidId;
+  }
+
+  it('promote of an unattributed bid requires a customerId', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const bidId = await generalBidReadyToPromote(mgr);
+
+    const noCust = await api('POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
+    expect(noCust.status).toBe(400);
+
+    const badCust = await api('POST', `/api/vendor-bids/${bidId}/promote`, {
+      token: mgr, body: { customerId: '00000000-0000-0000-0000-000000000000' },
+    });
+    expect(badCust.status).toBe(400);
+  });
+
+  it('promote with a valid customerId creates the SO and back-fills the bid', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const bidId = await generalBidReadyToPromote(mgr);
+    const cust = await api<{ id: string }>('POST', '/api/customers', {
+      token: mgr, body: { name: 'Chosen At Promote' },
+    });
+
+    const ok = await api<{ sellOrderId: string }>(
+      'POST', `/api/vendor-bids/${bidId}/promote`, {
+        token: mgr, body: { customerId: cust.body.id },
+      });
+    expect(ok.status).toBe(201);
+
+    const sql = getTestDb();
+    const so = (await sql`
+      SELECT customer_id FROM sell_orders WHERE id = ${ok.body.sellOrderId}
+    `)[0];
+    expect(so.customer_id).toBe(cust.body.id);
+    const bid = (await sql`
+      SELECT customer_id FROM vendor_bids WHERE id = ${bidId}
+    `)[0];
+    expect(bid.customer_id).toBe(cust.body.id);
+  });
 });

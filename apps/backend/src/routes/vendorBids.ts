@@ -188,6 +188,8 @@ vendorBids.post('/:id/promote', async (c) => {
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as { customerId?: string } | null;
+  const bodyCustomerId = typeof body?.customerId === 'string' ? body.customerId : null;
 
   type Outcome = { code: 201; sellId: string } | { code: 400; msg: string };
   let outcome: Outcome = { code: 400, msg: 'no accepted lines to promote' };
@@ -195,9 +197,22 @@ vendorBids.post('/:id/promote', async (c) => {
 
   await sql.begin(async (tx) => {
     sellId = await nextHumanId(tx, 'SO', 'SO');
-    const head = (await tx<{ customer_id: string; currency_code: SupportedCurrency }[]>`
+    const head = (await tx<{ customer_id: string | null; currency_code: SupportedCurrency }[]>`
       SELECT customer_id, currency_code FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
     if (!head) { outcome = { code: 400, msg: 'bid not found' }; return; }
+
+    // A bid from a general (customer-less) link carries no customer. The
+    // manager must choose one at promote time — sell_orders.customer_id is
+    // NOT NULL. Persist the choice back onto the bid for attribution.
+    let customerId = head.customer_id;
+    if (!customerId) {
+      if (!bodyCustomerId) { outcome = { code: 400, msg: 'customer required' }; return; }
+      const exists = (await tx<{ id: string }[]>`
+        SELECT id FROM customers WHERE id = ${bodyCustomerId} LIMIT 1`)[0];
+      if (!exists) { outcome = { code: 400, msg: 'customer not found' }; return; }
+      customerId = bodyCustomerId;
+      await tx`UPDATE vendor_bids SET customer_id = ${customerId} WHERE id = ${id}`;
+    }
 
     const fx = await getLatestRateToUsd(tx, head.currency_code);
     const isNonUsd = head.currency_code !== 'USD';
@@ -237,7 +252,7 @@ vendorBids.post('/:id/promote', async (c) => {
 
     await tx`
       INSERT INTO sell_orders (id, customer_id, status, notes, created_by)
-      VALUES (${sellId}, ${head.customer_id}, 'Draft',
+      VALUES (${sellId}, ${customerId}, 'Draft',
               ${'From vendor bid ' + id}, ${u.id})
     `;
     for (let i = 0; i < lines.length; i++) {
@@ -265,7 +280,7 @@ vendorBids.post('/:id/promote', async (c) => {
       vendorBidId: id,
       status: 'Draft',
       lineCount: lines.length,
-      customerId: head.customer_id,
+      customerId: customerId,
       currency: head.currency_code,
       fxRateToUsd: fx.rate,
       fxSource: fx.source,
