@@ -666,6 +666,14 @@ type VendorLinkRow = {
   } | null;
 };
 
+type GeneralLink = {
+  id: string;
+  token: string;
+  createdAt: string | null;
+  lastSeenAt: string | null;
+  bidCount: number;
+};
+
 function VendorLinksManager({
   onClose, onToast,
 }: {
@@ -682,8 +690,9 @@ function VendorLinksManager({
   // reveal animation so the manager visually confirms the generate action.
   const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
 
-  const reload = () => api.get<{ items: VendorLinkRow[] }>('/api/customers/vendor-links')
-    .then(r => setRows(r.items))
+  const [general, setGeneral] = useState<GeneralLink | null>(null);
+  const reload = () => api.get<{ items: VendorLinkRow[]; general: GeneralLink | null }>('/api/customers/vendor-links')
+    .then(r => { setRows(r.items); setGeneral(r.general); })
     .catch(e => onToast?.(e instanceof Error ? e.message : 'Failed to load vendor links', 'error'))
     .finally(() => setLoaded(true));
   useEffect(() => { reload(); }, []);
@@ -760,6 +769,45 @@ function VendorLinksManager({
     });
   };
 
+  const generateGeneral = async () => {
+    setBusyId('__general__');
+    try {
+      await api.post('/api/customers/vendor-links', {});
+      await reload();
+      onToast?.(t('vendorLinksGeneralGenerated'), 'success');
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Failed to generate general link', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const revokeGeneral = async () => {
+    if (!general) return;
+    if (!window.confirm(t('vendorLinksGeneralRevokeConfirm'))) return;
+    setBusyId('__general__');
+    try {
+      await api.patch(`/api/customers/vendor-link/${general.id}`, { active: false });
+      await reload();
+      onToast?.(t('vendorLinksGeneralRevoked'), 'success');
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : 'Failed to revoke general link', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const copyGeneral = () => {
+    if (!general) return;
+    shareOrCopy({
+      url: urlFor(general.token),
+      title: t('vendorLink'),
+      copiedMsg: t('vendorLinkCopied'),
+      failedMsg: t('orderIdCopyFailed'),
+      onToast,
+    });
+  };
+
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-shell" style={{ maxWidth: 980, width: 'calc(100vw - 80px)' }}>
@@ -789,6 +837,52 @@ function VendorLinksManager({
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
+          </div>
+        </div>
+
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{t('vendorLinksGeneralTitle')}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 2, maxWidth: 560 }}>
+                {t('vendorLinksGeneralSub')}
+              </div>
+              {general && (
+                <div className="vl-url" title={urlFor(general.token)} style={{ marginTop: 10 }}>
+                  <span className="vl-dot" aria-hidden />
+                  <span className="vl-url-text mono">{urlFor(general.token)}</span>
+                </div>
+              )}
+              {general && (
+                <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 6, display: 'flex', gap: 12 }}>
+                  <span>{t('vendorLinksColBids')}: {general.bidCount}</span>
+                  <span>
+                    {t('vendorLinksColLastSeen')}: {general.lastSeenAt
+                      ? relTime(general.lastSeenAt, locale)
+                      : t('vendorLinksNeverSeen')}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'inline-flex', gap: 4, whiteSpace: 'nowrap' }}>
+              {general ? (
+                <>
+                  <button className="btn sm" disabled={busyId === '__general__'} onClick={copyGeneral}>
+                    <Icon name="paperclip" size={12} /> {t('vendorLinkCopy')}
+                  </button>
+                  <button className="btn sm" disabled={busyId === '__general__'} onClick={generateGeneral}>
+                    {t('vendorLinksGeneralRegenerate')}
+                  </button>
+                  <button className="btn sm" disabled={busyId === '__general__'} onClick={revokeGeneral} style={{ color: 'var(--neg)' }}>
+                    {t('vendorLinkRevoke')}
+                  </button>
+                </>
+              ) : (
+                <button className="btn sm accent" disabled={busyId === '__general__'} onClick={generateGeneral}>
+                  <Icon name="globe" size={12} /> {t('vendorLinksGeneralGenerate')}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
