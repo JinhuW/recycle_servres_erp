@@ -8,6 +8,7 @@ import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, relTime } from '../../lib/format';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
+import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
 
 // Vendor-bid lifecycle. Mirrors the backend `status` column; drives the
 // filter tiles and the row chip.
@@ -294,6 +295,9 @@ function VendorBidDetail({
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [promoteCustomerId, setPromoteCustomerId] = useState('');
+  const needsCustomer = !!bid && !bid.customer_id;
 
   const fetchBid = (alive?: { v: boolean }) => {
     api.get<{ bid: VbDetail }>(`/api/vendor-bids/${id}`)
@@ -319,6 +323,15 @@ function VendorBidDetail({
     return () => { alive.v = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (!needsCustomer) return;
+    let alive = true;
+    api.get<{ items: Customer[] }>('/api/customers')
+      .then(r => { if (alive) setCustomers(r.items); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [needsCustomer]);
 
   useEscapeKey(onClose);
 
@@ -406,7 +419,10 @@ function VendorBidDetail({
     }
     setPromoting(true);
     try {
-      const r = await api.post<{ sellOrderId: string }>(`/api/vendor-bids/${bid.id}/promote`, {});
+      const r = await api.post<{ sellOrderId: string }>(
+        `/api/vendor-bids/${bid.id}/promote`,
+        needsCustomer ? { customerId: promoteCustomerId } : {},
+      );
       onToast?.(t('vbPromoted', { id: r.sellOrderId }), 'success');
       onChanged();
       onClose();
@@ -587,6 +603,19 @@ function VendorBidDetail({
               {allPromoted ? t('vbAllPromoted') : ''}
             </span>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {needsCustomer && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                    {t('vbPromotePickCustomer')}
+                  </span>
+                  <CustomerPicker
+                    customers={customers}
+                    value={promoteCustomerId}
+                    onChange={setPromoteCustomerId}
+                    onCreated={c => setCustomers(prev => [...prev, c])}
+                  />
+                </div>
+              )}
               {dirty && (
                 <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
                   {t('vbSaveFirst')}
@@ -599,7 +628,7 @@ function VendorBidDetail({
               <button
                 className="btn accent"
                 onClick={promote}
-                disabled={promoting || dirty || persistedPromotable === 0}
+                disabled={promoting || dirty || persistedPromotable === 0 || (needsCustomer && !promoteCustomerId)}
                 title={dirty ? t('vbSaveFirst') : persistedPromotable === 0 ? t('vbAllPromoted') : undefined}
               >
                 <Icon name="invoice" size={14} />{' '}
