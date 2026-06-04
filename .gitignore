@@ -54,3 +54,4 @@ docker-compose.override.yml
 # Ad-hoc DB dumps (pg_dump output) — keep out of git, may contain real data.
 *.sql.dump
 recycle_erp_dump.sql
+backups/

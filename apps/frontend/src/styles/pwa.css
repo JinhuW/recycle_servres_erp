@@ -1,33 +1,250 @@
-.pwa-install-prompt {
+/* ============================================================
+   PWA install / onboarding
+   Two surfaces share a teal-green vocabulary: a slim invitation
+   card that floats above the tab bar, and a full intro sheet.
+   ============================================================ */
+
+/* ── Collapsed invitation card ── */
+.pwa-intro-card {
   position: fixed;
-  bottom: max(16px, env(safe-area-inset-bottom));
-  left: 50%;
-  transform: translateX(-50%);
+  left: 12px; right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 16px) + 90px);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: var(--bg-elev);
-  color: var(--fg);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  z-index: 9999;
+  padding: 8px 8px 8px 10px;
+  border-radius: 18px;
+  background: color-mix(in oklch, var(--bg-elev) 92%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--border);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, white 60%, transparent) inset,
+    0 16px 36px rgba(15, 23, 42, 0.16),
+    0 2px 6px rgba(15, 23, 42, 0.06);
+  z-index: 9998;
+  animation: pwa-card-in 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
-.pwa-install-prompt button {
-  border: none;
-  padding: 6px 12px;
-  border-radius: 999px;
-  cursor: pointer;
-  font: inherit;
+@keyframes pwa-card-in {
+  from { transform: translateY(28px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0)    scale(1);    opacity: 1; }
 }
-.pwa-install-cta {
-  background: var(--accent);
+.pwa-intro-card-body {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 11px;
+  padding: 4px 2px 4px 4px;
+  background: transparent; border: none; text-align: left;
+  font: inherit; color: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pwa-intro-mark {
+  position: relative;
+  width: 42px; height: 42px; flex-shrink: 0;
+  border-radius: 12px;
+  display: grid; place-items: center;
+  background:
+    radial-gradient(120% 120% at 30% 20%,
+      var(--accent-soft) 0%,
+      color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev)) 70%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent),
+    0 4px 12px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.pwa-intro-mark .brand-mark { width: 26px; height: 26px; }
+.pwa-intro-card-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pwa-intro-card-title {
+  font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pwa-intro-card-sub {
+  font-size: 11.5px; color: var(--fg-subtle); line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pwa-intro-card-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.pwa-intro-primary {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 8px 14px;
+  border: none; border-radius: 11px;
+  background: linear-gradient(160deg,
+    color-mix(in oklch, var(--accent) 92%, white) 0%,
+    var(--accent-strong) 100%);
   color: var(--accent-fg);
-  font-weight: 600;
+  font: inherit; font-size: 13px; font-weight: 650; letter-spacing: -0.005em;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 32%, transparent),
+    0 4px 12px color-mix(in oklch, var(--accent) 34%, transparent);
+  cursor: pointer;
+  transition: transform 0.06s, box-shadow 0.16s;
 }
-.pwa-install-dismiss {
-  background: transparent;
-  color: var(--fg-muted);
+.pwa-intro-primary:active { transform: translateY(1px); }
+.pwa-intro-close {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: transparent; border: none; border-radius: 10px;
+  color: var(--fg-subtle); cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.pwa-intro-close:active { background: var(--bg-soft); color: var(--fg-muted); }
+
+/* ── Full intro sheet ── */
+.pwa-intro-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(10, 20, 16, 0.42);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 9998;
+  animation: fade-in 0.2s;
+}
+.pwa-intro-sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 9999;
+  padding: 12px 18px calc(env(safe-area-inset-bottom, 16px) + 22px);
+  background:
+    radial-gradient(140% 80% at 50% -10%,
+      var(--accent-soft) 0%,
+      color-mix(in oklch, var(--accent-soft) 24%, var(--bg)) 38%,
+      var(--bg) 70%);
+  border-radius: 26px 26px 0 0;
+  border-top: 1px solid color-mix(in oklch, var(--accent) 18%, var(--border));
+  box-shadow: 0 -10px 40px rgba(10, 20, 16, 0.22);
+  max-height: 88%;
+  overflow: auto;
+  animation: sheet-up 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.pwa-intro-hero {
+  display: flex; align-items: center; gap: 13px;
+  padding: 4px 0 16px;
+}
+.pwa-intro-hero-tile {
+  width: 58px; height: 58px; flex-shrink: 0;
+  border-radius: 16px;
+  display: grid; place-items: center;
+  background: linear-gradient(150deg,
+    color-mix(in oklch, var(--accent-soft) 92%, white) 0%,
+    color-mix(in oklch, var(--accent-soft) 55%, white) 100%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 24%, transparent),
+    0 8px 20px color-mix(in oklch, var(--accent) 24%, transparent);
+}
+.pwa-intro-hero-copy { flex: 1; min-width: 0; }
+.pwa-intro-hero-title {
+  font-size: 19px; font-weight: 700; letter-spacing: -0.02em; color: var(--fg);
+}
+.pwa-intro-hero-tagline {
+  font-size: 13px; color: var(--accent-strong); font-weight: 550; margin-top: 1px;
+}
+.pwa-intro-sheet-x {
+  width: 34px; height: 34px; flex-shrink: 0; align-self: flex-start;
+  display: grid; place-items: center;
+  background: color-mix(in oklch, var(--bg-elev) 70%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--fg-muted); cursor: pointer;
+}
+.pwa-intro-sheet-x:active { background: var(--bg-soft); }
+
+.pwa-intro-benefits {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 9px;
+}
+.pwa-intro-benefit {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 13px;
+  background: color-mix(in oklch, var(--bg-elev) 86%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  animation: pwa-benefit-in 0.4s both cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes pwa-benefit-in {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.pwa-intro-benefit-icon {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.pwa-intro-benefit-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pwa-intro-benefit-title { font-size: 13.5px; font-weight: 600; color: var(--fg); letter-spacing: -0.005em; }
+.pwa-intro-benefit-sub { font-size: 12px; color: var(--fg-muted); line-height: 1.35; }
+
+/* ── Platform steps / install block ── */
+.pwa-intro-steps { margin-top: 16px; }
+.pwa-intro-steps-head,
+.pwa-intro-install-block .pwa-intro-steps-head {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--fg-subtle); margin-bottom: 9px; padding-left: 2px;
+}
+.pwa-intro-step {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 13px;
+  border-radius: 13px;
+  background: color-mix(in oklch, var(--bg-elev) 70%, transparent);
+  border: 1px dashed color-mix(in oklch, var(--accent) 30%, var(--border));
+}
+.pwa-intro-step + .pwa-intro-step { margin-top: 8px; }
+.pwa-intro-step-n {
+  width: 24px; height: 24px; flex-shrink: 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--accent); color: var(--accent-fg);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; font-weight: 700;
+}
+.pwa-intro-step-text { flex: 1; font-size: 13.5px; color: var(--fg); line-height: 1.35; }
+.pwa-intro-step-glyph {
+  flex-shrink: 0;
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--accent-strong);
+}
+
+.pwa-intro-install-block { margin-top: 16px; }
+.pwa-intro-install-btn {
+  width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 18px;
+  border: none; border-radius: 14px;
+  background: linear-gradient(160deg,
+    color-mix(in oklch, var(--accent) 92%, white) 0%,
+    var(--accent-strong) 100%);
+  color: var(--accent-fg);
+  font: inherit; font-size: 15px; font-weight: 650; letter-spacing: -0.01em;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 32%, transparent),
+    0 8px 22px color-mix(in oklch, var(--accent) 34%, transparent);
+  cursor: pointer;
+  transition: transform 0.06s;
+}
+.pwa-intro-install-btn:active { transform: translateY(1px); }
+.pwa-intro-install-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+
+.pwa-intro-note {
+  margin: 10px 4px 0;
+  font-size: 12px; color: var(--fg-subtle); text-align: center; line-height: 1.45;
+}
+.pwa-intro-later {
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px;
+  background: transparent; border: none;
+  color: var(--fg-muted); font: inherit; font-size: 13.5px; font-weight: 550;
+  cursor: pointer;
+}
+.pwa-intro-later:active { color: var(--fg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pwa-intro-card,
+  .pwa-intro-sheet,
+  .pwa-intro-backdrop,
+  .pwa-intro-benefit { animation: none; }
 }
 
 .pwa-update-toast {
