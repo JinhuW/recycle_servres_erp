@@ -71,7 +71,15 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if ((event.data as { type?: string } | null)?.type === 'pwa:claimSharedFile' && pendingSharedFile) {
+  const data = event.data as { type?: string } | null;
+  // Prompt-mode update: a new SW waits until the user accepts the toast.
+  // updateSW(true) -> workbox-window messageSkipWaiting() posts this; only
+  // then do we activate, and workbox reloads the page on controllerchange.
+  if (data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+    return;
+  }
+  if (data?.type === 'pwa:claimSharedFile' && pendingSharedFile) {
     const file = pendingSharedFile;
     pendingSharedFile = null;
     (event.source as { postMessage?: (data: unknown) => void } | null)?.postMessage?.({
@@ -80,9 +88,9 @@ self.addEventListener('message', (event) => {
   }
 });
 
-self.addEventListener('install', () => {
-  self.skipWaiting();
-});
+// No skipWaiting on install — the new SW must wait for the user's tap so the
+// update is never applied mid-session. clients.claim() still lets the freshly
+// activated SW take control without a second reload.
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
