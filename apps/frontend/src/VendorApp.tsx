@@ -8,11 +8,19 @@ import { usePhScrolled } from './lib/usePhScrolled';
 import {
   type CatalogItem, type BasketLine, itemLabel, basketTotal, previewUrl,
 } from './lib/vendor';
+import {
+  type AttrSpec, type AttrFilters, attrSpecsFor, sortAttrValues,
+  filterCatalogItems, computeFacets,
+} from './lib/vendorCatalogFilter';
 import { fmtMoney } from './lib/format';
 
 type Tab = 'browse' | 'mine';
 type T = (k: string, p?: Record<string, string | number>) => string;
 type Currency = 'USD' | 'CNY';
+
+// Stable references so the browse useMemo deps don't churn every render.
+const EMPTY_ATTRS: AttrFilters = {};
+const EMPTY_FACETS: Record<string, Record<string, number>> = {};
 
 type BidLine = {
   bid_line_id?: string;
@@ -133,7 +141,18 @@ type VM = {
   categories: string[];
   catFilter: string;
   setCatFilter: (c: string) => void;
+  search: string;
+  setSearch: (s: string) => void;
+  attrSpecs: AttrSpec[];
+  facets: Record<string, Record<string, number>>;
+  attrFilters: AttrFilters;
+  toggleAttr: (key: string, value: string) => void;
+  clearAttrs: () => void;
+  activeAttrCount: number;
+  attrPanelOpen: boolean;
+  setAttrPanelOpen: (v: boolean) => void;
   itemCount: number;
+  shownCount: number;
   loadedOnce: boolean;
   basket: BasketLine[];
   byId: Map<string, BasketLine>;
@@ -162,6 +181,11 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
   const [reloadKey, setReloadKey] = useState(0);
   const [review, setReview] = useState(false);
   const [catFilter, setCatFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  // Attribute filters are kept per category so switching tabs doesn't drag a
+  // RAM speed filter onto SSDs; mirrors the desktop inventory page.
+  const [attrFiltersByCat, setAttrFiltersByCat] = useState<Record<string, AttrFilters>>({});
+  const [attrPanelOpen, setAttrPanelOpen] = useState(false);
   const [currency, setCurrency] = useState<Currency>('USD');
   const [fxUsdCny, setFxUsdCny] = useState<number | null>(null);
   const [fxFetchedAt, setFxFetchedAt] = useState<string | null>(null);
@@ -211,13 +235,44 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
 
   const categories = useMemo(
     () => Array.from(new Set(groups.map(g => g.category))), [groups]);
-  const filteredGroups = useMemo(
-    () => catFilter === 'all' ? groups : groups.filter(g => g.category === catFilter),
-    [groups, catFilter]);
   const itemCount = useMemo(
     () => groups.reduce((a, g) => a + g.items.length, 0), [groups]);
   const byId = useMemo(
     () => new Map(basket.map(l => [l.inventoryId, l])), [basket]);
+
+  const attrSpecs = useMemo(() => attrSpecsFor(catFilter), [catFilter]);
+  const attrFilters = attrFiltersByCat[catFilter] ?? EMPTY_ATTRS;
+  const activeAttrCount = useMemo(
+    () => Object.values(attrFilters).reduce((a, v) => a + v.length, 0), [attrFilters]);
+
+  // Groups in the selected category scope, before search / attribute filtering.
+  const scopedGroups = useMemo(
+    () => catFilter === 'all' ? groups : groups.filter(g => g.category === catFilter),
+    [groups, catFilter]);
+  const facets = useMemo(
+    () => attrSpecs.length
+      ? computeFacets(scopedGroups.flatMap(g => g.items), attrSpecs, search, attrFilters)
+      : EMPTY_FACETS,
+    [scopedGroups, attrSpecs, search, attrFilters]);
+  const filteredGroups = useMemo(
+    () => scopedGroups
+      .map(g => ({ category: g.category, items: filterCatalogItems(g.items, search, attrFilters) }))
+      .filter(g => g.items.length > 0),
+    [scopedGroups, search, attrFilters]);
+  const shownCount = useMemo(
+    () => filteredGroups.reduce((a, g) => a + g.items.length, 0), [filteredGroups]);
+
+  function setAttrFilters(next: AttrFilters) {
+    setAttrFiltersByCat(prev => ({ ...prev, [catFilter]: next }));
+  }
+  function toggleAttr(key: string, value: string) {
+    const cur = attrFilters[key] ?? [];
+    const next = cur.includes(value) ? cur.filter(v => v !== value) : [...cur, value];
+    const merged = { ...attrFilters };
+    if (next.length === 0) delete merged[key]; else merged[key] = next;
+    setAttrFilters(merged);
+  }
+  function clearAttrs() { setAttrFilters({}); }
 
   function reload() {
     setErrored(false);
@@ -227,7 +282,9 @@ export function VendorApp({ token, isPhone }: { token: string; isPhone: boolean 
 
   const vm: VM = {
     t, base, me, groups, filteredGroups, categories, catFilter, setCatFilter,
-    itemCount, loadedOnce, basket, byId, tab, setTab, review, setReview,
+    search, setSearch, attrSpecs, facets, attrFilters, toggleAttr, clearAttrs,
+    activeAttrCount, attrPanelOpen, setAttrPanelOpen,
+    itemCount, shownCount, loadedOnce, basket, byId, tab, setTab, review, setReview,
     currency, setCurrency, fxUsdCny, fxFetchedAt,
     addToBasket(it, qty, unitPrice) {
       setBasket(b => {
@@ -274,6 +331,115 @@ function StateScreen({ isPhone, icon, title, body, action }: {
         <h2 style={{ margin: '14px 0 6px', fontSize: 18 }}>{title}</h2>
         <p style={{ color: 'var(--fg-muted)', fontSize: 13, margin: 0 }}>{body}</p>
         {action && <div style={{ marginTop: 18 }}>{action}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Shared by both shells: search box + the collapsible attribute facet panel,
+// mirroring the desktop inventory page (lib/vendorCatalogFilter).
+
+function CatalogSearch({ vm, style }: { vm: VM; style?: React.CSSProperties }) {
+  const { t, search, setSearch } = vm;
+  return (
+    <div style={{ position: 'relative', ...style }}>
+      <Icon name="search" size={13} style={{
+        position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+        color: 'var(--fg-subtle)', pointerEvents: 'none',
+      }} />
+      <input
+        className="input"
+        placeholder={t('invSearchPlaceholder')}
+        style={{ paddingLeft: 30, width: '100%' }}
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function AttrFilterPanel({ vm }: { vm: VM }) {
+  const {
+    t, catFilter, attrSpecs, facets, attrFilters, toggleAttr, clearAttrs,
+    activeAttrCount, attrPanelOpen, setAttrPanelOpen,
+  } = vm;
+  if (attrSpecs.length === 0) return null;
+  return (
+    <div className="inv-subfilter" data-open={attrPanelOpen ? 'true' : 'false'}>
+      <button
+        type="button"
+        className="inv-subfilter__head"
+        onClick={() => setAttrPanelOpen(!attrPanelOpen)}
+        aria-expanded={attrPanelOpen}
+        aria-controls="vendor-subfilter-body"
+      >
+        <span className="inv-subfilter__chevron">
+          <Icon name="chevronDown" size={13} />
+        </span>
+        <span className="inv-subfilter__title">
+          {t('invRefinePre')} <strong>{catFilter}</strong>
+        </span>
+        {activeAttrCount > 0 && (
+          <span className="inv-subfilter__badge">
+            {t('invFiltersActive', { n: activeAttrCount })}
+          </span>
+        )}
+        <span className="inv-subfilter__spacer" />
+        {activeAttrCount > 0 && (
+          <span
+            className="inv-subfilter__clear"
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); clearAttrs(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                clearAttrs();
+              }
+            }}
+          >
+            {t('invClearAll')}
+          </span>
+        )}
+        <span className="inv-subfilter__hint">
+          {attrPanelOpen ? t('memSecHide') : t('memSecShow')}
+        </span>
+      </button>
+      <div id="vendor-subfilter-body" className="inv-subfilter__body">
+        {attrSpecs.map((spec) => {
+          const counts = facets[spec.key] ?? {};
+          const selected = attrFilters[spec.key] ?? [];
+          const values = sortAttrValues(spec.key, Object.keys(counts));
+          // Keep selected-but-now-empty values visible so they stay removable.
+          for (const s of selected) if (!values.includes(s)) values.push(s);
+          if (values.length === 0) return null;
+          return (
+            <div className="inv-subfilter__row" key={spec.key}>
+              <div className="inv-subfilter__label">{spec.label}</div>
+              <div className="inv-subfilter__chips">
+                {values.map((v) => {
+                  const isOn = selected.includes(v);
+                  const count = counts[v] ?? 0;
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className={'inv-chip' + (isOn ? ' on' : '') + (count === 0 && !isOn ? ' empty' : '')}
+                      onClick={() => toggleAttr(spec.key, v)}
+                      disabled={count === 0 && !isOn}
+                    >
+                      <span className="inv-chip__label">
+                        {spec.format ? spec.format(v) : v}
+                      </span>
+                      <span className="inv-chip__count">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -353,6 +519,19 @@ function MobileBrowse({ vm }: { vm: VM }) {
           </button>
         ))}
       </div>
+
+      <div style={{ marginTop: 8 }}>
+        <CatalogSearch vm={vm} />
+      </div>
+
+      {vm.attrSpecs.length > 0 && (
+        <div style={{
+          marginTop: 8, border: '1px solid var(--border)',
+          borderRadius: 12, overflow: 'hidden',
+        }}>
+          <AttrFilterPanel vm={vm} />
+        </div>
+      )}
 
       <div className="ph-info-banner">
         <Icon name="info" size={14} style={{ marginTop: 1, flexShrink: 0 }} />
@@ -714,10 +893,13 @@ function DesktopBrowse({ vm }: { vm: VM }) {
               </button>
             ))}
           </div>
+          <CatalogSearch vm={vm} style={{ flex: '1 1 200px', minWidth: 160, maxWidth: 320 }} />
           <span style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>
             {rows.length} {rows.length === 1 ? t('vendorItemOne') : t('vendorItemMany')}
           </span>
         </div>
+
+        <AttrFilterPanel vm={vm} />
 
         <div className="table-scroll">
           {!loadedOnce ? (
