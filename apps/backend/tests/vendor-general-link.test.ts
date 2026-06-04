@@ -55,4 +55,32 @@ describe('vendor general (customer-less) links', () => {
     // The general link must not appear as a per-customer row.
     expect(list.body.items.some(i => i.link?.id === gen.body.id)).toBe(false);
   });
+
+  it('portal /me is generic and bids store a null customer for a general link', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const gen = await api<{ token: string }>(
+      'POST', '/api/customers/vendor-links', { token: mgr });
+    const t = gen.body.token;
+
+    const me = await api<{ customer: { name: string } | null; label: string | null }>(
+      'GET', `/api/public/vendor/${t}/me`);
+    expect(me.status).toBe(200);
+    expect(me.body.customer).toBeNull();
+
+    const inv = await api<{ items: { id: string; qty: number }[] }>(
+      'GET', '/api/inventory?status=Done', { token: mgr });
+    const line = inv.body.items.find(i => i.qty >= 1)!;
+
+    const submit = await api<{ bidId: string }>(
+      'POST', `/api/public/vendor/${t}/bids`, {
+        body: { contactName: 'Anon Vendor', lines: [{ inventoryId: line.id, qty: 1, unitPrice: 5 }] },
+      });
+    expect(submit.status).toBe(201);
+
+    const sql = getTestDb();
+    const bid = (await sql`
+      SELECT customer_id FROM vendor_bids WHERE id = ${submit.body.bidId}
+    `)[0];
+    expect(bid.customer_id).toBeNull();
+  });
 });

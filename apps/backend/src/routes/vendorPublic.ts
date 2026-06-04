@@ -7,7 +7,7 @@ import { getLatestRateToUsd, isSupportedCurrency, type SupportedCurrency } from 
 
 const vendorPublic = new Hono<{ Bindings: Env }>();
 
-type Link = { id: string; customer_id: string; label: string | null };
+type Link = { id: string; customer_id: string | null; label: string | null };
 
 // Resolve a token to an active, non-expired link. Any miss returns null so
 // callers can answer a uniform 404 (never reveal whether a token exists).
@@ -27,6 +27,10 @@ vendorPublic.get('/:token/me', async (c) => {
   const sql = getDb(c.env);
   const link = await loadLink(sql, c.req.param('token'));
   if (!link) return c.json({ error: 'Not found' }, 404);
+  if (!link.customer_id) {
+    // General link — no customer to greet with.
+    return c.json({ customer: null, label: link.label });
+  }
   const cust = (await sql<{ name: string; short_name: string | null }[]>`
     SELECT name, short_name FROM customers WHERE id = ${link.customer_id} LIMIT 1
   `)[0];
