@@ -252,6 +252,7 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
 
       {openId && (
         <VendorBidDetail
+          key={openId}
           id={openId}
           onClose={() => navigate('/vendor-bids')}
           onToast={onToast}
