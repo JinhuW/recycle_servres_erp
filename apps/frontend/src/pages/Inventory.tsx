@@ -12,6 +12,7 @@ import { isCompleted, statusTone } from '../lib/status';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Category } from '../lib/types';
 import { PhoneListSkeleton } from '../components/Skeleton';
+import { SerialNumbers } from '../components/SerialNumbers';
 
 type InventoryItem = {
   id: string;
@@ -23,6 +24,7 @@ type InventoryItem = {
   interface: string | null;
   description: string | null;
   part_number: string | null;
+  serial_number: string | null;
   qty: number;
   unit_cost: number;
   sell_price: number | null;
@@ -122,6 +124,11 @@ export function Inventory({ onNewEntry }: Props) {
                   <span>{r.part_number ?? '—'} · qty {r.qty}</span>
                   {lowHealth && <span className="chip warn" style={{ fontSize: 10 }}>{r.health}%</span>}
                 </div>
+                {r.serial_number && (
+                  <div style={{ marginTop: 4 }}>
+                    <SerialNumbers raw={r.serial_number} max={3} size={10} />
+                  </div>
+                )}
               </div>
               <div style={{ textAlign: 'right' }}>
                 <span className={'chip ' + statusTone(r.status) + ' dot'} style={{ fontSize: 10 }}>{r.status}</span>

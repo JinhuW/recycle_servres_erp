@@ -69,7 +69,7 @@ function inventoryWhereFrag(
   // without rewriting the order.
   const whFrag       = warehouse ? sql`COALESCE(l.warehouse_id, o.warehouse_id) = ${warehouse}` : sql`TRUE`;
   const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
 
@@ -85,7 +85,7 @@ inventory.get('/', async (c) => {
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.part_number, l.condition,
+           l.interface, l.form_factor, l.description, l.part_number, l.serial_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.position,
            l.health::float AS health, l.rpm,
@@ -640,7 +640,7 @@ inventory.get('/products', async (c) => {
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
   const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
 
   const canonCol = canonPartCol(sql, sql`l.part_number`);
@@ -651,7 +651,7 @@ inventory.get('/products', async (c) => {
     generation: string | null; type: string | null; classification: string | null;
     rank: string | null; speed: string | null; interface: string | null;
     form_factor: string | null; description: string | null;
-    part_number: string | null; canon: string; rpm: number | null;
+    part_number: string | null; serial_number: string | null; canon: string; rpm: number | null;
     condition: string; qty: number; unit_cost: number; sell_price: number | null;
     status: string; health: number | null; created_at: string;
     warehouse_id: string | null; warehouse_short: string | null;
@@ -662,7 +662,7 @@ inventory.get('/products', async (c) => {
     SELECT l.id, l.order_id, o.user_id,
            l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
            l.rank, l.speed, l.interface, l.form_factor, l.description,
-           l.part_number, ${canonCol} AS canon, l.rpm,
+           l.part_number, l.serial_number, ${canonCol} AS canon, l.rpm,
            l.condition, l.qty, l.unit_cost::float AS unit_cost,
            l.sell_price::float AS sell_price, l.status, l.health::float AS health,
            l.created_at,
@@ -797,6 +797,7 @@ inventory.get('/products', async (c) => {
         id: l.id, order_id: l.order_id, created_at: l.created_at,
         user_name: l.user_name, user_initials: l.user_initials,
         sell_price: l.sell_price, condition: l.condition, health: l.health,
+        serial_number: l.serial_number,
         warehouse_id: l.warehouse_id, warehouse_short: l.warehouse_short,
         qty: l.qty, status: l.status, image_url: l.image_url,
         ...(isManager ? { unit_cost: l.unit_cost } : {}),

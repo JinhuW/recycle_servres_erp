@@ -17,6 +17,7 @@ import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
 import { DesktopActivityDrawer } from './DesktopActivityDrawer';
 import { TableSkeleton } from '../../components/Skeleton';
+import { SerialNumbers } from '../../components/SerialNumbers';
 import { InventoryProductTable } from './InventoryProductTable';
 import type { ProductGroup } from './InventoryProductTable';
 
@@ -34,6 +35,7 @@ type InventoryRow = {
   form_factor: string | null;
   description: string | null;
   part_number: string | null;
+  serial_number: string | null;
   condition: string;
   qty: number;
   unit_cost: number;
@@ -359,6 +361,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           type: g.type, classification: g.classification, rank: g.rank,
           speed: g.speed, interface: g.interface, form_factor: g.form_factor,
           description: g.description, part_number: g.part_number,
+          serial_number: lot.serial_number,
           condition: lot.condition, qty: lot.qty,
           unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,
           status: lot.status, health: lot.health, rpm: g.rpm,
@@ -1248,6 +1251,18 @@ function InventoryQuickView({
               </span>
             } borderLeft borderTop />
           </div>
+
+          {item.serial_number && (
+            <div style={{
+              border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px',
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+                {t('serialNumbers')}
+              </div>
+              <SerialNumbers raw={item.serial_number} max={24} size={11.5} bare />
+            </div>
+          )}
 
           {/* Submitter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--fg-subtle)' }}>

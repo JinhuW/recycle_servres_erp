@@ -4,6 +4,7 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { useT } from '../../lib/i18n';
+import { SerialNumbers } from '../../components/SerialNumbers';
 
 export type ProductLot = {
   id: string;
@@ -20,6 +21,7 @@ export type ProductLot = {
   qty: number;
   status: string;
   image_url: string | null;
+  serial_number: string | null;
 };
 
 export type ProductGroup = {
@@ -284,6 +286,11 @@ export function InventoryProductTable({
                                   )}
                                   {l.order_id}
                                 </span>
+                                {l.serial_number && (
+                                  <div style={{ marginTop: 5 }}>
+                                    <SerialNumbers raw={l.serial_number} max={4} size={10.5} />
+                                  </div>
+                                )}
                               </td>
                               <td className="muted">{fmtDateShort(l.created_at, locale)}</td>
                               <td>

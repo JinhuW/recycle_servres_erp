@@ -9,6 +9,7 @@ import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { parseSerials } from '../components/SerialNumbers';
 import { showErrorToast } from '../lib/errorToast';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 
@@ -145,6 +146,8 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !!scanUrl &&
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
+
+  const snCount = parseSerials(line.serialNumber).length;
 
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
     setLine(prev => ({ ...prev, [k]: v }));
@@ -403,6 +406,26 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               {CONDITIONS.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
+        </div>
+
+        <div className="ph-field">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
+            {t('serialNumbers')}
+            <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>· {t('optional')}</span>
+            {snCount > 0 && (
+              <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>{t('serialCount', { n: snCount })}</span>
+            )}
+          </label>
+          <textarea
+            className="input mono"
+            rows={Math.min(Math.max(snCount, 2), 5)}
+            value={line.serialNumber ?? ''}
+            onChange={e => set('serialNumber', e.target.value)}
+            placeholder={t('serialNumbersPh')}
+            style={{ resize: 'vertical', lineHeight: 1.6 }}
+          />
+          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>{t('serialNumbersHint')}</div>
         </div>
 
         {/* Pricing row mirrors desktop LineDrawer: qty → unit → total

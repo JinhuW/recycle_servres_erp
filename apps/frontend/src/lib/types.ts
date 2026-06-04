@@ -43,6 +43,7 @@ export type OrderLine = {
   formFactor: string | null;
   description: string | null;
   partNumber: string | null;
+  serialNumber: string | null;
   condition: string;
   qty: number;
   unitCost: number;
@@ -136,6 +137,7 @@ export type DraftLine = {
   formFactor?: string | null;
   description?: string | null;
   partNumber?: string | null;
+  serialNumber?: string | null;
   condition?: string;
   qty: number;
   unitCost: number;

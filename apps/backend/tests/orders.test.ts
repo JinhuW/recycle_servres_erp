@@ -441,6 +441,61 @@ describe('POST /api/orders/:id/archive (+/unarchive)', () => {
   });
 });
 
+describe('order line serial numbers', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('persists an optional multi-line serial number and returns it on the order detail', async () => {
+    const { token } = await loginAs(MARCUS);
+    const serials = 'SN-AAA-001\nSN-BBB-002\nSN-CCC-003';
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          partNumber: 'M393A4K40DB3-CWE', condition: 'Pulled — Tested',
+          serialNumber: serials, qty: 3, unitCost: 78.5,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const got = await api<{ order: { lines: { serialNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    expect(got.status).toBe(200);
+    expect(got.body.order.lines[0].serialNumber).toBe(serials);
+  });
+
+  it('defaults serial_number to null when omitted, and surfaces it in inventory', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '16GB',
+          partNumber: 'NO-SN-PART', condition: 'Pulled — Tested',
+          qty: 1, unitCost: 20,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const inv = await api<{ items: { part_number: string | null; serial_number: string | null }[] }>(
+      'GET', '/api/inventory', { token },
+    );
+    expect(inv.status).toBe(200);
+    const row = inv.body.items.find(i => i.part_number === 'NO-SN-PART');
+    expect(row).toBeTruthy();
+    expect(row!.serial_number).toBeNull();
+  });
+});
+
 describe('orders.commission_rate column', () => {
   beforeEach(async () => { await resetDb(); });
 

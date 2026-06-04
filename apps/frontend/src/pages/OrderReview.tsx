@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { LineSpecChips } from '../components/LineSpecChips';
+import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError, showErrorToast } from '../lib/errorToast';
@@ -106,6 +107,11 @@ export function OrderReview({
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>{l.partNumber || '—'}</div>
                   <LineSpecChips line={l} />
+                  {l.serialNumber && (
+                    <div style={{ marginTop: 4 }}>
+                      <SerialNumbers raw={l.serialNumber} max={3} size={10} />
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); onEditLine(i); }}

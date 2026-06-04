@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Icon } from '../../components/Icon';
+import { SerialNumbers } from '../../components/SerialNumbers';
 import { useT } from '../../lib/i18n';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { usePreference } from '../../lib/preferences';
@@ -634,7 +635,14 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                                       <div>{name}</div>
                                       {sub && <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{sub}</div>}
                                     </td>
-                                    <td className="mono muted">{l.partNumber}</td>
+                                    <td className="mono muted">
+                                      <div>{l.partNumber}</div>
+                                      {l.serialNumber && (
+                                        <div style={{ marginTop: 4 }}>
+                                          <SerialNumbers raw={l.serialNumber} max={4} size={10.5} />
+                                        </div>
+                                      )}
+                                    </td>
                                     <td className="num">{l.qty}</td>
                                     <td className="num mono">{fmtUSD0(l.unitCost, locale)}</td>
                                     <td className="num mono">{l.sellPrice != null ? fmtUSD0(l.sellPrice, locale) : '—'}</td>

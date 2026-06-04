@@ -4,6 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
+import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
@@ -328,6 +329,11 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                         {l.partNumber ?? '—'}
                       </div>
                     )}
+                  {l.serialNumber && (
+                    <div style={{ marginTop: 5 }}>
+                      <SerialNumbers raw={l.serialNumber} max={4} size={10.5} />
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>

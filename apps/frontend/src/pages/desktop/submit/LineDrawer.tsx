@@ -9,6 +9,7 @@ import type { Line } from '../DesktopSubmit';
 import { scanToLinePatch } from '../DesktopSubmit';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
+import { parseSerials } from '../../../components/SerialNumbers';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
 // When `editing` is true (e.g. used by DesktopEditOrder), the pricing grid
@@ -109,6 +110,7 @@ export function LineDrawer({
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAiUpload(); }
   };
 
+  const snCount = parseSerials(line.serialNumber).length;
   const qty = Number(line.qty) || 0;
   const cost = Number(line.unitCost) || 0;
   const sellPrice = line.sellPrice == null || line.sellPrice === '' ? 0 : Number(line.sellPrice);
@@ -335,6 +337,28 @@ export function LineDrawer({
             {cat === 'SSD' && <SsdFields line={line} set={set} />}
             {cat === 'HDD' && <HddFields line={line} set={set} />}
             {cat === 'Other' && <OtherFields line={line} set={set} />}
+
+            <div className="field">
+              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
+                {t('serialNumbers')}
+                <span className="muted" style={{ fontWeight: 400 }}>· {t('optional')}</span>
+                {snCount > 0 && (
+                  <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>
+                    {t('serialCount', { n: snCount })}
+                  </span>
+                )}
+              </label>
+              <textarea
+                className="input mono"
+                rows={Math.min(Math.max(snCount, 2), 6)}
+                value={line.serialNumber ?? ''}
+                onChange={e => set({ serialNumber: e.target.value })}
+                placeholder={t('serialNumbersPh')}
+                style={{ resize: 'vertical', lineHeight: 1.6 }}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t('serialNumbersHint')}</div>
+            </div>
 
             <div style={{
               display: 'grid',

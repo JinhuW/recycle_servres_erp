@@ -44,6 +44,7 @@ const toAddLine = (l: DraftLine) => ({
   formFactor: l.formFactor ?? null,
   description: l.description ?? null,
   partNumber: l.partNumber ?? null,
+  serialNumber: l.serialNumber ?? null,
   condition: l.condition ?? 'Pulled — Tested',
   qty: Number(l.qty) || 1,
   unitCost: Number(l.unitCost) || 0,
