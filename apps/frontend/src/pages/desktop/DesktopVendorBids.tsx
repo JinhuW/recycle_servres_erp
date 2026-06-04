@@ -25,7 +25,7 @@ type VbSummary = {
   note: string | null;
   status: VbStatus;
   created_at: string;
-  customer_name: string;
+  customer_name: string | null;
   customer_short: string | null;
   line_count: number;
   total_offered: number;
@@ -57,8 +57,8 @@ type VbDetail = {
   note: string | null;
   status: VbStatus;
   created_at: string;
-  customer_id: string;
-  customer_name: string;
+  customer_id: string | null;
+  customer_name: string | null;
   currency: 'USD' | 'CNY';
   fxRateToUsd: number;
   fxSource: 'frankfurter' | 'manual' | 'fixed';
@@ -203,9 +203,15 @@ export function DesktopVendorBids({ onToast, onOpenSellOrder }: VendorBidsProps 
                   onClick={() => navigate('/vendor-bids/' + b.id)}
                 >
                   <td>
-                    <div style={{ fontWeight: 500 }}>{b.customer_name}</div>
-                    {b.customer_short && (
-                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{b.customer_short}</div>
+                    {b.customer_name ? (
+                      <>
+                        <div style={{ fontWeight: 500 }}>{b.customer_name}</div>
+                        {b.customer_short && (
+                          <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{b.customer_short}</div>
+                        )}
+                      </>
+                    ) : (
+                      <span className="chip dot muted">{t('vbGeneralLink')}</span>
                     )}
                   </td>
                   <td>
@@ -439,7 +445,9 @@ function VendorBidDetail({
                     </span>
                   )}
                 </div>
-                <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{bid.customer_name}</h2>
+                <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>
+                  {bid.customer_name ?? t('vbGeneralLink')}
+                </h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
                   {fmtDate(bid.created_at, locale)}
                   {bid.contact_name ? ` · ${bid.contact_name}` : ''}
