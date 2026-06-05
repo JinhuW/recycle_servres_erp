@@ -18,6 +18,14 @@ import { ImageLightbox } from '../components/ImageLightbox';
 const realScan = (u?: string | null): u is string =>
   !!u && !u.startsWith('data:image/placeholder');
 
+// Stable hue (0–359) from an id, so a given warehouse/owner always paints the
+// same colour across the list. Feeds the `--h` custom prop on the meta tags.
+const hueFromId = (s: string): number => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return ((h % 360) + 360) % 360;
+};
+
 type Props = {
   onEdit: (o: Order) => void;
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
@@ -204,8 +212,26 @@ export function Orders({ onEdit, onToast }: Props) {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {fmtDateShort(o.createdAt, locale)}{o.warehouse ? ' · ' + o.warehouse.short : ''} · <span style={{ color: 'var(--fg-muted)' }}>{o.status}</span>
+                  <div className="ph-meta-tags">
+                    {o.warehouse && (
+                      <span
+                        className="ph-tag-wh"
+                        style={{ ['--h' as string]: hueFromId(o.warehouse.id) }}
+                        title={o.warehouse.region ? `${o.warehouse.short} · ${o.warehouse.region}` : o.warehouse.short}
+                      >
+                        <Icon name="warehouse" size={9} />
+                        <span className="ph-tag-wh-label">{o.warehouse.short}</span>
+                      </span>
+                    )}
+                    <span className={'chip ' + statusTone(o.status) + ' dot'}>{o.status}</span>
+                    <span
+                      className="ph-owner-coin"
+                      style={{ ['--h' as string]: hueFromId(o.userId) }}
+                      title={o.userName}
+                    >
+                      {o.userInitials}
+                    </span>
+                    <span className="ph-meta-date">{fmtDateShort(o.createdAt, locale)}</span>
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>

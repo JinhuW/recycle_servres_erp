@@ -188,6 +188,70 @@
 }
 .ph-line + .ph-line { margin-top: 6px; }
 
+/* Meta tag strip — color-keyed warehouse / status / owner under the order id.
+   Each facet speaks its own colour language so the three read apart at a glance:
+   warehouse + owner derive a stable hue from their id (--h set inline), status
+   reuses the semantic chip tones via statusTone(). Holding L/C constant across
+   the hashed hues keeps it refined rather than a rainbow. */
+.ph-meta-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  overflow: hidden;
+}
+.ph-meta-date {
+  margin-left: auto;
+  padding-left: 4px;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.ph-tag-wh {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 96px;
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  background: oklch(0.95 0.045 var(--h));
+  color: oklch(0.44 0.13 var(--h));
+  min-width: 0;
+}
+.ph-tag-wh .ph-tag-wh-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ph-tag-wh .icon { opacity: 0.8; flex-shrink: 0; }
+.ph-owner-coin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  flex-shrink: 0;
+  background: oklch(0.92 0.06 var(--h));
+  color: oklch(0.40 0.14 var(--h));
+}
+/* Status pill in the strip: shrink the shared chip to tag scale. */
+.ph-meta-tags .chip {
+  height: 18px;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 /* Submit category selector */
 .ph-cat-card {
   display: flex;
