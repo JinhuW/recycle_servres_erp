@@ -59,3 +59,6 @@ backups/
 # Tracked SQL lives under apps/backend/, so scoping these to the root is safe.
 /*.sql
 /po*_backup_*/
+
+# Playwright MCP browser-automation scratch (snapshots, screenshots, console logs).
+.playwright-mcp/
