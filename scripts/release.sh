@@ -3,7 +3,7 @@
 # tag, and build version-stamped Docker images.
 #
 # Usage:
-#   scripts/release.sh <patch|minor|major> [--allow-dirty] [--no-build] [--dry-run]
+#   scripts/release.sh <patch|minor|major> [--allow-dirty] [--no-build] [--deploy] [--dry-run]
 #
 # What it does, in order:
 #   1. Pre-flight: must be on `main`, in sync with origin/main, clean tree
@@ -16,8 +16,10 @@
 #   5. Build `recycle-erp-{backend,web}:X.Y.Z` (+ retag :latest) via compose
 #      with APP_VERSION / GIT_SHA build args.
 #
-# It does NOT push or deploy — it prints the exact next commands so you stay in
-# control. Phase 2 (a GitHub Action pushing to GHCR) can reuse the build step.
+# By default it does NOT push or deploy — it prints the exact next commands so
+# you stay in control. Pass --deploy to also push (main + tag) and bring the
+# stack up on the freshly-built images (APP_VERSION=<new>). Phase 2 (a GitHub
+# Action pushing to GHCR) can reuse the build step.
 
 set -euo pipefail
 
@@ -30,12 +32,14 @@ LEVEL=""
 ALLOW_DIRTY=0
 NO_BUILD=0
 DRY_RUN=0
+DEPLOY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     patch|minor|major) LEVEL="$1"; shift ;;
     --allow-dirty)     ALLOW_DIRTY=1; shift ;;
     --no-build)        NO_BUILD=1; shift ;;
+    --deploy)          DEPLOY=1; shift ;;
     --dry-run)         DRY_RUN=1; shift ;;
     -h|--help)
       sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
@@ -45,7 +49,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$LEVEL" ]]; then
-  echo "error: missing bump level. Usage: scripts/release.sh <patch|minor|major> [--allow-dirty] [--no-build] [--dry-run]" >&2
+  echo "error: missing bump level. Usage: scripts/release.sh <patch|minor|major> [--allow-dirty] [--no-build] [--deploy] [--dry-run]" >&2
+  exit 2
+fi
+
+# --deploy brings the stack up on the just-built images, so it can't run without
+# a build.
+if [[ "$DEPLOY" == "1" && "$NO_BUILD" == "1" ]]; then
+  echo "error: --deploy needs the image build; drop --no-build" >&2
   exit 2
 fi
 
@@ -199,6 +210,26 @@ else
   docker tag "recycle-erp-web:$NEW"     "recycle-erp-web:latest"
 fi
 
+# ── 6. Deploy (opt-in) ────────────────────────────────────────────────────────
+if [[ "$DEPLOY" == "1" ]]; then
+  command -v docker >/dev/null || die "--deploy needs docker on this host"
+  say "Pushing main + $TAG"
+  git push origin main
+  git push origin "$TAG"
+  say "Bringing the stack up on $TAG"
+  APP_VERSION="$NEW" GIT_SHA="$GIT_SHA" docker compose up -d
+
+  cat <<EOF
+
+$(say "Deployed $TAG.")  The stack is running the new images.
+
+To roll back to the previous version on the host:
+
+  APP_VERSION=$CURRENT docker compose up -d
+EOF
+  exit 0
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 cat <<EOF
 
@@ -206,6 +237,8 @@ $(say "Released $TAG locally.")  Next steps:
 
   git push origin main && git push origin $TAG
   APP_VERSION=$NEW docker compose up -d            # run the tagged images
+
+  # …or re-run with --deploy to push and bring the stack up in one shot.
 
 To roll back to the previous version on the host:
 
