@@ -63,6 +63,9 @@ orders.get('/', async (c) => {
   // matching what the FE shows so the two layers can't disagree.
   const isManager = effectiveRole(u) === 'manager';
 
+  // The mobile shell is a personal submission surface — it asks for `mine` so a
+  // manager sees only their own POs there, not the whole org's.
+  const mineOnly = c.req.query('mine') === 'true';
   const category = c.req.query('category');                 // RAM/SSD/Other
   const status = c.req.query('status');                     // order stage label (Draft/In Transit/…)
   const includeArchived = c.req.query('includeArchived') === 'true';
@@ -79,7 +82,8 @@ orders.get('/', async (c) => {
   // composes cleanly regardless of which params are present.
   //
   // Managers see every PO across the org; purchasers are scoped to their own.
-  const scopeFrag    = isManager
+  // `mine` overrides that and pins the list to the caller regardless of role.
+  const scopeFrag    = isManager && !mineOnly
     ? sql`TRUE`
     : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`o.category = ${category}` : sql`TRUE`;

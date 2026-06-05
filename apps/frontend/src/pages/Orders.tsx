@@ -48,6 +48,9 @@ export function Orders({ onEdit, onToast }: Props) {
   useEffect(() => {
     let alive = true;
     const params = new URLSearchParams();
+    // Mobile is a personal submission surface — always scope to my own POs,
+    // even for managers (who'd otherwise see the whole org's).
+    params.set('mine', 'true');
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (showArchived) params.set('includeArchived', 'true');
