@@ -39,7 +39,7 @@ shell, so each ships its own chunk):
 
 ## Stack
 
-- **Backend** — Node 22, Hono, postgres.js, `@aws-sdk/client-s3` for R2,
+- **Backend** — Node 24, Hono, postgres.js, `@aws-sdk/client-s3` for R2,
   bcryptjs, `@tsndr/cloudflare-worker-jwt` for JWT.
 - **Frontend** — Vite 6, React 18, TypeScript 5, no UI framework.
 - **DB** — Postgres 16. 41 SQL migrations under `apps/backend/migrations/`,

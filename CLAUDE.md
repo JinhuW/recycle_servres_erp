@@ -37,7 +37,7 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 
 ## Backend
 
-- Hono on `@hono/node-server` (Node 22).  Entry: `apps/backend/src/server.ts`
+- Hono on `@hono/node-server` (Node 24).  Entry: `apps/backend/src/server.ts`
   → `index.ts` mounts all routes under `/api/*`.
 - **One shared Postgres pool**, lazily created (`apps/backend/src/db.ts`).
   Do not new-up `postgres()` clients inline; call `getDb(env)`.  The historical
