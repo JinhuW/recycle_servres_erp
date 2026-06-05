@@ -244,37 +244,125 @@
   .pwa-intro-card,
   .pwa-intro-sheet,
   .pwa-intro-backdrop,
-  .pwa-intro-benefit { animation: none; }
+  .pwa-intro-benefit,
+  .pwa-update-toast,
+  .pwa-update-spark::after,
+  .pwa-update-pip,
+  .pwa-update-spin { animation: none; }
 }
 
+/* ── Update-available toast ──
+   A sibling of the install card on the same teal-glass vocabulary, but pinned
+   to the top and lighter in weight: it interrupts only to offer the refresh. */
 .pwa-update-toast {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
-  left: 50%;
-  transform: translateX(-50%);
+  left: 12px; right: 12px;
+  margin-inline: auto;
+  max-width: 420px;
   display: flex;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--bg-elev);
-  color: var(--fg);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  flex-direction: column;
+  gap: 11px;
+  padding: 12px 12px 13px;
+  border-radius: 18px;
+  background: color-mix(in oklch, var(--bg-elev) 92%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid color-mix(in oklch, var(--accent) 16%, var(--border));
+  box-shadow:
+    0 1px 0 color-mix(in oklch, white 60%, transparent) inset,
+    0 16px 40px rgba(15, 23, 42, 0.18),
+    0 2px 6px rgba(15, 23, 42, 0.06);
   z-index: 9999;
+  animation: pwa-update-in 0.46s cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
-.pwa-update-toast button {
-  border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  font: inherit;
+@keyframes pwa-update-in {
+  from { transform: translateY(-22px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0)     scale(1);    opacity: 1; }
 }
-.pwa-update-cta {
+
+.pwa-update-head { display: flex; align-items: center; gap: 11px; }
+
+.pwa-update-spark {
+  position: relative;
+  width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: 12px;
+  display: grid; place-items: center;
+  color: var(--accent-strong);
+  background:
+    radial-gradient(120% 120% at 30% 20%,
+      var(--accent-soft) 0%,
+      color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev)) 70%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent),
+    0 4px 12px color-mix(in oklch, var(--accent) 20%, transparent);
+  overflow: hidden;
+}
+/* One slow light-sweep across the tile to catch the eye, then it settles. */
+.pwa-update-spark::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(120deg, transparent 38%,
+    color-mix(in oklch, white 72%, transparent) 50%, transparent 62%);
+  background-size: 240% 100%;
+  background-position: 130% 0;
+  animation: pwa-update-sheen 2.8s ease-in-out 0.5s infinite;
+}
+@keyframes pwa-update-sheen {
+  0%, 64% { background-position: 130% 0; }
+  100%    { background-position: -130% 0; }
+}
+/* Pulsing "new" pip, anchored to the tile corner. */
+.pwa-update-pip {
+  position: absolute; top: -3px; right: -3px;
+  width: 11px; height: 11px;
+  border-radius: 50%;
   background: var(--accent);
-  color: var(--accent-fg);
-  font-weight: 600;
+  border: 2px solid var(--bg-elev);
+  animation: pwa-update-pip 1.9s ease-out infinite;
 }
+@keyframes pwa-update-pip {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 7px color-mix(in oklch, var(--accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
+}
+
+.pwa-update-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pwa-update-title {
+  font-size: 14px; font-weight: 650; letter-spacing: -0.01em; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pwa-update-sub {
+  font-size: 11.5px; color: var(--fg-subtle); line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 .pwa-update-dismiss {
-  background: transparent;
-  color: var(--fg-muted);
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: transparent; border: none; border-radius: 10px;
+  color: var(--fg-subtle); cursor: pointer;
+  transition: background 0.14s, color 0.14s;
 }
+.pwa-update-dismiss:active { background: var(--bg-soft); color: var(--fg-muted); }
+
+.pwa-update-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%;
+  padding: 11px 16px;
+  border: none; border-radius: 12px;
+  background: linear-gradient(160deg,
+    color-mix(in oklch, var(--accent) 92%, white) 0%,
+    var(--accent-strong) 100%);
+  color: var(--accent-fg);
+  font: inherit; font-size: 14px; font-weight: 650; letter-spacing: -0.005em;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 32%, transparent),
+    0 6px 16px color-mix(in oklch, var(--accent) 30%, transparent);
+  cursor: pointer;
+  transition: transform 0.06s, box-shadow 0.16s;
+}
+.pwa-update-cta:active { transform: translateY(1px); }
+.pwa-update-cta[data-busy='true'] { pointer-events: none; }
+.pwa-update-spin { display: inline-flex; animation: pwa-update-spin 0.7s linear infinite; }
+@keyframes pwa-update-spin { to { transform: rotate(360deg); } }
