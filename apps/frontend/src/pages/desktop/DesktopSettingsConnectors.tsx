@@ -25,12 +25,24 @@ export function DesktopSettingsConnectors() {
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+
+  // Same-origin: the backend mounts the MCP endpoint at /api/mcp behind the
+  // same host that serves this app, so the URL an MCP client needs is derivable
+  // on the client without threading OAUTH_ISSUER_URL to the frontend.
+  const mcpUrl = `${window.location.origin}/api/mcp`;
 
   async function copySecret() {
     if (!newSecret) return;
     await navigator.clipboard.writeText(newSecret);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function copyMcpUrl() {
+    await navigator.clipboard.writeText(mcpUrl);
+    setUrlCopied(true);
+    setTimeout(() => setUrlCopied(false), 1500);
   }
 
   const load = () =>
@@ -87,6 +99,50 @@ export function DesktopSettingsConnectors() {
       </div>
 
       <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">{t('connectorsMcpTitle')}</div>
+            <div className="card-sub">{t('connectorsMcpSub')}</div>
+          </div>
+        </div>
+        <div className="card-body">
+          <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)', marginBottom: 6 }}>
+            {t('connectorsMcpUrlLabel')}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+            <code
+              className="mono"
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                wordBreak: 'break-all',
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: 'var(--bg-soft)',
+                border: '1px solid var(--border)',
+                fontSize: 13,
+              }}
+            >
+              {mcpUrl}
+            </code>
+            <button type="button" className="btn sm" onClick={copyMcpUrl}>
+              {urlCopied ? t('connectorsCopied') : t('connectorsCopy')}
+            </button>
+          </div>
+          <ol style={{ margin: '14px 0 0', paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: 'var(--fg-muted)' }}>
+            <li>{t('connectorsMcpStep1')}</li>
+            <li>{t('connectorsMcpStep2')}</li>
+            <li>{t('connectorsMcpStep3')}</li>
+            <li>{t('connectorsMcpStep4')}</li>
+          </ol>
+          <div className="so-tip" style={{ marginTop: 14 }}>
+            <span>{t('connectorsMcpNote')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
           <div>
             <div className="card-title">{t('connectorsAddServiceTitle')}</div>
