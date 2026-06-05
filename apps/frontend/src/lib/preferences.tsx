@@ -30,6 +30,7 @@ export type PrefMap = {
   'inventory.cols.manager': string[];
   'inventory.cols.purchaser': string[];
   'inventory.view': 'grouped' | 'flat';
+  'analysis.collapsed': string[];
   'orders.cols': string[];
   'market.showStaleOnly': boolean;
 };

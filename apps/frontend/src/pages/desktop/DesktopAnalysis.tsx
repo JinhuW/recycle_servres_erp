@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
+import { usePreference } from '../../lib/preferences';
 import { handleFetchError } from '../../lib/errorToast';
 
 // ── Types — mirror GET /api/inventory/analysis ──────────────────────────────
@@ -42,6 +43,9 @@ const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 const moneyK = (n: number) => '$' + (n / 1000).toFixed(1) + 'K';
 const pct = (n: number, tot: number) => (tot ? Math.round((n / tot) * 100) : 0);
 
+// Stable empty fallback so usePreference doesn't hand back a fresh array each render.
+const NO_COLLAPSED: string[] = [];
+
 // ── Primitives ──────────────────────────────────────────────────────────────
 type Row = { label: string; value: number; color: string; swatch?: boolean };
 
@@ -81,9 +85,39 @@ function VBars({ data, color }: { data: [string, number][]; color: string }) {
 
 function Panel({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
   return (
-    <section className="an-card">
-      <div className="an-ph"><h2>{title}</h2>{meta && <span className="an-meta">{meta}</span>}</div>
+    <section className="an-card an-well">
+      <div className="an-ph"><h3>{title}</h3>{meta && <span className="an-meta">{meta}</span>}</div>
       <div className="an-pb">{children}</div>
+    </section>
+  );
+}
+
+// Collapsible section — header doubles as the toggle; body animates via the
+// grid-template-rows 0fr↔1fr trick so heights interpolate without JS measuring.
+function Section({ id, index, title, meta, open, onToggle, children, solid, accent }: {
+  id: string; index: string; title: ReactNode; meta?: ReactNode;
+  open: boolean; onToggle: (id: string) => void; children: ReactNode;
+  solid?: boolean; accent?: string;
+}) {
+  return (
+    <section className={`an-card an-sec${open ? ' is-open' : ''}${solid ? ' an-sec-solid' : ''}`}>
+      <h2 className="an-sec-h">
+        <button
+          type="button"
+          className="an-sec-head"
+          aria-expanded={open}
+          onClick={() => onToggle(id)}
+          style={solid ? { background: accent } : undefined}
+        >
+          <span className="an-sec-chev" aria-hidden>›</span>
+          <span className="an-sec-idx">{index}</span>
+          <span className="an-sec-title">{title}</span>
+          {meta != null && <span className="an-sec-meta">{meta}</span>}
+        </button>
+      </h2>
+      <div className="an-sec-body">
+        <div className="an-sec-clip"><div className="an-secpad">{children}</div></div>
+      </div>
     </section>
   );
 }
@@ -96,6 +130,8 @@ export function DesktopAnalysis() {
   const [busy, setBusy] = useState(false);
   const [cat, setCat] = useState('All');     // category name, or 'All'
   const [wh, setWh] = useState('All');       // warehouse id, or 'All'
+  // Persisted set of collapsed section ids (empty = everything open).
+  const [collapsed, setCollapsed] = usePreference('analysis.collapsed', NO_COLLAPSED);
 
   // The page re-queries on every filter change so all sections — KPIs,
   // composition, status, brands and the per-type sub-analysis — reflect the
@@ -125,6 +161,13 @@ export function DesktopAnalysis() {
   // Which type(s) get a sub-analysis card: the focused one, or all of them.
   const subCats = data.categories.filter(c => data.subtypes[c]);
 
+  const sectionIds = ['composition', 'distribution', ...subCats.map(c => `type:${c}`)];
+  const isOpen = (id: string) => !collapsed.includes(id);
+  const toggle = (id: string) =>
+    setCollapsed(isOpen(id) ? [...collapsed, id] : collapsed.filter(x => x !== id));
+  const allClosed = sectionIds.every(id => collapsed.includes(id));
+  const toggleAll = () => setCollapsed(allClosed ? [] : sectionIds);
+
   return (
     <div className="an-shell" style={busy ? { opacity: 0.6, transition: 'opacity .12s' } : undefined}>
       <div className="an-title">
@@ -143,10 +186,13 @@ export function DesktopAnalysis() {
               {data.warehouses.map(w => <option key={w.id} value={w.id}>{w.short}</option>)}
             </select>
           </label>
+          <button type="button" className="an-alltoggle" onClick={toggleAll}>
+            {allClosed ? t('analysisExpandAll') : t('analysisCollapseAll')}
+          </button>
         </div>
       </div>
 
-      {/* KPI strip — every figure is scoped to the current selection. */}
+      {/* KPI strip — pinned summary; every figure is scoped to the current selection. */}
       <div className="an-kpis">
         <Kpi label={t('analysisUnits')} value={String(data.totals.units)} sub={cat !== 'All' ? cat : t('analysisOnHand')} />
         <Kpi label={t('analysisCostValue')} value={moneyK(data.value.cost)} sub={t('analysisAtCost')} />
@@ -156,32 +202,61 @@ export function DesktopAnalysis() {
         <Kpi label={t('analysisLineItems')} value={String(data.totals.lines)} sub={t('analysisActiveSkus')} />
       </div>
 
-      {/* Composition + status */}
-      <div className="an-grid an-g2">
-        <Panel title={t('analysisCategoryComposition')} meta={cat !== 'All' ? cat : t('analysisByUnits')}>
-          {cat !== 'All' && data.subtypes[cat]
-            ? <FocusedComposition sub={data.subtypes[cat]!} color={catColor(cat)} dimTitle={dimTitle} />
-            : <Bars rows={data.byCategory.map(c => ({ label: c.category, value: c.units, color: catColor(c.category), swatch: true }))} lw={62} />}
-        </Panel>
-        <Panel title={t('analysisStatusPipeline')} meta={t('analysisInFlow', { n: data.totals.units })}>
-          <StatusPipeline data={data.byStatus} />
-        </Panel>
-      </div>
+      <div className="an-sections">
+        {/* Composition + status */}
+        <Section
+          id="composition" index="01"
+          title={t('analysisSecComposition')}
+          meta={t('analysisInFlow', { n: data.totals.units })}
+          open={isOpen('composition')} onToggle={toggle}
+        >
+          <div className="an-grid an-g2">
+            <Panel title={t('analysisCategoryComposition')} meta={cat !== 'All' ? cat : t('analysisByUnits')}>
+              {cat !== 'All' && data.subtypes[cat]
+                ? <FocusedComposition sub={data.subtypes[cat]!} color={catColor(cat)} dimTitle={dimTitle} />
+                : <Bars rows={data.byCategory.map(c => ({ label: c.category, value: c.units, color: catColor(c.category), swatch: true }))} lw={62} />}
+            </Panel>
+            <Panel title={t('analysisStatusPipeline')} meta={t('analysisInFlow', { n: data.totals.units })}>
+              <StatusPipeline data={data.byStatus} />
+            </Panel>
+          </div>
+        </Section>
 
-      {/* Warehouse + brands */}
-      <div className="an-grid an-gWh">
-        <Panel title={t('analysisByWarehouse')} meta={t('analysisLocations', { n: data.warehouses.length })}>
-          <WarehouseTable rows={data.byWarehouse} t={t} selectedWh={wh === 'All' ? null : wh} />
-        </Panel>
-        <Panel title={t('analysisTopBrands')} meta={t('analysisByUnits')}>
-          <Bars rows={data.brands.map(([l, n]) => ({ label: l, value: n, color: 'var(--accent)' }))} lw={80} />
-        </Panel>
-      </div>
+        {/* Warehouse + brands */}
+        <Section
+          id="distribution" index="02"
+          title={t('analysisSecDistribution')}
+          meta={t('analysisLocations', { n: data.warehouses.length })}
+          open={isOpen('distribution')} onToggle={toggle}
+        >
+          <div className="an-grid an-gWh">
+            <Panel title={t('analysisByWarehouse')} meta={t('analysisLocations', { n: data.warehouses.length })}>
+              <WarehouseTable rows={data.byWarehouse} t={t} selectedWh={wh === 'All' ? null : wh} />
+            </Panel>
+            <Panel title={t('analysisTopBrands')} meta={t('analysisByUnits')}>
+              <Bars rows={data.brands.map(([l, n]) => ({ label: l, value: n, color: 'var(--accent)' }))} lw={80} />
+            </Panel>
+          </div>
+        </Section>
 
-      {/* Per-type sub-analysis */}
-      {subCats.map(c => (
-        <SubAnalysis key={c} cat={c} sub={data.subtypes[c]!} dimTitle={dimTitle} t={t} />
-      ))}
+        {/* Per-type sub-analysis — the colour-coded header is the toggle. */}
+        {subCats.map((c, i) => {
+          const sub = data.subtypes[c]!;
+          const margin = sub.cost ? pct(sub.sell - sub.cost, sub.cost) : 0;
+          const meta = `${sub.units}u · ${money(sub.cost)} → ${money(sub.sell)}${sub.cost ? ` · +${margin}%` : ''}`;
+          const id = `type:${c}`;
+          return (
+            <Section
+              key={c} id={id} index={String(i + 3).padStart(2, '0')}
+              title={`${c} — ${t('analysisSubAnalysis')}`}
+              meta={meta} solid accent={catColor(c)}
+              open={isOpen(id)} onToggle={toggle}
+            >
+              <SubBody cat={c} sub={sub} dimTitle={dimTitle} t={t} />
+            </Section>
+          );
+        })}
+      </div>
 
       <div className="an-crumb an-foot">ⓘ {t('analysisSeedNote')}</div>
     </div>
@@ -258,40 +333,30 @@ function WarehouseTable({ rows, t, selectedWh }: {
   );
 }
 
-function SubAnalysis({ cat, sub, dimTitle, t }: {
+function SubBody({ cat, sub, dimTitle, t }: {
   cat: string; sub: Subtype; dimTitle: (k: string) => string;
   t: (k: string, v?: Record<string, string | number>) => string;
 }) {
   const color = catColor(cat);
-  const margin = sub.cost ? pct(sub.sell - sub.cost, sub.cost) : 0;
   return (
-    <section className="an-card an-sub">
-      <div className="an-typehead" style={{ background: color }}>
-        <div className="an-tic">{cat}</div>
-        <div className="an-tt">
-          <div className="an-tname">{cat} — {t('analysisSubAnalysis')}</div>
-          <div className="an-tsub">{sub.units}u · {money(sub.cost)} → {money(sub.sell)}{sub.cost ? ` · +${margin}%` : ''}</div>
+    <>
+      {sub.dims.length > 0 && (
+        <div className="an-dimgrid">
+          {sub.dims.map(d => (
+            <div key={d.key} className="an-dim">
+              <p className="an-rsub">{dimTitle(d.key)}</p>
+              {VBAR_DIMS.has(d.key)
+                ? <VBars data={d.data} color={color} />
+                : <Bars rows={d.data.map(([l, n]) => ({ label: l, value: n, color }))} lw={100} />}
+            </div>
+          ))}
         </div>
+      )}
+      {sub.sparse && <div className="an-note">{t('analysisSparseNote')}</div>}
+      <div className="an-dim" style={{ marginTop: 14 }}>
+        <p className="an-rsub">{t('analysisConditionMix')}</p>
+        <Bars rows={sub.condition.map(([l, n]) => ({ label: l, value: n, color }))} lw={140} />
       </div>
-      <div className="an-pb">
-        {sub.dims.length > 0 && (
-          <div className="an-dimgrid">
-            {sub.dims.map(d => (
-              <div key={d.key} className="an-dim">
-                <p className="an-rsub">{dimTitle(d.key)}</p>
-                {VBAR_DIMS.has(d.key)
-                  ? <VBars data={d.data} color={color} />
-                  : <Bars rows={d.data.map(([l, n]) => ({ label: l, value: n, color }))} lw={100} />}
-              </div>
-            ))}
-          </div>
-        )}
-        {sub.sparse && <div className="an-note">{t('analysisSparseNote')}</div>}
-        <div className="an-dim" style={{ marginTop: 14 }}>
-          <p className="an-rsub">{t('analysisConditionMix')}</p>
-          <Bars rows={sub.condition.map(([l, n]) => ({ label: l, value: n, color }))} lw={140} />
-        </div>
-      </div>
-    </section>
+    </>
   );
 }

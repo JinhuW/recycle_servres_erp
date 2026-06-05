@@ -22,6 +22,7 @@ const SCHEMA: Record<string, Validator> = {
   'tweaks.rolePreview':       isOneOf('actual', 'as_purchaser'),
   'inventory.cols.manager':   isStringArray,
   'inventory.cols.purchaser': isStringArray,
+  'analysis.collapsed':       isStringArray,
   'orders.cols':              isStringArray,
   'market.showStaleOnly':     isBoolean,
 };
