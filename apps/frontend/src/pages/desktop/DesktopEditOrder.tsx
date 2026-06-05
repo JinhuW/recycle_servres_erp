@@ -274,6 +274,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           .map(l => editLineToInsert(l, status)),
         removeLineIds: removeLineIds.length ? removeLineIds : undefined,
       });
+      // The stepper's stage lives on orders.lifecycle, which PATCH never
+      // touches — only /advance moves it (and cascades the line statuses).
+      // Without this the save returns 200, the lines flip, but the stage snaps
+      // back on reload. Managers may jump straight to the target stage;
+      // purchasers can only step forward and the backend rejects `toStage` for
+      // them, so send an empty body to advance one stage.
+      if (statusDirty) {
+        const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
+        await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
+      }
       onSaved('Saved ' + order.id);
     } catch (e) {
       // Keep the editor open and the user's edits intact on failure — calling
