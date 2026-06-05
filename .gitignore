@@ -55,3 +55,7 @@ docker-compose.override.yml
 *.sql.dump
 recycle_erp_dump.sql
 backups/
+# Root-level ad-hoc SQL scratch + PO data backups (real data, manual fixes).
+# Tracked SQL lives under apps/backend/, so scoping these to the root is safe.
+/*.sql
+/po*_backup_*/
