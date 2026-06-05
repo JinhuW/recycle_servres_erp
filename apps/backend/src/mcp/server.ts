@@ -5,7 +5,8 @@
 import type { Context } from 'hono';
 import { getDb } from '../db';
 import { readPackageVersion } from '../lib/version';
-import { TOOL_DEFS, callListMarketValues, callGetMarketValue } from './tools/market';
+import { TOOL_DEFS, callListMarketValues, callGetMarketValue, callSetMarketPrice } from './tools/market';
+import type { OAuthCtx } from '../types';
 import { mcpToolCallsTotal } from '../metrics';
 import type { Env } from '../types';
 
@@ -47,6 +48,20 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
         let payload: unknown;
         if (name === 'list_market_values') payload = await callListMarketValues(sql, args);
         else if (name === 'get_market_value') payload = await callGetMarketValue(sql, args);
+        else if (name === 'set_market_price') {
+          // The mount only requires market:read; this one tool needs the
+          // higher market:write scope, so a read-only token can browse but
+          // never mutate a reference price.
+          const ctx = c.get('oauthCtx') as OAuthCtx | undefined;
+          if (!ctx?.scopes.includes('market:write')) {
+            mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
+            return c.json(rpcErr(req.id, -32001, 'insufficient_scope: market:write required'));
+          }
+          payload = await callSetMarketPrice(sql, args, {
+            source: `mcp:${ctx.clientId}`,
+            actorUserId: ctx.userId,
+          });
+        }
         else {
           mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
           return c.json(rpcErr(req.id, -32601, `unknown tool: ${name}`));
