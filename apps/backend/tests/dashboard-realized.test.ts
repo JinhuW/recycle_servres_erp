@@ -3,10 +3,12 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, MARCUS, ALEX } from './helpers/auth';
 
-// Realized financials: GET /api/dashboard's revenue/profit/commission (and
-// the leaderboard and byCat aggregates) must come from sell_order_lines of
-// Done sell orders, priced at sol.unit_price (NOT the PO-side sell_price).
-// Date window is the sell order's Done transition (so.updated_at).
+// Realized financials are the MANAGER lens: GET /api/dashboard's
+// revenue/profit/commission (and the leaderboard and byCat aggregates) come
+// from sell_order_lines of Done sell orders, priced at sol.unit_price (NOT the
+// PO-side sell_price), team-wide. Date window is the sell order's Done
+// transition (so.updated_at). Purchasers get a different (projected) lens —
+// see dashboard-projected.test.ts.
 
 async function setupOneDoneSale(opts: { rate: number; unitPrice: number; soldQty: number }) {
   const db = getTestDb();
@@ -41,13 +43,13 @@ async function setupOneDoneSale(opts: { rate: number; unitPrice: number; soldQty
 describe('GET /api/dashboard — realized financials', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('purchaser KPIs reflect exactly the realized Done sale (sol.unit_price, not PO sell_price)', async () => {
+  it('manager KPIs reflect exactly the realized Done sale (sol.unit_price, not PO sell_price)', async () => {
     const RATE = 0.15;
     const UNIT_PRICE = 777;
     const SOLD_QTY = 2;
     const { unitCost } = await setupOneDoneSale({ rate: RATE, unitPrice: UNIT_PRICE, soldQty: SOLD_QTY });
 
-    const { token } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
     const r = await api<{
       kpis: { count: number; revenue: number; profit: number; commission: number };
     }>('GET', '/api/dashboard?range=30d', { token });
@@ -69,11 +71,13 @@ describe('GET /api/dashboard — realized financials', () => {
     const SOLD_QTY = 1;
     const { unitCost } = await setupOneDoneSale({ rate: RATE, unitPrice: UNIT_PRICE, soldQty: SOLD_QTY });
 
-    const { token, user } = await loginAs(MARCUS);
+    // Sale is sourced from Marcus's PO; viewed by a manager who sees all financials.
+    const { user: marcus } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
     const r = await api<{
       leaderboard: { id: string; commission: number | null; profit: number | null; revenue: number | null }[];
     }>('GET', '/api/dashboard?range=30d', { token });
-    const mine = r.body.leaderboard.find(x => x.id === user.id)!;
+    const mine = r.body.leaderboard.find(x => x.id === marcus.id)!;
     expect(mine).toBeTruthy();
     expect(mine.revenue).toBeCloseTo(UNIT_PRICE * SOLD_QTY, 2);
     expect(mine.profit).toBeCloseTo((UNIT_PRICE - unitCost) * SOLD_QTY, 2);
@@ -101,7 +105,7 @@ describe('GET /api/dashboard — realized financials', () => {
     const db = getTestDb();
     await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '45 days' WHERE id = 'SO-TEST-DASH-1'`;
 
-    const { token } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
     const r = await api<{
       kpis: { revenue: number; profit: number; prev: { revenue: number; profit: number } };
     }>('GET', '/api/dashboard?range=30d', { token });
@@ -118,7 +122,7 @@ describe('GET /api/dashboard — realized financials', () => {
     const db = getTestDb();
     await db`UPDATE sell_orders SET updated_at = NOW() - INTERVAL '30 days' WHERE id = 'SO-TEST-DASH-1'`;
 
-    const { token } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
     const inside  = await api<{ kpis: { revenue: number } }>('GET', '/api/dashboard?range=90d', { token });
     const outside = await api<{ kpis: { revenue: number } }>('GET', '/api/dashboard?range=7d',  { token });
     expect(inside.body.kpis.revenue).toBeGreaterThan(0);

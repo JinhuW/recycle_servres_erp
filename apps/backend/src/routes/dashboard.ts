@@ -18,21 +18,27 @@ dashboard.get('/', async (c) => {
   const range = c.req.query('range') ?? '30d';
   const days = RANGE_DAYS[range] ?? 30;
 
-  // Realized financials: revenue/profit/commission come from sell_order_lines
-  // of Done sell orders, priced at sol.unit_price (NOT the PO-side sell_price,
-  // which is a projection — different scope entirely). Commission is credited
-  // to the purchaser whose PO brought the source inventory in. Manual sell-
-  // order lines (inventory_id IS NULL) are excluded — no source PO, no
-  // purchaser to credit.
-  const saleScopeFrag = isManager ? sql`TRUE` : sql`po.user_id = ${u.id}`;
-  const saleDateWin   = sql`so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval`;
+  // Two financial lenses, never mixed on one screen — keyed off effectiveRole:
+  //  - Managers see REALIZED sales: revenue/profit/commission from
+  //    sell_order_lines of Done sell orders, priced at sol.unit_price, team-wide.
+  //  - Purchasers see PROJECTED profit from their OWN Done purchase orders — the
+  //    margin "set" on each line, (sell_price - unit_cost) * qty (the same
+  //    formula the orders list and recent-activity feed use). It lands on the
+  //    dashboard the moment the PO's lifecycle flips to 'done'; sell_price NULL
+  //    falls back to unit_cost (zero margin), matching the orders list.
+  const saleDateWin = sql`so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval`;
   // Previous equal-length window, immediately before the current one — used for
   // KPI trend deltas. Half-open: [-2d, -d) so the boundary day isn't counted twice.
-  const salePrevWin   = sql`so.status = 'Done'
-                            AND so.updated_at >= NOW() - (${days * 2} || ' days')::interval
-                            AND so.updated_at <  NOW() - (${days}     || ' days')::interval`;
-  // The "Recent activity" panel still tracks ingest (the purchasing pipeline),
-  // not sales, so it keeps the PO-side date scoping.
+  const salePrevWin = sql`so.status = 'Done'
+                          AND so.updated_at >= NOW() - (${days * 2} || ' days')::interval
+                          AND so.updated_at <  NOW() - (${days}     || ' days')::interval`;
+  // Projected windows key off the PO's own created_at; only the purchaser's Done POs count.
+  const projDateWin = sql`po.lifecycle = 'done' AND po.user_id = ${u.id}
+                          AND po.created_at >= NOW() - (${days} || ' days')::interval`;
+  const projPrevWin = sql`po.lifecycle = 'done' AND po.user_id = ${u.id}
+                          AND po.created_at >= NOW() - (${days * 2} || ' days')::interval
+                          AND po.created_at <  NOW() - (${days}     || ' days')::interval`;
+  // The "Recent activity" panel always tracks ingest (the purchasing pipeline).
   const poScopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const poDateWin   = sql`o.created_at >= NOW() - (${days} || ' days')::interval`;
   // Weekly chart spans the selected range, in weekly buckets.
@@ -40,62 +46,108 @@ dashboard.get('/', async (c) => {
 
   const [totals, prevTotals, cntRows, weeks, leaderboardRaw, byCatRows, recentRows] =
     await Promise.all([
-      // KPI totals — realized.
-      sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
-        SELECT
-          COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
-          COALESCE(SUM(ol.unit_cost   * sol.qty), 0)::float                              AS cost,
-          COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float             AS profit,
-          COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
-                       * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        JOIN order_lines ol ON ol.id = sol.inventory_id
-        JOIN orders po      ON po.id = ol.order_id
-        WHERE ${saleDateWin} AND ${saleScopeFrag}
-      `,
+      // KPI totals — realized (manager) or projected from Done POs (purchaser).
+      isManager
+        ? sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
+            SELECT
+              COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
+              COALESCE(SUM(ol.unit_cost   * sol.qty), 0)::float                              AS cost,
+              COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float             AS profit,
+              COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+                           * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
+            FROM sell_order_lines sol
+            JOIN sell_orders so ON so.id = sol.sell_order_id
+            JOIN order_lines ol ON ol.id = sol.inventory_id
+            JOIN orders po      ON po.id = ol.order_id
+            WHERE ${saleDateWin}
+          `
+        : sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
+            SELECT
+              COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
+              COALESCE(SUM(ol.unit_cost * ol.qty), 0)::float                                           AS cost,
+              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit,
+              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty
+                           * COALESCE(po.commission_rate, 0)), 0)::float                               AS commission
+            FROM order_lines ol
+            JOIN orders po ON po.id = ol.order_id
+            WHERE ${projDateWin}
+          `,
       // Previous-period revenue/profit — only what the KPI trend chips need.
-      sql<{ revenue: number; profit: number }[]>`
-        SELECT
-          COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
-          COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        JOIN order_lines ol ON ol.id = sol.inventory_id
-        JOIN orders po      ON po.id = ol.order_id
-        WHERE ${salePrevWin} AND ${saleScopeFrag}
-      `,
-      // Number of distinct Done sell orders in the window (scope-filtered).
-      sql<{ n: number }[]>`
-        SELECT COUNT(DISTINCT so.id)::int AS n
-        FROM sell_orders so
-        JOIN sell_order_lines sol ON sol.sell_order_id = so.id
-        JOIN order_lines ol ON ol.id = sol.inventory_id
-        JOIN orders po      ON po.id = ol.order_id
-        WHERE ${saleDateWin} AND ${saleScopeFrag}
-      `,
-      // Realized profit per week, bucketed by the sell order's Done date.
-      sql<{ label: string; profit: number }[]>`
-        WITH series AS (
-          SELECT generate_series(
-            date_trunc('week', NOW()) - (${chartWeeksBack} || ' weeks')::interval,
-            date_trunc('week', NOW()),
-            INTERVAL '1 week'
-          ) AS week_start
-        )
-        SELECT to_char(s.week_start,'IW') AS label,
-               COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
-        FROM series s
-        LEFT JOIN sell_orders so
-          ON so.status = 'Done'
-         AND so.updated_at >= s.week_start
-         AND so.updated_at <  s.week_start + INTERVAL '1 week'
-        LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
-        LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
-        LEFT JOIN orders po      ON po.id = ol.order_id
-                                AND (${isManager}::boolean OR po.user_id = ${u.id})
-        GROUP BY s.week_start ORDER BY s.week_start
-      `,
+      isManager
+        ? sql<{ revenue: number; profit: number }[]>`
+            SELECT
+              COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
+              COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+            FROM sell_order_lines sol
+            JOIN sell_orders so ON so.id = sol.sell_order_id
+            JOIN order_lines ol ON ol.id = sol.inventory_id
+            JOIN orders po      ON po.id = ol.order_id
+            WHERE ${salePrevWin}
+          `
+        : sql<{ revenue: number; profit: number }[]>`
+            SELECT
+              COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
+              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit
+            FROM order_lines ol
+            JOIN orders po ON po.id = ol.order_id
+            WHERE ${projPrevWin}
+          `,
+      // Count — distinct Done sell orders (manager) or distinct Done POs (purchaser).
+      isManager
+        ? sql<{ n: number }[]>`
+            SELECT COUNT(DISTINCT so.id)::int AS n
+            FROM sell_orders so
+            JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+            JOIN order_lines ol ON ol.id = sol.inventory_id
+            JOIN orders po      ON po.id = ol.order_id
+            WHERE ${saleDateWin}
+          `
+        : sql<{ n: number }[]>`
+            SELECT COUNT(DISTINCT po.id)::int AS n
+            FROM orders po
+            WHERE ${projDateWin}
+          `,
+      // Profit per week — realized by Done date (manager) or projected by PO
+      // created_at (purchaser).
+      isManager
+        ? sql<{ label: string; profit: number }[]>`
+            WITH series AS (
+              SELECT generate_series(
+                date_trunc('week', NOW()) - (${chartWeeksBack} || ' weeks')::interval,
+                date_trunc('week', NOW()),
+                INTERVAL '1 week'
+              ) AS week_start
+            )
+            SELECT to_char(s.week_start,'IW') AS label,
+                   COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+            FROM series s
+            LEFT JOIN sell_orders so
+              ON so.status = 'Done'
+             AND so.updated_at >= s.week_start
+             AND so.updated_at <  s.week_start + INTERVAL '1 week'
+            LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
+            LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+            GROUP BY s.week_start ORDER BY s.week_start
+          `
+        : sql<{ label: string; profit: number }[]>`
+            WITH series AS (
+              SELECT generate_series(
+                date_trunc('week', NOW()) - (${chartWeeksBack} || ' weeks')::interval,
+                date_trunc('week', NOW()),
+                INTERVAL '1 week'
+              ) AS week_start
+            )
+            SELECT to_char(s.week_start,'IW') AS label,
+                   COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit
+            FROM series s
+            LEFT JOIN orders po
+              ON po.lifecycle = 'done'
+             AND po.user_id = ${u.id}
+             AND po.created_at >= s.week_start
+             AND po.created_at <  s.week_start + INTERVAL '1 week'
+            LEFT JOIN order_lines ol ON ol.order_id = po.id
+            GROUP BY s.week_start ORDER BY s.week_start
+          `,
       // Leaderboard — realized per purchaser (the PO owner). LEFT JOIN keeps
       // purchasers with zero realized sales on the board with 0s.
       sql<{
@@ -126,19 +178,29 @@ dashboard.get('/', async (c) => {
         WHERE u.role = 'purchaser'
         ORDER BY profit DESC
       `,
-      // Per-category realized rollup. sol.category is the snapshot taken at
-      // sale time and is what reporting should reflect.
-      sql<{ category: string; count: number; revenue: number; profit: number }[]>`
-        SELECT sol.category, COUNT(*)::int AS count,
-               COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
-               COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
-        FROM sell_order_lines sol
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        JOIN order_lines ol ON ol.id = sol.inventory_id
-        JOIN orders po      ON po.id = ol.order_id
-        WHERE ${saleDateWin} AND ${saleScopeFrag}
-        GROUP BY sol.category
-      `,
+      // Per-category rollup — realized by sale-time snapshot (manager) or
+      // projected from Done PO lines (purchaser).
+      isManager
+        ? sql<{ category: string; count: number; revenue: number; profit: number }[]>`
+            SELECT sol.category, COUNT(*)::int AS count,
+                   COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
+                   COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+            FROM sell_order_lines sol
+            JOIN sell_orders so ON so.id = sol.sell_order_id
+            JOIN order_lines ol ON ol.id = sol.inventory_id
+            JOIN orders po      ON po.id = ol.order_id
+            WHERE ${saleDateWin}
+            GROUP BY sol.category
+          `
+        : sql<{ category: string; count: number; revenue: number; profit: number }[]>`
+            SELECT ol.category, COUNT(*)::int AS count,
+                   COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
+                   COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit
+            FROM order_lines ol
+            JOIN orders po ON po.id = ol.order_id
+            WHERE ${projDateWin}
+            GROUP BY ol.category
+          `,
       // Recent activity — tracks ingest (purchasing), not sales, so it stays
       // PO-line based with the PO date window.
       sql<Record<string, unknown>[]>`

@@ -30,10 +30,10 @@ describe('GET /api/dashboard', () => {
     }
   });
 
-  it('KPI commission = sum of profit x per-order rate, matching the leaderboard', async () => {
-    // Set up a deterministic Done sale on a MARCUS PO line so realized
-    // commission is provably nonzero (the seed's one Done sell order may or
-    // may not pick a MARCUS line, which would make this test flaky).
+  it('manager KPI commission matches the realized leaderboard (same lens)', async () => {
+    // Realized commission is the manager lens. Set up a deterministic Done sale
+    // on a MARCUS PO line so it's provably nonzero (the seed's one Done sell
+    // order may or may not pick a MARCUS line, which would make this flaky).
     const { getTestDb } = await import('./helpers/db');
     const db = getTestDb();
     await db`DELETE FROM sell_order_lines`;
@@ -57,17 +57,18 @@ describe('GET /api/dashboard', () => {
       VALUES ('SO-TEST-DASH-3', ${line.id}, ${line.category}, 'x', 1, 500.00, 0)
     `;
 
-    const { token, user } = await loginAs(MARCUS);
+    // Viewed by a manager: realized KPI commission is team-wide, and the only
+    // realized sale traces to Marcus's PO — so the KPI equals his board row.
+    const { user: marcus } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
     const r = await api<{
       kpis: { commission: number };
       leaderboard: { id: string; commission: number | null }[];
     }>('GET', '/api/dashboard?range=90d', { token });
     expect(r.status).toBe(200);
-    const mine = r.body.leaderboard.find(x => x.id === user.id);
+    const mine = r.body.leaderboard.find(x => x.id === marcus.id);
     expect(mine?.commission).not.toBeNull();
     expect(mine!.commission as number).toBeGreaterThan(0);
-    // A purchaser's whole-dashboard scope is exactly their own realized sales,
-    // so the KPI commission must equal their leaderboard commission.
     expect(r.body.kpis.commission).toBeCloseTo(mine!.commission as number, 2);
   });
 
