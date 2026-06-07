@@ -223,6 +223,27 @@ app.route('/api/vendor-bids', vendorBidsRoutes);
 // list above. csrfGuard still runs from the global stack.
 app.route('/api/oauth/clients', oauthAdmin);
 
+// Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
+// and are bearer-equivalent secrets — the only gate to a vendor's data. A
+// transient 500 on such a request must not write a replayable token into the
+// durable error log. Strip the token segment (and sensitive query values)
+// before anything reaches the sink.
+function redactSensitivePath(pathname: string): string {
+  return pathname.replace(/^(\/api\/public\/vendor\/)[^/]+/, '$1<redacted>');
+}
+const SENSITIVE_QUERY_KEYS = new Set([
+  'token', 'code', 'access_token', 'refresh_token', 'client_secret', 'at', 'rt',
+]);
+function redactSensitiveQuery(search: string): string | undefined {
+  if (!search) return undefined;
+  const params = new URLSearchParams(search);
+  let changed = false;
+  for (const k of [...params.keys()]) {
+    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) { params.set(k, '<redacted>'); changed = true; }
+  }
+  return changed ? `?${params.toString()}` : search;
+}
+
 app.onError((err, c) => {
   // Log the full error server-side with the request ID for correlation, but
   // never return err.message to the client — postgres.js errors embed
@@ -250,8 +271,8 @@ app.onError((err, c) => {
       ts: new Date().toISOString(),
       requestId,
       method: c.req.method,
-      path: url.pathname,
-      query: url.search || undefined,
+      path: redactSensitivePath(url.pathname),
+      query: redactSensitiveQuery(url.search),
       userId: user?.id,
       userEmail: user?.email,
       message,
