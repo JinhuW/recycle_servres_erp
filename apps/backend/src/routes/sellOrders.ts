@@ -13,6 +13,9 @@ import {
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
+import {
+  convertToUsd, getLatestRateToUsd, isSupportedCurrency, type SupportedCurrency,
+} from '../lib/fx';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -87,7 +90,7 @@ sellOrders.get('/', async (c) => {
 
   const rows = await sql`
     SELECT
-      so.id, so.status, so.notes, so.created_at, so.archived_at,
+      so.id, so.status, so.notes, so.created_at, so.archived_at, so.currency_code,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       COUNT(sol.id)::int                                AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
@@ -112,8 +115,11 @@ sellOrders.get('/', async (c) => {
     id: r.id, status: r.status,
     notes: r.notes, createdAt: r.created_at,
     archivedAt: r.archived_at,
+    currency: r.currency_code,
     customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
     lineCount: r.line_count, qty: r.qty,
+    // subtotal/total are USD — sol.unit_price is always the USD value, so the
+    // inbox sorts apples-to-apples regardless of each order's source currency.
     subtotal: r.subtotal,
     total: r.subtotal,
   }));
@@ -188,10 +194,12 @@ sellOrders.get('/:id', async (c) => {
   const head = (await sql<{
     id: string; status: string; notes: string | null; created_at: string;
     archived_at: string | null; close_reason_id: string | null;
+    currency_code: string; fx_rate_to_usd: number; fx_source: string;
     customer_id: string; customer_name: string; customer_short: string;
     customer_region: string;
   }[]>`
     SELECT so.id, so.status, so.notes, so.created_at, so.archived_at, so.close_reason_id,
+           so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
     FROM sell_orders so JOIN customers c ON c.id = so.customer_id
     WHERE so.id = ${id} LIMIT 1
@@ -201,12 +209,15 @@ sellOrders.get('/:id', async (c) => {
   const lines = await sql<{
     id: string; category: string; label: string; sub_label: string | null;
     part_number: string | null; qty: number; unit_price: number;
+    source_unit_price: number | null;
     condition: string | null; position: number; warehouse_short: string | null;
     inventory_id: string | null; warehouse_id: string | null;
     inventory_qty: number | null;
   }[]>`
     SELECT sol.id, sol.category, sol.label, sol.sub_label, sol.part_number,
-           sol.qty, sol.unit_price::float AS unit_price, sol.condition, sol.position,
+           sol.qty, sol.unit_price::float AS unit_price,
+           sol.source_unit_price::float AS source_unit_price,
+           sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id,
            w.short AS warehouse_short,
            ol.qty AS inventory_qty
@@ -216,7 +227,12 @@ sellOrders.get('/:id', async (c) => {
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
+  // unit_price is always USD; source_unit_price holds the native price for
+  // foreign-currency orders (null on USD orders, where native == USD).
   const subtotal = lines.reduce((a, l) => a + l.qty * l.unit_price, 0);
+  const nativeSubtotal = lines.reduce(
+    (a, l) => a + l.qty * (l.source_unit_price ?? l.unit_price), 0,
+  );
 
   // Pull per-status evidence (notes + attachments). The frontend expects a
   // map keyed by status with both fields flattened together.
@@ -248,10 +264,16 @@ sellOrders.get('/:id', async (c) => {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
       archivedAt: head.archived_at,
       closeReasonId: head.close_reason_id ?? null,
+      currency: head.currency_code,
+      fxRateToUsd: head.fx_rate_to_usd,
+      fxSource: head.fx_source,
       customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
       lines: lines.map(l => ({
         id: l.id, category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
-        qty: l.qty, unitPrice: l.unit_price, condition: l.condition, position: l.position,
+        qty: l.qty, unitPrice: l.unit_price,
+        // Native (order-currency) unit price; equals unitPrice for USD orders.
+        nativeUnitPrice: l.source_unit_price ?? l.unit_price,
+        condition: l.condition, position: l.position,
         warehouse: l.warehouse_short,
         inventoryId: l.inventory_id, warehouseId: l.warehouse_id,
         maxQty: l.inventory_qty ?? l.qty,
@@ -259,6 +281,8 @@ sellOrders.get('/:id', async (c) => {
       })),
       subtotal: +subtotal.toFixed(2),
       total:    +subtotal.toFixed(2),
+      nativeSubtotal: +nativeSubtotal.toFixed(2),
+      nativeTotal:    +nativeSubtotal.toFixed(2),
       statusMeta,
     },
   });
@@ -286,10 +310,16 @@ sellOrders.post('/', async (c) => {
     condition?: string | null;
   };
   const body = (await c.req.json().catch(() => null)) as
-    | { customerId: string; lines: LineIn[]; notes?: string }
+    | { customerId: string; lines: LineIn[]; notes?: string; currency?: string }
     | null;
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'customerId and at least one line required' }, 400);
+  }
+  // Currency is per-order; every line is quoted in it. Default USD keeps the
+  // common path unchanged. unitPrice on each line is the NATIVE price.
+  const currency: SupportedCurrency = body.currency === undefined ? 'USD' : body.currency as SupportedCurrency;
+  if (!isSupportedCurrency(currency)) {
+    return c.json({ error: 'unsupported currency' }, 400);
   }
   // Field range gates — fail fast with a clean 400 rather than letting the
   // sell_order_lines CHECK (qty>0, unit_price>=0) surface as a 500.
@@ -313,21 +343,31 @@ sellOrders.post('/', async (c) => {
     nextId = await nextHumanId(tx, 'SO', 'SO');
     const err = await validateSellLines(tx, body.lines, null);
     if (err) { outcome = { code: 400, msg: err }; return; } // roll back — nothing written
+    // Snapshot the FX rate once; every line shares the order's currency.
+    const fx = await getLatestRateToUsd(tx, currency);
+    const isNonUsd = currency !== 'USD';
     await tx`
-      INSERT INTO sell_orders (id, customer_id, status, notes, created_by)
-      VALUES (${nextId}, ${body.customerId}, 'Draft', ${body.notes ?? null}, ${u.id})
+      INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
+                               currency_code, fx_rate_to_usd, fx_source)
+      VALUES (${nextId}, ${body.customerId}, 'Draft', ${body.notes ?? null}, ${u.id},
+              ${currency}, ${fx.rate}, ${fx.source})
     `;
     for (let i = 0; i < body.lines.length; i++) {
       const l = body.lines[i];
+      const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
       await tx`
         INSERT INTO sell_order_lines
           (sell_order_id, inventory_id, category, label, sub_label, part_number,
-           qty, unit_price, warehouse_id, condition, position)
+           qty, unit_price, warehouse_id, condition, position,
+           source_currency, source_unit_price, source_fx_rate_to_usd)
         VALUES
           (${nextId}, ${l.inventoryId ?? null}, ${l.category}, ${l.label},
            ${l.subLabel ?? null}, ${l.partNumber ?? null},
-           ${l.qty}, ${l.unitPrice},
-           ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i})
+           ${l.qty}, ${unitPriceUsd},
+           ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i},
+           ${isNonUsd ? currency : null},
+           ${isNonUsd ? l.unitPrice : null},
+           ${isNonUsd ? fx.rate : null})
       `;
     }
     await writeSellOrderEvent(tx, nextId, u.id, 'created', {
@@ -335,6 +375,9 @@ sellOrders.post('/', async (c) => {
       status: 'Draft',
       lineCount: body.lines.length,
       customerId: body.customerId,
+      currency,
+      fxRateToUsd: fx.rate,
+      fxSource: fx.source,
     });
   });
   if (outcome.code !== 201) {
@@ -367,7 +410,7 @@ sellOrders.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
-        customerId?: string; lines?: LineIn[] }
+        customerId?: string; lines?: LineIn[]; currency?: string }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   // Status transitions are owned exclusively by POST /:id/status — that route
@@ -379,9 +422,21 @@ sellOrders.patch('/:id', async (c) => {
   if (body.status !== undefined) {
     return c.json({ error: 'Use POST /:id/status to change status' }, 400);
   }
+  // Currency can only change as part of a full line rewrite — line USD values
+  // are re-snapshotted at the new rate, so the new native prices must come with
+  // it. (The edit UI always resends the line set when the currency toggles.)
+  if (body.currency !== undefined) {
+    if (!isSupportedCurrency(body.currency)) {
+      return c.json({ error: 'unsupported currency' }, 400);
+    }
+    if (body.lines === undefined) {
+      return c.json({ error: 'lines required when changing currency' }, 400);
+    }
+  }
   const sql = getDb(c.env);
 
-  const editsStructure = body.customerId !== undefined || body.lines !== undefined;
+  const editsStructure = body.customerId !== undefined || body.lines !== undefined
+    || body.currency !== undefined;
 
   const current = (await sql<{ status: string }[]>`
     SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1
@@ -416,8 +471,8 @@ sellOrders.patch('/:id', async (c) => {
     // Snapshot BEFORE state for diffing. Lock the header row so a concurrent
     // edit can't slip an event we'd then miss; lines are read consistently
     // inside the same tx so no extra lock is needed.
-    const beforeHead = (await tx<{ notes: string | null; customer_id: string }[]>`
-      SELECT notes, customer_id FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    const beforeHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string }[]>`
+      SELECT notes, customer_id, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     const beforeLines = body.lines !== undefined
       ? await tx<SOLineSnap[]>`
@@ -427,6 +482,13 @@ sellOrders.patch('/:id', async (c) => {
         `
       : [];
 
+    // A line rewrite re-snapshots every line's USD value at the current rate.
+    // Currency is the explicit new one (validated above) or the order's
+    // existing one when only qty/price changed. `null` until we know we need it.
+    const effectiveCurrency = (body.currency ?? beforeHead.currency_code) as SupportedCurrency;
+    const fx = body.lines !== undefined
+      ? await getLatestRateToUsd(tx, effectiveCurrency)
+      : null;
     if (body.lines !== undefined) {
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
@@ -436,31 +498,40 @@ sellOrders.patch('/:id', async (c) => {
     }
     await tx`
       UPDATE sell_orders SET
-        notes       = COALESCE(${body.notes ?? null}, notes),
-        customer_id = COALESCE(${body.customerId ?? null}, customer_id),
-        updated_at  = NOW()
+        notes          = COALESCE(${body.notes ?? null}, notes),
+        customer_id    = COALESCE(${body.customerId ?? null}, customer_id),
+        currency_code  = COALESCE(${fx ? effectiveCurrency : null}, currency_code),
+        fx_rate_to_usd = COALESCE(${fx ? fx.rate : null}, fx_rate_to_usd),
+        fx_source      = COALESCE(${fx ? fx.source : null}, fx_source),
+        updated_at     = NOW()
       WHERE id = ${id}
     `;
-    if (body.lines !== undefined) {
+    if (body.lines !== undefined && fx) {
+      const isNonUsd = effectiveCurrency !== 'USD';
       await tx`DELETE FROM sell_order_lines WHERE sell_order_id = ${id}`;
       for (let i = 0; i < body.lines.length; i++) {
         const l = body.lines[i];
+        const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
         await tx`
           INSERT INTO sell_order_lines
             (sell_order_id, inventory_id, category, label, sub_label, part_number,
-             qty, unit_price, warehouse_id, condition, position)
+             qty, unit_price, warehouse_id, condition, position,
+             source_currency, source_unit_price, source_fx_rate_to_usd)
           VALUES
             (${id}, ${l.inventoryId ?? null}, ${l.category}, ${l.label},
              ${l.subLabel ?? null}, ${l.partNumber ?? null},
-             ${l.qty}, ${l.unitPrice},
-             ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i})
+             ${l.qty}, ${unitPriceUsd},
+             ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i},
+             ${isNonUsd ? effectiveCurrency : null},
+             ${isNonUsd ? l.unitPrice : null},
+             ${isNonUsd ? fx.rate : null})
         `;
       }
     }
 
     // Diff events — emitted only when something actually changed.
-    const afterHead = (await tx<{ notes: string | null; customer_id: string }[]>`
-      SELECT notes, customer_id FROM sell_orders WHERE id = ${id} LIMIT 1
+    const afterHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string }[]>`
+      SELECT notes, customer_id, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
     `)[0];
     const metaChanges: AuditChange[] = diff(
       beforeHead as unknown as Record<string, unknown>,

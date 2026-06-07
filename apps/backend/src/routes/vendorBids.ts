@@ -251,9 +251,11 @@ vendorBids.post('/:id/promote', async (c) => {
     }
 
     await tx`
-      INSERT INTO sell_orders (id, customer_id, status, notes, created_by)
+      INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
+                               currency_code, fx_rate_to_usd, fx_source)
       VALUES (${sellId}, ${customerId}, 'Draft',
-              ${'From vendor bid ' + id}, ${u.id})
+              ${'From vendor bid ' + id}, ${u.id},
+              ${head.currency_code}, ${fx.rate}, ${fx.source})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];

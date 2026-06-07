@@ -12,13 +12,16 @@ import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { fmtUSD, fmtUSD0, fmtDate, fmtDateShort } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort } from '../../lib/format';
+import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
-import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
+import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
+
+type Currency = 'USD' | 'CNY';
 
 // Statuses that capture per-status evidence (text note + attachments). The
 // `needs_meta` flag lives on the sell_order_statuses row.
@@ -38,6 +41,7 @@ type SellOrderSummary = {
   notes: string | null;
   createdAt: string;
   archivedAt: string | null;
+  currency: Currency;
   customer: { id: string; name: string; short: string; region: string };
   lineCount: number;
   qty: number;
@@ -52,10 +56,11 @@ type SellOrderLine = {
   sub: string | null;
   partNumber: string | null;
   qty: number;
-  unitPrice: number;
+  unitPrice: number;        // USD
+  nativeUnitPrice: number;  // order-currency price (== unitPrice for USD)
   condition: string | null;
   warehouse: string | null;
-  lineTotal: number;
+  lineTotal: number;        // USD
   position: number;
   inventoryId: string | null;
   warehouseId: string | null;
@@ -72,7 +77,7 @@ type EditLine = {
   partNumber: string | null;
   qty: number;
   maxQty: number;
-  unitPrice: number;
+  unitPrice: number;        // native (order-currency) price — sent to the API
   warehouseId: string | null;
   warehouse: string | null;
   condition: string | null;
@@ -87,7 +92,7 @@ const toEditLine = (l: SellOrderLine): EditLine => ({
   partNumber:  l.partNumber,
   qty:         l.qty,
   maxQty:      l.maxQty,
-  unitPrice:   l.unitPrice,
+  unitPrice:   l.nativeUnitPrice,
   warehouseId: l.warehouseId,
   warehouse:   l.warehouse,
   condition:   l.condition,
@@ -104,10 +109,15 @@ type SellOrderDetailType = {
   createdAt: string;
   archivedAt: string | null;
   closeReasonId: string | null;
+  currency: Currency;
+  fxRateToUsd: number;
+  fxSource: string;
   customer: { id: string; name: string; short: string; region: string };
   lines: SellOrderLine[];
-  subtotal: number;
-  total: number;
+  subtotal: number;        // USD
+  total: number;           // USD
+  nativeSubtotal: number;  // order currency
+  nativeTotal: number;
   statusMeta: StatusMetaMap;
 };
 
@@ -413,8 +423,11 @@ function SellOrderDetail({
     status: SellOrderDetailType['status'];
     notes: string;
     customerId: string;
+    currency: Currency;
     lines: EditLine[];
   } | null>(null);
+  // FX snapshot for the draft's currency (null for USD or until it loads).
+  const [fx, setFx] = useState<FxInfo | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -448,12 +461,25 @@ function SellOrderDetail({
           status: r.order.status,
           notes: r.order.notes ?? '',
           customerId: r.order.customer.id,
+          currency: r.order.currency,
           lines: r.order.lines.map(toEditLine),
         });
       })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [id, refreshKey]);
+
+  // Keep an FX snapshot for whatever currency the draft is in, so totals can
+  // show a USD-equivalent and saves re-price against a fresh rate.
+  const draftCurrency = draft?.currency ?? 'USD';
+  useEffect(() => {
+    if (draftCurrency === 'USD') { setFx(null); return; }
+    let alive = true;
+    fetchRateToUsd(draftCurrency)
+      .then(info => { if (alive) setFx(info); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [draftCurrency]);
 
   // Customer list — only needed when editing (re-pick customer).
   useEffect(() => {
@@ -468,23 +494,28 @@ function SellOrderDetail({
   useEscapeKey(onClose);
 
   const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
+  const currencyChanged = !!order && !!draft && draft.currency !== order.currency;
   const linesChanged = !!order && !!draft
     && linesSig(draft.lines) !== linesSig(order.lines.map(toEditLine));
   const dirty = order && draft && (
     draft.status !== order.status
     || (draft.notes ?? '') !== (order.notes ?? '')
     || customerChanged
+    || currencyChanged
     || linesChanged
   );
 
+  // draft.lines hold native prices. rateToUsd is null for CNY until fx loads.
+  const draftRateToUsd = draftCurrency === 'USD' ? 1 : (fx?.rateToUsd ?? null);
   const editTotals = useMemo(() => {
     if (!draft || !order) return null;
-    const subtotal = draft.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0);
+    const subtotalNative = draft.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0);
+    const subtotalUsd = draftRateToUsd == null ? null : +(subtotalNative * draftRateToUsd).toFixed(2);
     return {
-      subtotal: +subtotal.toFixed(2),
-      total: +subtotal.toFixed(2),
+      subtotalNative: +subtotalNative.toFixed(2),
+      subtotalUsd,
     };
-  }, [draft, order]);
+  }, [draft, order, draftRateToUsd]);
 
   const setLine = (idx: number, patch: Partial<EditLine>) =>
     setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
@@ -521,7 +552,11 @@ function SellOrderDetail({
       const patchBody: Record<string, unknown> = {};
       if ((draft.notes ?? '') !== (order.notes ?? '')) patchBody.notes = draft.notes;
       if (customerChanged) patchBody.customerId = draft.customerId;
-      if (linesChanged) {
+      // A currency change re-prices every line at the new rate, so the backend
+      // requires the full line set alongside it — resend lines whenever either
+      // the currency or the lines themselves changed.
+      if (currencyChanged) patchBody.currency = draft.currency;
+      if (linesChanged || currencyChanged) {
         patchBody.lines = draft.lines.map(l => ({
           inventoryId: l.inventoryId,
           category:    l.category,
@@ -575,6 +610,15 @@ function SellOrderDetail({
                 <div style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span className="mono">{order.id}</span>
                   <span className={'chip dot ' + toneFor(order.status)}>{order.status}</span>
+                  {order.currency !== 'USD' && (
+                    <span
+                      className="chip muted"
+                      style={{ fontSize: 10 }}
+                      title={t('soFxRateNote', { rate: (1 / order.fxRateToUsd).toFixed(4), currency: order.currency, source: order.fxSource })}
+                    >
+                      {order.currency}
+                    </span>
+                  )}
                   {editable && <span className="chip accent" style={{ fontSize: 10 }}>Editing</span>}
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
@@ -710,6 +754,19 @@ function SellOrderDetail({
                       onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
                     />
                   </div>
+                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
+                    <CurrencyPicker
+                      value={draft.currency}
+                      onChange={cur => setDraft({ ...draft, currency: cur })}
+                      t={t}
+                    />
+                    {currencyChanged && (
+                      <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                        {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -733,8 +790,15 @@ function SellOrderDetail({
                       </td>
                       <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
                       <td className="num mono">{l.qty}</td>
-                      <td className="num mono">{fmtUSD(l.unitPrice, locale)}</td>
-                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.lineTotal, locale)}</td>
+                      <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
+                      <td className="num mono" style={{ fontWeight: 500 }}>
+                        {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
+                        {order.currency !== 'USD' && (
+                          <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
+                            {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {editable && draft.lines.map((l, idx) => (
@@ -772,7 +836,7 @@ function SellOrderDetail({
                           style={{ width: 90 }}
                         />
                       </td>
-                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtUSD(l.qty * l.unitPrice, locale)}</td>
+                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtMoney(l.qty * l.unitPrice, draft.currency, locale)}</td>
                       <td>
                         <button
                           className="btn icon sm"
@@ -796,8 +860,23 @@ function SellOrderDetail({
               <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
                 <div className="so-row total">
                   <span>{t('eoTotal')}</span>
-                  <span className="mono">{fmtUSD(editable && editTotals ? editTotals.total : order.total, locale)}</span>
+                  <span className="mono">
+                    {fmtMoney(
+                      editable && editTotals ? editTotals.subtotalNative : order.nativeTotal,
+                      draftCurrency, locale,
+                    )}
+                  </span>
                 </div>
+                {draftCurrency !== 'USD' && (
+                  <div className="so-row muted" style={{ fontSize: 11.5 }}>
+                    <span />
+                    <span className="mono">
+                      {t('soUsdEquiv', {
+                        usd: fmtUSD(editable && editTotals ? editTotals.subtotalUsd : order.total, locale),
+                      })}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {editable && (
@@ -899,7 +978,7 @@ function SellOrderDetail({
                 <button
                   className="btn accent"
                   onClick={save}
-                  disabled={!dirty || saving}
+                  disabled={!dirty || saving || (draftCurrency !== 'USD' && draftRateToUsd == null)}
                 >
                   <Icon name="check2" size={14} /> {saving ? 'Saving…' : 'Save changes'}
                 </button>

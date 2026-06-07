@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtUSD, fmtDate } from '../../lib/format';
+import { fmtUSD, fmtMoney, fmtDate } from '../../lib/format';
+import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { useT } from '../../lib/i18n';
+
+type Currency = 'USD' | 'CNY';
 
 // Draft-sell-order modal: manager picks items off Inventory, the modal lets
 // them pick a customer, tweak qty / unit price per line, and save a Draft sell
@@ -62,6 +65,19 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-order currency. Line prices are entered in it; the FX snapshot (only
+  // needed for non-USD) drives the USD-equivalent preview and profit math.
+  const [currency, setCurrency] = useState<Currency>('USD');
+  const [fx, setFx] = useState<FxInfo | null>(null);
+
+  useEffect(() => {
+    if (currency === 'USD') { setFx(null); return; }
+    let alive = true;
+    fetchRateToUsd(currency)
+      .then(info => { if (alive) setFx(info); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [currency]);
 
   const [lines, setLines] = useState<Line[]>(() =>
     items.map(it => ({
@@ -96,23 +112,30 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   // Escape closes.
   useEscapeKey(onClose);
 
+  // rateToUsd multiplies a native amount to USD. For CNY it's null until the
+  // FX snapshot loads, which is why the USD-derived figures are nullable.
+  const rateToUsd = currency === 'USD' ? 1 : (fx?.rateToUsd ?? null);
+
   const totals = useMemo(() => {
-    let subtotal = 0, cost = 0, units = 0;
+    let subtotalNative = 0, cost = 0, units = 0;
     lines.forEach(l => {
-      subtotal += l.qty * l.unitPrice;
-      cost     += l.qty * l.unitCost;
-      units    += l.qty;
+      subtotalNative += l.qty * l.unitPrice;   // native (order currency)
+      cost           += l.qty * l.unitCost;    // USD cost basis
+      units          += l.qty;
     });
-    const profit = subtotal - cost;
-    const margin = subtotal > 0 ? (profit / subtotal) * 100 : 0;
+    const subtotalUsd = rateToUsd == null ? null : +(subtotalNative * rateToUsd).toFixed(2);
+    const profit = subtotalUsd == null ? null : +(subtotalUsd - cost).toFixed(2);
+    const margin = subtotalUsd && subtotalUsd > 0 && profit != null
+      ? (profit / subtotalUsd) * 100 : null;
     return {
-      subtotal: +subtotal.toFixed(2),
-      cost:     +cost.toFixed(2),
-      profit:   +profit.toFixed(2),
+      subtotalNative: +subtotalNative.toFixed(2),
+      subtotalUsd,
+      cost:   +cost.toFixed(2),
+      profit,
       margin,
       units,
     };
-  }, [lines]);
+  }, [lines, rateToUsd]);
 
   // Group lines by warehouse for visual rhythm
   const grouped = useMemo(() => {
@@ -130,13 +153,15 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const removeLine = (idx: number) =>
     setLines(arr => arr.filter((_, i) => i !== idx));
 
-  const canSubmit = lines.length > 0 && lines.every(l => l.qty > 0) && !!customerId;
+  const rateMissing = currency !== 'USD' && rateToUsd == null;
+  const canSubmit = lines.length > 0 && lines.every(l => l.qty > 0) && !!customerId && !rateMissing;
 
   const saveDisabledReason: string | null =
     saving                                ? null
   : lines.length === 0                    ? 'Add at least one item before saving.'
   : !customerId                           ? 'Pick a customer before saving.'
   : lines.some(l => l.qty <= 0)           ? 'Every line needs a quantity greater than zero.'
+  : rateMissing                           ? 'Waiting for the exchange rate…'
   : null;
 
   const save = async () => {
@@ -146,6 +171,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
       const r = await api.post<{ ok: true; id: string }>('/api/sell-orders', {
         customerId,
         notes,
+        currency,
         lines: lines.map(l => ({
           inventoryId: l.inventoryId,
           category:    l.category,
@@ -214,6 +240,10 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                   }}
                 />
               </div>
+              <div style={{ marginTop: 12 }}>
+                <label className="so-label">{t('currency.label')}</label>
+                <CurrencyPicker value={currency} onChange={setCurrency} t={t} />
+              </div>
             </div>
 
             {/* Line items */}
@@ -246,7 +276,10 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                       {g.items.map(l => {
                         const idx = l._idx;
                         const lineTotal = l.qty * l.unitPrice;
-                        const adjusted = l.unitPrice.toFixed(2) !== l.listPrice.toFixed(2);
+                        // listPrice is a USD suggestion, so the "adjusted"
+                        // warning only makes sense for USD orders.
+                        const adjusted = currency === 'USD'
+                          && l.unitPrice.toFixed(2) !== l.listPrice.toFixed(2);
                         return (
                           <tr key={l.inventoryId}>
                             <td>
@@ -287,7 +320,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                               />
                             </td>
                             <td className="num mono" style={{ fontWeight: 500 }}>
-                              {fmtUSD(lineTotal, locale)}
+                              {fmtMoney(lineTotal, currency, locale)}
                             </td>
                             <td>
                               <button
@@ -343,8 +376,14 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
 
               <div className="so-row total">
                 <span>{t('sodCustomerTotal')}</span>
-                <span className="mono">{fmtUSD(totals.subtotal, locale)}</span>
+                <span className="mono">{fmtMoney(totals.subtotalNative, currency, locale)}</span>
               </div>
+              {currency !== 'USD' && (
+                <div className="so-row muted" style={{ fontSize: 11.5 }}>
+                  <span />
+                  <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(totals.subtotalUsd, locale) })}</span>
+                </div>
+              )}
 
               <div className="so-divider" />
 
@@ -353,7 +392,13 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
                 <span>{t('profit')}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(totals.profit, locale)}</span>
               </div>
-              <div className="so-row muted"><span>{t('margin')}</span><span className="mono">{totals.margin.toFixed(1)}%</span></div>
+              <div className="so-row muted"><span>{t('margin')}</span><span className="mono">{totals.margin == null ? '—' : totals.margin.toFixed(1) + '%'}</span></div>
+              {currency !== 'USD' && fx && (
+                <div className="so-row muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  <span />
+                  <span className="mono">{t('soFxRateNote', { rate: fx.oneUsdInQuote.toFixed(4), currency, source: fx.source })}</span>
+                </div>
+              )}
             </div>
 
             <div className="so-tip">
@@ -390,6 +435,39 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Currency picker ─────────────────────────────────────────────────────────
+// Segmented USD/CNY control. Mirrors the vendor portal's bid-currency radio;
+// shared by the new-order builder and the edit modal.
+export function CurrencyPicker({
+  value, onChange, t, disabled,
+}: {
+  value: Currency;
+  onChange: (c: Currency) => void;
+  t: (k: string) => string;
+  disabled?: boolean;
+}) {
+  const opts: { id: Currency; labelKey: string }[] = [
+    { id: 'USD', labelKey: 'currency.usd' },
+    { id: 'CNY', labelKey: 'currency.cny' },
+  ];
+  return (
+    <div className="seg" style={{ display: 'inline-flex', gap: 4 }}>
+      {opts.map(o => (
+        <button
+          key={o.id}
+          type="button"
+          className={'btn sm' + (value === o.id ? ' accent' : '')}
+          disabled={disabled}
+          onClick={() => onChange(o.id)}
+          aria-pressed={value === o.id}
+        >
+          {t(o.labelKey)}
+        </button>
+      ))}
     </div>
   );
 }

@@ -28,6 +28,7 @@ export type SellOrderEventKind =
 export const META_FIELDS_SO = [
   'notes',
   'customer_id',
+  'currency_code',
 ] as const;
 export type MetaFieldSO = typeof META_FIELDS_SO[number];
 
