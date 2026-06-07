@@ -425,3 +425,28 @@ describe('sell_order_events append-only triggers', () => {
   });
 });
 
+describe('POST /api/sell-orders oversell guard', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Two lines on one order pointing at the same inventory line must be checked
+  // against their COMBINED qty — otherwise each passes the per-line qty check
+  // in isolation and the order silently oversells the source line.
+  it('rejects duplicate inventory_id lines whose summed qty exceeds stock', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    const mkLine = () => ({
+      inventoryId: line.id, category: 'RAM', label: 'Sample',
+      partNumber: 'PN-1', qty: line.qty, unitPrice: line.sell_price,
+      warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+    });
+    const r = await api('POST', '/api/sell-orders', {
+      token,
+      // Each line alone is exactly the available qty; together they are 2×.
+      body: { customerId, lines: [mkLine(), mkLine()] },
+    });
+    expect(r.status).toBe(400);
+    expect((r.body as { error?: string }).error).toMatch(/exceeds inventory available/);
+  });
+});
+

@@ -14,7 +14,8 @@ import {
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
-  convertToUsd, getLatestRateToUsd, isSupportedCurrency, type SupportedCurrency,
+  convertToUsd, getLatestRateToUsd, isSupportedCurrency,
+  type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
 import type { Env, User } from '../types';
 
@@ -44,24 +45,32 @@ async function validateSellLines(
   lines: SellLine[],
   excludeOrderId: string | null,
 ): Promise<string | null> {
+  // Sum requested qty per source line first. Two lines on the SAME order that
+  // draw on the same inventory line must be checked against their COMBINED
+  // demand — checking each in isolation lets one order oversell a source line
+  // (e.g. two qty-6 lines against 10 in stock both pass 6<=10).
+  const demand = new Map<string, number>();
   for (const l of lines) {
     if (!l.inventoryId) continue; // manual line — nothing to reserve
+    demand.set(l.inventoryId, (demand.get(l.inventoryId) ?? 0) + l.qty);
+  }
+  for (const [inventoryId, qty] of demand) {
     const inv = (await tx<{ qty: number; status: string }[]>`
-      SELECT qty, status FROM order_lines WHERE id = ${l.inventoryId} LIMIT 1 FOR UPDATE
+      SELECT qty, status FROM order_lines WHERE id = ${inventoryId} LIMIT 1 FOR UPDATE
     `)[0];
-    if (!inv) return `inventory line ${l.inventoryId} not found`;
+    if (!inv) return `inventory line ${inventoryId} not found`;
     if (inv.status !== 'Reviewing' && inv.status !== 'Done')
       return `inventory line not sellable (status=${inv.status})`;
-    if (l.qty > inv.qty) return `qty ${l.qty} exceeds inventory available ${inv.qty}`;
+    if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
     const taken = (await tx<{ n: number }[]>`
       SELECT COUNT(*)::int AS n
       FROM sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
-      WHERE sol.inventory_id = ${l.inventoryId}
+      WHERE sol.inventory_id = ${inventoryId}
         AND so.status NOT IN ('Done', 'Closed')
         AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
     `)[0];
-    if (taken.n > 0) return `inventory line ${l.inventoryId} is already on an open sell order`;
+    if (taken.n > 0) return `inventory line ${inventoryId} is already on an open sell order`;
   }
   return null;
 }
@@ -335,6 +344,12 @@ sellOrders.post('/', async (c) => {
   // Human-friendly id like SO-4001, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let nextId!: string;
+  // Resolve the FX rate BEFORE opening the transaction. getLatestRateToUsd can
+  // perform an outbound frankfurter fetch on a cold cache; running it inside
+  // sql.begin would hold the SO id-counter and inventory row locks across a
+  // third-party network call (serializing all sell-order creation and risking
+  // pool exhaustion). Every line shares the order's currency, so one snapshot.
+  const fx = await getLatestRateToUsd(sql, currency);
   // Sellability is validated *inside* the tx (source rows locked FOR UPDATE)
   // so two concurrent orders can't both pass the same check and oversell.
   type Outcome = { code: 400; msg: string } | { code: 201 };
@@ -343,8 +358,6 @@ sellOrders.post('/', async (c) => {
     nextId = await nextHumanId(tx, 'SO', 'SO');
     const err = await validateSellLines(tx, body.lines, null);
     if (err) { outcome = { code: 400, msg: err }; return; } // roll back — nothing written
-    // Snapshot the FX rate once; every line shares the order's currency.
-    const fx = await getLatestRateToUsd(tx, currency);
     const isNonUsd = currency !== 'USD';
     await tx`
       INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
@@ -438,10 +451,17 @@ sellOrders.patch('/:id', async (c) => {
   const editsStructure = body.customerId !== undefined || body.lines !== undefined
     || body.currency !== undefined;
 
-  const current = (await sql<{ status: string }[]>`
-    SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1
+  const current = (await sql<{ status: string; currency_code: string }[]>`
+    SELECT status, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
   `)[0];
   if (!current) return c.json({ error: 'Not found' }, 404);
+
+  // Resolve FX outside the transaction (a cold-cache frankfurter fetch must not
+  // run while the sell_orders row lock is held). Only a line rewrite needs a
+  // fresh rate; currency is the caller's new one, else the order's stored one.
+  const preFx: FxLookup | null = body.lines !== undefined
+    ? await getLatestRateToUsd(sql, (body.currency ?? current.currency_code) as SupportedCurrency)
+    : null;
 
   // Customer / line edits are locked once the deal closes — a Done order's
   // line set is the historical record of what was sold.
@@ -486,9 +506,7 @@ sellOrders.patch('/:id', async (c) => {
     // Currency is the explicit new one (validated above) or the order's
     // existing one when only qty/price changed. `null` until we know we need it.
     const effectiveCurrency = (body.currency ?? beforeHead.currency_code) as SupportedCurrency;
-    const fx = body.lines !== undefined
-      ? await getLatestRateToUsd(tx, effectiveCurrency)
-      : null;
+    const fx = body.lines !== undefined ? preFx : null;
     if (body.lines !== undefined) {
       // Same sellability check as POST, run inside the tx with FOR UPDATE.
       // This order is excluded so keeping its own already-committed lines
