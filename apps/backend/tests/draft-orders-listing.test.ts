@@ -10,13 +10,14 @@ type OrderSummary = {
   lineCount: number;
 };
 
-// Manager scope: drafts are purchaser-in-progress work and should not clutter
-// the manager review queue. They become visible only after Draft → In Transit.
-// Purchasers continue to see their own drafts (incl. the mobile Draft chip).
+// Manager scope: managers see every PO across the org, including purchasers'
+// in-progress drafts (feat 520d935 — managers see all PO statuses). Purchasers
+// are scoped to their own POs but still see their own drafts (incl. the mobile
+// Draft chip).
 describe('GET /api/orders draft visibility', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('empty draft is hidden from manager list', async () => {
+  it('empty draft is visible to the manager list', async () => {
     const { token: pTok } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders/draft', {
       token: pTok, body: { category: 'RAM' },
@@ -27,11 +28,12 @@ describe('GET /api/orders draft visibility', () => {
     const { token: mTok } = await loginAs(ALEX);
     const list = await api<{ orders: OrderSummary[] }>('GET', '/api/orders', { token: mTok });
     expect(list.status).toBe(200);
-    expect(list.body.orders.find(o => o.id === draftId)).toBeUndefined();
-    expect(list.body.orders.every(o => o.lifecycle !== 'draft')).toBe(true);
+    const found = list.body.orders.find(o => o.id === draftId);
+    expect(found).toBeDefined();
+    expect(found!.lifecycle).toBe('draft');
   });
 
-  it('manager filter ?status=Draft returns no drafts', async () => {
+  it('manager filter ?status=Draft returns the draft', async () => {
     const { token: pTok } = await loginAs(MARCUS);
     const draft = await api<{ id: string }>('POST', '/api/orders/draft', {
       token: pTok, body: { category: 'RAM' },
@@ -43,10 +45,11 @@ describe('GET /api/orders draft visibility', () => {
       'GET', '/api/orders?status=Draft', { token: mTok },
     );
     expect(list.status).toBe(200);
-    expect(list.body.orders).toEqual([]);
+    expect(list.body.orders.find(o => o.id === draft.body.id)).toBeDefined();
+    expect(list.body.orders.every(o => o.lifecycle === 'draft')).toBe(true);
   });
 
-  it('draft with lines is hidden from manager list', async () => {
+  it('draft with lines is visible to the manager list', async () => {
     const { token: pTok } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
@@ -59,7 +62,7 @@ describe('GET /api/orders draft visibility', () => {
 
     const { token: mTok } = await loginAs(ALEX);
     const list = await api<{ orders: OrderSummary[] }>('GET', '/api/orders', { token: mTok });
-    expect(list.body.orders.find(o => o.id === draftId)).toBeUndefined();
+    expect(list.body.orders.find(o => o.id === draftId)).toBeDefined();
   });
 
   it('purchaser still sees their own drafts (incl. ?status=Draft)', async () => {
