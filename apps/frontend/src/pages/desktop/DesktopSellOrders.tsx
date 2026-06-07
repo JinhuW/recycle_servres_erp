@@ -505,6 +505,12 @@ function SellOrderDetail({
     || linesChanged
   );
 
+  // The stepper shows only the forward lifecycle. Closed is an off-ramp
+  // reached via the Discard button (CloseSellOrderDialog needs a reason the
+  // stepper can't supply), so it's omitted here — the status still exists in
+  // the backend, the list filter, and the stat cards.
+  const stepperStatuses = sellOrderStatuses.filter(o => o.id !== 'Closed');
+
   // draft.lines hold native prices. rateToUsd is null for CNY until fx loads.
   const draftRateToUsd = draftCurrency === 'USD' ? 1 : (fx?.rateToUsd ?? null);
   const editTotals = useMemo(() => {
@@ -678,8 +684,8 @@ function SellOrderDetail({
                     </span>
                   </div>
                   <div className="so-stepper">
-                    {sellOrderStatuses.map(({ id: s }, i) => {
-                      const currentIdx = sellOrderStatuses.findIndex(o => o.id === draft.status);
+                    {stepperStatuses.map(({ id: s }, i) => {
+                      const currentIdx = stepperStatuses.findIndex(o => o.id === draft.status);
                       const active = s === draft.status;
                       const reached = currentIdx >= 0 && i <= currentIdx;
                       const meta = needsDialog(s) ? statusMeta?.[s] : null;
@@ -714,7 +720,7 @@ function SellOrderDetail({
                               )}
                             </span>
                           </button>
-                          {i < sellOrderStatuses.length - 1 && (
+                          {i < stepperStatuses.length - 1 && (
                             <span className={'so-step-bar' + (i < currentIdx ? ' reached' : '')} />
                           )}
                         </Fragment>
