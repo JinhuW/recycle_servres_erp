@@ -27,7 +27,7 @@ type BidLine = {
   label: string; offeredQty: number; offeredUnitPrice: number;
   status: string; acceptedUnitPrice: number | null;
 };
-type Bid = { id: string; status: string; createdAt: string; lines: BidLine[] };
+type Bid = { id: string; status: string; createdAt: string; currency: Currency; lines: BidLine[] };
 
 function catThumb(category: string): IconName {
   return category === 'RAM' ? 'chip'
@@ -806,8 +806,8 @@ function MobileMyOffers({ vm }: { vm: VM }) {
                   {l.label}
                 </div>
                 <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                  {l.offeredQty} × ${l.offeredUnitPrice}
-                  {l.acceptedUnitPrice != null && ` → @ $${l.acceptedUnitPrice}`}
+                  {l.offeredQty} × {fmtMoney(l.offeredUnitPrice, b.currency)}
+                  {l.acceptedUnitPrice != null && ` → @ ${fmtMoney(l.acceptedUnitPrice, b.currency)}`}
                 </div>
               </div>
               <span className={'chip ' + offerTone(l.status) + ' dot'} style={{ fontSize: 10, flexShrink: 0 }}>
@@ -1226,9 +1226,9 @@ function DesktopMyOffers({ vm }: { vm: VM }) {
                   <tr key={`${b.id}-${l.bid_line_id ?? i}`}>
                     <td>{l.label}</td>
                     <td className="num mono">{l.offeredQty}</td>
-                    <td className="num mono">${l.offeredUnitPrice}</td>
+                    <td className="num mono">{fmtMoney(l.offeredUnitPrice, b.currency)}</td>
                     <td className="num mono">
-                      {l.acceptedUnitPrice != null ? `$${l.acceptedUnitPrice}` : '—'}
+                      {l.acceptedUnitPrice != null ? fmtMoney(l.acceptedUnitPrice, b.currency) : '—'}
                     </td>
                     <td>
                       <span className={'chip ' + offerTone(l.status) + ' dot'}>

@@ -425,12 +425,15 @@ function OrderForm({
   // Escape closes the drawer.
   useEscapeKey(useCallback(() => setActiveIdx(null), []), activeIdx !== null);
 
-  const doSubmit = async () => {
+  // `submitLines` defaults to state, but the part-number confirm flow passes a
+  // freshly-patched array: setLines() is async, so submitting from state right
+  // after it would serialize the PRE-patch lines and drop accepted part numbers.
+  const doSubmit = async (submitLines: Line[] = lines) => {
     if (!draftId) { setAiError(t('subNoDraftErr')); return; }
     const totalCost = meta.totalCostOverride != null
       ? (Number(meta.totalCostOverride) || 0)
       : totals.cost;
-    const unconfirmedLines = lines.filter(l => !l._confirmed);
+    const unconfirmedLines = submitLines.filter(l => !l._confirmed);
     setSubmitting(true);
     try {
       await api.patch('/api/orders/' + draftId, {
@@ -451,12 +454,12 @@ function OrderForm({
   // Append all local lines to an existing Draft PO, then remove the throwaway
   // draft this session created. Target meta (warehouse/payment/notes) is
   // inherited — we send only lines + a refreshed total.
-  const doSubmitToExisting = async (target: OrderSummary) => {
+  const doSubmitToExisting = async (target: OrderSummary, submitLines: Line[] = lines) => {
     if (!draftId) { setAiError(t('subNoDraftErr')); return; }
     setSubmitting(true);
     try {
       await api.patch('/api/orders/' + target.id, {
-        addLines: lines.map(toWireLine),
+        addLines: submitLines.map(toWireLine),
         totalCost: (target.totalCost ?? 0) + totals.cost,
       });
       // Best-effort cleanup of the now-empty throwaway draft — the merge already
@@ -475,10 +478,13 @@ function OrderForm({
   // Mixed-brand SSD) is offered in a confirm modal; a blank we can't fill is a
   // hard stop. Only once all lines have (or accept) a part # do we proceed into
   // the existing target/duplicate flow.
-  const proceedSubmit = () => {
+  const proceedSubmit = (submitLines: Line[] = lines) => {
     if (targets.length > 0) { setChoice({ selectedId: null }); return; }
-    if (dupGroups.length > 0) { setDupConfirm(dupGroups); return; }
-    void doSubmit();
+    // Recompute duplicates from the lines we're about to submit — dupGroups is
+    // memoized on state, which lags a just-applied part-number patch.
+    const dups = submitLines === lines ? dupGroups : findDuplicatePartNumbers(submitLines);
+    if (dups.length > 0) { setDupConfirm(dups); return; }
+    void doSubmit(submitLines);
   };
 
   const attemptSubmit = () => {
@@ -918,9 +924,16 @@ function OrderForm({
               <button
                 className="btn accent"
                 onClick={() => {
-                  pnConfirm.forEach(p => updateLine(p.idx, { partNumber: p.value }));
+                  // Apply the accepted part numbers to a local array and submit
+                  // from it directly. updateLine()/setLines is async, so calling
+                  // proceedSubmit() against state here would drop these values.
+                  const patched = lines.map((l, i) => {
+                    const m = pnConfirm.find(p => p.idx === i);
+                    return m ? { ...l, partNumber: m.value } : l;
+                  });
+                  setLines(patched);
                   setPnConfirm(null);
-                  proceedSubmit();
+                  proceedSubmit(patched);
                 }}
               >
                 {t('pnConfirmUse')}
