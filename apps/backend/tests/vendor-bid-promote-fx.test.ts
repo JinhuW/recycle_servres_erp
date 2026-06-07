@@ -5,7 +5,8 @@ import { loginAs, ALEX } from './helpers/auth';
 
 // Mirror vendor-public-bid-currency.test.ts: stub Frankfurter so the
 // bid-submit path freezes a deterministic rate, then assert the promote
-// path re-snapshots fx + stamps the SO line audit cols.
+// path uses the rate FROZEN on the bid (not the live rate at promote time)
+// + stamps the SO line audit cols.
 function mockFrankfurter(rate: number, date = '2026-05-26') {
   vi.stubGlobal(
     'fetch',
@@ -35,7 +36,7 @@ async function anInStockLine(mgr: string, minQty = 1): Promise<{ id: string; qty
   return { id: row.id, qty: row.qty };
 }
 
-describe('vendor-bids promote — fx re-snapshot + SO line audit', () => {
+describe('vendor-bids promote — frozen fx + SO line audit', () => {
   beforeEach(async () => {
     await resetDb();
     mockFrankfurter(7.2154);
@@ -69,6 +70,11 @@ describe('vendor-bids promote — fx re-snapshot + SO line audit', () => {
       body: { lines: [{ lineId, decision: 'accepted', acceptedQty: 1, acceptedUnitPrice: 78 }] },
     });
     expect(dec.status).toBe(200);
+
+    // The live rate moves between submit and promote. The sell order must be
+    // created at the rate frozen on the bid (7.2154), NOT this new one — the
+    // manager approved a USD total computed from the frozen rate.
+    mockFrankfurter(8.5, '2026-05-27');
 
     const prom = await api<{ sellOrderId: string }>(
       'POST', `/api/vendor-bids/${bidId}/promote`, { token: mgr });
@@ -105,7 +111,6 @@ describe('vendor-bids promote — fx re-snapshot + SO line audit', () => {
     expect(d.currency).toBe('CNY');
     expect(Number(d.fxRateToUsd)).toBeCloseTo(1 / 7.2154, 6);
     expect(['frankfurter', 'manual']).toContain(d.fxSource as string);
-    expect(typeof d.fxEffectiveDate).toBe('string');
   });
 
   it('USD bid promotion leaves audit cols NULL', async () => {

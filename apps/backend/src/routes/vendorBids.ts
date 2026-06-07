@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { nextHumanId } from '../lib/id-seq';
 import { writeSellOrderEvent } from '../services/sellOrderAudit';
-import { getLatestRateToUsd, type SupportedCurrency } from '../lib/fx';
+import { type SupportedCurrency } from '../lib/fx';
 import type { Env, User } from '../types';
 
 const vendorBids = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -197,8 +197,10 @@ vendorBids.post('/:id/promote', async (c) => {
 
   await sql.begin(async (tx) => {
     sellId = await nextHumanId(tx, 'SO', 'SO');
-    const head = (await tx<{ customer_id: string | null; currency_code: SupportedCurrency }[]>`
-      SELECT customer_id, currency_code FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
+    const head = (await tx<{ customer_id: string | null; currency_code: SupportedCurrency;
+      fx_rate_to_usd: number; fx_source: string }[]>`
+      SELECT customer_id, currency_code, fx_rate_to_usd::float AS fx_rate_to_usd, fx_source
+      FROM vendor_bids WHERE id=${id} LIMIT 1`)[0];
     if (!head) { outcome = { code: 400, msg: 'bid not found' }; return; }
 
     // A bid from a general (customer-less) link carries no customer. The
@@ -214,7 +216,13 @@ vendorBids.post('/:id/promote', async (c) => {
       await tx`UPDATE vendor_bids SET customer_id = ${customerId} WHERE id = ${id}`;
     }
 
-    const fx = await getLatestRateToUsd(tx, head.currency_code);
+    // Use the FX rate FROZEN on the bid at submit time — not the live rate.
+    // The manager approved (and the vendor was quoted) a USD value computed
+    // from this rate; re-fetching at promote time would create the sell order
+    // at a different USD total if CNY/USD moved since. It also keeps an
+    // outbound FX fetch out of this lock-holding transaction.
+    const fxRate = head.fx_rate_to_usd;
+    const fxSource = head.fx_source;
     const isNonUsd = head.currency_code !== 'USD';
 
     const lines = await tx<{ id: string; inventory_id: string | null; category: string;
@@ -255,12 +263,12 @@ vendorBids.post('/:id/promote', async (c) => {
                                currency_code, fx_rate_to_usd, fx_source)
       VALUES (${sellId}, ${customerId}, 'Draft',
               ${'From vendor bid ' + id}, ${u.id},
-              ${head.currency_code}, ${fx.rate}, ${fx.source})
+              ${head.currency_code}, ${fxRate}, ${fxSource})
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       const unitPriceUsd = isNonUsd
-        ? Math.round(l.accepted_unit_price * fx.rate * 100) / 100
+        ? Math.round(l.accepted_unit_price * fxRate * 100) / 100
         : l.accepted_unit_price;
       await tx`
         INSERT INTO sell_order_lines
@@ -273,7 +281,7 @@ vendorBids.post('/:id/promote', async (c) => {
            NULL, NULL, ${i},
            ${isNonUsd ? head.currency_code : null},
            ${isNonUsd ? l.accepted_unit_price : null},
-           ${isNonUsd ? fx.rate : null})
+           ${isNonUsd ? fxRate : null})
       `;
       await tx`UPDATE vendor_bid_lines SET sell_order_id=${sellId} WHERE id=${l.id}`;
     }
@@ -284,9 +292,8 @@ vendorBids.post('/:id/promote', async (c) => {
       lineCount: lines.length,
       customerId: customerId,
       currency: head.currency_code,
-      fxRateToUsd: fx.rate,
-      fxSource: fx.source,
-      fxEffectiveDate: fx.effectiveDate,
+      fxRateToUsd: fxRate,
+      fxSource: fxSource,
     });
     outcome = { code: 201, sellId };
   });
