@@ -211,9 +211,13 @@ export function SellOrderHistory({ sellOrderId, refreshKey }: Props) {
   if (events === null) return <div style={{ color: 'var(--fg-subtle)' }}>{t('historyLoading')}</div>;
   if (events.length === 0) return <div style={{ color: 'var(--fg-subtle)' }}>{t('historyEmpty')}</div>;
 
+  // The API returns events oldest-first (chronological); show the timeline
+  // newest-first so the latest activity for the order sits at the top.
+  const ordered = [...events].reverse();
+
   return (
     <ol style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 12 }}>
-      {events.map(e => {
+      {ordered.map(e => {
         const tone = KIND_TONE[e.kind];
         return (
           <li key={e.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto', gap: 12, alignItems: 'start' }}>

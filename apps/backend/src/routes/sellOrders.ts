@@ -725,13 +725,15 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
 // via the status-meta attachments endpoints above. `attachmentIds` here
 // (generic /api/attachments rows) only needs to satisfy the evidence gate.
 // Transition map is the single source of truth for what status changes
-// are legal. Done has no outgoing edges (terminal happy path). Closed has
-// exactly one outgoing edge (reopen → Draft). Adding a new status means
-// editing this map + the CHECK constraint + the seed — no parallel guards
-// elsewhere (see CLAUDE.md "Status guards").
+// are legal. Any open stage can jump straight to Done (the deal can be
+// marked paid at any point) or to Closed. Done has no outgoing edges
+// (terminal happy path). Closed has exactly one outgoing edge (reopen →
+// Draft) and cannot go to Done. Adding a new status means editing this map
+// + the CHECK constraint + the seed — no parallel guards elsewhere (see
+// CLAUDE.md "Status guards").
 const ALLOWED_TRANSITIONS: Record<string, Set<string>> = {
-  Draft:               new Set(['Shipped', 'Closed']),
-  Shipped:             new Set(['Awaiting payment', 'Closed']),
+  Draft:               new Set(['Shipped', 'Done', 'Closed']),
+  Shipped:             new Set(['Awaiting payment', 'Done', 'Closed']),
   'Awaiting payment':  new Set(['Done', 'Closed']),
   Done:                new Set([]),
   Closed:              new Set(['Draft']),
