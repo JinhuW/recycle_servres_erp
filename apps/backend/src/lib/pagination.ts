@@ -1,4 +1,9 @@
-export type Cursor = { ts: string; id: string };
+// `ts` carries the value of the active sort column for the last row of the
+// previous page (an ISO timestamp for created_at, a number for total_cost,
+// text for lifecycle). `id` is the stable tiebreaker. The keyset WHERE clause
+// must compare on the SAME column the query is ordered by, or pages silently
+// skip/duplicate rows.
+export type Cursor = { ts: string | number; id: string };
 
 // base64url is base64 with URL-safe chars and no padding. We use btoa/atob so
 // this works on both Cloudflare Workers and Node — no Buffer dependency.

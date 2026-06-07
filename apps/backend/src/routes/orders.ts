@@ -104,11 +104,31 @@ orders.get('/', async (c) => {
   // Archived orders drop out of the default view; clients opt in to see them.
   const archivedFrag = includeArchived ? sql`TRUE` : sql`o.archived_at IS NULL`;
 
-  // keyset pagination: (created_at, id) lexicographic
+  // Keyset pagination. The cursor compares on the ACTIVE sort column (with id
+  // as the tiebreaker), not a fixed created_at — otherwise the WHERE boundary
+  // and the ORDER BY disagree under a total_cost/lifecycle sort and pages
+  // silently skip or duplicate rows. total_cost is COALESCEd so NULL overrides
+  // order consistently in both the predicate and ORDER BY.
+  const SORT_EXPR: Record<string, ReturnType<typeof sql>> = {
+    created_at: sql`o.created_at`,
+    total_cost: sql`COALESCE(o.total_cost, 0)`,
+    lifecycle: sql`o.lifecycle`,
+  };
+  const SORT_CAST: Record<string, string> = {
+    created_at: 'timestamptz',
+    total_cost: 'numeric',
+    lifecycle: 'text',
+  };
+  const sortExpr = SORT_EXPR[sort.col] ?? SORT_EXPR.created_at;
+  // sortCast/sortDir come from fixed allowlists (SORT_CAST + parseSort), never
+  // from user input, so sql.unsafe here cannot inject — hoisted onto their own
+  // lines so the safety review lives next to the call.
+  const castSql = sql.unsafe(SORT_CAST[sort.col] ?? SORT_CAST.created_at); // nosec
+  const dirSql = sql.unsafe(sort.dir.toUpperCase()); // nosec
   const cursorFrag = cursor
     ? (sort.dir === 'desc'
-        ? sql`AND (o.created_at, o.id) < (${cursor.ts}, ${cursor.id})`
-        : sql`AND (o.created_at, o.id) > (${cursor.ts}, ${cursor.id})`)
+        ? sql`AND (${sortExpr}, o.id) < (${cursor.ts}::${castSql}, ${cursor.id})`
+        : sql`AND (${sortExpr}, o.id) > (${cursor.ts}::${castSql}, ${cursor.id})`)
     : sql`AND TRUE`;
 
   const rows = await sql`
@@ -129,14 +149,20 @@ orders.get('/', async (c) => {
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
-    ORDER BY o.${sql(sort.col)} ${sql.unsafe(sort.dir.toUpperCase())}, o.id ${sql.unsafe(sort.dir.toUpperCase())}
+    ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
   `;
   const hasMore = rows.length > limit;
   const slice = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore
-    ? encodeCursor({ ts: (slice[slice.length - 1] as { created_at: string }).created_at, id: (slice[slice.length - 1] as { id: string }).id })
-    : null;
+  let nextCursor: string | null = null;
+  if (hasMore) {
+    const last = slice[slice.length - 1] as { created_at: string | Date; total_cost: number | null; lifecycle: string; id: string };
+    const sortVal: string | number =
+      sort.col === 'total_cost' ? (last.total_cost ?? 0)
+      : sort.col === 'lifecycle' ? last.lifecycle
+      : (last.created_at instanceof Date ? last.created_at.toISOString() : String(last.created_at));
+    nextCursor = encodeCursor({ ts: sortVal, id: last.id });
+  }
 
   return c.json({
     orders: slice.map(r => ({
@@ -483,7 +509,6 @@ orders.post('/', async (c) => {
 //   addLines:       new line rows to INSERT (no `id`)
 //   removeLineIds:  ids to DELETE (will 409 if referenced by sell_order_lines)
 type LineFields = {
-  status?: string;
   sellPrice?: number | null;
   qty?: number;
   unitCost?: number;
@@ -670,9 +695,14 @@ orders.patch('/:id', async (c) => {
       if (Array.isArray(body.lines)) {
         for (const l of body.lines) {
           const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
+          // `status` is deliberately NOT settable here. Line status is driven
+          // by the lifecycle (advance handler) and 'Sold' is a protected
+          // terminal state; accepting a client-supplied status would let any
+          // editor forge 'Sold'/'Done' and defeat the sell-order/inventory
+          // guards that key off it. order_lines.status has no CHECK, so this
+          // route layer is the gate.
           await tx`
             UPDATE order_lines SET
-              status         = COALESCE(${l.status ?? null}, status),
               sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${l.sellPrice ?? null} ELSE sell_price END,
               qty            = COALESCE(${l.qty ?? null}, qty),
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
@@ -715,7 +745,7 @@ orders.patch('/:id', async (c) => {
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
               ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.serialNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
-              ${l.status ?? LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
+              ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
             )

@@ -509,3 +509,44 @@ describe('orders.commission_rate column', () => {
     expect(rows.some(r => r.commission_rate === null)).toBe(true);
   });
 });
+
+describe('PATCH /api/orders/:id line status is not client-settable', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // order_lines.status is lifecycle-driven and 'Sold' is a protected terminal
+  // state. The PATCH line path must ignore a client-supplied status so an
+  // editor can't forge 'Sold'/'Done' and defeat the sell-order/inventory
+  // guards that key off it.
+  it('ignores a client-supplied line status while still applying other edits', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200', partNumber: 'M393A4K40DB3-CWE',
+          condition: 'Pulled — Tested', qty: 4, unitCost: 78.5,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    const before = await api<{ order: { lines: { id: string; status: string }[] } }>(
+      'GET', '/api/orders/' + id, { token });
+    const lineId = before.body.order.lines[0].id;
+    expect(before.body.order.lines[0].status).toBe('Draft');
+
+    const patched = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: { lines: [{ id: lineId, status: 'Sold', qty: 7 }] },
+    });
+    expect(patched.status).toBe(200);
+
+    const after = await api<{ order: { lines: { status: string; qty: number }[] } }>(
+      'GET', '/api/orders/' + id, { token });
+    // qty edit applied, status forge ignored.
+    expect(after.body.order.lines[0].qty).toBe(7);
+    expect(after.body.order.lines[0].status).toBe('Draft');
+  });
+});
