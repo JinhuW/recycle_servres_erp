@@ -65,24 +65,8 @@ describe('GET /api/dashboard — realized financials', () => {
     expect(r.body.kpis.count).toBe(1); // one Done sell order in window
   });
 
-  it('leaderboard credits the originating PO purchaser with realized numbers', async () => {
-    const RATE = 0.20;
-    const UNIT_PRICE = 500;
-    const SOLD_QTY = 1;
-    const { unitCost } = await setupOneDoneSale({ rate: RATE, unitPrice: UNIT_PRICE, soldQty: SOLD_QTY });
-
-    // Sale is sourced from Marcus's PO; viewed by a manager who sees all financials.
-    const { user: marcus } = await loginAs(MARCUS);
-    const { token } = await loginAs(ALEX);
-    const r = await api<{
-      leaderboard: { id: string; commission: number | null; profit: number | null; revenue: number | null }[];
-    }>('GET', '/api/dashboard?range=30d', { token });
-    const mine = r.body.leaderboard.find(x => x.id === marcus.id)!;
-    expect(mine).toBeTruthy();
-    expect(mine.revenue).toBeCloseTo(UNIT_PRICE * SOLD_QTY, 2);
-    expect(mine.profit).toBeCloseTo((UNIT_PRICE - unitCost) * SOLD_QTY, 2);
-    expect(mine.commission).toBeCloseTo((UNIT_PRICE - unitCost) * SOLD_QTY * RATE, 2);
-  });
+  // The contributor leaderboard is the PROJECTED lens (per-purchaser Done-PO
+  // margin), independent of role — see dashboard-projected.test.ts.
 
   it('no Done sell orders → revenue/profit/commission are all 0', async () => {
     const db = getTestDb();

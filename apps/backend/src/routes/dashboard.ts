@@ -148,24 +148,24 @@ dashboard.get('/', async (c) => {
             LEFT JOIN order_lines ol ON ol.order_id = po.id
             GROUP BY s.week_start ORDER BY s.week_start
           `,
-      // Leaderboard — realized per purchaser (the PO owner). LEFT JOIN keeps
-      // purchasers with zero realized sales on the board with 0s.
+      // Leaderboard — projected per purchaser (the PO owner), same lens as the
+      // purchaser dashboard: (sell_price - unit_cost) * qty over each purchaser's
+      // Done PO lines, windowed on the PO created_at. LEFT JOIN keeps purchasers
+      // with no Done POs on the board with 0s.
       sql<{
         id: string; name: string; initials: string; email: string; role: string;
         count: number; revenue: number; profit: number; commission: number;
       }[]>`
         WITH per_user AS (
           SELECT po.user_id,
-                 COUNT(*)::int                                                                  AS count,
-                 COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
-                 COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float             AS profit,
-                 COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
-                              * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
-          FROM sell_order_lines sol
-          JOIN sell_orders so ON so.id = sol.sell_order_id
-          JOIN order_lines ol ON ol.id = sol.inventory_id
-          JOIN orders po      ON po.id = ol.order_id
-          WHERE so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval
+                 COUNT(*)::int                                                                          AS count,
+                 COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                AS revenue,
+                 COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit,
+                 COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty
+                              * COALESCE(po.commission_rate, 0)), 0)::float                             AS commission
+          FROM order_lines ol
+          JOIN orders po ON po.id = ol.order_id
+          WHERE po.lifecycle = 'done' AND po.created_at >= NOW() - (${days} || ' days')::interval
           GROUP BY po.user_id
         )
         SELECT u.id, u.name, u.initials, u.email, u.role,

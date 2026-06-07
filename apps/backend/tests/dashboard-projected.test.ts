@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, MARCUS, PRIYA } from './helpers/auth';
+import { loginAs, MARCUS, PRIYA, ALEX } from './helpers/auth';
 
 // Projected financials are the PURCHASER lens: GET /api/dashboard's
 // revenue/profit/commission/count (and the weekly chart + byCat) come from the
@@ -75,6 +75,50 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     const r = await api<{ kpis: { profit: number; count: number } }>('GET', '/api/dashboard?range=30d', { token });
     expect(r.body.kpis.profit).toBeCloseTo((30 - 10) * 1, 2); // only PO-PROJ-MINE
     expect(r.body.kpis.count).toBe(1);
+  });
+
+  it('contributor leaderboard ranks purchasers by projected Done-PO profit', async () => {
+    await clearWindow();
+    // Marcus: 2 * (200-100) = 200 profit; Priya: 1 * (150-100) = 50 profit.
+    await insertDonePO('PO-LB-MARCUS', MARCUS, { rate: 0.1 }, [{ unitCost: 100, sellPrice: 200, qty: 2 }]);
+    await insertDonePO('PO-LB-PRIYA',  PRIYA,  { rate: 0.2 }, [{ unitCost: 100, sellPrice: 150, qty: 1 }]);
+
+    const marcus = await userId(MARCUS);
+    const priya  = await userId(PRIYA);
+
+    // Viewed by a manager so all rows' financials are visible.
+    const { token } = await loginAs(ALEX);
+    const r = await api<{
+      leaderboard: { id: string; profit: number; revenue: number; commission: number }[];
+    }>('GET', '/api/dashboard?range=30d', { token });
+
+    const m = r.body.leaderboard.find(x => x.id === marcus)!;
+    const p = r.body.leaderboard.find(x => x.id === priya)!;
+    expect(m.profit).toBeCloseTo(200, 2);
+    expect(m.revenue).toBeCloseTo(400, 2);
+    expect(m.commission).toBeCloseTo(200 * 0.1, 2);
+    expect(p.profit).toBeCloseTo(50, 2);
+    expect(p.commission).toBeCloseTo(50 * 0.2, 2);
+
+    // Ranked by projected profit DESC → Marcus ahead of Priya.
+    const idxM = r.body.leaderboard.findIndex(x => x.id === marcus);
+    const idxP = r.body.leaderboard.findIndex(x => x.id === priya);
+    expect(idxM).toBeLessThan(idxP);
+  });
+
+  it('purchaser KPI matches their own leaderboard row (same projected lens)', async () => {
+    await clearWindow();
+    await insertDonePO('PO-CONSIST', MARCUS, { rate: 0.12 }, [{ unitCost: 100, sellPrice: 175, qty: 2 }]);
+
+    const { token, user } = await loginAs(MARCUS);
+    const r = await api<{
+      kpis: { revenue: number; profit: number; commission: number };
+      leaderboard: { id: string; revenue: number | null; profit: number | null; commission: number | null }[];
+    }>('GET', '/api/dashboard?range=30d', { token });
+    const mine = r.body.leaderboard.find(x => x.id === user.id)!;
+    expect(mine.profit).toBeCloseTo(r.body.kpis.profit, 2);
+    expect(mine.revenue).toBeCloseTo(r.body.kpis.revenue, 2);
+    expect(mine.commission).toBeCloseTo(r.body.kpis.commission, 2);
   });
 
   it('a PO contributes nothing until its lifecycle flips to done', async () => {
