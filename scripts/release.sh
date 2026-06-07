@@ -132,7 +132,10 @@ while IFS= read -r subj; do
     perf*)     PERF+=("$subj") ;;
     *)         OTHER+=("$subj") ;;
   esac
-done < <(git log --no-merges --pretty=format:'%s' "$RANGE")
+# tformat (not format) terminates every line with a newline, including the
+# last — `git log --pretty=format:` omits the trailing newline, so the
+# `while read` loop would silently drop the oldest commit in the range.
+done < <(git log --no-merges --pretty=tformat:'%s' "$RANGE")
 
 emit_section() {
   local title="$1"; shift
