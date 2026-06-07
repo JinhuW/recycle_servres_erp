@@ -120,6 +120,10 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // Persisted across the open-item → back round-trip (see lib/listMemory).
   const [filter, setFilter] = usePersisted<string>('desktop.inventory.filter', 'all');
   const [statusFilter, setStatusFilter] = usePersisted<string>('desktop.inventory.statusFilter', 'all');
+  // Sold lots are a terminal state; hidden by default so the working list stays
+  // lean. The backend drops them unless includeSold is set (or a status is
+  // picked explicitly — see inventoryWhereFrag).
+  const [showSold, setShowSold] = usePersisted<boolean>('desktop.inventory.showSold', false);
   const [warehouseFilter, setWarehouseFilter] = usePersisted<string>('desktop.inventory.warehouseFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.inventory.search', '');
   const [selected, setSelected] = usePersisted<Set<string>>('desktop.inventory.selected', new Set());
@@ -247,6 +251,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (showSold) params.set('includeSold', '1');
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
     for (const spec of attrSchema) {
@@ -254,7 +259,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       if (vals && vals.length) params.set(spec.param, vals.join(','));
     }
     return params.toString();
-  }, [filter, statusFilter, warehouseFilter, search, attrSchema, attrFilters]);
+  }, [filter, statusFilter, showSold, warehouseFilter, search, attrSchema, attrFilters]);
 
   // Data fetch (debounced on search/filters)
   useEffect(() => {
@@ -620,6 +625,17 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               <option value="all">{t('invAllStatuses')}</option>
               {[...ORDER_STATUSES, 'Sold'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
+            <label className="inv-sold-toggle" title={t('invShowSoldTip')}>
+              <span className="toggle">
+                <input
+                  type="checkbox"
+                  checked={showSold}
+                  onChange={e => setShowSold(e.target.checked)}
+                />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </span>
+              <span>{t('invShowSold')}</span>
+            </label>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div className="seg inv-view-toggle" role="group" aria-label={t('invViewToggleAriaLabel')}>

@@ -57,6 +57,7 @@ function inventoryWhereFrag(
   const isManager = u.role === 'manager';
   const category = c.req.query('category');
   const status = c.req.query('status');
+  const includeSold = c.req.query('includeSold') === '1';
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
@@ -64,6 +65,10 @@ function inventoryWhereFrag(
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
   const statusFrag   = status ? sql`l.status = ${status}` : sql`TRUE`;
+  // Sold is a terminal state — hidden from the default list so day-to-day work
+  // isn't cluttered by already-sold lots. The "Show sold" toggle lifts the
+  // exclusion; picking Sold explicitly in the status filter overrides it too.
+  const soldFrag     = (status || includeSold) ? sql`TRUE` : sql`l.status <> 'Sold'`;
   // Effective warehouse = override on the line if present, else the parent
   // order's warehouse. Lets a manager transfer a line to a different warehouse
   // without rewriting the order.
@@ -73,7 +78,7 @@ function inventoryWhereFrag(
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
 
-  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag}`;
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag}`;
 }
 
 // List inventory with the same filters as the desktop screen.
@@ -662,6 +667,7 @@ inventory.get('/products', async (c) => {
   const isManager = u.role === 'manager';
   const category = c.req.query('category');
   const status = c.req.query('status');
+  const includeSold = c.req.query('includeSold') === '1';
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
@@ -672,6 +678,9 @@ inventory.get('/products', async (c) => {
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
   const statusFrag   = status ? sql`l.status = ${status}` : sql`TRUE`;
+  // Mirror the list: sold lots drop out of the default grouped view (and its
+  // facet/warehouse counts) unless the toggle or an explicit Sold filter is set.
+  const soldFrag     = (status || includeSold) ? sql`TRUE` : sql`l.status <> 'Sold'`;
   // Warehouse is intentionally NOT pushed into SQL here — keeping every
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
@@ -719,7 +728,7 @@ inventory.get('/products', async (c) => {
       ORDER BY ls.created_at ASC
       LIMIT 1
     ) img ON TRUE
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${searchFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${searchFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];

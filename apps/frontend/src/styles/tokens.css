@@ -489,6 +489,34 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 13.5px;
 }
 
+/* Inline labelled switch for filter bars — pairs the .toggle visual with a
+   caption inside a pill that sits flush with the seg/select controls (32px). */
+.inv-sold-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.inv-sold-toggle:hover { color: var(--fg); border-color: var(--border-strong); }
+.inv-sold-toggle:has(input:checked) {
+  color: var(--fg);
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+  background: color-mix(in oklch, var(--accent) 8%, var(--bg-soft));
+}
+.inv-sold-toggle .toggle { width: 30px; height: 18px; }
+.inv-sold-toggle .toggle-thumb { width: 14px; height: 14px; }
+.inv-sold-toggle .toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(12px); }
+
 /* ===== Permission lock chip ===== */
 .lock {
   display: inline-flex; align-items: center; gap: 4px;

@@ -42,6 +42,8 @@ export function Inventory({ onNewEntry }: Props) {
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const [filter, setFilter] = useState<string>('all');
+  // Sold lots are terminal; the backend hides them unless includeSold is set.
+  const [showSold, setShowSold] = useState(false);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -51,12 +53,13 @@ export function Inventory({ onNewEntry }: Props) {
     let alive = true;
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
+    if (showSold) params.set('includeSold', '1');
     api.get<{ items: InventoryItem[] }>(`/api/inventory?${params}`)
       .then(r => { if (alive) setItems(r.items); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [filter]);
+  }, [filter, showSold]);
 
   const isManager = user?.role === 'manager';
   const { activeItems, activeUnits } = useMemo(() => {
@@ -102,6 +105,22 @@ export function Inventory({ onNewEntry }: Props) {
               {f === 'all' ? t('filterAllCats') : f}
             </button>
           ))}
+        </div>
+
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, padding: '4px 2px', marginTop: 2, fontSize: 13.5,
+        }}>
+          <span style={{ color: 'var(--fg-subtle)' }}>{t('invShowSold')}</span>
+          <button
+            type="button"
+            className={'ph-switch ' + (showSold ? 'on' : '')}
+            onClick={() => setShowSold(s => !s)}
+            aria-pressed={showSold}
+            aria-label={t('invShowSold')}
+          >
+            <span className="ph-switch-knob" />
+          </button>
         </div>
 
         {!loadedOnce && <PhoneListSkeleton rows={6} />}

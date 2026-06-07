@@ -37,6 +37,49 @@ describe('GET /api/inventory — role-based field visibility', () => {
   });
 });
 
+describe('GET /api/inventory — sold lots hidden by default', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Flip a seeded line to the terminal Sold state without driving the whole
+  // sell-order→Done flow — we're exercising the list filter, not the sale.
+  async function markFirstLineSold(token: string): Promise<string> {
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    const list = await api<{ items: { id: string }[] }>('GET', '/api/inventory', { token });
+    const id = list.body.items[0].id;
+    await sql`UPDATE order_lines SET status = 'Sold' WHERE id = ${id}`;
+    return id;
+  }
+
+  it('omits Sold lines from the default list', async () => {
+    const { token } = await loginAs(ALEX);
+    const soldId = await markFirstLineSold(token);
+    const r = await api<{ items: { id: string }[] }>('GET', '/api/inventory', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.items.some(i => i.id === soldId)).toBe(false);
+  });
+
+  it('includeSold=1 brings Sold lines back', async () => {
+    const { token } = await loginAs(ALEX);
+    const soldId = await markFirstLineSold(token);
+    const r = await api<{ items: { id: string; status: string }[] }>(
+      'GET', '/api/inventory?includeSold=1', { token });
+    expect(r.status).toBe(200);
+    const row = r.body.items.find(i => i.id === soldId);
+    expect(row?.status).toBe('Sold');
+  });
+
+  it('an explicit status=Sold filter overrides the default hide', async () => {
+    const { token } = await loginAs(ALEX);
+    const soldId = await markFirstLineSold(token);
+    const r = await api<{ items: { id: string; status: string }[] }>(
+      'GET', '/api/inventory?status=Sold', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.items.some(i => i.id === soldId)).toBe(true);
+    expect(r.body.items.every(i => i.status === 'Sold')).toBe(true);
+  });
+});
+
 describe('GET /api/inventory/aggregate/by-part', () => {
   beforeEach(async () => { await resetDb(); });
 
