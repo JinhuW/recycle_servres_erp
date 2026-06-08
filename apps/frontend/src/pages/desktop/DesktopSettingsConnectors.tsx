@@ -22,6 +22,7 @@ export function DesktopSettingsConnectors() {
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [clients, setClients] = useState<Client[] | null>(null);
   const [newName, setNewName] = useState('');
+  const [newScope, setNewScope] = useState<'market' | 'sellorder'>('market');
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -61,7 +62,7 @@ export function DesktopSettingsConnectors() {
         {
           name,
           grantTypes: ['client_credentials'],
-          scopes: ['market:write'],
+          scopes: newScope === 'sellorder' ? ['sellorder:read', 'sellorder:write'] : ['market:write'],
           public: false,
         },
       );
@@ -160,6 +161,20 @@ export function DesktopSettingsConnectors() {
               onKeyDown={(e) => { if (e.key === 'Enter') createServiceClient(); }}
               disabled={creating}
             />
+            <label className="input" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px' }}>
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}>
+                {t('connectorsScopeLabel')}
+              </span>
+              <select
+                value={newScope}
+                onChange={(e) => setNewScope(e.target.value as 'market' | 'sellorder')}
+                disabled={creating}
+                style={{ border: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+              >
+                <option value="market">{t('connectorsScopeMarket')}</option>
+                <option value="sellorder">{t('connectorsScopeSellOrder')}</option>
+              </select>
+            </label>
             <button
               type="button"
               className="btn accent"
