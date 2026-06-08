@@ -42,14 +42,18 @@ function adminUrl(base: string): string {
 export default async function setup() {
   const base = baseUrl();
   const u = new URL(base);
-  const baseDbName = u.pathname.replace(/^\//, '') || 'recycle_erp_test';
+  const baseDbName = (u.pathname.replace(/^\//, '') || 'recycle_erp_test');
   // Unique, valid identifier (≤63 chars). pid + base-36 time is readable and
-  // collision-free across concurrent runs on one host.
-  const runDb = `${baseDbName}_${process.pid}_${Date.now().toString(36)}`;
+  // collision-free across concurrent runs on one host. Sanitised to
+  // [A-Za-z0-9_] so the interpolated DDL below can't be anything but a bare
+  // identifier — the value is internally generated (config + pid + clock),
+  // never user input, but this makes that property structural.
+  const runDb = `${baseDbName}_${process.pid}_${Date.now().toString(36)}`
+    .replace(/[^A-Za-z0-9_]/g, '_');
 
   const admin = postgres(adminUrl(base), { max: 1, onnotice: () => {} });
   try {
-    await admin.unsafe(`CREATE DATABASE "${runDb}"`);
+    await admin.unsafe(`CREATE DATABASE "${runDb}"`); // nosec — runDb is a sanitised internal identifier, not user input
   } finally {
     await admin.end({ timeout: 5 });
   }
@@ -65,11 +69,11 @@ export default async function setup() {
   return async () => {
     const a = postgres(adminUrl(base), { max: 1, onnotice: () => {} });
     try {
-      await a.unsafe(
+      await a.unsafe( // nosec — runDb is a sanitised internal identifier, not user input
         `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
            WHERE datname = '${runDb}' AND pid <> pg_backend_pid()`,
       );
-      await a.unsafe(`DROP DATABASE IF EXISTS "${runDb}"`);
+      await a.unsafe(`DROP DATABASE IF EXISTS "${runDb}"`); // nosec — runDb is a sanitised internal identifier, not user input
     } finally {
       await a.end({ timeout: 5 });
     }
