@@ -5,7 +5,7 @@ import type postgres from 'postgres';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
-import { getUploadLimits } from '../lib/settings';
+import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
+import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
@@ -295,6 +296,77 @@ sellOrders.get('/:id', async (c) => {
       statusMeta,
     },
   });
+});
+
+// Packing list — a price-free, printable pick/pack sheet for warehouse staff.
+// Lines are grouped by warehouse; lines with no warehouse fall into an
+// "Unassigned" group that sorts last. Manager-only like every route here.
+sellOrders.get('/:id/packing-list', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const head = (await sql<{
+    id: string; created_at: string;
+    customer_name: string; customer_short: string;
+  }[]>`
+    SELECT so.id, so.created_at, c.name AS customer_name, c.short_name AS customer_short
+    FROM sell_orders so JOIN customers c ON c.id = so.customer_id
+    WHERE so.id = ${id} LIMIT 1
+  `)[0];
+  if (!head) return c.json({ error: 'Not found' }, 404);
+
+  const lines = await sql<{
+    label: string; sub_label: string | null; part_number: string | null;
+    qty: number; warehouse_short: string | null; position: number;
+  }[]>`
+    SELECT sol.label, sol.sub_label, sol.part_number, sol.qty,
+           w.short AS warehouse_short, sol.position
+    FROM sell_order_lines sol
+    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
+    WHERE sol.sell_order_id = ${id}
+    ORDER BY sol.position
+  `;
+
+  // Group by warehouse, preserving line order within each group. 'Unassigned'
+  // sorts last; everything else alphabetically by warehouse code.
+  const UNASSIGNED = 'Unassigned';
+  const byWarehouse = new Map<string, (typeof lines)[number][]>();
+  for (const l of lines) {
+    const key = l.warehouse_short ?? UNASSIGNED;
+    if (!byWarehouse.has(key)) byWarehouse.set(key, []);
+    byWarehouse.get(key)!.push(l);
+  }
+  const groups = [...byWarehouse.keys()]
+    .sort((a, b) => {
+      if (a === UNASSIGNED) return 1;
+      if (b === UNASSIGNED) return -1;
+      return a.localeCompare(b);
+    })
+    .map((warehouse) => ({
+      warehouse,
+      lines: byWarehouse.get(warehouse)!.map((l) => ({
+        qty: l.qty,
+        label: l.label,
+        sub: l.sub_label ?? '',
+        partNumber: l.part_number ?? '',
+      })),
+    }));
+
+  const company = await getWorkspaceSetting<string>(sql, 'workspace_name', 'Recycle Servers');
+
+  const buf = await buildSellOrderPackingListPdf({
+    company,
+    soId: head.id,
+    date: new Date(head.created_at).toISOString().slice(0, 10),
+    customer: head.customer_name,
+    customerShort: head.customer_short ?? '',
+    groups,
+    logoPng: loadInvoiceLogo(),
+  });
+
+  return pdfResponse(buf, `${head.id}-packing-list.pdf`);
 });
 
 // Create a new sell order from a set of inventory lines. The manager picks
