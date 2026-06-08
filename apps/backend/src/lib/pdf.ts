@@ -92,6 +92,28 @@ export type InvoiceData = {
   generatedAt: string;
 };
 
+export type PackingLine = {
+  qty: number;
+  label: string;
+  sub: string;          // sub-label, '' when none
+  partNumber: string;   // '' when none
+};
+
+export type PackingGroup = {
+  warehouse: string;    // warehouse short code, or 'Unassigned'
+  lines: PackingLine[];
+};
+
+export type PackingListData = {
+  company: string;
+  soId: string;
+  date: string;         // YYYY-MM-DD
+  customer: string;     // customer name
+  customerShort: string;
+  groups: PackingGroup[];
+  logoPng: Buffer | null;
+};
+
 // ── Palette (matches the reference commercial-invoice template) ──────────────
 const PEACH = '#fbeee6';     // header band
 const ORANGE = '#e8731c';    // logo / accents
@@ -306,5 +328,129 @@ export function buildPoInvoicePdf(d: InvoiceData): Promise<Buffer> {
       .text(d.company || '', L, PAGE_BOTTOM + 14, { width: W * 0.6 });
     doc.font('Helvetica').fontSize(8).fillColor(MUTED)
       .text(`Generated ${d.generatedAt}`, L, PAGE_BOTTOM + 14, { width: W, align: 'right' });
+  });
+}
+
+// Packing list — price-free pick/pack sheet for warehouse staff. Lines arrive
+// pre-grouped by warehouse; each group is a section with a stroked-square
+// checkbox column to tick off by hand. Reuses the invoice header/logo treatment
+// so the two documents look like a set.
+const P = {
+  check: { x: 44,  box: 11 },
+  qty:   { x: 66,  w: 44 },
+  item:  { x: 118, w: 287 },
+  part:  { x: 415, w: 140 },
+};
+
+export function buildSellOrderPackingListPdf(d: PackingListData): Promise<Buffer> {
+  return renderPdfToBuffer((doc) => {
+    const PW = doc.page.width;
+    const L = doc.page.margins.left;
+    const R = PW - doc.page.margins.right;
+    const W = R - L;
+    const PAGE_BOTTOM = doc.page.height - 56;
+
+    // ── Header band ──────────────────────────────────────────────────────────
+    const bandH = 116;
+    doc.rect(0, 0, PW, bandH).fill(PEACH);
+
+    let logoBottom = 38;
+    if (d.logoPng) {
+      try {
+        doc.image(d.logoPng, L, 30, { fit: [150, 56], valign: 'center' });
+        logoBottom = 30 + 56;
+      } catch {
+        doc.fillColor(ORANGE).font('Helvetica-Bold').fontSize(26)
+          .text(d.company || 'Packing List', L, 38, { width: W * 0.56 });
+        logoBottom = doc.y;
+      }
+    } else {
+      doc.fillColor(ORANGE).font('Helvetica-Bold').fontSize(26)
+        .text(d.company || 'Packing List', L, 38, { width: W * 0.56 });
+      logoBottom = doc.y;
+    }
+    doc.fillColor(BURNT).font('Helvetica-Bold').fontSize(10)
+      .text(d.company || '', L, logoBottom + 4, { width: W * 0.56 });
+
+    // Title + sell-order id (right-aligned inside the band).
+    doc.fillColor(BURNT).font('Helvetica-Bold').fontSize(22)
+      .text('Packing List', L, 38, { width: W, align: 'right' });
+    doc.fillColor(INK).font('Helvetica').fontSize(12)
+      .text(d.soId, L, 66, { width: W, align: 'right' });
+
+    // ── Meta row: customer + date ────────────────────────────────────────────
+    let y = bandH + 18;
+    doc.font('Helvetica-Bold').fontSize(10.5).fillColor(BURNT).text('Customer', L, y);
+    const customerText = d.customerShort
+      ? `${d.customer} (${d.customerShort})`
+      : (d.customer || '—');
+    doc.font('Helvetica').fontSize(11).fillColor(INK).text(customerText, L, y + 15, { width: W * 0.6 });
+
+    doc.font('Helvetica-Bold').fontSize(10.5).fillColor(BURNT)
+      .text('Date', L + W * 0.6, y, { width: W * 0.4, align: 'right' });
+    doc.font('Helvetica').fontSize(11).fillColor(INK)
+      .text(d.date || '—', L + W * 0.6, y + 15, { width: W * 0.4, align: 'right' });
+    y += 48;
+
+    const drawColHead = (yy: number): number => {
+      doc.font('Helvetica').fontSize(9.5).fillColor(MUTED);
+      doc.text('Packed', P.check.x - 4, yy, { width: 40 });
+      doc.text('Qty', P.qty.x, yy, { width: P.qty.w, align: 'right' });
+      doc.text('Item', P.item.x, yy, { width: P.item.w });
+      doc.text('Part #', P.part.x, yy, { width: P.part.w });
+      const ny = yy + 16;
+      doc.moveTo(L, ny).lineTo(R, ny).lineWidth(1).strokeColor(RULE).stroke();
+      return ny + 6;
+    };
+
+    const drawSectionHead = (yy: number, warehouse: string): number => {
+      doc.rect(L, yy, W, 22).fill(ZEBRA);
+      doc.font('Helvetica-Bold').fontSize(12).fillColor(BURNT)
+        .text(`Warehouse: ${warehouse}`, L + 8, yy + 5, { width: W - 16 });
+      return yy + 30;
+    };
+
+    d.groups.forEach((g) => {
+      if (y + 60 > PAGE_BOTTOM) { doc.addPage(); y = doc.page.margins.top; }
+      y = drawSectionHead(y, g.warehouse);
+      y = drawColHead(y);
+
+      g.lines.forEach((l, i) => {
+        const sub = l.sub || '';
+        doc.font('Helvetica').fontSize(10.5);
+        const labelH = doc.heightOfString(l.label || '—', { width: P.item.w });
+        const subH = sub ? doc.heightOfString(sub, { width: P.item.w }) + 1 : 0;
+        const rowH = Math.max(labelH + subH, 16) + 12;
+
+        if (y + rowH > PAGE_BOTTOM) {
+          doc.addPage();
+          y = doc.page.margins.top;
+          y = drawColHead(y);
+        }
+
+        if (i % 2 === 0) doc.rect(L, y - 4, W, rowH).fill(ZEBRA);
+
+        const ty = y + 2;
+        // Checkbox: a stroked square (no reliable ☐ glyph in core fonts).
+        doc.lineWidth(1).strokeColor(INK)
+          .rect(P.check.x, ty + 1, P.check.box, P.check.box).stroke();
+        doc.font('Helvetica-Bold').fontSize(11).fillColor(INK)
+          .text(String(l.qty), P.qty.x, ty, { width: P.qty.w, align: 'right' });
+        doc.font('Helvetica').fontSize(10.5).fillColor(INK)
+          .text(l.label || '—', P.item.x, ty, { width: P.item.w });
+        if (sub) doc.font('Helvetica').fontSize(8.5).fillColor(MUTED)
+          .text(sub, P.item.x, doc.y + 1, { width: P.item.w });
+        doc.font('Helvetica').fontSize(10).fillColor(INK)
+          .text(l.partNumber || '—', P.part.x, ty, { width: P.part.w });
+        y += rowH;
+      });
+
+      y += 12;
+    });
+
+    if (d.groups.length === 0) {
+      doc.font('Helvetica').fontSize(11).fillColor(MUTED)
+        .text('This order has no line items to pack.', L, y);
+    }
   });
 }
