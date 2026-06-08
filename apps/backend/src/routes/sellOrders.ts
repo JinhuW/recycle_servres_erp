@@ -350,6 +350,9 @@ const SO_DETAIL_COLS: XlsxColumn[] = [
   // The realized sale price on this order, distinct from the inventory line's
   // listed Sell price above.
   { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
+  // Currency of the Price / Line total columns — USD, or CNY (native RMB) for
+  // foreign orders. Profit / Unit cost stay USD regardless.
+  { header: 'Currency',     key: 'currency',  width: 9 },
   { header: 'Profit',       key: 'profit',    width: 12, numFmt: '#,##0.00' },
   { header: 'Margin %',     key: 'margin',    width: 10, numFmt: '#,##0.0' },
   { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
@@ -364,10 +367,17 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
   const id = c.req.param('id');
   const sql = getDb(c.env);
 
-  const head = (await sql<{ id: string }[]>`
-    SELECT so.id FROM sell_orders so WHERE so.id = ${id} LIMIT 1
+  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null }[]>`
+    SELECT so.id, so.currency_code, c.name AS customer_name
+    FROM sell_orders so
+    JOIN customers c ON c.id = so.customer_id
+    WHERE so.id = ${id} LIMIT 1
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
+  // CNY orders invoice in RMB: the realized Price / Line total columns show the
+  // native price (sol.source_unit_price), while Unit cost / Profit stay USD —
+  // cost comes from inventory, which is always USD. The Currency column flags it.
+  const isCny = head.currency_code === 'CNY';
 
   // Root at the sold lines and reach back to each one's source inventory row
   // (sol.inventory_id) for the descriptive columns. The joins are LEFT because a
@@ -376,6 +386,7 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
   const rows = (await sql`
     SELECT
       sol.qty AS sell_qty, sol.unit_price::float AS sell_unit_price,
+      sol.source_unit_price::float AS source_unit_price,
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition, sol.position,
       w.short AS warehouse_short,
@@ -405,10 +416,13 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
   const data = rows.map((r) => {
     const hasInv = r.inv_id != null;
     const unitCost = r.unit_cost == null ? null : Number(r.unit_cost);
-    const price = Number(r.sell_unit_price ?? 0);
+    // usdPrice drives profit/margin (cost is USD); displayPrice is what the
+    // Price / Line total cells show — native RMB on CNY orders, USD otherwise.
+    const usdPrice = Number(r.sell_unit_price ?? 0);
+    const displayPrice = isCny ? Number(r.source_unit_price ?? r.sell_unit_price ?? 0) : usdPrice;
     const qty = Number(r.sell_qty ?? 0);
-    const profit = unitCost == null ? null : (price - unitCost) * qty;
-    const margin = unitCost != null && price > 0 ? ((price - unitCost) / price) * 100 : null;
+    const profit = unitCost == null ? null : (usdPrice - unitCost) * qty;
+    const margin = unitCost != null && usdPrice > 0 ? ((usdPrice - unitCost) / usdPrice) * 100 : null;
     const category = (r.category ?? r.sol_category ?? '') as string;
     return {
       warehouse: (r.warehouse_short ?? '') as string,
@@ -425,10 +439,11 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       qty,
       unitCost,
       sellPrice: r.sell_price == null ? null : Number(r.sell_price),
-      price,
+      price: displayPrice,
+      currency: head.currency_code,
       profit,
       margin,
-      lineTotal: +(qty * price).toFixed(2),
+      lineTotal: +(qty * displayPrice).toFixed(2),
       submitter: r.user_name ?? '',
       status: r.status ?? '',
       imageUrl: r.image_url ?? '',
@@ -456,7 +471,11 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     { name: 'Summary', columns: SO_DETAIL_COLS, rows: data },
     ...warehouseSheets,
   ]);
-  return xlsxResponse(buf, datedFilename(head.id));
+  // Prefix the file with the customer so a downloads folder full of exports is
+  // scannable by who, not just by order id. Strip filesystem/header-hostile
+  // characters and collapse whitespace to a single dash.
+  const slug = (head.customer_name ?? '').replace(/[^\w.\- ]+/g, '').trim().replace(/\s+/g, '-');
+  return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));
 });
 
 // Create a new sell order from a set of inventory lines. The manager picks

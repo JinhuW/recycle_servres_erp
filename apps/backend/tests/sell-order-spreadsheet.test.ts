@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import app from '../src/index';
 import { resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
@@ -22,6 +22,11 @@ async function firstCustomerId(token: string): Promise<string> {
   expect(r.status).toBe(200);
   expect(r.body.items.length).toBeGreaterThan(0);
   return r.body.items[0].id;
+}
+
+async function firstCustomerName(token: string): Promise<string> {
+  const r = await api<{ items: { name: string }[] }>('GET', '/api/customers', { token });
+  return r.body.items[0].name;
 }
 
 async function createSellOrder(token: string): Promise<string> {
@@ -52,12 +57,62 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     const res = await getRaw(`/api/sell-orders/${id}/spreadsheet`, token);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain(XLSX_MIME);
-    expect(res.headers.get('content-disposition')).toContain('.xlsx');
+    const disposition = res.headers.get('content-disposition') ?? '';
+    expect(disposition).toContain('.xlsx');
+    // Filename carries the customer name so downloads are scannable by who.
+    const customerName = await firstCustomerName(token);
+    expect(disposition).toContain(customerName.replace(/[^\w.\- ]+/g, '').trim().replace(/\s+/g, '-'));
 
     const buf = Buffer.from(await res.arrayBuffer());
     // XLSX is a zip container — the magic bytes are 'PK'.
     expect(buf.subarray(0, 2).toString('latin1')).toBe('PK');
     expect(buf.length).toBeGreaterThan(500);
+  });
+
+  it('renders Price in native RMB for a CNY order', async () => {
+    // Frankfurter is stubbed so the snapshot rate is deterministic.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ amount: 1, base: 'USD', date: '2026-06-07', rates: { CNY: 7.2154 } }),
+      { status: 200 },
+    )));
+    try {
+      const { token } = await loginAs(ALEX);
+      const line = await freeSellableLine(token);
+      const customerId = await firstCustomerId(token);
+      const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+        token,
+        body: {
+          customerId,
+          currency: 'CNY',
+          lines: [{
+            inventoryId: line.id, category: 'RAM', label: 'RMB DIMM',
+            partNumber: 'PN-RMB-1', qty: 3, unitPrice: 78, warehouseId: 'WH-LA1',
+          }],
+        },
+      });
+      expect(create.status).toBe(201);
+
+      const res = await getRaw(`/api/sell-orders/${create.body.id}/spreadsheet`, token);
+      expect(res.status).toBe(200);
+
+      const { default: ExcelJS } = await import('exceljs');
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await res.arrayBuffer());
+      const ws = wb.getWorksheet('Summary')!;
+      const headers = (ws.getRow(1).values as unknown[]).map((v) => String(v ?? ''));
+      const priceCol = headers.indexOf('Price');
+      const currencyCol = headers.indexOf('Currency');
+      const totalCol = headers.indexOf('Line total');
+      expect(priceCol).toBeGreaterThan(0);
+
+      const row = ws.getRow(2);
+      // Native RMB price, not the ~10.81 USD conversion.
+      expect(Number(row.getCell(priceCol).value)).toBe(78);
+      expect(String(row.getCell(currencyCol).value)).toBe('CNY');
+      expect(Number(row.getCell(totalCol).value)).toBe(234); // 3 × 78 RMB
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('404s an unknown sell order', async () => {
