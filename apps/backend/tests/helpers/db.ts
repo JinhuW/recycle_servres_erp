@@ -85,7 +85,7 @@ export async function ensureWorkerDb(): Promise<void> {
   const tsql = postgres(turl, { max: 1, onnotice: () => {} });
   try {
     const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
-    for (const f of files) await tsql.unsafe(readFileSync(join(migrationsDir, f), 'utf8'));
+    for (const f of files) await tsql.unsafe(readFileSync(join(migrationsDir, f), 'utf8')); // nosec — trusted migration SQL from the repo's migrations dir
   } finally {
     await tsql.end({ timeout: 5 });
   }
