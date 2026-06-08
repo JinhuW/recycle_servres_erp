@@ -1,5 +1,8 @@
 import type postgres from 'postgres';
 import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../../lib/inventoryLabel';
+import { getWorkspaceSetting } from '../../lib/settings';
+import { isSupportedCurrency, type SupportedCurrency } from '../../lib/fx';
+import { createSellOrderDraft, type DraftLineInput } from '../../services/sellOrderCreate';
 
 export const SELL_ORDER_TOOL_DEFS = [
   {
@@ -117,11 +120,80 @@ export async function callSearchSellableInventory(
   }));
 }
 
-// callCreateSellOrderDraft is implemented in the next task.
+const DEFAULT_MCP_CUSTOMER = 'f30f98bc-09c7-4108-b083-c7d69cc9968c';
+
+type CreateArgs = {
+  customerId?: string;
+  currency?: string;
+  notes?: string;
+  lines?: Array<{ inventoryId?: string; qty?: number; unitPrice?: number }>;
+};
+
 export async function callCreateSellOrderDraft(
-  _sql: postgres.Sql,
-  _args: unknown,
-  _ctx: { source: string; actorUserId: string | null },
-): Promise<unknown> {
-  throw new Error('not implemented');
+  sql: postgres.Sql,
+  args: CreateArgs,
+  ctx: { source: string; actorUserId: string | null },
+) {
+  const lines = Array.isArray(args.lines) ? args.lines : [];
+  if (lines.length === 0) throw new Error('at least one line required');
+
+  const currency: SupportedCurrency = args.currency === undefined ? 'USD' : (args.currency as SupportedCurrency);
+  if (!isSupportedCurrency(currency)) throw new Error('unsupported currency');
+
+  // Validate the agent-supplied numerics up front with clean messages (the
+  // sell_order_lines CHECK would otherwise surface as a generic 500).
+  for (const l of lines) {
+    if (!l.inventoryId) throw new Error('each line requires an inventoryId');
+    if (!Number.isInteger(l.qty) || (l.qty as number) <= 0) throw new Error('qty must be a positive integer');
+    if (!Number.isFinite(l.unitPrice) || (l.unitPrice as number) < 0) throw new Error('unitPrice must be >= 0');
+  }
+
+  // Derive descriptive fields from the referenced inventory lines — the agent
+  // supplies only ids/qty/price, never the label/category snapshot. A plain
+  // read here; createSellOrderDraft re-locks and re-validates sellability/qty
+  // inside its transaction (authoritative).
+  const ids = lines.map(l => l.inventoryId as string);
+  const invRows = await sql<Array<InventoryAttrs & {
+    id: string; part_number: string | null; warehouse_id: string | null;
+  }>>`
+    SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type,
+           l.classification, l.rank, l.speed, l.interface, l.form_factor,
+           l.description, l.part_number, l.condition,
+           l.health::float AS health, l.rpm,
+           COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id
+    FROM order_lines l
+    JOIN orders o ON o.id = l.order_id
+    WHERE l.id = ANY(${ids}::uuid[])
+  `;
+  const byId = new Map(invRows.map(r => [r.id, r]));
+
+  const draftLines: DraftLineInput[] = lines.map(l => {
+    const inv = byId.get(l.inventoryId as string);
+    if (!inv) throw new Error(`inventory line ${l.inventoryId} not found`);
+    return {
+      inventoryId: inv.id,
+      category: inv.category,
+      label: inventoryLabel(inv) || inv.id.slice(0, 8),
+      subLabel: inventorySpec(inv),
+      partNumber: inv.part_number,
+      qty: l.qty as number,
+      unitPrice: l.unitPrice as number,
+      warehouseId: inv.warehouse_id,
+      condition: inv.condition,
+    };
+  });
+
+  const customerId = args.customerId?.trim()
+    || await getWorkspaceSetting<string>(sql, 'mcp.sellOrderCustomerId', DEFAULT_MCP_CUSTOMER);
+
+  const result = await createSellOrderDraft(sql, {
+    customerId,
+    currency,
+    notes: args.notes ?? null,
+    lines: draftLines,
+    actorUserId: ctx.actorUserId,
+    source: ctx.source,
+  });
+  if (!result.ok) throw new Error(result.error);
+  return { id: result.id, status: 'Draft', customerId: result.customerId, lineCount: result.lineCount, currency: result.currency };
 }
