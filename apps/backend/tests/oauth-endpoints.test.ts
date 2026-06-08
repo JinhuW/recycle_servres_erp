@@ -48,6 +48,15 @@ describe('OAuth discovery', () => {
     expect((body.token_endpoint as string)).toBe('https://inventory.recycleservers.com/oauth/token');
   });
 
+  it('advertises the sell-order scopes in AS metadata', async () => {
+    const r = await api('GET', '/.well-known/oauth-authorization-server');
+    expect(r.status).toBe(200);
+    const scopes = (r.body as any).scopes_supported as string[];
+    expect(scopes).toContain('sellorder:read');
+    expect(scopes).toContain('sellorder:write');
+    expect(scopes).toContain('market:read'); // unchanged
+  });
+
   it('never emits a Host outside CORS_ALLOWED_ORIGINS (injection-proof)', async () => {
     const r = await api('GET', '/.well-known/oauth-authorization-server', {
       env: { CORS_ALLOWED_ORIGINS: 'https://inventory.recycleservers.com' },

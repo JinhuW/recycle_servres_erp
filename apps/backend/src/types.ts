@@ -96,7 +96,11 @@ export type Order = {
   status: string;
 };
 
-export type OAuthScope = 'market:read' | 'market:write';
+export type OAuthScope =
+  | 'market:read'
+  | 'market:write'
+  | 'sellorder:read'
+  | 'sellorder:write';
 
 export type OAuthCtx = {
   clientId: string;

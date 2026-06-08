@@ -5,7 +5,7 @@ import type { Env } from '../types';
 // generic, so callers with any Variables shape can pass their context through.
 type OriginCtx = { env: Env; req: { header(name: string): string | undefined } };
 
-const SCOPES = ['market:read', 'market:write'] as const;
+const SCOPES = ['market:read', 'market:write', 'sellorder:read', 'sellorder:write'] as const;
 
 const hostOf = (host: string) => host.split(':')[0];
 const isLoopback = (host: string) => {

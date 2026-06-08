@@ -14,12 +14,13 @@ import { oauthGrantsTotal } from '../metrics';
 const CODE_TTL_SEC = 600;
 const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
-const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write']);
-// market:write through the interactive code flow is reserved for managers; a
+const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write', 'sellorder:read', 'sellorder:write']);
+// :write scopes through the interactive code flow are reserved for managers; a
 // non-manager's consent yields a read-only grant. Service clients still get
 // write via the admin-minted client_credentials path.
+const WRITE_SCOPES = new Set(['market:write', 'sellorder:write']);
 const dropWriteUnlessManager = (scopes: string[], role: string | undefined): string[] =>
-  role === 'manager' ? scopes : scopes.filter(s => s !== 'market:write');
+  role === 'manager' ? scopes : scopes.filter(s => !WRITE_SCOPES.has(s));
 
 const wellKnown = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -504,7 +505,7 @@ oauth.get('/authorize/pending/:req', authMiddleware, async (c) => {
 // scraper) or revoke existing ones. The mutating verbs go through csrfGuard
 // like every other /api/* route — this surface is NOT exempt.
 const VALID_GRANT_TYPES = ['authorization_code', 'refresh_token', 'client_credentials'] as const;
-const VALID_SCOPES = ['market:read', 'market:write'] as const;
+const VALID_SCOPES = ['market:read', 'market:write', 'sellorder:read', 'sellorder:write'] as const;
 
 export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
