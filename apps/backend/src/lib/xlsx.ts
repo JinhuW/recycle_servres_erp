@@ -70,12 +70,26 @@ export function buildXlsxBuffer(
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+// A Content-Disposition that survives non-ASCII names (Chinese customers): an
+// ASCII fallback for legacy clients plus an RFC 5987 filename* carrying the
+// UTF-8 name. Without filename*, a raw CJK name is mangled or dropped by the
+// HTTP layer. encodeURIComponent leaves a few chars RFC 5987 reserves (notably
+// the ' that delimits the field) — escape those too.
+function contentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]+/g, '_').replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename).replace(
+    /['()*!]/g,
+    (ch) => '%' + ch.charCodeAt(0).toString(16).toUpperCase(),
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 export function xlsxResponse(buf: Buffer, filename: string): Response {
   return new Response(buf, {
     status: 200,
     headers: {
       'Content-Type': XLSX_MIME,
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Disposition': contentDisposition(filename),
       'Content-Length': String(buf.length),
     },
   });

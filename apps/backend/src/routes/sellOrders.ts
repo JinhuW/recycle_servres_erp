@@ -473,8 +473,12 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
   ]);
   // Prefix the file with the customer so a downloads folder full of exports is
   // scannable by who, not just by order id. Strip filesystem/header-hostile
-  // characters and collapse whitespace to a single dash.
-  const slug = (head.customer_name ?? '').replace(/[^\w.\- ]+/g, '').trim().replace(/\s+/g, '-');
+  // characters and collapse whitespace to a single dash. \p{L}\p{N} (not \w)
+  // keeps CJK names — most customers here are Chinese, and \w would erase them.
+  const slug = (head.customer_name ?? '')
+    .replace(/[^\p{L}\p{N}.\- ]+/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
   return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));
 });
 

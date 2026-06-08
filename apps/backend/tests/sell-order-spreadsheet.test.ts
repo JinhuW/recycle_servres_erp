@@ -69,6 +69,37 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     expect(buf.length).toBeGreaterThan(500);
   });
 
+  it('keeps a non-ASCII (Chinese) customer name in the download filename', async () => {
+    const { token } = await loginAs(ALEX);
+    const cnName = '深圳启航科技';
+    const cust = await api<{ id: string }>('POST', '/api/customers', {
+      token, body: { name: cnName },
+    });
+    expect(cust.status).toBe(201);
+
+    const line = await freeSellableLine(token);
+    const order = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId: cust.body.id,
+        lines: [{
+          inventoryId: line.id, category: 'RAM', label: 'Sample DIMM',
+          partNumber: 'PN-CN-1', qty: 1, unitPrice: line.sell_price,
+          warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+        }],
+      },
+    });
+    expect(order.status).toBe(201);
+
+    const res = await getRaw(`/api/sell-orders/${order.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+    const disposition = res.headers.get('content-disposition') ?? '';
+    // The \w-based slug used to strip every CJK character, dropping the customer
+    // from the name entirely. The name now rides in the RFC 5987 filename*.
+    expect(disposition).toContain(`filename*=UTF-8''`);
+    expect(disposition).toContain(encodeURIComponent(cnName));
+  });
+
   it('renders Price in native RMB for a CNY order', async () => {
     // Frankfurter is stubbed so the snapshot rate is deterministic.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
