@@ -35,6 +35,19 @@ describe('customers route — structured contact/address', () => {
     expect(row).not.toHaveProperty('contact');
   });
 
+  it('returns the created customer so the picker can render it without a reload', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<{ customer: { id: string; name: string; short_name: string | null; region: string | null } }>(
+      'POST', '/api/customers',
+      { token, body: { name: 'Picker Co', shortName: 'PickCo', region: 'US-West' } },
+    );
+    expect(created.status).toBe(201);
+    expect(created.body.customer).toMatchObject({
+      name: 'Picker Co', short_name: 'PickCo', region: 'US-West',
+    });
+    expect(typeof created.body.customer.id).toBe('string');
+  });
+
   it('patches contact fields', async () => {
     const { token } = await loginAs(ALEX);
     const list = await api<{ items: Array<{ id: string }> }>('GET', '/api/customers', { token });

@@ -83,9 +83,10 @@ customers.post('/', async (c) => {
     VALUES (${body.name}, ${body.shortName ?? null}, ${body.contactName ?? null},
             ${body.contactEmail ?? null}, ${body.contactPhone ?? null}, ${body.address ?? null},
             ${body.country ?? null}, ${body.region ?? null}, ${body.tags ?? []}, ${body.notes ?? null})
-    RETURNING id
+    RETURNING id, name, short_name, region
   `;
-  return c.json({ id: r[0].id }, 201);
+  // Return the row so the order-form picker can render it in place without a reload.
+  return c.json({ id: r[0].id, customer: r[0] }, 201);
 });
 
 // Manager dashboard view: every customer with their active vendor-link (if any)
