@@ -1285,10 +1285,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     soColOrder: 'Order',
     soColCreated: 'Created',
     soEditReplacesHint: "Editing replaces the order's line set. Inventory-backed quantities are capped at what's on the shelf.",
-    soEditPriceHint: 'Set each product’s sell price once — it applies to every warehouse it ships from.',
-    soLocCount: '{n} locations',
-    soPriceUnified: 'Was mixed — saving unifies it',
-    soPerLocationQty: 'Qty per location',
 
     // Danger dialog
     dangerDeleteWsTitle: 'Delete this workspace?',
@@ -2498,10 +2494,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     soColOrder: '订单',
     soColCreated: '创建时间',
     soEditReplacesHint: '编辑将替换该订单的明细集。库存支持的数量受限于实际现货。',
-    soEditPriceHint: '每个产品的销售价格只需设置一次 — 它将应用于其发货的每个仓库。',
-    soLocCount: '{n} 个仓库',
-    soPriceUnified: '价格原先不一致 — 保存后将统一',
-    soPerLocationQty: '各仓库数量',
 
     dangerDeleteWsTitle: '删除此工作区?',
     dangerDeleteWsBody: '所有订单、库存、销售订单和审计日志将被永久删除。此操作无法撤销。',
