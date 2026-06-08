@@ -101,6 +101,19 @@ function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+// Prefer the RFC 5987 `filename*=UTF-8''…` parameter (percent-encoded UTF-8) so
+// non-ASCII names — Chinese customers — come through intact; the plain
+// `filename="…"` is only an ASCII fallback (their CJK chars are '_' there).
+export function filenameFromContentDisposition(cd: string | null): string | null {
+  if (!cd) return null;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) {
+    try { return decodeURIComponent(star[1].trim()); } catch { /* malformed — fall back */ }
+  }
+  const plain = /filename="?([^";]+)"?/.exec(cd);
+  return plain ? plain[1].trim() : null;
+}
+
 // Binary download (xlsx export, etc.). GET is CSRF-exempt so no header needed;
 // we still ride the cookie + the single-flight 401→refresh→retry path. Pulls
 // the filename from Content-Disposition, falling back to `fallbackName`.
@@ -119,12 +132,11 @@ async function download(path: string, fallbackName: string): Promise<void> {
     throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status));
   }
   const blob = await res.blob();
-  const cd = res.headers.get('Content-Disposition');
-  const match = cd ? /filename="?([^"]+)"?/.exec(cd) : null;
+  const name = filenameFromContentDisposition(res.headers.get('Content-Disposition'));
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = match ? match[1] : fallbackName;
+  a.download = name ?? fallbackName;
   document.body.appendChild(a);
   a.click();
   a.remove();
