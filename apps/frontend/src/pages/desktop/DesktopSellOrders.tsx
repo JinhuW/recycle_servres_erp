@@ -948,6 +948,22 @@ function SellOrderDetail({
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn"
+                title={t('soPackingListTooltip')}
+                onClick={async () => {
+                  try {
+                    await api.download(
+                      `/api/sell-orders/${order.id}/packing-list`,
+                      `${order.id}-packing-list.pdf`,
+                    );
+                  } catch (e) {
+                    handleFetchError(e);
+                  }
+                }}
+              >
+                <Icon name="download" size={14} /> {t('soPackingList')}
+              </button>
               {editable && order.status !== 'Draft' && order.archivedAt === null && (
                 <button
                   className="btn"
