@@ -566,6 +566,13 @@ try {
 
   console.log('· Seeding customers…');
   await sql`DELETE FROM customers`;
+  // Canonical MCP customer (migration 0067) is re-seeded with its fixed UUID so
+  // the wipe above doesn't strip the default sell-order-draft customer.
+  await sql`
+    INSERT INTO customers (id, name, active)
+    VALUES ('f30f98bc-09c7-4108-b083-c7d69cc9968c', 'MCP', TRUE)
+    ON CONFLICT (id) DO NOTHING
+  `;
   const customers = [
     { name:'NorthBridge Data Centers', short:'NorthBridge',  contactName:'Dana Ortiz',   contactEmail:'ops@northbridge.io',       contactPhone:'+1-212-555-0147', address:'48 Hudson Yards, Floor 12\nNew York, NY 10001', country:'United States', region:'US-East',    tags:['hyperscaler','priority'] },
     { name:'Helios Cloud Pte Ltd',     short:'Helios Cloud', contactName:'Wei Lim',      contactEmail:'procurement@helios.sg',     contactPhone:'+65-6555-0192',   address:'1 Raffles Place, #20-01\nSingapore 048616',        country:'Singapore',     region:'APAC',       tags:['cloud'] },
