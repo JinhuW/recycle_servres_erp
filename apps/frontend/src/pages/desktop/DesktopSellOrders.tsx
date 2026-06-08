@@ -540,6 +540,46 @@ function SellOrderDetail({
     setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
   const removeLine = (idx: number) =>
     setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
+  // Fan a single sell price out to every location of one product.
+  const setGroupPrice = (idxs: number[], unitPrice: number) =>
+    setDraft(d => d && { ...d, lines: d.lines.map((l, i) => (idxs.includes(i) ? { ...l, unitPrice } : l)) });
+  const removeLines = (idxs: number[]) =>
+    setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => !idxs.includes(i)) });
+
+  // A product (same part + condition) can sit in several warehouses — "A" in
+  // Den and Boston. It still has one sell price, so collapse the editable lines
+  // into one card per product: the price input shows once and writes to every
+  // location, while qty stays per-warehouse (stock is picked per shelf).
+  const editGroups = useMemo(() => {
+    if (!draft) return [];
+    const map = new Map<string, {
+      key: string;
+      label: string;
+      partNumber: string | null;
+      condition: string | null;
+      category: EditLine['category'];
+      unitPrice: number;
+      priceVaries: boolean;
+      idxs: number[];
+      members: { line: EditLine; idx: number }[];
+    }>();
+    draft.lines.forEach((l, idx) => {
+      const key = `${l.partNumber ?? l.label}||${l.condition ?? ''}||${l.category}`;
+      const g = map.get(key);
+      if (!g) {
+        map.set(key, {
+          key, label: l.label, partNumber: l.partNumber, condition: l.condition,
+          category: l.category, unitPrice: l.unitPrice, priceVaries: false,
+          idxs: [idx], members: [{ line: l, idx }],
+        });
+      } else {
+        if (l.unitPrice !== g.unitPrice) g.priceVaries = true;
+        g.idxs.push(idx);
+        g.members.push({ line: l, idx });
+      }
+    });
+    return [...map.values()];
+  }, [draft]);
 
   const save = async () => {
     if (!order || !draft) return;
@@ -789,103 +829,141 @@ function SellOrderDetail({
                 </div>
               )}
 
-              <table className="so-line-table">
-                <thead>
-                  <tr>
-                    <th>{t('item')}</th>
-                    <th>{t('warehouse')}</th>
-                    <th className="num">{t('qty')}</th>
-                    <th className="num">{t('vendorTableUnit')}</th>
-                    <th className="num">{t('eoTotal')}</th>
-                    {editable && <th style={{ width: 36 }}></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {!editable && groupLinesByWarehouse(order.lines).map((g, gi) => (
-                    <Fragment key={(g.warehouse ?? '__none') + gi}>
-                      <tr>
-                        <td colSpan={5} style={{ padding: 0 }}>
-                          <div className="so-wh-head">
-                            <Icon name="warehouse" size={12} />
-                            <span>{g.warehouse ?? t('sodNoWarehouse')}</span>
-                            <span className="so-wh-count">{g.lines.length}</span>
-                          </div>
-                        </td>
-                      </tr>
-                      {g.lines.map(l => (
-                        <tr key={l.id}>
-                          <td>
-                            <div style={{ fontWeight: 500 }}>{l.label}</div>
-                            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
-                          </td>
-                          <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
-                          <td className="num mono">{l.qty}</td>
-                          <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
-                          <td className="num mono" style={{ fontWeight: 500 }}>
-                            {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
-                            {order.currency !== 'USD' && (
-                              <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
-                                {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
-                              </div>
-                            )}
+              {!editable ? (
+                <table className="so-line-table">
+                  <thead>
+                    <tr>
+                      <th>{t('item')}</th>
+                      <th>{t('warehouse')}</th>
+                      <th className="num">{t('qty')}</th>
+                      <th className="num">{t('vendorTableUnit')}</th>
+                      <th className="num">{t('eoTotal')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupLinesByWarehouse(order.lines).map((g, gi) => (
+                      <Fragment key={(g.warehouse ?? '__none') + gi}>
+                        <tr>
+                          <td colSpan={5} style={{ padding: 0 }}>
+                            <div className="so-wh-head">
+                              <Icon name="warehouse" size={12} />
+                              <span>{g.warehouse ?? t('sodNoWarehouse')}</span>
+                              <span className="so-wh-count">{g.lines.length}</span>
+                            </div>
                           </td>
                         </tr>
-                      ))}
-                    </Fragment>
-                  ))}
-                  {editable && draft.lines.map((l, idx) => (
-                    <tr key={l._cid}>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{l.label}</div>
-                        <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
-                      </td>
-                      <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
-                      <td className="num">
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                          <input
-                            className="so-mini-input"
-                            type="number"
-                            min={1}
-                            max={l.maxQty}
-                            value={l.qty}
-                            onChange={e => setLine(idx, {
-                              qty: Math.max(1, Math.min(l.maxQty, Number(e.target.value) || 0)),
-                            })}
-                            style={{ width: 64 }}
-                          />
-                          <span style={{ fontSize: 10.5, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>
-                            / {l.maxQty}
-                          </span>
+                        {g.lines.map(l => (
+                          <tr key={l.id}>
+                            <td>
+                              <div style={{ fontWeight: 500 }}>{l.label}</div>
+                              <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
+                            </td>
+                            <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
+                            <td className="num mono">{l.qty}</td>
+                            <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
+                            <td className="num mono" style={{ fontWeight: 500 }}>
+                              {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
+                              {order.currency !== 'USD' && (
+                                <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
+                                  {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="so-prod-list">
+                  {editGroups.map(g => {
+                    const lastProduct = draft.lines.length === g.idxs.length;
+                    return (
+                      <div className="so-prod-card" key={g.key}>
+                        <div className="so-prod-head">
+                          <div className="so-prod-id">
+                            <div className="so-prod-name">{g.label}</div>
+                            <div className="so-prod-sub">
+                              {g.partNumber && <span className="mono">{g.partNumber}</span>}
+                              {g.partNumber && g.condition && <span className="so-sep">·</span>}
+                              {g.condition && <span>{g.condition}</span>}
+                              {g.members.length > 1 && (
+                                <span className="so-loc-pill">
+                                  <Icon name="warehouse" size={10} />
+                                  {t('soLocCount', { n: g.members.length })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="so-prod-price">
+                            <label className="so-label">{t('vendorTableUnit')}</label>
+                            <div className="so-price-field">
+                              <span className="so-price-cur">{draft.currency}</span>
+                              <input
+                                className="so-mini-input"
+                                type="number"
+                                step="0.01"
+                                value={g.unitPrice}
+                                onChange={e => setGroupPrice(g.idxs, Number(e.target.value) || 0)}
+                                style={{ width: 96 }}
+                              />
+                            </div>
+                            {g.priceVaries && <span className="so-price-hint">{t('soPriceUnified')}</span>}
+                          </div>
+                          <button
+                            className="btn icon sm so-prod-x"
+                            title={t('soRemoveLineTooltip')}
+                            disabled={lastProduct}
+                            onClick={() => removeLines(g.idxs)}
+                          >
+                            <Icon name="x" size={13} />
+                          </button>
                         </div>
-                      </td>
-                      <td className="num">
-                        <input
-                          className="so-mini-input"
-                          type="number"
-                          step="0.01"
-                          value={l.unitPrice}
-                          onChange={e => setLine(idx, { unitPrice: Number(e.target.value) || 0 })}
-                          style={{ width: 90 }}
-                        />
-                      </td>
-                      <td className="num mono" style={{ fontWeight: 500 }}>{fmtMoney(l.qty * l.unitPrice, draft.currency, locale)}</td>
-                      <td>
-                        <button
-                          className="btn icon sm"
-                          title={t('soRemoveLineTooltip')}
-                          disabled={draft.lines.length === 1}
-                          onClick={() => removeLine(idx)}
-                        >
-                          <Icon name="x" size={12} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <div className="so-prod-locs">
+                          <div className="so-prod-locs-cap">{t('soPerLocationQty')}</div>
+                          {g.members.map(({ line, idx }) => (
+                            <div className="so-loc-row" key={line._cid}>
+                              <span className="so-loc-name">
+                                <Icon name="warehouse" size={12} />
+                                {line.warehouse ?? t('sodNoWarehouse')}
+                              </span>
+                              <div className="so-loc-qty">
+                                <input
+                                  className="so-mini-input"
+                                  type="number"
+                                  min={1}
+                                  max={line.maxQty}
+                                  value={line.qty}
+                                  onChange={e => setLine(idx, {
+                                    qty: Math.max(1, Math.min(line.maxQty, Number(e.target.value) || 0)),
+                                  })}
+                                  style={{ width: 60 }}
+                                />
+                                <span className="so-loc-max">/ {line.maxQty}</span>
+                              </div>
+                              <span className="so-loc-total mono">
+                                {fmtMoney(line.qty * g.unitPrice, draft.currency, locale)}
+                              </span>
+                              <button
+                                className="btn icon sm"
+                                title={t('soRemoveLineTooltip')}
+                                disabled={draft.lines.length === 1}
+                                onClick={() => removeLine(idx)}
+                              >
+                                <Icon name="x" size={11} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {editable && (
-                <div className="help" style={{ marginTop: 8 }}>
-                  {t('soEditReplacesHint')}
+                <div className="help" style={{ marginTop: 10 }}>
+                  {t('soEditPriceHint')} {t('soEditReplacesHint')}
                 </div>
               )}
 
