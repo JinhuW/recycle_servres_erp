@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { getCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import type { Env, OAuthScope, User } from '../types';
-import { authorizationServerMetadata, protectedResourceMetadata } from './metadata';
+import { authorizationServerMetadata, protectedResourceMetadata, resolvePublicOrigin } from './metadata';
 import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
@@ -14,14 +14,21 @@ import { oauthGrantsTotal } from '../metrics';
 const CODE_TTL_SEC = 600;
 const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
+const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write']);
+// market:write through the interactive code flow is reserved for managers; a
+// non-manager's consent yields a read-only grant. Service clients still get
+// write via the admin-minted client_credentials path.
+const dropWriteUnlessManager = (scopes: string[], role: string | undefined): string[] =>
+  role === 'manager' ? scopes : scopes.filter(s => s !== 'market:write');
+
 const wellKnown = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 wellKnown.get('/oauth-authorization-server', (c) =>
-  c.json(authorizationServerMetadata(c.env)),
+  c.json(authorizationServerMetadata(resolvePublicOrigin(c))),
 );
 
 wellKnown.get('/oauth-protected-resource', (c) =>
-  c.json(protectedResourceMetadata(c.env)),
+  c.json(protectedResourceMetadata(resolvePublicOrigin(c))),
 );
 
 export default wellKnown;
@@ -59,12 +66,13 @@ oauth.post('/register', async (c) => {
   const allowedGrants = new Set(['authorization_code', 'refresh_token']);
   const grants = (body.grant_types ?? ['authorization_code', 'refresh_token']).filter(g => allowedGrants.has(g));
   if (grants.length === 0) return c.json({ error: 'no allowed grant_types requested' }, 400);
-  // Narrow rather than reject: MCP SDKs request the union of advertised
-  // scopes_supported (market:read + market:write). Only market:read is
-  // grantable via DCR — market:write is reserved for manually-minted
-  // scraper clients. RFC 7591 §3.2.1 lets the AS return a narrower scope.
+  // Narrow to the advertised scope set, but keep market:write: registration
+  // alone grants nothing — a DCR client can only mint a token through the
+  // interactive code flow, where market:write survives only if the consenting
+  // user is a manager (see /authorize + /authorize/consent). RFC 7591 §3.2.1
+  // lets the AS return a narrower scope than requested.
   const requested = body.scope?.split(' ').filter(Boolean) ?? ['market:read'];
-  const scopes = requested.filter(s => s === 'market:read');
+  const scopes = requested.filter(s => KNOWN_SCOPES.has(s));
   if (scopes.length === 0) scopes.push('market:read');
   // token_endpoint_auth_method: "none" = public client (PKCE only, no secret).
   // Honour it so the SDK that asked for it isn't handed a secret it'll discard.
@@ -111,9 +119,9 @@ oauth.get('/authorize', async (c) => {
     return redirectWithError('invalid_request');
   }
   // Narrow rather than reject: an MCP SDK may request the union of
-  // scopes_supported (market:read + market:write) even after DCR returned
-  // only market:read. Drop scopes the client wasn't registered for; only
-  // fail if nothing remains. RFC 6749 §3.3 permits a narrower granted scope.
+  // scopes_supported (market:read + market:write). Drop scopes the client
+  // wasn't registered for; only fail if nothing remains. RFC 6749 §3.3 permits
+  // a narrower granted scope.
   const requestedRaw = (q.scope ?? '').split(' ').filter(Boolean);
   const requested = requestedRaw.length === 0
     ? [...client.scopes]
@@ -129,12 +137,17 @@ oauth.get('/authorize', async (c) => {
     const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
     return c.redirect(`/login?next=${next}`, 302);
   }
+  // Gate market:write on the consenter's role so the consent screen shows the
+  // scope that will actually be granted. The role here comes from the 15-min
+  // `at` JWT; /authorize/consent re-checks it against the live DB record.
+  const granted = dropWriteUnlessManager(requested, payload.role);
+  if (granted.length === 0) return redirectWithError('invalid_scope');
   // Park the request server-side; hand the SPA an opaque handle so the long
   // PKCE challenge stays out of the URL on the consent screen.
   const req = randomBytes(16).toString('hex');
   await sql`
     INSERT INTO oauth_pending_consent (req, client_id, redirect_uri, scopes, code_challenge, state, expires_at, user_id_from_cookie)
-    VALUES (${req}, ${q.client_id}, ${q.redirect_uri}, ${requested}, ${q.code_challenge}, ${q.state ?? null},
+    VALUES (${req}, ${q.client_id}, ${q.redirect_uri}, ${granted}, ${q.code_challenge}, ${q.state ?? null},
             NOW() + INTERVAL '10 minutes', ${payload.sub})
   `;
   return c.redirect(`/authorize?req=${req}`, 302);
@@ -170,6 +183,10 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
     if (row.user_id_from_cookie !== user.id) {
       return { ok: false, status: 400, error: 'user_mismatch' };
     }
+    // Authoritative scope gate: the pending row was frozen at /authorize using
+    // the JWT's role; re-derive against the live DB role so a demotion (or a
+    // tampered row) can't leak market:write to a non-manager.
+    const scopes = dropWriteUnlessManager(row.scopes, user.role);
     const code = randomBytes(32).toString('base64url');
     const expires = new Date(Date.now() + CODE_TTL_SEC * 1000);
     await tx`
@@ -177,7 +194,7 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
         (code_hash, client_id, user_id, redirect_uri, scopes, code_challenge, expires_at)
       VALUES
         (${sha256hex(code)}, ${row.client_id}, ${user.id}, ${row.redirect_uri},
-         ${row.scopes}, ${row.code_challenge}, ${expires})
+         ${scopes}, ${row.code_challenge}, ${expires})
     `;
     await tx`DELETE FROM oauth_pending_consent WHERE req = ${reqHandle}`;
     return { ok: true, redirectUri: row.redirect_uri, code, state: row.state };

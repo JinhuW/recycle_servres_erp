@@ -12,6 +12,9 @@ describe('OAuth discovery', () => {
     expect(r.status).toBe(200);
     const body = r.body as Record<string, unknown>;
     expect(typeof body.issuer).toBe('string');
+    // No Host/X-Forwarded-Host on this in-memory request, so the resolver falls
+    // back to the configured origin. Real HTTP (and the proxied case below)
+    // always carries a Host. See the X-Forwarded-Host test for the derived path.
     expect(body.issuer).toBe('http://localhost:8787');
     expect(body.response_types_supported).toEqual(['code']);
     expect(body.token_endpoint_auth_signing_alg_values_supported).toEqual(['EdDSA']);
@@ -30,6 +33,29 @@ describe('OAuth discovery', () => {
     const body = r.body as Record<string, unknown>;
     expect((body.authorization_servers as string[])[0]).toMatch(/^https?:\/\//);
     expect((body.scopes_supported as string[])).toEqual(expect.arrayContaining(['market:read','market:write']));
+  });
+
+  it('derives the issuer from the proxied Host (not the loopback env)', async () => {
+    const r = await api('GET', '/.well-known/oauth-authorization-server', {
+      headers: {
+        'X-Forwarded-Host': 'inventory.recycleservers.com',
+        'X-Forwarded-Proto': 'https',
+      },
+    });
+    const body = r.body as Record<string, unknown>;
+    expect(body.issuer).toBe('https://inventory.recycleservers.com');
+    expect(body.authorization_endpoint).toBe('https://inventory.recycleservers.com/oauth/authorize');
+    expect((body.token_endpoint as string)).toBe('https://inventory.recycleservers.com/oauth/token');
+  });
+
+  it('never emits a Host outside CORS_ALLOWED_ORIGINS (injection-proof)', async () => {
+    const r = await api('GET', '/.well-known/oauth-authorization-server', {
+      env: { CORS_ALLOWED_ORIGINS: 'https://inventory.recycleservers.com' },
+      headers: { 'X-Forwarded-Host': 'evil.example.com', 'X-Forwarded-Proto': 'https' },
+    });
+    // The injected host is not allowlisted, so the resolver falls back to the
+    // configured origin rather than advertising the attacker's domain.
+    expect((r.body as Record<string, unknown>).issuer).toBe('https://inventory.recycleservers.com');
   });
 });
 
@@ -71,6 +97,26 @@ describe('DCR /oauth/register', () => {
         body: { client_name: 'evil', redirect_uris: ['http://evil.example.com/cb'] },
       });
       expect(r.status).toBe(400);
+    } finally {
+      process.env.OAUTH_DCR_OPEN = prev;
+    }
+  });
+
+  it('keeps market:write when requested (granted only to managers at consent)', async () => {
+    const prev = process.env.OAUTH_DCR_OPEN;
+    process.env.OAUTH_DCR_OPEN = 'true';
+    try {
+      const r = await api('POST', '/oauth/register', {
+        body: {
+          client_name: 'claude-ai write',
+          redirect_uris: ['https://claude.ai/oauth/callback'],
+          grant_types: ['authorization_code','refresh_token'],
+          scope: 'market:read market:write',
+        },
+      });
+      expect(r.status).toBe(201);
+      expect(((r.body as Record<string, unknown>).scope as string).split(' '))
+        .toEqual(expect.arrayContaining(['market:read', 'market:write']));
     } finally {
       process.env.OAUTH_DCR_OPEN = prev;
     }
@@ -263,6 +309,49 @@ describe('/oauth/token', () => {
     expect(typeof body.refresh_token).toBe('string');
     expect(body.token_type).toBe('Bearer');
     expect(body.scope).toBe('market:read');
+  });
+
+  // Drives a write-capable client through authorize → consent → token, returning
+  // the granted scope string. Mirrors the interactive MCP flow (Claude.ai).
+  async function interactiveGrant(consenter: string) {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'tk-write', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'],
+      scopes: ['market:read', 'market:write'],
+      createdBy: u, public: false,
+    });
+    const verifier = generateVerifier();
+    const challenge = challengeS256(verifier);
+    const { token } = await loginAs(consenter);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb&code_challenge=${challenge}&code_challenge_method=S256&scope=market:read%20market:write&state=st`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const consent = await api('POST', '/oauth/authorize/consent', { body: { req }, token, redirect: 'manual' });
+    const code = new URL(consent.headers.get('location')!).searchParams.get('code')!;
+    const r = await api('POST', '/oauth/token', {
+      form: {
+        grant_type: 'authorization_code', code, code_verifier: verifier,
+        redirect_uri: 'https://example.com/cb',
+        client_id: c.clientId, client_secret: c.clientSecret!, // pragma: allowlist secret
+      },
+    });
+    expect(r.status).toBe(200);
+    return (r.body as Record<string, unknown>).scope as string;
+  }
+
+  it('interactive flow grants market:write when the consenter is a manager', async () => {
+    const scope = await interactiveGrant(ALEX);
+    expect(scope.split(' ')).toEqual(expect.arrayContaining(['market:read', 'market:write']));
+  });
+
+  it('interactive flow drops market:write for a non-manager consenter', async () => {
+    const scope = await interactiveGrant(MARCUS);
+    expect(scope).toBe('market:read');
   });
 
   it('authorization_code rejects code reuse', async () => {

@@ -58,12 +58,12 @@ export async function signToken(env: Env, user: { id: string; email: string; rol
   );
 }
 
-export async function verifyToken(env: Env, token: string): Promise<{ sub: string } | null> {
+export async function verifyToken(env: Env, token: string): Promise<{ sub: string; role?: string } | null> {
   try {
     const ok = await jwt.verify(token, env.JWT_SECRET);
     if (!ok) return null;
     const { payload } = jwt.decode(token);
-    return payload as { sub: string };
+    return payload as { sub: string; role?: string };
   } catch {
     return null;
   }
