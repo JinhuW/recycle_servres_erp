@@ -4,6 +4,9 @@
 
 export type Env = {
   DATABASE_URL?: string;
+  // Postgres pool size cap. Unset → 10 (prod default). The test harness sets it
+  // low so its many parallel worker pools stay under max_connections.
+  DB_POOL_MAX?: string;
   JWT_SECRET: string;
   JWT_ISSUER?: string;
   STUB_LOW_CONF?: string;

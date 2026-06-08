@@ -11,7 +11,9 @@ if (!url) {
   console.error('DATABASE_URL is not set. Add it to repo-root .env');
   process.exit(1);
 }
-const sql = postgres(url, { onnotice: () => {} });
+// Seeding is sequential, so a small pool suffices. SEED_POOL_MAX lets the test
+// harness shrink it further (many seed subprocesses run in parallel there).
+const sql = postgres(url, { max: Number(process.env.SEED_POOL_MAX) || 8, onnotice: () => {} });
 
 // ── Deterministic PRNG (mirrors data.jsx) ────────────────────────────────────
 const seed = (s) => () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };

@@ -6,6 +6,9 @@ import type { Env } from '../../src/types';
 // access so tests can flip the DCR gate or seed a signing key in a beforeAll.
 const TEST_ENV_BASE = {
   DATABASE_URL: TEST_DATABASE_URL,
+  // Tiny app pool: the suite runs many worker processes in parallel, each with
+  // its own pool — keep the total well under Postgres' max_connections.
+  DB_POOL_MAX: '3',
   JWT_SECRET: 'test-secret-' + Math.random().toString(36).slice(2),
   JWT_ISSUER: 'recycle-erp-test',
   OAUTH_ISSUER_URL: 'http://localhost:8787',

@@ -85,21 +85,28 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 
 ## Tests
 
-- Backend tests are **integration tests against a real Postgres**
-  (`vitest.config.ts` runs `pool: 'forks'` + `fileParallelism: false`).  They
-  need `127.0.0.1:5432` reachable — `docker-compose.override.yml` does that
-  for local dev.  Production compose doesn't ship the override.
-- `resetDb()` in `tests/helpers/db.ts` is **advisory-locked** to serialize
-  catalog DDL across the suite + the external `seed.mjs` process.  If you
-  see a flood of unrelated test failures, suspect the harness (lock
-  contention, stale connections) before logic regressions.  Don't disable
-  the lock.
+- Backend tests are **integration tests against a real Postgres** — they
+  exercise the real SQL, migrations, FK rules, and status guards (the layer
+  most likely to break), so the DB dependency is intentional, not a smell.
+  They need `127.0.0.1:5432` reachable — `docker-compose.override.yml` does
+  that for local dev.  Production compose doesn't ship the override.
+- **Test files run in PARALLEL** (`vitest.config.ts`: `pool: 'forks'`, files
+  parallel, `maxForks` 8 by default — override with `VITEST_MAX_FORKS`).  Each
+  fork owns a **private database**: `global-setup.ts` hands every worker a
+  run-scoped base name; `tests/helpers/db.ts` suffixes it with `VITEST_POOL_ID`
+  (`<run>_w<id>`).  The suite runs in ~15s, not ~8min.
+- `resetDb()` is a **template clone**, not a re-migrate.  Each worker builds a
+  migrated+seeded **template** DB once (`<run>_w<id>_tmpl`), then every test
+  drops its working DB and re-clones it via `CREATE DATABASE … TEMPLATE`
+  (~30ms vs ~850ms for the old drop→migrate→seed).  This is why there's no
+  per-test seed subprocess and the suite stays under `max_connections=100`
+  even at high parallelism.  Keep test-side pools small (`DB_POOL_MAX`,
+  `SEED_POOL_MAX`) — many parallel workers share the connection budget.
 - Frontend tests are sparse (~6 files).  Add coverage when you add a
   non-trivial pure helper; UI behavior is mostly validated by visiting it.
 - **To run a single backend test file**, `cd apps/backend && npx vitest run
   tests/foo.test.ts` — `pnpm --filter recycle-erp-backend test -- tests/foo.test.ts`
-  silently drops the path and runs the full ~400-test suite (which then
-  trips the known shared-DB flakiness in `test_harness_resetdb`).
+  silently drops the path and runs the full suite.
 
 ## Storage & OCR
 

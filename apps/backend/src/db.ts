@@ -24,7 +24,10 @@ export function getDb(env: Env): Sql {
   let pool = pools.get(url);
   if (!pool) {
     pool = postgres(url, {
-      max: 10,
+      // Default 10 for prod's single pool; the test harness sets this low
+      // (DB_POOL_MAX) because it runs many worker processes in parallel, each
+      // with its own pool, and must stay under Postgres' max_connections.
+      max: env.DB_POOL_MAX ? Number(env.DB_POOL_MAX) : 10,
       idle_timeout: 20,
       connect_timeout: 10,
       prepare: false, // disable prepared statements (safe with poolers; no perf need here)

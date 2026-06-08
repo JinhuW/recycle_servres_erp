@@ -51,29 +51,29 @@ export default async function setup() {
   const runDb = `${baseDbName}_${process.pid}_${Date.now().toString(36)}`
     .replace(/[^A-Za-z0-9_]/g, '_');
 
-  const admin = postgres(adminUrl(base), { max: 1, onnotice: () => {} });
-  try {
-    await admin.unsafe(`CREATE DATABASE "${runDb}"`); // nosec — runDb is a sanitised internal identifier, not user input
-  } finally {
-    await admin.end({ timeout: 5 });
-  }
-
-  // Point every test connection — resetDb's pool, the app-under-test pool, and
-  // the seed subprocess (all read TEST_DATABASE_URL) — at the ephemeral DB.
-  // globalSetup runs before the worker forks, so they inherit this env var.
+  // We don't create `runDb` itself — it's only a name prefix. Each vitest
+  // worker creates its own `<runDb>_w<poolId>` database (see db.ts →
+  // ensureWorkerDb) so test files run in parallel against private databases.
+  // globalSetup runs before the workers fork, so they inherit this env var.
   u.pathname = `/${runDb}`;
   process.env.TEST_DATABASE_URL = u.toString();
 
-  // Teardown: drop the ephemeral DB. Terminate any lingering backends first so
-  // DROP doesn't trip "database is being accessed by other users".
+  // Teardown: drop every per-worker DB this run created. Terminate any lingering
+  // backends first so DROP doesn't trip "database is being accessed by others".
   return async () => {
     const a = postgres(adminUrl(base), { max: 1, onnotice: () => {} });
     try {
-      await a.unsafe( // nosec — runDb is a sanitised internal identifier, not user input
-        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-           WHERE datname = '${runDb}' AND pid <> pg_backend_pid()`,
-      );
-      await a.unsafe(`DROP DATABASE IF EXISTS "${runDb}"`); // nosec — runDb is a sanitised internal identifier, not user input
+      // `\_` matches a literal underscore (LIKE treats bare `_` as a wildcard).
+      const dbs = await a<{ datname: string }[]>`
+        SELECT datname FROM pg_database WHERE datname LIKE ${runDb + '\\_w%'}
+      `;
+      for (const { datname } of dbs) {
+        await a.unsafe( // nosec — datname is prefix-matched against our sanitised run name
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+             WHERE datname = '${datname}' AND pid <> pg_backend_pid()`,
+        );
+        await a.unsafe(`DROP DATABASE IF EXISTS "${datname}"`); // nosec — internal, prefix-matched identifier
+      }
     } finally {
       await a.end({ timeout: 5 });
     }
