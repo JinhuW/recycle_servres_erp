@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
 import { verifyAccessToken } from './tokens';
+import { resolvePublicOrigin } from './metadata';
 import type { Env, OAuthCtx, OAuthScope } from '../types';
 
 // RFC 6750 bearer-token middleware. 401 (with WWW-Authenticate pointing at
@@ -11,7 +12,7 @@ export function bearerGuard(opts: { scopes: OAuthScope[] }): MiddlewareHandler<{
 }> {
   return async (c, next) => {
     const env = c.env;
-    const wwwAuth = `Bearer realm="recycle-erp", error="invalid_token", resource_metadata="${env.OAUTH_ISSUER_URL ?? ''}/.well-known/oauth-protected-resource"`;
+    const wwwAuth = `Bearer realm="recycle-erp", error="invalid_token", resource_metadata="${resolvePublicOrigin(c)}/.well-known/oauth-protected-resource"`;
     const header = c.req.header('authorization') ?? '';
     if (!header.toLowerCase().startsWith('bearer ')) {
       c.header('WWW-Authenticate', wwwAuth);
