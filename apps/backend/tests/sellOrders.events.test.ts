@@ -337,6 +337,40 @@ describe('sell-order audit events', () => {
     expect(r.body.events[0].actor?.id).toBe(user.id);
   });
 
+  it('GET /:id/events resolves a customer change to customer names, not UUIDs', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token);
+    const customers = (await api<{ items: { id: string; name: string }[] }>(
+      'GET', '/api/customers', { token })).body.items;
+    expect(customers.length).toBeGreaterThanOrEqual(2);
+    const from = customers[0];
+    const to   = customers[1];
+
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId: from.id,
+        lines: [{ inventoryId: line.id, category: 'RAM', label: 'X', partNumber: 'P', qty: 1, unitPrice: line.sell_price, warehouseId: 'WH-LA1', condition: 'Pulled — Tested' }],
+      },
+    });
+    const id = create.body.id;
+
+    const patch = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { customerId: to.id },
+    });
+    expect(patch.status).toBe(200);
+
+    const r = await api<{ events: Array<{ kind: string; detail: { changes?: Array<{ field: string; from: unknown; to: unknown }> } }> }>(
+      'GET', `/api/sell-orders/${id}/events`, { token });
+    expect(r.status).toBe(200);
+    const meta = r.body.events.find(e => e.kind === 'meta_changed');
+    const change = meta?.detail.changes?.find(ch => ch.field === 'customer_id');
+    expect(change).toBeTruthy();
+    // The audit detail stores raw UUIDs; the endpoint resolves them to names.
+    expect(change!.from).toBe(from.name);
+    expect(change!.to).toBe(to.name);
+  });
+
   it('GET /:id/events is forbidden for non-manager', async () => {
     const { token: managerTok } = await loginAs(ALEX);
     const line = await freeSellableLine(managerTok);

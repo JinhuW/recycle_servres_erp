@@ -1149,16 +1149,52 @@ sellOrders.get('/:id/events', async (c) => {
     actor_initials: string | null;
   }>;
 
+  // The audit detail stores the raw `customer_id` UUID in meta_changed diffs.
+  // Resolve those to customer names so the timeline reads "Acme Corp", not a
+  // UUID. Batch the lookup across the whole timeline to keep it one query.
+  const customerIds = new Set<string>();
+  for (const r of rows) {
+    if (r.kind !== 'meta_changed') continue;
+    const changes = (r.detail?.changes as Array<{ field: string; from: unknown; to: unknown }>) ?? [];
+    for (const ch of changes) {
+      if (ch.field !== 'customer_id') continue;
+      if (typeof ch.from === 'string') customerIds.add(ch.from);
+      if (typeof ch.to === 'string') customerIds.add(ch.to);
+    }
+  }
+  const customerNames = new Map<string, string>();
+  if (customerIds.size > 0) {
+    const names = await sql`
+      SELECT id, name FROM customers WHERE id = ANY(${[...customerIds]}::uuid[])
+    ` as Array<{ id: string; name: string }>;
+    for (const n of names) customerNames.set(n.id, n.name);
+  }
+  const resolveCustomer = (v: unknown): unknown =>
+    typeof v === 'string' && customerNames.has(v) ? customerNames.get(v) : v;
+
   return c.json({
-    events: rows.map(r => ({
-      id: r.id,
-      kind: r.kind,
-      detail: r.detail,
-      createdAt: r.created_at,
-      actor: r.actor_id
-        ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
-        : null,
-    })),
+    events: rows.map(r => {
+      let detail = r.detail;
+      if (r.kind === 'meta_changed' && customerNames.size > 0) {
+        const changes = (detail?.changes as Array<{ field: string; from: unknown; to: unknown }>) ?? [];
+        detail = {
+          ...detail,
+          changes: changes.map(ch =>
+            ch.field === 'customer_id'
+              ? { ...ch, from: resolveCustomer(ch.from), to: resolveCustomer(ch.to) }
+              : ch),
+        };
+      }
+      return {
+        id: r.id,
+        kind: r.kind,
+        detail,
+        createdAt: r.created_at,
+        actor: r.actor_id
+          ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
+          : null,
+      };
+    }),
   });
 });
 
