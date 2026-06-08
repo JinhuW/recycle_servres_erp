@@ -67,6 +67,19 @@ type SellOrderLine = {
   maxQty: number;
 };
 
+// Group saved-order lines by warehouse so the picking/shipping view lists
+// everything that ships from one place together — mirrors the draft builder's
+// warehouse rhythm. Lines keep their order; groups appear first-seen.
+function groupLinesByWarehouse(lines: SellOrderLine[]) {
+  const map = new Map<string, { warehouse: string | null; lines: SellOrderLine[] }>();
+  for (const l of lines) {
+    const key = l.warehouseId ?? '__none';
+    if (!map.has(key)) map.set(key, { warehouse: l.warehouse, lines: [] });
+    map.get(key)!.lines.push(l);
+  }
+  return [...map.values()];
+}
+
 // Editable line shape used by the edit modal (mirrors the new-order builder).
 type EditLine = {
   _cid: string;                 // stable client id for React keys (never sent to the API)
@@ -788,24 +801,37 @@ function SellOrderDetail({
                   </tr>
                 </thead>
                 <tbody>
-                  {!editable && order.lines.map(l => (
-                    <tr key={l.id}>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{l.label}</div>
-                        <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
-                      </td>
-                      <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
-                      <td className="num mono">{l.qty}</td>
-                      <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
-                      <td className="num mono" style={{ fontWeight: 500 }}>
-                        {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
-                        {order.currency !== 'USD' && (
-                          <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
-                            {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
+                  {!editable && groupLinesByWarehouse(order.lines).map((g, gi) => (
+                    <Fragment key={(g.warehouse ?? '__none') + gi}>
+                      <tr>
+                        <td colSpan={5} style={{ padding: 0 }}>
+                          <div className="so-wh-head">
+                            <Icon name="warehouse" size={12} />
+                            <span>{g.warehouse ?? t('sodNoWarehouse')}</span>
+                            <span className="so-wh-count">{g.lines.length}</span>
                           </div>
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {g.lines.map(l => (
+                        <tr key={l.id}>
+                          <td>
+                            <div style={{ fontWeight: 500 }}>{l.label}</div>
+                            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{l.partNumber}</div>
+                          </td>
+                          <td style={{ fontSize: 12 }}>{l.warehouse ?? '—'}</td>
+                          <td className="num mono">{l.qty}</td>
+                          <td className="num mono">{fmtMoney(l.nativeUnitPrice, order.currency, locale)}</td>
+                          <td className="num mono" style={{ fontWeight: 500 }}>
+                            {fmtMoney(l.qty * l.nativeUnitPrice, order.currency, locale)}
+                            {order.currency !== 'USD' && (
+                              <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 400 }}>
+                                {t('soUsdEquiv', { usd: fmtUSD(l.lineTotal, locale) })}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                   {editable && draft.lines.map((l, idx) => (
                     <tr key={l._cid}>
