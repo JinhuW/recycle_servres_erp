@@ -43,17 +43,17 @@ describe('MCP server /api/mcp', () => {
     });
     expect(r.status).toBe(200);
     const body = r.body as any;
-    expect(body.result.serverInfo.name).toBe('recycle-erp-market');
+    expect(body.result.serverInfo.name).toBe('recycle-erp-mcp');
     expect(body.result.capabilities.tools).toBeDefined();
   });
 
-  it('tools/list returns list_market_values + get_market_value', async () => {
+  it('tools/list filters by granted scope (read-only token: read tools only)', async () => {
     const r = await api('POST', '/api/mcp', {
       headers: { authorization: `Bearer ${bearerRead}` },
       body: { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
     });
     const names = (r.body as any).result.tools.map((t: any) => t.name).sort();
-    expect(names).toEqual(['get_market_value','list_market_values','set_market_price']);
+    expect(names).toEqual(['get_market_value', 'list_market_values']);
   });
 
   it('tools/call list_market_values returns rows', async () => {

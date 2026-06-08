@@ -170,7 +170,7 @@ app.route('/oauth', oauthRoutes);
 
 // MCP JSON-RPC endpoint — Bearer-authenticated (no cookies, no CSRF). Sits
 // outside the cookie-auth /api/* tree so authMiddleware doesn't run.
-app.use('/api/mcp', bearerGuard({ scopes: ['market:read'] }));
+app.use('/api/mcp', bearerGuard({ scopes: [] }));
 app.post('/api/mcp', (c) => handleMcp(c));
 app.get('/api/mcp', (c) => {
   c.header('Allow', 'POST');
