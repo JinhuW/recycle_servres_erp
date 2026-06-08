@@ -240,5 +240,7 @@ Mirror existing MCP + sell-order test style (`pool: 'forks'`,
 
 - Default customer is stored as the **`mcp.sellOrderCustomerId` setting**
   (default = the MCP customer UUID), not a hardcoded constant.
-- Search results **include an advisory `referencePrice`** (market `last_price`
-  by part number) to help the agent price lines.
+- Search results **include an advisory `sellPrice`** — the inventory line's own
+  assigned `order_lines.sell_price` (USD), the value the desktop draft pre-fills
+  as the default unit price. More direct than a market `last_price` lookup and
+  needs no extra join; the agent still chooses each line's `unitPrice`.
