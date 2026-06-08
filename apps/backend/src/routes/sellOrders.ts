@@ -327,11 +327,11 @@ sellOrders.get('/:id/packing-list', async (c) => {
   return pdfResponse(buf, `${head.id}-packing-list.pdf`);
 });
 
-// Per-order spreadsheet. Mirrors the Inventory export's columns (so a sold line
-// reads identically to its source stock row) and appends the realized sale
-// Price / Profit / Line total. Workbook carries a Summary tab plus one tab per
-// warehouse — the warehouse staff open just their own. Manager-only like every
-// route here; the cost/profit columns are never for purchaser eyes anyway.
+// Per-order spreadsheet. Mirrors the Inventory export's descriptive columns (so
+// a sold line reads identically to its source stock row) and appends the
+// realized sale Price / Line total. Workbook carries a Summary tab plus one tab
+// per warehouse — the warehouse staff open just their own. Manager-only like
+// every route here.
 const SO_DETAIL_COLS: XlsxColumn[] = [
   { header: 'ID',           key: 'id',        width: 12 },
   { header: 'Date',         key: 'date',      width: 12 },
@@ -345,19 +345,12 @@ const SO_DETAIL_COLS: XlsxColumn[] = [
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: 'Unit cost',    key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
-  { header: 'Sell price',   key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
-  // The realized sale price on this order, distinct from the inventory line's
-  // listed Sell price above.
+  // The realized sale price on this order.
   { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
   // Currency of the Price / Line total columns — USD, or CNY (native RMB) for
-  // foreign orders. Profit / Unit cost stay USD regardless.
+  // foreign orders.
   { header: 'Currency',     key: 'currency',  width: 9 },
-  { header: 'Profit',       key: 'profit',    width: 12, numFmt: '#,##0.00' },
-  { header: 'Margin %',     key: 'margin',    width: 10, numFmt: '#,##0.0' },
   { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Submitted by', key: 'submitter', width: 18 },
-  { header: 'Status',       key: 'status',    width: 14 },
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
@@ -392,16 +385,12 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       w.short AS warehouse_short,
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-      l.part_number, l.condition, l.unit_cost::float AS unit_cost,
-      l.sell_price::float AS sell_price, l.status, l.health::float AS health,
+      l.part_number, l.condition, l.health::float AS health,
       l.rpm, l.created_at,
-      u.name AS user_name,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines l ON l.id = sol.inventory_id
-    LEFT JOIN orders o ON o.id = l.order_id
-    LEFT JOIN users  u ON u.id = o.user_id
     LEFT JOIN LATERAL (
       SELECT ls.delivery_url
       FROM label_scans ls
@@ -415,14 +404,11 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
 
   const data = rows.map((r) => {
     const hasInv = r.inv_id != null;
-    const unitCost = r.unit_cost == null ? null : Number(r.unit_cost);
-    // usdPrice drives profit/margin (cost is USD); displayPrice is what the
-    // Price / Line total cells show — native RMB on CNY orders, USD otherwise.
+    // displayPrice is what the Price / Line total cells show — native RMB on CNY
+    // orders, the USD realized price otherwise.
     const usdPrice = Number(r.sell_unit_price ?? 0);
     const displayPrice = isCny ? Number(r.source_unit_price ?? r.sell_unit_price ?? 0) : usdPrice;
     const qty = Number(r.sell_qty ?? 0);
-    const profit = unitCost == null ? null : (usdPrice - unitCost) * qty;
-    const margin = unitCost != null && usdPrice > 0 ? ((usdPrice - unitCost) / usdPrice) * 100 : null;
     const category = (r.category ?? r.sol_category ?? '') as string;
     return {
       warehouse: (r.warehouse_short ?? '') as string,
@@ -437,15 +423,9 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       part: r.part_number ?? r.sol_part ?? '',
       condition: r.condition ?? r.sol_condition ?? '',
       qty,
-      unitCost,
-      sellPrice: r.sell_price == null ? null : Number(r.sell_price),
       price: displayPrice,
       currency: head.currency_code,
-      profit,
-      margin,
       lineTotal: +(qty * displayPrice).toFixed(2),
-      submitter: r.user_name ?? '',
-      status: r.status ?? '',
       imageUrl: r.image_url ?? '',
     };
   });

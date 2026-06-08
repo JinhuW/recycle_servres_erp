@@ -146,6 +146,27 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     }
   });
 
+  it('omits cost/profit/internal columns from the workbook', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createSellOrder(token);
+
+    const res = await getRaw(`/api/sell-orders/${id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Summary')!;
+    const headers = (ws.getRow(1).values as unknown[]).map((v) => String(v ?? ''));
+
+    for (const gone of ['Unit cost', 'Sell price', 'Profit', 'Margin %', 'Submitted by', 'Status']) {
+      expect(headers).not.toContain(gone);
+    }
+    for (const kept of ['ID', 'Item', 'Qty', 'Price', 'Currency', 'Line total', 'Image URL']) {
+      expect(headers).toContain(kept);
+    }
+  });
+
   it('404s an unknown sell order', async () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/sell-orders/SO-does-not-exist/spreadsheet', token);
