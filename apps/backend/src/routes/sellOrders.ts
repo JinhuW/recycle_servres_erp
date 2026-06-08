@@ -11,7 +11,11 @@ import {
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
-import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
+import {
+  buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
+  type XlsxColumn, type XlsxSheet,
+} from '../lib/xlsx';
+import { invLabel, invSpec } from './inventory';
 import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
@@ -321,6 +325,138 @@ sellOrders.get('/:id/packing-list', async (c) => {
   });
 
   return pdfResponse(buf, `${head.id}-packing-list.pdf`);
+});
+
+// Per-order spreadsheet. Mirrors the Inventory export's columns (so a sold line
+// reads identically to its source stock row) and appends the realized sale
+// Price / Profit / Line total. Workbook carries a Summary tab plus one tab per
+// warehouse — the warehouse staff open just their own. Manager-only like every
+// route here; the cost/profit columns are never for purchaser eyes anyway.
+const SO_DETAIL_COLS: XlsxColumn[] = [
+  { header: 'ID',           key: 'id',        width: 12 },
+  { header: 'Date',         key: 'date',      width: 12 },
+  { header: 'Category',     key: 'category',  width: 10 },
+  { header: 'Item',         key: 'item',      width: 30 },
+  { header: 'Type',         key: 'type',      width: 10 },
+  { header: 'Spec',         key: 'spec',      width: 26 },
+  { header: 'Rank',         key: 'rank',      width: 10 },
+  { header: 'Speed',        key: 'speed',     width: 10 },
+  { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Warehouse',    key: 'warehouse', width: 12 },
+  { header: 'Condition',    key: 'condition', width: 12 },
+  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
+  { header: 'Unit cost',    key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
+  { header: 'Sell price',   key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
+  // The realized sale price on this order, distinct from the inventory line's
+  // listed Sell price above.
+  { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
+  { header: 'Profit',       key: 'profit',    width: 12, numFmt: '#,##0.00' },
+  { header: 'Margin %',     key: 'margin',    width: 10, numFmt: '#,##0.0' },
+  { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
+  { header: 'Submitted by', key: 'submitter', width: 18 },
+  { header: 'Status',       key: 'status',    width: 14 },
+  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
+];
+
+sellOrders.get('/:id/spreadsheet', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const head = (await sql<{ id: string }[]>`
+    SELECT so.id FROM sell_orders so WHERE so.id = ${id} LIMIT 1
+  `)[0];
+  if (!head) return c.json({ error: 'Not found' }, 404);
+
+  // Root at the sold lines and reach back to each one's source inventory row
+  // (sol.inventory_id) for the descriptive columns. The joins are LEFT because a
+  // line can be added by hand or via MCP with no inventory link — those rows
+  // fall back to the line's own snapshot and leave cost-derived columns blank.
+  const rows = (await sql`
+    SELECT
+      sol.qty AS sell_qty, sol.unit_price::float AS sell_unit_price,
+      sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
+      sol.category AS sol_category, sol.condition AS sol_condition, sol.position,
+      w.short AS warehouse_short,
+      l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
+      l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
+      l.part_number, l.condition, l.unit_cost::float AS unit_cost,
+      l.sell_price::float AS sell_price, l.status, l.health::float AS health,
+      l.rpm, l.created_at,
+      u.name AS user_name,
+      img.delivery_url AS image_url
+    FROM sell_order_lines sol
+    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
+    LEFT JOIN order_lines l ON l.id = sol.inventory_id
+    LEFT JOIN orders o ON o.id = l.order_id
+    LEFT JOIN users  u ON u.id = o.user_id
+    LEFT JOIN LATERAL (
+      SELECT ls.delivery_url
+      FROM label_scans ls
+      WHERE ls.cf_image_id = l.scan_image_id
+      ORDER BY ls.created_at ASC
+      LIMIT 1
+    ) img ON TRUE
+    WHERE sol.sell_order_id = ${id}
+    ORDER BY sol.position
+  `) as Record<string, unknown>[];
+
+  const data = rows.map((r) => {
+    const hasInv = r.inv_id != null;
+    const unitCost = r.unit_cost == null ? null : Number(r.unit_cost);
+    const price = Number(r.sell_unit_price ?? 0);
+    const qty = Number(r.sell_qty ?? 0);
+    const profit = unitCost == null ? null : (price - unitCost) * qty;
+    const margin = unitCost != null && price > 0 ? ((price - unitCost) / price) * 100 : null;
+    const category = (r.category ?? r.sol_category ?? '') as string;
+    return {
+      warehouse: (r.warehouse_short ?? '') as string,
+      id: hasInv ? String(r.inv_id).slice(0, 8) : '',
+      date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
+      category,
+      item: hasInv ? invLabel(r) : (r.sol_label ?? ''),
+      type: category === 'RAM' ? (r.type ?? '') : '',
+      spec: hasInv ? invSpec(r) : (r.sol_sub ?? ''),
+      rank: r.rank ?? '',
+      speed: r.speed ?? '',
+      part: r.part_number ?? r.sol_part ?? '',
+      condition: r.condition ?? r.sol_condition ?? '',
+      qty,
+      unitCost,
+      sellPrice: r.sell_price == null ? null : Number(r.sell_price),
+      price,
+      profit,
+      margin,
+      lineTotal: +(qty * price).toFixed(2),
+      submitter: r.user_name ?? '',
+      status: r.status ?? '',
+      imageUrl: r.image_url ?? '',
+    };
+  });
+
+  // Summary tab carries every line; then one tab per warehouse, alphabetical
+  // with 'Unassigned' last — the same ordering the packing list uses.
+  const UNASSIGNED = 'Unassigned';
+  const byWarehouse = new Map<string, typeof data>();
+  for (const row of data) {
+    const key = row.warehouse || UNASSIGNED;
+    if (!byWarehouse.has(key)) byWarehouse.set(key, []);
+    byWarehouse.get(key)!.push(row);
+  }
+  const warehouseSheets: XlsxSheet[] = [...byWarehouse.keys()]
+    .sort((a, b) => {
+      if (a === UNASSIGNED) return 1;
+      if (b === UNASSIGNED) return -1;
+      return a.localeCompare(b);
+    })
+    .map((name) => ({ name, columns: SO_DETAIL_COLS, rows: byWarehouse.get(name)! }));
+
+  const buf = await buildXlsxWorkbook([
+    { name: 'Summary', columns: SO_DETAIL_COLS, rows: data },
+    ...warehouseSheets,
+  ]);
+  return xlsxResponse(buf, datedFilename(head.id));
 });
 
 // Create a new sell order from a set of inventory lines. The manager picks

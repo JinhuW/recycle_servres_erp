@@ -10,30 +10,61 @@ export type XlsxColumn = {
   numFmt?: string;
 };
 
-export async function buildXlsxBuffer(
-  sheetName: string,
-  columns: XlsxColumn[],
-  rows: Record<string, unknown>[],
-): Promise<Buffer> {
+export type XlsxSheet = {
+  name: string;
+  columns: XlsxColumn[];
+  rows: Record<string, unknown>[];
+};
+
+// Excel forbids \ / ? * : [ ] in tab names and caps them at 31 chars. Warehouse
+// codes are clean, but sanitize anyway so a future odd code can't corrupt the
+// workbook.
+function safeSheetName(name: string): string {
+  const cleaned = name.replace(/[\\/?*:[\]]/g, ' ').trim().slice(0, 31);
+  return cleaned || 'Sheet';
+}
+
+export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
   // exceljs is a heavy dependency only needed by the rarely-hit export
   // endpoints — load it lazily so its cost isn't paid on every process boot.
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(sheetName);
-  ws.columns = columns.map((col) => ({
-    header: col.header,
-    key: col.key,
-    width: col.width ?? 16,
-    style: col.numFmt ? { numFmt: col.numFmt } : {},
-  }));
-  ws.getRow(1).font = { bold: true };
-  ws.views = [{ state: 'frozen', ySplit: 1 }];
-  for (const r of rows) ws.addRow(r);
-  if (columns.length > 0) {
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
+  // Two tabs can't share a name; suffix collisions so a duplicate warehouse
+  // code (or one sanitized into another) can't throw mid-write.
+  const used = new Map<string, number>();
+  for (const sheet of sheets) {
+    let name = safeSheetName(sheet.name);
+    const seen = used.get(name);
+    if (seen != null) {
+      used.set(name, seen + 1);
+      name = safeSheetName(`${name} ${seen + 1}`);
+    } else {
+      used.set(name, 1);
+    }
+    const ws = wb.addWorksheet(name);
+    ws.columns = sheet.columns.map((col) => ({
+      header: col.header,
+      key: col.key,
+      width: col.width ?? 16,
+      style: col.numFmt ? { numFmt: col.numFmt } : {},
+    }));
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    for (const r of sheet.rows) ws.addRow(r);
+    if (sheet.columns.length > 0) {
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columns.length } };
+    }
   }
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out as ArrayBuffer);
+}
+
+export function buildXlsxBuffer(
+  sheetName: string,
+  columns: XlsxColumn[],
+  rows: Record<string, unknown>[],
+): Promise<Buffer> {
+  return buildXlsxWorkbook([{ name: sheetName, columns, rows }]);
 }
 
 const XLSX_MIME =

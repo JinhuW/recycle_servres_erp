@@ -429,6 +429,56 @@ button { font-family: inherit; cursor: pointer; }
   flex-shrink: 0;
 }
 .btn.icon-only.sm { width: 28px; height: 28px; }
+.btn .caret { transition: transform 0.15s; opacity: 0.6; }
+.btn[aria-expanded="true"] .caret { transform: rotate(180deg); opacity: 1; }
+
+/* ===== Popover menu (split-action dropdowns) =====
+   A small floating panel anchored to its trigger. `.up` flips it above the
+   trigger — used in the sell-order modal footer, which sits at the screen
+   bottom. The transparent backdrop captures the outside click that closes it. */
+.popmenu-wrap { position: relative; display: inline-flex; }
+.popmenu-backdrop { position: fixed; inset: 0; z-index: 40; }
+.popmenu {
+  position: absolute;
+  z-index: 41;
+  min-width: 232px;
+  right: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px -8px oklch(0.2 0.02 250 / 0.28), 0 2px 8px -2px oklch(0.2 0.02 250 / 0.18);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transform-origin: bottom right;
+  animation: popmenu-in 0.13s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.popmenu.up { bottom: calc(100% + 6px); }
+.popmenu:not(.up) { top: calc(100% + 6px); }
+@keyframes popmenu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.popmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  transition: background 0.1s;
+}
+.popmenu-item:hover { background: var(--bg-soft); }
+.popmenu-item .ico { color: var(--fg-muted); display: inline-grid; place-items: center; }
+.popmenu-item .txt { display: flex; flex-direction: column; line-height: 1.3; }
+.popmenu-item .txt b { font-size: 13px; font-weight: 600; }
+.popmenu-item .txt small { font-size: 11px; color: var(--fg-subtle); }
 
 /* ===== Avatar sizes (md/sm used in tables and modal headers) ===== */
 .avatar.md { width: 32px; height: 32px; font-size: 12px; }

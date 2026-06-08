@@ -146,7 +146,9 @@ const INV_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
-function invLabel(r: Record<string, unknown>): string {
+// Exported so the sell-order spreadsheet export can render the same Item/Spec
+// strings from a sold line's source inventory row.
+export function invLabel(r: Record<string, unknown>): string {
   const s = (v: unknown) => (v == null ? '' : String(v));
   switch (r.category) {
     case 'RAM': return [s(r.brand), s(r.capacity), s(r.generation)].filter(Boolean).join(' ');
@@ -155,7 +157,7 @@ function invLabel(r: Record<string, unknown>): string {
     default:    return s(r.description);
   }
 }
-function invSpec(r: Record<string, unknown>): string {
+export function invSpec(r: Record<string, unknown>): string {
   const s = (v: unknown) => (v == null ? '' : String(v));
   switch (r.category) {
     case 'RAM': return [s(r.classification), s(r.rank), r.speed ? `${r.speed}MHz` : ''].filter(Boolean).join(' · ');
