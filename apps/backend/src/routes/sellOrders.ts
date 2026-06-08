@@ -1,17 +1,16 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
-import type postgres from 'postgres';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
-import { nextHumanId } from '../lib/id-seq';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
+import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
 import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import {
@@ -29,51 +28,6 @@ type SqlClient = ReturnType<typeof getDb>;
 async function loadMetaStatuses(sql: SqlClient): Promise<Set<string>> {
   const rows = await sql`SELECT id FROM sell_order_statuses WHERE needs_meta = TRUE`;
   return new Set(rows.map(r => r.id as string));
-}
-
-type SellLine = { inventoryId?: string; qty: number };
-
-// Validate every inventory-backed line of a sell order. MUST run inside the
-// caller's transaction: each source row is locked FOR UPDATE so a concurrent
-// sell order cannot pass the same qty/sellability check and oversell (TOCTOU).
-// Also enforces the one-active-sell-order-per-line invariant — a line already
-// committed to an open (non-Done) sell order cannot be put on another.
-// `excludeOrderId` is the sell order being edited (so a PATCH may keep its
-// own already-committed lines); null for a brand-new order.
-// Returns a human error string, or null when every line is sellable.
-async function validateSellLines(
-  tx: postgres.TransactionSql,
-  lines: SellLine[],
-  excludeOrderId: string | null,
-): Promise<string | null> {
-  // Sum requested qty per source line first. Two lines on the SAME order that
-  // draw on the same inventory line must be checked against their COMBINED
-  // demand — checking each in isolation lets one order oversell a source line
-  // (e.g. two qty-6 lines against 10 in stock both pass 6<=10).
-  const demand = new Map<string, number>();
-  for (const l of lines) {
-    if (!l.inventoryId) continue; // manual line — nothing to reserve
-    demand.set(l.inventoryId, (demand.get(l.inventoryId) ?? 0) + l.qty);
-  }
-  for (const [inventoryId, qty] of demand) {
-    const inv = (await tx<{ qty: number; status: string }[]>`
-      SELECT qty, status FROM order_lines WHERE id = ${inventoryId} LIMIT 1 FOR UPDATE
-    `)[0];
-    if (!inv) return `inventory line ${inventoryId} not found`;
-    if (inv.status !== 'Reviewing' && inv.status !== 'Done')
-      return `inventory line not sellable (status=${inv.status})`;
-    if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
-    const taken = (await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n
-      FROM sell_order_lines sol
-      JOIN sell_orders so ON so.id = sol.sell_order_id
-      WHERE sol.inventory_id = ${inventoryId}
-        AND so.status NOT IN ('Done', 'Closed')
-        AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
-    `)[0];
-    if (taken.n > 0) return `inventory line ${inventoryId} is already on an open sell order`;
-  }
-  return null;
 }
 
 sellOrders.get('/', async (c) => {
@@ -413,64 +367,16 @@ sellOrders.post('/', async (c) => {
     }
   }
 
-  // Human-friendly id like SO-4001, allocated atomically (see id-seq.ts).
-  // Allocated inside the transaction so a rollback also rolls back the counter.
-  let nextId!: string;
-  // Resolve the FX rate BEFORE opening the transaction. getLatestRateToUsd can
-  // perform an outbound frankfurter fetch on a cold cache; running it inside
-  // sql.begin would hold the SO id-counter and inventory row locks across a
-  // third-party network call (serializing all sell-order creation and risking
-  // pool exhaustion). Every line shares the order's currency, so one snapshot.
-  const fx = await getLatestRateToUsd(sql, currency);
-  // Sellability is validated *inside* the tx (source rows locked FOR UPDATE)
-  // so two concurrent orders can't both pass the same check and oversell.
-  type Outcome = { code: 400; msg: string } | { code: 201 };
-  let outcome: Outcome = { code: 201 };
-  await sql.begin(async (tx) => {
-    nextId = await nextHumanId(tx, 'SO', 'SO');
-    const err = await validateSellLines(tx, body.lines, null);
-    if (err) { outcome = { code: 400, msg: err }; return; } // roll back — nothing written
-    const isNonUsd = currency !== 'USD';
-    await tx`
-      INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
-                               currency_code, fx_rate_to_usd, fx_source)
-      VALUES (${nextId}, ${body.customerId}, 'Draft', ${body.notes ?? null}, ${u.id},
-              ${currency}, ${fx.rate}, ${fx.source})
-    `;
-    for (let i = 0; i < body.lines.length; i++) {
-      const l = body.lines[i];
-      const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
-      await tx`
-        INSERT INTO sell_order_lines
-          (sell_order_id, inventory_id, category, label, sub_label, part_number,
-           qty, unit_price, warehouse_id, condition, position,
-           source_currency, source_unit_price, source_fx_rate_to_usd)
-        VALUES
-          (${nextId}, ${l.inventoryId ?? null}, ${l.category}, ${l.label},
-           ${l.subLabel ?? null}, ${l.partNumber ?? null},
-           ${l.qty}, ${unitPriceUsd},
-           ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i},
-           ${isNonUsd ? currency : null},
-           ${isNonUsd ? l.unitPrice : null},
-           ${isNonUsd ? fx.rate : null})
-      `;
-    }
-    await writeSellOrderEvent(tx, nextId, u.id, 'created', {
-      source: 'manager',
-      status: 'Draft',
-      lineCount: body.lines.length,
-      customerId: body.customerId,
-      currency,
-      fxRateToUsd: fx.rate,
-      fxSource: fx.source,
-    });
+  const result = await createSellOrderDraft(sql, {
+    customerId: body.customerId,
+    currency,
+    notes: body.notes ?? null,
+    lines: body.lines,
+    actorUserId: u.id,
+    source: 'manager',
   });
-  if (outcome.code !== 201) {
-    const e = outcome as { code: 400; msg: string };
-    return c.json({ error: e.msg }, 400);
-  }
-
-  return c.json({ ok: true, id: nextId }, 201);
+  if (!result.ok) return c.json({ error: result.error }, 400);
+  return c.json({ ok: true, id: result.id }, 201);
 });
 
 // Edit an existing sell order. Status / discount / notes are simple COALESCE
