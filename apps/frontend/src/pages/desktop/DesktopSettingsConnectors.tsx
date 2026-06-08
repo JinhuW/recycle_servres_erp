@@ -151,38 +151,52 @@ export function DesktopSettingsConnectors() {
           </div>
         </div>
         <div className="card-body">
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="input mono"
-              style={{ flex: 1 }}
-              placeholder={t('connectorsNamePlaceholder')}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') createServiceClient(); }}
-              disabled={creating}
-            />
-            <label className="input" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px' }}>
-              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}>
+          <div style={{ display: 'grid', gap: 14, maxWidth: 560 }}>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <label
+                htmlFor="connector-name"
+                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}
+              >
+                {t('connectorsNameLabel')}
+              </label>
+              <input
+                id="connector-name"
+                className="input mono"
+                placeholder={t('connectorsNamePlaceholder')}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') createServiceClient(); }}
+                disabled={creating}
+              />
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <label
+                htmlFor="connector-scope"
+                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}
+              >
                 {t('connectorsScopeLabel')}
-              </span>
+              </label>
               <select
+                id="connector-scope"
+                className="select"
                 value={newScope}
                 onChange={(e) => setNewScope(e.target.value as 'market' | 'sellorder')}
                 disabled={creating}
-                style={{ border: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
               >
                 <option value="market">{t('connectorsScopeMarket')}</option>
                 <option value="sellorder">{t('connectorsScopeSellOrder')}</option>
               </select>
-            </label>
-            <button
-              type="button"
-              className="btn accent"
-              onClick={createServiceClient}
-              disabled={creating || !newName.trim()}
-            >
-              {t('connectorsCreate')}
-            </button>
+            </div>
+            <div>
+              <button
+                type="button"
+                className="btn accent"
+                onClick={createServiceClient}
+                disabled={creating || !newName.trim()}
+              >
+                {t('connectorsCreate')}
+              </button>
+            </div>
           </div>
           {newSecret && (
             <div
