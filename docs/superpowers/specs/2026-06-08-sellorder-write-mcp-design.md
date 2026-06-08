@@ -236,8 +236,9 @@ Mirror existing MCP + sell-order test style (`pool: 'forks'`,
 - Endpoint: **one shared `/api/mcp`** with relaxed base guard + per-tool scope
   enforcement + `tools/list` scope-filtering (no second HTTP route).
 
-## Open points for spec review
+## Resolved (post-review)
 
-- Default-customer-as-setting vs hardcoded constant (proposed: setting).
-- Whether `referencePrice` in search results is worth the extra market lookup
-  (proposed: include, advisory).
+- Default customer is stored as the **`mcp.sellOrderCustomerId` setting**
+  (default = the MCP customer UUID), not a hardcoded constant.
+- Search results **include an advisory `referencePrice`** (market `last_price`
+  by part number) to help the agent price lines.
