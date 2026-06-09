@@ -9,9 +9,8 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
-import { ORDER_STATUSES, statusTone, isSellable } from '../../lib/status';
+import { ORDER_STATUSES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
-import { wsNumber } from '../../lib/workspace';
 import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
 import { DesktopInventoryTransfer, type TransferItem } from './DesktopInventoryTransfer';
@@ -124,6 +123,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   // lean. The backend drops them unless includeSold is set (or a status is
   // picked explicitly — see inventoryWhereFrag).
   const [showSold, setShowSold] = usePersisted<boolean>('desktop.inventory.showSold', false);
+  // Hide lots already claimed by a pending sell order (Draft/Shipped/Awaiting
+  // payment) so a fresh sell order doesn't re-pick committed stock.
+  const [hidePending, setHidePending] = usePersisted<boolean>('desktop.inventory.hidePending', false);
   const [warehouseFilter, setWarehouseFilter] = usePersisted<string>('desktop.inventory.warehouseFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.inventory.search', '');
   const [selected, setSelected] = usePersisted<Set<string>>('desktop.inventory.selected', new Set());
@@ -155,7 +157,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     () => ALL_COLS.filter(c => !c.managerOnly || isManager).map(c => c.id) as string[],
     [ALL_COLS, isManager],
   );
-  const [view, setView] = usePreference('inventory.view', 'grouped');
   const [products, setProducts] = useState<ProductGroup[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
 
@@ -196,14 +197,11 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [colsList, setColsList] = usePreference(colsKey, defaultCols);
   const visibleCols = useMemo(() => new Set(colsList as ColId[]), [colsList]);
   const isVis = (id: ColId) => visibleCols.has(id);
-  // Menu only lists toggles the active view honors (grouped drops the
-  // lot-level-only ones). All/None below scope to these and preserve the
-  // other view's stored prefs.
+  // Menu only lists toggles the grouped table honors — the lot-level-only
+  // columns (id/date/profit/margin/submitter) have no grouped column.
   const menuCols = useMemo(
-    () => view === 'grouped'
-      ? TOGGLEABLE_COLS.filter(c => GROUPED_COL_IDS.has(c.id))
-      : TOGGLEABLE_COLS,
-    [view, TOGGLEABLE_COLS],
+    () => TOGGLEABLE_COLS.filter(c => GROUPED_COL_IDS.has(c.id)),
+    [TOGGLEABLE_COLS],
   );
   const menuOnCount = useMemo(
     () => menuCols.filter(c => visibleCols.has(c.id)).length,
@@ -252,6 +250,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (showSold) params.set('includeSold', '1');
+    if (hidePending) params.set('hidePending', '1');
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
     for (const spec of attrSchema) {
@@ -259,7 +258,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       if (vals && vals.length) params.set(spec.param, vals.join(','));
     }
     return params.toString();
-  }, [filter, statusFilter, showSold, warehouseFilter, search, attrSchema, attrFilters]);
+  }, [filter, statusFilter, showSold, hidePending, warehouseFilter, search, attrSchema, attrFilters]);
 
   // Data fetch (debounced on search/filters)
   useEffect(() => {
@@ -274,9 +273,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   }, [filterQuery]);
 
   useEffect(() => {
-    // Products endpoint is also our source of facet + warehouse counts, so we
-    // fire it even when the user is on the flat view — otherwise the chip-bar
-    // counts and the warehouse pills would stale when toggling views.
+    // Products endpoint is also our source of facet + warehouse counts.
     let alive = true;
     const h = setTimeout(() => {
       api.get<{
@@ -299,7 +296,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         });
     }, 200);
     return () => { alive = false; clearTimeout(h); };
-  }, [view, filterQuery]);
+  }, [filterQuery]);
 
   useEffect(() => {
     let alive = true;
@@ -310,11 +307,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   }, []);
 
   // Restore the list scroll position when returning from an item's edit page.
-  // "Ready" = the rows for the active view have actually rendered.
-  const tableScrollRef = useScrollMemory(
-    'desktop.inventory',
-    view === 'grouped' ? productsLoaded : loadedOnce,
-  );
+  // "Ready" = the grouped rows have actually rendered.
+  const tableScrollRef = useScrollMemory('desktop.inventory', productsLoaded);
 
   // Per-warehouse counts come from /api/inventory/products which counts
   // distinct products with drop-self warehouse semantics — so a warehouse pill
@@ -330,24 +324,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const allWarehousesCount = whProductTotal || items.length;
 
   // Selection helpers
-  const selectableRows = useMemo(() => items.filter(r => isSellable(r.status)), [items]);
-  const allSelectableChecked = selectableRows.length > 0 && selectableRows.every(r => selected.has(r.id));
-  const someSelectableChecked = selectableRows.some(r => selected.has(r.id));
-  const toggleAll = () => setSelected(prev => {
-    if (allSelectableChecked) {
-      const next = new Set(prev);
-      selectableRows.forEach(r => next.delete(r.id));
-      return next;
-    }
-    const next = new Set(prev);
-    selectableRows.forEach(r => next.add(r.id));
-    return next;
-  });
-  const toggleRow = (id: string) => setSelected(prev => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
   const clearSelection = () => setSelected(new Set());
 
   // Selected lot ids can originate in the grouped product view, whose lots
@@ -414,17 +390,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     : r.category === 'HDD' ? [r.interface, r.form_factor, r.rpm && `${r.rpm}rpm`, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
     : (r.condition ?? '');
 
-  const qtyDotColor = (s: string) =>
-      s === 'In Transit' ? 'var(--info)'
-    : s === 'Done' ? 'var(--pos)'
-    : s === 'Reviewing' ? 'var(--accent)'
-    : 'var(--fg-subtle)';
-  const qtyTextColor = (s: string) =>
-      s === 'In Transit' ? 'var(--info)'
-    : s === 'Done' ? 'var(--pos)'
-    : s === 'Reviewing' ? 'var(--accent-strong)'
-    : 'var(--fg)';
-
   // Draft-modal state: holds the items we hand off to the modal. Snapshotted
   // when the user clicks "Create sell order" so further selection changes on
   // the table don't mutate what's in the modal.
@@ -435,15 +400,14 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [exporting, setExporting] = useState(false);
 
   // Export the FULL filtered set (the backend drops the 200-row list cap for
-  // the xlsx). Reuses the live filterQuery so the file matches what's on screen,
-  // and forwards the view so the grouped view exports one row per product while
-  // the flat view keeps the per-line file.
+  // the xlsx). Reuses the live filterQuery so the file matches what's on screen;
+  // the grouped view exports one row per product.
   const runExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
       const params = new URLSearchParams(filterQuery);
-      if (view === 'grouped') params.set('view', 'grouped');
+      params.set('view', 'grouped');
       await api.download(`/api/inventory/export?${params.toString()}`, 'inventory.xlsx');
     } catch (e) {
       handleFetchError(e);
@@ -636,12 +600,19 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               </span>
               <span>{t('invShowSold')}</span>
             </label>
+            <label className="inv-sold-toggle" title={t('invHidePendingTip')}>
+              <span className="toggle">
+                <input
+                  type="checkbox"
+                  checked={hidePending}
+                  onChange={e => setHidePending(e.target.checked)}
+                />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </span>
+              <span>{t('invHidePending')}</span>
+            </label>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div className="seg inv-view-toggle" role="group" aria-label={t('invViewToggleAriaLabel')}>
-              <button type="button" className={view === 'grouped' ? 'active' : ''} onClick={() => setView('grouped')}>{t('invGroupedView')}</button>
-              <button type="button" className={view === 'flat' ? 'active' : ''} onClick={() => setView('flat')}>{t('invFlatView')}</button>
-            </div>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
                 position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -819,207 +790,49 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         )}
 
         <div className="table-scroll" ref={tableScrollRef}>
-          {view === 'grouped' ? (
-            <>
-              {!productsLoaded ? (
-                <TableSkeleton rows={10} cols={8} withCheckbox={isManager} />
-              ) : (
-                <InventoryProductTable
-                  groups={products}
-                  isManager={isManager}
-                  cols={{
-                    category:   isVis('category'),
-                    partNumber: isVis('partNumber'),
-                    qty:        isVis('qty'),
-                    warehouse:  isVis('warehouse'),
-                    unitCost:   isVis('unitCost'),
-                    sellPrice:  isVis('sellPrice'),
-                    condition:  isVis('condition'),
-                  }}
-                  selected={selected}
-                  onToggleLot={(id) => {
-                    setSelected(prev => {
-                      const next = new Set(prev);
-                      if (next.has(id)) next.delete(id); else next.add(id);
-                      return next;
-                    });
-                  }}
-                  onToggleGroup={(g) => {
-                    const sellable = g.lines.filter(l => l.status === 'Reviewing' || l.status === 'Done').map(l => l.id);
-                    setSelected(prev => {
-                      const next = new Set(prev);
-                      const allOn = sellable.length > 0 && sellable.every(id => next.has(id));
-                      for (const id of sellable) { if (allOn) next.delete(id); else next.add(id); }
-                      return next;
-                    });
-                  }}
-                  onQuickView={(lotId) => {
-                    const row = items.find(i => i.id === lotId) ?? groupedRowsById.get(lotId);
-                    if (row) setQuickView(row); else onEditItem(lotId);
-                  }}
-                  onEditLot={(lotId) => onEditItem(lotId)}
-                />
-              )}
-              {productsLoaded && products.length === 0 && (
-                <div style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
-                  {t('invNoProductsMatch')}
-                </div>
-              )}
-            </>
-          ) : !loadedOnce ? (
+          {!productsLoaded ? (
             <TableSkeleton rows={10} cols={8} withCheckbox={isManager} />
           ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                {isManager && (
-                  <th style={{ width: 36 }}>
-                    <input
-                      type="checkbox"
-                      checked={allSelectableChecked}
-                      ref={el => { if (el) el.indeterminate = someSelectableChecked && !allSelectableChecked; }}
-                      onChange={toggleAll}
-                      title={t('invSelectAllSellableTitle')}
-                    />
-                  </th>
-                )}
-                {isVis('id')         && <th>{t('whFieldId')}</th>}
-                {isVis('date')       && <th>{t('date')}</th>}
-                {isVis('category')   && <th>{t('category')}</th>}
-                <th>{t('mktColItemSpec')}</th>
-                {isVis('partNumber') && <th>{t('partNumber')}</th>}
-                {isVis('warehouse')  && <th>{t('warehouse')}</th>}
-                {isVis('condition')  && <th>{t('condition')}</th>}
-                {isVis('qty')        && <th className="num">{t('qty')}</th>}
-                {isManager && isVis('unitCost')  && <th className="num">{t('unitCost')}</th>}
-                {isVis('sellPrice')  && <th className="num">{t('sellPrice')}</th>}
-                {isManager && isVis('profit')    && <th className="num">{t('profit')}</th>}
-                {isManager && isVis('margin')    && <th className="num">{t('margin')}</th>}
-                {isVis('submitter')  && <th>{t('submittedBy')}</th>}
-                <th>{t('status')}</th>
-                <th>{isManager ? '' : t('actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={20} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
-                    {t('invNoMatching')}
-                  </td>
-                </tr>
-              )}
-              {items.map(r => {
-                const sellable = isSellable(r.status);
-                const isSelected = selected.has(r.id);
-                const profit = r.sell_price != null ? (r.sell_price - r.unit_cost) * r.qty : null;
-                const margin = r.sell_price != null && r.sell_price > 0
-                  ? ((r.sell_price - r.unit_cost) / r.sell_price) * 100
-                  : null;
-                return (
-                  <tr key={r.id} className={'row-hover' + (isSelected ? ' row-selected' : '')}>
-                    {isManager && (
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleRow(r.id)}
-                          disabled={!sellable}
-                          title={sellable ? 'Add to sell order' : `Cannot sell — status is ${r.status}`}
-                        />
-                      </td>
-                    )}
-                    {isVis('id')       && <td className="mono" style={{ fontSize: 11.5 }}>{r.id.slice(0, 8)}</td>}
-                    {isVis('date')     && <td className="muted">{fmtDateShort(r.created_at, locale)}</td>}
-                    {isVis('category') && (
-                      <td>
-                        <span className={'chip ' + (r.category === 'RAM' ? 'info' : r.category === 'SSD' ? 'pos' : r.category === 'HDD' ? 'cool' : 'warn')}>
-                          {r.category}
-                        </span>
-                      </td>
-                    )}
-                    <td>
-                      <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {itemLabel(r)}
-                        {r.health != null && r.health < wsNumber('low_health_pct', 50) && (
-                          <span className="chip warn" style={{ fontSize: 10 }}>{r.health}%</span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(r)}</div>
-                    </td>
-                    {isVis('partNumber') && <td className="mono muted" style={{ fontSize: 11 }}>{r.part_number}</td>}
-                    {isVis('warehouse')  && (
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
-                          <Icon name="warehouse" size={11} style={{ color: 'var(--fg-subtle)' }} />
-                          {r.warehouse_short ?? '—'}
-                        </span>
-                      </td>
-                    )}
-                    {isVis('condition')  && <td><span className="chip" style={{ fontSize: 11 }}>{r.condition}</span></td>}
-                    {isVis('qty')        && (
-                      <td className="num">
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end',
-                        }}>
-                          <span
-                            title={r.status}
-                            style={{
-                              width: 7, height: 7, borderRadius: '50%',
-                              background: qtyDotColor(r.status),
-                              flexShrink: 0,
-                              backgroundImage: r.status === 'In Transit'
-                                ? 'repeating-linear-gradient(45deg, transparent 0 1.5px, color-mix(in oklch, var(--info) 60%, white) 1.5px 3px)'
-                                : 'none',
-                            }}
-                          />
-                          <span className="mono" style={{ fontWeight: 600, color: qtyTextColor(r.status) }}>{r.qty}</span>
-                        </span>
-                      </td>
-                    )}
-                    {isManager && isVis('unitCost')  && <td className="num mono muted">{fmtUSD(r.unit_cost, locale)}</td>}
-                    {isVis('sellPrice')  && (
-                      <td className="num mono">{r.sell_price != null ? fmtUSD(r.sell_price, locale) : '—'}</td>
-                    )}
-                    {isManager && isVis('profit')    && (
-                      <td className="num mono pos">{profit != null ? fmtUSD(profit, locale) : '—'}</td>
-                    )}
-                    {isManager && isVis('margin')    && (
-                      <td className={'num mono ' + (margin == null ? 'muted' : margin >= 25 ? 'pos' : margin >= 10 ? '' : 'neg')}>
-                        {margin == null ? '—' : margin.toFixed(1) + '%'}
-                      </td>
-                    )}
-                    {isVis('submitter')  && (
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div className="avatar sm">{r.user_initials}</div>
-                          <span style={{ fontSize: 12 }}>{r.user_name.split(' ')[0]}</span>
-                        </div>
-                      </td>
-                    )}
-                    <td><span className={'chip dot ' + statusTone(r.status)}>{r.status}</span></td>
-                    <td>
-                      <div style={{ display: 'inline-flex', gap: 4 }}>
-                        <button
-                          className="btn icon sm"
-                          title={t('invQuickViewTooltip')}
-                          onClick={() => setQuickView(r)}
-                        >
-                          <Icon name="eye" size={12} />
-                        </button>
-                        <button
-                          className="btn icon sm"
-                          title={t('edit')}
-                          onClick={() => onEditItem(r.id)}
-                        >
-                          <Icon name="edit" size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+            <InventoryProductTable
+              groups={products}
+              isManager={isManager}
+              cols={{
+                category:   isVis('category'),
+                partNumber: isVis('partNumber'),
+                qty:        isVis('qty'),
+                warehouse:  isVis('warehouse'),
+                unitCost:   isVis('unitCost'),
+                sellPrice:  isVis('sellPrice'),
+                condition:  isVis('condition'),
+              }}
+              selected={selected}
+              onToggleLot={(id) => {
+                setSelected(prev => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id); else next.add(id);
+                  return next;
+                });
+              }}
+              onToggleGroup={(g) => {
+                const sellable = g.lines.filter(l => l.status === 'Reviewing' || l.status === 'Done').map(l => l.id);
+                setSelected(prev => {
+                  const next = new Set(prev);
+                  const allOn = sellable.length > 0 && sellable.every(id => next.has(id));
+                  for (const id of sellable) { if (allOn) next.delete(id); else next.add(id); }
+                  return next;
+                });
+              }}
+              onQuickView={(lotId) => {
+                const row = items.find(i => i.id === lotId) ?? groupedRowsById.get(lotId);
+                if (row) setQuickView(row); else onEditItem(lotId);
+              }}
+              onEditLot={(lotId) => onEditItem(lotId)}
+            />
+          )}
+          {productsLoaded && products.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
+              {t('invNoProductsMatch')}
+            </div>
           )}
         </div>
 

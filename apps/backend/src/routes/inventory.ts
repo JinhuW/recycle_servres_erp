@@ -46,6 +46,23 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
   `;
 }
 
+// "Hide items already spoken for" — a line is in a pending sell order when some
+// sell_order_line points at it under a non-terminal order (Draft/Shipped/
+// Awaiting payment). Done/Closed are excluded: Done flips the line to 'Sold'
+// (filtered elsewhere) and Closed releases the commitment. Used to keep a new
+// sell order from re-selecting stock another in-flight order already claims.
+const PENDING_SO_STATUSES = ['Draft', 'Shipped', 'Awaiting payment'];
+function pendingSellOrderFrag(sql: ReturnType<typeof getDb>, hide: boolean) {
+  return hide
+    ? sql`NOT EXISTS (
+        SELECT 1 FROM sell_order_lines sol
+        JOIN sell_orders so ON so.id = sol.sell_order_id
+        WHERE sol.inventory_id = l.id
+          AND so.status = ANY(${PENDING_SO_STATUSES}::text[])
+      )`
+    : sql`TRUE`;
+}
+
 // Combined WHERE fragment for the inventory list — shared by the JSON list and
 // the xlsx export so the two always filter identically. Purchasers are scoped
 // to their own lines; managers see the whole workspace.
@@ -61,6 +78,7 @@ function inventoryWhereFrag(
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
+  const hidePending = c.req.query('hidePending') === '1';
 
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
@@ -77,8 +95,9 @@ function inventoryWhereFrag(
     ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
+  const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
 
-  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag}`;
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
 }
 
 // List inventory with the same filters as the desktop screen.
@@ -673,6 +692,7 @@ inventory.get('/products', async (c) => {
   const search = c.req.query('q')?.toLowerCase().trim();
   const warehouse = c.req.query('warehouse');
   const attrs = parseAttrFilters((k) => c.req.query(k));
+  const hidePending = c.req.query('hidePending') === '1';
 
   const RAW_CAP = 2000;
   const GROUP_CAP = 200;
@@ -689,6 +709,7 @@ inventory.get('/products', async (c) => {
   const searchFrag   = search
     ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
+  const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
 
   const canonCol = canonPartCol(sql, sql`l.part_number`);
 
@@ -730,7 +751,7 @@ inventory.get('/products', async (c) => {
       ORDER BY ls.created_at ASC
       LIMIT 1
     ) img ON TRUE
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${searchFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${searchFrag} AND ${pendingFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
