@@ -139,6 +139,11 @@ type SellStatusId = SellOrderSummary['status'];
 const toneFor  = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone  ?? 'muted';
 const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?? s;
 
+// "Inactive" = terminal orders that have left the working pipeline. The
+// Hide-inactive toggle declutters the default all-status view down to the
+// orders still in flight (Draft / Shipped / Awaiting payment).
+const INACTIVE_STATUSES = new Set<SellStatusId>(['Done', 'Closed']);
+
 type SellOrdersProps = {
   onNewFromInventory?: () => void;
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
@@ -152,6 +157,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.sellOrders.showArchived', false);
+  const [hideInactive, setHideInactive] = usePersisted<boolean>('desktop.sellOrders.hideInactive', false);
   const [exporting, setExporting] = useState(false);
   const { path } = useRoute();
 
@@ -198,12 +204,19 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   }, [statusFilter, showArchived]);
 
   const visible = useMemo(() => {
-    if (!search.trim()) return orders;
+    let list = orders;
+    // Only prune the default all-status view — when a specific status is
+    // selected the user has asked for exactly that, even a terminal one, so
+    // we leave the explicit pick untouched.
+    if (hideInactive && statusFilter === 'all') {
+      list = list.filter(o => !INACTIVE_STATUSES.has(o.status));
+    }
+    if (!search.trim()) return list;
     const q = search.toLowerCase();
-    return orders.filter(o =>
+    return list.filter(o =>
       o.id.toLowerCase().includes(q) || o.customer.name.toLowerCase().includes(q),
     );
-  }, [orders, search]);
+  }, [orders, search, hideInactive, statusFilter]);
 
   const stats = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
@@ -290,20 +303,41 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
               style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 260 }}
             />
           </div>
-          <button
-            className="btn"
-            onClick={() => setShowArchived(v => !v)}
-            title={showArchived ? t('hideArchivedSOs') : t('showArchivedSOs')}
-            style={{
-              height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
-              background: showArchived ? 'var(--bg-soft)' : undefined,
-              borderColor: showArchived ? 'var(--border-strong)' : undefined,
-              color: showArchived ? 'var(--fg)' : 'var(--fg-muted)',
-            }}
-          >
-            <Icon name="box" size={12} />
-            {showArchived ? t('hideArchivedBtn') : t('showArchivedBtn')}
-          </button>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              className="btn"
+              onClick={() => setHideInactive(v => !v)}
+              aria-pressed={hideInactive}
+              disabled={statusFilter !== 'all'}
+              title={statusFilter !== 'all'
+                ? t('inactiveToggleAllOnly')
+                : hideInactive ? t('showInactiveSOs') : t('hideInactiveSOs')}
+              style={{
+                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: hideInactive ? 'var(--bg-soft)' : undefined,
+                borderColor: hideInactive ? 'var(--border-strong)' : undefined,
+                color: hideInactive ? 'var(--fg)' : 'var(--fg-muted)',
+              }}
+            >
+              <Icon name="zap" size={12} />
+              {hideInactive ? t('showInactiveBtn') : t('hideInactiveBtn')}
+            </button>
+            <button
+              className="btn"
+              onClick={() => setShowArchived(v => !v)}
+              aria-pressed={showArchived}
+              title={showArchived ? t('hideArchivedSOs') : t('showArchivedSOs')}
+              style={{
+                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: showArchived ? 'var(--bg-soft)' : undefined,
+                borderColor: showArchived ? 'var(--border-strong)' : undefined,
+                color: showArchived ? 'var(--fg)' : 'var(--fg-muted)',
+              }}
+            >
+              <Icon name="box" size={12} />
+              {showArchived ? t('hideArchivedBtn') : t('showArchivedBtn')}
+            </button>
+          </div>
         </div>
 
         <div className="table-scroll">
