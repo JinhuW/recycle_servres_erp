@@ -116,8 +116,6 @@ html.desktop, body.desktop, .desktop #root {
   overflow-y: auto;
   overflow-x: hidden;
   width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
   padding: 10px 24px 24px;
   min-width: 0;
   box-sizing: border-box;
@@ -133,8 +131,6 @@ html.desktop, body.desktop, .desktop #root {
   justify-content: space-between;
   padding: 12px 24px 0;
   width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
   box-sizing: border-box;
 }
 .topbar-label {
@@ -146,8 +142,7 @@ html.desktop, body.desktop, .desktop #root {
 /* ===== Role-preview banner =====
    Shown when a manager has the rolePreview tweak set to "as_purchaser". */
 .role-preview-banner {
-  max-width: 1280px;
-  margin: 12px auto 0;
+  margin: 12px 0 0;
   padding: 8px 14px;
   background: var(--warn-soft);
   border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);

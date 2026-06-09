@@ -9,7 +9,6 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
-import { ORDER_STATUSES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { Warehouse } from '../../lib/types';
 import { DesktopSellOrderDraft, type DraftItem } from './DesktopSellOrderDraft';
@@ -118,7 +117,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [whs, setWhs] = useState<Warehouse[]>([]);
   // Persisted across the open-item → back round-trip (see lib/listMemory).
   const [filter, setFilter] = usePersisted<string>('desktop.inventory.filter', 'all');
-  const [statusFilter, setStatusFilter] = usePersisted<string>('desktop.inventory.statusFilter', 'all');
   // Sold lots are a terminal state; hidden by default so the working list stays
   // lean. The backend drops them unless includeSold is set (or a status is
   // picked explicitly — see inventoryWhereFrag).
@@ -248,7 +246,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
-    if (statusFilter !== 'all') params.set('status', statusFilter);
     if (showSold) params.set('includeSold', '1');
     if (hidePending) params.set('hidePending', '1');
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
@@ -258,7 +255,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       if (vals && vals.length) params.set(spec.param, vals.join(','));
     }
     return params.toString();
-  }, [filter, statusFilter, showSold, hidePending, warehouseFilter, search, attrSchema, attrFilters]);
+  }, [filter, showSold, hidePending, warehouseFilter, search, attrSchema, attrFilters]);
 
   // Data fetch (debounced on search/filters)
   useEffect(() => {
@@ -454,7 +451,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const refetchInventory = () => {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
-    if (statusFilter !== 'all') params.set('status', statusFilter);
     if (warehouseFilter !== 'all') params.set('warehouse', warehouseFilter);
     if (search.trim()) params.set('q', search.trim());
     api.get<{ items: InventoryRow[] }>(`/api/inventory?${params}`)
@@ -580,15 +576,6 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 </button>
               ))}
             </div>
-            <select
-              className="select"
-              style={{ width: 160, height: 32, fontSize: 12.5, padding: '0 12px' }}
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-            >
-              <option value="all">{t('invAllStatuses')}</option>
-              {[...ORDER_STATUSES, 'Sold'].map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
             <label className="inv-sold-toggle" title={t('invShowSoldTip')}>
               <span className="toggle">
                 <input
