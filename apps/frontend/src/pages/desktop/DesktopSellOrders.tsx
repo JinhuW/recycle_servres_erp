@@ -139,10 +139,11 @@ type SellStatusId = SellOrderSummary['status'];
 const toneFor  = (s: string) => sellOrderStatuses.find(o => o.id === s)?.tone  ?? 'muted';
 const shortFor = (s: string) => sellOrderStatuses.find(o => o.id === s)?.short ?? s;
 
-// "Inactive" = terminal orders that have left the working pipeline. The
-// Hide-inactive toggle declutters the default all-status view down to the
-// orders still in flight (Draft / Shipped / Awaiting payment).
-const INACTIVE_STATUSES = new Set<SellStatusId>(['Done', 'Closed']);
+// Closed & Done are the terminal statuses — orders that have left the working
+// pipeline. They're hidden from the default list (which shows only orders still
+// in flight: Draft / Shipped / Awaiting payment); the "Show closed & done"
+// toggle reveals them.
+const CLOSED_DONE_STATUSES = new Set<SellStatusId>(['Done', 'Closed']);
 
 type SellOrdersProps = {
   onNewFromInventory?: () => void;
@@ -156,8 +157,10 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | SellStatusId>('all');
   const [search, setSearch] = useState('');
-  const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.sellOrders.showArchived', false);
-  const [hideInactive, setHideInactive] = usePersisted<boolean>('desktop.sellOrders.hideInactive', false);
+  // Off by default: the list opens on active orders only. Turning it on reveals
+  // the terminal ones (Done / Closed) and also pulls in archived orders, so the
+  // detail-modal Archive action never strands an order out of reach.
+  const [showClosedDone, setShowClosedDone] = usePersisted<boolean>('desktop.sellOrders.showClosedDone', false);
   const [exporting, setExporting] = useState(false);
   const { path } = useRoute();
 
@@ -167,7 +170,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     try {
       const p = new URLSearchParams();
       if (statusFilter !== 'all') p.set('status', statusFilter);
-      if (showArchived) p.set('includeArchived', 'true');
+      if (showClosedDone) p.set('includeArchived', 'true');
       await api.download(`/api/sell-orders/export?${p}`, 'sell-orders.xlsx');
     } catch (e) {
       handleFetchError(e);
@@ -185,7 +188,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   const reload = () => {
     const p = new URLSearchParams();
     if (statusFilter !== 'all') p.set('status', statusFilter);
-    if (showArchived) p.set('includeArchived', 'true');
+    if (showClosedDone) p.set('includeArchived', 'true');
     api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
       .then(r => setOrders(r.items))
       .catch(handleFetchError)
@@ -195,28 +198,27 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
     let alive = true;
     const p = new URLSearchParams();
     if (statusFilter !== 'all') p.set('status', statusFilter);
-    if (showArchived) p.set('includeArchived', 'true');
+    if (showClosedDone) p.set('includeArchived', 'true');
     api.get<{ items: SellOrderSummary[] }>(`/api/sell-orders?${p}`)
       .then(r => { if (alive) setOrders(r.items); })
       .catch(handleFetchError)
       .finally(() => { if (alive) setLoadedOnce(true); });
     return () => { alive = false; };
-  }, [statusFilter, showArchived]);
+  }, [statusFilter, showClosedDone]);
 
   const visible = useMemo(() => {
     let list = orders;
-    // Only prune the default all-status view — when a specific status is
-    // selected the user has asked for exactly that, even a terminal one, so
-    // we leave the explicit pick untouched.
-    if (hideInactive && statusFilter === 'all') {
-      list = list.filter(o => !INACTIVE_STATUSES.has(o.status));
+    // Hide terminal orders from the default all-status view unless the toggle
+    // is on. A specific status pick is an explicit request, so don't prune it.
+    if (!showClosedDone && statusFilter === 'all') {
+      list = list.filter(o => !CLOSED_DONE_STATUSES.has(o.status));
     }
     if (!search.trim()) return list;
     const q = search.toLowerCase();
     return list.filter(o =>
       o.id.toLowerCase().includes(q) || o.customer.name.toLowerCase().includes(q),
     );
-  }, [orders, search, hideInactive, statusFilter]);
+  }, [orders, search, showClosedDone, statusFilter]);
 
   const stats = useMemo(() => {
     const m: Record<string, { count: number; revenue: number }> = {};
@@ -303,41 +305,25 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
               style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 260 }}
             />
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button
-              className="btn"
-              onClick={() => setHideInactive(v => !v)}
-              aria-pressed={hideInactive}
-              disabled={statusFilter !== 'all'}
-              title={statusFilter !== 'all'
-                ? t('inactiveToggleAllOnly')
-                : hideInactive ? t('showInactiveSOs') : t('hideInactiveSOs')}
-              style={{
-                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: hideInactive ? 'var(--bg-soft)' : undefined,
-                borderColor: hideInactive ? 'var(--border-strong)' : undefined,
-                color: hideInactive ? 'var(--fg)' : 'var(--fg-muted)',
-              }}
-            >
-              <Icon name="zap" size={12} />
-              {hideInactive ? t('showInactiveBtn') : t('hideInactiveBtn')}
-            </button>
-            <button
-              className="btn"
-              onClick={() => setShowArchived(v => !v)}
-              aria-pressed={showArchived}
-              title={showArchived ? t('hideArchivedSOs') : t('showArchivedSOs')}
-              style={{
-                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: showArchived ? 'var(--bg-soft)' : undefined,
-                borderColor: showArchived ? 'var(--border-strong)' : undefined,
-                color: showArchived ? 'var(--fg)' : 'var(--fg-muted)',
-              }}
-            >
-              <Icon name="box" size={12} />
-              {showArchived ? t('hideArchivedBtn') : t('showArchivedBtn')}
-            </button>
-          </div>
+          <button
+            className="btn"
+            onClick={() => setShowClosedDone(v => !v)}
+            aria-pressed={showClosedDone}
+            disabled={statusFilter !== 'all'}
+            title={statusFilter !== 'all'
+              ? t('closedDoneToggleAllOnly')
+              : showClosedDone ? t('hideClosedDoneSOs') : t('showClosedDoneSOs')}
+            style={{
+              marginLeft: 'auto',
+              height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: showClosedDone ? 'var(--bg-soft)' : undefined,
+              borderColor: showClosedDone ? 'var(--border-strong)' : undefined,
+              color: showClosedDone ? 'var(--fg)' : 'var(--fg-muted)',
+            }}
+          >
+            <Icon name="check2" size={12} />
+            {showClosedDone ? t('hideClosedDoneBtn') : t('showClosedDoneBtn')}
+          </button>
         </div>
 
         <div className="table-scroll">
