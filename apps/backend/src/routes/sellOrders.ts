@@ -11,6 +11,7 @@ import {
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
+import { searchSellableInventory } from '../services/sellableInventory';
 import {
   buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
   type XlsxColumn, type XlsxSheet,
@@ -151,6 +152,22 @@ sellOrders.get('/export', async (c) => {
   }));
   const buf = await buildXlsxBuffer('Sell orders', SO_EXPORT_COLS, data);
   return xlsxResponse(buf, datedFilename('sell-orders'));
+});
+
+// Sellable inventory for the desktop "add inventory to an order" picker. Returns
+// the same set as the search_sellable_inventory MCP tool (status Reviewing/Done,
+// not on an open sell order) — registered before /:id so it isn't captured as an
+// order id.
+sellOrders.get('/sellable', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const sql = getDb(c.env);
+  const items = await searchSellableInventory(sql, {
+    query: c.req.query('q') ?? null,
+    warehouseId: c.req.query('warehouseId') ?? null,
+    limit: 200,
+  });
+  return c.json({ items });
 });
 
 sellOrders.get('/:id', async (c) => {

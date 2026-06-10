@@ -20,6 +20,7 @@ import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
 import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
+import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 
 type Currency = 'USD' | 'CNY';
 
@@ -560,6 +561,7 @@ function SellOrderDetail({
   // Pending transition into a meta-status. null = no dialog showing.
   const [pending, setPending] = useState<MetaStatus | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [unarchiving, setUnarchiving] = useState(false);
   // Close (Draft/Shipped/Awaiting → Closed) and Reopen (Closed → Draft).
   // Both go through dedicated dialogs because the backend gates differ from
@@ -675,6 +677,37 @@ function SellOrderDetail({
     setDraft(d => d && { ...d, lines: d.lines.map(l => (productKey(l) === key ? { ...l, unitPrice } : l)) });
   const removeLine = (idx: number) =>
     setDraft(d => d && { ...d, lines: d.lines.filter((_, i) => i !== idx) });
+
+  // Append picked sellable lots as new lines. Price follows the per-product rule:
+  // if the order already carries that product, reuse its unit price; else 0 for
+  // the user to fill in. Dedupe against lots already on the draft (the server
+  // only excludes lots on *saved* open orders, not session-local adds).
+  const addLines = (picked: SellableItem[]) =>
+    setDraft(d => {
+      if (!d) return d;
+      const have = new Set(d.lines.map(l => l.inventoryId).filter(Boolean));
+      const priceFor = (it: SellableItem) => {
+        const key = `${it.partNumber ?? ''}|${it.label}|${it.condition ?? ''}`;
+        return d.lines.find(l => productKey(l) === key)?.unitPrice ?? 0;
+      };
+      const fresh: EditLine[] = picked
+        .filter(it => !have.has(it.inventoryId))
+        .map(it => ({
+          _cid:        crypto.randomUUID(),
+          inventoryId: it.inventoryId,
+          category:    it.category as EditLine['category'],
+          label:       it.label,
+          subLabel:    it.subLabel,
+          partNumber:  it.partNumber,
+          qty:         it.availableQty,
+          maxQty:      it.availableQty,
+          unitPrice:   priceFor(it),
+          warehouseId: it.warehouseId,
+          warehouse:   it.warehouseName,
+          condition:   it.condition,
+        }));
+      return { ...d, lines: [...d.lines, ...fresh] };
+    });
 
   const save = async () => {
     if (!order || !draft) return;
@@ -1047,6 +1080,16 @@ function SellOrderDetail({
                     </tbody>
                   </table>
                 )}
+
+                {editable && (
+                  <button
+                    className="btn sm"
+                    onClick={() => setAdding(true)}
+                    style={{ marginTop: 10 }}
+                  >
+                    <Icon name="plus" size={13} /> {t('soAddInventory')}
+                  </button>
+                )}
               </div>
 
               {editable && (
@@ -1262,6 +1305,14 @@ function SellOrderDetail({
           setPending(null);
         }}
         onMutated={() => setHistoryKey(k => k + 1)}
+      />
+    )}
+    {adding && draft && (
+      <AddInventoryPicker
+        excludeIds={new Set(draft.lines.map(l => l.inventoryId).filter((x): x is string => !!x))}
+        locale={locale}
+        onClose={() => setAdding(false)}
+        onAdd={addLines}
       />
     )}
     {confirmArchive && order && (
