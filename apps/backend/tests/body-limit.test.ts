@@ -29,6 +29,22 @@ describe('global JSON body-size limit', () => {
     expect(body.error).toBe('Payload too large');
   });
 
+  it('applies the 1 MiB cap to sell-order JSON routes (only the multipart endpoint is exempt)', async () => {
+    const bigValue = 'x'.repeat(OVER_1MIB_SIZE);
+    const res = await app.fetch(
+      new Request('http://test/api/sell-orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-By': 'recycle-erp',
+        },
+        body: JSON.stringify({ x: bigValue }),
+      }),
+      testEnv,
+    );
+    expect(res.status).toBe(413);
+  });
+
   it('accepts a POST body under 1 MiB on a JSON route (passes through to route logic)', async () => {
     // A normal-sized login attempt — wrong credentials, but NOT a 413.
     const payload = JSON.stringify({ email: 'nobody@example.com', password: 'wrong' });

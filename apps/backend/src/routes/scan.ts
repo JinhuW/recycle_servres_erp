@@ -93,7 +93,13 @@ scan.post('/label', async (c) => {
   // Canonicalise to the catalog vocabulary before it is stored or returned —
   // otherwise near-miss values ("32 GB", "4800 MT/s", generation-in-`type`)
   // never match a UI dropdown and silently vanish from the form.
-  result.fields = normalizeFields(category, result.fields);
+  // Then allowlist the keys: whatever extra keys the model invents must not
+  // reach the DB or the prefill payload.
+  result.fields = Object.fromEntries(
+    Object.entries(normalizeFields(category, result.fields)).filter(([k]) =>
+      EXPECTED_FIELDS_BY_CATEGORY[category].includes(k),
+    ),
+  );
 
   // Partial-fill detection. If the model skipped any expected field for this
   // category, log a warn record to errors.jsonl so an operator can grep for

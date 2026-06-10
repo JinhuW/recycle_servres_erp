@@ -1020,8 +1020,12 @@ inventory.patch('/:id', async (c) => {
   if (u.role !== 'manager' && probe.user_id !== u.id) {
     return c.json({ error: 'Forbidden' }, 403);
   }
-  if (u.role !== 'manager' && (body.status !== undefined || body.sellPrice !== undefined)) {
-    return c.json({ error: 'Only managers can change status or sell price' }, 403);
+  // unit_cost feeds commission/profit math ((unit_price - unit_cost) * qty) —
+  // letting an owner rewrite it on their own lines, including already-sold
+  // ones, would let them inflate their own commission retroactively.
+  if (u.role !== 'manager' &&
+      (body.status !== undefined || body.sellPrice !== undefined || body.unitCost !== undefined)) {
+    return c.json({ error: 'Only managers can change status, sell price or unit cost' }, 403);
   }
 
   // The snapshot read, the open-sell-order check and the UPDATE all run in

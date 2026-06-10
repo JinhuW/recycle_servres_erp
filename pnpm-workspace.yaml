@@ -5,3 +5,7 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+# uuid@8 (via exceljs) carries GHSA-w5hq-g745-h8pq; exceljs only calls v4(),
+# which is API-compatible across the bump.
+overrides:
+  "exceljs>uuid": "^11.1.1"

@@ -17,7 +17,9 @@ attachments.post('/', async (c) => {
   const sql = getDb(c.env);
   const { maxBytes, allowedMime } = await getUploadLimits(sql);
   if (f.size > maxBytes) return c.json({ error: `file exceeds ${maxBytes} bytes` }, 413);
-  if (f.type && !allowedMime.has(f.type)) return c.json({ error: `mime ${f.type} not allowed` }, 415);
+  // A missing Content-Type must not skip the allowlist (mirrors the
+  // sell-order evidence route).
+  if (!f.type || !allowedMime.has(f.type)) return c.json({ error: `mime ${f.type || '(none)'} not allowed` }, 415);
 
   // v1: store metadata only — actual R2 upload deferred.
   const storageId = 'local/' + crypto.randomUUID();

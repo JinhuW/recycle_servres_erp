@@ -2,6 +2,15 @@
 	encode gzip
 	# Vendor tokens appear in URL paths like /v/<token>; prevent Referer leakage.
 	header Referrer-Policy "same-origin"
+	header X-Content-Type-Options "nosniff"
+	# Nothing legitimately embeds this app in a frame.
+	header X-Frame-Options "DENY"
+	# script-src 'self' is the load-bearing directive (no inline scripts exist);
+	# 'unsafe-inline' styles are required by React style props; images come from
+	# the R2 attachments domain plus camera/share blobs and data URLs.
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://static.recycleservers.com; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	# Camera stays available to this origin — label scans use it.
+	header Permissions-Policy "geolocation=(), microphone=(), payment=()"
 	# API → backend container.
 	handle /api/* {
 		reverse_proxy backend:8787

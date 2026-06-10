@@ -500,9 +500,9 @@ orders.post('/', async (c) => {
 });
 
 // ── Edit — update order meta + line item details. The order owner
-// (purchaser) or a manager may PATCH; the desktop edit page gates by
-// status on the client side (Draft is purchaser-editable; later stages are
-// manager-only).
+// (purchaser) or a manager may PATCH. Draft is purchaser-editable; later
+// stages are manager-only — enforced here, not just in the client, so a
+// purchaser can't rewrite costs/lines on an order under review.
 //
 // Line shape on the wire:
 //   lines:          updates for existing lines (each carries `id`)
@@ -554,6 +554,9 @@ orders.patch('/:id', async (c) => {
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
+    return c.json({ error: 'Only managers can edit an order after submission' }, 403);
+  }
   if (body.commissionRate !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can set the commission rate' }, 403);
   }

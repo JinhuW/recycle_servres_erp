@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { contentDisposition } from './xlsx';
 
 // Brand logo shipped in the frontend's public assets. Read once and cached —
 // the file is resolved off this module's location so CWD/workspace filter don't
@@ -51,7 +52,9 @@ export function pdfResponse(buf: Buffer, filename: string): Response {
     status: 200,
     headers: {
       'Content-Type': PDF_MIME,
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      // Shared header-safe encoding — today's callers pass internal IDs, but a
+      // user-derived name must never be able to inject header syntax here.
+      'Content-Disposition': contentDisposition(filename),
       'Content-Length': String(buf.length),
     },
   });

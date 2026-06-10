@@ -4,6 +4,7 @@
 
 import type { Sql } from 'postgres';
 import { hashPassword, generateTempPassword, revokeUserRefreshTokens } from '../auth';
+import { revokeUserOAuthTokens } from '../oauth/tokens';
 
 export type MemberRole = 'manager' | 'purchaser';
 
@@ -134,6 +135,7 @@ export async function updateMember(
       // A password reset must invalidate any existing (possibly stolen)
       // refresh tokens, mirroring deactivateMember's revoke.
       await revokeUserRefreshTokens(tx, id);
+      await revokeUserOAuthTokens(tx, id);
     });
   } else {
     await sql`
@@ -182,6 +184,7 @@ export async function deactivateMember(sql: Sql, id: string): Promise<boolean> {
     // Close the refresh path immediately so they can't mint new access tokens.
     // (Their current short-lived access token still expires naturally <=15 min.)
     await revokeUserRefreshTokens(tx, id);
+    await revokeUserOAuthTokens(tx, id);
   });
   return updated;
 }

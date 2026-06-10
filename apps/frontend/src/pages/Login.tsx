@@ -114,7 +114,8 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
   const { login } = useAuth();
   const [picking, setPicking] = useState(initialPicking);
   const [email, setEmail] = useState(readLastLoginEmail);
-  const [password, setPassword] = useState('demo');
+  // Pre-fill the seed password only in dev builds — prod gets an empty field.
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'demo' : '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [accounts, setAccounts] = useState<DemoAccount[]>([]);

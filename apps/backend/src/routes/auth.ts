@@ -69,6 +69,9 @@ auth.post('/login', async (c) => {
   `;
   const u = rows[0];
   if (!u) {
+    // Burn the same bcrypt work as the known-user path so response timing
+    // doesn't reveal whether the email exists (fixed hash of a throwaway value).
+    await verifyPassword(body.password, '$2a$10$/fcBigHOjk6nVxcvSz4qvephw3ZjwoDPD5zFkLsPu4mMpgzGnlt9G');
     await recordAttempt(false);
     return c.json({ error: 'Invalid credentials' }, 401);
   }

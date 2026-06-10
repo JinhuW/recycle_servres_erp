@@ -8,7 +8,7 @@ import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
 import { verifyChallenge } from './pkce';
-import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily } from './tokens';
+import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily, dropWriteUnlessManager } from './tokens';
 import { oauthGrantsTotal } from '../metrics';
 
 const CODE_TTL_SEC = 600;
@@ -17,10 +17,8 @@ const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
 const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write', 'sellorder:read', 'sellorder:write']);
 // :write scopes through the interactive code flow are reserved for managers; a
 // non-manager's consent yields a read-only grant. Service clients still get
-// write via the admin-minted client_credentials path.
-const WRITE_SCOPES = new Set(['market:write', 'sellorder:write']);
-const dropWriteUnlessManager = (scopes: string[], role: string | undefined): string[] =>
-  role === 'manager' ? scopes : scopes.filter(s => !WRITE_SCOPES.has(s));
+// write via the admin-minted client_credentials path. The same rule is
+// re-applied on refresh rotation (see oauth/tokens.ts).
 
 const wellKnown = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 

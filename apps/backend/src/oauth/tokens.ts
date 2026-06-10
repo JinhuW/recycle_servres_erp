@@ -92,6 +92,13 @@ export async function verifyAccessToken(env: Env, token: string): Promise<Access
 
 const opaqueToken = () => randomBytes(32).toString('hex');
 
+// :write scopes are reserved for managers. Applied at consent time and
+// re-derived from the live role on every refresh rotation so a demotion
+// takes effect within one access-token lifetime.
+const WRITE_SCOPES = new Set(['market:write', 'sellorder:write']);
+export const dropWriteUnlessManager = (scopes: string[], role: string | undefined): string[] =>
+  role === 'manager' ? scopes : scopes.filter(s => !WRITE_SCOPES.has(s));
+
 export type IssueRefreshInput = {
   clientId: string;
   userId: string | null;
@@ -133,12 +140,15 @@ export async function rotateRefreshToken(
     const row = (await tx<{
       id: number; client_id: string; user_id: string | null; scopes: OAuthScope[];
       family_id: string; revoked_at: Date | null; expired: boolean;
+      user_active: boolean | null; user_role: string | null;
     }[]>`
-      SELECT id, client_id, user_id, scopes, family_id, revoked_at,
-             (expires_at <= NOW()) AS expired
-      FROM oauth_refresh_tokens
-      WHERE token_hash = ${sha256hex(raw)}
-      FOR UPDATE
+      SELECT rt.id, rt.client_id, rt.user_id, rt.scopes, rt.family_id, rt.revoked_at,
+             (rt.expires_at <= NOW()) AS expired,
+             u.active AS user_active, u.role AS user_role
+      FROM oauth_refresh_tokens rt
+      LEFT JOIN users u ON u.id = rt.user_id
+      WHERE rt.token_hash = ${sha256hex(raw)}
+      FOR UPDATE OF rt
       LIMIT 1
     `)[0];
     if (!row) return { ok: false, reason: 'not_found' };
@@ -148,17 +158,28 @@ export async function rotateRefreshToken(
       return { ok: false, reason: 'reused' };
     }
     if (row.expired) return { ok: false, reason: 'expired' };
+    // Liveness: a deactivated (or deleted) user must not keep minting access
+    // tokens via rotation — kill the family so the grant dies with the account.
+    if (row.user_id && !row.user_active) {
+      await revokeRefreshFamily(tx, row.family_id, 'manual');
+      return { ok: false, reason: 'revoked' };
+    }
+    // Re-derive write scopes from the live role so a demoted manager's grant
+    // narrows on the next rotation instead of living on as originally consented.
+    const scopes = row.user_id
+      ? (dropWriteUnlessManager(row.scopes, row.user_role ?? undefined) as OAuthScope[])
+      : row.scopes;
     await tx`UPDATE oauth_refresh_tokens SET revoked_at = NOW() WHERE id = ${row.id}`;
     const next = await issueRefreshToken(tx, env, {
       clientId: row.client_id,
       userId: row.user_id,
-      scopes: row.scopes,
+      scopes,
       familyId: row.family_id,
       parentId: row.id,
     });
     return {
       ok: true, raw: next.raw, clientId: row.client_id, userId: row.user_id,
-      scopes: row.scopes, familyId: row.family_id,
+      scopes, familyId: row.family_id,
     };
   });
 }
@@ -175,4 +196,15 @@ export async function revokeRefreshFamily(
     WHERE family_id = ${familyId} AND revoked_at IS NULL
   `;
   oauthRefreshRevocationsTotal.inc({ reason });
+}
+
+// Kill every OAuth grant a user holds. Offboarding and password resets must
+// close this path too — revoking only the cookie refresh_tokens would leave
+// MCP/API access alive indefinitely through rotation.
+export async function revokeUserOAuthTokens(sql: AnySql, userId: string): Promise<void> {
+  await sql`
+    UPDATE oauth_refresh_tokens SET revoked_at = NOW()
+    WHERE user_id = ${userId} AND revoked_at IS NULL
+  `;
+  oauthRefreshRevocationsTotal.inc({ reason: 'manual' });
 }

@@ -155,3 +155,22 @@ describe('audit log is append-only', () => {
     expect(err?.message).toMatch(/append-only/i);
   });
 });
+
+describe('PATCH /api/inventory/:id — unit cost is manager-only', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // unit_cost feeds the commission math; an owner rewriting it on their own
+  // (possibly already-sold) lines would inflate their commission retroactively.
+  it('purchaser cannot rewrite unitCost on an own line; manager can', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const mine = await api<{ items: { id: string }[] }>('GET', '/api/inventory', { token: pur });
+    const id = mine.body.items[0].id;
+
+    const denied = await api('PATCH', `/api/inventory/${id}`, { token: pur, body: { unitCost: 0.01 } });
+    expect(denied.status).toBe(403);
+
+    const { token: mgr } = await loginAs(ALEX);
+    const ok = await api('PATCH', `/api/inventory/${id}`, { token: mgr, body: { unitCost: 42 } });
+    expect(ok.status).toBe(200);
+  });
+});

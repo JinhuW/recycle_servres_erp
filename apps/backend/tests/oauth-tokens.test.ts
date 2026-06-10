@@ -5,6 +5,7 @@ import {
   generateSigningKey, signAccessToken, verifyAccessToken,
   issueRefreshToken, rotateRefreshToken, revokeRefreshFamily,
 } from '../src/oauth/tokens';
+import { deactivateMember } from '../src/services/members';
 
 const env = (overrides: Record<string, string> = {}) => ({
   OAUTH_ISSUER_URL: 'https://erp.test',
@@ -89,5 +90,54 @@ describe('oauth tokens', () => {
       clientId: c.clientId, userId: null, scopes: ['market:write'],
     });
     expect(r.raw).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  async function freshUser(role: 'manager' | 'purchaser'): Promise<string> {
+    const db = getTestDb();
+    const tag = crypto.randomUUID().slice(0, 8);
+    const r = await db<{ id: string }[]>`
+      INSERT INTO users (email, name, initials, role, password_hash, active)
+      VALUES (${`oauth-${tag}@test.local`}, 'OAuth Test', 'OT', ${role}, 'x', TRUE)
+      RETURNING id
+    `;
+    return r[0].id;
+  }
+
+  it('rotation refuses a deactivated user and kills the family for good', async () => {
+    const db = getTestDb();
+    const c = await aClient();
+    const u = await freshUser('manager');
+    const r1 = await issueRefreshToken(db, env(), {
+      clientId: c.clientId, userId: u, scopes: ['market:read'],
+    });
+    await db`UPDATE users SET active = FALSE WHERE id = ${u}`;
+    expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
+    // Reactivation must not resurrect the grant — the family was revoked.
+    await db`UPDATE users SET active = TRUE WHERE id = ${u}`;
+    expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
+  });
+
+  it('rotation drops :write scopes for a demoted manager', async () => {
+    const db = getTestDb();
+    const c = await aClient();
+    const u = await freshUser('manager');
+    const r1 = await issueRefreshToken(db, env(), {
+      clientId: c.clientId, userId: u, scopes: ['market:read', 'market:write'],
+    });
+    await db`UPDATE users SET role = 'purchaser' WHERE id = ${u}`;
+    const res = await rotateRefreshToken(db, env(), r1.raw);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.scopes).toEqual(['market:read']);
+  });
+
+  it('deactivateMember revokes OAuth grants alongside cookie sessions', async () => {
+    const db = getTestDb();
+    const c = await aClient();
+    const u = await freshUser('purchaser');
+    const r1 = await issueRefreshToken(db, env(), {
+      clientId: c.clientId, userId: u, scopes: ['market:read'],
+    });
+    await deactivateMember(db, u);
+    expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
   });
 });

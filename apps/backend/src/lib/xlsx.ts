@@ -75,7 +75,7 @@ const XLSX_MIME =
 // UTF-8 name. Without filename*, a raw CJK name is mangled or dropped by the
 // HTTP layer. encodeURIComponent leaves a few chars RFC 5987 reserves (notably
 // the ' that delimits the field) — escape those too.
-function contentDisposition(filename: string): string {
+export function contentDisposition(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]+/g, '_').replace(/["\\]/g, '_');
   const encoded = encodeURIComponent(filename).replace(
     /['()*!]/g,

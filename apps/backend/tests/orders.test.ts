@@ -550,3 +550,46 @@ describe('PATCH /api/orders/:id line status is not client-settable', () => {
     expect(after.body.order.lines[0].status).toBe('Draft');
   });
 });
+
+describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function createDraft(token: string): Promise<string> {
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200', partNumber: 'M393A4K40DB3-CWE',
+          condition: 'Pulled — Tested', qty: 4, unitCost: 78.5,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+    return created.body.id;
+  }
+
+  it('owner edits a draft, loses edit access after submission; manager keeps it', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const id = await createDraft(pur);
+
+    // Draft: owner can edit.
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'draft note' } })).status).toBe(200);
+
+    // Submit → in_transit: owner is frozen out, including cost/line rewrites.
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+    const denied = await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'late edit' } });
+    expect(denied.status).toBe(403);
+    const lines = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${id}`, { token: pur });
+    const deniedLines = await api('PATCH', `/api/orders/${id}`, {
+      token: pur,
+      body: { lines: [{ id: lines.body.order.lines[0].id, unitCost: 0.01 }] },
+    });
+    expect(deniedLines.status).toBe(403);
+
+    // Manager still edits post-submission.
+    const { token: mgr } = await loginAs(ALEX);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { notes: 'manager note' } })).status).toBe(200);
+  });
+});

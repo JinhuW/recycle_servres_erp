@@ -4,6 +4,7 @@ import { getCookie } from 'hono/cookie';
 import { MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { hashPassword, verifyPassword } from '../auth';
+import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
 import type { Env, User } from '../types';
 
@@ -182,6 +183,9 @@ me.post('/password', async (c) => {
       await tx`UPDATE refresh_tokens SET revoked_at = NOW()
                WHERE user_id = ${u.id} AND revoked_at IS NULL`;
     }
+    // OAuth grants must die with the old password too — they otherwise keep
+    // minting access tokens through rotation regardless of the credential change.
+    await revokeUserOAuthTokens(tx, u.id);
   });
 
   return c.json({ ok: true });

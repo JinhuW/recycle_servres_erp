@@ -46,6 +46,15 @@ try {
   if (existing.length > 0) {
     console.log(`↻ init-admin: ${email} already exists, skipping`);
   } else {
+    // Never provision a manager account with the published default password in
+    // production — fail the boot so the misconfiguration is impossible to miss.
+    if (process.env.NODE_ENV === 'production' && password === 'admin') {
+      console.error(
+        '✗ init-admin: refusing to create the default admin with password "admin" in production — set ADMIN_PASSWORD in .env',
+      );
+      await sql.end();
+      process.exit(1);
+    }
     const hash = await bcrypt.hash(password, 10);
     await sql`
       INSERT INTO users (email, name, initials, role, password_hash, active)

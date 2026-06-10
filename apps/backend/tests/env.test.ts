@@ -35,4 +35,33 @@ describe('buildEnv', () => {
       JWT_SECRET: 's',
     } as NodeJS.ProcessEnv)).not.toThrow();
   });
+
+  it('rejects the published default JWT_SECRET in production', () => {
+    expect(() => buildEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgres://u:realpw@db/erp',
+      JWT_SECRET: 'dev-jwt-secret-change-me-in-prod',
+      CORS_ALLOWED_ORIGINS: 'https://app',
+      OPENROUTER_API_KEY: 'k',
+      OAUTH_SIGNING_KEY_CURRENT: 'x',
+    } as NodeJS.ProcessEnv)).toThrow(/published default/);
+  });
+
+  it('rejects the default dev DB password in production', () => {
+    expect(() => buildEnv({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgres://recycle:recycle@postgres:5432/recycle_erp',
+      JWT_SECRET: 'a-real-secret', // test fixture — pragma: allowlist secret
+      CORS_ALLOWED_ORIGINS: 'https://app',
+      OPENROUTER_API_KEY: 'k',
+      OAUTH_SIGNING_KEY_CURRENT: 'x',
+    } as NodeJS.ProcessEnv)).toThrow(/default dev password/);
+  });
+
+  it('accepts the dev defaults outside production', () => {
+    expect(() => buildEnv({
+      DATABASE_URL: 'postgres://recycle:recycle@127.0.0.1:5432/recycle_erp',
+      JWT_SECRET: 'dev-jwt-secret-change-me-in-prod',
+    } as NodeJS.ProcessEnv)).not.toThrow();
+  });
 });

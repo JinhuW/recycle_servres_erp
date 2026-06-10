@@ -113,39 +113,26 @@ app.get('/api/health', async (c) => {
 });
 
 // ── Body caps ────────────────────────────────────────────────────────────────
-// Upload routes (scan / attachments / sell-orders) are allowed up to
-// UPLOAD_HARD_CAP_BYTES (50 MiB) because they carry multipart file payloads.
-// All other API routes get a tight 1 MiB JSON cap so a malformed or malicious
-// request is rejected before auth, without buffering.
-//
-// Order matters: upload routes register their cap FIRST. Hono matches
-// middleware in registration order; a path-specific handler runs only once, so
-// when a request matches /api/scan/* it will hit the upload limit and not the
-// global 1 MiB limit (because the global limit is applied only to paths that
-// did NOT match an upload prefix below).
+// The three multipart upload endpoints are allowed up to UPLOAD_HARD_CAP_BYTES
+// (50 MiB). All other API routes get a tight 1 MiB JSON cap so a malformed or
+// malicious request is rejected before auth, without buffering.
 const JSON_BODY_LIMIT = 1_048_576; // 1 MiB
 const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
-// Upload-bearing routes: apply the generous cap first.
-app.use('/api/scan/*', uploadBodyLimit);
-app.use('/api/attachments/*', uploadBodyLimit);
-app.use('/api/sell-orders/*', uploadBodyLimit);
+// Only the actual multipart endpoints get the generous cap. A prefix-wide
+// exemption (e.g. all of /api/sell-orders/*) would let every JSON endpoint
+// under it buffer 50 MiB bodies.
+const isUploadPath = (path: string): boolean =>
+  path === '/api/scan/label' ||
+  path === '/api/attachments' ||
+  /^\/api\/sell-orders\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path);
 
-// All other routes: apply the 1 MiB JSON cap.  We skip the three upload
-// prefixes with an explicit guard so the middleware doesn't double-trigger on
-// them (Hono runs '*' after path-specific handlers in this version).
+// All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({
   maxSize: JSON_BODY_LIMIT,
   onError: (c) => c.json({ error: 'Payload too large' }, 413),
 });
 app.use('*', (c, next) => {
-  const path = c.req.path;
-  if (
-    path.startsWith('/api/scan/') ||
-    path.startsWith('/api/attachments/') ||
-    path.startsWith('/api/sell-orders/')
-  ) {
-    return next();
-  }
+  if (isUploadPath(c.req.path)) return uploadBodyLimit(c, next);
   return jsonBodyLimit(c, next);
 });
 

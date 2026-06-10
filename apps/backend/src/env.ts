@@ -3,9 +3,32 @@
 
 import type { Env } from './types';
 
+// Values that ship in the repo (Dockerfile ENV / .env.example). Sessions are
+// HS256-signed with JWT_SECRET, so booting prod on a published value means
+// anyone can mint a valid cookie for any user — refuse instead.
+const KNOWN_DEFAULT_JWT_SECRETS = new Set([
+  'dev-jwt-secret-change-me-in-prod',
+  'dev-secret-change-me',
+]);
+
 export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (!src.JWT_SECRET) throw new Error('JWT_SECRET is not configured');
   if (!src.DATABASE_URL) throw new Error('DATABASE_URL is required');
+  if (src.NODE_ENV === 'production' && KNOWN_DEFAULT_JWT_SECRETS.has(src.JWT_SECRET)) {
+    throw new Error('JWT_SECRET is set to a published default — set a real secret in production');
+  }
+  if (src.NODE_ENV === 'production') {
+    // The compose file falls back to the documented dev password when
+    // POSTGRES_PASSWORD is unset; don't let that combination reach prod.
+    try {
+      if (new URL(src.DATABASE_URL).password === 'recycle') {
+        throw new Error('DATABASE_URL uses the default dev password in production');
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('default dev password')) throw e;
+      // unparseable URL: let the DB driver surface it
+    }
+  }
   if (src.NODE_ENV === 'production' && !src.CORS_ALLOWED_ORIGINS) {
     throw new Error('CORS_ALLOWED_ORIGINS is required in production');
   }
