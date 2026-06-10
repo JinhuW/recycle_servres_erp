@@ -35,6 +35,22 @@ type StatusMetaEntry = {
 };
 type StatusMetaMap = Record<MetaStatus, StatusMetaEntry>;
 
+const fmtFileSize = (n: number) =>
+  n < 1024 ? `${n} B`
+  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
+  : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+// The per-status evidence (note + attachments) captured at Shipped / Awaiting
+// payment / Done. Edit mode surfaces it through the stepper + StatusChangeDialog;
+// view mode has no stepper, so without this the attachments are unreachable.
+function evidenceEntries(meta: StatusMetaMap | null) {
+  if (!meta) return [];
+  return sellOrderStatuses
+    .filter(o => o.needsMeta)
+    .map(o => [o.id as MetaStatus, (meta as Record<string, StatusMetaEntry>)[o.id]] as const)
+    .filter(([, m]) => m && (!!m.note || m.attachments.length > 0));
+}
+
 type SellOrderSummary = {
   id: string;
   status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
@@ -1060,6 +1076,59 @@ function SellOrderDetail({
                   </div>
                 )}
               </div>
+
+              {/* Tracking & evidence — read-only view of the per-status notes and
+                  attachments. Edit mode reaches these via the stepper dialog; view
+                  mode has no stepper, so this is the only place to open the files. */}
+              {!editable && evidenceEntries(statusMeta).length > 0 && (
+                <div className="so-section" style={{ marginTop: 24 }}>
+                  <div className="so-section-head"><Icon name="paperclip" size={14} /> {t('soEvidenceSection')}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {evidenceEntries(statusMeta).map(([status, m]) => (
+                      <div key={status}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-subtle)', marginBottom: 6 }}>{status}</div>
+                        {m.note && (
+                          <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: m.attachments.length ? 8 : 0 }}>
+                            {m.note}
+                          </div>
+                        )}
+                        {m.attachments.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {m.attachments.map(a => (
+                              <a
+                                key={a.id}
+                                href={a.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={t('openAttachment')}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                  background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 8,
+                                  textDecoration: 'none', color: 'var(--fg)',
+                                }}
+                              >
+                                <span style={{
+                                  width: 32, height: 32, borderRadius: 6, background: 'var(--bg-soft)',
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  color: 'var(--fg-subtle)', flexShrink: 0,
+                                }}>
+                                  <Icon name={a.mime?.startsWith('image/') ? 'image' : 'file'} size={14} />
+                                </span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {a.filename}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{fmtFileSize(a.size)}</div>
+                                </div>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Internal notes — section in both modes; read-only text when viewing */}
               <div className="so-section" style={{ marginTop: 24 }}>

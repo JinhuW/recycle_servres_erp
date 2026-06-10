@@ -796,6 +796,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     soDownloadSpreadsheetHint: 'Item details + prices, one tab per warehouse',
     soRemoveLineTooltip: 'Remove line',
     soTrackingRecorded: 'Tracking info recorded',
+    soEvidenceSection: 'Tracking & evidence',
+    soEvidenceEmpty: 'No notes or attachments captured',
     soViewTooltip: 'View',
     category: 'Category',
 
@@ -2049,6 +2051,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     soDownloadSpreadsheetHint: '物料明细 + 价格，每个仓库一个工作表',
     soRemoveLineTooltip: '移除项目',
     soTrackingRecorded: '跟踪信息已记录',
+    soEvidenceSection: '跟踪与凭证',
+    soEvidenceEmpty: '未记录备注或附件',
     soViewTooltip: '查看',
     category: '类别',
 
