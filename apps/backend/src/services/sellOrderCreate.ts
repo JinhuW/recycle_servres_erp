@@ -33,15 +33,21 @@ export async function validateSellLines(
     if (inv.status !== 'Reviewing' && inv.status !== 'Done')
       return `inventory line not sellable (status=${inv.status})`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
-    const taken = (await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n
+    const conflict = (await tx<{ so_id: string; label: string; part_number: string | null }[]>`
+      SELECT so.id AS so_id, sol.label, sol.part_number
       FROM sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
       WHERE sol.inventory_id = ${inventoryId}
         AND so.status NOT IN ('Done', 'Closed')
         AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
+      LIMIT 1
     `)[0];
-    if (taken.n > 0) return `inventory line ${inventoryId} is already on an open sell order`;
+    if (conflict) {
+      const name = conflict.part_number
+        ? `${conflict.label} (${conflict.part_number})`
+        : conflict.label;
+      return `${name} is already on sell order ${conflict.so_id}`;
+    }
   }
   return null;
 }

@@ -138,7 +138,11 @@ describe('Tier 1 #1 — one active sell order per inventory line (oversell guard
 
     const second = await newSellOrder(token, line.id, line.price);
     expect(second.status).toBe(400);
-    expect(JSON.stringify(second.body)).toMatch(/sell order/i);
+    // The message names the product and the order it's already on — not a raw
+    // inventory UUID — so the user can act on it.
+    const msg = (second.body as { error?: string }).error ?? JSON.stringify(second.body);
+    expect(msg).toContain('x (pn) is already on sell order');
+    expect(msg).toContain(first.body.id);
   });
 
   it('PATCH may keep its own already-committed line (self excluded)', async () => {
