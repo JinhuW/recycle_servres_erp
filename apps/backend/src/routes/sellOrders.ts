@@ -876,11 +876,12 @@ const ALLOWED_TRANSITIONS: Record<string, Set<string>> = {
 const KNOWN_STATUSES = new Set<string>([
   'Draft', 'Shipped', 'Awaiting payment', 'Done', 'Closed',
 ]);
-// Statuses whose entry-edge requires a note OR attachments. The DB row
-// sell_order_statuses.needs_meta tracks the same idea for per-status meta
-// uploads (those routes look it up dynamically); this set governs the
-// transition-time evidence gate.
-const NEEDS_EVIDENCE = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']);
+// Statuses that carry a per-status meta row (note + attachments). The DB
+// row sell_order_statuses.needs_meta tracks the same idea for the per-status
+// upload routes (those look it up dynamically); this set governs which
+// transitions upsert a sell_order_status_meta row. Evidence is optional —
+// the note/attachments are captured opportunistically, never required.
+const META_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed']);
 
 // Fixed close-reason taxonomy from @recycle-erp/shared (single source of
 // truth, shared with the frontend picker). The SQL CHECK on
@@ -901,13 +902,8 @@ sellOrders.post('/:id/status', async (c) => {
   }
 
   const hasNote = typeof body.note === 'string' && body.note.trim().length > 0;
-  const hasFiles = Array.isArray(body.attachmentIds) && body.attachmentIds.length > 0;
 
-  // Static evidence gate (Shipped / Awaiting payment / Done / Closed).
-  if (NEEDS_EVIDENCE.has(body.to) && !hasNote && !hasFiles) {
-    return c.json({ error: 'note or attachments required for this status' }, 400);
-  }
-  // Close requires a structured reason in addition to evidence.
+  // Close requires a structured reason; the note remains optional.
   if (body.to === 'Closed' && !body.closeReasonId) {
     return c.json({ error: 'closeReasonId is required to close' }, 400);
   }
@@ -941,10 +937,10 @@ sellOrders.post('/:id/status', async (c) => {
       return { kind: 'illegal', from: cur.status, to: body.to };
     }
 
-    // Reopen (Closed → Draft) needs a note. We deliberately keep this
-    // *out* of the global NEEDS_EVIDENCE set: a fresh Draft creation
-    // doesn't need a note, so the rule is "transitions *into* Draft from
-    // Closed need a note", not "Draft is a needs-evidence status".
+    // Reopen (Closed → Draft) needs a note. This is the one remaining
+    // required-note rule: a fresh Draft creation doesn't need a note, so the
+    // rule is "transitions *into* Draft from Closed need a note", not "Draft
+    // is a meta status".
     if (cur.status === 'Closed' && body.to === 'Draft' && !hasNote) {
       return { kind: 'reopenNeedsNote' };
     }
@@ -976,7 +972,7 @@ sellOrders.post('/:id/status', async (c) => {
     // Draft is intentionally excluded: reopen-to-Draft notes live in
     // sell_order_events so successive reopen cycles don't overwrite each
     // other (status_meta PK is sell_order_id + status, single row per pair).
-    if (NEEDS_EVIDENCE.has(body.to) && body.to !== 'Draft') {
+    if (META_STATUSES.has(body.to) && body.to !== 'Draft') {
       await tx`
         INSERT INTO sell_order_status_meta (sell_order_id, status, note, set_at, set_by)
         VALUES (${id}, ${body.to}, ${body.note ?? null}, NOW(), ${u.id})

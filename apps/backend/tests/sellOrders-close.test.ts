@@ -146,13 +146,13 @@ describe('POST /api/sell-orders/:id/status — Close', () => {
     expect(r.status).toBe(400);
   });
 
-  it('Close without note: 400', async () => {
+  it('Close without note: 200 (note is optional, only the reason is required)', async () => {
     const { token } = await loginAs(ALEX);
     const { id } = await createDraftSellOrder(token);
     const r = await api('POST', `/api/sell-orders/${id}/status`, {
       token, body: { to: 'Closed', closeReasonId: 'other' },
     });
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(200);
   });
 
   it('Closed → Shipped: 409 illegal transition', async () => {

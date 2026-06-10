@@ -676,9 +676,9 @@ function SellOrderDetail({
           to: draft.status,
           // Evidence (note + attachments) is uploaded live by
           // StatusChangeDialog into status-meta tables, so we just announce
-          // the transition here. Re-send the note so the POST passes the
-          // "note or attachments" evidence gate even if nothing was uploaded
-          // through the attachments path.
+          // the transition here. Re-send the note so the /status upsert
+          // preserves the dialog's note instead of nulling it out — evidence
+          // itself is optional, but a captured note shouldn't be lost.
           note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
             ?.[draft.status]?.note ?? undefined,
         });

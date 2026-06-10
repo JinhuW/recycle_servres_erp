@@ -38,13 +38,15 @@ async function createDraftSellOrder(token: string): Promise<string> {
 describe('POST /api/sell-orders/:id/status', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('Shipped requires note OR attachments', async () => {
+  it('Shipped no longer requires note or attachments', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
-    const bad = await api('POST', `/api/sell-orders/${id}/status`, {
+    const r = await api('POST', `/api/sell-orders/${id}/status`, {
       token, body: { to: 'Shipped' },
     });
-    expect(bad.status).toBe(400);
+    expect(r.status).toBe(200);
+    const got = await api<{ order: { status: string } }>('GET', `/api/sell-orders/${id}`, { token });
+    expect(got.body.order.status).toBe('Shipped');
   });
 
   it('Shipped accepts a note', async () => {
