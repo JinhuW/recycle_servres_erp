@@ -55,7 +55,8 @@ function errMsg(e: unknown): string {
 
 function downloadOrderCsv(order: TransferOrder): void {
   const head = ['Item', 'Qty', 'From', 'To', 'Transferred'];
-  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  // Excel/Sheets execute cells starting with = + - @ as formulas; Item/From carry OCR/user text.
+  const esc = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
   const to = order.to_short ?? order.to_warehouse_id;
   const rows = order.lines.map((l) =>
     [
