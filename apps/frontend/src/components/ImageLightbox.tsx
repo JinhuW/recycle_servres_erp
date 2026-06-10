@@ -6,11 +6,14 @@ type Props = {
   url: string;
   alt?: string;
   onClose: () => void;
+  // Override when the viewer must sit above a stacked modal (e.g. the sell-order
+  // dialogs at z-index 110–120). Defaults to 100 for the standalone callers.
+  zIndex?: number;
 };
 
 // Full-screen read-only image viewer. Sits above the desktop LineDrawer
 // (z-index 80) and the mobile shell. Close via X button, backdrop click, or Esc.
-export function ImageLightbox({ url, alt, onClose }: Props) {
+export function ImageLightbox({ url, alt, onClose, zIndex = 100 }: Props) {
   const { t } = useT();
   useEscapeKey(onClose);
 
@@ -21,7 +24,7 @@ export function ImageLightbox({ url, alt, onClose }: Props) {
         position: 'fixed',
         inset: 0,
         background: 'rgba(0,0,0,0.85)',
-        zIndex: 100,
+        zIndex,
         display: 'grid',
         placeItems: 'center',
         padding: 24,

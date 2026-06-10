@@ -9,6 +9,7 @@ import { Icon, type IconName } from './Icon';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { useT } from '../lib/i18n';
+import { AttachmentChip } from './AttachmentChip';
 
 export type StatusAttachment = {
   id: string;
@@ -58,12 +59,6 @@ function presetsFor(t: TFn): Record<MetaStatus, Preset> {
       acceptHint: t('statusDoneAcceptHint'),
     },
   };
-}
-
-function fmtSize(n: number) {
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 type Props = {
@@ -247,56 +242,9 @@ export function StatusChangeDialog({
 
             {attachments.length > 0 && (
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {attachments.map(a => {
-                  const isImg = a.mime?.startsWith('image/');
-                  return (
-                    <div
-                      key={a.id}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                        background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 8,
-                      }}
-                    >
-                      <a
-                        href={a.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          width: 32, height: 32, borderRadius: 6, background: 'var(--bg-soft)',
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          color: 'var(--fg-subtle)', flexShrink: 0, textDecoration: 'none',
-                        }}
-                        onClick={e => e.stopPropagation()}
-                        title={t('openAttachment')}
-                      >
-                        <Icon name={isImg ? 'image' : 'file'} size={14} />
-                      </a>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <a
-                          href={a.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{
-                            fontSize: 13, color: 'var(--fg)', display: 'block',
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            textDecoration: 'none',
-                          }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          {a.filename}
-                        </a>
-                        <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{fmtSize(a.size)}</div>
-                      </div>
-                      <button
-                        className="btn icon sm"
-                        onClick={e => { e.stopPropagation(); removeAttachment(a); }}
-                        title={t('remove')}
-                      >
-                        <Icon name="x" size={12} />
-                      </button>
-                    </div>
-                  );
-                })}
+                {attachments.map(a => (
+                  <AttachmentChip key={a.id} a={a} onRemove={() => removeAttachment(a)} />
+                ))}
               </div>
             )}
           </div>

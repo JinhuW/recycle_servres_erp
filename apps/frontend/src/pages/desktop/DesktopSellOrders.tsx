@@ -21,6 +21,7 @@ import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
 import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
+import { AttachmentChip } from '../../components/AttachmentChip';
 
 type Currency = 'USD' | 'CNY';
 
@@ -35,11 +36,6 @@ type StatusMetaEntry = {
   attachments: StatusAttachment[];
 };
 type StatusMetaMap = Record<MetaStatus, StatusMetaEntry>;
-
-const fmtFileSize = (n: number) =>
-  n < 1024 ? `${n} B`
-  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
-  : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 // The per-status evidence (note + attachments) captured at Shipped / Awaiting
 // payment / Done. Edit mode surfaces it through the stepper + StatusChangeDialog;
@@ -1138,32 +1134,7 @@ function SellOrderDetail({
                         {m.attachments.length > 0 && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {m.attachments.map(a => (
-                              <a
-                                key={a.id}
-                                href={a.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={t('openAttachment')}
-                                style={{
-                                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                                  background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 8,
-                                  textDecoration: 'none', color: 'var(--fg)',
-                                }}
-                              >
-                                <span style={{
-                                  width: 32, height: 32, borderRadius: 6, background: 'var(--bg-soft)',
-                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                  color: 'var(--fg-subtle)', flexShrink: 0,
-                                }}>
-                                  <Icon name={a.mime?.startsWith('image/') ? 'image' : 'file'} size={14} />
-                                </span>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {a.filename}
-                                  </div>
-                                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{fmtFileSize(a.size)}</div>
-                                </div>
-                              </a>
+                              <AttachmentChip key={a.id} a={a} />
                             ))}
                           </div>
                         )}
