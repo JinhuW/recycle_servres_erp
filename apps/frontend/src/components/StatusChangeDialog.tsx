@@ -32,6 +32,19 @@ type Preset = {
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
 
+// Purchase orders reuse this dialog for their single evidence point (Done),
+// with PO-flavored copy — the sell presets talk about customers and invoices.
+function poDonePreset(t: TFn): Preset {
+  return {
+    title: t('poStatusDoneTitle'),
+    sub: t('poStatusDoneSub'),
+    icon: 'check',
+    tone: 'pos',
+    placeholder: t('poStatusDonePlaceholder'),
+    acceptHint: t('poStatusDoneAcceptHint'),
+  };
+}
+
 function presetsFor(t: TFn): Record<MetaStatus, Preset> {
   return {
     'Shipped': {
@@ -74,10 +87,15 @@ type Props = {
   // Fires after any internal mutation (attachment add/remove, note PUT) so
   // the parent can refresh views that depend on backend-emitted audit events.
   onMutated?: () => void;
+  // Endpoint prefix the live saves target. Purchase orders pass '/api/orders'
+  // (and variant 'purchase' for PO-flavored copy); sell orders are the default.
+  apiBase?: string;
+  variant?: 'sell' | 'purchase';
 };
 
 export function StatusChangeDialog({
   orderId, to, currentStatus, initialNote, initialAttachments, onCancel, onConfirm, onMutated,
+  apiBase = '/api/sell-orders', variant = 'sell',
 }: Props) {
   const { t } = useT();
   const [note, setNote] = useState(initialNote);
@@ -86,7 +104,7 @@ export function StatusChangeDialog({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const cfg = presetsFor(t)[to];
+  const cfg = variant === 'purchase' ? poDonePreset(t) : presetsFor(t)[to];
 
   // Escape closes the dialog.
   useEscapeKey(onCancel);
@@ -105,7 +123,7 @@ export function StatusChangeDialog({
         const form = new FormData();
         form.append('file', f);
         const r = await api.upload<{ attachment: StatusAttachment }>(
-          `/api/sell-orders/${orderId}/status-meta/${encodeURIComponent(to)}/attachments`,
+          `${apiBase}/${orderId}/status-meta/${encodeURIComponent(to)}/attachments`,
           form,
         );
         setAttachments(prev => [...prev, r.attachment]);
@@ -122,7 +140,7 @@ export function StatusChangeDialog({
     setError(null);
     try {
       await api.delete(
-        `/api/sell-orders/${orderId}/status-meta/${encodeURIComponent(to)}/attachments/${att.id}`,
+        `${apiBase}/${orderId}/status-meta/${encodeURIComponent(to)}/attachments/${att.id}`,
       );
       setAttachments(prev => prev.filter(a => a.id !== att.id));
       onMutated?.();
@@ -137,7 +155,7 @@ export function StatusChangeDialog({
     setError(null);
     try {
       await api.put<{ ok: true }>(
-        `/api/sell-orders/${orderId}/status-meta/${encodeURIComponent(to)}`,
+        `${apiBase}/${orderId}/status-meta/${encodeURIComponent(to)}`,
         { note: note.trim() },
       );
       onMutated?.();
@@ -185,7 +203,7 @@ export function StatusChangeDialog({
         {/* Body */}
         <div style={{ padding: 24, display: 'grid', gap: 18 }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">{t('trackingNote')}</label>
+            <label className="label">{variant === 'purchase' ? t('poStatusNoteLabel') : t('trackingNote')}</label>
             <textarea
               className="input"
               rows={4}

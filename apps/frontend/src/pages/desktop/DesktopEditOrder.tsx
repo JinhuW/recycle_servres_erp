@@ -13,6 +13,8 @@ import {
 } from './DesktopSubmit';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
+import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
+import { AttachmentChip } from '../../components/AttachmentChip';
 
 const realScan = (u?: string | null): u is string =>
   !!u && !u.startsWith('data:image/placeholder');
@@ -70,6 +72,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     : ORDER_STATUSES.slice();
 
   const [status, setStatus] = useState(effectiveStatus);
+  // Optional Done evidence (note + attachments). The dialog live-saves to the
+  // backend; these mirror its latest confirmed state for the read-only block.
+  const [doneDialogOpen, setDoneDialogOpen] = useState(false);
+  const [doneNote, setDoneNote] = useState(order.statusMeta?.['Done']?.note ?? '');
+  const [doneAttachments, setDoneAttachments] = useState<StatusAttachment[]>(
+    order.statusMeta?.['Done']?.attachments ?? [],
+  );
+  const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
@@ -641,7 +651,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         {/* PO audit log — lives under Payment detail in the side column, fully
             foldable. The component hides its own card chrome before load and
             handles the empty-state copy for drafts. */}
-        <OrderActivityLog orderId={order.id} />
+        <OrderActivityLog orderId={order.id} refreshKey={activityKey} />
       </aside>
 
       <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
@@ -668,7 +678,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   <button
                     type="button"
                     className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '') + (locked ? ' locked' : '')}
-                    onClick={() => { if (!locked && !orderLocked) setStatus(s); }}
+                    onClick={() => {
+                      if (locked || orderLocked) return;
+                      // Done gets the evidence dialog first; confirming stages
+                      // the status, Save commits it. Purchasers never reach
+                      // here for Done (allowedStatuses keeps it locked).
+                      if (s === 'Done' && status !== 'Done') { setDoneDialogOpen(true); return; }
+                      setStatus(s);
+                    }}
                     disabled={locked || orderLocked}
                     title={locked
                       ? t('eoStepLockedTooltip')
@@ -735,6 +752,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             }}>
               <Icon name="info" size={13} />
               {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {t('eoStatusChangePurchPost')}
+            </div>
+          )}
+          {(doneNote || doneAttachments.length > 0) && (
+            <div style={{
+              marginTop: 10, padding: '10px 12px', borderRadius: 8,
+              background: 'var(--bg-soft)', border: '1px solid var(--border)',
+              display: 'grid', gap: 8,
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                textTransform: 'uppercase', letterSpacing: '0.06em',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <Icon name="paperclip" size={11} /> {t('poDoneEvidenceTitle')}
+              </div>
+              {doneNote && (
+                <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{doneNote}</div>
+              )}
+              {doneAttachments.map(a => <AttachmentChip key={a.id} a={a} />)}
             </div>
           )}
         </div>
@@ -1082,6 +1118,26 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
       {lightboxUrl && (
         <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
+      )}
+
+      {doneDialogOpen && (
+        <StatusChangeDialog
+          orderId={order.id}
+          to="Done"
+          currentStatus={effectiveStatus}
+          initialNote={doneNote}
+          initialAttachments={doneAttachments}
+          apiBase="/api/orders"
+          variant="purchase"
+          onCancel={() => setDoneDialogOpen(false)}
+          onConfirm={({ note, attachments }) => {
+            setDoneNote(note);
+            setDoneAttachments(attachments);
+            setDoneDialogOpen(false);
+            setStatus('Done');
+          }}
+          onMutated={() => setActivityKey(k => k + 1)}
+        />
       )}
     </>
   );

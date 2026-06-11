@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
-import { deleteAttachment } from '../r2';
+import { uploadAttachment, deleteAttachment } from '../r2';
 import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
@@ -9,7 +9,7 @@ import {
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
-import { getWorkspaceSetting } from '../lib/settings';
+import { getWorkspaceSetting, getUploadLimits } from '../lib/settings';
 import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
@@ -231,6 +231,31 @@ orders.get('/:id', async (c) => {
 
   const status = LINE_STATUS_FOR_LIFECYCLE[order.lifecycle as string] ?? order.lifecycle as string;
 
+  // Per-status evidence (note + attachments) — currently captured only for
+  // Done. Same response shape as sell orders' statusMeta.
+  const metaRows = await sql`
+    SELECT status, note, set_at FROM order_status_meta WHERE order_id = ${id}
+  `;
+  const attRows = await sql`
+    SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
+    FROM order_status_attachments WHERE order_id = ${id} ORDER BY uploaded_at
+  `;
+  const statusMeta: Record<string, {
+    note: string | null; when: string;
+    attachments: { id: string; filename: string; size: number; mime: string; url: string; uploadedAt: string }[];
+  }> = {};
+  for (const m of metaRows) {
+    statusMeta[m.status as string] = { note: m.note, when: m.set_at, attachments: [] };
+  }
+  for (const a of attRows) {
+    const s = a.status as string;
+    statusMeta[s] ??= { note: null, when: a.uploaded_at, attachments: [] };
+    statusMeta[s].attachments.push({
+      id: a.id, filename: a.filename, size: a.size_bytes,
+      mime: a.mime_type, url: a.delivery_url, uploadedAt: a.uploaded_at,
+    });
+  }
+
   return c.json({
     order: {
       id: order.id,
@@ -243,6 +268,7 @@ orders.get('/:id', async (c) => {
       lifecycle: order.lifecycle,
       archivedAt: order.archived_at,
       status,
+      statusMeta,
       createdAt: order.created_at,
       totalCost: order.total_cost,
       commissionRate: order.commission_rate,
@@ -1009,6 +1035,163 @@ async function setArchived(c: OrderCtx, archive: boolean) {
 
 orders.post('/:id/archive',   c => setArchived(c, true));
 orders.post('/:id/unarchive', c => setArchived(c, false));
+
+// ─── Per-status evidence (note + attachments) ──────────────────────────────
+// Optional evidence a manager can leave when moving a PO to Done. Same
+// live-save contract as the sell-order endpoints: the dialog persists
+// directly here, so files survive a cancelled status change. Statuses are a
+// hardcoded map (no needs_meta table like sell orders), so the valid set is
+// a constant.
+const PO_META_STATUSES = new Set(['Done']);
+
+// Upsert the text note for a single (order, status).
+orders.put('/:id/status-meta/:status', async (c) => {
+  const u = c.var.user;
+  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const status = c.req.param('status');
+  if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
+  const body = (await c.req.json().catch(() => null)) as { note?: string | null } | null;
+  if (!body) return c.json({ error: 'invalid body' }, 400);
+  const sql = getDb(c.env);
+
+  // Ensure the order exists; otherwise the FK upsert silently inserts.
+  const existing = (await sql`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { lifecycle: string } | undefined;
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  // Drafts must never accumulate order_events rows — the append-only trigger
+  // would block the draft-only DELETE cascade (see 0037). Same gate as PATCH.
+  const auditable = existing.lifecycle !== 'draft';
+
+  const note = (body.note ?? '').trim() || null;
+  await sql.begin(async (tx) => {
+    const before = (await tx<{ note: string | null }[]>`
+      SELECT note FROM order_status_meta
+      WHERE order_id = ${id} AND status = ${status} LIMIT 1
+    `)[0];
+    await tx`
+      INSERT INTO order_status_meta (order_id, status, note, set_by)
+      VALUES (${id}, ${status}, ${note}, ${u.id})
+      ON CONFLICT (order_id, status)
+      DO UPDATE SET note = EXCLUDED.note, set_at = NOW(), set_by = EXCLUDED.set_by
+    `;
+    const fromNote = before?.note ?? null;
+    if (auditable && fromNote !== note) {
+      await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
+        status, field: 'note', from: fromNote, to: note,
+      });
+    }
+  });
+  return c.json({ ok: true });
+});
+
+// Upload one attachment for (order, status). Multipart with field `file`.
+orders.post('/:id/status-meta/:status/attachments', async (c) => {
+  const u = c.var.user;
+  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const status = c.req.param('status');
+  if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
+
+  const sql = getDb(c.env);
+  const existing = (await sql`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { lifecycle: string } | undefined;
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  // See the note PUT above: no audit rows on drafts.
+  const auditable = existing.lifecycle !== 'draft';
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  // These files land in the PUBLIC R2 bucket and are served with their
+  // declared Content-Type — an unchecked HTML/SVG is a stored-XSS vector.
+  // A missing type is rejected (not allowed through as octet-stream).
+  if (!file.type || !allowedMime.has(file.type)) {
+    return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
+  }
+  if (file.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
+  }
+
+  // R2 upload happens outside the transaction — it's the slow part. If the
+  // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
+  // a separate concern.
+  const uploaded = await uploadAttachment(c.env, file, `orders/${id}/${status}`)
+    .catch(e => { console.error('attachment upload', e); return null; });
+  if (!uploaded) return c.json({ error: 'upload failed' }, 502);
+
+  const row = await sql.begin(async (tx) => {
+    const r = (await tx`
+      INSERT INTO order_status_attachments
+        (order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
+      VALUES
+        (${id}, ${status}, ${file.name}, ${file.size},
+         ${file.type || 'application/octet-stream'},
+         ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
+      RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+    `)[0];
+    if (auditable) {
+      await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
+        status, field: 'attachment_added',
+        attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+      });
+    }
+    return r;
+  });
+
+  return c.json({
+    attachment: {
+      id: row.id,
+      filename: row.filename,
+      size: row.size_bytes,
+      mime: row.mime_type,
+      url: row.delivery_url,
+      uploadedAt: row.uploaded_at,
+    },
+  });
+});
+
+// Remove a single attachment.
+orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) => {
+  const u = c.var.user;
+  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const status = c.req.param('status');
+  const attachmentId = c.req.param('attachmentId');
+  if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
+
+  const sql = getDb(c.env);
+  const existing = (await sql`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { lifecycle: string } | undefined;
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  // See the note PUT above: no audit rows on drafts.
+  const auditable = existing.lifecycle !== 'draft';
+
+  const removed = await sql.begin(async (tx) => {
+    const row = (await tx`
+      SELECT storage_key, filename FROM order_status_attachments
+      WHERE id = ${attachmentId} AND order_id = ${id} AND status = ${status}
+      LIMIT 1
+    `)[0] as { storage_key: string; filename: string } | undefined;
+    if (!row) return null;
+    await tx`DELETE FROM order_status_attachments WHERE id = ${attachmentId}`;
+    if (auditable) {
+      await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
+        status, field: 'attachment_removed',
+        attachmentId, filename: row.filename,
+      });
+    }
+    return row;
+  });
+
+  if (!removed) return c.json({ error: 'Not found' }, 404);
+  // R2 delete outside the tx — slow side effect, kept out of the lock window.
+  // Best-effort.
+  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  return c.json({ ok: true });
+});
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → done) is the source of

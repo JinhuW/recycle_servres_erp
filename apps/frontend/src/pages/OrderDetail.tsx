@@ -3,6 +3,8 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
+import { StatusChangeDialog } from '../components/StatusChangeDialog';
+import { AttachmentChip } from '../components/AttachmentChip';
 import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
@@ -58,6 +60,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const [saveError, setSaveError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
+  const [doneDialogOpen, setDoneDialogOpen] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
@@ -142,8 +145,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
 
-  const advance = async () => {
-    if (!canAdvance) return;
+  const doAdvance = async () => {
     setAdvancing(true);
     setAdvanceError(null);
     try {
@@ -157,11 +159,21 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     }
   };
 
+  const advance = async () => {
+    if (!canAdvance) return;
+    // Moving to Done first offers the optional evidence dialog (note +
+    // attachments); confirming there fires the actual advance.
+    if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
+    await doAdvance();
+  };
+
   const itemLabel = (l: OrderLine) =>
       l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
     : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
     : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
     : (l.description ?? '—');
+
+  const doneMeta = order.statusMeta?.['Done'];
 
   const headerTitle = orderLocked ? t('viewOrder') : t('editOrderId', { id: order.id });
   const headerSub = `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
@@ -287,6 +299,27 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
               border: '1px solid var(--border)',
             }}>
               <Icon name="eye" size={12} /> {t('lifecycleManagerLock')}
+            </div>
+          )}
+          {doneMeta && (doneMeta.note || doneMeta.attachments.length > 0) && (
+            <div style={{
+              marginTop: 12, padding: '10px 12px', borderRadius: 10,
+              background: 'var(--bg-soft)', border: '1px solid var(--border)',
+              display: 'grid', gap: 8,
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                textTransform: 'uppercase', letterSpacing: '0.06em',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <Icon name="paperclip" size={11} /> {t('poDoneEvidenceTitle')}
+              </div>
+              {doneMeta.note && (
+                <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                  {doneMeta.note}
+                </div>
+              )}
+              {doneMeta.attachments.map(a => <AttachmentChip key={a.id} a={a} />)}
             </div>
           )}
         </div>
@@ -638,6 +671,23 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
 
       {lightboxUrl && (
         <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
+      )}
+
+      {doneDialogOpen && (
+        <StatusChangeDialog
+          orderId={order.id}
+          to="Done"
+          currentStatus={effectiveStatus}
+          initialNote={doneMeta?.note ?? ''}
+          initialAttachments={doneMeta?.attachments ?? []}
+          apiBase="/api/orders"
+          variant="purchase"
+          // Evidence live-saves inside the dialog, so a cancel still needs a
+          // refetch for the read-only block to reflect what was uploaded.
+          onCancel={() => { setDoneDialogOpen(false); refetchOrder(); }}
+          onConfirm={async () => { setDoneDialogOpen(false); await doAdvance(); }}
+          onMutated={() => setActivityRefreshKey(k => k + 1)}
+        />
       )}
     </div>
   );

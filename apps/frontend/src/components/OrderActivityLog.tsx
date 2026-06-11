@@ -19,6 +19,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_removed: 'trash',
   line_edited:  'edit',
   meta_changed: 'settings',
+  status_meta_changed: 'paperclip',
   archived:     'box',
   unarchived:   'rotate',
 };
@@ -31,6 +32,7 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_removed: 'warn',
   line_edited:  'info',
   meta_changed: 'muted',
+  status_meta_changed: 'muted',
   archived:     'muted',
   unarchived:   'info',
 };
@@ -136,6 +138,15 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
     case 'meta_changed': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
       return { title: 'Updated order details', lines: changes.map(c => changeLine(c, locale)) };
+    }
+    case 'status_meta_changed': {
+      const status = String(d.status ?? '');
+      const field = String(d.field);
+      if (field === 'note') {
+        return { title: `Note on ${status}`, lines: [renderValue('note', d.to, locale)] };
+      }
+      const verb = field === 'attachment_removed' ? 'removed' : 'added';
+      return { title: `Attachment ${verb} on ${status}`, lines: [String(d.filename ?? '')] };
     }
     case 'archived': {
       return { title: 'Archived', lines: ['Hidden from the default order list'] };

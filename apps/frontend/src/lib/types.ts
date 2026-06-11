@@ -78,7 +78,17 @@ export type OrderSummary = {
   status: string;
 };
 
-export type Order = OrderSummary & { lines: OrderLine[] };
+// Per-status evidence (note + attachments) — only the detail endpoint
+// returns it, and currently only for 'Done'.
+export type OrderStatusMeta = Record<string, {
+  note: string | null;
+  when: string;
+  attachments: {
+    id: string; filename: string; size: number; mime: string; url: string; uploadedAt: string;
+  }[];
+}>;
+
+export type Order = OrderSummary & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
 
 export type OrderEventKind =
   | 'submitted'
@@ -87,6 +97,7 @@ export type OrderEventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'status_meta_changed'
   | 'archived'
   | 'unarchived';
 

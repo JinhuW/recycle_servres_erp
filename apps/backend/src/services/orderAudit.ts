@@ -20,6 +20,7 @@ export type EventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'status_meta_changed'
   | 'archived'
   | 'unarchived';
 
