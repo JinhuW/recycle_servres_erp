@@ -1196,7 +1196,8 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → done) is the source of
 // truth, matching the frontend's WORKFLOW_STAGES.
-// Purchasers may only move Draft → In Transit (and not back).
+// Purchasers may only move Draft → In Transit (and not back); that one
+// transition is open to every signed-in user, owner or not.
 const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
   draft: 'Draft',
   in_transit: 'In Transit',
@@ -1229,7 +1230,6 @@ orders.post('/:id/advance', async (c) => {
     const cur = (await tx`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
       | { user_id: string; lifecycle: string } | undefined;
     if (!cur) return { kind: 'notFound' };
-    if (u.role !== 'manager' && cur.user_id !== u.id) return { kind: 'forbidden', msg: 'Forbidden' };
 
     const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
     let nextStageId: string;
@@ -1241,7 +1241,9 @@ orders.post('/:id/advance', async (c) => {
       if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
       nextStageId = stages[curIdx + 1].id;
     }
-    // Purchaser can only advance Draft → in_transit.
+    // Purchaser can only advance Draft → in_transit — but ANY purchaser may,
+    // not just the PO's creator: whoever handles the goods submits the order.
+    // Every other transition stays manager-only.
     if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
       return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
     }

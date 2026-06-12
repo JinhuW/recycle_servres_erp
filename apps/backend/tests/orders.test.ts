@@ -128,6 +128,34 @@ describe('POST /api/orders/:id/advance', () => {
     expect(got.body.order.lines[0].status).toBe('In Transit');
   });
 
+  it('purchaser can advance another user\'s Draft → in_transit', async () => {
+    const { token: ownerTok } = await loginAs(MARCUS);
+    const { token: otherTok } = await loginAs(PRIYA);
+    const c = await api<{ id: string }>('POST', '/api/orders', {
+      token: ownerTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    const r = await api('POST', `/api/orders/${c.body.id}/advance`, { token: otherTok });
+    expect(r.status).toBe(200);
+    const got = await api<{ order: { lifecycle: string } }>(
+      'GET', `/api/orders/${c.body.id}`, { token: ownerTok });
+    expect(got.body.order.lifecycle).toBe('in_transit');
+  });
+
+  it('non-owner purchaser still cannot advance past in_transit', async () => {
+    const { token: ownerTok } = await loginAs(MARCUS);
+    const { token: otherTok } = await loginAs(PRIYA);
+    const c = await api<{ id: string }>('POST', '/api/orders', {
+      token: ownerTok,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    await api('POST', `/api/orders/${c.body.id}/advance`, { token: ownerTok });
+    const r = await api('POST', `/api/orders/${c.body.id}/advance`, { token: otherTok });
+    expect(r.status).toBe(403);
+  });
+
   it('purchaser cannot jump past in_transit', async () => {
     const { token: pTok } = await loginAs(MARCUS);
     const c = await api<{ id: string }>('POST', '/api/orders', {
