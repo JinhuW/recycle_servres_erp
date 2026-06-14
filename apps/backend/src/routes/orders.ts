@@ -11,6 +11,7 @@ import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
 import { getWorkspaceSetting, getUploadLimits } from '../lib/settings';
 import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
+import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 
@@ -440,6 +441,96 @@ orders.get('/:id/invoice', async (c) => {
   });
 
   return pdfResponse(buf, `${order.id}.pdf`);
+});
+
+// ── PO spreadsheet (XLSX). Same access rules and payment summary as the PDF
+// invoice, but as a workbook: a Payment tab with the header/payment fields and a
+// Line items tab with the costed lines. Reuses the shared exceljs builder.
+const PO_LINE_COLS: XlsxColumn[] = [
+  { header: 'Item',       key: 'item',      width: 34 },
+  { header: 'Part #',     key: 'part',      width: 18 },
+  { header: 'Category',   key: 'category',  width: 10 },
+  { header: 'Condition',  key: 'condition', width: 12 },
+  { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
+  { header: 'Unit cost',  key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
+  { header: 'Line total', key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
+];
+
+const PO_PAYMENT_COLS: XlsxColumn[] = [
+  { header: 'Field', key: 'field', width: 24 },
+  { header: 'Value', key: 'value', width: 44 },
+];
+
+orders.get('/:id/spreadsheet', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const order = (await sql`
+    SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
+           o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
+           u.name AS user_name,
+           w.short AS warehouse_short, w.region AS warehouse_region
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+    LEFT JOIN warehouses w ON w.id = o.warehouse_id
+    WHERE o.id = ${id}
+    LIMIT 1
+  `)[0] as Record<string, unknown> | undefined;
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+
+  const lines = await sql`
+    SELECT category, brand, capacity, generation, type, classification, rank, speed,
+           interface, form_factor, description, part_number, condition, qty,
+           unit_cost::float AS unit_cost
+    FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
+  ` as unknown as Record<string, unknown>[];
+
+  const lineRows = lines.map((l) => {
+    const qty = Number(l.qty ?? 0);
+    const unitCost = Number(l.unit_cost ?? 0);
+    return {
+      item: poLineLabel(l),
+      part: String(l.part_number ?? ''),
+      category: String(l.category ?? ''),
+      condition: String(l.condition ?? ''),
+      qty,
+      unitCost,
+      lineTotal: +(qty * unitCost).toFixed(2),
+    };
+  });
+
+  // Mirror the invoice's payment summary: subtotal is the sum of line costs;
+  // total_cost may be a manual override (negotiated lot price). Commission is a
+  // rate only — the dollar amount depends on realized sell-side profit this
+  // document doesn't carry.
+  const subtotal = +lines.reduce((s, l) => s + Number(l.qty ?? 0) * Number(l.unit_cost ?? 0), 0).toFixed(2);
+  const totalQty = lines.reduce((s, l) => s + Number(l.qty ?? 0), 0);
+  const totalCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
+  const commissionRate = order.commission_rate != null ? Number(order.commission_rate) : null;
+  const warehouse = [order.warehouse_short, order.warehouse_region].filter(Boolean).join(' — ');
+
+  const paymentRows = [
+    { field: 'PO ID',                value: String(order.id) },
+    { field: 'Date',                 value: fmtTs(order.created_at).slice(0, 10) },
+    { field: 'Status',               value: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle) },
+    { field: 'Buyer',                value: String(order.user_name ?? '') },
+    { field: 'Category',             value: String(order.category ?? '') },
+    { field: 'Warehouse',            value: warehouse },
+    { field: 'Payment method',       value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
+    { field: 'Total quantity',       value: totalQty },
+    { field: 'Subtotal (line costs)', value: subtotal },
+    { field: 'Total cost',           value: totalCost },
+    { field: 'Commission rate',      value: commissionRate != null ? `${(commissionRate * 100).toFixed(2)}%` : '—' },
+    { field: 'Notes',                value: String(order.notes ?? '') },
+  ];
+
+  const buf = await buildXlsxWorkbook([
+    { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows },
+    { name: 'Line items', columns: PO_LINE_COLS, rows: lineRows },
+  ]);
+  return xlsxResponse(buf, `${order.id}.xlsx`);
 });
 
 // ── Create a new order with its lines (purchaser submits from phone).

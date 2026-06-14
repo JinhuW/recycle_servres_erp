@@ -583,6 +583,16 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           </button>
                           <button
                             className="btn icon sm"
+                            title={t('downloadPoXlsx')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              api.download(`/api/orders/${o.id}/spreadsheet`, `${o.id}.xlsx`).catch(handleFetchError);
+                            }}
+                          >
+                            <Icon name="file" size={12} />
+                          </button>
+                          <button
+                            className="btn icon sm"
                             title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
                             onClick={(e) => {
                               e.stopPropagation();
