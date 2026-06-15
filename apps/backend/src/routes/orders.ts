@@ -454,6 +454,9 @@ const PO_LINE_COLS: XlsxColumn[] = [
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
   { header: 'Unit cost',  key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
   { header: 'Line total', key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
+  { header: 'Sell price', key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
+  { header: 'Sell total', key: 'sellTotal', width: 13, numFmt: '#,##0.00' },
+  { header: 'Profit',     key: 'profit',    width: 12, numFmt: '#,##0.00' },
 ];
 
 const PO_PAYMENT_COLS: XlsxColumn[] = [
@@ -483,13 +486,19 @@ orders.get('/:id/spreadsheet', async (c) => {
   const lines = await sql`
     SELECT category, brand, capacity, generation, type, classification, rank, speed,
            interface, form_factor, description, part_number, condition, qty,
-           unit_cost::float AS unit_cost
+           unit_cost::float AS unit_cost, sell_price::float AS sell_price
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
   ` as unknown as Record<string, unknown>[];
 
+  // Projected economics. The PO carries a manager-set `sell_price` per line (a
+  // target, not a realized sale — the spreadsheet is purchaser-facing and a PO
+  // has no sell-side data of its own). Profit/commission here are the projected
+  // figures the purchaser sees on their dashboard; lines without a sell price
+  // set simply don't contribute (left blank, no profit).
   const lineRows = lines.map((l) => {
     const qty = Number(l.qty ?? 0);
     const unitCost = Number(l.unit_cost ?? 0);
+    const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
       item: poLineLabel(l),
       part: String(l.part_number ?? ''),
@@ -498,32 +507,42 @@ orders.get('/:id/spreadsheet', async (c) => {
       qty,
       unitCost,
       lineTotal: +(qty * unitCost).toFixed(2),
+      sellPrice,
+      sellTotal: sellPrice != null ? +(qty * sellPrice).toFixed(2) : null,
+      profit: sellPrice != null ? +(qty * (sellPrice - unitCost)).toFixed(2) : null,
     };
   });
 
   // Mirror the invoice's payment summary: subtotal is the sum of line costs;
-  // total_cost may be a manual override (negotiated lot price). Commission is a
-  // rate only — the dollar amount depends on realized sell-side profit this
-  // document doesn't carry.
+  // total_cost may be a manual override (negotiated lot price).
   const subtotal = +lines.reduce((s, l) => s + Number(l.qty ?? 0) * Number(l.unit_cost ?? 0), 0).toFixed(2);
   const totalQty = lines.reduce((s, l) => s + Number(l.qty ?? 0), 0);
   const totalCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
   const commissionRate = order.commission_rate != null ? Number(order.commission_rate) : null;
   const warehouse = [order.warehouse_short, order.warehouse_region].filter(Boolean).join(' — ');
 
+  // Projected totals over priced lines, consistent with the purchaser dashboard
+  // KPIs. Commission is the projected profit times the manager-set rate.
+  const projectedRevenue = +lineRows.reduce((s, r) => s + (r.sellTotal ?? 0), 0).toFixed(2);
+  const projectedProfit = +lineRows.reduce((s, r) => s + (r.profit ?? 0), 0).toFixed(2);
+  const commissionAmount = commissionRate != null ? +(projectedProfit * commissionRate).toFixed(2) : null;
+
   const paymentRows = [
-    { field: 'PO ID',                value: String(order.id) },
-    { field: 'Date',                 value: fmtTs(order.created_at).slice(0, 10) },
-    { field: 'Status',               value: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle) },
-    { field: 'Buyer',                value: String(order.user_name ?? '') },
-    { field: 'Category',             value: String(order.category ?? '') },
-    { field: 'Warehouse',            value: warehouse },
-    { field: 'Payment method',       value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
-    { field: 'Total quantity',       value: totalQty },
+    { field: 'PO ID',                 value: String(order.id) },
+    { field: 'Date',                  value: fmtTs(order.created_at).slice(0, 10) },
+    { field: 'Status',                value: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle) },
+    { field: 'Buyer',                 value: String(order.user_name ?? '') },
+    { field: 'Category',              value: String(order.category ?? '') },
+    { field: 'Warehouse',             value: warehouse },
+    { field: 'Payment method',        value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
+    { field: 'Total quantity',        value: totalQty },
     { field: 'Subtotal (line costs)', value: subtotal },
-    { field: 'Total cost',           value: totalCost },
-    { field: 'Commission rate',      value: commissionRate != null ? `${(commissionRate * 100).toFixed(2)}%` : '—' },
-    { field: 'Notes',                value: String(order.notes ?? '') },
+    { field: 'Total cost',            value: totalCost },
+    { field: 'Projected sell value',  value: projectedRevenue },
+    { field: 'Projected profit',      value: projectedProfit },
+    { field: 'Commission rate',       value: commissionRate != null ? `${(commissionRate * 100).toFixed(2)}%` : '—' },
+    { field: 'Commission amount',     value: commissionAmount != null ? commissionAmount : '—' },
+    { field: 'Notes',                 value: String(order.notes ?? '') },
   ];
 
   const buf = await buildXlsxWorkbook([
