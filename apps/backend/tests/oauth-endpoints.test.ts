@@ -363,6 +363,50 @@ describe('/oauth/token', () => {
     expect(scope).toBe('market:read');
   });
 
+  it('client_credentials grant issues every scope a multi-scope service client holds', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient, findOAuthClient } = await import('../src/oauth/clients');
+    const scopes = ['market:read', 'market:write', 'sellorder:write'];
+    const c = await createOAuthClient(sql, {
+      name: 'tk-cc-multi', redirectUris: [],
+      grantTypes: ['client_credentials'], scopes,
+      createdBy: u, public: false,
+    });
+    // The minted client persists every scope it was created with — not just the first.
+    const stored = await findOAuthClient(sql, c.clientId);
+    expect(stored?.scopes).toEqual(expect.arrayContaining(scopes));
+
+    const r = await api('POST', '/oauth/token', {
+      form: {
+        grant_type: 'client_credentials', scope: scopes.join(' '),
+        client_id: c.clientId, client_secret: c.clientSecret!, // pragma: allowlist secret
+      },
+    });
+    expect(r.status).toBe(200);
+    expect(((r.body as Record<string, unknown>).scope as string).split(' '))
+      .toEqual(expect.arrayContaining(scopes));
+  });
+
+  it('client_credentials grant rejects a scope the client does not hold', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'tk-cc-narrow', redirectUris: [],
+      grantTypes: ['client_credentials'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const r = await api('POST', '/oauth/token', {
+      form: {
+        grant_type: 'client_credentials', scope: 'market:read sellorder:write',
+        client_id: c.clientId, client_secret: c.clientSecret!, // pragma: allowlist secret
+      },
+    });
+    expect(r.status).toBe(400);
+    expect((r.body as Record<string, unknown>).error).toBe('invalid_scope');
+  });
+
   it('authorization_code rejects code reuse', async () => {
     const sql = getTestDb();
     const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;

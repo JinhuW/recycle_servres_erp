@@ -17,12 +17,21 @@ type Client = {
   lastUsedAt: string | null;
 };
 
+// The four scopes the backend grants (oauth/server.ts VALID_SCOPES). Order is
+// fixed here so the checkbox list renders stably; labels resolve via i18n.
+const SCOPE_OPTIONS = [
+  { scope: 'market:read', labelKey: 'connectorsScopeMarketRead' },
+  { scope: 'market:write', labelKey: 'connectorsScopeMarketWrite' },
+  { scope: 'sellorder:read', labelKey: 'connectorsScopeSellOrderRead' },
+  { scope: 'sellorder:write', labelKey: 'connectorsScopeSellOrderWrite' },
+] as const;
+
 export function DesktopSettingsConnectors() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [clients, setClients] = useState<Client[] | null>(null);
   const [newName, setNewName] = useState('');
-  const [newScope, setNewScope] = useState<'market' | 'sellorder'>('market');
+  const [newScopes, setNewScopes] = useState<string[]>(['market:read']);
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -62,7 +71,7 @@ export function DesktopSettingsConnectors() {
         {
           name,
           grantTypes: ['client_credentials'],
-          scopes: newScope === 'sellorder' ? ['sellorder:read', 'sellorder:write'] : ['market:write'],
+          scopes: newScopes,
           public: false,
         },
       );
@@ -74,6 +83,12 @@ export function DesktopSettingsConnectors() {
     } finally {
       setCreating(false);
     }
+  }
+
+  function toggleScope(scope: string) {
+    setNewScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
   }
 
   async function revoke(id: string) {
@@ -170,29 +185,32 @@ export function DesktopSettingsConnectors() {
               />
             </div>
             <div style={{ display: 'grid', gap: 6 }}>
-              <label
-                htmlFor="connector-scope"
-                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}
-              >
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}>
                 {t('connectorsScopeLabel')}
-              </label>
-              <select
-                id="connector-scope"
-                className="select"
-                value={newScope}
-                onChange={(e) => setNewScope(e.target.value as 'market' | 'sellorder')}
-                disabled={creating}
-              >
-                <option value="market">{t('connectorsScopeMarket')}</option>
-                <option value="sellorder">{t('connectorsScopeSellOrder')}</option>
-              </select>
+              </span>
+              <div style={{ display: 'grid', gap: 8, marginTop: 2 }}>
+                {SCOPE_OPTIONS.map(({ scope, labelKey }) => (
+                  <label
+                    key={scope}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: creating ? 'default' : 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={newScopes.includes(scope)}
+                      onChange={() => toggleScope(scope)}
+                      disabled={creating}
+                    />
+                    {t(labelKey)}
+                  </label>
+                ))}
+              </div>
             </div>
             <div>
               <button
                 type="button"
                 className="btn accent"
                 onClick={createServiceClient}
-                disabled={creating || !newName.trim()}
+                disabled={creating || !newName.trim() || newScopes.length === 0}
               >
                 {t('connectorsCreate')}
               </button>
