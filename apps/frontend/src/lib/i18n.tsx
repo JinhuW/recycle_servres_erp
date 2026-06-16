@@ -1091,6 +1091,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
 
     // LineFields
     selectPlaceholder: 'Select…',
+    customValuePh: 'Or type a custom value',
     healthPct: 'Health (%)',
     lfItemDescription: 'Item description',
     lfItemDescriptionPh: 'e.g. Xeon Gold 6248',
@@ -2343,6 +2344,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     drawerConfirmFailed: '确认明细失败',
 
     selectPlaceholder: '请选择…',
+    customValuePh: '或输入自定义值',
     healthPct: '健康度 (%)',
     lfItemDescription: '物品描述',
     lfItemDescriptionPh: '例如:Xeon Gold 6248',

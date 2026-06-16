@@ -1,4 +1,3 @@
-import { useId } from 'react';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -29,26 +28,28 @@ function CatSelect({ value, options, onChange }: { value: string | undefined; op
   );
 }
 
-// Like CatSelect but accepts a custom value: the catalog options ride in a
-// <datalist> the user can pick from, while the <input> still takes any typed
-// value. Used for fields (drive capacity, brand) whose real-world set outruns
-// the catalog — purchasers see odd SSD/HDD sizes the list doesn't carry.
+// Like CatSelect but accepts a custom value: a preset dropdown plus an
+// always-editable text input, both bound to the same value. Pick a catalog
+// option from the dropdown, or type anything in the input — used for fields
+// (drive capacity, brand) whose real-world set outruns the catalog.
 function CatCombo({ value, options, onChange }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void }) {
   const { t } = useT();
-  const listId = useId();
+  // The dropdown only reflects the value when it's an actual preset; a custom
+  // value leaves it on the placeholder while the input below carries the text.
+  const selValue = value != null && options.includes(value) ? value : '';
   return (
-    <>
+    <div className="combo-field">
+      <select className="select" value={selValue} onChange={e => onChange(e.target.value)}>
+        <option value="">{t('selectPlaceholder')}</option>
+        {options.map(o => <option key={o}>{o}</option>)}
+      </select>
       <input
         className="input"
-        list={listId}
         value={value ?? ''}
-        placeholder={t('selectPlaceholder')}
+        placeholder={t('customValuePh')}
         onChange={e => onChange(e.target.value)}
       />
-      <datalist id={listId}>
-        {options.map(o => <option key={o} value={o} />)}
-      </datalist>
-    </>
+    </div>
   );
 }
 
