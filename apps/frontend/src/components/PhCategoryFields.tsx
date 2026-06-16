@@ -1,6 +1,7 @@
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
+import { Combobox } from './Combobox';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -48,36 +49,20 @@ function PhCatSelect({
 }
 
 /**
- * Catalog-backed combo: a preset dropdown plus an always-editable text input,
- * both bound to the same value. Pick a catalog option, or type anything —
- * used where the real-world set outruns the catalog (drive capacity / brand
- * purchasers hit SSD/HDD sizes the list doesn't carry).
+ * Catalog field that also accepts a custom value (drive capacity / brand —
+ * their real-world set outruns the catalog). Single field: type anything, or
+ * pick a preset. Styled like the sell-order Customer picker.
  */
 function PhCatCombo({
-  value, options, onChange, selectClassName, inputClassName,
+  value, options, onChange, className,
 }: {
   value: string | null | undefined;
   options: readonly string[];
   onChange: (v: string) => void;
-  selectClassName: string;
-  inputClassName: string;
+  className: string;
 }) {
   const { t } = useT();
-  const selValue = value != null && options.includes(value as string) ? (value as string) : '';
-  return (
-    <div className="combo-field">
-      <select className={selectClassName} value={selValue} onChange={e => onChange(e.target.value)}>
-        <option value="">{t('selectPlaceholder')}</option>
-        {options.map(o => <option key={o}>{o}</option>)}
-      </select>
-      <input
-        className={inputClassName}
-        value={value ?? ''}
-        placeholder={t('customValuePh')}
-        onChange={e => onChange(e.target.value)}
-      />
-    </div>
-  );
+  return <Combobox value={value} options={options} onChange={onChange} placeholder={t('selectPlaceholder')} className={className} />;
 }
 
 /**
@@ -148,11 +133,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatCombo selectClassName={selectClsFor('brand')} inputClassName={inputClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatCombo className={inputClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatCombo selectClassName={selectClsFor('capacity')} inputClassName={inputClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatCombo className={inputClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
@@ -193,11 +178,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatCombo selectClassName={selectClsFor('brand')} inputClassName={inputClsFor('brand')} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatCombo className={inputClsFor('brand')} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatCombo selectClassName={selectClsFor('capacity')} inputClassName={inputClsFor('capacity')} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatCombo className={inputClsFor('capacity')} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">

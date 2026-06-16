@@ -6,6 +6,7 @@ import {
 } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
+import { Combobox } from '../../../components/Combobox';
 import type { Line } from '../DesktopSubmit';
 
 // ─── Field groups ────────────────────────────────────────────────────────────
@@ -28,29 +29,12 @@ function CatSelect({ value, options, onChange }: { value: string | undefined; op
   );
 }
 
-// Like CatSelect but accepts a custom value: a preset dropdown plus an
-// always-editable text input, both bound to the same value. Pick a catalog
-// option from the dropdown, or type anything in the input — used for fields
-// (drive capacity, brand) whose real-world set outruns the catalog.
+// Catalog field that also accepts a custom value (drive capacity / brand —
+// their real-world set outruns the catalog). Single field: type anything, or
+// pick a preset. Styled like the sell-order Customer picker.
 function CatCombo({ value, options, onChange }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void }) {
   const { t } = useT();
-  // The dropdown only reflects the value when it's an actual preset; a custom
-  // value leaves it on the placeholder while the input below carries the text.
-  const selValue = value != null && options.includes(value) ? value : '';
-  return (
-    <div className="combo-field">
-      <select className="select" value={selValue} onChange={e => onChange(e.target.value)}>
-        <option value="">{t('selectPlaceholder')}</option>
-        {options.map(o => <option key={o}>{o}</option>)}
-      </select>
-      <input
-        className="input"
-        value={value ?? ''}
-        placeholder={t('customValuePh')}
-        onChange={e => onChange(e.target.value)}
-      />
-    </div>
-  );
+  return <Combobox value={value} options={options} onChange={onChange} placeholder={t('selectPlaceholder')} />;
 }
 
 export function RamFields({ line, set }: FieldsProps) {

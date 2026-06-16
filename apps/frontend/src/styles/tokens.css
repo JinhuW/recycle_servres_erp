@@ -115,9 +115,6 @@ button { font-family: inherit; cursor: pointer; }
 }
 .input.mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
 
-/* Preset dropdown stacked over a free-text input (catalog combo). */
-.combo-field { display: flex; flex-direction: column; gap: 6px; }
-
 /* ===== Segmented control ===== */
 .seg {
   display: inline-flex;
