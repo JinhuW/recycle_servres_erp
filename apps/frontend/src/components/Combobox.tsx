@@ -67,6 +67,24 @@ export function Combobox({
           background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
           boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 50, overflow: 'hidden',
         }}>
+          {/* Explicit affordance that a typed value the catalog doesn't carry
+              is accepted as-is — mirrors the Customer picker's "Add new" row. */}
+          {q && !exact && (
+            <button
+              type="button"
+              onMouseDown={e => { e.preventDefault(); setOpen(false); }}
+              style={{
+                width: '100%', textAlign: 'left', padding: '10px 12px',
+                border: 'none', background: 'var(--bg-soft)', cursor: 'pointer',
+                borderBottom: '1px solid var(--border)', fontFamily: 'inherit',
+                color: 'var(--accent-strong)', display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 12.5, fontWeight: 500,
+              }}
+            >
+              <Icon name="plus" size={13} />
+              {t('comboUseCustom', { value: (value ?? '').trim() })}
+            </button>
+          )}
           <div style={{ maxHeight: 240, overflowY: 'auto' }}>
             {filtered.map(o => (
               <button
@@ -88,7 +106,7 @@ export function Combobox({
                 {o === value && <Icon name="check" size={13} style={{ color: 'var(--accent)' }} />}
               </button>
             ))}
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !(q && !exact) && (
               <div style={{ padding: 16, fontSize: 12.5, color: 'var(--fg-subtle)', textAlign: 'center' }}>
                 {t('sodNoMatches')}
               </div>
