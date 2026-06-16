@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -25,6 +26,29 @@ function CatSelect({ value, options, onChange }: { value: string | undefined; op
       {orphan && <option value={value}>{value}</option>}
       {options.map(o => <option key={o}>{o}</option>)}
     </select>
+  );
+}
+
+// Like CatSelect but accepts a custom value: the catalog options ride in a
+// <datalist> the user can pick from, while the <input> still takes any typed
+// value. Used for fields (drive capacity, brand) whose real-world set outruns
+// the catalog — purchasers see odd SSD/HDD sizes the list doesn't carry.
+function CatCombo({ value, options, onChange }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void }) {
+  const { t } = useT();
+  const listId = useId();
+  return (
+    <>
+      <input
+        className="input"
+        list={listId}
+        value={value ?? ''}
+        placeholder={t('selectPlaceholder')}
+        onChange={e => onChange(e.target.value)}
+      />
+      <datalist id={listId}>
+        {options.map(o => <option key={o} value={o} />)}
+      </datalist>
+    </>
   );
 }
 
@@ -87,11 +111,11 @@ export function SsdFields({ line, set }: FieldsProps) {
     <div className="grid-2">
       <div className="field">
         <label className="label">{t('brand')} <span className="req">*</span></label>
-        <CatSelect value={line.brand} options={SSD_BRANDS} onChange={v => set({ brand: v })} />
+        <CatCombo value={line.brand} options={SSD_BRANDS} onChange={v => set({ brand: v })} />
       </div>
       <div className="field">
         <label className="label">{t('capacity')} <span className="req">*</span></label>
-        <CatSelect value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
+        <CatCombo value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
         <label className="label">{t('interfaceLbl')} <span className="req">*</span></label>
@@ -133,11 +157,11 @@ export function HddFields({ line, set }: FieldsProps) {
     <div className="grid-2">
       <div className="field">
         <label className="label">{t('brand')} <span className="req">*</span></label>
-        <CatSelect value={line.brand} options={HDD_BRANDS} onChange={v => set({ brand: v })} />
+        <CatCombo value={line.brand} options={HDD_BRANDS} onChange={v => set({ brand: v })} />
       </div>
       <div className="field">
         <label className="label">{t('capacity')} <span className="req">*</span></label>
-        <CatSelect value={line.capacity} options={HDD_CAP} onChange={v => set({ capacity: v })} />
+        <CatCombo value={line.capacity} options={HDD_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
         <label className="label">{t('interfaceLbl')} <span className="req">*</span></label>

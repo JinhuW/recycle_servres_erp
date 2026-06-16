@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
@@ -44,6 +45,38 @@ function PhCatSelect({
       {orphan && <option value={value as string}>{value}</option>}
       {options.map(o => <option key={o}>{o}</option>)}
     </select>
+  );
+}
+
+/**
+ * Catalog-backed combo: the options ride in a <datalist> the user can pick
+ * from, while the <input> still accepts any typed value. Used where the
+ * real-world set outruns the catalog — drive capacity / brand purchasers hit
+ * SSD/HDD sizes the list doesn't carry, so they need a custom value.
+ */
+function PhCatCombo({
+  value, options, onChange, className,
+}: {
+  value: string | null | undefined;
+  options: readonly string[];
+  onChange: (v: string) => void;
+  className: string;
+}) {
+  const { t } = useT();
+  const listId = useId();
+  return (
+    <>
+      <input
+        className={className}
+        list={listId}
+        value={value ?? ''}
+        placeholder={t('selectPlaceholder')}
+        onChange={e => onChange(e.target.value)}
+      />
+      <datalist id={listId}>
+        {options.map(o => <option key={o} value={o} />)}
+      </datalist>
+    </>
   );
 }
 
@@ -115,11 +148,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatCombo className={inputClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatCombo className={inputClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
@@ -160,11 +193,11 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('brand')}<Req /></label>
-            <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
+            <PhCatCombo className={inputClsFor('brand')} value={value.brand} options={HDD_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatCombo className={inputClsFor('capacity')} value={value.capacity} options={HDD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">
