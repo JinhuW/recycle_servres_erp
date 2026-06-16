@@ -159,12 +159,53 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     const ws = wb.getWorksheet('Summary')!;
     const headers = (ws.getRow(1).values as unknown[]).map((v) => String(v ?? ''));
 
-    for (const gone of ['Unit cost', 'Sell price', 'Profit', 'Margin %', 'Submitted by', 'Status']) {
+    // The Summary tab is a part-number aggregate, so per-line/internal columns
+    // are gone; descriptive + summed columns stay.
+    for (const gone of ['Unit cost', 'Sell price', 'Profit', 'Margin %', 'Submitted by', 'Status', 'ID', 'Date', 'Warehouse']) {
       expect(headers).not.toContain(gone);
     }
-    for (const kept of ['ID', 'Item', 'Qty', 'Price', 'Currency', 'Line total', 'Image URL']) {
+    for (const kept of ['Part #', 'Item', 'Qty', 'Price', 'Currency', 'Line total', 'Image URL']) {
       expect(headers).toContain(kept);
     }
+  });
+
+  it('Summary groups by part number and sums quantity', async () => {
+    const { token } = await loginAs(ALEX);
+    const customerId = await firstCustomerId(token);
+
+    // Two hand-added lines (no inventory link, so the displayed Part # is the
+    // line's own snapshot) sharing one part number but in different warehouses —
+    // the Summary should collapse them into a single row with Qty summed.
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        lines: [
+          { category: 'RAM', label: 'DIMM A', partNumber: 'PN-DUP', qty: 2, unitPrice: 10, warehouseId: 'WH-LA1' },
+          { category: 'RAM', label: 'DIMM A', partNumber: 'PN-DUP', qty: 3, unitPrice: 10, warehouseId: 'WH-NJ2' },
+        ],
+      },
+    });
+    expect(create.status).toBe(201);
+
+    const res = await getRaw(`/api/sell-orders/${create.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Summary')!;
+    const headers = (ws.getRow(1).values as unknown[]).map((v) => String(v ?? ''));
+    const partCol = headers.indexOf('Part #');
+    const qtyCol = headers.indexOf('Qty');
+    const totalCol = headers.indexOf('Line total');
+
+    // Header row + exactly one data row for the single distinct part number.
+    expect(ws.actualRowCount).toBe(2);
+    const row = ws.getRow(2);
+    expect(String(row.getCell(partCol).value)).toBe('PN-DUP');
+    expect(Number(row.getCell(qtyCol).value)).toBe(5);       // 2 + 3
+    expect(Number(row.getCell(totalCol).value)).toBe(50);    // (2 + 3) × 10
   });
 
   it('404s an unknown sell order', async () => {

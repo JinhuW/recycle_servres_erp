@@ -371,6 +371,27 @@ const SO_DETAIL_COLS: XlsxColumn[] = [
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
+// Summary tab is an aggregate: one row per distinct part number with Qty / Line
+// total summed across every line (and warehouse). The per-line ID / Date /
+// Warehouse columns are dropped — they don't survive grouping — and live on the
+// per-warehouse detail tabs instead. Price shows the blended unit price
+// (Line total ÷ Qty) so it stays consistent with the summed quantity.
+const SO_SUMMARY_COLS: XlsxColumn[] = [
+  { header: 'Category',     key: 'category',  width: 10 },
+  { header: 'Item',         key: 'item',      width: 30 },
+  { header: 'Type',         key: 'type',      width: 10 },
+  { header: 'Spec',         key: 'spec',      width: 26 },
+  { header: 'Rank',         key: 'rank',      width: 10 },
+  { header: 'Speed',        key: 'speed',     width: 10 },
+  { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Condition',    key: 'condition', width: 12 },
+  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
+  { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
+  { header: 'Currency',     key: 'currency',  width: 9 },
+  { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
+  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
+];
+
 sellOrders.get('/:id/spreadsheet', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -447,8 +468,30 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     };
   });
 
-  // Summary tab carries every line; then one tab per warehouse, alphabetical
-  // with 'Unassigned' last — the same ordering the packing list uses.
+  // Summary tab groups by part number — one row per distinct part with Qty and
+  // Line total summed across lines/warehouses. Lines without a part number
+  // (hand- or MCP-added) key off their item label so distinct items don't merge
+  // into a single blank-part bucket. First occurrence wins for descriptive
+  // fields; Price is re-derived as the blended unit price.
+  type DataRow = (typeof data)[number];
+  const byPart = new Map<string, DataRow>();
+  for (const row of data) {
+    const key = row.part ? `pn:${row.part}` : `item:${row.item}`;
+    const existing = byPart.get(key);
+    if (existing) {
+      existing.qty += row.qty;
+      existing.lineTotal = +(existing.lineTotal + row.lineTotal).toFixed(2);
+    } else {
+      byPart.set(key, { ...row });
+    }
+  }
+  const summaryData = [...byPart.values()].map((g) => ({
+    ...g,
+    price: g.qty ? +(g.lineTotal / g.qty).toFixed(2) : 0,
+  }));
+
+  // Then one tab per warehouse, alphabetical with 'Unassigned' last — the same
+  // ordering the packing list uses. These keep the full per-line detail.
   const UNASSIGNED = 'Unassigned';
   const byWarehouse = new Map<string, typeof data>();
   for (const row of data) {
@@ -465,7 +508,7 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     .map((name) => ({ name, columns: SO_DETAIL_COLS, rows: byWarehouse.get(name)! }));
 
   const buf = await buildXlsxWorkbook([
-    { name: 'Summary', columns: SO_DETAIL_COLS, rows: data },
+    { name: 'Summary', columns: SO_SUMMARY_COLS, rows: summaryData },
     ...warehouseSheets,
   ]);
   // Prefix the file with the customer so a downloads folder full of exports is
