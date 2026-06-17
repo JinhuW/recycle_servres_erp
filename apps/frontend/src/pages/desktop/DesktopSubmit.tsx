@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { AttachmentChip } from '../../components/AttachmentChip';
 import { useT } from '../../lib/i18n';
 import { api, createDraftOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -254,6 +255,46 @@ function OrderForm({
   const [aiError, setAiError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Submission evidence is buffered locally, not uploaded live: the merge path
+  // deletes the throwaway draft, so the only stable target id is known after
+  // submit succeeds. Upload runs against that final id (see uploadEvidence).
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
+  const [evidenceDragOver, setEvidenceDragOver] = useState(false);
+  const evidenceInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Object URLs for local preview; revoked when the file set changes / unmounts.
+  const evidencePreviews = useMemo(
+    () => evidenceFiles.map(f => ({ file: f, url: URL.createObjectURL(f) })),
+    [evidenceFiles],
+  );
+  useEffect(
+    () => () => { evidencePreviews.forEach(p => URL.revokeObjectURL(p.url)); },
+    [evidencePreviews],
+  );
+
+  const addEvidenceFiles = (fl: FileList | null) => {
+    const picked = Array.from(fl || []).filter(f => {
+      if (f.size > 10 * 1024 * 1024) { setAiError(t('fileTooLarge', { name: f.name })); return false; }
+      return true;
+    });
+    if (picked.length) setEvidenceFiles(prev => [...prev, ...picked]);
+  };
+
+  // Upload buffered evidence to the FINAL order id (the new draft, or the merge
+  // target). Returns true if every file uploaded. Non-fatal: a false result
+  // surfaces a warning but the order is already submitted.
+  const uploadEvidence = async (finalId: string): Promise<boolean> => {
+    let ok = true;
+    for (const f of evidenceFiles) {
+      try {
+        const form = new FormData();
+        form.append('file', f);
+        await api.upload(`/api/orders/${finalId}/status-meta/Submission/attachments`, form);
+      } catch { ok = false; }
+    }
+    return ok;
+  };
+
   // Create a server-side draft order as soon as the form mounts so that
   // per-line confirms have an order to attach to.
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -443,6 +484,13 @@ function OrderForm({
         totalCost,
         ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
       });
+      if (evidenceFiles.length > 0) {
+        const ok = await uploadEvidence(draftId);
+        onDone(ok
+          ? { msg: t('orderSubmitted'), kind: 'success' }
+          : { msg: t('poSubmitUploadWarning'), kind: 'error' });
+        return;
+      }
       onDone({ msg: t('orderSubmitted'), kind: 'success' });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
@@ -462,10 +510,13 @@ function OrderForm({
         addLines: submitLines.map(toWireLine),
         totalCost: (target.totalCost ?? 0) + totals.cost,
       });
+      const evidenceOk = evidenceFiles.length === 0 || await uploadEvidence(target.id);
       // Best-effort cleanup of the now-empty throwaway draft — the merge already
       // succeeded, so a failure here must not fail the submit.
       try { await deleteOrder(draftId); } catch { /* leaves an empty draft; harmless */ }
-      onDone({ msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' });
+      onDone(evidenceOk
+        ? { msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' }
+        : { msg: t('poSubmitUploadWarning'), kind: 'error' });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
     } finally {
@@ -707,6 +758,50 @@ function OrderForm({
               />
             </div>
           </div>
+        </div>
+
+        <div style={{ padding: '0 16px 16px' }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>{t('poSubmitAttachLabel')}</span>
+            <span style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>{t('poSubmitAttachHint')}</span>
+          </label>
+          <div
+            onDragOver={e => { e.preventDefault(); setEvidenceDragOver(true); }}
+            onDragLeave={() => setEvidenceDragOver(false)}
+            onDrop={e => { e.preventDefault(); setEvidenceDragOver(false); addEvidenceFiles(e.dataTransfer.files); }}
+            onClick={() => evidenceInputRef.current?.click()}
+            style={{
+              border: '1.5px dashed ' + (evidenceDragOver ? 'var(--accent)' : 'var(--border-strong)'),
+              background: evidenceDragOver ? 'var(--accent-soft)' : 'var(--bg-soft)',
+              borderRadius: 10, padding: '16px', textAlign: 'center', cursor: 'pointer',
+              transition: 'border-color 120ms, background 120ms',
+            }}
+          >
+            <Icon name="upload" size={18} style={{ color: 'var(--fg-subtle)' }} />
+            <div style={{ marginTop: 6, fontSize: 13 }}>
+              <strong style={{ color: 'var(--accent-strong)' }}>{t('clickToUpload')}</strong> {t('orDragDrop')}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('uploadHint')}</div>
+            <input
+              ref={evidenceInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
+              style={{ display: 'none' }}
+              onChange={e => { addEvidenceFiles(e.target.files); e.target.value = ''; }}
+            />
+          </div>
+          {evidencePreviews.length > 0 && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {evidencePreviews.map((p, i) => (
+                <AttachmentChip
+                  key={i}
+                  a={{ id: String(i), filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
+                  onRemove={() => setEvidenceFiles(prev => prev.filter((_, j) => j !== i))}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 18, alignItems: 'center' }}>
