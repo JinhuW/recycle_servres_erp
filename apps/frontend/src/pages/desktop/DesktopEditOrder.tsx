@@ -15,6 +15,7 @@ import { ImageLightbox } from '../../components/ImageLightbox';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
+import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 
 const realScan = (u?: string | null): u is string =>
   !!u && !u.startsWith('data:image/placeholder');
@@ -832,16 +833,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 />
               ))}
               {canEditSubmission && (
-                <label className="btn sm" style={{ justifySelf: 'start', cursor: 'pointer' }}>
-                  <Icon name="upload" size={12} /> {submissionUploading ? t('uploadingLabel') : t('clickToUpload')}
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
-                    style={{ display: 'none' }}
-                    onChange={e => { addSubmissionFiles(e.target.files); e.target.value = ''; }}
-                  />
-                </label>
+                <AttachmentDropzone uploading={submissionUploading} onFiles={addSubmissionFiles} />
               )}
             </div>
           )}

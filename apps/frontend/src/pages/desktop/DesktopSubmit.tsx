@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { AttachmentChip } from '../../components/AttachmentChip';
+import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { useT } from '../../lib/i18n';
 import { api, createDraftOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -259,8 +260,6 @@ function OrderForm({
   // deletes the throwaway draft, so the only stable target id is known after
   // submit succeeds. Upload runs against that final id (see uploadEvidence).
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
-  const [evidenceDragOver, setEvidenceDragOver] = useState(false);
-  const evidenceInputRef = useRef<HTMLInputElement | null>(null);
 
   // One object URL per File, created lazily and revoked only on unmount — so
   // removing one file never revokes a URL still in use by another's preview.
@@ -698,7 +697,7 @@ function OrderForm({
       {/* Sticky bottom: meta + totals + submit */}
       <div className="card" style={{ position: 'sticky', bottom: 16, zIndex: 5, boxShadow: '0 12px 24px rgba(15,23,42,0.06)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')} <span className="req">*</span></label>
               <select
@@ -751,60 +750,39 @@ function OrderForm({
                 />
               </div>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('orderNotes')}</label>
-              <input
-                className="input"
-                value={meta.notes}
-                onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
-                placeholder={t('subOptional')}
-              />
-            </div>
           </div>
         </div>
 
-        <div style={{ padding: '0 16px 16px' }}>
-          <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>{t('poSubmitAttachLabel')}</span>
-            <span style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>{t('poSubmitAttachHint')}</span>
-          </label>
-          <div
-            onDragOver={e => { e.preventDefault(); setEvidenceDragOver(true); }}
-            onDragLeave={() => setEvidenceDragOver(false)}
-            onDrop={e => { e.preventDefault(); setEvidenceDragOver(false); addEvidenceFiles(e.dataTransfer.files); }}
-            onClick={() => evidenceInputRef.current?.click()}
-            style={{
-              border: '1.5px dashed ' + (evidenceDragOver ? 'var(--accent)' : 'var(--border-strong)'),
-              background: evidenceDragOver ? 'var(--accent-soft)' : 'var(--bg-soft)',
-              borderRadius: 10, padding: '16px', textAlign: 'center', cursor: 'pointer',
-              transition: 'border-color 120ms, background 120ms',
-            }}
-          >
-            <Icon name="upload" size={18} style={{ color: 'var(--fg-subtle)' }} />
-            <div style={{ marginTop: 6, fontSize: 13 }}>
-              <strong style={{ color: 'var(--accent-strong)' }}>{t('clickToUpload')}</strong> {t('orDragDrop')}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('uploadHint')}</div>
-            <input
-              ref={evidenceInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
-              style={{ display: 'none' }}
-              onChange={e => { addEvidenceFiles(e.target.files); e.target.value = ''; }}
+        <div style={{ padding: '0 16px 16px', display: 'grid', gap: 12 }}>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label className="label">{t('orderNotes')}</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={meta.notes}
+              onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
+              placeholder={t('subOptional')}
+              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
             />
           </div>
-          {evidencePreviews.length > 0 && (
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {evidencePreviews.map(p => (
-                <AttachmentChip
-                  key={p.url}
-                  a={{ id: p.url, filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
-                  onRemove={() => setEvidenceFiles(prev => prev.filter(x => x !== p.file))}
-                />
-              ))}
-            </div>
-          )}
+          <div className="field" style={{ marginBottom: 0 }}>
+            <AttachmentDropzone
+              label={t('poSubmitAttachLabel')}
+              acceptHint={t('poSubmitAttachHint')}
+              onFiles={addEvidenceFiles}
+            />
+            {evidencePreviews.length > 0 && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {evidencePreviews.map(p => (
+                  <AttachmentChip
+                    key={p.url}
+                    a={{ id: p.url, filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
+                    onRemove={() => setEvidenceFiles(prev => prev.filter(x => x !== p.file))}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 18, alignItems: 'center' }}>

@@ -4,12 +4,13 @@
 // survive a parent-modal Cancel; (2) attachments come back as URLs the
 // frontend can render.
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { useT } from '../lib/i18n';
 import { AttachmentChip } from './AttachmentChip';
+import { AttachmentDropzone } from './AttachmentDropzone';
 
 export type StatusAttachment = {
   id: string;
@@ -100,10 +101,8 @@ export function StatusChangeDialog({
   const { t } = useT();
   const [note, setNote] = useState(initialNote);
   const [attachments, setAttachments] = useState<StatusAttachment[]>(initialAttachments);
-  const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cfg = variant === 'purchase' ? poDonePreset(t) : presetsFor(t)[to];
 
   // Escape closes the dialog.
@@ -216,47 +215,12 @@ export function StatusChangeDialog({
           </div>
 
           <div className="field" style={{ marginBottom: 0 }}>
-            <label
-              className="label"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-            >
-              <span>{t('attachmentsLabel')}</span>
-              <span style={{ fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400 }}>{cfg.acceptHint}</span>
-            </label>
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                border: '1.5px dashed ' + (dragOver ? 'var(--accent)' : 'var(--border-strong)'),
-                background: dragOver ? 'var(--accent-soft)' : 'var(--bg-soft)',
-                borderRadius: 10,
-                padding: '20px 16px',
-                textAlign: 'center',
-                cursor: uploading ? 'wait' : 'pointer',
-                transition: 'border-color 120ms, background 120ms',
-                opacity: uploading ? 0.6 : 1,
-              }}
-            >
-              <Icon name="upload" size={20} style={{ color: 'var(--fg-subtle)' }} />
-              <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg)' }}>
-                <strong style={{ color: 'var(--accent-strong)' }}>
-                  {uploading ? t('uploadingLabel') : t('clickToUpload')}
-                </strong> {!uploading && t('orDragDrop')}
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-                {t('uploadHint')}
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
-                style={{ display: 'none' }}
-                onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
-              />
-            </div>
+            <AttachmentDropzone
+              label={t('attachmentsLabel')}
+              acceptHint={cfg.acceptHint}
+              uploading={uploading}
+              onFiles={addFiles}
+            />
 
             {attachments.length > 0 && (
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
