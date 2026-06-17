@@ -720,9 +720,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     onClick={() => {
                       if (locked || orderLocked) return;
                       // Done gets the evidence dialog first; confirming stages
-                      // the status, Save commits it. Purchasers never reach
-                      // here for Done (allowedStatuses keeps it locked).
-                      if (s === 'Done' && status !== 'Done') { setDoneDialogOpen(true); return; }
+                      // the status, Save commits it. Re-open it even when already
+                      // at Done so the user can add more notes / attachments.
+                      // Purchasers never reach here for Done (allowedStatuses
+                      // keeps it locked).
+                      if (s === 'Done') { setDoneDialogOpen(true); return; }
                       setStatus(s);
                     }}
                     disabled={locked || orderLocked}

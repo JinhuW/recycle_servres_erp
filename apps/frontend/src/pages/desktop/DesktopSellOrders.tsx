@@ -874,11 +874,15 @@ function SellOrderDetail({
                             type="button"
                             className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')}
                             onClick={() => {
-                              if (dialog && s !== draft.status) setPending(s);
+                              // Re-open the dialog even on the current status so the
+                              // user can come back and add more notes / attachments.
+                              if (dialog) setPending(s);
                               else setDraft({ ...draft, status: s });
                             }}
                             title={dialog
-                              ? `Advance to ${s} (add tracking note / attachments)`
+                              ? (s === draft.status
+                                  ? `Edit tracking note / attachments for ${s}`
+                                  : `Advance to ${s} (add tracking note / attachments)`)
                               : `Set status to ${s}`}
                           >
                             <span className="so-step-dot">{i + 1}</span>
