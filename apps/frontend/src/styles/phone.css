@@ -489,20 +489,30 @@
   padding: 12px 14px;
   border-radius: 11px;
   border: 1px solid var(--border-strong);
-  background: var(--bg-elev);
+  /* background-color (not shorthand) so the select chevron image survives. */
+  background-color: var(--bg-elev);
   font-size: 14px;
   font-family: inherit;
   width: 100%;
   outline: none;
 }
+/* Match the desktop normalization: lucide chevron in place of the OS arrow. */
+.ph-field .select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' viewBox='0 0 24 24' fill='none' stroke='%238b93a3' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+}
 .ph-field .input.ai-filled,
 .ph-field .select.ai-filled {
-  background: color-mix(in oklch, var(--accent-soft) 60%, white);
+  background-color: color-mix(in oklch, var(--accent-soft) 60%, white);
   border-color: var(--accent);
 }
 .ph-field .input.ai-low-conf,
 .ph-field .select.ai-low-conf {
-  background: color-mix(in oklch, var(--neg-soft, #fee2e2) 70%, white);
+  background-color: color-mix(in oklch, var(--neg-soft, #fee2e2) 70%, white);
   border-color: var(--neg, #dc2626);
 }
 .ph-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
