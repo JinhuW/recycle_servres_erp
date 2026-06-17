@@ -10,11 +10,14 @@ export function AttachmentDropzone({
   uploading = false,
   label,
   acceptHint,
+  boxHint,
 }: {
   onFiles: (files: FileList | null) => void;
   uploading?: boolean;
   label?: string;
   acceptHint?: string;
+  // Hint rendered inside the dropzone box (replaces the default size hint).
+  boxHint?: string;
 }) {
   const { t } = useT();
   const [dragOver, setDragOver] = useState(false);
@@ -48,7 +51,7 @@ export function AttachmentDropzone({
             {uploading ? t('uploadingLabel') : t('clickToUpload')}
           </strong> {!uploading && t('orDragDrop')}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{t('uploadHint')}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>{boxHint ?? t('uploadHint')}</div>
         <input
           ref={inputRef}
           type="file"

@@ -812,35 +812,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               {doneAttachments.map(a => <AttachmentChip key={a.id} a={a} />)}
             </div>
           )}
-          {(submissionAtts.length > 0 || canEditSubmission) && (
-            <div style={{
-              marginTop: 10, padding: '10px 12px', borderRadius: 8,
-              background: 'var(--bg-soft)', border: '1px solid var(--border)',
-              display: 'grid', gap: 8,
-            }}>
-              <div style={{
-                fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                <Icon name="paperclip" size={11} /> {t('poSubmissionEvidenceTitle')}
-              </div>
-              {submissionAtts.map(a => (
-                <AttachmentChip
-                  key={a.id}
-                  a={a}
-                  onRemove={canEditSubmission ? () => removeSubmissionAtt(a) : undefined}
-                />
-              ))}
-              {canEditSubmission && (
-                <AttachmentDropzone
-                  acceptHint={t('poSubmitAttachHint')}
-                  uploading={submissionUploading}
-                  onFiles={addSubmissionFiles}
-                />
-              )}
-            </div>
-          )}
         </div>
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
@@ -956,6 +927,29 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
               />
             </div>
+            {(submissionAtts.length > 0 || canEditSubmission) && (
+              <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+                <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
+                </label>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {submissionAtts.map(a => (
+                    <AttachmentChip
+                      key={a.id}
+                      a={a}
+                      onRemove={canEditSubmission ? () => removeSubmissionAtt(a) : undefined}
+                    />
+                  ))}
+                  {canEditSubmission && (
+                    <AttachmentDropzone
+                      boxHint={t('poSubmitAttachHint')}
+                      uploading={submissionUploading}
+                      onFiles={addSubmissionFiles}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
