@@ -1152,12 +1152,19 @@ orders.post('/:id/unarchive', c => setArchived(c, false));
 // directly here, so files survive a cancelled status change. Statuses are a
 // hardcoded map (no needs_meta table like sell orders), so the valid set is
 // a constant.
-const PO_META_STATUSES = new Set(['Done']);
+const PO_META_STATUSES = new Set(['Submission', 'Done']);
+
+// Submission evidence (receipts attached at submit time) is owner-editable: the
+// purchaser who owns the order may add/remove files while it is still a Draft.
+// Every other meta status (Done) remains manager-only.
+function canWriteMeta(u: User, status: string, order: { user_id: string; lifecycle: string }): boolean {
+  if (effectiveRole(u) === 'manager') return true;
+  return status === 'Submission' && order.user_id === u.id && order.lifecycle === 'draft';
+}
 
 // Upsert the text note for a single (order, status).
 orders.put('/:id/status-meta/:status', async (c) => {
   const u = c.var.user;
-  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const status = c.req.param('status');
   if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
@@ -1166,9 +1173,10 @@ orders.put('/:id/status-meta/:status', async (c) => {
   const sql = getDb(c.env);
 
   // Ensure the order exists; otherwise the FK upsert silently inserts.
-  const existing = (await sql`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { lifecycle: string } | undefined;
+  const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
+  if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
   // Drafts must never accumulate order_events rows — the append-only trigger
   // would block the draft-only DELETE cascade (see 0037). Same gate as PATCH.
   const auditable = existing.lifecycle !== 'draft';
@@ -1198,15 +1206,15 @@ orders.put('/:id/status-meta/:status', async (c) => {
 // Upload one attachment for (order, status). Multipart with field `file`.
 orders.post('/:id/status-meta/:status/attachments', async (c) => {
   const u = c.var.user;
-  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const status = c.req.param('status');
   if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
 
   const sql = getDb(c.env);
-  const existing = (await sql`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { lifecycle: string } | undefined;
+  const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
+  if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
   // See the note PUT above: no audit rows on drafts.
   const auditable = existing.lifecycle !== 'draft';
 
@@ -1266,16 +1274,16 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
 // Remove a single attachment.
 orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) => {
   const u = c.var.user;
-  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
   const status = c.req.param('status');
   const attachmentId = c.req.param('attachmentId');
   if (!PO_META_STATUSES.has(status)) return c.json({ error: 'invalid status' }, 400);
 
   const sql = getDb(c.env);
-  const existing = (await sql`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
-    | { lifecycle: string } | undefined;
+  const existing = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
+  if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
   // See the note PUT above: no audit rows on drafts.
   const auditable = existing.lifecycle !== 'draft';
 

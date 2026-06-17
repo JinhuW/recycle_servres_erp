@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
-import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
 // Optional evidence (note + attachments) a manager can leave when moving a
 // PO to Done — mirror of the sell-order status-meta endpoints, scoped to the
@@ -189,5 +189,64 @@ describe('PO advance to done — evidence stays optional', () => {
       'GET', `/api/orders/${id}`, { token: mgr });
     expect(r.body.order.lifecycle).toBe('done');
     expect(r.body.order.statusMeta).toEqual({});
+  });
+});
+
+describe('PO status-meta — Submission (owner-editable while Draft)', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('owner can upload + delete a Submission attachment on their own Draft', async () => {
+    const { token: purchaser } = await loginAs(MARCUS);
+    const id = await createOrder(purchaser, { advance: false }); // stays Draft
+
+    const up = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
+      { file: PNG() }, { token: purchaser });
+    expect(up.status).toBe(200);
+    const att = (up.body as { attachment: { id: string } }).attachment;
+
+    const meta = await getStatusMeta(purchaser, id);
+    expect(meta.Submission.attachments).toHaveLength(1);
+    expect(meta.Submission.note).toBeNull();
+
+    const del = await api('DELETE',
+      `/api/orders/${id}/status-meta/Submission/attachments/${att.id}`, { token: purchaser });
+    expect(del.status).toBe(200);
+  });
+
+  it('a non-owner purchaser is forbidden; a manager is allowed', async () => {
+    const { token: owner } = await loginAs(MARCUS);
+    const { token: stranger } = await loginAs(PRIYA); // another purchaser, not the owner
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createOrder(owner, { advance: false });
+
+    const strangerUp = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
+      { file: PNG() }, { token: stranger });
+    expect(strangerUp.status).toBe(403);
+
+    const mgrUp = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
+      { file: PNG() }, { token: mgr });
+    expect(mgrUp.status).toBe(200);
+  });
+
+  it('after the order leaves Draft, the owner is locked out but a manager is not', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { token: owner } = await loginAs(MARCUS);
+    const id = await createOrder(owner); // advances out of Draft
+
+    const ownerUp = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
+      { file: PNG() }, { token: owner });
+    expect(ownerUp.status).toBe(403);
+
+    const mgrUp = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
+      { file: PNG() }, { token: mgr });
+    expect(mgrUp.status).toBe(200);
+  });
+
+  it('regression: Done evidence stays manager-only (owner purchaser forbidden)', async () => {
+    const { token: owner } = await loginAs(MARCUS);
+    const id = await createOrder(owner, { advance: false });
+    const up = await multipart(`/api/orders/${id}/status-meta/Done/attachments`,
+      { file: PNG() }, { token: owner });
+    expect(up.status).toBe(403);
   });
 });
