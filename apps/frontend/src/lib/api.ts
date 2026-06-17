@@ -183,6 +183,17 @@ export const createDraftOrder = (
   meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
 ) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
 
+// Create a PO already carrying its first line(s). The desktop submit form uses
+// this so a draft is never written empty — the order is born with content.
+export const createOrder = (body: {
+  category: Category;
+  warehouseId?: string;
+  payment?: OrderSummary['payment'];
+  notes?: string | null;
+  totalCost?: number;
+  lines: unknown[];
+}) => api.post<{ id: string }>('/api/orders', body);
+
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);
 

@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { useT } from '../../lib/i18n';
-import { api, createDraftOrder, deleteOrder } from '../../lib/api';
+import { api, createOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -250,9 +250,9 @@ function OrderForm({
     totalCostOverride: null,
   });
 
-  // Order-level error banner — populated by submit/confirm failures and the
-  // draft-creation guard below. AI scan failures live inside the LineDrawer,
-  // alongside the dropzone that produces them.
+  // Order-level error banner — populated by submit/confirm failures. AI scan
+  // failures live inside the LineDrawer, alongside the dropzone that produces
+  // them.
   const [aiError, setAiError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -297,23 +297,14 @@ function OrderForm({
     return ok;
   };
 
-  // Create a server-side draft order as soon as the form mounts so that
-  // per-line confirms have an order to attach to.
-  const [draftId, setDraftId] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    createDraftOrder(category)
-      .then(r => { if (alive) setDraftId(r.id); })
-      .catch(() => {
-        if (alive) setAiError('Could not start a draft order — retry.');
-      });
-    return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category]);
+  // The PO is created lazily — only when its first line is persisted (see
+  // persistLines) — so abandoning the form never writes an empty draft. Null
+  // until then, then holds the real PO id.
+  const [orderId, setOrderId] = useState<string | null>(null);
 
   // Existing same-category Draft POs the user can append to instead of creating
-  // a fresh PO. Fetched once; re-filtered when draftId resolves so the throwaway
-  // draft this form just created never appears as its own merge target.
+  // a fresh PO. Fetched once on mount, before any order exists; excludeId keeps
+  // this session's own order out of the list once it's been created.
   const [allDrafts, setAllDrafts] = useState<OrderSummary[]>([]);
   useEffect(() => {
     let alive = true;
@@ -325,8 +316,8 @@ function OrderForm({
   }, [category]);
 
   const targets = useMemo(
-    () => eligibleDraftTargets(allDrafts, { category, meId: user?.id, excludeId: draftId }),
-    [allDrafts, category, user?.id, draftId],
+    () => eligibleDraftTargets(allDrafts, { category, meId: user?.id, excludeId: orderId }),
+    [allDrafts, category, user?.id, orderId],
   );
 
   // Default the warehouse to the first one once they load.
@@ -437,31 +428,48 @@ function OrderForm({
     scanConfidence: l.scanConfidence ?? null,
   });
 
-  // Confirms a single line AND auto-saves the current order metadata in the
-  // same PATCH. The user doesn't need to click "Submit Order" to keep their
-  // work safe — closing the tab after confirming a line leaves nothing
-  // unsaved. (Submit Order remains as the navigate-away trigger.)
-  const handleConfirmLine = async (idx: number): Promise<void> => {
-    if (!draftId) {
-      setAiError('Could not start a draft order — retry.');
-      return;
+  type WireMeta = {
+    warehouseId?: string;
+    payment: 'company' | 'self';
+    notes: string | null;
+    totalCost: number;
+  };
+
+  // Lazily create-or-append. The first persist creates the PO already carrying
+  // its content (POST /api/orders); later persists append via PATCH. An empty
+  // PO is therefore never written — if the first POST fails, orderId stays null
+  // and a retry creates it fresh. Returns the resolved id so callers can chain
+  // (e.g. evidence upload).
+  const persistLines = async (wireLines: ReturnType<typeof toWireLine>[], m: WireMeta): Promise<string> => {
+    if (orderId) {
+      await api.patch('/api/orders/' + orderId, { addLines: wireLines, ...m });
+      return orderId;
     }
+    const r = await createOrder({ category, lines: wireLines, ...m });
+    setOrderId(r.id);
+    return r.id;
+  };
+
+  const wireMeta = (): WireMeta => ({
+    ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
+    payment: meta.payment === 'Company' ? 'company' : 'self',
+    notes: meta.notes || null,
+    totalCost: meta.totalCostOverride != null ? (Number(meta.totalCostOverride) || 0) : totals.cost,
+  });
+
+  // Confirms a single line AND auto-saves the current order metadata in the
+  // same write. The user doesn't need to click "Submit Order" to keep their
+  // work safe — closing the tab after confirming a line leaves nothing
+  // unsaved. The first confirm is what creates the PO. (Submit Order remains
+  // as the navigate-away trigger.)
+  const handleConfirmLine = async (idx: number): Promise<void> => {
     const l = lines[idx];
     if (l._confirmed) return;
     if (!lineReady(l)) {
       setAiError('Fill in brand/description, quantity and unit cost before confirming this line.');
       return;
     }
-    const totalCost = meta.totalCostOverride != null
-      ? (Number(meta.totalCostOverride) || 0)
-      : totals.cost;
-    await api.patch('/api/orders/' + draftId, {
-      addLines: [toWireLine(l)],
-      ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
-      payment: meta.payment === 'Company' ? 'company' : 'self',
-      notes: meta.notes || null,
-      totalCost,
-    });
+    await persistLines([toWireLine(l)], wireMeta());
     updateLine(idx, { _confirmed: true });
   };
 
@@ -472,22 +480,14 @@ function OrderForm({
   // freshly-patched array: setLines() is async, so submitting from state right
   // after it would serialize the PRE-patch lines and drop accepted part numbers.
   const doSubmit = async (submitLines: Line[] = lines) => {
-    if (!draftId) { setAiError(t('subNoDraftErr')); return; }
-    const totalCost = meta.totalCostOverride != null
-      ? (Number(meta.totalCostOverride) || 0)
-      : totals.cost;
     const unconfirmedLines = submitLines.filter(l => !l._confirmed);
     setSubmitting(true);
     try {
-      await api.patch('/api/orders/' + draftId, {
-        warehouseId: meta.warehouseId,
-        payment: meta.payment === 'Company' ? 'company' : 'self',
-        notes: meta.notes || null,
-        totalCost,
-        ...(unconfirmedLines.length > 0 ? { addLines: unconfirmedLines.map(toWireLine) } : {}),
-      });
+      // Creates the PO if no line was ever confirmed (single-line straight
+      // submit); otherwise appends any still-unconfirmed lines + refreshes meta.
+      const finalId = await persistLines(unconfirmedLines.map(toWireLine), wireMeta());
       if (evidenceFiles.length > 0) {
-        const ok = await uploadEvidence(draftId);
+        const ok = await uploadEvidence(finalId);
         onDone(ok
           ? { msg: t('orderSubmitted'), kind: 'success' }
           : { msg: t('poSubmitUploadWarning'), kind: 'error' });
@@ -501,11 +501,9 @@ function OrderForm({
     }
   };
 
-  // Append all local lines to an existing Draft PO, then remove the throwaway
-  // draft this session created. Target meta (warehouse/payment/notes) is
-  // inherited — we send only lines + a refreshed total.
+  // Append all local lines to an existing Draft PO. Target meta (warehouse/
+  // payment/notes) is inherited — we send only lines + a refreshed total.
   const doSubmitToExisting = async (target: OrderSummary, submitLines: Line[] = lines) => {
-    if (!draftId) { setAiError(t('subNoDraftErr')); return; }
     setSubmitting(true);
     try {
       await api.patch('/api/orders/' + target.id, {
@@ -513,9 +511,10 @@ function OrderForm({
         totalCost: (target.totalCost ?? 0) + totals.cost,
       });
       const evidenceOk = evidenceFiles.length === 0 || await uploadEvidence(target.id);
-      // Best-effort cleanup of the now-empty throwaway draft — the merge already
-      // succeeded, so a failure here must not fail the submit.
-      try { await deleteOrder(draftId); } catch { /* leaves an empty draft; harmless */ }
+      // Best-effort cleanup of the throwaway draft IF one was created — lazy
+      // creation means there may be none (user merged before confirming a
+      // line). The merge already succeeded, so a failure here must not fail it.
+      if (orderId) { try { await deleteOrder(orderId); } catch { /* harmless */ } }
       onDone(evidenceOk
         ? { msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' }
         : { msg: t('poSubmitUploadWarning'), kind: 'error' });
@@ -555,10 +554,9 @@ function OrderForm({
 
   // Reason the Submit button is disabled, surfaced inline so the user isn't
   // staring at a dead button wondering what's wrong. Checked in priority
-  // order: still submitting → draft creation → warehouse pick → per-line completeness.
+  // order: still submitting → warehouse load → warehouse pick → per-line completeness.
   const submitDisabledReason: string | null =
     submitting              ? null
-  : !draftId                ? t('subStartingDraft')
   : warehouses.length === 0 ? t('subWarehousesNotLoaded')
   : !meta.warehouseId       ? t('reviewPickWarehouseHint')
   : !canSubmit              ? (() => {
@@ -579,7 +577,7 @@ function OrderForm({
             <div className="card-sub">{t('subOrderContainsMultiple', { cat: category })}</div>
           </div>
           <span className="chip mono">
-            {(draftId ?? t('subDrafting'))} · {t('lifecycleDraft')}
+            {(orderId ?? t('subDrafting'))} · {t('lifecycleDraft')}
           </span>
         </div>
 
@@ -697,7 +695,7 @@ function OrderForm({
       {/* Sticky bottom: meta + totals + submit */}
       <div className="card" style={{ position: 'sticky', bottom: 16, zIndex: 5, boxShadow: '0 12px 24px rgba(15,23,42,0.06)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')} <span className="req">*</span></label>
               <select
@@ -750,39 +748,34 @@ function OrderForm({
                 />
               </div>
             </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="label">{t('orderNotes')}</label>
+              <input
+                className="input"
+                value={meta.notes}
+                onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
+                placeholder={t('subOptional')}
+              />
+            </div>
           </div>
         </div>
 
-        <div style={{ padding: '0 16px 16px', display: 'grid', gap: 12 }}>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">{t('orderNotes')}</label>
-            <textarea
-              className="input"
-              rows={2}
-              value={meta.notes}
-              onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
-              placeholder={t('subOptional')}
-              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
-            />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <AttachmentDropzone
-              label={t('poSubmitAttachLabel')}
-              acceptHint={t('poSubmitAttachHint')}
-              onFiles={addEvidenceFiles}
-            />
-            {evidencePreviews.length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {evidencePreviews.map(p => (
-                  <AttachmentChip
-                    key={p.url}
-                    a={{ id: p.url, filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
-                    onRemove={() => setEvidenceFiles(prev => prev.filter(x => x !== p.file))}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+        <div style={{ padding: '0 16px 16px' }}>
+          <AttachmentDropzone
+            label={t('poSubmitAttachLabel')}
+            onFiles={addEvidenceFiles}
+          />
+          {evidencePreviews.length > 0 && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {evidencePreviews.map(p => (
+                <AttachmentChip
+                  key={p.url}
+                  a={{ id: p.url, filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
+                  onRemove={() => setEvidenceFiles(prev => prev.filter(x => x !== p.file))}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 18, alignItems: 'center' }}>
@@ -810,7 +803,7 @@ function OrderForm({
               <button className="btn" onClick={onCancel}>{t('cancel')}</button>
               <button
                 className="btn accent"
-                disabled={!canSubmit || !meta.warehouseId || !draftId || submitting}
+                disabled={!canSubmit || !meta.warehouseId || submitting}
                 title={submitDisabledReason ?? undefined}
                 onClick={attemptSubmit}
               >
