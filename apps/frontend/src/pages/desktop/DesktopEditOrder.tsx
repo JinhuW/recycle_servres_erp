@@ -79,6 +79,35 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [doneAttachments, setDoneAttachments] = useState<StatusAttachment[]>(
     order.statusMeta?.['Done']?.attachments ?? [],
   );
+  const [submissionAtts, setSubmissionAtts] = useState<StatusAttachment[]>(
+    order.statusMeta?.['Submission']?.attachments ?? [],
+  );
+  const [submissionUploading, setSubmissionUploading] = useState(false);
+  // Owner may edit while Draft; managers always. Mirrors the backend gate.
+  const canEditSubmission = !isPurchaser || (order.userId === user?.id && effectiveStatus === 'Draft');
+
+  const addSubmissionFiles = async (fl: FileList | null) => {
+    const files = Array.from(fl || []);
+    if (!files.length) return;
+    setSubmissionUploading(true);
+    try {
+      for (const f of files) {
+        if (f.size > 10 * 1024 * 1024) continue;
+        const form = new FormData();
+        form.append('file', f);
+        const r = await api.upload<{ attachment: StatusAttachment }>(
+          `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
+        setSubmissionAtts(prev => [...prev, r.attachment]);
+      }
+    } finally {
+      setSubmissionUploading(false);
+    }
+  };
+
+  const removeSubmissionAtt = async (att: StatusAttachment) => {
+    await api.delete<{ ok: true }>(`/api/orders/${order.id}/status-meta/Submission/attachments/${att.id}`);
+    setSubmissionAtts(prev => prev.filter(a => a.id !== att.id));
+  };
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
@@ -771,6 +800,40 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{doneNote}</div>
               )}
               {doneAttachments.map(a => <AttachmentChip key={a.id} a={a} />)}
+            </div>
+          )}
+          {(submissionAtts.length > 0 || canEditSubmission) && (
+            <div style={{
+              marginTop: 10, padding: '10px 12px', borderRadius: 8,
+              background: 'var(--bg-soft)', border: '1px solid var(--border)',
+              display: 'grid', gap: 8,
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                textTransform: 'uppercase', letterSpacing: '0.06em',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <Icon name="paperclip" size={11} /> {t('poSubmissionEvidenceTitle')}
+              </div>
+              {submissionAtts.map(a => (
+                <AttachmentChip
+                  key={a.id}
+                  a={a}
+                  onRemove={canEditSubmission ? () => removeSubmissionAtt(a) : undefined}
+                />
+              ))}
+              {canEditSubmission && (
+                <label className="btn sm" style={{ justifySelf: 'start', cursor: 'pointer' }}>
+                  <Icon name="upload" size={12} /> {submissionUploading ? t('uploadingLabel') : t('clickToUpload')}
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
+                    style={{ display: 'none' }}
+                    onChange={e => { addSubmissionFiles(e.target.files); e.target.value = ''; }}
+                  />
+                </label>
+              )}
             </div>
           )}
         </div>
