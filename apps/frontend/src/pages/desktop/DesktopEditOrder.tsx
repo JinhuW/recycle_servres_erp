@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
-import { handleFetchError } from '../../lib/errorToast';
+import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
@@ -92,21 +92,30 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     setSubmissionUploading(true);
     try {
       for (const f of files) {
-        if (f.size > 10 * 1024 * 1024) continue;
+        if (f.size > 10 * 1024 * 1024) {
+          showErrorToast(t('fileTooLarge', { name: f.name }));
+          continue;
+        }
         const form = new FormData();
         form.append('file', f);
         const r = await api.upload<{ attachment: StatusAttachment }>(
           `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
         setSubmissionAtts(prev => [...prev, r.attachment]);
       }
+    } catch (e) {
+      handleFetchError(e);
     } finally {
       setSubmissionUploading(false);
     }
   };
 
   const removeSubmissionAtt = async (att: StatusAttachment) => {
-    await api.delete<{ ok: true }>(`/api/orders/${order.id}/status-meta/Submission/attachments/${att.id}`);
-    setSubmissionAtts(prev => prev.filter(a => a.id !== att.id));
+    try {
+      await api.delete<{ ok: true }>(`/api/orders/${order.id}/status-meta/Submission/attachments/${att.id}`);
+      setSubmissionAtts(prev => prev.filter(a => a.id !== att.id));
+    } catch (e) {
+      handleFetchError(e);
+    }
   };
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
