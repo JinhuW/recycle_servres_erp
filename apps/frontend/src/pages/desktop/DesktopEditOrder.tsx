@@ -833,7 +833,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 />
               ))}
               {canEditSubmission && (
-                <AttachmentDropzone uploading={submissionUploading} onFiles={addSubmissionFiles} />
+                <AttachmentDropzone
+                  acceptHint={t('poSubmitAttachHint')}
+                  uploading={submissionUploading}
+                  onFiles={addSubmissionFiles}
+                />
               )}
             </div>
           )}
