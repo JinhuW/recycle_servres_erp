@@ -262,15 +262,18 @@ function OrderForm({
   const [evidenceDragOver, setEvidenceDragOver] = useState(false);
   const evidenceInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Object URLs for local preview; revoked when the file set changes / unmounts.
-  const evidencePreviews = useMemo(
-    () => evidenceFiles.map(f => ({ file: f, url: URL.createObjectURL(f) })),
-    [evidenceFiles],
-  );
-  useEffect(
-    () => () => { evidencePreviews.forEach(p => URL.revokeObjectURL(p.url)); },
-    [evidencePreviews],
-  );
+  // One object URL per File, created lazily and revoked only on unmount — so
+  // removing one file never revokes a URL still in use by another's preview.
+  const evidenceUrlsRef = useRef<Map<File, string>>(new Map());
+  const evidencePreviews = evidenceFiles.map(f => {
+    let url = evidenceUrlsRef.current.get(f);
+    if (!url) { url = URL.createObjectURL(f); evidenceUrlsRef.current.set(f, url); }
+    return { file: f, url };
+  });
+  useEffect(() => () => {
+    for (const url of evidenceUrlsRef.current.values()) URL.revokeObjectURL(url);
+    evidenceUrlsRef.current.clear();
+  }, []);
 
   const addEvidenceFiles = (fl: FileList | null) => {
     const picked = Array.from(fl || []).filter(f => {
@@ -793,11 +796,11 @@ function OrderForm({
           </div>
           {evidencePreviews.length > 0 && (
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {evidencePreviews.map((p, i) => (
+              {evidencePreviews.map(p => (
                 <AttachmentChip
-                  key={i}
-                  a={{ id: String(i), filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
-                  onRemove={() => setEvidenceFiles(prev => prev.filter((_, j) => j !== i))}
+                  key={p.url}
+                  a={{ id: p.url, filename: p.file.name, size: p.file.size, mime: p.file.type, url: p.url }}
+                  onRemove={() => setEvidenceFiles(prev => prev.filter(x => x !== p.file))}
                 />
               ))}
             </div>
