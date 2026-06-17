@@ -11,11 +11,45 @@ import type { Env, User } from '../types';
 const market = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 // Reference prices for the Market Value screen. Search + category filter +
-// computed maxBuy (avgSell × (1 - 30% margin target)).
+// stale filter + server-side sort, paginated 100 rows at a time so the desktop
+// list can scroll past the first page. maxBuy = avgSell × (1 - 30% margin).
+const PAGE_SIZE = 100;
+// Mirrors the frontend staleness rule (marketStaleness.ts): a recorded price
+// older than STALE_DAYS full days — or never recorded — counts as stale.
+const STALE_DAYS = 5;
+
 market.get('/', async (c) => {
   const sql = getDb(c.env);
   const category = c.req.query('category');
   const search = c.req.query('q')?.toLowerCase().trim();
+  const staleOnly = c.req.query('staleOnly') === '1';
+  const offset = Math.max(0, Number.parseInt(c.req.query('offset') ?? '0', 10) || 0);
+
+  // Whitelisted sort → fragment; the default mirrors the old updated_at order.
+  // rp.id is appended as a stable tiebreaker so OFFSET paging is deterministic.
+  const sortParam = c.req.query('sort');
+  const orderBy =
+    sortParam === 'sell-high' ? sql`rp.avg_sell DESC NULLS LAST`
+    : sortParam === 'rising'  ? sql`rp.trend DESC NULLS LAST`
+    : sortParam === 'falling' ? sql`rp.trend ASC NULLS LAST`
+    : sortParam === 'samples' ? sql`rp.samples DESC NULLS LAST`
+    : sql`rp.updated_at DESC`;
+
+  // Filters shared by the page query and the count, so `total` always reflects
+  // the full filtered set even on a page that returns no rows (offset past end).
+  const where = sql`
+    (${category ?? null}::text IS NULL OR rp.category = ${category ?? null})
+    AND (
+      ${search ?? null}::text IS NULL
+      OR LOWER(rp.label) LIKE '%' || ${search ?? ''} || '%'
+      OR LOWER(COALESCE(rp.part_number,'')) LIKE '%' || ${search ?? ''} || '%'
+    )
+    AND (
+      ${!staleOnly}
+      OR rp.last_price_at IS NULL
+      OR rp.last_price_at < NOW() - ${STALE_DAYS + 1} * INTERVAL '1 day'
+    )
+  `;
 
   // `internal_sales` aggregates the team's last-30d projected sell prices
   // from PO order_lines, keyed by canonical part_number (same rule as
@@ -67,19 +101,19 @@ market.get('/', async (c) => {
         ORDER BY created_at DESC LIMIT 12
       ) e
     ) rec ON TRUE
-    WHERE (${category ?? null}::text IS NULL OR rp.category = ${category ?? null})
-      AND (
-        ${search ?? null}::text IS NULL
-        OR LOWER(rp.label) LIKE '%' || ${search ?? ''} || '%'
-        OR LOWER(COALESCE(rp.part_number,'')) LIKE '%' || ${search ?? ''} || '%'
-      )
-    ORDER BY rp.updated_at DESC
-    LIMIT 100
+    WHERE ${where}
+    ORDER BY ${orderBy}, rp.id DESC
+    LIMIT ${PAGE_SIZE} OFFSET ${offset}
+  `;
+
+  const [{ total }] = await sql<{ total: number }[]>`
+    SELECT COUNT(*)::int AS total FROM ref_prices rp WHERE ${where}
   `;
 
   const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
   return c.json({
     targetMargin: TARGET_MARGIN,
+    total,
     items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
   });
 });

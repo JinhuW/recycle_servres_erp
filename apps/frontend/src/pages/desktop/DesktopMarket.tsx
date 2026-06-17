@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
@@ -84,24 +84,61 @@ export function DesktopMarket() {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [editing, setEditing] = useState<null | { row: RefPrice & { maxBuy: number | null } }>(null);
   const [showStaleOnly, setShowStaleOnly] = usePreference('market.showStaleOnly', false);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLTableRowElement>(null);
+  // Bumped on every first-page (re)load; lets an in-flight loadMore drop its
+  // result when the query shape changed underneath it.
+  const genRef = useRef(0);
 
+  // Category, search, sort and the stale filter are all applied server-side so
+  // pagination stays consistent; the desktop list pages 100 rows at a time.
+  const buildParams = useCallback((offset: number) => {
+    const params = new URLSearchParams();
+    if (filter !== 'all') params.set('category', filter);
+    if (search.trim()) params.set('q', search.trim());
+    params.set('sort', sort);
+    if (showStaleOnly) params.set('staleOnly', '1');
+    if (offset > 0) params.set('offset', String(offset));
+    return params;
+  }, [filter, search, sort, showStaleOnly]);
+
+  // First page — refetched (debounced) whenever the query shape changes.
   useEffect(() => {
     const handle = setTimeout(() => {
-      const params = new URLSearchParams();
-      if (filter !== 'all') params.set('category', filter);
-      if (search.trim()) params.set('q', search.trim());
-      api.get<{ items: RefPrice[]; targetMargin?: number }>(`/api/market?${params}`)
+      const gen = ++genRef.current;
+      api.get<{ items: RefPrice[]; total: number; targetMargin?: number }>(`/api/market?${buildParams(0)}`)
         .then(r => {
+          if (gen !== genRef.current) return;
           setItems(r.items);
+          setTotal(r.total);
           if (typeof r.targetMargin === 'number') setTargetMargin(r.targetMargin);
         })
         .catch(handleFetchError)
         .finally(() => setLoadedOnce(true));
     }, 200);
     return () => clearTimeout(handle);
-  }, [filter, search]);
+  }, [buildParams]);
 
-  const allRows = useMemo(
+  const hasMore = items.length < total;
+
+  // Append the next page. Offset = how many rows we already hold.
+  const loadMore = useCallback(() => {
+    if (loadingMore || items.length >= total) return;
+    const gen = genRef.current;
+    setLoadingMore(true);
+    api.get<{ items: RefPrice[]; total: number }>(`/api/market?${buildParams(items.length)}`)
+      .then(r => {
+        if (gen !== genRef.current) return;
+        setItems(prev => prev.concat(r.items));
+        setTotal(r.total);
+      })
+      .catch(handleFetchError)
+      .finally(() => setLoadingMore(false));
+  }, [loadingMore, items.length, total, buildParams]);
+
+  const rows = useMemo(
     () => items.map(p => {
       // Prefer the recorded last_price over avg_sell as the basis. Both can be
       // null on brand-new rows; if so, leave maxBuy null and the cell renders an
@@ -115,20 +152,19 @@ export function DesktopMarket() {
     [items, targetMargin],
   );
 
-  const rows = useMemo(() => {
-    const arr = [...allRows];
-    // Null prices sort last in price-based orderings.
-    const nullsLast = (v: number | null) => (v == null ? -Infinity : v);
-    if (sort === 'recent')    arr.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
-    if (sort === 'sell-high') arr.sort((a, b) => nullsLast(b.avgSell) - nullsLast(a.avgSell));
-    if (sort === 'rising')    arr.sort((a, b) => b.trend - a.trend);
-    if (sort === 'falling')   arr.sort((a, b) => a.trend - b.trend);
-    if (sort === 'samples')   arr.sort((a, b) => b.samples - a.samples);
-    if (showStaleOnly) {
-      return arr.filter(p => staleness(p.lastPriceAt).isStale);
-    }
-    return arr;
-  }, [allRows, sort, showStaleOnly]);
+  // Fetch the next page when the sentinel row scrolls into the table viewport.
+  // Re-armed on every loadMore identity change; the sentinel unmounts at the end.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = scrollRef.current;
+    if (!sentinel || !root) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) loadMore(); },
+      { root, rootMargin: '300px' },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [loadMore]);
 
   return (
     <>
@@ -136,6 +172,16 @@ export function DesktopMarket() {
         .pencil-btn { opacity: 0.55; }
         .row-hover:hover .pencil-btn { opacity: 1; }
         .pencil-btn:hover { background: var(--bg-soft) !important; color: var(--accent-strong) !important; }
+        /* Fixed layout pins column widths to the colgroup so content-visibility
+           rows can't reflow the table horizontally as they enter/leave paint. */
+        .mkt-table { table-layout: fixed; }
+        /* Browser-native windowing: skip layout/paint for off-screen rows.
+           Keeps the DOM cost flat no matter how many pages accumulate; degrades
+           to rendering everything where unsupported. */
+        .mkt-table tbody tr.mkt-vrow { content-visibility: auto; contain-intrinsic-size: auto 56px; }
+        /* Fixed columns can't widen to fit, so wrap long tokens (part numbers)
+           instead of letting them overflow into the neighbouring cell. */
+        .mkt-table td { overflow-wrap: anywhere; }
       `}</style>
       <div className="page-head">
         <div>
@@ -215,14 +261,24 @@ export function DesktopMarket() {
           </div>
         </div>
 
-        <div className="table-scroll">
+        <div className="table-scroll" ref={scrollRef}>
           {!loadedOnce ? (
             <TableSkeleton rows={10} cols={7} />
           ) : (
-          <table className="table">
+          <table className="table mkt-table">
+            <colgroup>
+              <col style={{ width: 260 }} />
+              <col style={{ width: 140 }} />
+              <col style={{ width: 140 }} />
+              <col style={{ width: 185 }} />
+              <col style={{ width: 115 }} />
+              <col style={{ width: 115 }} />
+              <col style={{ width: 90 }} />
+              <col style={{ width: 35 }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ minWidth: 240 }}>{t('mktColItemSpec')}</th>
+                <th>{t('mktColItemSpec')}</th>
                 <th>{t('partNumber')}</th>
                 <th className="num" style={{ color: 'var(--pos)' }}>{t('mktColLastSell')}</th>
                 <th>{t('mktCol12wTrend')}</th>
@@ -233,7 +289,7 @@ export function DesktopMarket() {
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, 40).map(r => {
+              {rows.map(r => {
                 const isOpen = openKey === r.id;
                 const sellHistory = r.recentPrices.map(p => p.price);
                 const stale = staleness(r.lastPriceAt);
@@ -244,7 +300,7 @@ export function DesktopMarket() {
                 return (
                   <Fragment key={r.id}>
                     <tr
-                      className="row-hover"
+                      className="row-hover mkt-vrow"
                       style={{ cursor: 'pointer' }}
                       onClick={() => setOpenKey(isOpen ? null : r.id)}
                     >
@@ -377,6 +433,13 @@ export function DesktopMarket() {
                   </Fragment>
                 );
               })}
+              {hasMore && (
+                <tr ref={sentinelRef}>
+                  <td colSpan={8} style={{ padding: 16, textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 12 }}>
+                    {t('mktLoadingMore')}
+                  </td>
+                </tr>
+              )}
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)' }}>
@@ -394,7 +457,7 @@ export function DesktopMarket() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           fontSize: 12, color: 'var(--fg-subtle)',
         }}>
-          <div>{t('mktShowingOf', { n: Math.min(40, rows.length), total: rows.length })}</div>
+          <div>{t('mktShowingOf', { n: rows.length, total })}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="info" size={11} />
             {t('mktMaxBuyExplain', { pct: (targetMargin * 100).toFixed(0), d: STALE_DAYS })}
