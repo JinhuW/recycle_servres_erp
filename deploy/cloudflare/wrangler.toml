@@ -1,0 +1,16 @@
+name = "recycle-erp-experiment"
+main = "worker.js"
+compatibility_date = "2026-06-18"
+
+# Static SPA build output. run_worker_first=true makes the Worker run for
+# every request so it can decide API-proxy vs. asset; not_found_handling
+# serves index.html for client-side routes via env.ASSETS.fetch().
+[assets]
+directory = "../../apps/frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[vars]
+# Filled in Task 4 with the Railway backend public URL (https, no trailing slash).
+BACKEND_URL = "https://REPLACE-WITH-RAILWAY-URL"
