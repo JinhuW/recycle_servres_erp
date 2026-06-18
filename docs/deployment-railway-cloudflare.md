@@ -224,7 +224,7 @@ Expected: same `200` response proxied through the Worker.
 curl -i -X POST \
   -H "Content-Type: application/json" \
   -H "X-Requested-By: recycle-erp" \
-  -d '{"username":"admin","password":"<ADMIN_PASSWORD>"}' \
+  -d '{"email":"admin@recycle.local","password":"<ADMIN_PASSWORD>"}' \
   https://recycle-erp-experiment.jinhuwang1127.workers.dev/api/auth/login
 ```
 
@@ -259,6 +259,28 @@ git push --no-verify
 ```
 
 Do not use `--no-verify` on `main`.
+
+---
+
+## Known limitations & risks
+
+This is an experiment; it accepts trade-offs the production Docker stack does not.
+
+- **`/metrics` is publicly reachable.** The backend mounts an unauthenticated
+  Prometheus endpoint at `/metrics`. In the Docker stack this was bound to
+  loopback only (`127.0.0.1:9090`, per the 2026-06-10 security review). On
+  Railway there is a single public port, so
+  `https://backend-production-7b10.up.railway.app/metrics` is world-readable
+  (heap/GC internals, HTTP route histograms, OAuth grant counters). The Worker
+  does **not** proxy `/metrics` (only `/api`, `/oauth`, `/.well-known`), but the
+  Railway URL exposes it directly. Acceptable for a throwaway experiment; a
+  real deploy would need Railway private networking or an auth-guarded metrics
+  route.
+- **R2 bucket is shared with production.** Experiment uploads (label scans,
+  attachments) land in the same R2 bucket as prod. **Teardown does NOT remove
+  them** — the objects persist in the prod bucket after the experiment is gone.
+- **Seeded admin is internet-reachable.** Hence the overridden `ADMIN_PASSWORD`
+  and `ENABLE_DEMO_ACCOUNTS=false`.
 
 ---
 

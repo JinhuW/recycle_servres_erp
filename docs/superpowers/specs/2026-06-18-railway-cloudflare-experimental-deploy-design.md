@@ -131,7 +131,9 @@ docs. It does **not** edit `README.md`. Covers:
 - No changes to `docker-compose*.yml`, the Dockerfiles' behavior, `README.md`,
   or `CLAUDE.md`.
 - No custom domains (use default `*.workers.dev` / `*.up.railway.app`).
-- No OAuth/MCP signing-key setup on the experiment.
+- No `OAUTH_SIGNING_KEY_PREVIOUS` / key rotation, and no MCP-client setup on the
+  experiment. (`OAUTH_SIGNING_KEY_CURRENT` itself is **required** — see the
+  boot-guard correction above.)
 - No CI/CD wiring; deploys are manual.
 
 ## Risks / notes
