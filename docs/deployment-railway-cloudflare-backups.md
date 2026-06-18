@@ -40,7 +40,6 @@ attachments or the Terraform-state bucket, and vice versa.
 |------|---------|
 | `infra/terraform/environments/experiment-backups/main.tf` | R2 bucket + 30-day lifecycle + bucket-scoped R2 token + outputs |
 | `infra/terraform/environments/experiment-backups/backend.tf` | Terraform state in the `recycle-erp-tfstate` R2 bucket (key `experiment-backups/`) |
-| `infra/terraform/environments/experiment-backups/experiment-backups.auto.tfvars` | Cloudflare account id |
 | `deploy/railway-backup/Dockerfile` | `postgres:18-alpine` + `rclone` |
 | `deploy/railway-backup/backup.sh` | the dump→gzip→R2 stream |
 

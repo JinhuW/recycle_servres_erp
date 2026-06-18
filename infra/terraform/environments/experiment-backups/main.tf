@@ -25,6 +25,9 @@ provider "cloudflare" {
 
 variable "cloudflare_account_id" {
   type = string
+  # Not a secret (it's already in backend.tf's endpoint). Defaulted so no
+  # gitignored *.tfvars is needed; override with -var if you fork this.
+  default = "cf0e09b533b74d32407f6fe1b558165b"
 }
 
 variable "bucket_name" {
