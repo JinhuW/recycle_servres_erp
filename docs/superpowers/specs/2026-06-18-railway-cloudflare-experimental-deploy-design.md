@@ -96,9 +96,14 @@ Browser ──https──> Cloudflare Worker (<app>.workers.dev)
 | `OPENROUTER_API_KEY` | reused from current `.env` | label OCR (else silent stub) |
 | `ADMIN_PASSWORD` | overridden (not `admin`) | internet-exposed; harden the seeded admin |
 | `ENABLE_DEMO_ACCOUNTS` | `false` | prevents username enumeration |
+| `OAUTH_SIGNING_KEY_CURRENT` | freshly generated Ed25519 key | **required at boot** when `NODE_ENV=production` (`env.ts:42`) |
 
-- `OAUTH_SIGNING_KEY_*` intentionally left unset — the MCP/OAuth surface is
-  degraded on the experiment; out of scope.
+- **Boot-guard correction (discovered during execution):** `env.ts` refuses to
+  boot in production without `OAUTH_SIGNING_KEY_CURRENT` (base64-encoded
+  Ed25519 PKCS#8 PEM — generate with `openssl genpkey -algorithm ed25519 |
+  base64 -w0`). This was originally scoped out; it is in fact mandatory, so a
+  fresh key is generated and set. `OAUTH_SIGNING_KEY_PREVIOUS` stays unset (no
+  rotation needed on the experiment).
 
 ### 3. Dedicated ops page (`docs/deployment-railway-cloudflare.md`, new)
 
