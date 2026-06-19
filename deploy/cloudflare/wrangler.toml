@@ -15,15 +15,19 @@ run_worker_first = true
 # Two deployments — one Worker per Railway backend environment. Deploy with:
 #   unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env prod
 #   unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env dev
-# `vars` is NOT inherited from the top level, so each env sets its own
-# BACKEND_URL (the Railway backend it reverse-proxies to).
+# `vars` and `routes` are NOT inherited from the top level, so each env sets
+# its own BACKEND_URL (the Railway backend it reverse-proxies to) and its
+# custom domain. custom_domain=true makes Cloudflare provision the DNS record
+# + TLS cert on the recycleservers.com zone automatically.
 
 [env.prod]
 name = "recycle-erp-prod"
+routes = [{ pattern = "inventory-prod.recycleservers.com", custom_domain = true }]
 [env.prod.vars]
 BACKEND_URL = "https://backend-production-7b10.up.railway.app"
 
 [env.dev]
 name = "recycle-erp-dev"
+routes = [{ pattern = "inventory-dev.recycleservers.com", custom_domain = true }]
 [env.dev.vars]
 BACKEND_URL = "https://backend-dev-f94e.up.railway.app"
