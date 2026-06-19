@@ -18,6 +18,28 @@
 >   `CORS_ALLOWED_ORIGINS` (and OAuth issuer) set to its own custom domain;
 >   verified each domain proxies to the correct backend.
 
+## Origin lockdown (Worker ↔ Railway shared secret)
+
+The Railway backend has a public URL, so without a gate anyone could bypass the
+Worker and hit it directly (including the unauthenticated `/metrics`). A shared
+secret closes that:
+
+- The Worker injects `X-Proxy-Secret: <PROXY_SECRET>` on every proxied request
+  (`deploy/cloudflare/worker.js`).
+- The backend refuses any request lacking it with **403** (`apps/backend/src/index.ts`),
+  **except `/api/health`** (Railway's healthcheck probes the container directly,
+  bypassing the Worker). When `PROXY_SECRET` is unset the gate is **off**, so the
+  Docker stack / local dev are unaffected.
+- `PROXY_SECRET` is a Cloudflare **Worker secret** (`wrangler secret put
+  PROXY_SECRET --env prod|dev`) and a Railway backend env var — never in the repo.
+  **Independent value per environment** (prod Worker ↔ prod backend, dev ↔ dev).
+
+Verified: direct Railway `/.well-known` + `/metrics` → 403; direct `/api/health`
+→ 200; everything via the Worker custom domains → 200.
+
+> **Ordering when rotating the secret:** set it on the Worker (and deploy) first,
+> then on the backend — otherwise the Worker's own requests get 403 in the gap.
+
 ## Frontend (Cloudflare)
 
 Two Workers from one `wrangler.toml`, deployed per environment. Each serves the
