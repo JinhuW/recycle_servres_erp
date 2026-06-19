@@ -1,20 +1,17 @@
 # Railway dev + prod environments with prod→dev DB sync
 
-> **Status (2026-06-19): mostly provisioned + sync verified.**
+> **Status (2026-06-19): COMPLETE.**
 > - ✅ Git branches `prod` + `dev` pushed.
-> - ✅ Railway `production` env (backend `backend-production-7b10`, own Postgres)
->   and forked `dev` env (backend `backend-dev-f94e`, own fresh Postgres). The
->   `dev` env deploys the `dev` branch.
-> - ✅ **Prod→dev sync verified working** — ran `pg_dump --clean prod | psql dev`
->   via a `postgres:18-alpine` container; dev now mirrors prod (row counts match).
-> - ✅ `db-sync` service created in the `dev` env with `PROD_DATABASE_URL`
+> - ✅ Railway `production` env (backend `backend-production-7b10`, own Postgres,
+>   tracks `prod` branch) and forked `dev` env (backend `backend-dev-f94e`, own
+>   Postgres, tracks `dev` branch).
+> - ✅ **Prod→dev sync verified** — `pg_dump --clean prod | psql dev` run via a
+>   `postgres:18-alpine` container; dev mirrored prod (row counts matched).
+> - ✅ **Native Railway cron service `db-sync`** in the `dev` env: builds the
+>   `deploy/railway-sync/Dockerfile` (pinned via `railway.toml`), `cronSchedule
+>   = "0 4 * * *"` UTC, `restartPolicyType = NEVER`. Variables `PROD_DATABASE_URL`
 >   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`).
-> - ⏳ **Remaining (needs Railway MCP, currently auth-lapsed):** set `db-sync`
->   build/cron — `root_directory=deploy/railway-sync`, `dockerfile_path=Dockerfile`,
->   `cron_schedule="0 4 * * *"`, `restart_policy=NEVER`. The CLI's
->   `environment edit --service-config` would not apply these non-interactively.
-> - ⏳ **Cosmetic:** `production` env still deploys the `experiment/railway-cloudflare-deploy`
->   branch (identical backend content to `prod`); repoint to `prod` via MCP.
+>   Build SUCCESS; first scheduled run 04:00 UTC.
 
 ## Topology
 
