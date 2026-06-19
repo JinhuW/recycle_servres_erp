@@ -1,8 +1,20 @@
 # Railway dev + prod environments with prod→dev DB sync
 
-> **Status: structure in progress.** Git branches `prod` and `dev` exist and are
-> pushed. The Railway `dev` environment and the sync service are pending Railway
-> API access (provisioning steps below).
+> **Status (2026-06-19): mostly provisioned + sync verified.**
+> - ✅ Git branches `prod` + `dev` pushed.
+> - ✅ Railway `production` env (backend `backend-production-7b10`, own Postgres)
+>   and forked `dev` env (backend `backend-dev-f94e`, own fresh Postgres). The
+>   `dev` env deploys the `dev` branch.
+> - ✅ **Prod→dev sync verified working** — ran `pg_dump --clean prod | psql dev`
+>   via a `postgres:18-alpine` container; dev now mirrors prod (row counts match).
+> - ✅ `db-sync` service created in the `dev` env with `PROD_DATABASE_URL`
+>   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`).
+> - ⏳ **Remaining (needs Railway MCP, currently auth-lapsed):** set `db-sync`
+>   build/cron — `root_directory=deploy/railway-sync`, `dockerfile_path=Dockerfile`,
+>   `cron_schedule="0 4 * * *"`, `restart_policy=NEVER`. The CLI's
+>   `environment edit --service-config` would not apply these non-interactively.
+> - ⏳ **Cosmetic:** `production` env still deploys the `experiment/railway-cloudflare-deploy`
+>   branch (identical backend content to `prod`); repoint to `prod` via MCP.
 
 ## Topology
 
