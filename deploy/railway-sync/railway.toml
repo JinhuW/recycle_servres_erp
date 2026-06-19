@@ -1,0 +1,12 @@
+# Railway config for the db-sync cron service. Read from this service's root
+# directory (deploy/railway-sync). Pins the Dockerfile builder — without this,
+# Railway falls back to Railpack autodetect and fails (no start command).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Nightly prod -> dev sync at 04:00 UTC. The container runs sync.sh and exits;
+# NEVER restart so a completed run isn't relooped (the cron fires the next run).
+cronSchedule = "0 4 * * *"
+restartPolicyType = "NEVER"
