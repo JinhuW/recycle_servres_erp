@@ -5,13 +5,25 @@ compatibility_date = "2026-06-18"
 # Static SPA build output. run_worker_first=true makes the Worker run for
 # every request so it can decide API-proxy vs. asset; not_found_handling
 # serves index.html for client-side routes via env.ASSETS.fetch().
+# Inherited by both named environments below.
 [assets]
 directory = "../../apps/frontend/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
-[vars]
-# Railway backend public URL (https, no trailing slash). The Worker reverse-
-# proxies /api, /oauth, /.well-known here.
+# Two deployments — one Worker per Railway backend environment. Deploy with:
+#   unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env prod
+#   unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env dev
+# `vars` is NOT inherited from the top level, so each env sets its own
+# BACKEND_URL (the Railway backend it reverse-proxies to).
+
+[env.prod]
+name = "recycle-erp-prod"
+[env.prod.vars]
 BACKEND_URL = "https://backend-production-7b10.up.railway.app"
+
+[env.dev]
+name = "recycle-erp-dev"
+[env.dev.vars]
+BACKEND_URL = "https://backend-dev-f94e.up.railway.app"
