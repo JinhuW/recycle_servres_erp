@@ -12,6 +12,33 @@
 >   = "0 4 * * *"` UTC, `restartPolicyType = NEVER`. Variables `PROD_DATABASE_URL`
 >   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`).
 >   Build SUCCESS; first scheduled run 04:00 UTC.
+> - ✅ **Two frontend Workers** (`deploy/cloudflare`, wrangler envs): `recycle-erp-prod`
+>   at **`inventory-prod.recycleservers.com`** → prod backend, and `recycle-erp-dev`
+>   at **`inventory-dev.recycleservers.com`** → dev backend. Each backend's
+>   `CORS_ALLOWED_ORIGINS` (and OAuth issuer) set to its own custom domain;
+>   verified each domain proxies to the correct backend.
+
+## Frontend (Cloudflare)
+
+Two Workers from one `wrangler.toml`, deployed per environment. Each serves the
+SPA and reverse-proxies `/api`,`/oauth`,`/.well-known` to its **own** backend, so
+each domain is same-origin end-to-end.
+
+| Worker | Custom domain | BACKEND_URL |
+|--------|---------------|-------------|
+| `recycle-erp-prod` | `inventory-prod.recycleservers.com` | prod backend (`backend-production-7b10`) |
+| `recycle-erp-dev`  | `inventory-dev.recycleservers.com`  | dev backend (`backend-dev-f94e`) |
+
+```bash
+# Deploy (custom domains auto-provisioned on the recycleservers.com zone):
+cd deploy/cloudflare
+unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env prod
+unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env dev
+```
+
+Attaching a custom domain disables that Worker's `*.workers.dev` URL (Cloudflare
+default); add `workers_dev = true` per env to keep it. Each backend's
+`CORS_ALLOWED_ORIGINS` must match its frontend's custom domain.
 
 ## Topology
 
