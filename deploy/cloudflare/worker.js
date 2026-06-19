@@ -19,6 +19,11 @@ export default {
     // new Request(target, request) copies method, headers (Cookie,
     // X-Requested-By, Content-Type) and body. redirect:'manual' lets OAuth
     // 3xx pass through to the browser unchanged.
-    return fetch(new Request(target, request), { redirect: 'manual' });
+    const proxied = new Request(target, request);
+    // Prove this request came from the Worker so the backend can refuse direct
+    // hits to its public Railway origin. PROXY_SECRET is a Worker secret; when
+    // it's unset the backend gate is off, so this header is simply omitted.
+    if (env.PROXY_SECRET) proxied.headers.set('X-Proxy-Secret', env.PROXY_SECRET);
+    return fetch(proxied, { redirect: 'manual' });
   },
 };
