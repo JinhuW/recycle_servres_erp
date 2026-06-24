@@ -1,0 +1,17 @@
+# Railway config for the db-restore service. Read from this service's root
+# directory (deploy/railway-restore). Pins the Dockerfile builder — without
+# this, Railway falls back to Railpack autodetect and fails (no start command).
+#
+# TEMPORARY: this exists only for the Railway+Cloudflare migration period to keep
+# the Railway DB refreshed from R2 backups. Remove the service when the migration
+# is done.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Daily refresh at 03:30 UTC (just before the 04:00 db-sync prod->dev). Each run
+# is a DESTRUCTIVE full restore of the newest backup. NEVER restart so a
+# completed (or refused) run isn't relooped — the cron fires the next run.
+cronSchedule = "30 3 * * *"
+restartPolicyType = "NEVER"
