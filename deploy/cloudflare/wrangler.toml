@@ -24,10 +24,10 @@ run_worker_first = true
 name = "recycle-erp-prod"
 routes = [{ pattern = "inventory-prod.recycleservers.com", custom_domain = true }]
 [env.prod.vars]
-BACKEND_URL = "https://backend-production-7b10.up.railway.app"
+BACKEND_URL = "https://api.prod.recycleservers.com"
 
 [env.dev]
 name = "recycle-erp-dev"
 routes = [{ pattern = "inventory-dev.recycleservers.com", custom_domain = true }]
 [env.dev.vars]
-BACKEND_URL = "https://backend-dev-f94e.up.railway.app"
+BACKEND_URL = "https://api.dev.recycleservers.com"
