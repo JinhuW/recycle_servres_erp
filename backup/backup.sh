@@ -40,26 +40,36 @@ R2_PREFIX="${R2_PREFIX%/}"
 R2_DST="${R2_BUCKET}/${R2_PREFIX}"
 
 TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
-DUMP_FILE="/tmp/${NAME_PREFIX}_${TIMESTAMP}.dump.gz"
+DUMP_RAW="/tmp/${NAME_PREFIX}_${TIMESTAMP}.dump"
+DUMP_FILE="${DUMP_RAW}.gz"
 
 echo "[$(date -u +%FT%TZ)] Dumping Railway Postgres -> ${DUMP_FILE} ..."
 
 # --format=custom keeps the dump compact and lets pg_restore be selective.
-# pipefail (set above) ensures a pg_dump failure fails the whole pipeline
-# rather than shipping a truncated, gzip-valid-but-empty dump.
+# Write to a plain (seekable) file, NOT through a `| gzip` pipe: a bare
+# redirect lets `set -e` abort on a pg_dump failure directly, and the file can
+# then be integrity-checked without a pipe (see below).
 pg_dump \
   --format=custom \
   --no-owner \
   --no-privileges \
   "$DATABASE_URL" \
-  | gzip > "$DUMP_FILE"
+  > "$DUMP_RAW"
 
-# Integrity gate: a custom-format dump must list its table of contents.
-# If this fails the dump is corrupt and we abort before uploading it.
-if ! gunzip -c "$DUMP_FILE" | pg_restore --list >/dev/null 2>&1; then
+# Integrity gate: a custom-format dump must list its table of contents. Read
+# the archive from the FILE, never `gunzip -c | pg_restore --list`: pg_restore
+# reads only the TOC and exits early, so gunzip dies of SIGPIPE (exit 141) and
+# `set -o pipefail` would report a false "corrupt" verdict on a perfectly good
+# dump. Checking the file directly avoids that pipe entirely.
+if ! pg_restore --list "$DUMP_RAW" >/dev/null 2>&1; then
   echo "ERROR: dump failed integrity check (pg_restore --list); not uploading." >&2
   exit 1
 fi
+
+# Compress for storage/transfer. Custom format is already zlib-compressed, so
+# this is a modest extra squeeze but keeps the .dump.gz naming consistent with
+# the prod-service host backups. -f to overwrite any stale temp.
+gzip -n -f "$DUMP_RAW"
 
 SIZE="$(du -sh "$DUMP_FILE" | cut -f1)"
 echo "[$(date -u +%FT%TZ)] Dump OK (${SIZE}). Uploading to R2:${R2_DST}/ ..."
