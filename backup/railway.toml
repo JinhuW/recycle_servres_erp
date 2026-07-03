@@ -15,9 +15,8 @@ dockerfilePath = "Dockerfile"
 [deploy]
 # Dump once and exit; the container closes all connections when the script ends.
 startCommand = "/usr/local/bin/backup.sh"
-# TEMPORARY (verification): every 5 min. Restored to "30 3 * * *" once a green
-# run is confirmed. Railway cron schedules are always UTC.
-cronSchedule = "*/5 * * * *"
+# 03:30 UTC daily. Railway cron schedules are always UTC.
+cronSchedule = "30 3 * * *"
 # A cron run must not be retried/looped on crash — NEVER prevents overlap and
 # lets the failure surface in logs for the next scheduled attempt.
 restartPolicyType = "NEVER"
