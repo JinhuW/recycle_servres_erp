@@ -264,12 +264,12 @@ Single-host Docker Compose:
 4. **Do not** ship `docker-compose.override.yml` — it re-publishes Postgres
    on the host loopback for the dev test harness.
 
-Postgres cluster files live in `./data/postgres/` (bind-mount).  Back them
-up with `apps/backend/scripts/backup.sh` or snapshot the directory while pg
-is stopped.
+Postgres cluster files live in `./data/postgres/` (bind-mount); for a
+file-level backup, snapshot that directory while pg is stopped.
 
-Daily backups: `bash apps/backend/scripts/backup.sh --out /var/backups/`
-(pg_dump custom format, gzipped, retains last 14).
+Logical backups of the production database are handled by the Railway cron
+service in [`backup/`](backup/README.md) — a daily `pg_dump` (custom format,
+gzipped) to Cloudflare R2 with retention and restore steps documented there.
 
 The compose stack is hardened: `cap_drop: ALL` everywhere with the minimum
 caps re-added (Postgres needs CHOWN/DAC_OVERRIDE/FOWNER/FSETID/SETGID/SETUID
