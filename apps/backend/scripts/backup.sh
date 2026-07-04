@@ -58,6 +58,20 @@ mkdir -p "$OUT_DIR"
 TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
 DUMP_FILE="$OUT_DIR/recycle_erp_${TIMESTAMP}.dump.gz"
 
+# Dump to an intermediate custom-format file, then compress it — rather than
+# streaming `pg_dump | gzip` straight to disk. Two reasons:
+#   1. A bare redirect makes pg_dump's own exit status authoritative under
+#      `set -e`. In `pg_dump | gzip`, gzip still exits 0 after compressing
+#      partial/empty input, which can mask a pg_dump failure (e.g. a client
+#      that is older than the server and refuses to dump it).
+#   2. The integrity check below reads the archive from a SEEKABLE FILE. It must
+#      never be `... | pg_restore --list`: --list reads only the archive's table
+#      of contents and exits early, so the upstream process dies of SIGPIPE
+#      (exit 141) and `set -o pipefail` then reports a false "corrupt" verdict
+#      on a perfectly good dump.
+RAW_DUMP="$(mktemp "${TMPDIR:-/tmp}/recycle_erp_${TIMESTAMP}.XXXXXX")"
+trap 'rm -f "$RAW_DUMP"' EXIT
+
 echo "Dumping database to ${DUMP_FILE} ..."
 
 if [[ -n "$CONTAINER" ]]; then
@@ -68,7 +82,7 @@ if [[ -n "$CONTAINER" ]]; then
     --no-privileges \
     -U "$PG_USER" \
     "$PG_DB" \
-    | gzip > "$DUMP_FILE"
+    > "$RAW_DUMP"
 else
   if [[ -z "${DATABASE_URL:-}" ]]; then
     echo "ERROR: DATABASE_URL is not set (and no --container/BACKUP_PG_CONTAINER given)." >&2
@@ -79,8 +93,32 @@ else
     --no-owner \
     --no-privileges \
     "$DATABASE_URL" \
-    | gzip > "$DUMP_FILE"
+    > "$RAW_DUMP"
 fi
+
+# Integrity gate: the archive must list its table of contents, or we abort
+# before gzipping/uploading a corrupt dump. Read from the file (seekable), never
+# a pipe. Container mode has no host pg_restore, so verify with the container's
+# own client against a copy placed inside the container.
+echo "Verifying dump integrity ..."
+if [[ -n "$CONTAINER" ]]; then
+  IN_CONTAINER_DUMP="/tmp/recycle_erp_verify_${TIMESTAMP}.dump"
+  docker cp "$RAW_DUMP" "${CONTAINER}:${IN_CONTAINER_DUMP}"
+  if ! docker exec "$CONTAINER" pg_restore --list "$IN_CONTAINER_DUMP" >/dev/null 2>&1; then
+    docker exec "$CONTAINER" rm -f "$IN_CONTAINER_DUMP" || true
+    echo "ERROR: dump failed integrity check (pg_restore --list); not uploading." >&2
+    exit 1
+  fi
+  docker exec "$CONTAINER" rm -f "$IN_CONTAINER_DUMP" || true
+else
+  if ! pg_restore --list "$RAW_DUMP" >/dev/null 2>&1; then
+    echo "ERROR: dump failed integrity check (pg_restore --list); not uploading." >&2
+    exit 1
+  fi
+fi
+
+# Compress into place. -n omits the timestamp/name header for reproducibility.
+gzip -n -c "$RAW_DUMP" > "$DUMP_FILE"
 
 SIZE=$(du -sh "$DUMP_FILE" | cut -f1)
 echo "Backup complete: ${DUMP_FILE} (${SIZE})"
