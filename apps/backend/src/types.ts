@@ -23,6 +23,11 @@ export type Env = {
   // requests. Unset = loopback-only (dev); set it in production to the real
   // frontend origin(s).
   CORS_ALLOWED_ORIGINS?: string;
+  // Shared secret that the Cloudflare Worker injects (X-Proxy-Secret) on every
+  // proxied request. When set, the backend refuses requests that don't carry
+  // it — so the public Railway origin can't be hit directly, only via the
+  // Worker. Unset disables the gate (Docker stack / local dev). See index.ts.
+  PROXY_SECRET?: string;
   // 'production' locks down dev-only conveniences (e.g. the demo-accounts
   // login picker). Sourced from process.env.NODE_ENV.
   NODE_ENV?: string;

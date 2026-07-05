@@ -51,6 +51,24 @@ app.use('*', async (c, next) => {
 });
 
 app.use('*', logger());
+
+// ── Origin lockdown ──────────────────────────────────────────────────────────
+// When PROXY_SECRET is set, only requests carrying it in X-Proxy-Secret are
+// honored. The Cloudflare Worker (the sole intended caller) injects the header,
+// so direct hits to the public Railway origin — including /metrics — are
+// refused with 403. /api/health is exempt because Railway's healthcheck probes
+// the container directly, bypassing the Worker. Unset (Docker stack / local
+// dev) disables the gate, so this stays backward-compatible.
+app.use('*', async (c, next) => {
+  const secret = (c.env as Env).PROXY_SECRET;
+  if (secret && c.req.path !== '/api/health') {
+    if (c.req.header('X-Proxy-Secret') !== secret) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+  }
+  await next();
+});
+
 app.use(
   '*',
   cors({
