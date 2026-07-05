@@ -2,9 +2,7 @@
 
 A **Railway cron service** (`db-sync` in the `recycle-erp-experiment` project)
 that dumps the ERP Postgres once a day and stores the dump offsite in
-Cloudflare R2. Self-contained on Railway — it does **not** depend on the
-prod-service VM (which runs a separate hourly backup of the VM's local
-Postgres container).
+Cloudflare R2. Fully self-contained on Railway.
 
 ## How it works
 
@@ -29,8 +27,8 @@ Result: `recycle-db-backup/railway-erp/recycle_erp_railway_<UTC>.dump.gz`.
 
 Secrets are **not** in code (Railway config-as-code can't hold variables).
 Set on the service: `R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`,
-`R2_SECRET_ACCESS_KEY` (reused from the prod-service `.env`), and
-`DATABASE_URL` as a reference to `${{Postgres.DATABASE_URL}}`.
+`R2_SECRET_ACCESS_KEY`, and `DATABASE_URL` as a reference to
+`${{Postgres.DATABASE_URL}}`.
 
 ## Restore
 
@@ -46,10 +44,8 @@ a server whose major version is newer than the client, with:
     pg_dump: error: server version: 18.x; pg_dump version: 16.x
     pg_dump: error: aborting because of server version mismatch
 
-The prod-service VM has no host `pg_dump`, and its only client (the local
-`recycle_pg` container) is **v16** — so the VM **cannot** dump this DB. That is
-why this job runs on Railway from a **`postgres:18`** image instead of reusing
-the VM's hourly `backup.sh`.
+That is why this job runs from a **`postgres:18`** image: the client must be at
+least as new as the Railway server (18.x), or `pg_dump` aborts.
 
 **Rule:** keep the Dockerfile `FROM postgres:<N>` where `N >=` the Railway
 server's major version. If Railway upgrades Postgres (e.g. to 19), bump the

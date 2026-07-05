@@ -67,15 +67,14 @@ if ! pg_restore --list "$DUMP_RAW" >/dev/null 2>&1; then
 fi
 
 # Compress for storage/transfer. Custom format is already zlib-compressed, so
-# this is a modest extra squeeze but keeps the .dump.gz naming consistent with
-# the prod-service host backups. -f to overwrite any stale temp.
+# this is a modest extra squeeze but keeps the .dump.gz naming consistent.
+# -f to overwrite any stale temp.
 gzip -n -f "$DUMP_RAW"
 
 SIZE="$(du -sh "$DUMP_FILE" | cut -f1)"
 echo "[$(date -u +%FT%TZ)] Dump OK (${SIZE}). Uploading to R2:${R2_DST}/ ..."
 
 # Configure the rclone S3 remote entirely from env — no rclone.conf on disk.
-# (Identical remote setup to the prod-service host backup, for consistency.)
 export RCLONE_CONFIG_R2_TYPE=s3
 export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
 export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
