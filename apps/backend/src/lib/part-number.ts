@@ -24,3 +24,12 @@ export function canonPartCol(sql: Sql, col: ReturnType<Sql>) {
 export function canonPartArg(sql: Sql, raw: string) {
   return sql`UPPER(REGEXP_REPLACE(REGEXP_REPLACE(${raw}, ${PART_PREFIX_RE}, '', 'i'), '[[:space:]]+', '', 'g'))`;
 }
+
+// JS twin of the SQL canonicaliser above, for grouping rows in application
+// code before a DB round-trip. Keep in lockstep with PART_PREFIX_RE.
+export function canonPartNumberJs(pn: string): string {
+  return pn
+    .replace(/^\s*(?:P\s*\/?\s*N|S\s*\/?\s*N|PART\s*(?:NO|NUMBER)?)\s*[:#]?\s*/i, '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
