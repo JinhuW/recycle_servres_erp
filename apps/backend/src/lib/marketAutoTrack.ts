@@ -23,6 +23,8 @@ export type TrackablePart = {
   interface?: string | null;
   formFactor?: string | null;
   description?: string | null;
+  label?: string | null;
+  subLabel?: string | null;
   health?: number | null;
   rpm?: number | null;
 };
@@ -88,13 +90,14 @@ export async function autoTrackParts(
       INSERT INTO ref_prices (
         id, category, brand, capacity, type, classification, rank, speed,
         interface, form_factor, description, part_number,
-        label, samples, source, updated_at, health, rpm
+        label, sub_label, samples, source, updated_at, health, rpm
       ) VALUES (
         gen_random_uuid()::text, ${part.category},
         ${part.brand ?? null}, ${part.capacity ?? null}, ${part.type ?? null},
         ${part.classification ?? null}, ${part.rank ?? null}, ${part.speed ?? null},
         ${part.interface ?? null}, ${part.formFactor ?? null}, ${part.description ?? null},
-        ${raw}, ${synthLabel(part, raw)}, 0, 'auto-intake', NOW(),
+        ${raw}, ${(part.label ?? '').trim() || synthLabel(part, raw)}, ${part.subLabel ?? null},
+        0, 'auto-intake', NOW(),
         ${part.health ?? null}, ${part.rpm ?? null}
       )
     `;
