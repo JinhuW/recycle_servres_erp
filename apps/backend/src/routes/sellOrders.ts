@@ -22,6 +22,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
+import { recordSaleDataPoints } from '../lib/sellOrderMarket';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -1109,6 +1110,10 @@ sellOrders.post('/:id/status', async (c) => {
           body: 'Commission ready for review.',
         });
       }
+
+      // A completed sale is the most authoritative price signal we have —
+      // record one market data point per sold product.
+      await recordSaleDataPoints(tx, id, u.id);
     }
     return { kind: 'done' };
   });
