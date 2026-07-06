@@ -57,7 +57,7 @@ describe('sell order Done → market data point', () => {
   it('rolls up same-PN lines into one qty-weighted data point', async () => {
     const { token } = await loginAs(ALEX);
     const a = await freeSellableLine(token, 1);
-    const b = await freeSellableLine(token, 1);
+    const b = await freeSellableLine(token, 1, new Set([a.id]));
     const customerId = await firstCustomerId(token);
     const pn = 'SALE-DP-ROLLUP-001';
 
@@ -133,6 +133,57 @@ describe('sell order Done → market data point', () => {
     `)[0];
     // Stored unit_price is USD: 100 CNY × 0.14 = 14.00.
     expect(rp.last_price).toBeCloseTo(14, 2);
+  });
+
+  it('preserves scraper-owned aggregates on a pre-existing tracked row', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await freeSellableLine(token, 1);
+    const customerId = await firstCustomerId(token);
+    const pn = 'SALE-DP-PREEXIST-001';
+
+    const sql = getTestDb();
+    const existing = (await sql<{ id: string }[]>`
+      INSERT INTO ref_prices (
+        id, category, part_number, label, samples, avg_sell, low_price, high_price, source, updated_at
+      ) VALUES (
+        gen_random_uuid()::text, 'RAM', ${pn}, 'Existing Scraped RAM', 9, 42, 30, 55, 'scraper:test', NOW()
+      )
+      RETURNING id
+    `)[0];
+
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM',
+        label: 'Sold RAM', partNumber: pn, qty: 1, unitPrice: 47 }] },
+    });
+    expect(create.status).toBe(201);
+    expect((await toDone(token, create.body.id)).status).toBe(200);
+
+    const rp = (await sql<{
+      id: string; samples: number; avg_sell: number; low_price: number; high_price: number;
+      source: string; last_price: number; last_price_source: string; last_price_at: Date | null;
+    }[]>`
+      SELECT id, samples, avg_sell::float AS avg_sell, low_price::float AS low_price,
+             high_price::float AS high_price, source,
+             last_price::float AS last_price, last_price_source, last_price_at
+      FROM ref_prices WHERE id = ${existing.id}
+    `)[0];
+    // Scraper-owned aggregates + source byte-for-byte unchanged.
+    expect(rp.samples).toBe(9);
+    expect(rp.avg_sell).toBe(42);
+    expect(rp.low_price).toBe(30);
+    expect(rp.high_price).toBe(55);
+    expect(rp.source).toBe('scraper:test');
+    // The sale still lands on last_price* via the same appendPriceEvent path.
+    expect(rp.last_price).toBe(47);
+    expect(rp.last_price_source).toBe(`sale:${create.body.id}`);
+    expect(rp.last_price_at).not.toBeNull();
+
+    const events = await sql<{ price: number }[]>`
+      SELECT price::float AS price FROM ref_price_events WHERE ref_price_id = ${existing.id}
+    `;
+    expect(events).toHaveLength(1);
+    expect(events[0].price).toBe(47);
   });
 
   it('does not record a data point when the order is Closed', async () => {

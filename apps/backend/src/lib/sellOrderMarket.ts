@@ -1,5 +1,5 @@
 import type { TransactionSql } from 'postgres';
-import { PART_PREFIX_RE, canonPartNumberJs } from './part-number';
+import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
 import { appendPriceEvent } from './refPriceEvents';
 
@@ -64,16 +64,9 @@ export async function recordSaleDataPoints(
   // Map each canonical PN back to its ref_prices id.
   const canons = Array.from(byCanon.keys());
   const idRows = await tx<{ id: string; canon: string }[]>`
-    SELECT id,
-           UPPER(REGEXP_REPLACE(
-             REGEXP_REPLACE(COALESCE(part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
-             '[[:space:]]+', '', 'g'
-           )) AS canon
+    SELECT id, ${canonPartCol(tx, tx`part_number`)} AS canon
     FROM ref_prices
-    WHERE UPPER(REGEXP_REPLACE(
-             REGEXP_REPLACE(COALESCE(part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
-             '[[:space:]]+', '', 'g'
-           )) = ANY(${canons}::text[])
+    WHERE ${canonPartCol(tx, tx`part_number`)} = ANY(${canons}::text[])
   `;
   const idByCanon = new Map<string, string>();
   for (const r of idRows) if (!idByCanon.has(r.canon)) idByCanon.set(r.canon, r.id);

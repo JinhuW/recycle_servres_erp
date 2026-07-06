@@ -96,7 +96,7 @@ export async function autoTrackParts(
         ${part.brand ?? null}, ${part.capacity ?? null}, ${part.type ?? null},
         ${part.classification ?? null}, ${part.rank ?? null}, ${part.speed ?? null},
         ${part.interface ?? null}, ${part.formFactor ?? null}, ${part.description ?? null},
-        ${raw}, ${(part.label ?? '').trim() || synthLabel(part, raw)}, ${part.subLabel ?? null},
+        ${raw}, ${(part.label ?? '').trim() || synthLabel(part, raw)}, ${(part.subLabel ?? '').trim() || null},
         0, 'auto-intake', NOW(),
         ${part.health ?? null}, ${part.rpm ?? null}
       )
