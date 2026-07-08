@@ -23,6 +23,7 @@ import {
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
 import { recordSaleDataPoints } from '../lib/sellOrderMarket';
+import { maybeRenameReceipt } from '../ai/receipt';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -810,6 +811,10 @@ sellOrders.put('/:id/status-meta/:status', async (c) => {
   return c.json({ ok: true });
 });
 
+// Statuses whose attachments are payment receipts — eligible for AI rename.
+// 'Shipped' evidence is packing/label photos; those keep their name.
+const RECEIPT_RENAME_STATUSES = new Set(['Awaiting payment', 'Done']);
+
 // Upload one attachment for (order, status). Multipart with field `file`.
 sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   const u = c.var.user;
@@ -839,11 +844,15 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
+  const stored = RECEIPT_RENAME_STATUSES.has(status)
+    ? await maybeRenameReceipt(c.env, file)
+    : file;
+
   // R2 upload happens outside the transaction — it's the slow part. A tx open
   // across it would hold a row lock for the whole upload. If the DB INSERT
   // below fails the uploaded object is orphaned in R2; r2.ts treats orphans
   // as a separate concern.
-  const uploaded = await uploadAttachment(c.env, file, `sell-orders/${id}/${status}`)
+  const uploaded = await uploadAttachment(c.env, stored, `sell-orders/${id}/${status}`)
     .catch(e => { console.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
@@ -852,8 +861,8 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
       INSERT INTO sell_order_status_attachments
         (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
       VALUES
-        (${id}, ${status}, ${file.name}, ${file.size},
-         ${file.type || 'application/octet-stream'},
+        (${id}, ${status}, ${stored.name}, ${stored.size},
+         ${stored.type || 'application/octet-stream'},
          ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
       RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
     `)[0];

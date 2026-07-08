@@ -14,6 +14,7 @@ import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
+import { maybeRenameReceipt } from '../ai/receipt';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -1233,10 +1234,14 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
+  // Both PO meta statuses (Submission, Done) hold payment receipts, so the
+  // AI rename applies unconditionally — no per-status gate like sell orders.
+  const stored = await maybeRenameReceipt(c.env, file);
+
   // R2 upload happens outside the transaction — it's the slow part. If the
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
   // a separate concern.
-  const uploaded = await uploadAttachment(c.env, file, `orders/${id}/${status}`)
+  const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
     .catch(e => { console.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
@@ -1245,8 +1250,8 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
       INSERT INTO order_status_attachments
         (order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
       VALUES
-        (${id}, ${status}, ${file.name}, ${file.size},
-         ${file.type || 'application/octet-stream'},
+        (${id}, ${status}, ${stored.name}, ${stored.size},
+         ${stored.type || 'application/octet-stream'},
          ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
       RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
     `)[0];
