@@ -73,6 +73,14 @@ export function RamFields({ line, set }: FieldsProps) {
           onChange={e => set({ speed: e.target.value })}
         />
       </div>
+      <div className="field">
+        <label className="label">{t('chipNumber')}</label>
+        <input
+          className="input mono"
+          value={line.chipNumber ?? ''}
+          onChange={e => set({ chipNumber: e.target.value })}
+        />
+      </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')}</label>
         <input

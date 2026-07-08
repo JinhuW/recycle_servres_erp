@@ -484,17 +484,18 @@ describe('order line serial numbers', () => {
         lines: [{
           category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
           partNumber: 'M393A4K40DB3-CWE', condition: 'Pulled — Tested',
-          serialNumber: serials, qty: 3, unitCost: 78.5,
+          serialNumber: serials, chipNumber: 'K4A8G085WC-BCTD', qty: 3, unitCost: 78.5,
         }],
       },
     });
     expect(created.status).toBe(201);
 
-    const got = await api<{ order: { lines: { serialNumber: string | null }[] } }>(
+    const got = await api<{ order: { lines: { serialNumber: string | null; chipNumber: string | null }[] } }>(
       'GET', '/api/orders/' + created.body.id, { token },
     );
     expect(got.status).toBe(200);
     expect(got.body.order.lines[0].serialNumber).toBe(serials);
+    expect(got.body.order.lines[0].chipNumber).toBe('K4A8G085WC-BCTD');
   });
 
   it('defaults serial_number to null when omitted, and surfaces it in inventory', async () => {

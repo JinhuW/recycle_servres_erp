@@ -52,6 +52,7 @@ export const LINE_FIELDS = [
   'form_factor',
   'description',
   'part_number',
+  'chip_number',
   'condition',
   'health',
   'rpm',

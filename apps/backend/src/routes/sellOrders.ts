@@ -361,6 +361,7 @@ const SO_DETAIL_COLS: XlsxColumn[] = [
   { header: 'Rank',         key: 'rank',      width: 10 },
   { header: 'Speed',        key: 'speed',     width: 10 },
   { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Chip #',       key: 'chip',      width: 22 },
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -386,6 +387,7 @@ const SO_SUMMARY_COLS: XlsxColumn[] = [
   { header: 'Rank',         key: 'rank',      width: 10 },
   { header: 'Speed',        key: 'speed',     width: 10 },
   { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Chip #',       key: 'chip',      width: 22 },
   { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
   { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
@@ -425,7 +427,7 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       w.short AS warehouse_short,
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-      l.part_number, l.condition, l.health::float AS health,
+      l.part_number, l.chip_number, l.condition, l.health::float AS health,
       l.rpm, l.created_at,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
@@ -461,6 +463,7 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       rank: r.rank ?? '',
       speed: r.speed ?? '',
       part: r.part_number ?? r.sol_part ?? '',
+      chip: r.chip_number ?? '',
       condition: r.condition ?? r.sol_condition ?? '',
       qty,
       price: displayPrice,

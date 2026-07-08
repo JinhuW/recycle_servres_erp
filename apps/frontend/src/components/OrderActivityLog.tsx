@@ -77,6 +77,7 @@ const FIELD_LABEL: Record<string, string> = {
   form_factor:     'Form factor',
   description:     'Description',
   part_number:     'Part number',
+  chip_number:     'Chip number',
   condition:       'Condition',
   health:          'Health',
   rpm:             'RPM',

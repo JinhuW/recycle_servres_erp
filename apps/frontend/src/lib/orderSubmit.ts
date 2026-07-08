@@ -45,6 +45,7 @@ const toAddLine = (l: DraftLine) => ({
   description: l.description ?? null,
   partNumber: l.partNumber ?? null,
   serialNumber: l.serialNumber ?? null,
+  chipNumber: l.chipNumber ?? null,
   condition: l.condition ?? 'Pulled — Tested',
   qty: Number(l.qty) || 1,
   unitCost: Number(l.unitCost) || 0,

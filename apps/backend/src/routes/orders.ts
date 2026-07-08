@@ -47,6 +47,7 @@ type LineInput = {
   description?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
+  chipNumber?: string | null;
   condition?: string;
   qty: number;
   unitCost: number;
@@ -220,7 +221,7 @@ orders.get('/:id', async (c) => {
   const lines = await sql`
     SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
            ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description,
-           ol.part_number, ol.serial_number, ol.condition, ol.qty,
+           ol.part_number, ol.serial_number, ol.chip_number, ol.condition, ol.qty,
            ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
            ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
            ol.health::float AS health, ol.rpm,
@@ -292,6 +293,7 @@ orders.get('/:id', async (c) => {
         description: l.description,
         partNumber: l.part_number,
         serialNumber: l.serial_number,
+        chipNumber: l.chip_number,
         condition: l.condition,
         qty: l.qty,
         unitCost: l.unit_cost,
@@ -450,6 +452,7 @@ orders.get('/:id/invoice', async (c) => {
 const PO_LINE_COLS: XlsxColumn[] = [
   { header: 'Item',       key: 'item',      width: 34 },
   { header: 'Part #',     key: 'part',      width: 18 },
+  { header: 'Chip #',     key: 'chip',      width: 18 },
   { header: 'Category',   key: 'category',  width: 10 },
   { header: 'Condition',  key: 'condition', width: 12 },
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -486,7 +489,7 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const lines = await sql`
     SELECT category, brand, capacity, generation, type, classification, rank, speed,
-           interface, form_factor, description, part_number, condition, qty,
+           interface, form_factor, description, part_number, chip_number, condition, qty,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
   ` as unknown as Record<string, unknown>[];
@@ -503,6 +506,7 @@ orders.get('/:id/spreadsheet', async (c) => {
     return {
       item: poLineLabel(l),
       part: String(l.part_number ?? ''),
+      chip: String(l.chip_number ?? ''),
       category: String(l.category ?? ''),
       condition: String(l.condition ?? ''),
       qty,
@@ -602,14 +606,14 @@ orders.post('/', async (c) => {
       await tx`
         INSERT INTO order_lines (
           order_id, category, brand, capacity, generation, type, classification, rank, speed,
-          interface, form_factor, description, part_number, serial_number, condition, qty,
+          interface, form_factor, description, part_number, serial_number, chip_number, condition, qty,
           unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
           health, rpm
         ) VALUES (
           ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
-          ${resolvePartNumber(l.category ?? body.category, l)}, ${l.serialNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
+          ${resolvePartNumber(l.category ?? body.category, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
           ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
@@ -661,6 +665,7 @@ type LineFields = {
   description?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
+  chipNumber?: string | null;
   condition?: string;
   health?: number | null;
   rpm?: number | null;
@@ -787,7 +792,7 @@ orders.patch('/:id', async (c) => {
         ? await tx`
             SELECT id, status, qty, brand, capacity, type, generation, classification,
                    rank, speed, interface, form_factor, description, part_number,
-                   condition, rpm,
+                   chip_number, condition, rpm,
                    unit_cost::float AS unit_cost,
                    sell_price::float AS sell_price,
                    health::float AS health
@@ -858,6 +863,7 @@ orders.patch('/:id', async (c) => {
               description    = COALESCE(${l.description ?? null}, description),
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
+              chip_number    = COALESCE(${l.chipNumber ?? null}, chip_number),
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = COALESCE(${l.health ?? null}, health),
               rpm            = COALESCE(${l.rpm ?? null}, rpm)
@@ -875,7 +881,7 @@ orders.patch('/:id', async (c) => {
           const inserted = await tx`
             INSERT INTO order_lines (
               order_id, category, brand, capacity, generation, type, classification, rank, speed,
-              interface, form_factor, description, part_number, serial_number, condition, qty,
+              interface, form_factor, description, part_number, serial_number, chip_number, condition, qty,
               unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
               health, rpm
             ) VALUES (
@@ -883,7 +889,7 @@ orders.patch('/:id', async (c) => {
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null},
-              ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.serialNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
               ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
@@ -939,7 +945,7 @@ orders.patch('/:id', async (c) => {
           const afters = (await tx`
             SELECT id, status, qty, brand, capacity, type, generation, classification,
                    rank, speed, interface, form_factor, description, part_number,
-                   condition, rpm,
+                   chip_number, condition, rpm,
                    unit_cost::float AS unit_cost,
                    sell_price::float AS sell_price,
                    health::float AS health

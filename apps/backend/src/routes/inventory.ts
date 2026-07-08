@@ -153,6 +153,7 @@ const INV_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Rank',         key: 'rank',      width: 10 },
   { header: 'Speed',        key: 'speed',     width: 10 },
   { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Chip #',       key: 'chip',      width: 22 },
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -192,6 +193,7 @@ export function invSpec(r: Record<string, unknown>): string {
 // Manager-only like the flat export, so cost columns are always present.
 const INV_EXPORT_COLS_GROUPED: XlsxColumn[] = [
   { header: 'Part #',       key: 'part',       width: 22 },
+  { header: 'Chip #',       key: 'chip',       width: 22 },
   { header: 'Category',     key: 'category',   width: 10 },
   { header: 'Item',         key: 'item',       width: 30 },
   { header: 'Type',         key: 'type',       width: 10 },
@@ -223,7 +225,7 @@ inventory.get('/export', async (c) => {
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
              l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-             l.part_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
+             l.part_number, l.chip_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
              l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
              l.status, l.health::float AS health, l.created_at,
              w.short AS warehouse_short, u.name AS user_name
@@ -254,6 +256,7 @@ inventory.get('/export', async (c) => {
       const submitters = new Set<string>();
       const pos = new Set<string>();
       let repPn: string | null = null;
+      let repChip: string | null = null;
       for (const l of lots) {
         const lqty = Number(l.qty ?? 0);
         const cost = Number(l.unit_cost ?? 0);
@@ -268,9 +271,11 @@ inventory.get('/export', async (c) => {
         if (l.user_name) submitters.add(String(l.user_name));
         pos.add(String(l.order_id));
         if (repPn === null && l.part_number) repPn = String(l.part_number);
+        if (repChip === null && l.chip_number) repChip = String(l.chip_number);
       }
       return {
         part: repPn ?? '',
+        chip: repChip ?? '',
         category: head.category ?? '',
         item: invLabel(head),
         type: head.category === 'RAM' ? (head.type ?? '') : '',
@@ -296,7 +301,7 @@ inventory.get('/export', async (c) => {
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.part_number, l.condition,
+           l.interface, l.form_factor, l.description, l.part_number, l.chip_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.health::float AS health, l.rpm,
            u.name AS user_name, w.short AS warehouse_short,
@@ -334,6 +339,7 @@ inventory.get('/export', async (c) => {
       rank: r.rank ?? '',
       speed: r.speed ?? '',
       part: r.part_number ?? '',
+      chip: r.chip_number ?? '',
       warehouse: r.warehouse_short ?? '',
       condition: r.condition ?? '',
       qty,
