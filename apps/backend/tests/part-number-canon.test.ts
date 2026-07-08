@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import postgres from 'postgres';
-import { canonPartArg } from '../src/lib/part-number';
+import { canonPartArg, canonPartNumberJs } from '../src/lib/part-number';
 
 // Uses the test Postgres directly (same DATABASE_URL the app uses in tests).
 const sql = postgres(process.env.DATABASE_URL as string, { prepare: false, max: 2 });
@@ -25,4 +25,19 @@ describe('canonPartArg — canonical part-number parity', () => {
   });
 
   afterAll(async () => { await sql.end({ timeout: 5 }); });
+});
+
+describe('canonPartNumberJs', () => {
+  it('strips a P/N prefix, drops whitespace, upper-cases', () => {
+    expect(canonPartNumberJs('P/N: hma 84gr7 afr4n-uh')).toBe('HMA84GR7AFR4N-UH');
+  });
+  it('strips an S/N prefix', () => {
+    expect(canonPartNumberJs('S/N abc-123')).toBe('ABC-123');
+  });
+  it('treats spacing/case variants of the same PN as equal', () => {
+    expect(canonPartNumberJs('  m393a2k43bb1-ctd ')).toBe(canonPartNumberJs('M393A2K43BB1-CTD'));
+  });
+  it('leaves a bare part number untouched except case', () => {
+    expect(canonPartNumberJs('720-ct')).toBe('720-CT');
+  });
 });

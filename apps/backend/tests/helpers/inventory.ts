@@ -7,10 +7,17 @@ export type SellableLine = { id: string; qty: number; unit_cost: number; sell_pr
 // sellable lines to seeded sell orders, and the one-active-sell-order-per-line
 // invariant rejects a second open order on the same line — so tests that build
 // a fresh sell order must start from a genuinely free line.
-export async function freeSellableLine(token: string, minQty = 1): Promise<SellableLine> {
+//
+// `exclude` lets a caller ask for a SECOND distinct free line within the same
+// test, before any order has been posted (which is otherwise what marks a
+// line "taken" — a second call with no order in between would just return the
+// same line again).
+export async function freeSellableLine(
+  token: string, minQty = 1, exclude: ReadonlySet<string> = new Set(),
+): Promise<SellableLine> {
   const r = await api<{ items: Array<{ id: string; status: string; qty: number; unit_cost: number; sell_price: number | null }> }>(
     'GET', '/api/inventory?status=Reviewing', { token });
-  const candidates = r.body.items.filter(i => i.sell_price != null && i.qty >= minQty);
+  const candidates = r.body.items.filter(i => i.sell_price != null && i.qty >= minQty && !exclude.has(i.id));
   for (const c of candidates) {
     const so = await api<{ items: { status: string }[] }>(
       'GET', `/api/inventory/${c.id}/sell-orders`, { token });
