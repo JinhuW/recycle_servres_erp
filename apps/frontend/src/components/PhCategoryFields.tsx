@@ -120,6 +120,10 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           <PhCatSelect className={selectClsFor('type')} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
         </div>
         <div className="ph-field">
+          <label>{t('chipNumber')}</label>
+          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value)} />
+        </div>
+        <div className="ph-field">
           <label>{t('partNumber')}</label>
           <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
         </div>
@@ -137,7 +141,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatCombo className={inputClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">

@@ -35,11 +35,15 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export async function openRouterScan(
+// Generic image→JSON transport: send one image plus a prompt, get back the
+// parsed JSON object. Shared by the label scanner and the receipt renamer so
+// timeout/model/retry tuning stays in one place. Throws on missing key, HTTP
+// error, timeout, or (after one retry turn) unparseable JSON.
+export async function openRouterImageJson(
   env: Env,
-  category: LineCategory,
+  prompt: string,
   imageBytes: ArrayBuffer,
-): Promise<ScanResult> {
+): Promise<Record<string, unknown>> {
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
@@ -49,7 +53,7 @@ export async function openRouterScan(
   type ChatMessage = { role: 'user' | 'assistant'; content: string | Array<Record<string, unknown>> };
 
   const baseContent: Array<Record<string, unknown>> = [
-    { type: 'text', text: PROMPT_BY_CATEGORY[category] },
+    { type: 'text', text: prompt },
     { type: 'image_url', image_url: { url: dataUrl } },
   ];
 
@@ -92,6 +96,15 @@ export async function openRouterScan(
     json = parseModelJson(second);
   }
   if (!json) throw new Error('OpenRouter: could not parse JSON from response');
+  return json;
+}
+
+export async function openRouterScan(
+  env: Env,
+  category: LineCategory,
+  imageBytes: ArrayBuffer,
+): Promise<ScanResult> {
+  const json = await openRouterImageJson(env, PROMPT_BY_CATEGORY[category], imageBytes);
 
   // Pull the model's self-rated confidence out of the JSON. If it's missing or
   // not a finite number, default to 0.45 — just below the verify floor so a

@@ -144,6 +144,7 @@ export type Line = {
   description?: string;
   partNumber?: string;
   serialNumber?: string;
+  chipNumber?: string;
   condition: string;
   qty: number | string;
   unitCost: number | string;
@@ -418,6 +419,7 @@ function OrderForm({
     description: l.description ?? null,
     partNumber: l.partNumber ?? null,
     serialNumber: l.serialNumber ?? null,
+    chipNumber: l.chipNumber ?? null,
     condition: l.condition,
     qty: Number(l.qty) || 1,
     unitCost: Number(l.unitCost) || 0,

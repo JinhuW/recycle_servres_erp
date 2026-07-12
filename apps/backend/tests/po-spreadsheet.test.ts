@@ -108,6 +108,36 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     expect(checked).toBe(true);
   });
 
+  it('carries the line chip number in a Chip # column', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          partNumber: 'M393A4K40DB3-CWE', chipNumber: 'K4A8G085WC-BCTD',
+          condition: 'Pulled — Tested', qty: 2, unitCost: 60,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Line items')!;
+    const headers = ws.getRow(1).values as unknown[];
+    const chipC = headers.indexOf('Chip #');
+    expect(chipC).toBeGreaterThan(0);
+    expect(String(ws.getRow(2).getCell(chipC).value)).toBe('K4A8G085WC-BCTD');
+  });
+
   it('lets a purchaser download their OWN PO', async () => {
     const { token } = await loginAs(MARCUS);
     const ids = await listOrderIds(token); // purchaser list is already own-scoped

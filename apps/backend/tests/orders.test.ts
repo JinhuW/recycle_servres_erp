@@ -484,17 +484,52 @@ describe('order line serial numbers', () => {
         lines: [{
           category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
           partNumber: 'M393A4K40DB3-CWE', condition: 'Pulled — Tested',
-          serialNumber: serials, qty: 3, unitCost: 78.5,
+          serialNumber: serials, chipNumber: 'K4A8G085WC-BCTD', qty: 3, unitCost: 78.5,
         }],
       },
     });
     expect(created.status).toBe(201);
 
-    const got = await api<{ order: { lines: { serialNumber: string | null }[] } }>(
+    const got = await api<{ order: { lines: { serialNumber: string | null; chipNumber: string | null }[] } }>(
       'GET', '/api/orders/' + created.body.id, { token },
     );
     expect(got.status).toBe(200);
     expect(got.body.order.lines[0].serialNumber).toBe(serials);
+    expect(got.body.order.lines[0].chipNumber).toBe('K4A8G085WC-BCTD');
+  });
+
+  it('clears chip_number to null when the edit sends an empty string', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          partNumber: 'CHIP-CLEAR-1', condition: 'Pulled — Tested',
+          chipNumber: 'K4A8G085WC-BCTD', qty: 1, unitCost: 10,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const before = await api<{ order: { lines: { id: string; chipNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    const lineId = before.body.order.lines[0].id;
+    expect(before.body.order.lines[0].chipNumber).toBe('K4A8G085WC-BCTD');
+
+    const patched = await api('PATCH', '/api/orders/' + created.body.id, {
+      token, body: { lines: [{ id: lineId, chipNumber: '' }] },
+    });
+    expect(patched.status).toBe(200);
+
+    const after = await api<{ order: { lines: { chipNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    expect(after.body.order.lines[0].chipNumber).toBeNull();
   });
 
   it('defaults serial_number to null when omitted, and surfaces it in inventory', async () => {

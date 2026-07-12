@@ -73,6 +73,14 @@ export function RamFields({ line, set }: FieldsProps) {
           onChange={e => set({ speed: e.target.value })}
         />
       </div>
+      <div className="field">
+        <label className="label">{t('chipNumber')}</label>
+        <input
+          className="input mono"
+          value={line.chipNumber ?? ''}
+          onChange={e => set({ chipNumber: e.target.value })}
+        />
+      </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')}</label>
         <input
@@ -100,7 +108,7 @@ export function SsdFields({ line, set }: FieldsProps) {
       </div>
       <div className="field">
         <label className="label">{t('capacity')} <span className="req">*</span></label>
-        <CatCombo value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
+        <CatSelect value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
         <label className="label">{t('interfaceLbl')} <span className="req">*</span></label>

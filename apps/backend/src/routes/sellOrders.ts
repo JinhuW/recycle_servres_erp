@@ -22,6 +22,8 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
+import { recordSaleDataPoints } from '../lib/sellOrderMarket';
+import { maybeRenameReceipt } from '../ai/receipt';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -359,6 +361,7 @@ const SO_DETAIL_COLS: XlsxColumn[] = [
   { header: 'Rank',         key: 'rank',      width: 10 },
   { header: 'Speed',        key: 'speed',     width: 10 },
   { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Chip #',       key: 'chip',      width: 22 },
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -384,6 +387,7 @@ const SO_SUMMARY_COLS: XlsxColumn[] = [
   { header: 'Rank',         key: 'rank',      width: 10 },
   { header: 'Speed',        key: 'speed',     width: 10 },
   { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Chip #',       key: 'chip',      width: 22 },
   { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
   { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
@@ -423,7 +427,7 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       w.short AS warehouse_short,
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-      l.part_number, l.condition, l.health::float AS health,
+      l.part_number, l.chip_number, l.condition, l.health::float AS health,
       l.rpm, l.created_at,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
@@ -459,6 +463,7 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
       rank: r.rank ?? '',
       speed: r.speed ?? '',
       part: r.part_number ?? r.sol_part ?? '',
+      chip: r.chip_number ?? '',
       condition: r.condition ?? r.sol_condition ?? '',
       qty,
       price: displayPrice,
@@ -809,6 +814,10 @@ sellOrders.put('/:id/status-meta/:status', async (c) => {
   return c.json({ ok: true });
 });
 
+// Statuses whose attachments are payment receipts — eligible for AI rename.
+// 'Shipped' evidence is packing/label photos; those keep their name.
+const RECEIPT_RENAME_STATUSES = new Set(['Awaiting payment', 'Done']);
+
 // Upload one attachment for (order, status). Multipart with field `file`.
 sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   const u = c.var.user;
@@ -838,11 +847,15 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
+  const stored = RECEIPT_RENAME_STATUSES.has(status)
+    ? await maybeRenameReceipt(c.env, file)
+    : file;
+
   // R2 upload happens outside the transaction — it's the slow part. A tx open
   // across it would hold a row lock for the whole upload. If the DB INSERT
   // below fails the uploaded object is orphaned in R2; r2.ts treats orphans
   // as a separate concern.
-  const uploaded = await uploadAttachment(c.env, file, `sell-orders/${id}/${status}`)
+  const uploaded = await uploadAttachment(c.env, stored, `sell-orders/${id}/${status}`)
     .catch(e => { console.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
@@ -851,8 +864,8 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
       INSERT INTO sell_order_status_attachments
         (sell_order_id, status, filename, size_bytes, mime_type, storage_key, delivery_url, uploaded_by)
       VALUES
-        (${id}, ${status}, ${file.name}, ${file.size},
-         ${file.type || 'application/octet-stream'},
+        (${id}, ${status}, ${stored.name}, ${stored.size},
+         ${stored.type || 'application/octet-stream'},
          ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
       RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
     `)[0];
@@ -1109,6 +1122,10 @@ sellOrders.post('/:id/status', async (c) => {
           body: 'Commission ready for review.',
         });
       }
+
+      // A completed sale is the most authoritative price signal we have —
+      // record one market data point per sold product.
+      await recordSaleDataPoints(tx, id, u.id);
     }
     return { kind: 'done' };
   });
