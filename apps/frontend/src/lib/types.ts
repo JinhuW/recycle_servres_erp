@@ -44,6 +44,7 @@ export type OrderLine = {
   description: string | null;
   partNumber: string | null;
   serialNumber: string | null;
+  chipNumber: string | null;
   condition: string;
   qty: number;
   unitCost: number;
@@ -149,6 +150,7 @@ export type DraftLine = {
   description?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
+  chipNumber?: string | null;
   condition?: string;
   qty: number;
   unitCost: number;

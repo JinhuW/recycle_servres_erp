@@ -72,6 +72,7 @@ export type OrderLine = {
   formFactor: string | null;
   description: string | null;
   partNumber: string | null;
+  chipNumber: string | null;
   condition: string;
   qty: number;
   unitCost: number;

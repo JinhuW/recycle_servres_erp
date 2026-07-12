@@ -222,6 +222,17 @@ export function StatusChangeDialog({
               onFiles={addFiles}
             />
 
+            {uploading && (
+              <div style={{
+                marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                background: 'var(--accent-soft)', color: 'var(--accent-strong)', fontSize: 12.5,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span className="busy-spinner" />
+                {t('receiptOcrWaitHint')}
+              </div>
+            )}
+
             {attachments.length > 0 && (
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {attachments.map(a => (
