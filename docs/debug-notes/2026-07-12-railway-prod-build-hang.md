@@ -42,3 +42,15 @@ curl -s https://backboard.railway.com/graphql/v2 \
   fine; it's the builder. Retry, and if retries hang too, wait it out or
   contact Railway support — there is no user-side fix.
 - The environment name is `production`, not `prod`, in Railway API calls.
+- **Missing log lines ≠ steps didn't run.** The deployment that finally
+  succeeded showed no `migrate.mjs` output at all in its deploy logs (log
+  indexing was flaky the same day as the build hangs). Ground truth is the
+  DB: `SELECT max(filename) FROM schema_migrations` over the Postgres TCP
+  proxy (`DATABASE_PUBLIC_URL` on the Postgres service), not the log stream.
+
+## Resolution
+
+The third attempt completed on its own at 21:54 UTC (~25 min in BUILDING).
+Verified directly in prod Postgres afterwards: ledger head
+`0072_restore_ssd_cap_480.sql`, SSD_CAP = 20 new values + 480GB preserved,
+`order_lines.chip_number` present.
