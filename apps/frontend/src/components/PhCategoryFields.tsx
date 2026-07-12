@@ -141,7 +141,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
-            <PhCatCombo className={inputClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
+            <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={SSD_CAP} onChange={v => onChange('capacity', v)} />
           </div>
         </div>
         <div className="ph-field-row">

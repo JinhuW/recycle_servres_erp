@@ -108,7 +108,7 @@ export function SsdFields({ line, set }: FieldsProps) {
       </div>
       <div className="field">
         <label className="label">{t('capacity')} <span className="req">*</span></label>
-        <CatCombo value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
+        <CatSelect value={line.capacity} options={SSD_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
         <label className="label">{t('interfaceLbl')} <span className="req">*</span></label>
