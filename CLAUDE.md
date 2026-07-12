@@ -8,6 +8,11 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - **pnpm only** — `packageManager` is pinned to `pnpm@11.0.9` and the lockfile
   is `pnpm-lock.yaml`.  Don't introduce `package-lock.json` or `yarn.lock`.
 - Workspaces are declared in `pnpm-workspace.yaml`: `apps/*` and `packages/*`.
+- **Every code push to `dev` bumps the root `package.json` version** (patch
+  for fixes, minor for features). CI (`.github/workflows/version-check.yml`)
+  fails the push if code under `apps/`, `packages/`, or `deploy/` changed
+  since the latest `v*` tag without a bump, and auto-tags `v<version>` on
+  green. Docs-only pushes are exempt.
 - Common entry points from the repo root:
   - `pnpm dev` — runs backend (`:8787`) and frontend (`:5173`) in parallel.
   - `pnpm typecheck` / `pnpm build` — recursive across the workspace.
