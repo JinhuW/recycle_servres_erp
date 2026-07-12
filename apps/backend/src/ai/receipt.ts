@@ -68,8 +68,10 @@ export function buildReceiptName(
   now: Date = new Date(),
 ): string {
   const date = now.toISOString().slice(0, 10);
+  // Extension comes from the validated MIME, never the browser filename — a
+  // "receipt.exe" upload with image/png content must not produce an .exe name.
   const extMatch = originalName.match(/\.([A-Za-z0-9]+)$/);
-  const ext = extMatch ? extMatch[1].toLowerCase() : EXT_BY_MIME[mime];
+  const ext = EXT_BY_MIME[mime] ?? (extMatch ? extMatch[1].toLowerCase() : 'bin');
   // Currency is intentionally absent — the requested format is
   // date-method-amount; the order's own currency context disambiguates.
   return `${date}-${method}-${amount}.${ext}`;

@@ -1,10 +1,9 @@
--- Replace the SSD capacity catalog with the full range the business actually
+-- Expand the SSD capacity catalog to the full range the business actually
 -- buys (120GB–30.72TB). The PO form's capacity field becomes a strict select
--- at the same time, so the list must cover every real-world size; lines that
--- stored a now-removed value (e.g. 480GB) still render via the orphan-safe
--- select pattern in the frontend.
-DELETE FROM catalog_options WHERE "group" = 'SSD_CAP';
-
+-- at the same time, so the list must cover every real-world size. Upsert
+-- only — pre-existing values (e.g. a hand-added size) are kept, positions of
+-- known values are re-ranked. Idempotent via the ("group", value) unique
+-- constraint.
 INSERT INTO catalog_options ("group", value, position) VALUES
   ('SSD_CAP', '256GB',   0),
   ('SSD_CAP', '240GB',   1),

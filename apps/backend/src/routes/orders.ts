@@ -863,7 +863,9 @@ orders.patch('/:id', async (c) => {
               description    = COALESCE(${l.description ?? null}, description),
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
-              chip_number    = COALESCE(${l.chipNumber ?? null}, chip_number),
+              -- '' means "cleared by the user" (the edit forms always send the
+              -- field); NULLIF turns it into NULL instead of storing ''.
+              chip_number    = NULLIF(COALESCE(${l.chipNumber ?? null}, chip_number), ''),
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = COALESCE(${l.health ?? null}, health),
               rpm            = COALESCE(${l.rpm ?? null}, rpm)

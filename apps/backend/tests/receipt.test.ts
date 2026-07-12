@@ -34,9 +34,11 @@ describe('buildReceiptName', () => {
       .toBe('2026-07-06-alipay-1250.00.png');
   });
 
-  it('lowercases the original extension', () => {
+  it('derives the extension from the MIME type, not the original filename', () => {
     expect(buildReceiptName('zelle', '980.00', 'RECEIPT.JPEG', 'image/jpeg', now))
-      .toBe('2026-07-06-zelle-980.00.jpeg');
+      .toBe('2026-07-06-zelle-980.00.jpg');
+    expect(buildReceiptName('zelle', '980.00', 'receipt.exe', 'image/png', now))
+      .toBe('2026-07-06-zelle-980.00.png');
   });
 
   it('falls back to the MIME map when the name has no extension', () => {
