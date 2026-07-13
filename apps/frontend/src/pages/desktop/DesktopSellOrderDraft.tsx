@@ -115,8 +115,9 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         }
       })
       .catch(handleFetchError);
-    api.get<{ items: MemberOption[] }>('/api/members')
-      .then(r => setMembers(r.items))
+    // Receivers are managers only — the backend rejects anyone else.
+    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
+      .then(r => setMembers(r.items.filter(m => m.role === 'manager')))
       .catch(handleFetchError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

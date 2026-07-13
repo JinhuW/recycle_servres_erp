@@ -473,7 +473,7 @@ describe('sell-order payment receiver', () => {
     });
   }
 
-  it('create stores the receiver; detail returns id + name and createdBy', async () => {
+  it('create stores the receiver; detail returns id + name and createdBy; list returns the name', async () => {
     const { token, user } = await loginAs(ALEX);
     const r = await createWithReceiver(token, user.id);
     expect(r.status).toBe(201);
@@ -485,6 +485,11 @@ describe('sell-order payment receiver', () => {
     expect(got.status).toBe(200);
     expect(got.body.order.createdBy).toBe(user.id);
     expect(got.body.order.paymentReceivedBy).toEqual({ id: user.id, name: 'Alex Chen' });
+
+    const list = await api<{ rows: { id: string; paymentReceiverName: string | null }[] }>(
+      'GET', '/api/sell-orders', { token });
+    const row = list.body.rows.find(x => x.id === r.body.id);
+    expect(row?.paymentReceiverName).toBe('Alex Chen');
   });
 
   it('create with an unknown receiver: 400', async () => {
@@ -492,6 +497,20 @@ describe('sell-order payment receiver', () => {
     const r = await createWithReceiver(token, '00000000-0000-4000-8000-000000000000');
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/paymentReceivedBy/);
+  });
+
+  it('receiver must be a manager — purchaser id: 400 on create and PATCH', async () => {
+    const { user: marcus } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
+    const r = await createWithReceiver(token, marcus.id);
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/manager/);
+
+    const ok = await createWithReceiver(token, null);
+    const patched = await api<{ error: string }>('PATCH', `/api/sell-orders/${ok.body.id}`, {
+      token, body: { paymentReceivedBy: marcus.id },
+    });
+    expect(patched.status).toBe(400);
   });
 
   it('PATCH sets, keeps when omitted, and clears with null; meta_changed logged', async () => {

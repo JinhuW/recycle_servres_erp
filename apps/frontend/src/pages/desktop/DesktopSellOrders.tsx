@@ -57,6 +57,7 @@ type SellOrderSummary = {
   archivedAt: string | null;
   currency: Currency;
   customer: { id: string; name: string; short: string; region: string };
+  paymentReceiverName: string | null;
   lineCount: number;
   qty: number;
   subtotal: number;
@@ -344,13 +345,14 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
 
         <div className="table-scroll">
           {!loadedOnce ? (
-            <TableSkeleton rows={8} cols={8} />
+            <TableSkeleton rows={8} cols={9} />
           ) : (
           <table className="table">
             <thead>
               <tr>
                 <th>{t('soColOrder')}</th>
                 <th>{t('fieldCustomer')}</th>
+                <th>{t('paymentReceiverLabel')}</th>
                 <th>{t('soColCreated')}</th>
                 <th className="num">{t('lines')}</th>
                 <th className="num">{t('sodUnits')}</th>
@@ -398,6 +400,9 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                   <td>
                     <div style={{ fontWeight: 500 }}>{o.customer.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{o.customer.region}</div>
+                  </td>
+                  <td className={o.paymentReceiverName ? undefined : 'muted'}>
+                    {o.paymentReceiverName ?? '—'}
                   </td>
                   <td className="muted">{fmtDateShort(o.createdAt, locale)}</td>
                   <td className="num mono">{o.lineCount}</td>
@@ -616,8 +621,8 @@ function SellOrderDetail({
     api.get<{ items: Customer[] }>('/api/customers')
       .then(r => { if (alive) setCustomers(r.items); })
       .catch(handleFetchError);
-    api.get<{ items: MemberOption[] }>('/api/members')
-      .then(r => { if (alive) setMembers(r.items); })
+    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
+      .then(r => { if (alive) setMembers(r.items.filter(m => m.role === 'manager')); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [mode]);

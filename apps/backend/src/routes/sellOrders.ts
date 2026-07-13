@@ -37,8 +37,12 @@ async function loadMetaStatuses(sql: SqlClient): Promise<Set<string>> {
   return new Set(rows.map(r => r.id as string));
 }
 
-async function isActiveUser(sql: SqlClient, userId: string): Promise<boolean> {
-  const rows = await sql`SELECT 1 FROM users WHERE id = ${userId} AND active = TRUE LIMIT 1`;
+// Payment receivers are managers only — purchasers never handle customer money.
+async function isActiveManager(sql: SqlClient, userId: string): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1 FROM users
+    WHERE id = ${userId} AND active = TRUE AND role = 'manager' LIMIT 1
+  `;
   return rows.length > 0;
 }
 
@@ -68,14 +72,16 @@ sellOrders.get('/', async (c) => {
     SELECT
       so.id, so.status, so.notes, so.created_at, so.archived_at, so.currency_code,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
+      pu.name AS payment_received_by_name,
       COUNT(sol.id)::int                                AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
       COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS subtotal
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
+    LEFT JOIN users pu ON pu.id = so.payment_received_by
     LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
     WHERE ${statusFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY so.id, c.id
+    GROUP BY so.id, c.id, pu.name
     ORDER BY so.created_at DESC, so.id DESC
     LIMIT ${limit + 1}
   `;
@@ -93,6 +99,7 @@ sellOrders.get('/', async (c) => {
     archivedAt: r.archived_at,
     currency: r.currency_code,
     customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
+    paymentReceiverName: r.payment_received_by_name ?? null,
     lineCount: r.line_count, qty: r.qty,
     // subtotal/total are USD — sol.unit_price is always the USD value, so the
     // inbox sorts apples-to-apples regardless of each order's source currency.
@@ -569,11 +576,11 @@ sellOrders.post('/', async (c) => {
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'customerId and at least one line required' }, 400);
   }
-  // Receiver must be an active member — catch a stale/forged id as a clean 400
-  // instead of an FK violation 500.
+  // Receiver must be an active manager — catch a stale/forged id as a clean
+  // 400 instead of an FK violation 500.
   if (body.paymentReceivedBy != null
-      && !(await isActiveUser(sql, body.paymentReceivedBy))) {
-    return c.json({ error: 'unknown paymentReceivedBy' }, 400);
+      && !(await isActiveManager(sql, body.paymentReceivedBy))) {
+    return c.json({ error: 'paymentReceivedBy must be an active manager' }, 400);
   }
   // Currency is per-order; every line is quoted in it. Default USD keeps the
   // common path unchanged. unitPrice on each line is the NATIVE price.
@@ -653,10 +660,10 @@ sellOrders.patch('/:id', async (c) => {
   }
   const sql = getDb(c.env);
 
-  // Same active-member gate as POST; explicit null is a clear (always allowed).
+  // Same active-manager gate as POST; explicit null is a clear (always allowed).
   if (body.paymentReceivedBy != null
-      && !(await isActiveUser(sql, body.paymentReceivedBy))) {
-    return c.json({ error: 'unknown paymentReceivedBy' }, 400);
+      && !(await isActiveManager(sql, body.paymentReceivedBy))) {
+    return c.json({ error: 'paymentReceivedBy must be an active manager' }, 400);
   }
 
   const editsStructure = body.customerId !== undefined || body.lines !== undefined
