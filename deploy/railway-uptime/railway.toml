@@ -1,0 +1,14 @@
+# Railway config for the uptime-monitor cron service. Read from this service's
+# root directory (deploy/railway-uptime). Pins the Dockerfile builder — without
+# this, Railway falls back to Railpack autodetect and fails (no start command).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Probe every 5 minutes (Railway's minimum cron granularity). The container
+# runs check.sh and exits; NEVER restart so a completed run isn't relooped —
+# a non-zero exit still shows the run as FAILED, which is the alert signal
+# when no ALERT_WEBHOOK_URL is configured.
+cronSchedule = "*/5 * * * *"
+restartPolicyType = "NEVER"

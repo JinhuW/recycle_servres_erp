@@ -1,6 +1,8 @@
 name = "recycle-erp-experiment"
 main = "worker.js"
 compatibility_date = "2026-06-18"
+# Lets CI deploy with a scoped CLOUDFLARE_API_TOKEN (no OAuth session).
+account_id = "cf0e09b533b74d32407f6fe1b558165b"
 
 # Static SPA build output. run_worker_first=true makes the Worker run for
 # every request so it can decide API-proxy vs. asset; not_found_handling
@@ -13,12 +15,17 @@ not_found_handling = "single-page-application"
 run_worker_first = true
 
 # Two deployments — one Worker per Railway backend environment. Deploy with:
-#   unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env prod
-#   unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env dev
+#   deploy/cloudflare/deploy.sh prod   # builds, deploys, smoke-checks the domains
+#   deploy/cloudflare/deploy.sh dev
 # `vars` and `routes` are NOT inherited from the top level, so each env sets
 # its own BACKEND_URL (the Railway backend it reverse-proxies to) and its
 # custom domain. custom_domain=true makes Cloudflare provision the DNS record
 # + TLS cert on the recycleservers.com zone automatically.
+#
+# EVERY public hostname must be declared here. Deploys reconcile the Worker's
+# custom domains against this file, so a domain attached only via the CF
+# dashboard gets its DNS record + cert DELETED by the next deploy (2026-07-12
+# outage — see docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md).
 
 [env.prod]
 name = "recycle-erp-prod"

@@ -156,6 +156,20 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
   the backend (UID 1000) can't write and the sink silently degrades to
   stdout-only.  See `apps/backend/src/lib/error-log.ts`.
 
+## Cloudflare Worker deploys
+
+- Deploy the frontend Workers with `deploy/cloudflare/deploy.sh <prod|dev>` —
+  it builds, deploys, and smoke-checks every public hostname through
+  Cloudflare. Don't run bare `wrangler deploy`.
+- **Every public hostname must be declared in `wrangler.toml` routes**
+  (`custom_domain = true`). Deploys reconcile custom domains against the
+  file; a domain attached only via the CF dashboard gets its DNS record +
+  cert deleted by the next deploy → sitewide 523 while Railway stays green.
+  See `docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md`.
+- Pushes to `prod` auto-deploy via `.github/workflows/deploy-frontend.yml`
+  (needs `CLOUDFLARE_API_TOKEN` repo secret). The `uptime-monitor` Railway
+  cron (`deploy/railway-uptime/`) probes prod every 5 min as the backstop.
+
 ## Infrastructure (Terraform)
 
 - `infra/terraform/` owns Cloudflare side: R2 attachments bucket, custom
