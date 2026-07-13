@@ -68,6 +68,7 @@ export type CreateDraftInput = {
   customerId: string;
   currency: SupportedCurrency;
   notes?: string | null;
+  paymentReceivedBy?: string | null;
   lines: DraftLineInput[];
   actorUserId: string | null;   // null for client_credentials MCP clients
   source: string;               // 'manager' | `mcp:<clientId>`
@@ -99,9 +100,9 @@ export async function createSellOrderDraft(
     if (err) { outcome = { ok: false, error: err }; return; } // roll back — nothing written
     await tx`
       INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
-                               currency_code, fx_rate_to_usd, fx_source)
+                               payment_received_by, currency_code, fx_rate_to_usd, fx_source)
       VALUES (${nextId}, ${input.customerId}, 'Draft', ${input.notes ?? null}, ${input.actorUserId},
-              ${input.currency}, ${fx.rate}, ${fx.source})
+              ${input.paymentReceivedBy ?? null}, ${input.currency}, ${fx.rate}, ${fx.source})
     `;
     for (let i = 0; i < input.lines.length; i++) {
       const l = input.lines[i];

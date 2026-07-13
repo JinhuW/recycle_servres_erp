@@ -672,6 +672,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reopenSoSubmitting: 'Reopening…',
     reopenSoError: 'Reopen failed',
 
+    // Payment receiver
+    paymentReceiverLabel: 'Payment receiver',
+    paymentReceiverNone: 'Not assigned',
+    fieldPaymentReceiver: 'Payment receiver',
+
     // StatusChangeDialog
     statusShippedTitle: 'Mark as Shipped',
     statusShippedSub: 'Capture the tracking info so the customer can be notified.',
@@ -1953,6 +1958,10 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reopenSoSubmit: '重新打开订单',
     reopenSoSubmitting: '正在重新打开…',
     reopenSoError: '重新打开失败',
+
+    paymentReceiverLabel: '收款人',
+    paymentReceiverNone: '未指定',
+    fieldPaymentReceiver: '收款人',
 
     statusShippedTitle: '标记为已发货',
     statusShippedSub: '记录运单信息以便通知客户。',

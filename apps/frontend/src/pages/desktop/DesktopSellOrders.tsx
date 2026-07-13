@@ -19,7 +19,8 @@ import { closeReasonLabelKey } from '../../lib/closeReasons';
 import { usePersisted } from '../../lib/listMemory';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { SellOrderHistory } from '../../components/SellOrderHistory';
-import { CustomerPicker, CurrencyPicker, type Customer } from './DesktopSellOrderDraft';
+import { CustomerPicker, CurrencyPicker, type Customer, type MemberOption } from './DesktopSellOrderDraft';
+import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
 
@@ -135,6 +136,8 @@ type SellOrderDetailType = {
   createdAt: string;
   archivedAt: string | null;
   closeReasonId: string | null;
+  createdBy: string | null;
+  paymentReceivedBy: { id: string; name: string } | null;
   currency: Currency;
   fxRateToUsd: number;
   fxSource: string;
@@ -538,17 +541,20 @@ function SellOrderDetail({
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { user } = useAuth();
   const [order, setOrder] = useState<SellOrderDetailType | null>(null);
   const [draft, setDraft] = useState<{
     status: SellOrderDetailType['status'];
     notes: string;
     customerId: string;
+    paymentReceivedBy: string;   // '' = not assigned
     currency: Currency;
     lines: EditLine[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [members, setMembers] = useState<MemberOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // Per-status evidence — loaded from the order, mutated live by the dialog,
@@ -582,6 +588,7 @@ function SellOrderDetail({
           status: r.order.status,
           notes: r.order.notes ?? '',
           customerId: r.order.customer.id,
+          paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
           lines: r.order.lines.map(toEditLine),
         });
@@ -602,12 +609,15 @@ function SellOrderDetail({
     return () => { alive = false; };
   }, [draftCurrency]);
 
-  // Customer list — only needed when editing (re-pick customer).
+  // Customer + member lists — only needed when editing (re-pick either).
   useEffect(() => {
     if (mode !== 'edit') return;
     let alive = true;
     api.get<{ items: Customer[] }>('/api/customers')
       .then(r => { if (alive) setCustomers(r.items); })
+      .catch(handleFetchError);
+    api.get<{ items: MemberOption[] }>('/api/members')
+      .then(r => { if (alive) setMembers(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [mode]);
@@ -616,12 +626,15 @@ function SellOrderDetail({
 
   const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
   const currencyChanged = !!order && !!draft && draft.currency !== order.currency;
+  const receiverChanged = !!order && !!draft
+    && (draft.paymentReceivedBy || null) !== (order.paymentReceivedBy?.id ?? null);
   const linesChanged = !!order && !!draft
     && linesSig(draft.lines) !== linesSig(order.lines.map(toEditLine));
   const dirty = order && draft && (
     draft.status !== order.status
     || (draft.notes ?? '') !== (order.notes ?? '')
     || customerChanged
+    || receiverChanged
     || currencyChanged
     || linesChanged
   );
@@ -735,6 +748,7 @@ function SellOrderDetail({
       const patchBody: Record<string, unknown> = {};
       if ((draft.notes ?? '') !== (order.notes ?? '')) patchBody.notes = draft.notes;
       if (customerChanged) patchBody.customerId = draft.customerId;
+      if (receiverChanged) patchBody.paymentReceivedBy = draft.paymentReceivedBy || null;
       // A currency change re-prices every line at the new rate, so the backend
       // requires the full line set alongside it — resend lines whenever either
       // the currency or the lines themselves changed.
@@ -954,6 +968,27 @@ function SellOrderDetail({
                       </span>
                     )}
                   </div>
+                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('paymentReceiverLabel')}</span>
+                    <select
+                      className="select"
+                      style={{ maxWidth: 260 }}
+                      value={draft.paymentReceivedBy}
+                      onChange={e => setDraft({ ...draft, paymentReceivedBy: e.target.value })}
+                    >
+                      <option value="">{t('paymentReceiverNone')}</option>
+                      {/* A deactivated receiver isn't in the active-members list —
+                          keep them selectable so opening the editor doesn't
+                          silently clear the assignment. */}
+                      {order.paymentReceivedBy
+                        && !members.some(m => m.id === order.paymentReceivedBy!.id) && (
+                        <option value={order.paymentReceivedBy.id}>{order.paymentReceivedBy.name}</option>
+                      )}
+                      {members.map(m => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )}
 
@@ -1148,6 +1183,17 @@ function SellOrderDetail({
                 </div>
               )}
 
+              {/* Payment receiver — read-only in view mode (edit mode has the
+                  select up in the Customer block) */}
+              {!editable && (
+                <div className="so-section" style={{ marginTop: 24 }}>
+                  <div className="so-section-head"><Icon name="user" size={14} /> {t('paymentReceiverLabel')}</div>
+                  <div style={{ fontSize: 13, color: order.paymentReceivedBy ? 'var(--fg)' : 'var(--fg-subtle)' }}>
+                    {order.paymentReceivedBy?.name ?? t('paymentReceiverNone')}
+                  </div>
+                </div>
+              )}
+
               {/* Internal notes — section in both modes; read-only text when viewing */}
               <div className="so-section" style={{ marginTop: 24 }}>
                 <div className="so-section-head"><Icon name="edit" size={14} /> {t('ieInternalNotes')}</div>
@@ -1235,7 +1281,10 @@ function SellOrderDetail({
                   Discard
                 </button>
               )}
-              {order.status === 'Closed' && (
+              {/* Reopen is creator-only (backend 403s anyone else). Orders with
+                  no creator (MCP-created) stay reopenable by any manager. */}
+              {order.status === 'Closed'
+                && (order.createdBy === null || order.createdBy === user?.id) && (
                 <button
                   className="btn accent"
                   onClick={() => setShowReopenDialog(true)}
