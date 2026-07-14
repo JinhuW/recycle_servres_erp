@@ -35,6 +35,12 @@ export type Customer = {
   region: string | null;
 };
 
+// Minimal slice of GET /api/members — the picker only needs id + name.
+export type MemberOption = {
+  id: string;
+  name: string;
+};
+
 type Line = {
   inventoryId: string;
   category: 'RAM' | 'SSD' | 'HDD' | 'Other';
@@ -62,6 +68,8 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<string>('');
+  const [members, setMembers] = useState<MemberOption[]>([]);
+  const [paymentReceivedBy, setPaymentReceivedBy] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +114,10 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           setCustomerId(r.items[0].id);
         }
       })
+      .catch(handleFetchError);
+    // Receivers are managers only — the backend rejects anyone else.
+    api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
+      .then(r => setMembers(r.items.filter(m => m.role === 'manager')))
       .catch(handleFetchError);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -172,6 +184,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
         customerId,
         notes,
         currency,
+        paymentReceivedBy: paymentReceivedBy || null,
         lines: lines.map(l => ({
           inventoryId: l.inventoryId,
           category:    l.category,
@@ -243,6 +256,19 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
               <div style={{ marginTop: 12 }}>
                 <label className="so-label">{t('currency.label')}</label>
                 <CurrencyPicker value={currency} onChange={setCurrency} t={t} />
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <label className="so-label">{t('paymentReceiverLabel')}</label>
+                <select
+                  className="select"
+                  value={paymentReceivedBy}
+                  onChange={e => setPaymentReceivedBy(e.target.value)}
+                >
+                  <option value="">{t('paymentReceiverNone')}</option>
+                  {members.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -548,7 +574,6 @@ export function CustomerPicker({
             <span style={{ color: 'var(--fg-subtle)' }}>{t('sodSelectCustomer')}</span>
           )}
         </span>
-        <Icon name="chevronDown" size={13} style={{ color: 'var(--fg-subtle)', flexShrink: 0 }} />
       </button>
       {open && (
         <div style={{

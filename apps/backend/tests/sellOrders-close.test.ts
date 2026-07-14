@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
 import { freeSellableLine } from './helpers/inventory';
 
 async function firstCustomerId(token: string): Promise<string> {
@@ -10,13 +10,14 @@ async function firstCustomerId(token: string): Promise<string> {
   return r.body.items[0].id;
 }
 
-async function createDraftSellOrder(token: string): Promise<{ id: string; lineId: string }> {
+async function createDraftSellOrder(token: string, notes?: string): Promise<{ id: string; lineId: string }> {
   const line = await freeSellableLine(token);
   const customerId = await firstCustomerId(token);
   const r = await api<{ id: string }>('POST', '/api/sell-orders', {
     token,
     body: {
       customerId,
+      notes,
       lines: [{
         inventoryId: line.id, category: 'RAM', label: 'Sample',
         partNumber: 'PN-1', qty: 1, unitPrice: line.sell_price,
@@ -193,6 +194,75 @@ describe('POST /api/sell-orders/:id/status — Close', () => {
 
     // Can re-advance like any Draft.
     await advanceTo(token, id, 'Shipped', 're-shipped');
+  });
+
+  it('Reopen appends the reason to existing order notes', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id } = await createDraftSellOrder(token, 'original');
+    await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'other', note: 'oops' },
+    });
+    const reopen = await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Draft', note: 'customer came back' },
+    });
+    expect(reopen.status).toBe(200);
+
+    const sql = getTestDb();
+    const order = (await sql`SELECT notes FROM sell_orders WHERE id = ${id}`)[0];
+    expect(order.notes).toBe('original\n\nReopened: customer came back');
+  });
+
+  it('Reopen with empty prior notes stores just the reason line', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id } = await createDraftSellOrder(token);
+    await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'other', note: 'oops' },
+    });
+    const reopen = await api('POST', `/api/sell-orders/${id}/status`, {
+      token, body: { to: 'Draft', note: '  deal is back on  ' },
+    });
+    expect(reopen.status).toBe(200);
+
+    const sql = getTestDb();
+    const order = (await sql`SELECT notes FROM sell_orders WHERE id = ${id}`)[0];
+    expect(order.notes).toBe('Reopened: deal is back on');
+  });
+
+  it('Reopen by a non-creator manager: 403, order stays Closed', async () => {
+    const { token: alexToken } = await loginAs(ALEX);
+    const { id } = await createDraftSellOrder(alexToken, 'original');
+    await api('POST', `/api/sell-orders/${id}/status`, {
+      token: alexToken, body: { to: 'Closed', closeReasonId: 'other', note: 'oops' },
+    });
+
+    const { token: sofiaToken } = await loginAs(SOFIA);
+    const r = await api<{ error: string }>('POST', `/api/sell-orders/${id}/status`, {
+      token: sofiaToken, body: { to: 'Draft', note: 'let me reopen it' },
+    });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toMatch(/creator/);
+
+    const sql = getTestDb();
+    const order = (await sql`SELECT status, notes FROM sell_orders WHERE id = ${id}`)[0];
+    expect(order.status).toBe('Closed');
+    expect(order.notes).toBe('original');
+  });
+
+  it('Reopen of a creator-less order (MCP-created): any manager may reopen', async () => {
+    const { token: alexToken } = await loginAs(ALEX);
+    const { id } = await createDraftSellOrder(alexToken);
+    await api('POST', `/api/sell-orders/${id}/status`, {
+      token: alexToken, body: { to: 'Closed', closeReasonId: 'other', note: 'oops' },
+    });
+
+    const sql = getTestDb();
+    await sql`UPDATE sell_orders SET created_by = NULL WHERE id = ${id}`;
+
+    const { token: sofiaToken } = await loginAs(SOFIA);
+    const r = await api('POST', `/api/sell-orders/${id}/status`, {
+      token: sofiaToken, body: { to: 'Draft', note: 'orphan reopen' },
+    });
+    expect(r.status).toBe(200);
   });
 
   it('Reopen without note: 400', async () => {
