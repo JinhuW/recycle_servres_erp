@@ -1,0 +1,22 @@
+# Railway config-as-code for the `db-sync` service (the daily Postgres -> R2
+# backup cron). Build/deploy settings are driven from this file; change the
+# schedule or restart policy here and push, rather than editing the dashboard.
+#
+# The service's build context (root directory) is this `backup/` folder, so
+# `dockerfilePath` is relative to it. Secrets (R2_*, DATABASE_URL) are NOT here
+# — Railway config-as-code cannot hold variables; those are set on the service.
+
+"$schema" = "https://railway.com/railway.schema.json"
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Dump once and exit; the container closes all connections when the script ends.
+startCommand = "/usr/local/bin/backup.sh"
+# 03:30 UTC daily. Railway cron schedules are always UTC.
+cronSchedule = "30 3 * * *"
+# A cron run must not be retried/looped on crash — NEVER prevents overlap and
+# lets the failure surface in logs for the next scheduled attempt.
+restartPolicyType = "NEVER"
