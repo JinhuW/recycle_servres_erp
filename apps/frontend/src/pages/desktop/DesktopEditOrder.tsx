@@ -93,7 +93,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     setSubmissionUploading(true);
     try {
       for (const f of files) {
-        if (f.size > 10 * 1024 * 1024) {
+        // 50 MiB server hard cap; oversized images are shrunk server-side.
+        if (f.size > 50 * 1024 * 1024) {
           showErrorToast(t('fileTooLarge', { name: f.name }));
           continue;
         }
@@ -114,6 +115,19 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     try {
       await api.delete<{ ok: true }>(`/api/orders/${order.id}/status-meta/Submission/attachments/${att.id}`);
       setSubmissionAtts(prev => prev.filter(a => a.id !== att.id));
+    } catch (e) {
+      handleFetchError(e);
+    }
+  };
+
+  // Done evidence stays editable after the transition — the dialog only opens
+  // on the way into Done, so without this a wrong photo was stuck forever.
+  // Manager-only, mirroring the backend canWriteMeta gate.
+  const removeDoneAtt = async (att: StatusAttachment) => {
+    try {
+      await api.delete<{ ok: true }>(`/api/orders/${order.id}/status-meta/Done/attachments/${att.id}`);
+      setDoneAttachments(prev => prev.filter(a => a.id !== att.id));
+      setActivityKey(k => k + 1);
     } catch (e) {
       handleFetchError(e);
     }
@@ -811,7 +825,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               {doneNote && (
                 <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{doneNote}</div>
               )}
-              {doneAttachments.map(a => <AttachmentChip key={a.id} a={a} />)}
+              {doneAttachments.map(a => (
+                <AttachmentChip
+                  key={a.id}
+                  a={a}
+                  onRemove={!isPurchaser ? () => removeDoneAtt(a) : undefined}
+                />
+              ))}
             </div>
           )}
         </div>
