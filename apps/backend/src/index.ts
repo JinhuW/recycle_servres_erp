@@ -131,7 +131,7 @@ app.get('/api/health', async (c) => {
 });
 
 // ── Body caps ────────────────────────────────────────────────────────────────
-// The three multipart upload endpoints are allowed up to UPLOAD_HARD_CAP_BYTES
+// The multipart upload endpoints are allowed up to UPLOAD_HARD_CAP_BYTES
 // (50 MiB). All other API routes get a tight 1 MiB JSON cap so a malformed or
 // malicious request is rejected before auth, without buffering.
 const JSON_BODY_LIMIT = 1_048_576; // 1 MiB
@@ -142,7 +142,7 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/attachments' ||
-  /^\/api\/sell-orders\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path);
+  /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path);
 
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({
