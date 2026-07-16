@@ -47,11 +47,16 @@ if [ -n "${EXPECTED_DEV_DB_HOST:-}" ] && [ "$dev_host" != "$EXPECTED_DEV_DB_HOST
   exit 1
 fi
 
-# --clean --if-exists: drop each object before recreating, so dev ends up an
-# exact copy (schema + data + the migration ledger). --single-transaction +
-# ON_ERROR_STOP on the restore side means a failure leaves dev unchanged rather
-# than half-synced.
-pg_dump --no-owner --no-privileges --clean --if-exists "$PROD_DATABASE_URL" \
-  | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
+# Reset dev's schema wholesale instead of pg_dump --clean: --clean orders its
+# DROPs by PROD's dependency graph, so any dev-only object (e.g. an FK from a
+# migration not yet shipped to prod) blocks a DROP and aborts the sync — this
+# broke nightly when 0074's sell_orders FK existed on dev only. The preamble
+# runs inside the same --single-transaction as the restore, so a failure still
+# rolls back to an unchanged dev rather than an empty one. pgcrypto lives in
+# public and is dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
+{
+  echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
+  pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL"
+} | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
 
 echo "[sync] done $(date -u +%Y-%m-%dT%H:%M:%SZ)"
