@@ -39,6 +39,22 @@ Verified locally against `postgres:16-alpine` (same image as the cron): old
 pipeline reproduces the exact error; new pipeline mirrors, recreates
 pgcrypto, and a mid-restore failure leaves dev's tables intact.
 
+## Follow-up hazard found while verifying (fixed in v1.17.4)
+
+The first version of the fix streamed pg_dump straight into the psql that
+also carried the `DROP SCHEMA` preamble. If pg_dump fails **before emitting
+anything** (client/server major-version mismatch, revoked grants, network),
+psql receives preamble-then-EOF — a complete, valid script — and **commits an
+empty dev database**. This actually happened on 2026-07-16 during a local
+verification run (pg_dump 16 vs the upgraded Postgres 18 server refused to
+dump; dev was left with 0 tables and had to be restored by re-running the
+sync with the right client). v1.17.4 dumps to a temp file first and only a
+fully successful pg_dump reaches the restore step.
+
+Also: the managed Postgres is **18.x** — any local run of sync.sh must use
+`postgres:18-alpine` (the cron image already pins it). A `postgres:16` client
+refuses the dump outright.
+
 ## Where to look next time
 
 The failure is only visible in the **dev environment** logs of the `db-sync`

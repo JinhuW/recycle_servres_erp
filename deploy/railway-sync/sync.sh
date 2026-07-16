@@ -50,13 +50,25 @@ fi
 # Reset dev's schema wholesale instead of pg_dump --clean: --clean orders its
 # DROPs by PROD's dependency graph, so any dev-only object (e.g. an FK from a
 # migration not yet shipped to prod) blocks a DROP and aborts the sync — this
-# broke nightly when 0074's sell_orders FK existed on dev only. The preamble
-# runs inside the same --single-transaction as the restore, so a failure still
-# rolls back to an unchanged dev rather than an empty one. pgcrypto lives in
-# public and is dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
+# broke nightly when 0074's sell_orders FK existed on dev only.
+#
+# The dump lands in a temp file FIRST, and only a fully successful pg_dump
+# reaches the restore. Never stream pg_dump straight into the psql that also
+# carries the DROP SCHEMA preamble: if pg_dump dies early (version mismatch,
+# revoked grants, network), psql sees preamble-then-EOF — a complete, valid
+# script — and COMMITS an empty dev. That exact wipe happened on 2026-07-16.
+# No suffix after the X's — busybox mktemp (alpine) requires the template to
+# end in XXXXXX.
+dump="$(mktemp /tmp/prod-dump.XXXXXX)"
+trap 'rm -f "$dump"' EXIT
+pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" > "$dump"
+
+# Preamble + dump run in ONE transaction, so a mid-restore failure still rolls
+# back to an unchanged dev rather than an empty one. pgcrypto lives in public
+# and is dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
 {
   echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
-  pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL"
+  cat "$dump"
 } | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
 
 echo "[sync] done $(date -u +%Y-%m-%dT%H:%M:%SZ)"
