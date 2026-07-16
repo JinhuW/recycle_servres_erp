@@ -1,8 +1,8 @@
-# Deploy the prod frontend Worker whenever frontend-affecting code lands on
-# `prod`. Deploying from CI (instead of a laptop checkout) guarantees the
-# committed wrangler.toml is what reconciles the Worker's custom domains —
-# a stale local checkout deploying without a domain in its routes DELETES
-# that domain's DNS record + cert (2026-07-12 outage; see
+# Deploy the frontend Worker whenever frontend-affecting code lands on `prod`
+# (prod Worker) or `dev` (dev Worker). Deploying from CI (instead of a laptop
+# checkout) guarantees the committed wrangler.toml is what reconciles the
+# Worker's custom domains — a stale local checkout deploying without a domain
+# in its routes DELETES that domain's DNS record + cert (2026-07-12 outage; see
 # docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md).
 #
 # Requires the CLOUDFLARE_API_TOKEN repo secret (Workers Scripts:Edit +
@@ -11,7 +11,7 @@ name: deploy-frontend
 
 on:
   push:
-    branches: [prod]
+    branches: [prod, dev]
     paths:
       - "apps/frontend/**"
       - "packages/shared/**"
@@ -20,7 +20,7 @@ on:
   workflow_dispatch: # manual re-deploy without a code change
 
 concurrency:
-  group: deploy-frontend-prod
+  group: deploy-frontend-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -43,6 +43,7 @@ jobs:
 
       # Builds the frontend, deploys the Worker, then smoke-checks every
       # public hostname through Cloudflare — fails the run on any 52x.
-      - run: deploy/cloudflare/deploy.sh prod
+      # Branch picks the target: prod -> prod Worker, dev -> dev Worker.
+      - run: deploy/cloudflare/deploy.sh ${{ github.ref_name == 'prod' && 'prod' || 'dev' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
