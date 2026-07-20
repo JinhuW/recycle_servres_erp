@@ -1325,10 +1325,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     invClearAll: 'Clear all',
     invNoProductsMatch: 'No products match these filters.',
     invNoMatching: 'No matching inventory.',
+    invSelectAllFilter: 'Select all ({n})',
+    invUnselectAllFilter: 'Unselect all',
+    invSelectAllFilterTip: 'Select all sellable lots matching the current filters',
 
     // DesktopSellOrders remaining
     soColOrder: 'Order',
     soColCreated: 'Created',
+    soColUpdated: 'Updated',
     soEditReplacesHint: "Editing replaces the order's line set. Inventory-backed quantities are capped at what's on the shelf.",
 
     // Danger dialog
@@ -2577,9 +2581,13 @@ export const I18N: Record<Lang, Record<string, string>> = {
     invClearAll: '清除全部',
     invNoProductsMatch: '没有符合筛选的产品。',
     invNoMatching: '没有匹配的库存。',
+    invSelectAllFilter: '全选（{n}）',
+    invUnselectAllFilter: '取消全选',
+    invSelectAllFilterTip: '全选符合当前筛选的可售批次',
 
     soColOrder: '订单',
     soColCreated: '创建时间',
+    soColUpdated: '更新时间',
     soEditReplacesHint: '编辑将替换该订单的明细集。库存支持的数量受限于实际现货。',
 
     dangerDeleteWsTitle: '删除此工作区?',

@@ -375,6 +375,36 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     return { lines, qty, value };
   }, [selectedItems]);
 
+  // "Select all" targets the sellable lots of every listed group, narrowed to
+  // the active warehouse — the one filter the backend applies at group level
+  // ("any lot matches") rather than per lot, so it must be re-applied here.
+  const filterSellableIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const g of products) {
+      for (const l of g.lines) {
+        if (l.status !== 'Reviewing' && l.status !== 'Done') continue;
+        if (warehouseFilter !== 'all' && l.warehouse_id !== warehouseFilter) continue;
+        ids.push(l.id);
+      }
+    }
+    return ids;
+  }, [products, warehouseFilter]);
+  const selectAllState: 'empty' | 'none' | 'some' | 'all' = useMemo(() => {
+    if (!filterSellableIds.length) return 'empty';
+    const n = filterSellableIds.reduce((a, id) => a + (selected.has(id) ? 1 : 0), 0);
+    return n === 0 ? 'none' : n === filterSellableIds.length ? 'all' : 'some';
+  }, [filterSellableIds, selected]);
+  // Only removes the current filter's ids — selections made under other
+  // filters survive; "Clear" remains the full wipe.
+  const toggleSelectAll = () => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      const allOn = filterSellableIds.length > 0 && filterSellableIds.every(id => next.has(id));
+      for (const id of filterSellableIds) { if (allOn) next.delete(id); else next.add(id); }
+      return next;
+    });
+  };
+
   // ── Render helpers ──────────────────────────────────────────────────────────
   const itemLabel = (r: InventoryRow) =>
       r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
@@ -793,6 +823,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 condition:  isVis('condition'),
               }}
               selected={selected}
+              selectAllState={selectAllState}
+              onToggleAll={toggleSelectAll}
               onToggleLot={(id) => {
                 setSelected(prev => {
                   const next = new Set(prev);
@@ -852,6 +884,13 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            {selectAllState !== 'empty' && (
+              <button className="btn ghost" onClick={toggleSelectAll} title={t('invSelectAllFilterTip')}>
+                {selectAllState === 'all'
+                  ? t('invUnselectAllFilter')
+                  : t('invSelectAllFilter', { n: filterSellableIds.length })}
+              </button>
+            )}
             <button className="btn ghost" onClick={clearSelection}>Clear</button>
             <button className="btn" onClick={openTransferModal}>
               <Icon name="truck" size={14} /> {t('transfer')}

@@ -71,7 +71,7 @@ sellOrders.get('/', async (c) => {
 
   const rows = await sql`
     SELECT
-      so.id, so.status, so.notes, so.created_at, so.archived_at, so.currency_code,
+      so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.currency_code,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       pu.name AS payment_received_by_name,
       COUNT(sol.id)::int                                AS line_count,
@@ -96,7 +96,7 @@ sellOrders.get('/', async (c) => {
     : null;
   const shaped = slice.map(r => ({
     id: r.id, status: r.status,
-    notes: r.notes, createdAt: r.created_at,
+    notes: r.notes, createdAt: r.created_at, updatedAt: r.updated_at,
     archivedAt: r.archived_at,
     currency: r.currency_code,
     customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
@@ -193,14 +193,14 @@ sellOrders.get('/:id', async (c) => {
 
   const head = (await sql<{
     id: string; status: string; notes: string | null; created_at: string;
-    archived_at: string | null; close_reason_id: string | null;
+    updated_at: string; archived_at: string | null; close_reason_id: string | null;
     currency_code: string; fx_rate_to_usd: number; fx_source: string;
     customer_id: string; customer_name: string; customer_short: string;
     customer_region: string;
     created_by: string | null;
     payment_received_by: string | null; payment_received_by_name: string | null;
   }[]>`
-    SELECT so.id, so.status, so.notes, so.created_at, so.archived_at, so.close_reason_id,
+    SELECT so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.close_reason_id,
            so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
            so.created_by, so.payment_received_by, pu.name AS payment_received_by_name,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
@@ -267,6 +267,7 @@ sellOrders.get('/:id', async (c) => {
   return c.json({
     order: {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
+      updatedAt: head.updated_at,
       archivedAt: head.archived_at,
       closeReasonId: head.close_reason_id ?? null,
       createdBy: head.created_by,
