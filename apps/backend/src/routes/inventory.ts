@@ -191,13 +191,12 @@ export function invSpec(r: Record<string, unknown>): string {
 // canonical part number collapse together, mirroring the desktop grouped view.
 // Aggregates qty by status, counts POs/lots, and spreads cost min/avg/max.
 // Manager-only like the flat export, so cost columns are always present.
-const INV_EXPORT_COLS_GROUPED: XlsxColumn[] = [
-  { header: 'Part #',       key: 'part',       width: 22 },
-  { header: 'Chip #',       key: 'chip',       width: 22 },
-  { header: 'Category',     key: 'category',   width: 10 },
-  { header: 'Item',         key: 'item',       width: 30 },
-  { header: 'Type',         key: 'type',       width: 10 },
-  { header: 'Spec',         key: 'spec',       width: 26 },
+//
+// The leading columns depend on the active category filter: a specific
+// category gets its granular attribute columns (one per submit-form field,
+// superseding the computed Item/Spec strings); "all" or an unknown category
+// falls back to the shared set. The aggregate tail is identical everywhere.
+const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Warehouses',   key: 'warehouses', width: 18 },
   { header: 'Qty',          key: 'qty',        width: 8,  numFmt: '#,##0' },
   { header: 'In stock',     key: 'inStock',    width: 10, numFmt: '#,##0' },
@@ -212,6 +211,52 @@ const INV_EXPORT_COLS_GROUPED: XlsxColumn[] = [
   { header: 'Submitted by', key: 'submitter',  width: 22 },
 ];
 
+const GROUPED_LEAD_BY_CATEGORY: Record<string, XlsxColumn[]> = {
+  RAM: [
+    { header: 'Part #',      key: 'part',           width: 22 },
+    { header: 'Chip #',      key: 'chip',           width: 22 },
+    { header: 'Brand',       key: 'brand',          width: 14 },
+    { header: 'Capacity',    key: 'capacity',       width: 10 },
+    { header: 'Gen',         key: 'generation',     width: 8 },
+    { header: 'Type',        key: 'type',           width: 10 },
+    { header: 'Class',       key: 'classification', width: 10 },
+    { header: 'Rank',        key: 'rank',           width: 8 },
+    { header: 'Speed',       key: 'speed',          width: 10 },
+    { header: 'Condition',   key: 'condition',      width: 12 },
+  ],
+  SSD: [
+    { header: 'Part #',      key: 'part',           width: 22 },
+    { header: 'Brand',       key: 'brand',          width: 14 },
+    { header: 'Capacity',    key: 'capacity',       width: 10 },
+    { header: 'Interface',   key: 'interface',      width: 12 },
+    { header: 'Form factor', key: 'formFactor',     width: 12 },
+    { header: 'Health %',    key: 'health',         width: 10, numFmt: '#,##0' },
+    { header: 'Condition',   key: 'condition',      width: 12 },
+  ],
+  HDD: [
+    { header: 'Part #',      key: 'part',           width: 22 },
+    { header: 'Brand',       key: 'brand',          width: 14 },
+    { header: 'Capacity',    key: 'capacity',       width: 10 },
+    { header: 'Interface',   key: 'interface',      width: 12 },
+    { header: 'Form factor', key: 'formFactor',     width: 12 },
+    { header: 'RPM',         key: 'rpm',            width: 8,  numFmt: '#,##0' },
+    { header: 'Health %',    key: 'health',         width: 10, numFmt: '#,##0' },
+    { header: 'Condition',   key: 'condition',      width: 12 },
+  ],
+  Other: [
+    { header: 'Part #',      key: 'part',           width: 22 },
+    { header: 'Description', key: 'description',    width: 30 },
+    { header: 'Condition',   key: 'condition',      width: 12 },
+  ],
+};
+
+const GROUPED_LEAD_SHARED: XlsxColumn[] = [
+  { header: 'Part #',       key: 'part',      width: 22 },
+  { header: 'Category',     key: 'category',  width: 10 },
+  { header: 'Item',         key: 'item',      width: 30 },
+  { header: 'Condition',    key: 'condition', width: 12 },
+];
+
 inventory.get('/export', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -221,6 +266,13 @@ inventory.get('/export', async (c) => {
   // Grouped mode collapses lines by canonical part number into one row each,
   // matching the desktop grouped view. Same filters/cap-drop as the flat path.
   if (c.req.query('view') === 'grouped') {
+    // Object.hasOwn: the category comes from the query string, so a value
+    // like 'constructor' must miss rather than hit a prototype key.
+    const category = c.req.query('category');
+    const lead = category && Object.hasOwn(GROUPED_LEAD_BY_CATEGORY, category)
+      ? GROUPED_LEAD_BY_CATEGORY[category]
+      : undefined;
+    const cols = [...(lead ?? GROUPED_LEAD_SHARED), ...GROUPED_TAIL_COLS];
     const canonCol = canonPartCol(sql, sql`l.part_number`);
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
@@ -255,6 +307,9 @@ inventory.get('/export', async (c) => {
       const whs = new Set<string>();
       const submitters = new Set<string>();
       const pos = new Set<string>();
+      // Lots of the same part can arrive in different conditions (New vs
+      // Used), so condition aggregates to a distinct join like Warehouses.
+      const conds = new Set<string>();
       let repPn: string | null = null;
       let repChip: string | null = null;
       for (const l of lots) {
@@ -269,17 +324,34 @@ inventory.get('/export', async (c) => {
         costWeighted += cost * lqty;
         if (l.warehouse_short) whs.add(String(l.warehouse_short));
         if (l.user_name) submitters.add(String(l.user_name));
+        if (l.condition) conds.add(String(l.condition));
         pos.add(String(l.order_id));
         if (repPn === null && l.part_number) repPn = String(l.part_number);
         if (repChip === null && l.chip_number) repChip = String(l.chip_number);
       }
+      // Attribute keys are emitted unconditionally — exceljs only renders the
+      // keys declared in the selected column set, so the mapper stays
+      // branch-free. Lines in a group share attributes by construction (same
+      // canonical part number), so the head is representative. Numeric attrs
+      // emit null when absent so the cell stays blank instead of showing 0.
       return {
         part: repPn ?? '',
         chip: repChip ?? '',
         category: head.category ?? '',
         item: invLabel(head),
-        type: head.category === 'RAM' ? (head.type ?? '') : '',
-        spec: invSpec(head),
+        brand: head.brand ?? '',
+        capacity: head.capacity ?? '',
+        generation: head.generation ?? '',
+        type: head.type ?? '',
+        classification: head.classification ?? '',
+        rank: head.rank ?? '',
+        speed: head.speed ?? '',
+        interface: head.interface ?? '',
+        formFactor: head.form_factor ?? '',
+        rpm: head.rpm ?? null,
+        health: head.health ?? null,
+        description: head.description ?? '',
+        condition: [...conds].join(', '),
         warehouses: [...whs].join(', '),
         qty,
         inStock,
@@ -295,8 +367,11 @@ inventory.get('/export', async (c) => {
       };
     });
 
-    const buf = await buildXlsxBuffer('Inventory', INV_EXPORT_COLS_GROUPED, grouped);
-    return xlsxResponse(buf, datedFilename('inventory-grouped'));
+    const buf = await buildXlsxBuffer('Inventory', cols, grouped);
+    return xlsxResponse(
+      buf,
+      datedFilename(lead ? `inventory-${category!.toLowerCase()}` : 'inventory-grouped'),
+    );
   }
 
   const rows = await sql`
