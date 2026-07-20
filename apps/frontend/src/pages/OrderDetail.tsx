@@ -167,6 +167,16 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     await doAdvance();
   };
 
+  const removeDoneAtt = async (attachmentId: string) => {
+    try {
+      await api.delete(`/api/orders/${order.id}/status-meta/Done/attachments/${attachmentId}`);
+      await refetchOrder();
+      setActivityRefreshKey(k => k + 1);
+    } catch {
+      // Chip stays; the next interaction resurfaces the state.
+    }
+  };
+
   const itemLabel = (l: OrderLine) =>
       l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
     : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
@@ -319,7 +329,16 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   {doneMeta.note}
                 </div>
               )}
-              {doneMeta.attachments.map(a => <AttachmentChip key={a.id} a={a} />)}
+              {doneMeta.attachments.map(a => (
+                <AttachmentChip
+                  key={a.id}
+                  a={a}
+                  // Done evidence stays editable after the transition — the
+                  // dialog only opens on the way into Done. Manager-only,
+                  // mirroring the backend canWriteMeta gate.
+                  onRemove={!isPurchaser ? () => removeDoneAtt(a.id) : undefined}
+                />
+              ))}
             </div>
           )}
         </div>

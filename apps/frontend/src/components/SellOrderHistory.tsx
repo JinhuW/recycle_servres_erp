@@ -76,6 +76,7 @@ function lifecycleLabel(t: TFn, raw: string): string {
 const FIELD_KEY: Record<string, string> = {
   notes:              'fieldNotes',
   customer_id:        'fieldCustomer',
+  payment_received_by: 'fieldPaymentReceiver',
   qty:                'fieldQty',
   unit_price:         'fieldUnitPrice',
   condition:          'fieldCondition',

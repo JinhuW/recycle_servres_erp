@@ -672,6 +672,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reopenSoSubmitting: 'Reopening…',
     reopenSoError: 'Reopen failed',
 
+    // Payment receiver
+    paymentReceiverLabel: 'Payment receiver',
+    paymentReceiverNone: 'Not assigned',
+    fieldPaymentReceiver: 'Payment receiver',
+
     // StatusChangeDialog
     statusShippedTitle: 'Mark as Shipped',
     statusShippedSub: 'Capture the tracking info so the customer can be notified.',
@@ -701,7 +706,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     openAttachment: 'Open attachment',
     editLaterHint: 'You can edit this later by clicking the step again.',
     confirmAdvance: 'Confirm',
-    fileTooLarge: '{name} exceeds 10 MB',
+    fileTooLarge: '{name} exceeds 50 MB',
     poSubmitAttachLabel: 'Attachment',
     poSubmitAttachHint: 'Receipt, chat history, etc. (PDF / JPG / PNG) — optional',
     poSubmitUploadWarning: 'Order submitted, but the file could not be attached. You can add it from the order page.',
@@ -1954,6 +1959,10 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reopenSoSubmitting: '正在重新打开…',
     reopenSoError: '重新打开失败',
 
+    paymentReceiverLabel: '收款人',
+    paymentReceiverNone: '未指定',
+    fieldPaymentReceiver: '收款人',
+
     statusShippedTitle: '标记为已发货',
     statusShippedSub: '记录运单信息以便通知客户。',
     statusShippedPlaceholder: '运单号、承运商、发货日期、装运人 —— 客户或仓库可能需要的任何信息。',
@@ -1982,7 +1991,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     openAttachment: '打开附件',
     editLaterHint: '稍后可再次点击此步骤进行编辑。',
     confirmAdvance: '确认',
-    fileTooLarge: '{name} 超过 10 MB',
+    fileTooLarge: '{name} 超过 50 MB',
     poSubmitAttachLabel: '附件',
     poSubmitAttachHint: '收据、聊天记录等（PDF / JPG / PNG）— 可选',
     poSubmitUploadWarning: '订单已提交，但文件未能上传。您可以在订单页面添加。',

@@ -1,0 +1,71 @@
+# Enforce the versioning rule: every push to dev that changes code must bump
+# the root package.json version past the latest v* tag. Passing pushes get
+# their version tagged automatically, which is what arms the check for the
+# next push. Docs/CI-only pushes are exempt — "code" is the deployable
+# surface (apps/, packages/, deploy/, compose).
+#
+# To satisfy the check: bump the version in the same push as the code, e.g.
+#   npm version patch --no-git-tag-version   # or minor/major
+name: version-check
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+jobs:
+  version-tag-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags — the check compares against the latest v* tag
+
+      - name: Enforce version bump and tag for code changes
+        env:
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
+          LAST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+
+          if [ -n "$LAST_TAG" ]; then
+            LAST_VERSION="${LAST_TAG#v}"
+            if ! git diff --name-only "$LAST_TAG"..HEAD -- apps packages deploy docker-compose.yml | grep -q .; then
+              echo "No code changes since $LAST_TAG — version bump not required."
+              exit 0
+            fi
+            if [ "$VERSION" = "$LAST_VERSION" ]; then
+              echo "::error::Code changed since $LAST_TAG but package.json is still $VERSION. Bump it in the same push: npm version patch --no-git-tag-version"
+              exit 1
+            fi
+            if [ "$(printf '%s\n%s\n' "$LAST_VERSION" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+              echo "::error::package.json version $VERSION is lower than the latest tag $LAST_TAG."
+              exit 1
+            fi
+          else
+            echo "No previous v* tag — accepting $TAG as the baseline."
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            # Re-run on an already-tagged commit is fine; the same version on
+            # an unrelated commit means the bump was skipped.
+            if ! git merge-base --is-ancestor "$TAG" HEAD; then
+              echo "::error::Tag $TAG already exists on an unrelated commit — bump the version."
+              exit 1
+            fi
+            echo "Tag $TAG already present — ok."
+          elif [ "$IS_PR" = "true" ]; then
+            echo "PR check passed — $TAG will be created when this lands on dev."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+            echo "Created and pushed $TAG."
+          fi

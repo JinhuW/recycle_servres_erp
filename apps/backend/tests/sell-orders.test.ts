@@ -452,3 +452,116 @@ describe('POST /api/sell-orders oversell guard', () => {
   });
 });
 
+
+describe('sell-order payment receiver', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function createWithReceiver(token: string, paymentReceivedBy: string | null) {
+    const line = await findSellableLine(token);
+    const customerId = await firstCustomerId(token);
+    return api<{ id: string; error?: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId,
+        paymentReceivedBy,
+        lines: [{
+          inventoryId: line.id, category: 'RAM', label: 'Sample',
+          partNumber: 'PN-1', qty: 1, unitPrice: line.sell_price,
+          warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
+        }],
+      },
+    });
+  }
+
+  it('create stores the receiver; detail returns id + name and createdBy; list returns the name', async () => {
+    const { token, user } = await loginAs(ALEX);
+    const r = await createWithReceiver(token, user.id);
+    expect(r.status).toBe(201);
+
+    const got = await api<{ order: {
+      createdBy: string | null;
+      paymentReceivedBy: { id: string; name: string } | null;
+    } }>('GET', `/api/sell-orders/${r.body.id}`, { token });
+    expect(got.status).toBe(200);
+    expect(got.body.order.createdBy).toBe(user.id);
+    expect(got.body.order.paymentReceivedBy).toEqual({ id: user.id, name: 'Alex Chen' });
+
+    const list = await api<{ rows: { id: string; paymentReceiverName: string | null }[] }>(
+      'GET', '/api/sell-orders', { token });
+    const row = list.body.rows.find(x => x.id === r.body.id);
+    expect(row?.paymentReceiverName).toBe('Alex Chen');
+  });
+
+  it('create with an unknown receiver: 400', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await createWithReceiver(token, '00000000-0000-4000-8000-000000000000');
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/paymentReceivedBy/);
+  });
+
+  it('receiver must be a manager — purchaser id: 400 on create and PATCH', async () => {
+    const { user: marcus } = await loginAs(MARCUS);
+    const { token } = await loginAs(ALEX);
+    const r = await createWithReceiver(token, marcus.id);
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/manager/);
+
+    const ok = await createWithReceiver(token, null);
+    const patched = await api<{ error: string }>('PATCH', `/api/sell-orders/${ok.body.id}`, {
+      token, body: { paymentReceivedBy: marcus.id },
+    });
+    expect(patched.status).toBe(400);
+  });
+
+  it('PATCH sets, keeps when omitted, and clears with null; meta_changed logged', async () => {
+    const { token, user } = await loginAs(ALEX);
+    const create = await createWithReceiver(token, null);
+    const id = create.body.id;
+
+    const set = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { paymentReceivedBy: user.id },
+    });
+    expect(set.status).toBe(200);
+
+    const sql = getTestDb();
+    let row = (await sql`SELECT payment_received_by FROM sell_orders WHERE id = ${id}`)[0];
+    expect(row.payment_received_by).toBe(user.id);
+
+    // Omitting the field must not touch it.
+    const untouched = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { notes: 'edited notes' },
+    });
+    expect(untouched.status).toBe(200);
+    row = (await sql`SELECT payment_received_by FROM sell_orders WHERE id = ${id}`)[0];
+    expect(row.payment_received_by).toBe(user.id);
+
+    // Explicit null clears.
+    const clear = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { paymentReceivedBy: null },
+    });
+    expect(clear.status).toBe(200);
+    row = (await sql`SELECT payment_received_by FROM sell_orders WHERE id = ${id}`)[0];
+    expect(row.payment_received_by).toBeNull();
+
+    const events = await sql`
+      SELECT detail FROM sell_order_events
+      WHERE sell_order_id = ${id} AND kind = 'meta_changed'
+      ORDER BY created_at
+    `;
+    const receiverChanges = events.flatMap(e =>
+      (e.detail.changes as { field: string; from: unknown; to: unknown }[])
+        .filter(ch => ch.field === 'payment_received_by'));
+    expect(receiverChanges.length).toBe(2);
+    expect(receiverChanges[0]).toMatchObject({ from: null, to: user.id });
+    expect(receiverChanges[1]).toMatchObject({ from: user.id, to: null });
+  });
+
+  it('PATCH with an unknown receiver: 400', async () => {
+    const { token } = await loginAs(ALEX);
+    const create = await createWithReceiver(token, null);
+    const r = await api('PATCH', `/api/sell-orders/${create.body.id}`, {
+      token, body: { paymentReceivedBy: '00000000-0000-4000-8000-000000000000' },
+    });
+    expect(r.status).toBe(400);
+  });
+});

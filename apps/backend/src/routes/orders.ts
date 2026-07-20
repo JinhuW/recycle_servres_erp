@@ -15,6 +15,7 @@ import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
+import { shrinkImageToFit } from '../lib/image-shrink';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -1238,13 +1239,17 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
   if (!file.type || !allowedMime.has(file.type)) {
     return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
   }
-  if (file.size > maxBytes) {
+  // Oversized images are downscaled to fit the cap rather than rejected —
+  // receipts arrive as multi-MB phone screenshots. Non-images (PDF) can't be
+  // recompressed and fall through to the 413.
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
   // Both PO meta statuses (Submission, Done) hold payment receipts, so the
   // AI rename applies unconditionally — no per-status gate like sell orders.
-  const stored = await maybeRenameReceipt(c.env, file);
+  const stored = await maybeRenameReceipt(c.env, fitted);
 
   // R2 upload happens outside the transaction — it's the slow part. If the
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as

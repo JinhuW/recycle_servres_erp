@@ -115,7 +115,10 @@ export function StatusChangeDialog({
     setError(null);
     try {
       for (const f of files) {
-        if (f.size > 10 * 1024 * 1024) {
+        // Matches the server's 50 MiB hard cap; oversized images are shrunk
+        // server-side to the workspace limit, so the old 10 MiB client reject
+        // would block uploads the backend now accepts.
+        if (f.size > 50 * 1024 * 1024) {
           setError(t('fileTooLarge', { name: f.name }));
           continue;
         }

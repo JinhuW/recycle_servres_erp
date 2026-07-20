@@ -20,5 +20,6 @@ export async function loginAs(email: string, password = 'demo'): Promise<LoginRe
 }
 
 export const ALEX = 'alex@recycleservers.io';        // manager
+export const SOFIA = 'sofia@recycleservers.io';      // manager
 export const MARCUS = 'marcus@recycleservers.io';    // purchaser
 export const PRIYA = 'priya@recycleservers.io';      // purchaser

@@ -24,6 +24,7 @@ import {
 } from '../lib/fx';
 import { recordSaleDataPoints } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
+import { shrinkImageToFit } from '../lib/image-shrink';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -35,6 +36,15 @@ type SqlClient = ReturnType<typeof getDb>;
 async function loadMetaStatuses(sql: SqlClient): Promise<Set<string>> {
   const rows = await sql`SELECT id FROM sell_order_statuses WHERE needs_meta = TRUE`;
   return new Set(rows.map(r => r.id as string));
+}
+
+// Payment receivers are managers only — purchasers never handle customer money.
+async function isActiveManager(sql: SqlClient, userId: string): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1 FROM users
+    WHERE id = ${userId} AND active = TRUE AND role = 'manager' LIMIT 1
+  `;
+  return rows.length > 0;
 }
 
 sellOrders.get('/', async (c) => {
@@ -63,14 +73,16 @@ sellOrders.get('/', async (c) => {
     SELECT
       so.id, so.status, so.notes, so.created_at, so.archived_at, so.currency_code,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
+      pu.name AS payment_received_by_name,
       COUNT(sol.id)::int                                AS line_count,
       COALESCE(SUM(sol.qty), 0)::int                    AS qty,
       COALESCE(SUM(sol.qty * sol.unit_price), 0)::float AS subtotal
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
+    LEFT JOIN users pu ON pu.id = so.payment_received_by
     LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
     WHERE ${statusFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY so.id, c.id
+    GROUP BY so.id, c.id, pu.name
     ORDER BY so.created_at DESC, so.id DESC
     LIMIT ${limit + 1}
   `;
@@ -88,6 +100,7 @@ sellOrders.get('/', async (c) => {
     archivedAt: r.archived_at,
     currency: r.currency_code,
     customer: { id: r.customer_id, name: r.customer_name, short: r.customer_short },
+    paymentReceiverName: r.payment_received_by_name ?? null,
     lineCount: r.line_count, qty: r.qty,
     // subtotal/total are USD — sol.unit_price is always the USD value, so the
     // inbox sorts apples-to-apples regardless of each order's source currency.
@@ -184,11 +197,16 @@ sellOrders.get('/:id', async (c) => {
     currency_code: string; fx_rate_to_usd: number; fx_source: string;
     customer_id: string; customer_name: string; customer_short: string;
     customer_region: string;
+    created_by: string | null;
+    payment_received_by: string | null; payment_received_by_name: string | null;
   }[]>`
     SELECT so.id, so.status, so.notes, so.created_at, so.archived_at, so.close_reason_id,
            so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
+           so.created_by, so.payment_received_by, pu.name AS payment_received_by_name,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
-    FROM sell_orders so JOIN customers c ON c.id = so.customer_id
+    FROM sell_orders so
+    JOIN customers c ON c.id = so.customer_id
+    LEFT JOIN users pu ON pu.id = so.payment_received_by
     WHERE so.id = ${id} LIMIT 1
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
@@ -251,6 +269,10 @@ sellOrders.get('/:id', async (c) => {
       id: head.id, status: head.status, notes: head.notes, createdAt: head.created_at,
       archivedAt: head.archived_at,
       closeReasonId: head.close_reason_id ?? null,
+      createdBy: head.created_by,
+      paymentReceivedBy: head.payment_received_by
+        ? { id: head.payment_received_by, name: head.payment_received_by_name }
+        : null,
       currency: head.currency_code,
       fxRateToUsd: head.fx_rate_to_usd,
       fxSource: head.fx_source,
@@ -549,10 +571,17 @@ sellOrders.post('/', async (c) => {
     condition?: string | null;
   };
   const body = (await c.req.json().catch(() => null)) as
-    | { customerId: string; lines: LineIn[]; notes?: string; currency?: string }
+    | { customerId: string; lines: LineIn[]; notes?: string; currency?: string;
+        paymentReceivedBy?: string | null }
     | null;
   if (!body || !body.customerId || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'customerId and at least one line required' }, 400);
+  }
+  // Receiver must be an active manager — catch a stale/forged id as a clean
+  // 400 instead of an FK violation 500.
+  if (body.paymentReceivedBy != null
+      && !(await isActiveManager(sql, body.paymentReceivedBy))) {
+    return c.json({ error: 'paymentReceivedBy must be an active manager' }, 400);
   }
   // Currency is per-order; every line is quoted in it. Default USD keeps the
   // common path unchanged. unitPrice on each line is the NATIVE price.
@@ -575,6 +604,7 @@ sellOrders.post('/', async (c) => {
     customerId: body.customerId,
     currency,
     notes: body.notes ?? null,
+    paymentReceivedBy: body.paymentReceivedBy ?? null,
     lines: body.lines,
     actorUserId: u.id,
     source: 'manager',
@@ -605,7 +635,8 @@ sellOrders.patch('/:id', async (c) => {
   const id = c.req.param('id');
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
-        customerId?: string; lines?: LineIn[]; currency?: string }
+        customerId?: string; lines?: LineIn[]; currency?: string;
+        paymentReceivedBy?: string | null }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   // Status transitions are owned exclusively by POST /:id/status — that route
@@ -629,6 +660,12 @@ sellOrders.patch('/:id', async (c) => {
     }
   }
   const sql = getDb(c.env);
+
+  // Same active-manager gate as POST; explicit null is a clear (always allowed).
+  if (body.paymentReceivedBy != null
+      && !(await isActiveManager(sql, body.paymentReceivedBy))) {
+    return c.json({ error: 'paymentReceivedBy must be an active manager' }, 400);
+  }
 
   const editsStructure = body.customerId !== undefined || body.lines !== undefined
     || body.currency !== undefined;
@@ -673,8 +710,9 @@ sellOrders.patch('/:id', async (c) => {
     // Snapshot BEFORE state for diffing. Lock the header row so a concurrent
     // edit can't slip an event we'd then miss; lines are read consistently
     // inside the same tx so no extra lock is needed.
-    const beforeHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string }[]>`
-      SELECT notes, customer_id, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    const beforeHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string; payment_received_by: string | null }[]>`
+      SELECT notes, customer_id, currency_code, payment_received_by
+      FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     const beforeLines = body.lines !== undefined
       ? await tx<SOLineSnap[]>`
@@ -696,6 +734,8 @@ sellOrders.patch('/:id', async (c) => {
       const err = await validateSellLines(tx, body.lines, id);
       if (err) { outcome = { code: 400, msg: err }; return; }
     }
+    // COALESCE can't express "clear to NULL", so the receiver (the one nullable
+    // editable field) gets a CASE keyed on whether the key was present at all.
     await tx`
       UPDATE sell_orders SET
         notes          = COALESCE(${body.notes ?? null}, notes),
@@ -703,6 +743,9 @@ sellOrders.patch('/:id', async (c) => {
         currency_code  = COALESCE(${fx ? effectiveCurrency : null}, currency_code),
         fx_rate_to_usd = COALESCE(${fx ? fx.rate : null}, fx_rate_to_usd),
         fx_source      = COALESCE(${fx ? fx.source : null}, fx_source),
+        payment_received_by = CASE WHEN ${body.paymentReceivedBy !== undefined}
+                                   THEN ${body.paymentReceivedBy ?? null}::uuid
+                                   ELSE payment_received_by END,
         updated_at     = NOW()
       WHERE id = ${id}
     `;
@@ -730,8 +773,9 @@ sellOrders.patch('/:id', async (c) => {
     }
 
     // Diff events — emitted only when something actually changed.
-    const afterHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string }[]>`
-      SELECT notes, customer_id, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
+    const afterHead = (await tx<{ notes: string | null; customer_id: string; currency_code: string; payment_received_by: string | null }[]>`
+      SELECT notes, customer_id, currency_code, payment_received_by
+      FROM sell_orders WHERE id = ${id} LIMIT 1
     `)[0];
     const metaChanges: AuditChange[] = diff(
       beforeHead as unknown as Record<string, unknown>,
@@ -843,13 +887,17 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   if (!file.type || !allowedMime.has(file.type)) {
     return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
   }
-  if (file.size > maxBytes) {
+  // Oversized images are downscaled to fit the cap rather than rejected —
+  // receipts arrive as multi-MB phone screenshots. Non-images (PDF) can't be
+  // recompressed and fall through to the 413.
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
   const stored = RECEIPT_RENAME_STATUSES.has(status)
-    ? await maybeRenameReceipt(c.env, file)
-    : file;
+    ? await maybeRenameReceipt(c.env, fitted)
+    : fitted;
 
   // R2 upload happens outside the transaction — it's the slow part. A tx open
   // across it would hold a row lock for the whole upload. If the DB INSERT
@@ -995,12 +1043,13 @@ sellOrders.post('/:id/status', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'illegal'; from: string; to: string }
     | { kind: 'idempotent'; status: string }
+    | { kind: 'notCreator' }
     | { kind: 'reopenNeedsNote' }
     | { kind: 'done' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
-    const cur = (await tx<{ status: string }[]>`
-      SELECT status FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    const cur = (await tx<{ status: string; created_by: string | null }[]>`
+      SELECT status, created_by FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!cur) return { kind: 'notFound' };
     if (cur.status === body.to) return { kind: 'idempotent', status: cur.status };
@@ -1008,6 +1057,15 @@ sellOrders.post('/:id/status', async (c) => {
     const allowed = ALLOWED_TRANSITIONS[cur.status] ?? new Set<string>();
     if (!allowed.has(body.to)) {
       return { kind: 'illegal', from: cur.status, to: body.to };
+    }
+
+    // Reopen (Closed → Draft) is creator-only. NULL created_by (MCP
+    // client_credentials orders) falls through so those aren't permanently
+    // bricked — any manager may reopen them. Checked before the note gate so
+    // a non-creator gets 403, not a misleading "note required" 400.
+    if (cur.status === 'Closed' && body.to === 'Draft'
+        && cur.created_by !== null && cur.created_by !== u.id) {
+      return { kind: 'notCreator' };
     }
 
     // Reopen (Closed → Draft) needs a note. This is the one remaining
@@ -1029,10 +1087,17 @@ sellOrders.post('/:id/status', async (c) => {
          WHERE id = ${id}
       `;
     } else if (cur.status === 'Closed' && body.to === 'Draft') {
+      // The reopen reason also lands on the order itself as an appended notes
+      // line — the events timeline alone is too easy to miss. Prior notes are
+      // preserved; each reopen cycle appends its own line.
+      const reopenLine = `Reopened: ${body.note!.trim()}`;
       await tx`
         UPDATE sell_orders
            SET status = 'Draft',
                close_reason_id = NULL,
+               notes = CASE WHEN notes IS NULL OR notes = ''
+                            THEN ${reopenLine}
+                            ELSE notes || ${'\n\n' + reopenLine} END,
                updated_at = NOW()
          WHERE id = ${id}
       `;
@@ -1135,6 +1200,9 @@ sellOrders.post('/:id/status', async (c) => {
     return c.json({ error: `illegal transition: ${outcome.from} → ${outcome.to}` }, 409);
   }
   if (outcome.kind === 'idempotent') return c.json({ ok: true, status: outcome.status });
+  if (outcome.kind === 'notCreator') {
+    return c.json({ error: 'only the creator can reopen this order' }, 403);
+  }
   if (outcome.kind === 'reopenNeedsNote') {
     return c.json({ error: 'note required to reopen' }, 400);
   }

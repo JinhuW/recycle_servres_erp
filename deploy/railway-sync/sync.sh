@@ -16,6 +16,11 @@ set -o pipefail
 
 : "${PROD_DATABASE_URL:?PROD_DATABASE_URL is required}"
 : "${DEV_DATABASE_URL:?DEV_DATABASE_URL is required}"
+# Checked up front so a missing redeploy credential aborts before the
+# destructive restore, not after it.
+: "${RAILWAY_PROJECT_TOKEN:?RAILWAY_PROJECT_TOKEN is required}"
+: "${BACKEND_SERVICE_ID:?BACKEND_SERVICE_ID is required}"
+: "${RAILWAY_ENVIRONMENT_ID:?RAILWAY_ENVIRONMENT_ID is required}"
 
 # Safety rail: refuse to run if source and target are the same database, so a
 # misconfiguration can never make the job write onto prod.
@@ -47,11 +52,46 @@ if [ -n "${EXPECTED_DEV_DB_HOST:-}" ] && [ "$dev_host" != "$EXPECTED_DEV_DB_HOST
   exit 1
 fi
 
-# --clean --if-exists: drop each object before recreating, so dev ends up an
-# exact copy (schema + data + the migration ledger). --single-transaction +
-# ON_ERROR_STOP on the restore side means a failure leaves dev unchanged rather
-# than half-synced.
-pg_dump --no-owner --no-privileges --clean --if-exists "$PROD_DATABASE_URL" \
-  | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
+# Reset dev's schema wholesale instead of pg_dump --clean: --clean orders its
+# DROPs by PROD's dependency graph, so any dev-only object (e.g. an FK from a
+# migration not yet shipped to prod) blocks a DROP and aborts the sync — this
+# broke nightly when 0074's sell_orders FK existed on dev only.
+#
+# The dump lands in a temp file FIRST, and only a fully successful pg_dump
+# reaches the restore. Never stream pg_dump straight into the psql that also
+# carries the DROP SCHEMA preamble: if pg_dump dies early (version mismatch,
+# revoked grants, network), psql sees preamble-then-EOF — a complete, valid
+# script — and COMMITS an empty dev. That exact wipe happened on 2026-07-16.
+# No suffix after the X's — busybox mktemp (alpine) requires the template to
+# end in XXXXXX.
+dump="$(mktemp /tmp/prod-dump.XXXXXX)"
+trap 'rm -f "$dump"' EXIT
+pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" > "$dump"
+
+# Preamble + dump run in ONE transaction, so a mid-restore failure still rolls
+# back to an unchanged dev rather than an empty one. pgcrypto lives in public
+# and is dropped by the CASCADE; the dump's CREATE EXTENSION restores it.
+{
+  echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
+  cat "$dump"
+} | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
+
+# The restore just replaced dev's schema with prod's, which erases any dev-only
+# migrations and leaves the running backend holding pooled connections and
+# cached plans against dropped objects — every query 500s until it restarts
+# (broke /api/sell-orders nightly while 0074 existed only on dev). Redeploy the
+# backend so its boot sequence re-runs migrate.mjs on the fresh schema.
+# GraphQL returns HTTP 200 even on failure, so grep the body for "errors".
+resp=$(curl -fsS -X POST https://backboard.railway.com/graphql/v2 \
+  -H "Project-Access-Token: $RAILWAY_PROJECT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"query\":\"mutation { serviceInstanceRedeploy(serviceId: \\\"$BACKEND_SERVICE_ID\\\", environmentId: \\\"$RAILWAY_ENVIRONMENT_ID\\\") }\"}")
+case "$resp" in
+  *'"errors"'*)
+    echo "[sync] backend redeploy FAILED: $resp" >&2
+    exit 1
+    ;;
+esac
+echo "[sync] backend redeploy triggered"
 
 echo "[sync] done $(date -u +%Y-%m-%dT%H:%M:%SZ)"

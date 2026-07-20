@@ -8,6 +8,11 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - **pnpm only** — `packageManager` is pinned to `pnpm@11.0.9` and the lockfile
   is `pnpm-lock.yaml`.  Don't introduce `package-lock.json` or `yarn.lock`.
 - Workspaces are declared in `pnpm-workspace.yaml`: `apps/*` and `packages/*`.
+- **Every code push to `dev` bumps the root `package.json` version** (patch
+  for fixes, minor for features). CI (`.github/workflows/version-check.yml`)
+  fails the push if code under `apps/`, `packages/`, or `deploy/` changed
+  since the latest `v*` tag without a bump, and auto-tags `v<version>` on
+  green. Docs-only pushes are exempt.
 - Common entry points from the repo root:
   - `pnpm dev` — runs backend (`:8787`) and frontend (`:5173`) in parallel.
   - `pnpm typecheck` / `pnpm build` — recursive across the workspace.
@@ -150,6 +155,21 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
   `mkdir -p data/errors && sudo chown 1000:1000 data/errors` — without it
   the backend (UID 1000) can't write and the sink silently degrades to
   stdout-only.  See `apps/backend/src/lib/error-log.ts`.
+
+## Cloudflare Worker deploys
+
+- Deploy the frontend Workers with `deploy/cloudflare/deploy.sh <prod|dev>` —
+  it builds, deploys, and smoke-checks every public hostname through
+  Cloudflare. Don't run bare `wrangler deploy`.
+- **Every public hostname must be declared in `wrangler.toml` routes**
+  (`custom_domain = true`). Deploys reconcile custom domains against the
+  file; a domain attached only via the CF dashboard gets its DNS record +
+  cert deleted by the next deploy → sitewide 523 while Railway stays green.
+  See `docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md`.
+- Pushes to `prod` and `dev` auto-deploy their Worker via
+  `.github/workflows/deploy-frontend.yml` (needs `CLOUDFLARE_API_TOKEN` repo
+  secret); the branch picks the target. The `uptime-monitor` Railway cron
+  (`deploy/railway-uptime/`) probes prod every 5 min as the backstop.
 
 ## Infrastructure (Terraform)
 

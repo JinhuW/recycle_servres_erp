@@ -10,7 +10,11 @@
 > - ✅ **Native Railway cron service `db-sync`** in the `dev` env: builds the
 >   `deploy/railway-sync/Dockerfile` (pinned via `railway.toml`), `cronSchedule
 >   = "0 4 * * *"` UTC, `restartPolicyType = NEVER`. Variables `PROD_DATABASE_URL`
->   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`).
+>   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`),
+>   plus `RAILWAY_PROJECT_TOKEN` (dev-env project token `db-sync-backend-redeploy`)
+>   and `BACKEND_SERVICE_ID` — after each restore the sync redeploys the dev
+>   backend so `migrate.mjs` re-applies dev-only migrations (see
+>   `docs/debug-notes/2026-07-19-dev-sell-orders-500-after-nightly-sync.md`).
 >   Build SUCCESS; first scheduled run 04:00 UTC.
 > - ✅ **Two frontend Workers** (`deploy/cloudflare`, wrangler envs): `recycle-erp-prod`
 >   at **`inventory-prod.recycleservers.com`** → prod backend, and `recycle-erp-dev`
@@ -52,11 +56,19 @@ each domain is same-origin end-to-end.
 | `recycle-erp-dev`  | `inventory-dev.recycleservers.com`  | dev backend (`backend-dev-f94e`) |
 
 ```bash
-# Deploy (custom domains auto-provisioned on the recycleservers.com zone):
-cd deploy/cloudflare
-unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env prod
-unset CLOUDFLARE_API_TOKEN && npx wrangler deploy --env dev
+# Deploy (custom domains auto-provisioned on the recycleservers.com zone).
+# The script builds the frontend, runs wrangler, then smoke-checks every
+# public hostname through Cloudflare — a 523 here means the custom domain
+# binding broke even though Railway is green.
+deploy/cloudflare/deploy.sh prod
+deploy/cloudflare/deploy.sh dev
 ```
+
+Prod deploys also run automatically on pushes to the `prod` branch
+(`.github/workflows/deploy-frontend.yml`, needs the `CLOUDFLARE_API_TOKEN`
+repo secret). Never attach a hostname to a Worker via the Cloudflare
+dashboard — declare it in `wrangler.toml` routes instead, or the next deploy
+deletes its DNS record + cert (2026-07-12 outage).
 
 Attaching a custom domain disables that Worker's `*.workers.dev` URL (Cloudflare
 default); add `workers_dev = true` per env to keep it. Each backend's

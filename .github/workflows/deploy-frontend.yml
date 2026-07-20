@@ -1,0 +1,49 @@
+# Deploy the frontend Worker whenever frontend-affecting code lands on `prod`
+# (prod Worker) or `dev` (dev Worker). Deploying from CI (instead of a laptop
+# checkout) guarantees the committed wrangler.toml is what reconciles the
+# Worker's custom domains — a stale local checkout deploying without a domain
+# in its routes DELETES that domain's DNS record + cert (2026-07-12 outage; see
+# docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md).
+#
+# Requires the CLOUDFLARE_API_TOKEN repo secret (Workers Scripts:Edit +
+# Workers Custom Domains:Edit + Zone DNS:Edit on recycleservers.com).
+name: deploy-frontend
+
+on:
+  push:
+    branches: [prod, dev]
+    paths:
+      - "apps/frontend/**"
+      - "packages/shared/**"
+      - "deploy/cloudflare/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch: # manual re-deploy without a code change
+
+concurrency:
+  group: deploy-frontend-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the frontend, deploys the Worker, then smoke-checks every
+      # public hostname through Cloudflare — fails the run on any 52x.
+      # Branch picks the target: prod -> prod Worker, dev -> dev Worker.
+      - run: deploy/cloudflare/deploy.sh ${{ github.ref_name == 'prod' && 'prod' || 'dev' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
