@@ -277,7 +277,8 @@ function OrderForm({
 
   const addEvidenceFiles = (fl: FileList | null) => {
     const picked = Array.from(fl || []).filter(f => {
-      if (f.size > 10 * 1024 * 1024) { setAiError(t('fileTooLarge', { name: f.name })); return false; }
+      // 50 MiB server hard cap; oversized images are shrunk server-side.
+      if (f.size > 50 * 1024 * 1024) { setAiError(t('fileTooLarge', { name: f.name })); return false; }
       return true;
     });
     if (picked.length) setEvidenceFiles(prev => [...prev, ...picked]);

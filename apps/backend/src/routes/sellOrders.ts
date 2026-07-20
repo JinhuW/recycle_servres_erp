@@ -24,6 +24,7 @@ import {
 } from '../lib/fx';
 import { recordSaleDataPoints } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
+import { shrinkImageToFit } from '../lib/image-shrink';
 import type { Env, User } from '../types';
 
 const sellOrders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -886,13 +887,17 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   if (!file.type || !allowedMime.has(file.type)) {
     return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
   }
-  if (file.size > maxBytes) {
+  // Oversized images are downscaled to fit the cap rather than rejected —
+  // receipts arrive as multi-MB phone screenshots. Non-images (PDF) can't be
+  // recompressed and fall through to the 413.
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) {
     return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
   }
 
   const stored = RECEIPT_RENAME_STATUSES.has(status)
-    ? await maybeRenameReceipt(c.env, file)
-    : file;
+    ? await maybeRenameReceipt(c.env, fitted)
+    : fitted;
 
   // R2 upload happens outside the transaction — it's the slow part. A tx open
   // across it would hold a row lock for the whole upload. If the DB INSERT

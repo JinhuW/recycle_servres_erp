@@ -7,6 +7,9 @@
 # is PostgreSQL 18, so this pins the v18 client. Bump if the DB is upgraded.
 FROM postgres:18-alpine
 
+# curl calls the Railway API to redeploy the backend after each restore.
+RUN apk add --no-cache curl
+
 COPY sync.sh /usr/local/bin/sync.sh
 RUN chmod +x /usr/local/bin/sync.sh
 

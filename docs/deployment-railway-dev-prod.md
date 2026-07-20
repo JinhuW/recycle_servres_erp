@@ -10,7 +10,11 @@
 > - ✅ **Native Railway cron service `db-sync`** in the `dev` env: builds the
 >   `deploy/railway-sync/Dockerfile` (pinned via `railway.toml`), `cronSchedule
 >   = "0 4 * * *"` UTC, `restartPolicyType = NEVER`. Variables `PROD_DATABASE_URL`
->   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`).
+>   (prod `DATABASE_PUBLIC_URL`) + `DEV_DATABASE_URL` (`${{Postgres.DATABASE_URL}}`),
+>   plus `RAILWAY_PROJECT_TOKEN` (dev-env project token `db-sync-backend-redeploy`)
+>   and `BACKEND_SERVICE_ID` — after each restore the sync redeploys the dev
+>   backend so `migrate.mjs` re-applies dev-only migrations (see
+>   `docs/debug-notes/2026-07-19-dev-sell-orders-500-after-nightly-sync.md`).
 >   Build SUCCESS; first scheduled run 04:00 UTC.
 > - ✅ **Two frontend Workers** (`deploy/cloudflare`, wrangler envs): `recycle-erp-prod`
 >   at **`inventory-prod.recycleservers.com`** → prod backend, and `recycle-erp-dev`
