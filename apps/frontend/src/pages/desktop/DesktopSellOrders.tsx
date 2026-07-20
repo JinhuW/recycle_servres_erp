@@ -54,6 +54,7 @@ type SellOrderSummary = {
   status: 'Draft' | 'Shipped' | 'Awaiting payment' | 'Done' | 'Closed';
   notes: string | null;
   createdAt: string;
+  updatedAt: string;
   archivedAt: string | null;
   currency: Currency;
   customer: { id: string; name: string; short: string; region: string };
@@ -135,6 +136,7 @@ type SellOrderDetailType = {
   status: SellOrderSummary['status'];
   notes: string | null;
   createdAt: string;
+  updatedAt: string;
   archivedAt: string | null;
   closeReasonId: string | null;
   createdBy: string | null;
@@ -345,7 +347,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
 
         <div className="table-scroll">
           {!loadedOnce ? (
-            <TableSkeleton rows={8} cols={9} />
+            <TableSkeleton rows={8} cols={10} />
           ) : (
           <table className="table">
             <thead>
@@ -354,6 +356,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                 <th>{t('fieldCustomer')}</th>
                 <th>{t('paymentReceiverLabel')}</th>
                 <th>{t('soColCreated')}</th>
+                <th>{t('soColUpdated')}</th>
                 <th className="num">{t('lines')}</th>
                 <th className="num">{t('sodUnits')}</th>
                 <th className="num">{t('eoTotal')}</th>
@@ -405,6 +408,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                     {o.paymentReceiverName ?? '—'}
                   </td>
                   <td className="muted">{fmtDateShort(o.createdAt, locale)}</td>
+                  <td className="muted">{fmtDateShort(o.updatedAt, locale)}</td>
                   <td className="num mono">{o.lineCount}</td>
                   <td className="num mono">{o.qty}</td>
                   <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total, locale)}</td>
@@ -433,7 +437,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)' }}>
+                  <td colSpan={10} style={{ padding: 40, textAlign: 'center', color: 'var(--fg-subtle)' }}>
                     No orders match these filters.
                   </td>
                 </tr>
@@ -825,7 +829,7 @@ function SellOrderDetail({
                 </div>
                 <h2 style={{ fontSize: 19, fontWeight: 600, margin: 0 }}>{order.customer.name}</h2>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                  {fmtDate(order.createdAt, locale)} · {order.customer.region}
+                  {t('soColCreated')} {fmtDate(order.createdAt, locale)} · {t('soColUpdated')} {fmtDate(order.updatedAt, locale)} · {order.customer.region}
                 </div>
               </>
             )}
