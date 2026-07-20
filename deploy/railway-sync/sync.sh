@@ -16,6 +16,11 @@ set -o pipefail
 
 : "${PROD_DATABASE_URL:?PROD_DATABASE_URL is required}"
 : "${DEV_DATABASE_URL:?DEV_DATABASE_URL is required}"
+# Checked up front so a missing redeploy credential aborts before the
+# destructive restore, not after it.
+: "${RAILWAY_PROJECT_TOKEN:?RAILWAY_PROJECT_TOKEN is required}"
+: "${BACKEND_SERVICE_ID:?BACKEND_SERVICE_ID is required}"
+: "${RAILWAY_ENVIRONMENT_ID:?RAILWAY_ENVIRONMENT_ID is required}"
 
 # Safety rail: refuse to run if source and target are the same database, so a
 # misconfiguration can never make the job write onto prod.
@@ -70,5 +75,23 @@ pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" > "$dump"
   echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'
   cat "$dump"
 } | psql --single-transaction --set ON_ERROR_STOP=1 "$DEV_DATABASE_URL" >/dev/null
+
+# The restore just replaced dev's schema with prod's, which erases any dev-only
+# migrations and leaves the running backend holding pooled connections and
+# cached plans against dropped objects — every query 500s until it restarts
+# (broke /api/sell-orders nightly while 0074 existed only on dev). Redeploy the
+# backend so its boot sequence re-runs migrate.mjs on the fresh schema.
+# GraphQL returns HTTP 200 even on failure, so grep the body for "errors".
+resp=$(curl -fsS -X POST https://backboard.railway.com/graphql/v2 \
+  -H "Project-Access-Token: $RAILWAY_PROJECT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"query\":\"mutation { serviceInstanceRedeploy(serviceId: \\\"$BACKEND_SERVICE_ID\\\", environmentId: \\\"$RAILWAY_ENVIRONMENT_ID\\\") }\"}")
+case "$resp" in
+  *'"errors"'*)
+    echo "[sync] backend redeploy FAILED: $resp" >&2
+    exit 1
+    ;;
+esac
+echo "[sync] backend redeploy triggered"
 
 echo "[sync] done $(date -u +%Y-%m-%dT%H:%M:%SZ)"
