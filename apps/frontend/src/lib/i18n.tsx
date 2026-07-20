@@ -1325,6 +1325,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     invClearAll: 'Clear all',
     invNoProductsMatch: 'No products match these filters.',
     invNoMatching: 'No matching inventory.',
+    invSelectAllFilter: 'Select all ({n})',
+    invUnselectAllFilter: 'Unselect all',
+    invSelectAllFilterTip: 'Select all sellable lots matching the current filters',
 
     // DesktopSellOrders remaining
     soColOrder: 'Order',
@@ -2578,6 +2581,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     invClearAll: '清除全部',
     invNoProductsMatch: '没有符合筛选的产品。',
     invNoMatching: '没有匹配的库存。',
+    invSelectAllFilter: '全选（{n}）',
+    invUnselectAllFilter: '取消全选',
+    invSelectAllFilterTip: '全选符合当前筛选的可售批次',
 
     soColOrder: '订单',
     soColCreated: '创建时间',
