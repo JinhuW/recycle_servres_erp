@@ -74,6 +74,8 @@ type Props = {
   isManager: boolean;
   cols: GroupedColVis;
   selected: Set<string>;
+  selectAllState: 'empty' | 'none' | 'some' | 'all';
+  onToggleAll: () => void;
   onToggleLot: (id: string) => void;
   onToggleGroup: (g: ProductGroup) => void;
   onQuickView: (lotId: string) => void;
@@ -105,7 +107,8 @@ function productSpec(g: ProductGroup): string {
 }
 
 export function InventoryProductTable({
-  groups, isManager, cols, selected, onToggleLot, onToggleGroup, onQuickView, onEditLot,
+  groups, isManager, cols, selected, selectAllState, onToggleAll,
+  onToggleLot, onToggleGroup, onQuickView, onEditLot,
 }: Props) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -134,7 +137,21 @@ export function InventoryProductTable({
     <table className="table">
       <thead>
         <tr>
-          <th style={{ width: 56 }} />
+          <th style={{ width: 56 }}>
+            {isManager && (
+              <input
+                type="checkbox"
+                aria-label={t('invSelectAllFilterTip')}
+                // Aligned under the group checkboxes (13px chevron + 8px gap).
+                style={{ marginLeft: 21 }}
+                checked={selectAllState === 'all'}
+                ref={(el) => { if (el) el.indeterminate = selectAllState === 'some'; }}
+                disabled={selectAllState === 'empty'}
+                title={selectAllState === 'empty' ? t('iptNoSellableLots') : t('invSelectAllFilterTip')}
+                onChange={onToggleAll}
+              />
+            )}
+          </th>
           <th>{t('iptProduct')}</th>
           {cols.partNumber && <th>{t('partNumber')}</th>}
           {cols.qty && <th className="num">{t('qty')}</th>}
