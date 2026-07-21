@@ -1,5 +1,11 @@
 # Railway dev + prod environments with prod→dev DB sync
 
+> **Update (2026-07-20): the `prod` branch is RETIRED.** The Railway
+> `production` environment now tracks **`main`** (switched via
+> `connect_service_source`), and `.github/workflows/deploy-frontend.yml`
+> deploys the prod Worker on `main` pushes. Releasing = one PR `dev`→`main`.
+> References to the `prod` branch below are historical.
+
 > **Status (2026-06-19): COMPLETE.**
 > - ✅ Git branches `prod` + `dev` pushed.
 > - ✅ Railway `production` env (backend `backend-production-7b10`, own Postgres,
@@ -90,7 +96,8 @@ GitHub branch  dev  ───► Railway env "dev"  ── backend ── Postgr
                                              sync service (cron)
 ```
 
-- **prod env** tracks the `prod` branch; **dev env** tracks the `dev` branch.
+- **prod env** tracks the `main` branch (since 2026-07-20; formerly the
+  retired `prod` branch); **dev env** tracks the `dev` branch.
   Each backend auto-deploys when its branch changes (watch patterns scope
   rebuilds to `apps/backend/**` + `packages/shared/**`).
 - **Sync is one-directional, prod → dev.** Dev's database is clobbered to mirror

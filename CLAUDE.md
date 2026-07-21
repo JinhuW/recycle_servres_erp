@@ -166,9 +166,11 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
   file; a domain attached only via the CF dashboard gets its DNS record +
   cert deleted by the next deploy → sitewide 523 while Railway stays green.
   See `docs/debug-notes/2026-07-13-cloudflare-worker-custom-domain-deleted.md`.
-- Pushes to `prod` and `dev` auto-deploy their Worker via
+- Pushes to `main` and `dev` auto-deploy their Worker via
   `.github/workflows/deploy-frontend.yml` (needs `CLOUDFLARE_API_TOKEN` repo
-  secret); the branch picks the target. The `uptime-monitor` Railway cron
+  secret); the branch picks the target (`main` → prod Worker). The Railway
+  production environment also tracks `main` (the `prod` branch is retired,
+  2026-07-20), so a `dev`→`main` merge is a full release. The `uptime-monitor` Railway cron
   (`deploy/railway-uptime/`) probes prod every 5 min as the backstop.
 
 ## Infrastructure (Terraform)
