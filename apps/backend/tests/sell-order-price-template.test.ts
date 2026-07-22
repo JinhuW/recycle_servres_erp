@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import ExcelJS from 'exceljs';
 import sharp from 'sharp';
 import app from '../src/index';
@@ -6,8 +6,9 @@ import { resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 import {
-  buildPriceTemplateWorkbook, makePriceTemplateThumbnail,
+  buildPriceTemplateWorkbook, makePriceTemplateThumbnail, fetchScanBytes,
 } from '../src/lib/sellOrderPriceTemplate';
+import type { Env } from '../src/types';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -136,13 +137,23 @@ describe('GET /api/sell-orders/:id/price-template', () => {
   });
 
   it('labels the price columns CNY on a CNY order', async () => {
-    const { token } = await loginAs(ALEX);
-    const id = await createOrder(token, { currency: 'CNY' });
-    const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
-    expect(res.status).toBe(200);
-    const ws = (await loadWorkbook(res)).worksheets[0];
-    const { cols } = findHeaderRow(ws);
-    expect(cols.get('Unit Price (CNY)')).toBeGreaterThan(0);
+    // Frankfurter is stubbed so the CNY order's FX snapshot never hits the
+    // network (same as sell-order-spreadsheet.test.ts).
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ amount: 1, base: 'USD', date: '2026-06-07', rates: { CNY: 7.2154 } }),
+      { status: 200 },
+    )));
+    try {
+      const { token } = await loginAs(ALEX);
+      const id = await createOrder(token, { currency: 'CNY' });
+      const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
+      expect(res.status).toBe(200);
+      const ws = (await loadWorkbook(res)).worksheets[0];
+      const { cols } = findHeaderRow(ws);
+      expect(cols.get('Unit Price (CNY)')).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('includes lines that have no part number', async () => {
@@ -199,6 +210,36 @@ describe('GET /api/sell-orders/:id/price-template', () => {
 
   it('makePriceTemplateThumbnail returns null for corrupt bytes', async () => {
     expect(await makePriceTemplateThumbnail(Buffer.from('not an image'))).toBeNull();
+  });
+});
+
+// Dev databases are nightly copies of prod, so stored R2 keys point at the
+// PROD bucket — unreadable with this environment's credentials. The stored
+// absolute delivery_url still resolves publicly, so it is the fallback.
+describe('fetchScanBytes', () => {
+  const noR2: Env = { JWT_SECRET: 'x' } as Env;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('falls back to fetching the public delivery URL when the key misses', async () => {
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })));
+    const buf = await fetchScanBytes(noR2, 'label-scans/prod-only.jpg', 'https://cdn.example.com/prod-only.jpg');
+    expect(buf).toEqual(Buffer.from(bytes));
+    expect(fetch).toHaveBeenCalledWith('https://cdn.example.com/prod-only.jpg', expect.anything());
+  });
+
+  it('never fetches stub data: URLs', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    expect(await fetchScanBytes(noR2, 'stub-123', 'data:image/placeholder;x')).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('returns null on HTTP errors and network failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));
+    expect(await fetchScanBytes(noR2, 'label-scans/x.jpg', 'https://cdn.example.com/x.jpg')).toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
+    expect(await fetchScanBytes(noR2, 'label-scans/x.jpg', 'https://cdn.example.com/x.jpg')).toBeNull();
   });
 
   it('404s unknown orders and 403s non-managers', async () => {

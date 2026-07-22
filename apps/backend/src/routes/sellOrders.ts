@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
 import { getDb } from '../db';
-import { uploadAttachment, deleteAttachment, getAttachmentBytes } from '../r2';
+import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
@@ -17,7 +17,7 @@ import {
   type SellOrderLineRow,
 } from '../services/sellOrderPriceImport';
 import {
-  buildPriceTemplateWorkbook, makePriceTemplateThumbnail,
+  buildPriceTemplateWorkbook, makePriceTemplateThumbnail, fetchScanBytes,
   type PriceTemplateThumbnail,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
@@ -609,16 +609,25 @@ sellOrders.get('/:id/price-template', async (c) => {
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
-      l.rpm, l.scan_image_id
+      l.rpm, l.scan_image_id,
+      img.delivery_url AS image_url
     FROM sell_order_lines sol
     LEFT JOIN order_lines l ON l.id = sol.inventory_id
+    LEFT JOIN LATERAL (
+      SELECT ls.delivery_url
+      FROM label_scans ls
+      WHERE ls.cf_image_id = l.scan_image_id
+      ORDER BY ls.created_at ASC
+      LIMIT 1
+    ) img ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `) as Record<string, unknown>[];
 
   type Group = {
     label: string; subLabel: string | null; partNumber: string | null;
-    condition: string | null; qty: number; scanImageId: string | null;
+    condition: string | null; qty: number;
+    scanImageId: string | null; imageUrl: string | null;
   };
   const groups = new Map<string, Group>();
   for (const r of rows) {
@@ -631,12 +640,16 @@ sellOrders.get('/:id/price-template', async (c) => {
     const existing = groups.get(key);
     if (existing) {
       existing.qty += Number(r.sell_qty ?? 0);
-      if (!existing.scanImageId && r.scan_image_id) existing.scanImageId = r.scan_image_id as string;
+      if (!existing.scanImageId && r.scan_image_id) {
+        existing.scanImageId = r.scan_image_id as string;
+        existing.imageUrl = (r.image_url as string | null) ?? null;
+      }
     } else {
       groups.set(key, {
         label, subLabel, partNumber: part, condition,
         qty: Number(r.sell_qty ?? 0),
         scanImageId: (r.scan_image_id as string | null) ?? null,
+        imageUrl: (r.image_url as string | null) ?? null,
       });
     }
   }
@@ -650,9 +663,9 @@ sellOrders.get('/:id/price-template', async (c) => {
     for (;;) {
       const i = cursor++;
       if (i >= list.length) return;
-      const scanImageId = list[i].scanImageId;
-      if (!scanImageId || i >= PRICE_TEMPLATE_MAX_IMAGES) continue;
-      const bytes = await getAttachmentBytes(c.env, scanImageId);
+      const { scanImageId, imageUrl } = list[i];
+      if ((!scanImageId && !imageUrl) || i >= PRICE_TEMPLATE_MAX_IMAGES) continue;
+      const bytes = await fetchScanBytes(c.env, scanImageId, imageUrl);
       if (bytes) thumbs[i] = await makePriceTemplateThumbnail(bytes);
     }
   }));

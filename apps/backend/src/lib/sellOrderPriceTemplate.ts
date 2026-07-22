@@ -8,6 +8,8 @@
 
 import sharp from 'sharp';
 import type ExcelJS from 'exceljs';
+import { getAttachmentBytes } from '../r2';
+import type { Env } from '../types';
 
 export type PriceTemplateThumbnail = {
   data: Buffer;
@@ -54,6 +56,34 @@ export async function makePriceTemplateThumbnail(
       width: Math.max(1, Math.round(info.width * scale)),
       height: Math.max(1, Math.round(info.height * scale)),
     };
+  } catch {
+    return null;
+  }
+}
+
+// Bytes for a label scan, best-effort. The S3 key is the fast path, but dev
+// databases are nightly copies of prod: their keys point at the PROD bucket,
+// which this environment's credentials can't read. The scan's stored absolute
+// delivery_url still resolves publicly, so it is the fallback — it also covers
+// legacy scans whose ids predate the R2 migration.
+const SCAN_FETCH_MAX_BYTES = 20 * 1024 * 1024;
+
+export async function fetchScanBytes(
+  env: Env,
+  storageKey: string | null,
+  deliveryUrl: string | null,
+): Promise<Buffer | null> {
+  if (storageKey) {
+    const bytes = await getAttachmentBytes(env, storageKey);
+    if (bytes) return bytes;
+  }
+  if (!deliveryUrl || !/^https:\/\//i.test(deliveryUrl)) return null;
+  try {
+    const res = await fetch(deliveryUrl, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > SCAN_FETCH_MAX_BYTES) return null;
+    return buf;
   } catch {
     return null;
   }
