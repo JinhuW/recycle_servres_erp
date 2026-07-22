@@ -17,8 +17,7 @@ import {
   type SellOrderLineRow,
 } from '../services/sellOrderPriceImport';
 import {
-  buildPriceTemplateWorkbook, makePriceTemplateThumbnail, fetchScanBytes,
-  type PriceTemplateThumbnail,
+  buildPriceTemplateWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
 import { searchSellableInventory } from '../services/sellableInventory';
@@ -26,7 +25,7 @@ import {
   buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
   type XlsxColumn, type XlsxSheet, type XlsxSection,
 } from '../lib/xlsx';
-import { invLabel, invSpec, GROUPED_LEAD_BY_CATEGORY } from './inventory';
+import { invLabel, GROUPED_LEAD_BY_CATEGORY } from './inventory';
 import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
@@ -628,12 +627,9 @@ function customerSlug(name: string | null): string {
 }
 
 // Vendor bid sheet: the same product grouping the edit form prices by
-// (part|label|condition, qty summed across warehouses), one row each, with an
-// embedded item photo and a blank Unit Price column. The vendor fills it and
-// the manager round-trips it through POST /:id/price-import/preview.
-const PRICE_TEMPLATE_MAX_IMAGES = 200;
-const THUMBNAIL_CONCURRENCY = 4;
-
+// (part|label|condition, qty summed across warehouses), one row each, with a
+// clickable item-photo URL and a blank Unit Price column. The vendor fills it
+// and the manager round-trips it through POST /:id/price-import/preview.
 sellOrders.get('/:id/price-template', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -656,7 +652,7 @@ sellOrders.get('/:id/price-template', async (c) => {
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
-      l.rpm, l.scan_image_id,
+      l.rpm,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
     LEFT JOIN order_lines l ON l.id = sol.inventory_id
@@ -672,50 +668,48 @@ sellOrders.get('/:id/price-template', async (c) => {
   `) as Record<string, unknown>[];
 
   type Group = {
-    label: string; subLabel: string | null; partNumber: string | null;
-    condition: string | null; qty: number;
-    scanImageId: string | null; imageUrl: string | null;
+    category: SoCategory; label: string; partNumber: string | null;
+    condition: string | null; qty: number; imageUrl: string | null;
+    specs: Record<string, string | number>;
   };
+  // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
+  // that would render as garbage text in the cell.
+  const publicUrl = (v: unknown): string | null =>
+    typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
+  const s = (v: unknown) => (v == null ? '' : String(v));
   const groups = new Map<string, Group>();
   for (const r of rows) {
     const hasInv = r.inv_id != null;
-    const label = hasInv ? invLabel(r) : String(r.sol_label ?? '');
-    const subLabel = (hasInv ? invSpec(r) : (r.sol_sub as string | null)) || null;
+    // Manual lines fold sub_label into the label — the sheet's spec columns
+    // only fill from an inventory row.
+    const label = hasInv
+      ? invLabel(r)
+      : [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
+    const rawCategory = s(r.category ?? r.sol_category);
+    const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
+      ? (rawCategory as SoCategory)
+      : 'Other';
     const part = (r.part_number ?? r.sol_part ?? null) as string | null;
     const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
     const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
     const existing = groups.get(key);
     if (existing) {
       existing.qty += Number(r.sell_qty ?? 0);
-      if (!existing.scanImageId && r.scan_image_id) {
-        existing.scanImageId = r.scan_image_id as string;
-        existing.imageUrl = (r.image_url as string | null) ?? null;
-      }
+      if (!existing.imageUrl) existing.imageUrl = publicUrl(r.image_url);
     } else {
       groups.set(key, {
-        label, subLabel, partNumber: part, condition,
+        category, label, partNumber: part, condition,
         qty: Number(r.sell_qty ?? 0),
-        scanImageId: (r.scan_image_id as string | null) ?? null,
-        imageUrl: (r.image_url as string | null) ?? null,
+        imageUrl: publicUrl(r.image_url),
+        specs: hasInv ? {
+          brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
+          type: s(r.type), classification: s(r.classification), rank: s(r.rank),
+          speed: s(r.speed), interface: s(r.interface), formFactor: s(r.form_factor),
+          health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
+        } : {},
       });
     }
   }
-  const list = [...groups.values()];
-
-  // Small worker pool: R2 fetch + sharp per product, never fatal — a broken
-  // image ships as a row without a photo.
-  const thumbs: (PriceTemplateThumbnail | null)[] = new Array(list.length).fill(null);
-  let cursor = 0;
-  await Promise.all(Array.from({ length: THUMBNAIL_CONCURRENCY }, async () => {
-    for (;;) {
-      const i = cursor++;
-      if (i >= list.length) return;
-      const { scanImageId, imageUrl } = list[i];
-      if ((!scanImageId && !imageUrl) || i >= PRICE_TEMPLATE_MAX_IMAGES) continue;
-      const bytes = await fetchScanBytes(c.env, scanImageId, imageUrl);
-      if (bytes) thumbs[i] = await makePriceTemplateThumbnail(bytes);
-    }
-  }));
 
   const buf = await buildPriceTemplateWorkbook(
     {
@@ -723,10 +717,7 @@ sellOrders.get('/:id/price-template', async (c) => {
       customerName: head.customer_name ?? '',
       currencyCode: head.currency_code,
     },
-    list.map((g, i) => ({
-      label: g.label, subLabel: g.subLabel, partNumber: g.partNumber,
-      condition: g.condition, qty: g.qty, thumbnail: thumbs[i],
-    })),
+    [...groups.values()],
   );
   const slug = customerSlug(head.customer_name);
   return xlsxResponse(

@@ -7,6 +7,13 @@
 > "type, rank, speed should be in an individual column". v1.24.1 briefly
 > collapsed them into one composed `Spec` field on a misread of that request
 > and was reverted in v1.24.2. Don't re-merge spec attributes into one column.
+>
+> **v1.25.0 extended the same rules to the vendor price template**
+> (`lib/sellOrderPriceTemplate.ts`): per-attribute spec columns (union of the
+> categories present, `SPEC_COLS_BY_CATEGORY`), and item photos as clickable
+> Image URL cells instead of embedded thumbnails (the sharp/R2 thumbnail
+> pipeline was removed; only `https:` URLs reach the sheet — seeded scans
+> carry `data:` stubs).
 
 ## Problem
 
