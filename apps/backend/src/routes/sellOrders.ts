@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
 import { getDb } from '../db';
-import { uploadAttachment, deleteAttachment } from '../r2';
+import { uploadAttachment, deleteAttachment, getAttachmentBytes } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
@@ -11,6 +11,15 @@ import {
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
 import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
+import {
+  parsePriceWorkbook, groupOrderProducts, PriceColumnsNotFoundError,
+  type SellOrderLineRow,
+} from '../services/sellOrderPriceImport';
+import {
+  buildPriceTemplateWorkbook, makePriceTemplateThumbnail,
+  type PriceTemplateThumbnail,
+} from '../lib/sellOrderPriceTemplate';
+import { canonPartNumberJs } from '../lib/part-number';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
   buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
@@ -539,15 +548,172 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     { name: 'Summary', columns: SO_SUMMARY_COLS, rows: summaryData },
     ...warehouseSheets,
   ]);
-  // Prefix the file with the customer so a downloads folder full of exports is
-  // scannable by who, not just by order id. Strip filesystem/header-hostile
-  // characters and collapse whitespace to a single dash. \p{L}\p{N} (not \w)
-  // keeps CJK names — most customers here are Chinese, and \w would erase them.
-  const slug = (head.customer_name ?? '')
+  const slug = customerSlug(head.customer_name);
+  return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));
+});
+
+// Prefix download filenames with the customer so a downloads folder full of
+// exports is scannable by who, not just by order id. Strip filesystem/header-
+// hostile characters and collapse whitespace to a single dash. \p{L}\p{N}
+// (not \w) keeps CJK names — most customers here are Chinese.
+function customerSlug(name: string | null): string {
+  return (name ?? '')
     .replace(/[^\p{L}\p{N}.\- ]+/gu, '')
     .trim()
     .replace(/\s+/g, '-');
-  return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));
+}
+
+// Vendor bid sheet: the same product grouping the edit form prices by
+// (part|label|condition, qty summed across warehouses), one row each, with an
+// embedded item photo and a blank Unit Price column. The vendor fills it and
+// the manager round-trips it through POST /:id/price-import/preview.
+const PRICE_TEMPLATE_MAX_IMAGES = 200;
+const THUMBNAIL_CONCURRENCY = 4;
+
+sellOrders.get('/:id/price-template', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null }[]>`
+    SELECT so.id, so.currency_code, c.name AS customer_name
+    FROM sell_orders so
+    JOIN customers c ON c.id = so.customer_id
+    WHERE so.id = ${id} LIMIT 1
+  `)[0];
+  if (!head) return c.json({ error: 'Not found' }, 404);
+
+  const rows = (await sql`
+    SELECT
+      sol.qty AS sell_qty,
+      sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
+      sol.category AS sol_category, sol.condition AS sol_condition,
+      l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
+      l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
+      l.part_number, l.chip_number, l.condition, l.health::float AS health,
+      l.rpm, l.scan_image_id
+    FROM sell_order_lines sol
+    LEFT JOIN order_lines l ON l.id = sol.inventory_id
+    WHERE sol.sell_order_id = ${id}
+    ORDER BY sol.position
+  `) as Record<string, unknown>[];
+
+  type Group = {
+    label: string; subLabel: string | null; partNumber: string | null;
+    condition: string | null; qty: number; scanImageId: string | null;
+  };
+  const groups = new Map<string, Group>();
+  for (const r of rows) {
+    const hasInv = r.inv_id != null;
+    const label = hasInv ? invLabel(r) : String(r.sol_label ?? '');
+    const subLabel = (hasInv ? invSpec(r) : (r.sol_sub as string | null)) || null;
+    const part = (r.part_number ?? r.sol_part ?? null) as string | null;
+    const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
+    const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.qty += Number(r.sell_qty ?? 0);
+      if (!existing.scanImageId && r.scan_image_id) existing.scanImageId = r.scan_image_id as string;
+    } else {
+      groups.set(key, {
+        label, subLabel, partNumber: part, condition,
+        qty: Number(r.sell_qty ?? 0),
+        scanImageId: (r.scan_image_id as string | null) ?? null,
+      });
+    }
+  }
+  const list = [...groups.values()];
+
+  // Small worker pool: R2 fetch + sharp per product, never fatal — a broken
+  // image ships as a row without a photo.
+  const thumbs: (PriceTemplateThumbnail | null)[] = new Array(list.length).fill(null);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: THUMBNAIL_CONCURRENCY }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= list.length) return;
+      const scanImageId = list[i].scanImageId;
+      if (!scanImageId || i >= PRICE_TEMPLATE_MAX_IMAGES) continue;
+      const bytes = await getAttachmentBytes(c.env, scanImageId);
+      if (bytes) thumbs[i] = await makePriceTemplateThumbnail(bytes);
+    }
+  }));
+
+  const buf = await buildPriceTemplateWorkbook(
+    {
+      id: head.id,
+      customerName: head.customer_name ?? '',
+      currencyCode: head.currency_code,
+    },
+    list.map((g, i) => ({
+      label: g.label, subLabel: g.subLabel, partNumber: g.partNumber,
+      condition: g.condition, qty: g.qty, thumbnail: thumbs[i],
+    })),
+  );
+  const slug = customerSlug(head.customer_name);
+  return xlsxResponse(
+    buf,
+    datedFilename(`${slug ? `${head.id}-${slug}` : head.id}-price-template`),
+  );
+});
+
+// Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how
+// its rows match this order's products — by canonical part number, never by
+// cell position. Writes nothing; the manager applies the matched prices
+// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit.
+const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+
+sellOrders.post('/:id/price-import/preview', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const head = (await sql<{ id: string; status: string; currency_code: string }[]>`
+    SELECT id, status, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
+  `)[0];
+  if (!head) return c.json({ error: 'Not found' }, 404);
+  // Same lock the edit form honors: a Done/Closed order's prices are final.
+  if (head.status === 'Done' || head.status === 'Closed') {
+    return c.json({ error: `prices are locked on a ${head.status} order` }, 409);
+  }
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+  if (file.size > PRICE_IMPORT_MAX_BYTES) {
+    return c.json({ error: `file too large (max ${PRICE_IMPORT_MAX_BYTES} bytes)` }, 413);
+  }
+
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  try {
+    await wb.xlsx.load(await file.arrayBuffer());
+  } catch {
+    return c.json({ error: 'not a valid .xlsx file' }, 400);
+  }
+
+  const lines = (await sql`
+    SELECT label, part_number, condition, qty,
+           unit_price::float AS unit_price,
+           source_unit_price::float AS source_unit_price
+    FROM sell_order_lines
+    WHERE sell_order_id = ${id}
+    ORDER BY position
+  `) as SellOrderLineRow[];
+  const products = groupOrderProducts(lines, head.currency_code === 'CNY');
+
+  try {
+    const preview = parsePriceWorkbook(wb, products);
+    return c.json({ currency: head.currency_code, ...preview });
+  } catch (e) {
+    if (e instanceof PriceColumnsNotFoundError) {
+      return c.json({ error: e.message, code: 'columns-not-found' }, 400);
+    }
+    throw e;
+  }
 });
 
 // Create a new sell order from a set of inventory lines. The manager picks

@@ -142,7 +142,10 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/attachments' ||
-  /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path);
+  /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
+  // Vendor bid sheets round-trip our own template, which embeds item photos —
+  // they routinely exceed the JSON cap. The route enforces its own 8 MB limit.
+  /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path);
 
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({

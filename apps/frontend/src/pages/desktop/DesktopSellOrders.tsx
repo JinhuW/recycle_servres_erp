@@ -23,6 +23,8 @@ import { CustomerPicker, CurrencyPicker, type Customer, type MemberOption } from
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
+import { PriceImportSection } from './SellOrderPriceImportDialog';
+import { applyPriceRows } from '../../lib/priceImport';
 
 type Currency = 'USD' | 'CNY';
 
@@ -526,6 +528,18 @@ function DownloadMenu({ orderId }: { orderId: string }) {
               <span className="txt">
                 <b>{t('soDownloadSpreadsheet')}</b>
                 <small>{t('soDownloadSpreadsheetHint')}</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="popmenu-item"
+              role="menuitem"
+              onClick={() => download(`/api/sell-orders/${orderId}/price-template`, `${orderId}-price-template.xlsx`)}
+            >
+              <span className="ico"><Icon name="dollar" size={17} /></span>
+              <span className="txt">
+                <b>{t('soDownloadPriceTemplate')}</b>
+                <small>{t('soDownloadPriceTemplateHint')}</small>
               </span>
             </button>
           </div>
@@ -1142,6 +1156,16 @@ function SellOrderDetail({
                 <div className="help" style={{ marginTop: 8 }}>
                   {t('soEditReplacesHint')}
                 </div>
+              )}
+
+              {editable && (
+                <PriceImportSection
+                  orderId={order.id}
+                  currency={draft.currency}
+                  locale={locale}
+                  onApply={rows =>
+                    setDraft(d => d && { ...d, lines: applyPriceRows(d.lines, rows) })}
+                />
               )}
 
               <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
