@@ -1,29 +1,27 @@
 // Vendor bid sheet for one sell order: a styled workbook the manager emails
 // out and the vendor fills in. Built directly with exceljs rather than
 // lib/xlsx.ts — the flat sheet builder there has no notion of merged
-// instruction rows, embedded images, per-cell protection, or formulas.
+// instruction rows, per-cell protection, or formulas.
+//
+// Photos ship as clickable Image URL cells, not embedded thumbnails
+// (user-requested 2026-07-22): links keep the file small and always show the
+// full-size scan. Spec attributes get individual columns (same request as the
+// order spreadsheet — never re-merge them into one composed field); the
+// column set is the union of the categories actually present on the order.
 //
 // Everything except the Unit Price column is locked; the import parser still
-// never relies on that structure (it re-locates columns by header text).
-
-import sharp from 'sharp';
-import type ExcelJS from 'exceljs';
-import { getAttachmentBytes } from '../r2';
-import type { Env } from '../types';
-
-export type PriceTemplateThumbnail = {
-  data: Buffer;
-  width: number;
-  height: number;
-};
+// never relies on that structure (it re-locates columns by header text —
+// safe here because no spec header matches its part/price heuristics).
 
 export type PriceTemplateProduct = {
+  category: string;
   label: string;
-  subLabel: string | null;
   partNumber: string | null;
   condition: string | null;
   qty: number;
-  thumbnail: PriceTemplateThumbnail | null;
+  imageUrl: string | null;
+  // Keyed by SPEC_COLS_BY_CATEGORY keys; absent/blank for manual lines.
+  specs: Record<string, string | number>;
 };
 
 export type PriceTemplateHead = {
@@ -32,69 +30,59 @@ export type PriceTemplateHead = {
   currencyCode: string;
 };
 
-// Rendered at half resolution so photos stay crisp on hi-DPI screens.
-const THUMB_SOURCE_PX = 192;
-const THUMB_DISPLAY_MAX_PX = 96;
+type SpecCol = { header: string; key: string; width: number };
 
-export async function makePriceTemplateThumbnail(
-  bytes: Buffer,
-): Promise<PriceTemplateThumbnail | null> {
-  try {
-    const { data, info } = await sharp(bytes)
-      .rotate()
-      .resize({
-        width: THUMB_SOURCE_PX,
-        height: THUMB_SOURCE_PX,
-        fit: 'inside',
-        withoutEnlargement: true,
-      })
-      .jpeg({ quality: 70 })
-      .toBuffer({ resolveWithObject: true });
-    const scale = Math.min(1, THUMB_DISPLAY_MAX_PX / Math.max(info.width, info.height));
-    return {
-      data,
-      width: Math.max(1, Math.round(info.width * scale)),
-      height: Math.max(1, Math.round(info.height * scale)),
-    };
-  } catch {
-    return null;
-  }
-}
-
-// Bytes for a label scan, best-effort. The S3 key is the fast path, but dev
-// databases are nightly copies of prod: their keys point at the PROD bucket,
-// which this environment's credentials can't read. The scan's stored absolute
-// delivery_url still resolves publicly, so it is the fallback — it also covers
-// legacy scans whose ids predate the R2 migration.
-const SCAN_FETCH_MAX_BYTES = 20 * 1024 * 1024;
-
-export async function fetchScanBytes(
-  env: Env,
-  storageKey: string | null,
-  deliveryUrl: string | null,
-): Promise<Buffer | null> {
-  if (storageKey) {
-    const bytes = await getAttachmentBytes(env, storageKey);
-    if (bytes) return bytes;
-  }
-  if (!deliveryUrl || !/^https:\/\//i.test(deliveryUrl)) return null;
-  try {
-    const res = await fetch(deliveryUrl, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length === 0 || buf.length > SCAN_FETCH_MAX_BYTES) return null;
-    return buf;
-  } catch {
-    return null;
-  }
-}
+// Same vocabulary as the order spreadsheet's category tabs. Shared columns
+// (Brand, Capacity, Interface…) dedupe by key when categories mix.
+const SPEC_COLS_BY_CATEGORY: Record<string, SpecCol[]> = {
+  RAM: [
+    { header: 'Brand',       key: 'brand',          width: 14 },
+    { header: 'Capacity',    key: 'capacity',       width: 10 },
+    { header: 'Gen',         key: 'generation',     width: 8 },
+    { header: 'Type',        key: 'type',           width: 10 },
+    { header: 'Class',       key: 'classification', width: 10 },
+    { header: 'Rank',        key: 'rank',           width: 8 },
+    { header: 'Speed',       key: 'speed',          width: 10 },
+  ],
+  SSD: [
+    { header: 'Brand',       key: 'brand',          width: 14 },
+    { header: 'Capacity',    key: 'capacity',       width: 10 },
+    { header: 'Interface',   key: 'interface',      width: 12 },
+    { header: 'Form factor', key: 'formFactor',     width: 12 },
+    { header: 'Health %',    key: 'health',         width: 10 },
+  ],
+  HDD: [
+    { header: 'Brand',       key: 'brand',          width: 14 },
+    { header: 'Capacity',    key: 'capacity',       width: 10 },
+    { header: 'Interface',   key: 'interface',      width: 12 },
+    { header: 'Form factor', key: 'formFactor',     width: 12 },
+    { header: 'RPM',         key: 'rpm',            width: 8 },
+    { header: 'Health %',    key: 'health',         width: 10 },
+  ],
+  Other: [],
+};
 
 const HEADER_ROW = 5;
-const COLS = { index: 1, photo: 2, item: 3, detail: 4, part: 5, condition: 6, qty: 7, price: 8, total: 9 };
 
 const BAND_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } } as const;
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } } as const;
 const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7C2' } } as const;
+
+// Union of spec columns for the categories present, in RAM → SSD → HDD order.
+function specColsFor(products: PriceTemplateProduct[]): SpecCol[] {
+  const present = new Set(products.map((p) => p.category));
+  const seen = new Set<string>();
+  const cols: SpecCol[] = [];
+  for (const cat of ['RAM', 'SSD', 'HDD']) {
+    if (!present.has(cat)) continue;
+    for (const col of SPEC_COLS_BY_CATEGORY[cat]) {
+      if (seen.has(col.key)) continue;
+      seen.add(col.key);
+      cols.push(col);
+    }
+  }
+  return cols;
+}
 
 export async function buildPriceTemplateWorkbook(
   head: PriceTemplateHead,
@@ -105,15 +93,32 @@ export async function buildPriceTemplateWorkbook(
   const ws = wb.addWorksheet('Price Sheet', {
     views: [{ state: 'frozen', ySplit: HEADER_ROW }],
   });
-  ws.columns = [
-    { width: 5 }, { width: 14 }, { width: 34 }, { width: 28 }, { width: 24 },
-    { width: 18 }, { width: 8 }, { width: 16 }, { width: 14 },
-  ];
 
   const cur = head.currencyCode;
   const currencyLabel = cur === 'CNY' ? '人民币 CNY' : 'USD';
 
-  ws.mergeCells(1, 1, 1, COLS.total);
+  // The spec block sits between Item and Part Number, so every later column
+  // index depends on how many categories the order mixes.
+  const specCols = specColsFor(products);
+  const IDX = {
+    index: 1,
+    image: 2,
+    item: 3,
+    specStart: 4,
+    part: 4 + specCols.length,
+    condition: 5 + specCols.length,
+    qty: 6 + specCols.length,
+    price: 7 + specCols.length,
+    total: 8 + specCols.length,
+  };
+
+  ws.columns = [
+    { width: 5 }, { width: 40 }, { width: 34 },
+    ...specCols.map((c) => ({ width: c.width })),
+    { width: 24 }, { width: 18 }, { width: 8 }, { width: 16 }, { width: 14 },
+  ];
+
+  ws.mergeCells(1, 1, 1, IDX.total);
   const band = ws.getCell(1, 1);
   band.value = `Recycle Servers · Sell Order ${head.id} — ${head.customerName}`;
   band.fill = BAND_FILL;
@@ -121,7 +126,7 @@ export async function buildPriceTemplateWorkbook(
   band.alignment = { vertical: 'middle' };
   ws.getRow(1).height = 30;
 
-  ws.mergeCells(2, 1, 2, COLS.total);
+  ws.mergeCells(2, 1, 2, IDX.total);
   const instr = ws.getCell(2, 1);
   // Always bilingual: the backend has no per-user i18n and CNY-order vendors
   // are typically Chinese-speaking.
@@ -136,9 +141,10 @@ export async function buildPriceTemplateWorkbook(
   ws.getCell(3, 1).font = { size: 10, color: { argb: 'FF6B7280' } };
 
   const headers: [number, string][] = [
-    [COLS.index, '#'], [COLS.photo, 'Photo'], [COLS.item, 'Item'], [COLS.detail, 'Detail'],
-    [COLS.part, 'Part Number'], [COLS.condition, 'Condition'], [COLS.qty, 'Qty'],
-    [COLS.price, `Unit Price (${cur})`], [COLS.total, `Line Total (${cur})`],
+    [IDX.index, '#'], [IDX.image, 'Image URL'], [IDX.item, 'Item'],
+    ...specCols.map((c, i): [number, string] => [IDX.specStart + i, c.header]),
+    [IDX.part, 'Part Number'], [IDX.condition, 'Condition'], [IDX.qty, 'Qty'],
+    [IDX.price, `Unit Price (${cur})`], [IDX.total, `Line Total (${cur})`],
   ];
   const headerRow = ws.getRow(HEADER_ROW);
   for (const [col, text] of headers) {
@@ -152,41 +158,34 @@ export async function buildPriceTemplateWorkbook(
   products.forEach((p, i) => {
     const r = HEADER_ROW + 1 + i;
     const row = ws.getRow(r);
-    row.getCell(COLS.index).value = i + 1;
-    row.getCell(COLS.item).value = p.label;
-    row.getCell(COLS.detail).value = p.subLabel ?? '';
-    row.getCell(COLS.part).value = p.partNumber ?? '';
-    row.getCell(COLS.condition).value = p.condition ?? '';
-    const qtyCell = row.getCell(COLS.qty);
+    row.getCell(IDX.index).value = i + 1;
+    row.getCell(IDX.item).value = p.label;
+    specCols.forEach((c, j) => {
+      row.getCell(IDX.specStart + j).value = p.specs[c.key] ?? '';
+    });
+    row.getCell(IDX.part).value = p.partNumber ?? '';
+    row.getCell(IDX.condition).value = p.condition ?? '';
+    const qtyCell = row.getCell(IDX.qty);
     qtyCell.value = p.qty;
     qtyCell.numFmt = '#,##0';
 
     // Blank bid cell: existing order prices must not leak to the vendor.
-    const priceCell = row.getCell(COLS.price);
+    const priceCell = row.getCell(IDX.price);
     priceCell.numFmt = '#,##0.00';
     priceCell.fill = PRICE_FILL;
     priceCell.protection = { locked: false };
 
-    const totalCell = row.getCell(COLS.total);
-    const qtyRef = `${ws.getColumn(COLS.qty).letter}${r}`;
-    const priceRef = `${ws.getColumn(COLS.price).letter}${r}`;
+    const totalCell = row.getCell(IDX.total);
+    const qtyRef = `${ws.getColumn(IDX.qty).letter}${r}`;
+    const priceRef = `${ws.getColumn(IDX.price).letter}${r}`;
     totalCell.value = { formula: `${qtyRef}*${priceRef}` };
     totalCell.numFmt = '#,##0.00';
 
     row.alignment = { vertical: 'middle' };
-    if (p.thumbnail) {
-      // exceljs ships its own Buffer alias that predates Node's generic Buffer.
-      const imgId = wb.addImage({
-        buffer: p.thumbnail.data as unknown as ExcelJS.Buffer,
-        extension: 'jpeg',
-      });
-      // tl is zero-based; nudge off the cell edge so borders stay visible.
-      ws.addImage(imgId, {
-        tl: { col: COLS.photo - 1 + 0.05, row: r - 1 + 0.05 },
-        ext: { width: p.thumbnail.width, height: p.thumbnail.height },
-      });
-      // Row height is in points (~0.75 px) — size for the display box.
-      row.height = Math.max(20, Math.round(p.thumbnail.height * 0.78));
+    if (p.imageUrl) {
+      const imageCell = row.getCell(IDX.image);
+      imageCell.value = { text: p.imageUrl, hyperlink: p.imageUrl };
+      imageCell.font = { color: { argb: 'FF2563EB' }, underline: true };
     }
   });
 

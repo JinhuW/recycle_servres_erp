@@ -1,14 +1,10 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
-import sharp from 'sharp';
 import app from '../src/index';
 import { resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import {
-  buildPriceTemplateWorkbook, makePriceTemplateThumbnail, fetchScanBytes,
-} from '../src/lib/sellOrderPriceTemplate';
-import type { Env } from '../src/types';
+import { buildPriceTemplateWorkbook } from '../src/lib/sellOrderPriceTemplate';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -176,70 +172,61 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(items).toContain('Mystery caddy');
   });
 
-  it('degrades to no images when R2 is unconfigured (stub scans)', async () => {
-    // Test env has no R2 creds, and seeded scan keys are stubs — the template
-    // must still download, just without embedded photos.
+  it('shows spec columns for the categories on the order only', async () => {
+    const { token } = await loginAs(ALEX);
+    // RAM + SSD mix: union of both spec sets, no HDD-only RPM column.
+    const mixed = await createOrder(token);
+    const mixedWs = (await loadWorkbook(
+      await getRaw(`/api/sell-orders/${mixed}/price-template`, token),
+    )).worksheets[0];
+    const { cols: mixedCols } = findHeaderRow(mixedWs);
+    for (const h of ['Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Interface', 'Form factor', 'Health %']) {
+      expect(mixedCols.get(h)).toBeGreaterThan(0);
+    }
+    expect(mixedCols.has('RPM')).toBe(false);
+    expect(mixedCols.has('Detail')).toBe(false);
+
+    const ramOnly = await createOrder(token, {
+      lines: [{ category: 'RAM', label: 'DIMM A', partNumber: 'TPL-R1', qty: 1, unitPrice: 10, warehouseId: 'WH-LA1' }],
+    });
+    const ramWs = (await loadWorkbook(
+      await getRaw(`/api/sell-orders/${ramOnly}/price-template`, token),
+    )).worksheets[0];
+    const { cols: ramCols } = findHeaderRow(ramWs);
+    expect(ramCols.get('Speed')).toBeGreaterThan(0);
+    expect(ramCols.has('Interface')).toBe(false);
+  });
+
+  it('never embeds images and links the photo as an Image URL hyperlink', async () => {
+    // Route path: seeded scans carry stub data: URLs, which must not reach the
+    // sheet — cells stay blank and nothing is embedded.
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
     expect(res.status).toBe(200);
     const ws = (await loadWorkbook(res)).worksheets[0];
     expect(ws.getImages()).toHaveLength(0);
-  });
+    expect(findHeaderRow(ws).cols.get('Image URL')).toBe(2);
 
-  it('embeds a thumbnail and sizes the row for it', async () => {
-    // 800×600 source → thumbnail capped at 96 px on the long edge.
-    const photo = await sharp({
-      create: { width: 800, height: 600, channels: 3, background: { r: 200, g: 30, b: 30 } },
-    }).jpeg().toBuffer();
-    const thumb = await makePriceTemplateThumbnail(photo);
-    expect(thumb).not.toBeNull();
-    expect(Math.max(thumb!.width, thumb!.height)).toBeLessThanOrEqual(96);
-
+    // Builder path: a real https URL renders as a clickable hyperlink cell.
     const buf = await buildPriceTemplateWorkbook(
       { id: 'SL-IMG', customerName: 'Acme', currencyCode: 'USD' },
-      [{ label: 'DIMM A', subLabel: null, partNumber: 'TPL-A1', condition: null, qty: 2, thumbnail: thumb }],
+      [{
+        category: 'RAM', label: 'DIMM A', partNumber: 'TPL-A1', condition: null,
+        qty: 2, imageUrl: 'https://static.recycleservers.com/label-scans/x.jpg',
+        specs: { brand: 'Samsung', speed: 3200 },
+      }],
     );
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf as unknown as ArrayBuffer);
-    const ws = wb.worksheets[0];
-    expect(ws.getImages()).toHaveLength(1);
-    const { row: headerRow } = findHeaderRow(ws);
-    expect(ws.getRow(headerRow + 1).height).toBeGreaterThan(20);
-  });
-
-  it('makePriceTemplateThumbnail returns null for corrupt bytes', async () => {
-    expect(await makePriceTemplateThumbnail(Buffer.from('not an image'))).toBeNull();
-  });
-});
-
-// Dev databases are nightly copies of prod, so stored R2 keys point at the
-// PROD bucket — unreadable with this environment's credentials. The stored
-// absolute delivery_url still resolves publicly, so it is the fallback.
-describe('fetchScanBytes', () => {
-  const noR2: Env = { JWT_SECRET: 'x' } as Env;
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('falls back to fetching the public delivery URL when the key misses', async () => {
-    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })));
-    const buf = await fetchScanBytes(noR2, 'label-scans/prod-only.jpg', 'https://cdn.example.com/prod-only.jpg');
-    expect(buf).toEqual(Buffer.from(bytes));
-    expect(fetch).toHaveBeenCalledWith('https://cdn.example.com/prod-only.jpg', expect.anything());
-  });
-
-  it('never fetches stub data: URLs', async () => {
-    const spy = vi.fn();
-    vi.stubGlobal('fetch', spy);
-    expect(await fetchScanBytes(noR2, 'stub-123', 'data:image/placeholder;x')).toBeNull();
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it('returns null on HTTP errors and network failures', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));
-    expect(await fetchScanBytes(noR2, 'label-scans/x.jpg', 'https://cdn.example.com/x.jpg')).toBeNull();
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
-    expect(await fetchScanBytes(noR2, 'label-scans/x.jpg', 'https://cdn.example.com/x.jpg')).toBeNull();
+    const built = wb.worksheets[0];
+    expect(built.getImages()).toHaveLength(0);
+    const { row: headerRow, cols } = findHeaderRow(built);
+    const cell = built.getRow(headerRow + 1).getCell(cols.get('Image URL')!);
+    const v = cell.value as { text?: string; hyperlink?: string };
+    expect(v?.hyperlink).toBe('https://static.recycleservers.com/label-scans/x.jpg');
+    expect(v?.text).toBe('https://static.recycleservers.com/label-scans/x.jpg');
+    expect(String(built.getRow(headerRow + 1).getCell(cols.get('Brand')!).value)).toBe('Samsung');
   });
 
   it('404s unknown orders and 403s non-managers', async () => {
