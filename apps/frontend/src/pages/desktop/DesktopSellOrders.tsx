@@ -1235,15 +1235,16 @@ function SellOrderDetail({
                 <div className="so-row total">
                   <span>
                     {t('eoTotal')}
-                    {/* Negotiated-total pencil — view mode only. Edit mode
-                        already lets the user retype line prices, and mixing
-                        the two would race unsaved edits against the saved-line
-                        proration. */}
-                    {!editable && !locked && !adjusting && (
+                    {/* Negotiated-total pencil. The proration runs on the
+                        SAVED line set server-side and the reload rebuilds the
+                        draft, so in edit mode it stays disabled while there
+                        are unsaved changes — otherwise they'd be discarded. */}
+                    {!locked && !adjusting && (
                       <button
                         className="btn icon sm"
-                        title={t('soAdjustTotal')}
+                        title={editable && dirty ? t('soAdjustSaveFirst') : t('soAdjustTotal')}
                         aria-label={t('soAdjustTotal')}
+                        disabled={!!(editable && dirty)}
                         style={{ marginLeft: 6, verticalAlign: 'middle' }}
                         onClick={() => {
                           setAdjustInput(String(order.nativeTotal));
@@ -1290,7 +1291,11 @@ function SellOrderDetail({
                     </span>
                   ) : (
                     <span className="mono">
-                      {!editable && order.priceAdjustment && (
+                      {/* Strikethrough + badge stay visible in edit mode until
+                          the draft's lines diverge from the saved (adjusted)
+                          set — then the baseline no longer describes what's on
+                          screen. */}
+                      {order.priceAdjustment && !(editable && dirty) && (
                         <s style={{ color: 'var(--fg-subtle)', fontWeight: 400, marginRight: 8 }}>
                           {fmtMoney(order.priceAdjustment.preAdjustNativeTotal, draftCurrency, locale)}
                         </s>
@@ -1302,7 +1307,7 @@ function SellOrderDetail({
                     </span>
                   )}
                 </div>
-                {!editable && order.priceAdjustment && !adjusting && (
+                {order.priceAdjustment && !(editable && dirty) && !adjusting && (
                   <div className="so-row" style={{ fontSize: 11.5 }}>
                     <span />
                     <span
