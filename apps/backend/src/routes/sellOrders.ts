@@ -26,7 +26,7 @@ import {
   buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
   type XlsxColumn, type XlsxSheet, type XlsxSection,
 } from '../lib/xlsx';
-import { invLabel, invSpec } from './inventory';
+import { invLabel, invSpec, GROUPED_LEAD_BY_CATEGORY } from './inventory';
 import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
@@ -396,34 +396,27 @@ sellOrders.get('/:id/packing-list', async (c) => {
 });
 
 // Per-order spreadsheet. A sell order mixes categories whose specs differ —
-// RAM has class/rank/speed, SSD has interface/health — so the workbook
-// carries one detail tab per category (RAM / SSD / HDD / Other, skipped when
-// empty), plus a Summary tab of stacked per-category sections: one aggregated
-// row per part number, bold per-section subtotals, and an order total.
-// Warehouse is a detail column (the per-warehouse tabs this replaced live on
-// in the packing list). Manager-only like every route here.
+// RAM has gen/rank/speed, SSD has interface/health — so the workbook carries
+// one detail tab per category (RAM / SSD / HDD / Other, skipped when empty)
+// with the Inventory grouped export's granular spec columns, plus a Summary
+// tab of stacked per-category sections: one aggregated row per part number,
+// bold per-section subtotals, and an order total. Warehouse is a detail
+// column (the per-warehouse tabs this replaced live on in the packing list).
+// Manager-only like every route here.
 const SO_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 type SoCategory = (typeof SO_CATEGORY_ORDER)[number];
 
-// The item's specs stay composed into ONE Spec field per row (invSpec — e.g.
-// RAM 'RDIMM · 2Rx8 · 3200MHz', SSD 'SATA · 2.5in · 98%') rather than one
-// column per attribute — user-requested format. `Item` (invLabel) keeps
-// manual, non-inventory-linked lines identifiable: they carry the line's own
-// label/sub_label snapshot in Item/Spec.
-const SO_ITEM_COLS: XlsxColumn[] = [
-  { header: 'Item',         key: 'item',      width: 30 },
-  { header: 'Spec',         key: 'spec',      width: 26 },
-  { header: 'Part #',       key: 'part',      width: 22 },
-];
-// RAM is the only category with per-row chip numbers.
-const SO_CHIP_COL: XlsxColumn = { header: 'Chip #', key: 'chip', width: 22 };
-const SO_CONDITION_COL: XlsxColumn = { header: 'Condition', key: 'condition', width: 12 };
+// `Item` (invLabel) keeps manual, non-inventory-linked lines identifiable —
+// their granular spec cells are blank. `Other` drops it: its Description
+// column already carries the same fallback string.
+const SO_ITEM_COL: XlsxColumn = { header: 'Item', key: 'item', width: 30 };
 
 const SO_DETAIL_HEAD: XlsxColumn[] = [
   { header: 'ID',           key: 'id',        width: 12 },
   { header: 'Date',         key: 'date',      width: 12 },
 ];
 const SO_DETAIL_TAIL: XlsxColumn[] = [
+  { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
   // The realized sale price on this order.
   { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
@@ -448,16 +441,13 @@ const SO_SUMMARY_TAIL: XlsxColumn[] = [
 
 const soDetailCols = (cat: SoCategory): XlsxColumn[] => [
   ...SO_DETAIL_HEAD,
-  ...SO_ITEM_COLS,
-  ...(cat === 'RAM' ? [SO_CHIP_COL] : []),
-  { header: 'Warehouse',    key: 'warehouse', width: 12 },
-  SO_CONDITION_COL,
+  ...(cat === 'Other' ? [] : [SO_ITEM_COL]),
+  ...GROUPED_LEAD_BY_CATEGORY[cat],
   ...SO_DETAIL_TAIL,
 ];
 const soSummaryCols = (cat: SoCategory): XlsxColumn[] => [
-  ...SO_ITEM_COLS,
-  ...(cat === 'RAM' ? [SO_CHIP_COL] : []),
-  SO_CONDITION_COL,
+  ...(cat === 'Other' ? [] : [SO_ITEM_COL]),
+  ...GROUPED_LEAD_BY_CATEGORY[cat],
   ...SO_SUMMARY_TAIL,
 ];
 
@@ -529,13 +519,27 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
       ? (rawCategory as SoCategory)
       : 'Other';
+    // Manual lines fold sub_label into the human-readable column — the tabs
+    // have no generic Spec column to carry the snapshot anymore.
+    const fallback = [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
     return {
       warehouse: (r.warehouse_short ?? '') as string,
       id: hasInv ? String(r.inv_id).slice(0, 8) : '',
       date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
       category,
-      item: hasInv ? invLabel(r) : (r.sol_label ?? ''),
-      spec: hasInv ? invSpec(r) : (r.sol_sub ?? ''),
+      item: hasInv ? invLabel(r) : fallback,
+      description: hasInv ? (r.description ?? '') : fallback,
+      brand: r.brand ?? '',
+      capacity: r.capacity ?? '',
+      generation: r.generation ?? '',
+      type: r.type ?? '',
+      classification: r.classification ?? '',
+      rank: r.rank ?? '',
+      speed: r.speed ?? '',
+      interface: r.interface ?? '',
+      formFactor: r.form_factor ?? '',
+      health: r.health ?? '',
+      rpm: r.rpm ?? '',
       part: r.part_number ?? r.sol_part ?? '',
       chip: r.chip_number ?? '',
       condition: r.condition ?? r.sol_condition ?? '',

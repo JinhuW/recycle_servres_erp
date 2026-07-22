@@ -211,7 +211,9 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Submitted by', key: 'submitter',  width: 22 },
 ];
 
-const GROUPED_LEAD_BY_CATEGORY: Record<string, XlsxColumn[]> = {
+// Exported so the sell-order spreadsheet renders the same per-category spec
+// columns — a sold row should read identically to its source stock row.
+export const GROUPED_LEAD_BY_CATEGORY: Record<string, XlsxColumn[]> = {
   RAM: [
     { header: 'Part #',      key: 'part',           width: 22 },
     { header: 'Chip #',      key: 'chip',           width: 22 },
