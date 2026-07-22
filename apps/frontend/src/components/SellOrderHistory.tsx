@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
-import { fmtDate, relTime, fmtUSD } from '../lib/format';
+import { fmtDate, relTime, fmtUSD, fmtMoney } from '../lib/format';
 import { useT } from '../lib/i18n';
 import type { SellOrderEvent } from '../lib/types';
 
@@ -19,6 +19,7 @@ const KIND_ICON: Record<SellOrderEvent['kind'], IconName> = {
   line_removed:        'trash',
   line_edited:         'edit',
   meta_changed:        'settings',
+  price_adjusted:      'dollar',
   status_meta_changed: 'paperclip',
   archived:            'box',
   unarchived:          'rotate',
@@ -34,6 +35,7 @@ const KIND_TONE: Record<SellOrderEvent['kind'], Tone> = {
   line_removed:        'warn',
   line_edited:         'info',
   meta_changed:        'muted',
+  price_adjusted:      'warn',
   status_meta_changed: 'muted',
   archived:            'muted',
   unarchived:          'info',
@@ -173,6 +175,15 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
           </ul>
         </>
       );
+    }
+    case 'price_adjusted': {
+      const currency = typeof d.currency === 'string' ? d.currency : 'USD';
+      const from = typeof d.fromTotal === 'number' ? fmtMoney(d.fromTotal, currency, locale) : '—';
+      const to   = typeof d.toTotal === 'number' ? fmtMoney(d.toTotal, currency, locale) : '—';
+      const pct  = typeof d.pct === 'number'
+        ? ` (${d.pct > 0 ? '+' : ''}${d.pct}%)`
+        : '';
+      return <>{t('historyPriceAdjusted')}: <b>{from}</b> → <b>{to}</b>{pct}</>;
     }
     case 'status_meta_changed': {
       const status = lifecycleLabel(t, String(d.status));

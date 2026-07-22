@@ -10,6 +10,7 @@ import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
+import { prorateLines, validateTarget } from '../services/sellOrderPriceAdjust';
 import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
 import {
   parsePriceWorkbook, groupOrderProducts, PriceColumnsNotFoundError,
@@ -81,6 +82,7 @@ sellOrders.get('/', async (c) => {
   const rows = await sql`
     SELECT
       so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.currency_code,
+      (so.adjusted_at IS NOT NULL) AS adjusted,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       pu.name AS payment_received_by_name,
       COUNT(sol.id)::int                                AS line_count,
@@ -115,6 +117,7 @@ sellOrders.get('/', async (c) => {
     // inbox sorts apples-to-apples regardless of each order's source currency.
     subtotal: r.subtotal,
     total: r.subtotal,
+    adjusted: r.adjusted as boolean,
   }));
   return c.json({
     rows: shaped,
@@ -208,14 +211,19 @@ sellOrders.get('/:id', async (c) => {
     customer_region: string;
     created_by: string | null;
     payment_received_by: string | null; payment_received_by_name: string | null;
+    pre_adjust_native_total: number | null; adjusted_at: string | null;
+    adjusted_by: string | null; adjusted_by_name: string | null;
   }[]>`
     SELECT so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.close_reason_id,
            so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
            so.created_by, so.payment_received_by, pu.name AS payment_received_by_name,
+           so.pre_adjust_native_total::float AS pre_adjust_native_total,
+           so.adjusted_at, so.adjusted_by, au.name AS adjusted_by_name,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     LEFT JOIN users pu ON pu.id = so.payment_received_by
+    LEFT JOIN users au ON au.id = so.adjusted_by
     WHERE so.id = ${id} LIMIT 1
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
@@ -286,6 +294,15 @@ sellOrders.get('/:id', async (c) => {
       currency: head.currency_code,
       fxRateToUsd: head.fx_rate_to_usd,
       fxSource: head.fx_source,
+      priceAdjustment: head.pre_adjust_native_total != null
+        ? {
+            preAdjustNativeTotal: head.pre_adjust_native_total,
+            adjustedAt: head.adjusted_at,
+            adjustedBy: head.adjusted_by
+              ? { id: head.adjusted_by, name: head.adjusted_by_name }
+              : null,
+          }
+        : null,
       customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
       lines: lines.map(l => ({
         id: l.id, category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
@@ -913,6 +930,15 @@ sellOrders.patch('/:id', async (c) => {
         payment_received_by = CASE WHEN ${body.paymentReceivedBy !== undefined}
                                    THEN ${body.paymentReceivedBy ?? null}::uuid
                                    ELSE payment_received_by END,
+        -- A line rewrite replaces the priced set wholesale, so the negotiated
+        -- baseline no longer describes this order — clear the adjustment badge.
+        -- The price_adjusted events stay in the immutable timeline.
+        pre_adjust_native_total = CASE WHEN ${body.lines !== undefined}
+                                       THEN NULL ELSE pre_adjust_native_total END,
+        adjusted_at    = CASE WHEN ${body.lines !== undefined}
+                              THEN NULL ELSE adjusted_at END,
+        adjusted_by    = CASE WHEN ${body.lines !== undefined}
+                              THEN NULL ELSE adjusted_by END,
         updated_at     = NOW()
       WHERE id = ${id}
     `;
@@ -1176,6 +1202,110 @@ const META_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed'])
 // sell_orders.close_reason_id (migration 0057) must list the same values;
 // adding a reason means extending CLOSE_REASON_IDS and widening the CHECK.
 const CLOSE_REASONS = new Set<string>(CLOSE_REASON_IDS);
+
+// Statuses in which the negotiated final total may still change. Done is the
+// sold historical record and Closed is frozen until reopened — same reasoning
+// as the PATCH structural-edit lock, kept next to ALLOWED_TRANSITIONS per the
+// status-guard convention (CLAUDE.md).
+const ADJUSTABLE_STATUSES = new Set(['Draft', 'Shipped', 'Awaiting payment']);
+
+// Negotiated final-price adjustment: the buyer names one final total and we
+// prorate the delta across line unit prices server-side (client rounding
+// could break the total===Σlines invariant). Works on the read-only view
+// modal, so it deliberately does NOT require the caller to resend lines —
+// that's why this isn't part of PATCH /:id.
+sellOrders.post('/:id/adjust-price', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as
+    | { targetTotal?: number }
+    | null;
+  if (!body || typeof body.targetTotal !== 'number') {
+    return c.json({ error: 'targetTotal is required' }, 400);
+  }
+  const targetTotal = body.targetTotal;
+  const sql = getDb(c.env);
+
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'locked'; status: string }
+    | { kind: 'invalid'; msg: string }
+    | { kind: 'done'; fromTotal: number; achievedTotal: number };
+
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const cur = (await tx<{
+      status: string; currency_code: string; fx_rate_to_usd: number;
+    }[]>`
+      SELECT status, currency_code, fx_rate_to_usd::float AS fx_rate_to_usd
+      FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0];
+    if (!cur) return { kind: 'notFound' };
+    if (!ADJUSTABLE_STATUSES.has(cur.status)) {
+      return { kind: 'locked', status: cur.status };
+    }
+
+    const lines = await tx<{
+      id: string; qty: number; unit_price: number; source_unit_price: number | null;
+    }[]>`
+      SELECT id, qty, unit_price::float AS unit_price,
+             source_unit_price::float AS source_unit_price
+      FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY position
+    `;
+    const native = lines.map(l => ({
+      qty: l.qty,
+      price: l.source_unit_price ?? l.unit_price,
+    }));
+    const invalid = validateTarget(native, targetTotal);
+    if (invalid) return { kind: 'invalid', msg: invalid };
+
+    const fromTotal = +native.reduce((a, l) => a + l.qty * l.price, 0).toFixed(2);
+    const { prices, achievedTotal } = prorateLines(native, targetTotal);
+
+    // In-place updates keep line ids, positions, and serial/chip snapshots.
+    // Non-USD lines re-derive the USD value at the header's frozen rate; the
+    // source_* columns keep carrying the native negotiation truth.
+    const isNonUsd = cur.currency_code !== 'USD';
+    for (let i = 0; i < lines.length; i++) {
+      const usd = isNonUsd
+        ? convertToUsd(prices[i], cur.fx_rate_to_usd)
+        : prices[i];
+      await tx`
+        UPDATE sell_order_lines
+        SET unit_price = ${usd},
+            source_unit_price = ${isNonUsd ? prices[i] : null}
+        WHERE id = ${lines[i].id}
+      `;
+    }
+
+    // Baseline is the first pre-negotiation total; later adjustments only move
+    // adjusted_at/by so the badge always compares first-quoted vs current.
+    await tx`
+      UPDATE sell_orders SET
+        pre_adjust_native_total = COALESCE(pre_adjust_native_total, ${fromTotal}),
+        adjusted_at = NOW(),
+        adjusted_by = ${u.id},
+        updated_at  = NOW()
+      WHERE id = ${id}
+    `;
+
+    const pct = +((achievedTotal / fromTotal - 1) * 100).toFixed(2);
+    await writeSellOrderEvent(tx, id, u.id, 'price_adjusted', {
+      fromTotal, toTotal: achievedTotal, requestedTotal: targetTotal,
+      currency: cur.currency_code, pct,
+    });
+    return { kind: 'done', fromTotal, achievedTotal };
+  });
+
+  switch (outcome.kind) {
+    case 'notFound': return c.json({ error: 'Not found' }, 404);
+    case 'locked':
+      return c.json({ error: `cannot adjust price of a ${outcome.status} order` }, 409);
+    case 'invalid': return c.json({ error: outcome.msg }, 400);
+    case 'done':
+      return c.json({ ok: true, achievedTotal: outcome.achievedTotal });
+  }
+});
 
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;
