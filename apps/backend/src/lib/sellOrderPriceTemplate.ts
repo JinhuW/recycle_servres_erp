@@ -9,9 +9,11 @@
 // order spreadsheet — never re-merge them into one composed field); the
 // column set is the union of the categories actually present on the order.
 //
-// Everything except the Unit Price column is locked; the import parser still
-// never relies on that structure (it re-locates columns by header text —
-// safe here because no spec header matches its part/price heuristics).
+// Everything except the Unit Price and Note columns is locked; the import
+// parser still never relies on that structure (it re-locates columns by header
+// text — safe here because no spec header matches its part/price/condition
+// heuristics: "chip#" and "note备注" contain none of partnumber/price/单价/
+// condition/成色 etc., see services/sellOrderPriceImport.ts).
 
 export type PriceTemplateProduct = {
   category: string;
@@ -43,6 +45,7 @@ const SPEC_COLS_BY_CATEGORY: Record<string, SpecCol[]> = {
     { header: 'Class',       key: 'classification', width: 10 },
     { header: 'Rank',        key: 'rank',           width: 8 },
     { header: 'Speed',       key: 'speed',          width: 10 },
+    { header: 'Chip #',      key: 'chip',           width: 16 },
   ],
   SSD: [
     { header: 'Brand',       key: 'brand',          width: 14 },
@@ -110,15 +113,17 @@ export async function buildPriceTemplateWorkbook(
     qty: 6 + specCols.length,
     price: 7 + specCols.length,
     total: 8 + specCols.length,
+    note: 9 + specCols.length,
   };
 
   ws.columns = [
     { width: 5 }, { width: 40 }, { width: 34 },
     ...specCols.map((c) => ({ width: c.width })),
     { width: 24 }, { width: 18 }, { width: 8 }, { width: 16 }, { width: 14 },
+    { width: 28 },
   ];
 
-  ws.mergeCells(1, 1, 1, IDX.total);
+  ws.mergeCells(1, 1, 1, IDX.note);
   const band = ws.getCell(1, 1);
   band.value = `Recycle Servers · Sell Order ${head.id} — ${head.customerName}`;
   band.fill = BAND_FILL;
@@ -126,13 +131,13 @@ export async function buildPriceTemplateWorkbook(
   band.alignment = { vertical: 'middle' };
   ws.getRow(1).height = 30;
 
-  ws.mergeCells(2, 1, 2, IDX.total);
+  ws.mergeCells(2, 1, 2, IDX.note);
   const instr = ws.getCell(2, 1);
   // Always bilingual: the backend has no per-user i18n and CNY-order vendors
   // are typically Chinese-speaking.
   instr.value =
-    `Fill ONLY the highlighted "Unit Price (${cur})" column, in ${currencyLabel}. ` +
-    `Do not edit other cells. / 请只在高亮的 "Unit Price (${cur})" 列填写单价（${currencyLabel}），请勿修改其他内容。`;
+    `Fill the highlighted "Unit Price (${cur})" column, in ${currencyLabel}; remarks may go in the "Note / 备注" column. ` +
+    `Do not edit other cells. / 请在高亮的 "Unit Price (${cur})" 列填写单价（${currencyLabel}），如有备注请填写在 "Note / 备注" 列，请勿修改其他内容。`;
   instr.font = { size: 11 };
   instr.alignment = { vertical: 'middle', wrapText: true };
   ws.getRow(2).height = 32;
@@ -145,6 +150,7 @@ export async function buildPriceTemplateWorkbook(
     ...specCols.map((c, i): [number, string] => [IDX.specStart + i, c.header]),
     [IDX.part, 'Part Number'], [IDX.condition, 'Condition'], [IDX.qty, 'Qty'],
     [IDX.price, `Unit Price (${cur})`], [IDX.total, `Line Total (${cur})`],
+    [IDX.note, 'Note / 备注'],
   ];
   const headerRow = ws.getRow(HEADER_ROW);
   for (const [col, text] of headers) {
@@ -180,6 +186,10 @@ export async function buildPriceTemplateWorkbook(
     const priceRef = `${ws.getColumn(IDX.price).letter}${r}`;
     totalCell.value = { formula: `${qtyRef}*${priceRef}` };
     totalCell.numFmt = '#,##0.00';
+
+    // Free-text remarks the vendor may fill alongside the price — starts
+    // blank on purpose (user-decided: nothing is pre-filled from the DB).
+    row.getCell(IDX.note).protection = { locked: false };
 
     row.alignment = { vertical: 'middle' };
     if (p.imageUrl) {

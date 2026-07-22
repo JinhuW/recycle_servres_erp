@@ -4,7 +4,7 @@ import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
-import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
+import { getUploadLimits } from '../lib/settings';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
@@ -22,11 +22,9 @@ import {
 import { canonPartNumberJs } from '../lib/part-number';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
-  buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
-  type XlsxColumn, type XlsxSheet, type XlsxSection,
+  buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
-import { invLabel, GROUPED_LEAD_BY_CATEGORY } from './inventory';
-import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
+import { invLabel } from './inventory';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
@@ -323,297 +321,10 @@ sellOrders.get('/:id', async (c) => {
   });
 });
 
-// Packing list — a price-free, printable pick/pack sheet for warehouse staff.
-// Lines are grouped by warehouse; lines with no warehouse fall into an
-// "Unassigned" group that sorts last. Manager-only like every route here.
-sellOrders.get('/:id/packing-list', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const id = c.req.param('id');
-  const sql = getDb(c.env);
-
-  const head = (await sql<{
-    id: string; created_at: string;
-    customer_name: string; customer_short: string;
-  }[]>`
-    SELECT so.id, so.created_at, c.name AS customer_name, c.short_name AS customer_short
-    FROM sell_orders so JOIN customers c ON c.id = so.customer_id
-    WHERE so.id = ${id} LIMIT 1
-  `)[0];
-  if (!head) return c.json({ error: 'Not found' }, 404);
-
-  const lines = await sql<{
-    label: string; sub_label: string | null; part_number: string | null;
-    qty: number; warehouse_short: string | null; position: number;
-  }[]>`
-    SELECT sol.label, sol.sub_label, sol.part_number, sol.qty,
-           w.short AS warehouse_short, sol.position
-    FROM sell_order_lines sol
-    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
-    WHERE sol.sell_order_id = ${id}
-    ORDER BY sol.position
-  `;
-
-  // Group by warehouse, preserving line order within each group. 'Unassigned'
-  // sorts last; everything else alphabetically by warehouse code.
-  const UNASSIGNED = 'Unassigned';
-  const byWarehouse = new Map<string, (typeof lines)[number][]>();
-  for (const l of lines) {
-    const key = l.warehouse_short ?? UNASSIGNED;
-    if (!byWarehouse.has(key)) byWarehouse.set(key, []);
-    byWarehouse.get(key)!.push(l);
-  }
-  const groups = [...byWarehouse.keys()]
-    .sort((a, b) => {
-      if (a === UNASSIGNED) return 1;
-      if (b === UNASSIGNED) return -1;
-      return a.localeCompare(b);
-    })
-    .map((warehouse) => ({
-      warehouse,
-      lines: byWarehouse.get(warehouse)!.map((l) => ({
-        qty: l.qty,
-        label: l.label,
-        sub: l.sub_label ?? '',
-        partNumber: l.part_number ?? '',
-      })),
-    }));
-
-  const company = await getWorkspaceSetting<string>(sql, 'workspace_name', 'Recycle Servers');
-
-  const buf = await buildSellOrderPackingListPdf({
-    company,
-    soId: head.id,
-    date: new Date(head.created_at).toISOString().slice(0, 10),
-    customer: head.customer_name,
-    customerShort: head.customer_short ?? '',
-    groups,
-    logoPng: loadInvoiceLogo(),
-  });
-
-  return pdfResponse(buf, `${head.id}-packing-list.pdf`);
-});
-
-// Per-order spreadsheet. A sell order mixes categories whose specs differ —
-// RAM has gen/rank/speed, SSD has interface/health — so the workbook carries
-// one detail tab per category (RAM / SSD / HDD / Other, skipped when empty)
-// with the Inventory grouped export's granular spec columns, plus a Summary
-// tab of stacked per-category sections: one aggregated row per part number,
-// bold per-section subtotals, and an order total. Warehouse is a detail
-// column (the per-warehouse tabs this replaced live on in the packing list).
-// Manager-only like every route here.
+// Category buckets for the price template: unknown categories fold into
+// Other so every line lands somewhere.
 const SO_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 type SoCategory = (typeof SO_CATEGORY_ORDER)[number];
-
-// `Item` (invLabel) keeps manual, non-inventory-linked lines identifiable —
-// their granular spec cells are blank. `Other` drops it: its Description
-// column already carries the same fallback string.
-const SO_ITEM_COL: XlsxColumn = { header: 'Item', key: 'item', width: 30 };
-
-const SO_DETAIL_HEAD: XlsxColumn[] = [
-  { header: 'ID',           key: 'id',        width: 12 },
-  { header: 'Date',         key: 'date',      width: 12 },
-];
-const SO_DETAIL_TAIL: XlsxColumn[] = [
-  { header: 'Warehouse',    key: 'warehouse', width: 12 },
-  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  // The realized sale price on this order.
-  { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
-  // Currency of the Price / Line total columns — USD, or CNY (native RMB) for
-  // foreign orders.
-  { header: 'Currency',     key: 'currency',  width: 9 },
-  { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
-];
-
-// Summary sections aggregate per part number, so the per-line ID / Date /
-// Warehouse columns don't survive grouping — they live on the detail tabs.
-// Avg price is the blended unit price (Total ÷ Qty) so it stays consistent
-// with the summed quantity.
-const SO_SUMMARY_TAIL: XlsxColumn[] = [
-  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: 'Avg price',    key: 'price',     width: 12, numFmt: '#,##0.00' },
-  { header: 'Total',        key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Currency',     key: 'currency',  width: 9 },
-  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
-];
-
-const soDetailCols = (cat: SoCategory): XlsxColumn[] => [
-  ...SO_DETAIL_HEAD,
-  ...(cat === 'Other' ? [] : [SO_ITEM_COL]),
-  ...GROUPED_LEAD_BY_CATEGORY[cat],
-  ...SO_DETAIL_TAIL,
-];
-const soSummaryCols = (cat: SoCategory): XlsxColumn[] => [
-  ...(cat === 'Other' ? [] : [SO_ITEM_COL]),
-  ...GROUPED_LEAD_BY_CATEGORY[cat],
-  ...SO_SUMMARY_TAIL,
-];
-
-// Layout for the Summary sheet's bold Order total row. Sections disagree on
-// column meaning by index, so the grand total declares its own three cells.
-const SO_TOTAL_COLS: XlsxColumn[] = [
-  { header: '',             key: 'label',     width: 22 },
-  { header: '',             key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: '',             key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-];
-
-sellOrders.get('/:id/spreadsheet', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const id = c.req.param('id');
-  const sql = getDb(c.env);
-
-  const head = (await sql<{ id: string; currency_code: string; customer_name: string | null }[]>`
-    SELECT so.id, so.currency_code, c.name AS customer_name
-    FROM sell_orders so
-    JOIN customers c ON c.id = so.customer_id
-    WHERE so.id = ${id} LIMIT 1
-  `)[0];
-  if (!head) return c.json({ error: 'Not found' }, 404);
-  // CNY orders invoice in RMB: the realized Price / Line total columns show the
-  // native price (sol.source_unit_price), while Unit cost / Profit stay USD —
-  // cost comes from inventory, which is always USD. The Currency column flags it.
-  const isCny = head.currency_code === 'CNY';
-
-  // Root at the sold lines and reach back to each one's source inventory row
-  // (sol.inventory_id) for the descriptive columns. The joins are LEFT because a
-  // line can be added by hand or via MCP with no inventory link — those rows
-  // fall back to the line's own snapshot and leave cost-derived columns blank.
-  const rows = (await sql`
-    SELECT
-      sol.qty AS sell_qty, sol.unit_price::float AS sell_unit_price,
-      sol.source_unit_price::float AS source_unit_price,
-      sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
-      sol.category AS sol_category, sol.condition AS sol_condition, sol.position,
-      w.short AS warehouse_short,
-      l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
-      l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-      l.part_number, l.chip_number, l.condition, l.health::float AS health,
-      l.rpm, l.created_at,
-      img.delivery_url AS image_url
-    FROM sell_order_lines sol
-    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
-    LEFT JOIN order_lines l ON l.id = sol.inventory_id
-    LEFT JOIN LATERAL (
-      SELECT ls.delivery_url
-      FROM label_scans ls
-      WHERE ls.cf_image_id = l.scan_image_id
-      ORDER BY ls.created_at ASC
-      LIMIT 1
-    ) img ON TRUE
-    WHERE sol.sell_order_id = ${id}
-    ORDER BY sol.position
-  `) as Record<string, unknown>[];
-
-  const data = rows.map((r) => {
-    const hasInv = r.inv_id != null;
-    // displayPrice is what the Price / Line total cells show — native RMB on CNY
-    // orders, the USD realized price otherwise.
-    const usdPrice = Number(r.sell_unit_price ?? 0);
-    const displayPrice = isCny ? Number(r.source_unit_price ?? r.sell_unit_price ?? 0) : usdPrice;
-    const qty = Number(r.sell_qty ?? 0);
-    const rawCategory = (r.category ?? r.sol_category ?? '') as string;
-    // Bucket unknown categories into Other so every line lands on a tab.
-    const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
-      ? (rawCategory as SoCategory)
-      : 'Other';
-    // Manual lines fold sub_label into the human-readable column — the tabs
-    // have no generic Spec column to carry the snapshot anymore.
-    const fallback = [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
-    return {
-      warehouse: (r.warehouse_short ?? '') as string,
-      id: hasInv ? String(r.inv_id).slice(0, 8) : '',
-      date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
-      category,
-      item: hasInv ? invLabel(r) : fallback,
-      description: hasInv ? (r.description ?? '') : fallback,
-      brand: r.brand ?? '',
-      capacity: r.capacity ?? '',
-      generation: r.generation ?? '',
-      type: r.type ?? '',
-      classification: r.classification ?? '',
-      rank: r.rank ?? '',
-      speed: r.speed ?? '',
-      interface: r.interface ?? '',
-      formFactor: r.form_factor ?? '',
-      health: r.health ?? '',
-      rpm: r.rpm ?? '',
-      part: r.part_number ?? r.sol_part ?? '',
-      chip: r.chip_number ?? '',
-      condition: r.condition ?? r.sol_condition ?? '',
-      qty,
-      price: displayPrice,
-      currency: head.currency_code,
-      lineTotal: +(qty * displayPrice).toFixed(2),
-      imageUrl: r.image_url ?? '',
-    };
-  });
-
-  type DataRow = (typeof data)[number];
-  const byCategory = new Map<SoCategory, DataRow[]>();
-  for (const row of data) {
-    if (!byCategory.has(row.category)) byCategory.set(row.category, []);
-    byCategory.get(row.category)!.push(row);
-  }
-  const presentCategories = SO_CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
-
-  // Summary sections aggregate per part number *within* each category (a
-  // shared label can't merge a RAM row into an SSD one). Lines without a part
-  // number (hand- or MCP-added) key off their item label so distinct items
-  // don't merge into a single blank-part bucket. First occurrence wins for
-  // descriptive fields; Avg price is re-derived as the blended unit price.
-  const sections: XlsxSection[] = presentCategories.map((cat) => {
-    const byPart = new Map<string, DataRow>();
-    for (const row of byCategory.get(cat)!) {
-      const key = row.part ? `pn:${row.part}` : `item:${row.item}`;
-      const existing = byPart.get(key);
-      if (existing) {
-        existing.qty += row.qty;
-        existing.lineTotal = +(existing.lineTotal + row.lineTotal).toFixed(2);
-      } else {
-        byPart.set(key, { ...row });
-      }
-    }
-    const sectionRows = [...byPart.values()].map((g) => ({
-      ...g,
-      price: g.qty ? +(g.lineTotal / g.qty).toFixed(2) : 0,
-    }));
-    const columns = soSummaryCols(cat);
-    return {
-      title: cat,
-      columns,
-      rows: sectionRows,
-      subtotal: {
-        [columns[0].key]: 'Subtotal',
-        qty: sectionRows.reduce((sum, r) => sum + r.qty, 0),
-        lineTotal: +sectionRows.reduce((sum, r) => sum + r.lineTotal, 0).toFixed(2),
-      },
-    };
-  });
-
-  const categorySheets: XlsxSheet[] = presentCategories.map((cat) => ({
-    name: cat,
-    columns: soDetailCols(cat),
-    rows: byCategory.get(cat)!,
-  }));
-
-  const buf = await buildXlsxWorkbook([
-    {
-      name: 'Summary',
-      sections,
-      total: {
-        label: 'Order total',
-        qty: data.reduce((sum, r) => sum + r.qty, 0),
-        lineTotal: +data.reduce((sum, r) => sum + r.lineTotal, 0).toFixed(2),
-      },
-      totalColumns: SO_TOTAL_COLS,
-    },
-    ...categorySheets,
-  ]);
-  const slug = customerSlug(head.customer_name);
-  return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));
-});
 
 // Prefix download filenames with the customer so a downloads folder full of
 // exports is scannable by who, not just by order id. Strip filesystem/header-
@@ -704,7 +415,8 @@ sellOrders.get('/:id/price-template', async (c) => {
         specs: hasInv ? {
           brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
           type: s(r.type), classification: s(r.classification), rank: s(r.rank),
-          speed: s(r.speed), interface: s(r.interface), formFactor: s(r.form_factor),
+          speed: s(r.speed), chip: s(r.chip_number), interface: s(r.interface),
+          formFactor: s(r.form_factor),
           health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
         } : {},
       });
