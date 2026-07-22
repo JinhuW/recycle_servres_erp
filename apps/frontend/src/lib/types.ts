@@ -119,6 +119,7 @@ export type SellOrderEventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'price_adjusted'
   | 'status_meta_changed'
   | 'archived'
   | 'unarchived'

@@ -65,6 +65,7 @@ type SellOrderSummary = {
   qty: number;
   subtotal: number;
   total: number;
+  adjusted: boolean;
 };
 
 type SellOrderLine = {
@@ -152,6 +153,13 @@ type SellOrderDetailType = {
   total: number;           // USD
   nativeSubtotal: number;  // order currency
   nativeTotal: number;
+  // Set once the final total was negotiated down (or up) via adjust-price.
+  // preAdjustNativeTotal is the first pre-negotiation total (badge baseline).
+  priceAdjustment: {
+    preAdjustNativeTotal: number;
+    adjustedAt: string;
+    adjustedBy: { id: string; name: string } | null;
+  } | null;
   statusMeta: StatusMetaMap;
 };
 
@@ -413,7 +421,18 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                   <td className="muted">{fmtDateShort(o.updatedAt, locale)}</td>
                   <td className="num mono">{o.lineCount}</td>
                   <td className="num mono">{o.qty}</td>
-                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total, locale)}</td>
+                  <td className="num mono" style={{ fontWeight: 600 }}>
+                    {o.adjusted && (
+                      <span
+                        className="chip warn"
+                        title={t('soAdjustedListTooltip')}
+                        style={{ fontSize: 9.5, padding: '1px 5px', marginRight: 6, verticalAlign: 'middle' }}
+                      >
+                        {t('soAdjustedShort')}
+                      </span>
+                    )}
+                    {fmtUSD0(o.total, locale)}
+                  </td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -457,6 +476,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           onSwitchToEdit={() => navigate('/sell-orders/' + open.id + '/edit')}
           onClose={() => navigate('/sell-orders')}
           onSaved={() => { reload(); navigate('/sell-orders'); }}
+          onAdjusted={reload}
         />
       )}
     </>
@@ -554,13 +574,16 @@ function DownloadMenu({ orderId }: { orderId: string }) {
 // order): re-pick the customer, edit line qty / unit price, drop lines, plus
 // advance the status and edit internal notes. Saved via PATCH /sell-orders/:id.
 function SellOrderDetail({
-  id, mode, onClose, onSaved, onSwitchToEdit,
+  id, mode, onClose, onSaved, onSwitchToEdit, onAdjusted,
 }: {
   id: string;
   mode: 'view' | 'edit';
   onClose: () => void;
   onSaved: () => void;
   onSwitchToEdit: () => void;
+  // Price adjustment keeps the modal open (unlike onSaved, which navigates
+  // away); this only refreshes the list behind it.
+  onAdjusted?: () => void;
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -599,6 +622,12 @@ function SellOrderDetail({
   const [refreshKey, setRefreshKey] = useState(0);
   // Bumped after every successful mutation so <SellOrderHistory> re-fetches.
   const [historyKey, setHistoryKey] = useState(0);
+  // Inline negotiated-total editor in the view modal. Available while the
+  // order is still adjustable (pre-Done) even though the rest of the view is
+  // read-only — buyers counter-offer right before paying.
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustInput, setAdjustInput] = useState('');
+  const [adjustSaving, setAdjustSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -679,6 +708,40 @@ function SellOrderDetail({
       subtotalUsd,
     };
   }, [draft, order, draftRateToUsd]);
+
+  // Sign-aware delta chip label: "−5%" for the usual talk-down, "+3%" when the
+  // final price moved up. Baseline is the first pre-negotiation total.
+  const adjustPctLabel = useMemo(() => {
+    if (!order?.priceAdjustment) return '';
+    const from = order.priceAdjustment.preAdjustNativeTotal;
+    if (from <= 0) return '';
+    const pct = (order.nativeTotal / from - 1) * 100;
+    const rounded = Math.abs(pct) < 0.1 ? pct.toFixed(2) : pct.toFixed(1);
+    return `${pct >= 0 ? '+' : '−'}${Math.abs(Number(rounded))}%`;
+  }, [order]);
+
+  const submitAdjust = async () => {
+    if (!order) return;
+    const target = Number(adjustInput);
+    if (!Number.isFinite(target) || target <= 0) return;
+    setAdjustSaving(true);
+    try {
+      // The server prorates line prices and returns the achieved total (the
+      // typed value may be unreachable at 2dp granularity) — re-fetch instead
+      // of trusting the input.
+      await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
+        targetTotal: +target.toFixed(2),
+      });
+      setAdjusting(false);
+      setRefreshKey(k => k + 1);
+      setHistoryKey(k => k + 1);
+      onAdjusted?.();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setAdjustSaving(false);
+    }
+  };
 
   // Warehouse-grouped views of the line set — one card per warehouse, mirroring
   // the draft builder's rhythm.
@@ -1168,16 +1231,92 @@ function SellOrderDetail({
                 />
               )}
 
-              <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
+              <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 320 }}>
                 <div className="so-row total">
-                  <span>{t('eoTotal')}</span>
-                  <span className="mono">
-                    {fmtMoney(
-                      editable && editTotals ? editTotals.subtotalNative : order.nativeTotal,
-                      draftCurrency, locale,
+                  <span>
+                    {t('eoTotal')}
+                    {/* Negotiated-total pencil — view mode only. Edit mode
+                        already lets the user retype line prices, and mixing
+                        the two would race unsaved edits against the saved-line
+                        proration. */}
+                    {!editable && !locked && !adjusting && (
+                      <button
+                        className="btn icon sm"
+                        title={t('soAdjustTotal')}
+                        aria-label={t('soAdjustTotal')}
+                        style={{ marginLeft: 6, verticalAlign: 'middle' }}
+                        onClick={() => {
+                          setAdjustInput(String(order.nativeTotal));
+                          setAdjusting(true);
+                        }}
+                      >
+                        <Icon name="edit" size={12} />
+                      </button>
                     )}
                   </span>
+                  {adjusting ? (
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <input
+                        className="mono"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        autoFocus
+                        value={adjustInput}
+                        disabled={adjustSaving}
+                        onChange={e => setAdjustInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') void submitAdjust();
+                          if (e.key === 'Escape') { e.stopPropagation(); setAdjusting(false); }
+                        }}
+                        style={{ width: 110, textAlign: 'right' }}
+                      />
+                      <button
+                        className="btn icon sm"
+                        title={t('soAdjustApply')}
+                        disabled={adjustSaving}
+                        onClick={() => void submitAdjust()}
+                      >
+                        <Icon name="check" size={12} />
+                      </button>
+                      <button
+                        className="btn icon sm"
+                        title={t('cancel')}
+                        disabled={adjustSaving}
+                        onClick={() => setAdjusting(false)}
+                      >
+                        <Icon name="x" size={12} />
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="mono">
+                      {!editable && order.priceAdjustment && (
+                        <s style={{ color: 'var(--fg-subtle)', fontWeight: 400, marginRight: 8 }}>
+                          {fmtMoney(order.priceAdjustment.preAdjustNativeTotal, draftCurrency, locale)}
+                        </s>
+                      )}
+                      {fmtMoney(
+                        editable && editTotals ? editTotals.subtotalNative : order.nativeTotal,
+                        draftCurrency, locale,
+                      )}
+                    </span>
+                  )}
                 </div>
+                {!editable && order.priceAdjustment && !adjusting && (
+                  <div className="so-row" style={{ fontSize: 11.5 }}>
+                    <span />
+                    <span
+                      className="chip warn"
+                      style={{ fontSize: 10.5 }}
+                      title={t('soAdjustedTooltip', {
+                        name: order.priceAdjustment.adjustedBy?.name ?? '—',
+                        when: fmtDate(order.priceAdjustment.adjustedAt, locale),
+                      })}
+                    >
+                      {t('soAdjustedChip', { pct: adjustPctLabel })}
+                    </span>
+                  </div>
+                )}
                 {draftCurrency !== 'USD' && (
                   <div className="so-row muted" style={{ fontSize: 11.5 }}>
                     <span />
