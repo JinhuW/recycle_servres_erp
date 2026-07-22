@@ -199,7 +199,7 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     for (const gone of ['ID', 'Date', 'Warehouse']) {
       expect(headers).not.toContain(gone);
     }
-    for (const kept of ['Part #', 'Item', 'Qty', 'Avg price', 'Total', 'Currency', 'Image URL']) {
+    for (const kept of ['Part #', 'Item', 'Spec', 'Qty', 'Avg price', 'Total', 'Currency', 'Image URL']) {
       expect(headers).toContain(kept);
     }
   });
@@ -289,20 +289,23 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     // Fixed category order; no HDD tab for an order with no HDD lines.
     expect(wb.worksheets.map((w) => w.name)).toEqual(['Summary', 'RAM', 'SSD', 'Other']);
 
-    // Each detail tab carries its category's spec vocabulary — and only its own.
+    // Specs stay composed into one Spec field (invSpec format); Chip # is the
+    // one per-category column (RAM only). Category is the tab name, not a column.
     const ramHeaders = rowStrings(wb.getWorksheet('RAM')!, 1);
-    for (const h of ['ID', 'Date', 'Item', 'Part #', 'Chip #', 'Gen', 'Class', 'Speed', 'Warehouse', 'Qty', 'Price', 'Currency', 'Line total', 'Image URL']) {
+    for (const h of ['ID', 'Date', 'Item', 'Spec', 'Part #', 'Chip #', 'Warehouse', 'Condition', 'Qty', 'Price', 'Currency', 'Line total', 'Image URL']) {
       expect(ramHeaders).toContain(h);
     }
-    for (const gone of ['Category', 'Spec', 'Interface', 'Health %']) {
+    for (const gone of ['Category', 'Brand', 'Gen', 'Class', 'Speed', 'Interface', 'Health %']) {
       expect(ramHeaders).not.toContain(gone);
     }
 
     const ssdHeaders = rowStrings(wb.getWorksheet('SSD')!, 1);
-    for (const h of ['Interface', 'Form factor', 'Health %']) {
+    for (const h of ['Item', 'Spec', 'Part #']) {
       expect(ssdHeaders).toContain(h);
     }
-    expect(ssdHeaders).not.toContain('Gen');
+    for (const gone of ['Chip #', 'Interface', 'Form factor', 'Health %']) {
+      expect(ssdHeaders).not.toContain(gone);
+    }
 
     // Detail tabs keep the frozen bold header of the flat sheets.
     expect(wb.getWorksheet('RAM')!.views[0]?.ySplit).toBe(1);
@@ -316,24 +319,25 @@ describe('GET /api/sell-orders/:id/spreadsheet', () => {
     expect(ssdTitle).toBeGreaterThan(ramTitle);
     expect(otherTitle).toBeGreaterThan(ssdTitle);
 
-    // A manual line has no inventory row: Item folds label — sub_label so the
-    // snapshot survives, granular spec cells stay blank.
+    // A manual line has no inventory row: Item/Spec carry the line's own
+    // label/sub_label snapshot.
     const ssdWs = wb.getWorksheet('SSD')!;
     const itemCol = ssdHeaders.indexOf('Item');
-    const brandCol = ssdHeaders.indexOf('Brand');
+    const specCol = ssdHeaders.indexOf('Spec');
     const partCol = ssdHeaders.indexOf('Part #');
     const whCol = ssdHeaders.indexOf('Warehouse');
     const dataRow = ssdWs.getRow(2);
-    expect(String(dataRow.getCell(itemCol).value)).toBe('Samsung 960GB — SATA · 2.5in');
-    expect(String(dataRow.getCell(brandCol).value ?? '')).toBe('');
+    expect(String(dataRow.getCell(itemCol).value)).toBe('Samsung 960GB');
+    expect(String(dataRow.getCell(specCol).value)).toBe('SATA · 2.5in');
     expect(String(dataRow.getCell(partCol).value)).toBe('PN-MIX-SSD');
     expect(String(dataRow.getCell(whCol).value)).not.toBe('');
 
-    // Other drops Item — Description carries the same fallback.
-    const otherHeaders = rowStrings(wb.getWorksheet('Other')!, 1);
-    expect(otherHeaders).not.toContain('Item');
-    const descCol = otherHeaders.indexOf('Description');
-    expect(String(wb.getWorksheet('Other')!.getRow(2).getCell(descCol).value)).toBe('Rail kit — 1U');
+    const otherWs = wb.getWorksheet('Other')!;
+    const otherHeaders = rowStrings(otherWs, 1);
+    const otherItemCol = otherHeaders.indexOf('Item');
+    const otherSpecCol = otherHeaders.indexOf('Spec');
+    expect(String(otherWs.getRow(2).getCell(otherItemCol).value)).toBe('Rail kit');
+    expect(String(otherWs.getRow(2).getCell(otherSpecCol).value)).toBe('1U');
   });
 
   it('404s an unknown sell order', async () => {

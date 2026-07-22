@@ -14,9 +14,9 @@ the item is.
 ## Decisions (user-approved)
 
 1. **One worksheet tab per category** (RAM / SSD / HDD / Other, fixed order,
-   skipped when empty) with that category's granular spec columns. These
-   replace the per-warehouse tabs; Warehouse is now a detail column. The
-   warehouse-oriented view lives on in the packing-list PDF.
+   skipped when empty). These replace the per-warehouse tabs; Warehouse is
+   now a detail column. The warehouse-oriented view lives on in the
+   packing-list PDF.
 2. **Summary tab split into stacked per-category sections** — section title,
    category-specific header, one aggregated row per part number, bold
    per-section subtotal (Qty / Total), and a bold Order total after the last
@@ -24,16 +24,15 @@ the item is.
 
 ## Semantics
 
-- **Column vocabulary is shared with the inventory grouped export**:
-  `GROUPED_LEAD_BY_CATEGORY` is exported from `routes/inventory.ts` and
-  composed with sell-order head/tail columns in `routes/sellOrders.ts`
-  (`soDetailCols` / `soSummaryCols`) — a sold row reads identically to its
-  stock row.
-- **`Item` (invLabel) stays on RAM/SSD/HDD** so manual, non-inventory-linked
-  lines remain identifiable: their granular spec cells are blank and `Item`
-  folds `label — sub_label` (there is no generic Spec column to carry the
-  snapshot anymore). `Other` drops `Item`; its `Description` column carries
-  the same fallback.
+- **Specs stay composed into one `Spec` field per row** (user-requested,
+  2026-07-22 follow-up): `invSpec` format — RAM `RDIMM · 2Rx8 · 3200MHz`,
+  SSD `SATA · 2.5in · 98%`, HDD adds rpm — next to `Item` (invLabel), rather
+  than one column per attribute. The first iteration used the inventory
+  grouped export's granular columns (`GROUPED_LEAD_BY_CATEGORY`); that was
+  reverted same-day. Columns are now identical across tabs except `Chip #`,
+  which only RAM carries.
+- **Manual, non-inventory-linked lines** carry their own snapshot: `Item` =
+  `label`, `Spec` = `sub_label`, granular inventory fields don't apply.
 - **Aggregation is scoped per category** (key `pn:<part>` else
   `item:<label>`), which also fixes the old latent bug where same-label lines
   could merge across categories.
@@ -52,8 +51,8 @@ the item is.
 ## Tests
 
 `apps/backend/tests/sell-order-spreadsheet.test.ts` — tab layout for RAM-only
-and mixed orders, per-category header vocabularies, sectioned-Summary
-aggregation with subtotal/order-total rows, manual-line fallback rendering,
+and mixed orders, Item/Spec/Chip # header shape per tab, sectioned-Summary
+aggregation with subtotal/order-total rows, manual-line snapshot rendering,
 CNY native prices, no-cost-columns sweep across all sheets, 403/404.
 `freeSellableLine` gained an optional category filter — the export derives a
 line's tab from its source inventory row, so tests pin RAM to stay
