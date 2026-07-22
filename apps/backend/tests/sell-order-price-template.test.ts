@@ -59,7 +59,7 @@ function findHeaderRow(ws: ExcelJS.Worksheet): { row: number; cols: Map<string, 
 describe('GET /api/sell-orders/:id/price-template', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('streams a bid sheet with all parts and an instruction block above the table', async () => {
+  it('streams one tab per category with all parts and an instruction block per tab', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
 
@@ -69,20 +69,24 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(res.headers.get('content-disposition')).toContain('price-template');
 
     const wb = await loadWorkbook(res);
-    const ws = wb.worksheets[0];
-    const { row: headerRow, cols } = findHeaderRow(ws);
-    expect(headerRow).toBeGreaterThan(1);
-    // The instruction block names the order and the fill-in currency.
-    const preamble = [1, 2, 3].map(r =>
-      (ws.getRow(r).values as unknown[]).map(v => String(v ?? '')).join(' ')).join(' ');
-    expect(preamble).toContain(id);
-    expect(preamble).toContain('USD');
+    // RAM line + SSD line → a dedicated sub-sheet each, in fixed order.
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD']);
 
-    const partCol = cols.get('Part Number')!;
     const parts: string[] = [];
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const v = ws.getRow(r).getCell(partCol).value;
-      if (v) parts.push(String(v));
+    for (const ws of wb.worksheets) {
+      const { row: headerRow, cols } = findHeaderRow(ws);
+      expect(headerRow).toBeGreaterThan(1);
+      // Every tab is self-contained: instruction block names the order and
+      // the fill-in currency.
+      const preamble = [1, 2, 3].map(r =>
+        (ws.getRow(r).values as unknown[]).map(v => String(v ?? '')).join(' ')).join(' ');
+      expect(preamble).toContain(id);
+      expect(preamble).toContain('USD');
+      const partCol = cols.get('Part Number')!;
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        const v = ws.getRow(r).getCell(partCol).value;
+        if (v) parts.push(String(v));
+      }
     }
     expect(parts.sort()).toEqual(['TPL-A1', 'TPL-B2']);
   });
@@ -108,27 +112,30 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(Number(ws.getRow(dataRows[0]).getCell(qtyCol).value)).toBe(5);
   });
 
-  it('leaves Unit Price blank and unlocked, locks the sheet, formulas Line Total', async () => {
+  it('leaves Unit Price blank and unlocked, locks every sheet, formulas Line Total', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
-    const ws = (await loadWorkbook(res)).worksheets[0];
-    const { row: headerRow, cols } = findHeaderRow(ws);
-    const priceCol = cols.get('Unit Price (USD)')!;
-    const totalCol = cols.get('Line Total (USD)')!;
-    expect(priceCol).toBeGreaterThan(0);
-    expect(totalCol).toBeGreaterThan(0);
-    expect(ws.sheetProtection).toBeTruthy();
+    const wb = await loadWorkbook(res);
+    expect(wb.worksheets.length).toBeGreaterThan(1);
+    for (const ws of wb.worksheets) {
+      const { row: headerRow, cols } = findHeaderRow(ws);
+      const priceCol = cols.get('Unit Price (USD)')!;
+      const totalCol = cols.get('Line Total (USD)')!;
+      expect(priceCol).toBeGreaterThan(0);
+      expect(totalCol).toBeGreaterThan(0);
+      expect(ws.sheetProtection).toBeTruthy();
 
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const row = ws.getRow(r);
-      if (!row.getCell(cols.get('Part Number')!).value) continue;
-      const priceCell = row.getCell(priceCol);
-      // Blank bid sheet: existing order prices must not leak to the vendor.
-      expect(priceCell.value).toBeNull();
-      expect(priceCell.protection?.locked).toBe(false);
-      const totalCell = row.getCell(totalCol);
-      expect(totalCell.formula).toBeTruthy();
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r);
+        if (!row.getCell(cols.get('Part Number')!).value) continue;
+        const priceCell = row.getCell(priceCol);
+        // Blank bid sheet: existing order prices must not leak to the vendor.
+        expect(priceCell.value).toBeNull();
+        expect(priceCell.protection?.locked).toBe(false);
+        const totalCell = row.getCell(totalCol);
+        expect(totalCell.formula).toBeTruthy();
+      }
     }
   });
 
@@ -152,7 +159,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
   });
 
-  it('includes lines that have no part number', async () => {
+  it('includes lines that have no part number on their category tab', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, {
       lines: [
@@ -160,75 +167,68 @@ describe('GET /api/sell-orders/:id/price-template', () => {
         { category: 'RAM', label: 'DIMM A', partNumber: 'TPL-A1', qty: 2, unitPrice: 40, warehouseId: 'WH-LA1' },
       ],
     });
-    const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
-    const ws = (await loadWorkbook(res)).worksheets[0];
-    const { row: headerRow, cols } = findHeaderRow(ws);
+    const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/price-template`, token));
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'Other']);
+    const other = wb.worksheets.find(w => w.name === 'Other')!;
+    const { row: headerRow, cols } = findHeaderRow(other);
     const itemCol = cols.get('Item')!;
     const items: string[] = [];
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const v = ws.getRow(r).getCell(itemCol).value;
+    for (let r = headerRow + 1; r <= other.rowCount; r++) {
+      const v = other.getRow(r).getCell(itemCol).value;
       if (v) items.push(String(v));
     }
     expect(items).toContain('Mystery caddy');
   });
 
-  it('shows spec columns for the categories on the order only', async () => {
+  it('each category tab carries only its own spec columns', async () => {
     const { token } = await loginAs(ALEX);
-    // RAM + SSD mix: union of both spec sets, no HDD-only RPM column.
     const mixed = await createOrder(token);
-    const mixedWs = (await loadWorkbook(
+    const wb = await loadWorkbook(
       await getRaw(`/api/sell-orders/${mixed}/price-template`, token),
-    )).worksheets[0];
-    const { cols: mixedCols } = findHeaderRow(mixedWs);
-    for (const h of ['Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Chip #', 'Interface', 'Form factor', 'Health %']) {
-      expect(mixedCols.get(h)).toBeGreaterThan(0);
+    );
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD']);
+
+    const { cols: ramCols } = findHeaderRow(wb.worksheets.find(w => w.name === 'RAM')!);
+    for (const h of ['Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Chip #']) {
+      expect(ramCols.get(h)).toBeGreaterThan(0);
     }
-    expect(mixedCols.has('RPM')).toBe(false);
-    expect(mixedCols.has('Detail')).toBe(false);
+    for (const h of ['Interface', 'Form factor', 'Health %', 'RPM', 'Detail']) {
+      expect(ramCols.has(h)).toBe(false);
+    }
 
-    const ramOnly = await createOrder(token, {
-      lines: [{ category: 'RAM', label: 'DIMM A', partNumber: 'TPL-R1', qty: 1, unitPrice: 10, warehouseId: 'WH-LA1' }],
-    });
-    const ramWs = (await loadWorkbook(
-      await getRaw(`/api/sell-orders/${ramOnly}/price-template`, token),
-    )).worksheets[0];
-    const { cols: ramCols } = findHeaderRow(ramWs);
-    expect(ramCols.get('Speed')).toBeGreaterThan(0);
-    expect(ramCols.get('Chip #')).toBeGreaterThan(0);
-    expect(ramCols.has('Interface')).toBe(false);
-
-    const ssdOnly = await createOrder(token, {
-      lines: [{ category: 'SSD', label: 'Drive B', partNumber: 'TPL-S1', qty: 1, unitPrice: 10, warehouseId: 'WH-LA1' }],
-    });
-    const ssdWs = (await loadWorkbook(
-      await getRaw(`/api/sell-orders/${ssdOnly}/price-template`, token),
-    )).worksheets[0];
-    const { cols: ssdCols } = findHeaderRow(ssdWs);
-    expect(ssdCols.has('Chip #')).toBe(false);
+    const { cols: ssdCols } = findHeaderRow(wb.worksheets.find(w => w.name === 'SSD')!);
+    for (const h of ['Brand', 'Capacity', 'Interface', 'Form factor', 'Health %']) {
+      expect(ssdCols.get(h)).toBeGreaterThan(0);
+    }
+    for (const h of ['Gen', 'Class', 'Rank', 'Speed', 'Chip #', 'RPM']) {
+      expect(ssdCols.has(h)).toBe(false);
+    }
   });
 
-  it('always carries a blank, unlocked Note column for vendor remarks', async () => {
+  it('every tab carries a blank, unlocked Note column for vendor remarks', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
-    const ws = (await loadWorkbook(
+    const wb = await loadWorkbook(
       await getRaw(`/api/sell-orders/${id}/price-template`, token),
-    )).worksheets[0];
-    const { row: headerRow, cols } = findHeaderRow(ws);
-    const noteCol = cols.get('Note / 备注')!;
-    // Last column, after Line Total.
-    expect(noteCol).toBeGreaterThan(cols.get('Line Total (USD)')!);
-    // The instruction block invites remarks there.
-    const preamble = [1, 2, 3].map(r =>
-      (ws.getRow(r).values as unknown[]).map(v => String(v ?? '')).join(' ')).join(' ');
-    expect(preamble).toContain('Note / 备注');
+    );
+    for (const ws of wb.worksheets) {
+      const { row: headerRow, cols } = findHeaderRow(ws);
+      const noteCol = cols.get('Note / 备注')!;
+      // Last column, after Line Total.
+      expect(noteCol).toBeGreaterThan(cols.get('Line Total (USD)')!);
+      // The instruction block invites remarks there.
+      const preamble = [1, 2, 3].map(r =>
+        (ws.getRow(r).values as unknown[]).map(v => String(v ?? '')).join(' ')).join(' ');
+      expect(preamble).toContain('Note / 备注');
 
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const row = ws.getRow(r);
-      if (!row.getCell(cols.get('Qty')!).value) continue;
-      const noteCell = row.getCell(noteCol);
-      // Nothing pre-filled from the DB — the vendor/manager types remarks.
-      expect(noteCell.value).toBeNull();
-      expect(noteCell.protection?.locked).toBe(false);
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r);
+        if (!row.getCell(cols.get('Qty')!).value) continue;
+        const noteCell = row.getCell(noteCol);
+        // Nothing pre-filled from the DB — the vendor/manager types remarks.
+        expect(noteCell.value).toBeNull();
+        expect(noteCell.protection?.locked).toBe(false);
+      }
     }
   });
 
@@ -239,9 +239,10 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     const id = await createOrder(token);
     const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
     expect(res.status).toBe(200);
-    const ws = (await loadWorkbook(res)).worksheets[0];
-    expect(ws.getImages()).toHaveLength(0);
-    expect(findHeaderRow(ws).cols.get('Image URL')).toBe(2);
+    for (const ws of (await loadWorkbook(res)).worksheets) {
+      expect(ws.getImages()).toHaveLength(0);
+      expect(findHeaderRow(ws).cols.get('Image URL')).toBe(2);
+    }
 
     // Builder path: a real https URL renders as a clickable hyperlink cell.
     const buf = await buildPriceTemplateWorkbook(

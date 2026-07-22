@@ -338,9 +338,11 @@ function customerSlug(name: string | null): string {
 }
 
 // Vendor bid sheet: the same product grouping the edit form prices by
-// (part|label|condition, qty summed across warehouses), one row each, with a
-// clickable item-photo URL and a blank Unit Price column. The vendor fills it
-// and the manager round-trips it through POST /:id/price-import/preview.
+// (part|label|condition, qty summed across warehouses), one row each on its
+// category's worksheet (RAM/SSD/HDD/Other tabs), with a clickable item-photo
+// URL and a blank Unit Price column. The vendor fills it and the manager
+// round-trips it through POST /:id/price-import/preview — the parser reads
+// every tab.
 sellOrders.get('/:id/price-template', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);

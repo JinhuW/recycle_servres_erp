@@ -6,8 +6,9 @@ import {
   type OrderProduct,
   type PriceImportPreview,
 } from '../src/services/sellOrderPriceImport';
+import app from '../src/index';
 import { resetDb } from './helpers/db';
-import { api, multipart } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
 const XLSX_MIME =
@@ -79,14 +80,48 @@ describe('header detection', () => {
     expect(res.rows[0]).toMatchObject({ status: 'matched', canonPart: 'ABC123', price: 100 });
   });
 
-  it('uses the first sheet that has recognizable headers', () => {
+  it('skips header-less sheets and parses the ones with recognizable headers', () => {
     const wb = new ExcelJS.Workbook();
     wb.addWorksheet('Cover').addRow(['Hello']);
     const ws = wb.addWorksheet('Prices');
     ws.addRow(['Part Number', 'Unit Price (USD)']);
     ws.addRow(['ABC123', 42]);
     const res = parsePriceWorkbook(wb, [product({})]);
-    expect(res.rows[0]).toMatchObject({ status: 'matched', price: 42 });
+    expect(res.rows[0]).toMatchObject({ status: 'matched', price: 42, sheet: 'Prices' });
+  });
+
+  it('reads prices from every tab — the template ships one sheet per category', () => {
+    const wb = new ExcelJS.Workbook();
+    // Mimic the per-category template: different spec columns per tab, so the
+    // price column sits at a different index on each sheet.
+    const ram = wb.addWorksheet('RAM');
+    ram.addRow(['Part Number', 'Speed', 'Chip #', 'Unit Price (USD)']);
+    ram.addRow(['ABC123', 3200, 'K4A8G', 100]);
+    const ssd = wb.addWorksheet('SSD');
+    ssd.addRow(['Part Number', 'Interface', 'Unit Price (USD)']);
+    ssd.addRow(['XYZ-9', 'SATA', 55.5]);
+    const products = [
+      product({ partNumber: 'ABC123', label: 'RAM 16GB' }),
+      product({ partNumber: 'XYZ-9', label: 'SSD 1TB' }),
+    ];
+    const res = parsePriceWorkbook(wb, products);
+    expect(res.summary.matched).toBe(2);
+    expect(res.rows.find(r => r.canonPart === 'ABC123')).toMatchObject({ sheet: 'RAM', price: 100 });
+    expect(res.rows.find(r => r.canonPart === 'XYZ-9')).toMatchObject({ sheet: 'SSD', price: 55.5 });
+    expect(res.unmatchedProducts).toEqual([]);
+  });
+
+  it('re-pricing a part on a later tab demotes the earlier tab row to duplicate', () => {
+    const wb = new ExcelJS.Workbook();
+    const a = wb.addWorksheet('RAM');
+    a.addRow(['Part Number', 'Unit Price (USD)']);
+    a.addRow(['ABC123', 10]);
+    const b = wb.addWorksheet('Other');
+    b.addRow(['Part Number', 'Unit Price (USD)']);
+    b.addRow(['ABC123', 20]);
+    const res = parsePriceWorkbook(wb, [product({})]);
+    expect(res.rows.map(r => [r.sheet, r.status])).toEqual([['RAM', 'duplicate'], ['Other', 'matched']]);
+    expect(res.rows[1].price).toBe(20);
   });
 
   it('accepts Chinese headers', () => {
@@ -292,6 +327,50 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     const detail = await api<{ order: { lines: { unitPrice: number }[] } }>(
       'GET', `/api/sell-orders/${id}`, { token });
     expect(detail.body.order.lines.map(l => l.unitPrice).sort()).toEqual([40, 90]);
+  });
+
+  it('round-trips the downloaded per-category template with prices filled on every tab', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token);
+
+    // Download the real bid template (one tab per category)...
+    const dl = await app.fetch(
+      new Request(`http://test/api/sell-orders/${id}/price-template`, {
+        headers: { cookie: `at=${token}`, 'X-Requested-By': 'recycle-erp' },
+      }),
+      testEnv,
+    );
+    expect(dl.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await dl.arrayBuffer());
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD']);
+
+    // ...fill the Unit Price cell of every product row, vendor-style...
+    for (const ws of wb.worksheets) {
+      let headerRow = 0, partCol = 0, priceCol = 0;
+      for (let r = 1; r <= ws.rowCount && !headerRow; r++) {
+        ws.getRow(r).eachCell((cell, col) => {
+          const v = String(cell.value ?? '');
+          if (v === 'Part Number') { headerRow = r; partCol = col; }
+          if (v.startsWith('Unit Price')) priceCol = col;
+        });
+      }
+      for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+        if (ws.getRow(r).getCell(partCol).value) {
+          ws.getRow(r).getCell(priceCol).value = ws.name === 'RAM' ? 45 : 111;
+        }
+      }
+    }
+    const filled = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
+
+    // ...and every tab's price lands in the preview.
+    const res = await multipart(`/api/sell-orders/${id}/price-import/preview`, { file: filled }, { token });
+    expect(res.status).toBe(200);
+    const body = res.body as PriceImportPreview;
+    expect(body.summary.matched).toBe(2);
+    expect(body.rows.find(r => r.canonPart === 'IMP-A1')).toMatchObject({ sheet: 'RAM', price: 45 });
+    expect(body.rows.find(r => r.canonPart === 'IMP-B2')).toMatchObject({ sheet: 'SSD', price: 111 });
+    expect(body.unmatchedProducts).toEqual([]);
   });
 
   it('groups multi-warehouse lines into one product with summed qty', async () => {
