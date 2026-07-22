@@ -483,89 +483,23 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   );
 }
 
-// ─── Download split menu ─────────────────────────────────────────────────────
-// One trigger, two file types: the printable packing list (PDF) and the
-// per-warehouse spreadsheet (XLSX). Opens upward — it lives in the modal footer
-// pinned to the screen bottom. A transparent backdrop captures the outside
-// click; Escape closes the menu without bubbling up to close the whole modal.
+// ─── Download button ─────────────────────────────────────────────────────────
+// The vendor price template (bid sheet) is the only sell-order export.
 function DownloadMenu({ orderId }: { orderId: string }) {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open]);
-
-  const download = async (path: string, name: string) => {
-    setOpen(false);
+  const download = async () => {
     try {
-      await api.download(path, name);
+      await api.download(`/api/sell-orders/${orderId}/price-template`, `${orderId}-price-template.xlsx`);
     } catch (e) {
       handleFetchError(e);
     }
   };
 
   return (
-    <div className="popmenu-wrap">
-      <button
-        className="btn"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={t('soDownloadTooltip')}
-        onClick={() => setOpen(o => !o)}
-      >
-        <Icon name="download" size={14} /> {t('soDownload')}
-        <Icon name="chevronDown" size={13} className="caret" />
-      </button>
-      {open && (
-        <>
-          <div className="popmenu-backdrop" onClick={() => setOpen(false)} />
-          <div className="popmenu up" role="menu">
-            <button
-              type="button"
-              className="popmenu-item"
-              role="menuitem"
-              onClick={() => download(`/api/sell-orders/${orderId}/packing-list`, `${orderId}-packing-list.pdf`)}
-            >
-              <span className="ico"><Icon name="invoice" size={17} /></span>
-              <span className="txt">
-                <b>{t('soDownloadPackingPdf')}</b>
-                <small>{t('soPackingListTooltip')}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="popmenu-item"
-              role="menuitem"
-              onClick={() => download(`/api/sell-orders/${orderId}/spreadsheet`, `${orderId}.xlsx`)}
-            >
-              <span className="ico"><Icon name="analytics" size={17} /></span>
-              <span className="txt">
-                <b>{t('soDownloadSpreadsheet')}</b>
-                <small>{t('soDownloadSpreadsheetHint')}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="popmenu-item"
-              role="menuitem"
-              onClick={() => download(`/api/sell-orders/${orderId}/price-template`, `${orderId}-price-template.xlsx`)}
-            >
-              <span className="ico"><Icon name="dollar" size={17} /></span>
-              <span className="txt">
-                <b>{t('soDownloadPriceTemplate')}</b>
-                <small>{t('soDownloadPriceTemplateHint')}</small>
-              </span>
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+    <button className="btn" title={t('soDownloadPriceTemplateHint')} onClick={download}>
+      <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
+    </button>
   );
 }
 

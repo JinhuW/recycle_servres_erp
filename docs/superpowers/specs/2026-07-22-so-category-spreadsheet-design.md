@@ -1,7 +1,14 @@
 # Sell-Order Spreadsheet — Per-Category Tabs + Sectioned Summary
 
 **Date:** 2026-07-22
-**Status:** Implemented
+**Status:** Superseded (v1.26.0, same day) — the sell-order spreadsheet AND
+packing-list PDF exports were removed at the user's request; the vendor price
+template (`lib/sellOrderPriceTemplate.ts`) is now the only sell-order export.
+The sectioned-sheet primitive was dropped from `lib/xlsx.ts` with it. The
+per-attribute-column rule below still governs the price template: it carries
+one column per spec attribute (plus `Chip #` and a blank vendor-editable
+`Note / 备注` column) — **never re-merge spec attributes into one composed
+field** (that misread caused the v1.24.1 revert).
 
 > **Note (same-day):** the per-attribute columns below are confirmed intent —
 > "type, rank, speed should be in an individual column". v1.24.1 briefly

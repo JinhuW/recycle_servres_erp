@@ -180,7 +180,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       await getRaw(`/api/sell-orders/${mixed}/price-template`, token),
     )).worksheets[0];
     const { cols: mixedCols } = findHeaderRow(mixedWs);
-    for (const h of ['Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Interface', 'Form factor', 'Health %']) {
+    for (const h of ['Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Chip #', 'Interface', 'Form factor', 'Health %']) {
       expect(mixedCols.get(h)).toBeGreaterThan(0);
     }
     expect(mixedCols.has('RPM')).toBe(false);
@@ -194,7 +194,42 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     )).worksheets[0];
     const { cols: ramCols } = findHeaderRow(ramWs);
     expect(ramCols.get('Speed')).toBeGreaterThan(0);
+    expect(ramCols.get('Chip #')).toBeGreaterThan(0);
     expect(ramCols.has('Interface')).toBe(false);
+
+    const ssdOnly = await createOrder(token, {
+      lines: [{ category: 'SSD', label: 'Drive B', partNumber: 'TPL-S1', qty: 1, unitPrice: 10, warehouseId: 'WH-LA1' }],
+    });
+    const ssdWs = (await loadWorkbook(
+      await getRaw(`/api/sell-orders/${ssdOnly}/price-template`, token),
+    )).worksheets[0];
+    const { cols: ssdCols } = findHeaderRow(ssdWs);
+    expect(ssdCols.has('Chip #')).toBe(false);
+  });
+
+  it('always carries a blank, unlocked Note column for vendor remarks', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token);
+    const ws = (await loadWorkbook(
+      await getRaw(`/api/sell-orders/${id}/price-template`, token),
+    )).worksheets[0];
+    const { row: headerRow, cols } = findHeaderRow(ws);
+    const noteCol = cols.get('Note / 备注')!;
+    // Last column, after Line Total.
+    expect(noteCol).toBeGreaterThan(cols.get('Line Total (USD)')!);
+    // The instruction block invites remarks there.
+    const preamble = [1, 2, 3].map(r =>
+      (ws.getRow(r).values as unknown[]).map(v => String(v ?? '')).join(' ')).join(' ');
+    expect(preamble).toContain('Note / 备注');
+
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      if (!row.getCell(cols.get('Qty')!).value) continue;
+      const noteCell = row.getCell(noteCol);
+      // Nothing pre-filled from the DB — the vendor/manager types remarks.
+      expect(noteCell.value).toBeNull();
+      expect(noteCell.protection?.locked).toBe(false);
+    }
   });
 
   it('never embeds images and links the photo as an Image URL hyperlink', async () => {
@@ -214,7 +249,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       [{
         category: 'RAM', label: 'DIMM A', partNumber: 'TPL-A1', condition: null,
         qty: 2, imageUrl: 'https://static.recycleservers.com/label-scans/x.jpg',
-        specs: { brand: 'Samsung', speed: 3200 },
+        specs: { brand: 'Samsung', speed: 3200, chip: 'K4A8G085WB-BCTD' },
       }],
     );
     const wb = new ExcelJS.Workbook();
@@ -227,6 +262,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(v?.hyperlink).toBe('https://static.recycleservers.com/label-scans/x.jpg');
     expect(v?.text).toBe('https://static.recycleservers.com/label-scans/x.jpg');
     expect(String(built.getRow(headerRow + 1).getCell(cols.get('Brand')!).value)).toBe('Samsung');
+    expect(String(built.getRow(headerRow + 1).getCell(cols.get('Chip #')!).value)).toBe('K4A8G085WB-BCTD');
   });
 
   it('404s unknown orders and 403s non-managers', async () => {
