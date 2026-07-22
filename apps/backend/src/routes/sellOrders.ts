@@ -24,9 +24,9 @@ import { canonPartNumberJs } from '../lib/part-number';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
   buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
-  type XlsxColumn, type XlsxSheet,
+  type XlsxColumn, type XlsxSheet, type XlsxSection,
 } from '../lib/xlsx';
-import { invLabel, invSpec } from './inventory';
+import { invLabel, invSpec, GROUPED_LEAD_BY_CATEGORY } from './inventory';
 import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
@@ -395,24 +395,28 @@ sellOrders.get('/:id/packing-list', async (c) => {
   return pdfResponse(buf, `${head.id}-packing-list.pdf`);
 });
 
-// Per-order spreadsheet. Mirrors the Inventory export's descriptive columns (so
-// a sold line reads identically to its source stock row) and appends the
-// realized sale Price / Line total. Workbook carries a Summary tab plus one tab
-// per warehouse — the warehouse staff open just their own. Manager-only like
-// every route here.
-const SO_DETAIL_COLS: XlsxColumn[] = [
+// Per-order spreadsheet. A sell order mixes categories whose specs differ —
+// RAM has gen/rank/speed, SSD has interface/health — so the workbook carries
+// one detail tab per category (RAM / SSD / HDD / Other, skipped when empty)
+// with the Inventory grouped export's granular spec columns, plus a Summary
+// tab of stacked per-category sections: one aggregated row per part number,
+// bold per-section subtotals, and an order total. Warehouse is a detail
+// column (the per-warehouse tabs this replaced live on in the packing list).
+// Manager-only like every route here.
+const SO_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
+type SoCategory = (typeof SO_CATEGORY_ORDER)[number];
+
+// `Item` (invLabel) keeps manual, non-inventory-linked lines identifiable —
+// their granular spec cells are blank. `Other` drops it: its Description
+// column already carries the same fallback string.
+const SO_ITEM_COL: XlsxColumn = { header: 'Item', key: 'item', width: 30 };
+
+const SO_DETAIL_HEAD: XlsxColumn[] = [
   { header: 'ID',           key: 'id',        width: 12 },
   { header: 'Date',         key: 'date',      width: 12 },
-  { header: 'Category',     key: 'category',  width: 10 },
-  { header: 'Item',         key: 'item',      width: 30 },
-  { header: 'Type',         key: 'type',      width: 10 },
-  { header: 'Spec',         key: 'spec',      width: 26 },
-  { header: 'Rank',         key: 'rank',      width: 10 },
-  { header: 'Speed',        key: 'speed',     width: 10 },
-  { header: 'Part #',       key: 'part',      width: 22 },
-  { header: 'Chip #',       key: 'chip',      width: 22 },
+];
+const SO_DETAIL_TAIL: XlsxColumn[] = [
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
-  { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
   // The realized sale price on this order.
   { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
@@ -423,26 +427,36 @@ const SO_DETAIL_COLS: XlsxColumn[] = [
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
-// Summary tab is an aggregate: one row per distinct part number with Qty / Line
-// total summed across every line (and warehouse). The per-line ID / Date /
-// Warehouse columns are dropped — they don't survive grouping — and live on the
-// per-warehouse detail tabs instead. Price shows the blended unit price
-// (Line total ÷ Qty) so it stays consistent with the summed quantity.
-const SO_SUMMARY_COLS: XlsxColumn[] = [
-  { header: 'Category',     key: 'category',  width: 10 },
-  { header: 'Item',         key: 'item',      width: 30 },
-  { header: 'Type',         key: 'type',      width: 10 },
-  { header: 'Spec',         key: 'spec',      width: 26 },
-  { header: 'Rank',         key: 'rank',      width: 10 },
-  { header: 'Speed',        key: 'speed',     width: 10 },
-  { header: 'Part #',       key: 'part',      width: 22 },
-  { header: 'Chip #',       key: 'chip',      width: 22 },
-  { header: 'Condition',    key: 'condition', width: 12 },
+// Summary sections aggregate per part number, so the per-line ID / Date /
+// Warehouse columns don't survive grouping — they live on the detail tabs.
+// Avg price is the blended unit price (Total ÷ Qty) so it stays consistent
+// with the summed quantity.
+const SO_SUMMARY_TAIL: XlsxColumn[] = [
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
+  { header: 'Avg price',    key: 'price',     width: 12, numFmt: '#,##0.00' },
+  { header: 'Total',        key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
   { header: 'Currency',     key: 'currency',  width: 9 },
-  { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
+];
+
+const soDetailCols = (cat: SoCategory): XlsxColumn[] => [
+  ...SO_DETAIL_HEAD,
+  ...(cat === 'Other' ? [] : [SO_ITEM_COL]),
+  ...GROUPED_LEAD_BY_CATEGORY[cat],
+  ...SO_DETAIL_TAIL,
+];
+const soSummaryCols = (cat: SoCategory): XlsxColumn[] => [
+  ...(cat === 'Other' ? [] : [SO_ITEM_COL]),
+  ...GROUPED_LEAD_BY_CATEGORY[cat],
+  ...SO_SUMMARY_TAIL,
+];
+
+// Layout for the Summary sheet's bold Order total row. Sections disagree on
+// column meaning by index, so the grand total declares its own three cells.
+const SO_TOTAL_COLS: XlsxColumn[] = [
+  { header: '',             key: 'label',     width: 22 },
+  { header: '',             key: 'qty',       width: 8,  numFmt: '#,##0' },
+  { header: '',             key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
 ];
 
 sellOrders.get('/:id/spreadsheet', async (c) => {
@@ -500,17 +514,32 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     const usdPrice = Number(r.sell_unit_price ?? 0);
     const displayPrice = isCny ? Number(r.source_unit_price ?? r.sell_unit_price ?? 0) : usdPrice;
     const qty = Number(r.sell_qty ?? 0);
-    const category = (r.category ?? r.sol_category ?? '') as string;
+    const rawCategory = (r.category ?? r.sol_category ?? '') as string;
+    // Bucket unknown categories into Other so every line lands on a tab.
+    const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
+      ? (rawCategory as SoCategory)
+      : 'Other';
+    // Manual lines fold sub_label into the human-readable column — the tabs
+    // have no generic Spec column to carry the snapshot anymore.
+    const fallback = [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
     return {
       warehouse: (r.warehouse_short ?? '') as string,
       id: hasInv ? String(r.inv_id).slice(0, 8) : '',
       date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
       category,
-      item: hasInv ? invLabel(r) : (r.sol_label ?? ''),
-      type: category === 'RAM' ? (r.type ?? '') : '',
-      spec: hasInv ? invSpec(r) : (r.sol_sub ?? ''),
+      item: hasInv ? invLabel(r) : fallback,
+      description: hasInv ? (r.description ?? '') : fallback,
+      brand: r.brand ?? '',
+      capacity: r.capacity ?? '',
+      generation: r.generation ?? '',
+      type: r.type ?? '',
+      classification: r.classification ?? '',
       rank: r.rank ?? '',
       speed: r.speed ?? '',
+      interface: r.interface ?? '',
+      formFactor: r.form_factor ?? '',
+      health: r.health ?? '',
+      rpm: r.rpm ?? '',
       part: r.part_number ?? r.sol_part ?? '',
       chip: r.chip_number ?? '',
       condition: r.condition ?? r.sol_condition ?? '',
@@ -522,48 +551,66 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     };
   });
 
-  // Summary tab groups by part number — one row per distinct part with Qty and
-  // Line total summed across lines/warehouses. Lines without a part number
-  // (hand- or MCP-added) key off their item label so distinct items don't merge
-  // into a single blank-part bucket. First occurrence wins for descriptive
-  // fields; Price is re-derived as the blended unit price.
   type DataRow = (typeof data)[number];
-  const byPart = new Map<string, DataRow>();
+  const byCategory = new Map<SoCategory, DataRow[]>();
   for (const row of data) {
-    const key = row.part ? `pn:${row.part}` : `item:${row.item}`;
-    const existing = byPart.get(key);
-    if (existing) {
-      existing.qty += row.qty;
-      existing.lineTotal = +(existing.lineTotal + row.lineTotal).toFixed(2);
-    } else {
-      byPart.set(key, { ...row });
-    }
+    if (!byCategory.has(row.category)) byCategory.set(row.category, []);
+    byCategory.get(row.category)!.push(row);
   }
-  const summaryData = [...byPart.values()].map((g) => ({
-    ...g,
-    price: g.qty ? +(g.lineTotal / g.qty).toFixed(2) : 0,
+  const presentCategories = SO_CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
+
+  // Summary sections aggregate per part number *within* each category (a
+  // shared label can't merge a RAM row into an SSD one). Lines without a part
+  // number (hand- or MCP-added) key off their item label so distinct items
+  // don't merge into a single blank-part bucket. First occurrence wins for
+  // descriptive fields; Avg price is re-derived as the blended unit price.
+  const sections: XlsxSection[] = presentCategories.map((cat) => {
+    const byPart = new Map<string, DataRow>();
+    for (const row of byCategory.get(cat)!) {
+      const key = row.part ? `pn:${row.part}` : `item:${row.item}`;
+      const existing = byPart.get(key);
+      if (existing) {
+        existing.qty += row.qty;
+        existing.lineTotal = +(existing.lineTotal + row.lineTotal).toFixed(2);
+      } else {
+        byPart.set(key, { ...row });
+      }
+    }
+    const sectionRows = [...byPart.values()].map((g) => ({
+      ...g,
+      price: g.qty ? +(g.lineTotal / g.qty).toFixed(2) : 0,
+    }));
+    const columns = soSummaryCols(cat);
+    return {
+      title: cat,
+      columns,
+      rows: sectionRows,
+      subtotal: {
+        [columns[0].key]: 'Subtotal',
+        qty: sectionRows.reduce((sum, r) => sum + r.qty, 0),
+        lineTotal: +sectionRows.reduce((sum, r) => sum + r.lineTotal, 0).toFixed(2),
+      },
+    };
+  });
+
+  const categorySheets: XlsxSheet[] = presentCategories.map((cat) => ({
+    name: cat,
+    columns: soDetailCols(cat),
+    rows: byCategory.get(cat)!,
   }));
 
-  // Then one tab per warehouse, alphabetical with 'Unassigned' last — the same
-  // ordering the packing list uses. These keep the full per-line detail.
-  const UNASSIGNED = 'Unassigned';
-  const byWarehouse = new Map<string, typeof data>();
-  for (const row of data) {
-    const key = row.warehouse || UNASSIGNED;
-    if (!byWarehouse.has(key)) byWarehouse.set(key, []);
-    byWarehouse.get(key)!.push(row);
-  }
-  const warehouseSheets: XlsxSheet[] = [...byWarehouse.keys()]
-    .sort((a, b) => {
-      if (a === UNASSIGNED) return 1;
-      if (b === UNASSIGNED) return -1;
-      return a.localeCompare(b);
-    })
-    .map((name) => ({ name, columns: SO_DETAIL_COLS, rows: byWarehouse.get(name)! }));
-
   const buf = await buildXlsxWorkbook([
-    { name: 'Summary', columns: SO_SUMMARY_COLS, rows: summaryData },
-    ...warehouseSheets,
+    {
+      name: 'Summary',
+      sections,
+      total: {
+        label: 'Order total',
+        qty: data.reduce((sum, r) => sum + r.qty, 0),
+        lineTotal: +data.reduce((sum, r) => sum + r.lineTotal, 0).toFixed(2),
+      },
+      totalColumns: SO_TOTAL_COLS,
+    },
+    ...categorySheets,
   ]);
   const slug = customerSlug(head.customer_name);
   return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));

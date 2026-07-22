@@ -16,6 +16,30 @@ export type XlsxSheet = {
   rows: Record<string, unknown>[];
 };
 
+// A sheet made of stacked sub-tables ("sections"), each with its own title,
+// header row, and column set — used when one flat header can't fit rows of
+// different shapes (e.g. the sell-order Summary mixing RAM and SSD spec
+// columns). Sectioned sheets get no autoFilter or frozen header: both bind to
+// a single header row, which this layout doesn't have.
+export type XlsxSection = {
+  title: string;
+  columns: XlsxColumn[];
+  rows: Record<string, unknown>[];
+  // Optional bold trailing row (e.g. per-section subtotal); keys align to
+  // `columns`, absent keys render blank.
+  subtotal?: Record<string, unknown>;
+};
+
+export type XlsxSectionedSheet = {
+  name: string;
+  sections: XlsxSection[];
+  // Optional bold grand-total row appended after a blank spacer. `totalColumns`
+  // supplies its key→cell placement and number formats (sections may disagree
+  // on column meaning by index, so the total declares its own layout).
+  total?: Record<string, unknown>;
+  totalColumns?: XlsxColumn[];
+};
+
 // Excel forbids \ / ? * : [ ] in tab names and caps them at 31 chars. Warehouse
 // codes are clean, but sanitize anyway so a future odd code can't corrupt the
 // workbook.
@@ -24,7 +48,58 @@ function safeSheetName(name: string): string {
   return cleaned || 'Sheet';
 }
 
-export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
+// Sectioned sheets never set `ws.columns` (that would write a header row and
+// pin one key set), so rows are appended positionally and numFmt is applied
+// per cell — column-level styles can't work when header sets differ per
+// section.
+function addKeyedRow(
+  ws: import('exceljs').Worksheet,
+  columns: XlsxColumn[],
+  values: Record<string, unknown>,
+  bold: boolean,
+): void {
+  const row = ws.addRow(columns.map((c) => values[c.key] ?? ''));
+  if (bold) row.font = { bold: true };
+  columns.forEach((c, i) => {
+    if (c.numFmt) row.getCell(i + 1).numFmt = c.numFmt;
+  });
+}
+
+function renderSectionedSheet(
+  ws: import('exceljs').Worksheet,
+  sheet: XlsxSectionedSheet,
+): void {
+  // Column widths are shared per index across all sections; take the widest so
+  // no section's cells get clipped.
+  const widths: number[] = [];
+  const widen = (cols: XlsxColumn[]) =>
+    cols.forEach((c, i) => {
+      widths[i] = Math.max(widths[i] ?? 0, c.width ?? 16);
+    });
+  for (const sec of sheet.sections) widen(sec.columns);
+  if (sheet.totalColumns) widen(sheet.totalColumns);
+  widths.forEach((w, i) => {
+    ws.getColumn(i + 1).width = w;
+  });
+
+  let first = true;
+  for (const sec of sheet.sections) {
+    if (!first) ws.addRow([]);
+    first = false;
+    ws.addRow([sec.title]).font = { bold: true };
+    ws.addRow(sec.columns.map((c) => c.header)).font = { bold: true };
+    for (const r of sec.rows) addKeyedRow(ws, sec.columns, r, false);
+    if (sec.subtotal) addKeyedRow(ws, sec.columns, sec.subtotal, true);
+  }
+  if (sheet.total && sheet.totalColumns) {
+    ws.addRow([]);
+    addKeyedRow(ws, sheet.totalColumns, sheet.total, true);
+  }
+}
+
+export async function buildXlsxWorkbook(
+  sheets: (XlsxSheet | XlsxSectionedSheet)[],
+): Promise<Buffer> {
   // exceljs is a heavy dependency only needed by the rarely-hit export
   // endpoints — load it lazily so its cost isn't paid on every process boot.
   const { default: ExcelJS } = await import('exceljs');
@@ -42,6 +117,10 @@ export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
       used.set(name, 1);
     }
     const ws = wb.addWorksheet(name);
+    if ('sections' in sheet) {
+      renderSectionedSheet(ws, sheet);
+      continue;
+    }
     ws.columns = sheet.columns.map((col) => ({
       header: col.header,
       key: col.key,
