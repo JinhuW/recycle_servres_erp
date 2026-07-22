@@ -953,51 +953,53 @@ function SellOrderDetail({
                   }}>
                     <Icon name="user" size={12} /> Customer
                   </div>
-                  <div style={{ maxWidth: 360 }}>
-                    <CustomerPicker
-                      customers={customers.length ? customers : [{
-                        id: order.customer.id, name: order.customer.name,
-                        short_name: order.customer.short, region: order.customer.region,
-                      }]}
-                      value={draft.customerId}
-                      onChange={id => setDraft({ ...draft, customerId: id })}
-                      onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
-                    />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '0 1 340px', minWidth: 240 }}>
+                      <CustomerPicker
+                        customers={customers.length ? customers : [{
+                          id: order.customer.id, name: order.customer.name,
+                          short_name: order.customer.short, region: order.customer.region,
+                        }]}
+                        value={draft.customerId}
+                        onChange={id => setDraft({ ...draft, customerId: id })}
+                        onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
+                      <CurrencyPicker
+                        value={draft.currency}
+                        onChange={cur => setDraft({ ...draft, currency: cur })}
+                        t={t}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
+                      <select
+                        className="select"
+                        style={{ maxWidth: 260 }}
+                        value={draft.paymentReceivedBy}
+                        onChange={e => setDraft({ ...draft, paymentReceivedBy: e.target.value })}
+                      >
+                        <option value="">{t('paymentReceiverNone')}</option>
+                        {/* A deactivated receiver isn't in the active-members list —
+                            keep them selectable so opening the editor doesn't
+                            silently clear the assignment. */}
+                        {order.paymentReceivedBy
+                          && !members.some(m => m.id === order.paymentReceivedBy!.id) && (
+                          <option value={order.paymentReceivedBy.id}>{order.paymentReceivedBy.name}</option>
+                        )}
+                        {members.map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
-                    <CurrencyPicker
-                      value={draft.currency}
-                      onChange={cur => setDraft({ ...draft, currency: cur })}
-                      t={t}
-                    />
-                    {currencyChanged && (
-                      <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                        {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('paymentReceiverLabel')}</span>
-                    <select
-                      className="select"
-                      style={{ maxWidth: 260 }}
-                      value={draft.paymentReceivedBy}
-                      onChange={e => setDraft({ ...draft, paymentReceivedBy: e.target.value })}
-                    >
-                      <option value="">{t('paymentReceiverNone')}</option>
-                      {/* A deactivated receiver isn't in the active-members list —
-                          keep them selectable so opening the editor doesn't
-                          silently clear the assignment. */}
-                      {order.paymentReceivedBy
-                        && !members.some(m => m.id === order.paymentReceivedBy!.id) && (
-                        <option value={order.paymentReceivedBy.id}>{order.paymentReceivedBy.name}</option>
-                      )}
-                      {members.map(m => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {currencyChanged && (
+                    <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                      {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
+                    </div>
+                  )}
                 </div>
               )}
 
