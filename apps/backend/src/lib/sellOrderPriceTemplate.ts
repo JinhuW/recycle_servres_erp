@@ -3,11 +3,15 @@
 // lib/xlsx.ts — the flat sheet builder there has no notion of merged
 // instruction rows, per-cell protection, or formulas.
 //
+// One worksheet per category present (RAM / SSD / HDD / Other, user-requested
+// 2026-07-22: "the SSD should be in a dedicated sub sheet"), each carrying
+// only that category's spec columns. The import parser reads prices from
+// EVERY sheet, so a vendor filling several tabs round-trips fine.
+//
 // Photos ship as clickable Image URL cells, not embedded thumbnails
 // (user-requested 2026-07-22): links keep the file small and always show the
 // full-size scan. Spec attributes get individual columns (same request as the
-// order spreadsheet — never re-merge them into one composed field); the
-// column set is the union of the categories actually present on the order.
+// order spreadsheet — never re-merge them into one composed field).
 //
 // Everything except the Unit Price and Note columns is locked; the import
 // parser still never relies on that structure (it re-locates columns by header
@@ -71,21 +75,7 @@ const BAND_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F293
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } } as const;
 const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7C2' } } as const;
 
-// Union of spec columns for the categories present, in RAM → SSD → HDD order.
-function specColsFor(products: PriceTemplateProduct[]): SpecCol[] {
-  const present = new Set(products.map((p) => p.category));
-  const seen = new Set<string>();
-  const cols: SpecCol[] = [];
-  for (const cat of ['RAM', 'SSD', 'HDD']) {
-    if (!present.has(cat)) continue;
-    for (const col of SPEC_COLS_BY_CATEGORY[cat]) {
-      if (seen.has(col.key)) continue;
-      seen.add(col.key);
-      cols.push(col);
-    }
-  }
-  return cols;
-}
+const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 
 export async function buildPriceTemplateWorkbook(
   head: PriceTemplateHead,
@@ -93,7 +83,33 @@ export async function buildPriceTemplateWorkbook(
 ): Promise<Buffer> {
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Price Sheet', {
+
+  // One tab per category present, named after it. Unknown categories fold
+  // into Other so no product can fall off the workbook.
+  const byCategory = new Map<string, PriceTemplateProduct[]>();
+  for (const p of products) {
+    const cat = (CATEGORY_ORDER as readonly string[]).includes(p.category) ? p.category : 'Other';
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(p);
+  }
+  for (const cat of CATEGORY_ORDER) {
+    const catProducts = byCategory.get(cat);
+    if (!catProducts) continue;
+    await renderCategorySheet(wb, cat, head, catProducts);
+  }
+  // A workbook needs at least one sheet to be a valid file.
+  if (byCategory.size === 0) await renderCategorySheet(wb, 'Other', head, []);
+
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function renderCategorySheet(
+  wb: import('exceljs').Workbook,
+  category: string,
+  head: PriceTemplateHead,
+  products: PriceTemplateProduct[],
+): Promise<void> {
+  const ws = wb.addWorksheet(category, {
     views: [{ state: 'frozen', ySplit: HEADER_ROW }],
   });
 
@@ -101,8 +117,8 @@ export async function buildPriceTemplateWorkbook(
   const currencyLabel = cur === 'CNY' ? '人民币 CNY' : 'USD';
 
   // The spec block sits between Item and Part Number, so every later column
-  // index depends on how many categories the order mixes.
-  const specCols = specColsFor(products);
+  // index depends on the category's spec-column count.
+  const specCols = SPEC_COLS_BY_CATEGORY[category] ?? [];
   const IDX = {
     index: 1,
     image: 2,
@@ -212,6 +228,4 @@ export async function buildPriceTemplateWorkbook(
     sort: false,
     autoFilter: false,
   });
-
-  return Buffer.from(await wb.xlsx.writeBuffer());
 }

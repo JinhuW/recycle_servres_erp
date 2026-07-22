@@ -25,6 +25,9 @@ export type ParsedRowStatus =
   | 'ambiguous';
 
 export type ParsedPriceRow = {
+  // Worksheet the row came from — the template ships one tab per category, so
+  // (sheet, rowNumber) is a row's identity; rowNumber alone repeats per tab.
+  sheet: string;
   rowNumber: number;
   rawPart: string;
   canonPart: string;
@@ -136,7 +139,12 @@ type HeaderHit = {
   condCol: number | null;
 };
 
-function findHeader(wb: ExcelJS.Workbook): HeaderHit | null {
+// Every sheet with a recognizable header participates — the bid template
+// ships one tab per category, and a vendor may fill prices on several tabs.
+// Columns are located per sheet, so tabs with different spec-column counts
+// (and therefore different price-column positions) all parse correctly.
+function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
+  const hits: HeaderHit[] = [];
   for (const ws of wb.worksheets) {
     const last = Math.min(ws.rowCount, HEADER_SCAN_ROWS);
     for (let r = 1; r <= last; r++) {
@@ -152,11 +160,12 @@ function findHeader(wb: ExcelJS.Workbook): HeaderHit | null {
         else if (condCol === null && isConditionHeader(h)) condCol = c;
       }
       if (partCol !== null && priceCol !== null) {
-        return { ws, headerRow: r, partCol, priceCol, condCol };
+        hits.push({ ws, headerRow: r, partCol, priceCol, condCol });
+        break;
       }
     }
   }
-  return null;
+  return hits;
 }
 
 const normCondition = (s: string | null) =>
@@ -203,9 +212,8 @@ export function parsePriceWorkbook(
   wb: ExcelJS.Workbook,
   orderProducts: OrderProduct[],
 ): PriceImportPreview {
-  const hit = findHeader(wb);
-  if (!hit) throw new PriceColumnsNotFoundError();
-  const { ws, headerRow, partCol, priceCol, condCol } = hit;
+  const hits = findHeaders(wb);
+  if (hits.length === 0) throw new PriceColumnsNotFoundError();
 
   const manualProducts: OrderProduct[] = [];
   const byCanon = new Map<string, { product: OrderProduct; index: number }[]>();
@@ -223,60 +231,64 @@ export function parsePriceWorkbook(
   const rows: ParsedPriceRow[] = [];
   // One winner per product: a later valid price for the same product demotes
   // the earlier row to 'duplicate' (vendors often re-list corrected prices at
-  // the bottom of the sheet).
+  // the bottom of the sheet). The map spans sheets, so re-pricing a part on
+  // another tab demotes the first occurrence the same way.
   const winnerByProduct = new Map<number, ParsedPriceRow>();
 
-  for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-    const row = ws.getRow(r);
-    const rawPart = cellText(row.getCell(partCol).value).trim();
-    if (rawPart === '') continue;
+  for (const { ws, headerRow, partCol, priceCol, condCol } of hits) {
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const rawPart = cellText(row.getCell(partCol).value).trim();
+      if (rawPart === '') continue;
 
-    const priceValue = row.getCell(priceCol).value;
-    const price = parsePrice(priceValue);
-    const fileCondition = condCol ? cellText(row.getCell(condCol).value).trim() || null : null;
-    const parsed: ParsedPriceRow = {
-      rowNumber: r,
-      rawPart,
-      canonPart: canonPartNumberJs(rawPart),
-      condition: fileCondition,
-      price: price.kind === 'ok' ? price.value : null,
-      rawPrice: cellText(priceValue),
-      status: 'no-price',
-    };
+      const priceValue = row.getCell(priceCol).value;
+      const price = parsePrice(priceValue);
+      const fileCondition = condCol ? cellText(row.getCell(condCol).value).trim() || null : null;
+      const parsed: ParsedPriceRow = {
+        sheet: ws.name,
+        rowNumber: r,
+        rawPart,
+        canonPart: canonPartNumberJs(rawPart),
+        condition: fileCondition,
+        price: price.kind === 'ok' ? price.value : null,
+        rawPrice: cellText(priceValue),
+        status: 'no-price',
+      };
 
-    const candidates = byCanon.get(parsed.canonPart);
-    if (!candidates) {
-      parsed.status = 'not-in-order';
-    } else {
-      let target: { product: OrderProduct; index: number } | null = null;
-      if (candidates.length === 1) {
-        target = candidates[0];
+      const candidates = byCanon.get(parsed.canonPart);
+      if (!candidates) {
+        parsed.status = 'not-in-order';
       } else {
-        const matches = candidates.filter(
-          c => normCondition(c.product.condition) === normCondition(fileCondition),
-        );
-        target = matches.length === 1 ? matches[0] : null;
+        let target: { product: OrderProduct; index: number } | null = null;
+        if (candidates.length === 1) {
+          target = candidates[0];
+        } else {
+          const matches = candidates.filter(
+            c => normCondition(c.product.condition) === normCondition(fileCondition),
+          );
+          target = matches.length === 1 ? matches[0] : null;
+        }
+        if (!target) {
+          parsed.status = 'ambiguous';
+        } else if (price.kind === 'empty') {
+          parsed.status = 'no-price';
+        } else if (price.kind === 'invalid') {
+          parsed.status = 'invalid-price';
+        } else {
+          parsed.status = 'matched';
+          parsed.partNumber = target.product.partNumber;
+          parsed.label = target.product.label;
+          parsed.condition = target.product.condition;
+          parsed.oldPrice = target.product.oldPrice;
+          parsed.qty = target.product.qty;
+          parsed.lineCount = target.product.lineCount;
+          const prior = winnerByProduct.get(target.index);
+          if (prior) prior.status = 'duplicate';
+          winnerByProduct.set(target.index, parsed);
+        }
       }
-      if (!target) {
-        parsed.status = 'ambiguous';
-      } else if (price.kind === 'empty') {
-        parsed.status = 'no-price';
-      } else if (price.kind === 'invalid') {
-        parsed.status = 'invalid-price';
-      } else {
-        parsed.status = 'matched';
-        parsed.partNumber = target.product.partNumber;
-        parsed.label = target.product.label;
-        parsed.condition = target.product.condition;
-        parsed.oldPrice = target.product.oldPrice;
-        parsed.qty = target.product.qty;
-        parsed.lineCount = target.product.lineCount;
-        const prior = winnerByProduct.get(target.index);
-        if (prior) prior.status = 'duplicate';
-        winnerByProduct.set(target.index, parsed);
-      }
+      rows.push(parsed);
     }
-    rows.push(parsed);
   }
 
   const unmatchedProducts = orderProducts.filter(

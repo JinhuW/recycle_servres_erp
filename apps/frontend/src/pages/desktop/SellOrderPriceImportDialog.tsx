@@ -18,6 +18,9 @@ type PreviewRowStatus =
   | 'matched' | 'not-in-order' | 'no-price' | 'invalid-price' | 'duplicate' | 'ambiguous';
 
 type PreviewRow = {
+  // The template ships one tab per category, so a row's identity is
+  // (sheet, rowNumber) — rowNumber alone repeats across tabs.
+  sheet: string;
   rowNumber: number;
   rawPart: string;
   canonPart: string;
@@ -194,17 +197,18 @@ function PriceImportPreviewDialog({
 
   const matched = preview.rows.filter(r => r.status === 'matched');
   const warnings = preview.rows.filter(r => r.status !== 'matched');
-  const [excluded, setExcluded] = useState<Set<number>>(new Set());
+  const rowKey = (r: PreviewRow) => `${r.sheet ?? ''}:${r.rowNumber}`;
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
-  const toggle = (rowNumber: number) =>
+  const toggle = (key: string) =>
     setExcluded(prev => {
       const next = new Set(prev);
-      if (next.has(rowNumber)) next.delete(rowNumber);
-      else next.add(rowNumber);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
-  const included = matched.filter(r => !excluded.has(r.rowNumber));
+  const included = matched.filter(r => !excluded.has(rowKey(r)));
   const confirm = () =>
     onConfirm(included.map(r => ({
       canonPart: r.canonPart,
@@ -240,12 +244,12 @@ function PriceImportPreviewDialog({
               </thead>
               <tbody>
                 {matched.map(r => (
-                  <tr key={r.rowNumber} style={{ opacity: excluded.has(r.rowNumber) ? 0.45 : 1 }}>
+                  <tr key={rowKey(r)} style={{ opacity: excluded.has(rowKey(r)) ? 0.45 : 1 }}>
                     <td>
                       <input
                         type="checkbox"
-                        checked={!excluded.has(r.rowNumber)}
-                        onChange={() => toggle(r.rowNumber)}
+                        checked={!excluded.has(rowKey(r))}
+                        onChange={() => toggle(rowKey(r))}
                       />
                     </td>
                     <td>
@@ -270,7 +274,7 @@ function PriceImportPreviewDialog({
           {(warnings.length > 0 || preview.unmatchedProducts.length > 0 || preview.manualProducts.length > 0) && (
             <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {warnings.map(r => (
-                <div key={`w${r.rowNumber}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <div key={`w${rowKey(r)}`} style={{ fontSize: 12.5, color: 'var(--fg-subtle)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
                   <Icon name="alert" size={12} style={{ flexShrink: 0, transform: 'translateY(1px)' }} />
                   <span>
                     <span className="mono">{r.rawPart}</span>
