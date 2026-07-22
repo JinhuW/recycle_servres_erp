@@ -54,10 +54,22 @@ had been adjusted.
 - `POST /api/sell-orders/:id/adjust-price` — manager-gated, `FOR UPDATE`,
   status-guarded; body `{ targetTotal }`; returns `{ ok, achievedTotal }`.
 - `GET /:id` → `order.priceAdjustment`; `GET /` rows → `adjusted: boolean`.
-- Frontend: pencil next to Total in the **view** modal (hidden in edit mode so
-  unsaved line edits can't race the saved-line proration), inline numeric
-  input, struck-through original + `Adjusted −X%` chip, history entry, list
-  chip. i18n keys `soAdjust*` / `historyPriceAdjusted` (EN + ZH).
+- Frontend (revised same-day, v1.23.0): an **order-summary card** with
+  `Subtotal / Adjustment / Total` breakdown rows (signed delta, colored, pct
+  chip with who/when tooltip) replaces the original strikethrough treatment.
+  "Adjust total" lives in the card head and is **never disabled**:
+  - **View modal** — applying calls `adjust-price` immediately (order is
+    otherwise read-only there).
+  - **Edit modal** — the target joins the draft (`pendingAdjust`) like any
+    other edit and is applied on **Save**. Save sequencing is
+    `PATCH → adjust-price → status POST`: proration must run on the saved
+    line set, and a `Done` transition must see negotiated prices (it consumes
+    stock + records market datapoints). Subtotal tracks the live draft while
+    the buyer's target stays fixed; an (×) removes the pending adjustment;
+    a saved adjustment's rows hide once the draft's priced set diverges
+    (PATCH clears the baseline on save anyway).
+  i18n keys `soAdjust*` / `soOrderSummary` / `soSubtotalRow` /
+  `soAdjustmentRow` / `historyPriceAdjusted` (EN + ZH).
 
 ## Tests
 

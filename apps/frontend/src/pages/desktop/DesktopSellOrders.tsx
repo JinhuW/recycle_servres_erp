@@ -12,7 +12,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
@@ -622,12 +622,14 @@ function SellOrderDetail({
   const [refreshKey, setRefreshKey] = useState(0);
   // Bumped after every successful mutation so <SellOrderHistory> re-fetches.
   const [historyKey, setHistoryKey] = useState(0);
-  // Inline negotiated-total editor in the view modal. Available while the
-  // order is still adjustable (pre-Done) even though the rest of the view is
-  // read-only — buyers counter-offer right before paying.
+  // Inline negotiated-total editor. In the view modal an applied target hits
+  // the server immediately (the order is otherwise read-only there); in the
+  // edit modal it becomes part of the draft (`pendingAdjust`) and is applied
+  // on Save alongside the other edits — so it's never disabled.
   const [adjusting, setAdjusting] = useState(false);
   const [adjustInput, setAdjustInput] = useState('');
   const [adjustSaving, setAdjustSaving] = useState(false);
+  const [pendingAdjust, setPendingAdjust] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -644,6 +646,7 @@ function SellOrderDetail({
           currency: r.order.currency,
           lines: r.order.lines.map(toEditLine),
         });
+        setPendingAdjust(null);
       })
       .catch(handleFetchError);
     return () => { alive = false; };
@@ -676,6 +679,13 @@ function SellOrderDetail({
 
   useEscapeKey(onClose);
 
+  // "locked" = no structural edits or status moves allowed. Done is the
+  // terminal happy path; Closed is the off-ramp (line set + customer + status
+  // are all frozen until the order is Reopened). Both the list-page edit
+  // pencil and the in-page status stepper / line inputs respect this guard.
+  const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
+  const editable = mode === 'edit' && !locked;
+
   const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
   const currencyChanged = !!order && !!draft && draft.currency !== order.currency;
   const receiverChanged = !!order && !!draft
@@ -689,6 +699,7 @@ function SellOrderDetail({
     || receiverChanged
     || currencyChanged
     || linesChanged
+    || pendingAdjust != null
   );
 
   // The stepper shows only the forward lifecycle. Closed is an off-ramp
@@ -709,28 +720,64 @@ function SellOrderDetail({
     };
   }, [draft, order, draftRateToUsd]);
 
-  // Sign-aware delta chip label: "−5%" for the usual talk-down, "+3%" when the
-  // final price moved up. Baseline is the first pre-negotiation total.
+  // Breakdown for the order-summary card: Subtotal / Adjustment / Total.
+  // A pending (unsaved) target wins in edit mode — subtotal tracks the live
+  // draft while the buyer's number stays fixed, so the delta recomputes as
+  // lines are edited. A saved adjustment shows the stored baseline, but only
+  // while the draft's priced set still matches what it describes (a line or
+  // currency rewrite clears it on save). subtotal === null → no adjustment
+  // row, just the Total.
+  const summary = useMemo(() => {
+    if (!order) return null;
+    if (editable && pendingAdjust != null && editTotals) {
+      return { subtotal: editTotals.subtotalNative, total: pendingAdjust, pending: true };
+    }
+    const liveTotal = editable && editTotals ? editTotals.subtotalNative : order.nativeTotal;
+    const saved = order.priceAdjustment;
+    if (saved && !(editable && (linesChanged || currencyChanged))) {
+      return { subtotal: saved.preAdjustNativeTotal, total: liveTotal, pending: false };
+    }
+    return { subtotal: null, total: liveTotal, pending: false };
+  }, [order, editable, editTotals, pendingAdjust, linesChanged, currencyChanged]);
+
+  const adjustDelta = summary?.subtotal != null
+    ? +(summary.total - summary.subtotal).toFixed(2)
+    : null;
+  // Sign-aware chip label: "−5%" for the usual talk-down, "+3%" for a markup.
   const adjustPctLabel = useMemo(() => {
-    if (!order?.priceAdjustment) return '';
-    const from = order.priceAdjustment.preAdjustNativeTotal;
-    if (from <= 0) return '';
-    const pct = (order.nativeTotal / from - 1) * 100;
+    if (summary?.subtotal == null || summary.subtotal <= 0) return '';
+    const pct = (summary.total / summary.subtotal - 1) * 100;
     const rounded = Math.abs(pct) < 0.1 ? pct.toFixed(2) : pct.toFixed(1);
     return `${pct >= 0 ? '+' : '−'}${Math.abs(Number(rounded))}%`;
-  }, [order]);
+  }, [summary]);
 
-  const submitAdjust = async () => {
+  // USD-equiv line under the Total. For a pending target the saved order.total
+  // is stale, so it's re-derived from the live summary at the draft's rate.
+  const summaryUsd = !order || !summary
+    ? null
+    : editable
+      ? (draftRateToUsd != null ? +(summary.total * draftRateToUsd).toFixed(2) : null)
+      : order.total;
+
+  const applyAdjust = async () => {
     if (!order) return;
     const target = Number(adjustInput);
     if (!Number.isFinite(target) || target <= 0) return;
+    const rounded = +target.toFixed(2);
+    // Edit mode: the target joins the draft and is applied on Save with the
+    // rest of the edits — nothing hits the server here.
+    if (editable) {
+      setPendingAdjust(rounded);
+      setAdjusting(false);
+      return;
+    }
     setAdjustSaving(true);
     try {
       // The server prorates line prices and returns the achieved total (the
       // typed value may be unreachable at 2dp granularity) — re-fetch instead
       // of trusting the input.
       await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
-        targetTotal: +target.toFixed(2),
+        targetTotal: rounded,
       });
       setAdjusting(false);
       setRefreshKey(k => k + 1);
@@ -810,24 +857,6 @@ function SellOrderDetail({
     setSaving(true);
     setSaveError(null);
     try {
-      // Status transitions live on the dedicated endpoint — it takes a row
-      // lock + an idempotency guard so a Done order can't be reverted, and so
-      // a double-submit can't fire the consume-stock side-effects twice. PATCH
-      // refuses to touch status outright.
-      const statusChanged = draft.status !== order.status;
-      if (statusChanged) {
-        await api.post(`/api/sell-orders/${order.id}/status`, {
-          to: draft.status,
-          // Evidence (note + attachments) is uploaded live by
-          // StatusChangeDialog into status-meta tables, so we just announce
-          // the transition here. Re-send the note so the /status upsert
-          // preserves the dialog's note instead of nulling it out — evidence
-          // itself is optional, but a captured note shouldn't be lost.
-          note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
-            ?.[draft.status]?.note ?? undefined,
-        });
-        setHistoryKey(k => k + 1);
-      }
       // Structural / notes edits go through PATCH. Skip the call entirely if
       // only status changed — saves a round trip and avoids touching
       // updated_at when nothing else moved.
@@ -856,6 +885,33 @@ function SellOrderDetail({
         await api.patch(`/api/sell-orders/${order.id}`, patchBody);
         setHistoryKey(k => k + 1);
       }
+      // A pending negotiated total applies AFTER the line rewrite (the server
+      // prorates the just-saved set) and BEFORE any status move — a Done
+      // transition consumes stock and records market datapoints from line
+      // prices, which must already be the negotiated ones.
+      if (pendingAdjust != null) {
+        await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
+          targetTotal: pendingAdjust,
+        });
+        setHistoryKey(k => k + 1);
+      }
+      // Status transitions live on the dedicated endpoint — it takes a row
+      // lock + an idempotency guard so a Done order can't be reverted, and so
+      // a double-submit can't fire the consume-stock side-effects twice. PATCH
+      // refuses to touch status outright.
+      if (draft.status !== order.status) {
+        await api.post(`/api/sell-orders/${order.id}/status`, {
+          to: draft.status,
+          // Evidence (note + attachments) is uploaded live by
+          // StatusChangeDialog into status-meta tables, so we just announce
+          // the transition here. Re-send the note so the /status upsert
+          // preserves the dialog's note instead of nulling it out — evidence
+          // itself is optional, but a captured note shouldn't be lost.
+          note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
+            ?.[draft.status]?.note ?? undefined,
+        });
+        setHistoryKey(k => k + 1);
+      }
       onSaved();
     } catch (e) {
       // Keep the editor open with the user's edits intact — calling onSaved
@@ -866,12 +922,6 @@ function SellOrderDetail({
     }
   };
 
-  // "locked" = no structural edits or status moves allowed. Done is the
-  // terminal happy path; Closed is the off-ramp (line set + customer + status
-  // are all frozen until the order is Reopened). Both the list-page edit
-  // pencil and the in-page status stepper / line inputs respect this guard.
-  const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
-  const editable = mode === 'edit' && !locked;
   const closeReasonLabel = order?.closeReasonId
     ? t(closeReasonLabelKey(order.closeReasonId))
     : null;
@@ -1231,34 +1281,84 @@ function SellOrderDetail({
                 />
               )}
 
-              <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 320 }}>
-                <div className="so-row total">
-                  <span>
-                    {t('eoTotal')}
-                    {/* Negotiated-total pencil. The proration runs on the
-                        SAVED line set server-side and the reload rebuilds the
-                        draft, so in edit mode it stays disabled while there
-                        are unsaved changes — otherwise they'd be discarded. */}
-                    {!locked && !adjusting && (
-                      <button
-                        className="btn icon sm"
-                        title={editable && dirty ? t('soAdjustSaveFirst') : t('soAdjustTotal')}
-                        aria-label={t('soAdjustTotal')}
-                        disabled={!!(editable && dirty)}
-                        style={{ marginLeft: 6, verticalAlign: 'middle' }}
-                        onClick={() => {
-                          setAdjustInput(String(order.nativeTotal));
-                          setAdjusting(true);
-                        }}
+              {summary && (
+              <div className="so-summary" style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 340 }}>
+                <div
+                  className="so-summary-head"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}
+                >
+                  <span>{t('soOrderSummary')}</span>
+                  {!locked && !adjusting && (
+                    <button
+                      className="btn ghost sm"
+                      style={{ padding: '2px 8px', fontSize: 11, color: 'var(--fg-muted)' }}
+                      onClick={() => {
+                        setAdjustInput(String(summary.total));
+                        setAdjusting(true);
+                      }}
+                    >
+                      <Icon name="edit" size={11} /> {t('soAdjustTotal')}
+                    </button>
+                  )}
+                </div>
+
+                {summary.subtotal != null && (
+                  <div className="so-row muted">
+                    <span>{t('soSubtotalRow')}</span>
+                    <span className="mono">{fmtMoney(summary.subtotal, draftCurrency, locale)}</span>
+                  </div>
+                )}
+                {adjustDelta != null && (
+                  <div
+                    className="so-row"
+                    title={!summary.pending && order.priceAdjustment
+                      ? t('soAdjustedTooltip', {
+                          name: order.priceAdjustment.adjustedBy?.name ?? '—',
+                          when: fmtDate(order.priceAdjustment.adjustedAt, locale),
+                        })
+                      : undefined}
+                  >
+                    <span>
+                      {t('soAdjustmentRow')}
+                      <span
+                        className={'chip ' + (adjustDelta <= 0 ? 'neg' : 'pos')}
+                        style={{ fontSize: 10, marginLeft: 6, padding: '1px 6px' }}
                       >
-                        <Icon name="edit" size={12} />
-                      </button>
-                    )}
-                  </span>
+                        {adjustPctLabel}
+                      </span>
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <span
+                        className="mono"
+                        style={{ color: adjustDelta <= 0 ? 'var(--neg)' : 'var(--accent-strong)' }}
+                      >
+                        {adjustDelta >= 0 ? '+' : '−'}
+                        {fmtMoney(Math.abs(adjustDelta), draftCurrency, locale)}
+                      </span>
+                      {summary.pending && (
+                        <button
+                          className="btn icon sm"
+                          title={t('soAdjustRemove')}
+                          aria-label={t('soAdjustRemove')}
+                          style={{ padding: 2 }}
+                          onClick={() => setPendingAdjust(null)}
+                        >
+                          <Icon name="x" size={10} />
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                )}
+
+                <div className="so-row total">
+                  <span>{t('eoTotal')}</span>
                   {adjusting ? (
                     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
+                        {CURRENCY_SYMBOL[draftCurrency] ?? draftCurrency}
+                      </span>
                       <input
-                        className="mono"
+                        className="mono so-mini-input"
                         type="number"
                         min={0.01}
                         step={0.01}
@@ -1267,7 +1367,7 @@ function SellOrderDetail({
                         disabled={adjustSaving}
                         onChange={e => setAdjustInput(e.target.value)}
                         onKeyDown={e => {
-                          if (e.key === 'Enter') void submitAdjust();
+                          if (e.key === 'Enter') void applyAdjust();
                           if (e.key === 'Escape') { e.stopPropagation(); setAdjusting(false); }
                         }}
                         style={{ width: 110, textAlign: 'right' }}
@@ -1276,7 +1376,7 @@ function SellOrderDetail({
                         className="btn icon sm"
                         title={t('soAdjustApply')}
                         disabled={adjustSaving}
-                        onClick={() => void submitAdjust()}
+                        onClick={() => void applyAdjust()}
                       >
                         <Icon name="check" size={12} />
                       </button>
@@ -1290,49 +1390,22 @@ function SellOrderDetail({
                       </button>
                     </span>
                   ) : (
-                    <span className="mono">
-                      {/* Strikethrough + badge stay visible in edit mode until
-                          the draft's lines diverge from the saved (adjusted)
-                          set — then the baseline no longer describes what's on
-                          screen. */}
-                      {order.priceAdjustment && !(editable && dirty) && (
-                        <s style={{ color: 'var(--fg-subtle)', fontWeight: 400, marginRight: 8 }}>
-                          {fmtMoney(order.priceAdjustment.preAdjustNativeTotal, draftCurrency, locale)}
-                        </s>
-                      )}
-                      {fmtMoney(
-                        editable && editTotals ? editTotals.subtotalNative : order.nativeTotal,
-                        draftCurrency, locale,
-                      )}
-                    </span>
+                    <span className="mono">{fmtMoney(summary.total, draftCurrency, locale)}</span>
                   )}
                 </div>
-                {order.priceAdjustment && !(editable && dirty) && !adjusting && (
-                  <div className="so-row" style={{ fontSize: 11.5 }}>
+                {draftCurrency !== 'USD' && (
+                  <div className="so-row muted" style={{ fontSize: 11.5, paddingTop: 0 }}>
                     <span />
-                    <span
-                      className="chip warn"
-                      style={{ fontSize: 10.5 }}
-                      title={t('soAdjustedTooltip', {
-                        name: order.priceAdjustment.adjustedBy?.name ?? '—',
-                        when: fmtDate(order.priceAdjustment.adjustedAt, locale),
-                      })}
-                    >
-                      {t('soAdjustedChip', { pct: adjustPctLabel })}
-                    </span>
+                    <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(summaryUsd, locale) })}</span>
                   </div>
                 )}
-                {draftCurrency !== 'USD' && (
-                  <div className="so-row muted" style={{ fontSize: 11.5 }}>
-                    <span />
-                    <span className="mono">
-                      {t('soUsdEquiv', {
-                        usd: fmtUSD(editable && editTotals ? editTotals.subtotalUsd : order.total, locale),
-                      })}
-                    </span>
+                {summary.pending && (
+                  <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                    {t('soAdjustAppliesOnSave')}
                   </div>
                 )}
               </div>
+              )}
 
               {/* Tracking & evidence — read-only view of the per-status notes and
                   attachments. Edit mode reaches these via the stepper dialog; view
