@@ -117,12 +117,13 @@ app.get('/', (c) =>
 // hides outages from the load balancer. Unauthenticated by design.
 app.get('/api/health', async (c) => {
   // Build provenance. APP_VERSION/GIT_SHA are release-time Docker build args
-  // (scripts/release.sh) — Railway never passes them, so fall back to the
-  // root package.json version (bumped on every dev push, present in the
-  // image) and Railway's injected commit sha. Read from process.env, not
-  // c.env: these are image/runtime-scoped, not per-request.
-  const version = process.env.APP_VERSION ?? readRootVersion();
-  const commit = process.env.GIT_SHA ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? 'unknown';
+  // (scripts/release.sh) — Railway never passes them and the Dockerfile bakes
+  // them as EMPTY env strings, so use || (not ??) to fall back to the root
+  // package.json version (bumped on every dev push, present in the image)
+  // and Railway's injected commit sha. Read from process.env, not c.env:
+  // these are image/runtime-scoped, not per-request.
+  const version = process.env.APP_VERSION || readRootVersion();
+  const commit = process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
   try {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit });

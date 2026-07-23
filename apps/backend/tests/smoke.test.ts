@@ -37,8 +37,10 @@ describe('smoke', () => {
 
   it('GET /api/health falls back to the root package version and Railway sha when build env is absent', async () => {
     const prev = { v: process.env.APP_VERSION, c: process.env.GIT_SHA, r: process.env.RAILWAY_GIT_COMMIT_SHA };
-    delete process.env.APP_VERSION;
-    delete process.env.GIT_SHA;
+    // Empty strings, not deletions: the Dockerfile bakes the unset args as
+    // empty env, so this is exactly what a Railway container sees.
+    process.env.APP_VERSION = '';
+    process.env.GIT_SHA = '';
     process.env.RAILWAY_GIT_COMMIT_SHA = 'railwaysha123';
     try {
       const r = await api('GET', '/api/health');
