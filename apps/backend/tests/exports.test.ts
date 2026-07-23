@@ -83,6 +83,47 @@ describe('GET /api/inventory/export', () => {
     }
   });
 
+  it('exports only the selected rows when ids are passed', async () => {
+    const { token } = await loginAs(ALEX);
+    const list = await getRaw('/api/inventory?status=Reviewing', token);
+    const { items } = await list.json() as { items: { id: string }[] };
+    const picked = items.slice(0, 2).map(i => i.id);
+    expect(picked).toHaveLength(2);
+
+    const res = await getRaw(`/api/inventory/export?ids=${picked.join(',')}`, token);
+    expect(res.status).toBe(200);
+    const wb = await loadWorkbook(res);
+    let dataRows = 0;
+    const exportedIds: string[] = [];
+    for (const ws of wb.worksheets) {
+      for (let r = 2; r <= ws.rowCount; r++) {
+        if (ws.getRow(r).getCell(1).value) {
+          dataRows++;
+          exportedIds.push(String(ws.getRow(r).getCell(1).value));
+        }
+      }
+    }
+    expect(dataRows).toBe(2);
+    // The ID column carries the 8-char prefix of each selected line.
+    expect(exportedIds.sort()).toEqual(picked.map(id => id.slice(0, 8)).sort());
+  });
+
+  it('styles the header band and zebra-stripes data rows', async () => {
+    const { token } = await loginAs(ALEX);
+    const res = await getRaw('/api/inventory/export', token);
+    const wb = await loadWorkbook(res);
+    const ws = wb.worksheets[0];
+
+    const headerCell = ws.getRow(1).getCell(1);
+    expect(headerCell.font?.bold).toBe(true);
+    expect(headerCell.font?.color?.argb).toBe('FFFFFFFF');
+    expect((headerCell.fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBe('FF1F2937');
+    // Row 2 (first data row) is unstriped; row 3 carries the zebra fill.
+    expect(ws.rowCount).toBeGreaterThan(2);
+    const striped = ws.getRow(3).getCell(1).fill as { fgColor?: { argb?: string } };
+    expect(striped?.fgColor?.argb).toBe('FFF3F4F6');
+  });
+
   it('forbids purchasers (the workbook carries cost columns)', async () => {
     const { token } = await loginAs(MARCUS);
     const res = await getRaw('/api/inventory/export', token);

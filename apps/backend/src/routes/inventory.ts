@@ -273,7 +273,13 @@ inventory.get('/export', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
-  const whereFrag = inventoryWhereFrag(c, sql, u);
+  // An explicit row selection (checkboxes on the desktop list) exports exactly
+  // those lines and ignores the list filters — the selection may deliberately
+  // span warehouses or statuses the current filters would exclude. The route
+  // is manager-only, so bypassing the filters loses no role scoping.
+  const idsParam = c.req.query('ids');
+  const ids = idsParam ? [...new Set(idsParam.split(',').filter(Boolean))].slice(0, 1000) : [];
+  const whereFrag = ids.length ? sql`l.id IN ${sql(ids)}` : inventoryWhereFrag(c, sql, u);
 
   // Grouped mode collapses lines by canonical part number into one row each,
   // matching the desktop grouped view. Same filters/cap-drop as the flat path.
