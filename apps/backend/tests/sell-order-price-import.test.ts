@@ -343,9 +343,11 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     expect(dl.status).toBe(200);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await dl.arrayBuffer());
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD']);
+    // Category bid tabs first, then the warehouse packing-checklist tab.
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'LA1']);
 
-    // ...fill the Unit Price cell of every product row, vendor-style...
+    // ...fill the Unit Price cell of every product row, vendor-style. The
+    // packing tab has no Unit Price column, so it is naturally skipped.
     for (const ws of wb.worksheets) {
       let headerRow = 0, partCol = 0, priceCol = 0;
       for (let r = 1; r <= ws.rowCount && !headerRow; r++) {
@@ -355,6 +357,7 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
           if (v.startsWith('Unit Price')) priceCol = col;
         });
       }
+      if (!headerRow || !priceCol) continue;
       for (let r = headerRow + 1; r <= ws.rowCount; r++) {
         if (ws.getRow(r).getCell(partCol).value) {
           ws.getRow(r).getCell(priceCol).value = ws.name === 'RAM' ? 45 : 111;
@@ -363,13 +366,18 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     }
     const filled = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
 
-    // ...and every tab's price lands in the preview.
+    // ...and every bid tab's price lands in the preview — while the parser
+    // never reads the packing tab even though it repeats the part numbers
+    // (it has "Part #" but no price header, so findHeaders skips it; a
+    // parsed LA1 row would demote the bid rows to duplicates here).
     const res = await multipart(`/api/sell-orders/${id}/price-import/preview`, { file: filled }, { token });
     expect(res.status).toBe(200);
     const body = res.body as PriceImportPreview;
     expect(body.summary.matched).toBe(2);
+    expect(body.summary.duplicate).toBe(0);
     expect(body.rows.find(r => r.canonPart === 'IMP-A1')).toMatchObject({ sheet: 'RAM', price: 45 });
     expect(body.rows.find(r => r.canonPart === 'IMP-B2')).toMatchObject({ sheet: 'SSD', price: 111 });
+    expect(body.rows.every(r => ['RAM', 'SSD'].includes(r.sheet))).toBe(true);
     expect(body.unmatchedProducts).toEqual([]);
   });
 
