@@ -108,6 +108,27 @@ describe('GET /api/inventory/export', () => {
     expect(exportedIds.sort()).toEqual(picked.map(id => id.slice(0, 8)).sort());
   });
 
+  it('rejects malformed ids instead of 500ing, and ignores junk among valid ones', async () => {
+    const { token } = await loginAs(ALEX);
+    // All-junk selection: 400, never a Postgres uuid cast error.
+    const bad = await getRaw('/api/inventory/export?ids=not-a-uuid', token);
+    expect(bad.status).toBe(400);
+
+    // Junk mixed into a valid selection is dropped, not fatal.
+    const list = await getRaw('/api/inventory?status=Reviewing', token);
+    const { items } = await list.json() as { items: { id: string }[] };
+    const res = await getRaw(`/api/inventory/export?ids=${items[0].id},garbage`, token);
+    expect(res.status).toBe(200);
+    const wb = await loadWorkbook(res);
+    let dataRows = 0;
+    for (const ws of wb.worksheets) {
+      for (let r = 2; r <= ws.rowCount; r++) {
+        if (ws.getRow(r).getCell(1).value) dataRows++;
+      }
+    }
+    expect(dataRows).toBe(1);
+  });
+
   it('styles the header band and zebra-stripes data rows', async () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export', token);
