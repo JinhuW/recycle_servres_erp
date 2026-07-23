@@ -48,9 +48,29 @@ export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
       width: col.width ?? 16,
       style: col.numFmt ? { numFmt: col.numFmt } : {},
     }));
-    ws.getRow(1).font = { bold: true };
+    // Styled header band (same dark slate as the sell-order bid sheet) +
+    // zebra-striped data rows, so every export reads as one designed set.
+    const header = ws.getRow(1);
+    header.height = 22;
+    for (let cIdx = 1; cIdx <= sheet.columns.length; cIdx++) {
+      const cell = header.getCell(cIdx);
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
+      cell.alignment = { vertical: 'middle' };
+      cell.border = { bottom: { style: 'medium', color: { argb: 'FF111827' } } };
+    }
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    for (const r of sheet.rows) ws.addRow(r);
+    for (const r of sheet.rows) {
+      const row = ws.addRow(r);
+      if (row.number % 2 === 1) {
+        // Odd sheet rows are even data rows (row 1 is the header).
+        for (let cIdx = 1; cIdx <= sheet.columns.length; cIdx++) {
+          row.getCell(cIdx).fill = {
+            type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' },
+          };
+        }
+      }
+    }
     if (sheet.columns.length > 0) {
       ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columns.length } };
     }

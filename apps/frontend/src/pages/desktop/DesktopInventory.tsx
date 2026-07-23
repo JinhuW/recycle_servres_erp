@@ -426,15 +426,19 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
   const [quickView, setQuickView] = useState<InventoryRow | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  // Export the FULL filtered set (the backend drops the 200-row list cap for
-  // the xlsx). Reuses the live filterQuery so the file matches what's on screen;
-  // the grouped view exports one row per product.
+  // With rows selected, export exactly the selection (ids override the list
+  // filters server-side). Otherwise the FULL filtered set — the backend drops
+  // the 200-row list cap for the xlsx, and the live filterQuery keeps the file
+  // matching what's on screen. The grouped view exports one row per product.
   const runExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
       const params = new URLSearchParams(filterQuery);
       params.set('view', 'grouped');
+      if (selectedItems.length > 0) {
+        params.set('ids', selectedItems.map(r => r.id).join(','));
+      }
       await api.download(`/api/inventory/export?${params.toString()}`, 'inventory.xlsx');
     } catch (e) {
       handleFetchError(e);
@@ -508,8 +512,20 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
         </div>
         <div className="page-actions">
           {isManager && (
-            <button className="btn" onClick={runExport} disabled={exporting}>
+            <button
+              className="btn"
+              onClick={runExport}
+              disabled={exporting}
+              title={selectedItems.length > 0 ? t('exportSelectedHint') : t('exportAllHint')}
+            >
               <Icon name="download" size={14} /> {exporting ? `${t('export')}…` : t('export')}
+              {selectedItems.length > 0 && (
+                <span style={{
+                  marginLeft: 4, padding: '1px 7px',
+                  background: 'var(--bg-soft)', borderRadius: 999,
+                  fontSize: 11, fontWeight: 600,
+                }}>{selectedItems.length}</span>
+              )}
             </button>
           )}
           <button className="btn" onClick={() => setShowActivity(true)}>
