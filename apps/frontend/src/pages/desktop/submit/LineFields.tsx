@@ -50,23 +50,23 @@ export function RamFields({ line, set }: FieldsProps) {
         <CatSelect value={line.capacity} options={RAM_CAP} onChange={v => set({ capacity: v })} />
       </div>
       <div className="field">
-        <label className="label">{t('generation')}</label>
+        <label className="label">{t('generation')} <span className="req">*</span></label>
         <CatSelect value={line.generation} options={RAM_GENERATIONS} onChange={v => set({ generation: v })} />
       </div>
       <div className="field">
-        <label className="label">{t('type')}</label>
+        <label className="label">{t('type')} <span className="req">*</span></label>
         <CatSelect value={line.type} options={RAM_DEVICE_TYPES} onChange={v => set({ type: v })} />
       </div>
       <div className="field">
-        <label className="label">{t('klass')}</label>
+        <label className="label">{t('klass')} <span className="req">*</span></label>
         <CatSelect value={line.classification} options={RAM_CLASS} onChange={v => set({ classification: v })} />
       </div>
       <div className="field">
-        <label className="label">{t('rank')}</label>
+        <label className="label">{t('rank')} <span className="req">*</span></label>
         <CatSelect value={line.rank} options={RAM_RANK} onChange={v => set({ rank: v })} />
       </div>
       <div className="field">
-        <label className="label">{t('speedMhz')}</label>
+        <label className="label">{t('speedMhz')} <span className="req">*</span></label>
         <input
           className="input"
           value={line.speed ?? ''}
@@ -74,7 +74,7 @@ export function RamFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">{t('chipNumber')}</label>
+        <label className="label">{t('chipNumber')} <span className="req">*</span></label>
         <input
           className="input mono"
           value={line.chipNumber ?? ''}
@@ -82,7 +82,7 @@ export function RamFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">{t('partNumber')}</label>
+        <label className="label">{t('partNumber')} <span className="req">*</span></label>
         <input
           className="input mono"
           value={line.partNumber ?? ''}

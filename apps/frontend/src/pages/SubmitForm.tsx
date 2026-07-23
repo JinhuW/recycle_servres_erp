@@ -12,6 +12,7 @@ import { ImageLightbox } from '../components/ImageLightbox';
 import { parseSerials } from '../components/SerialNumbers';
 import { showErrorToast } from '../lib/errorToast';
 import { synthesizePartNumber } from '@recycle-erp/shared';
+import { missingRamFields } from '../lib/ramRequired';
 
 type Props = {
   category: Category;
@@ -184,8 +185,17 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
   // Part # is required. A typed value saves directly; a blank we can auto-fill
   // (e.g. a Mixed-brand SSD) prompts the confirm sheet; an un-fillable blank is
-  // a hard stop.
+  // a hard stop. RAM lines additionally require every spec field — the toast
+  // names the blanks (which include Part #, so the synth path never fires).
   const attemptSave = () => {
+    if (line.category === 'RAM') {
+      const missing = missingRamFields(line);
+      if (missing.length) {
+        const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
+        showErrorToast(t('fillRequiredFields', { fields }));
+        return;
+      }
+    }
     const typed = (line.partNumber ?? '').trim();
     if (typed) { persist(typed); return; }
     const gen = synthesizePartNumber(line.category, line);
