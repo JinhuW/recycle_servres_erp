@@ -277,8 +277,16 @@ inventory.get('/export', async (c) => {
   // those lines and ignores the list filters — the selection may deliberately
   // span warehouses or statuses the current filters would exclude. The route
   // is manager-only, so bypassing the filters loses no role scoping.
-  const idsParam = c.req.query('ids');
-  const ids = idsParam ? [...new Set(idsParam.split(',').filter(Boolean))].slice(0, 1000) : [];
+  // Non-UUID tokens are rejected up front: l.id is uuid-typed, so a mangled
+  // id would otherwise make Postgres throw and 500 the export. A selection
+  // that yields NO valid id is a 400 — silently exporting the full set on a
+  // corrupted link would be worse than failing.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const rawIds = (c.req.query('ids') ?? '').split(',').filter(Boolean);
+  const ids = [...new Set(rawIds.filter((id) => UUID_RE.test(id)))].slice(0, 1000);
+  if (rawIds.length > 0 && ids.length === 0) {
+    return c.json({ error: 'Invalid ids' }, 400);
+  }
   const whereFrag = ids.length ? sql`l.id IN ${sql(ids)}` : inventoryWhereFrag(c, sql, u);
 
   // Grouped mode collapses lines by canonical part number into one row each,
