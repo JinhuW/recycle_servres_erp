@@ -35,18 +35,26 @@ describe('smoke', () => {
     }
   });
 
-  it('GET /api/health falls back to dev/unknown when build env is absent', async () => {
-    const prev = { v: process.env.APP_VERSION, c: process.env.GIT_SHA };
+  it('GET /api/health falls back to the root package version and Railway sha when build env is absent', async () => {
+    const prev = { v: process.env.APP_VERSION, c: process.env.GIT_SHA, r: process.env.RAILWAY_GIT_COMMIT_SHA };
     delete process.env.APP_VERSION;
     delete process.env.GIT_SHA;
+    process.env.RAILWAY_GIT_COMMIT_SHA = 'railwaysha123';
     try {
       const r = await api('GET', '/api/health');
       const body = r.body as { version: string; commit: string };
-      expect(body.version).toBe('dev');
-      expect(body.commit).toBe('unknown');
+      // Railway builds pass no release args — the root package.json version
+      // (bumped on every dev push) is the truthful fallback, so the frontend
+      // version display and deploy checks show the real release.
+      const rootPkg = await import('../../../package.json');
+      expect(body.version).toBe(rootPkg.version);
+      expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(body.commit).toBe('railwaysha123');
     } finally {
       process.env.APP_VERSION = prev.v;
       process.env.GIT_SHA = prev.c;
+      if (prev.r === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
+      else process.env.RAILWAY_GIT_COMMIT_SHA = prev.r;
     }
   });
 
