@@ -9,6 +9,14 @@ per-attribute-column rule below still governs the price template: it carries
 one column per spec attribute (plus `Chip #` and a blank vendor-editable
 `Note / 备注` column) — **never re-merge spec attributes into one composed
 field** (that misread caused the v1.24.1 revert).
+>
+> v1.27.0 split the price template into one worksheet per category; v1.28.0
+> revived the warehouse view as per-warehouse **packing-checklist tabs** after
+> the category tabs (stacked per-category sections, "Packed ✓" tick column,
+> qty subtotals + warehouse total). Those tabs are **price-free by design** —
+> the same file is the vendor bid sheet — and their headers must never gain a
+> `price`/`单价`/`价格`-matching name, or the price-import parser would start
+> reading them (`findHeaders` needs part + price headers on one row).
 
 > **Note (same-day):** the per-attribute columns below are confirmed intent —
 > "type, rank, speed should be in an individual column". v1.24.1 briefly

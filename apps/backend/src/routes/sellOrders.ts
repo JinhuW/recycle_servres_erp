@@ -342,7 +342,8 @@ function customerSlug(name: string | null): string {
 // category's worksheet (RAM/SSD/HDD/Other tabs), with a clickable item-photo
 // URL and a blank Unit Price column. The vendor fills it and the manager
 // round-trips it through POST /:id/price-import/preview — the parser reads
-// every tab.
+// every tab. After the category tabs come per-warehouse packing-checklist
+// tabs (price-free, ignored by the parser — see lib/sellOrderPriceTemplate).
 sellOrders.get('/:id/price-template', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
@@ -362,12 +363,14 @@ sellOrders.get('/:id/price-template', async (c) => {
       sol.qty AS sell_qty,
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
       sol.category AS sol_category, sol.condition AS sol_condition,
+      w.short AS warehouse_short,
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
       l.rpm,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
+    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines l ON l.id = sol.inventory_id
     LEFT JOIN LATERAL (
       SELECT ls.delivery_url
@@ -391,6 +394,9 @@ sellOrders.get('/:id/price-template', async (c) => {
     typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
   const s = (v: unknown) => (v == null ? '' : String(v));
   const groups = new Map<string, Group>();
+  // Same aggregation scoped per warehouse — feeds the packing-checklist tabs.
+  // Warehouse-less lines land in an 'Unassigned' tab (old packing-list rule).
+  const byWarehouse = new Map<string, Map<string, Group>>();
   for (const r of rows) {
     const hasInv = r.inv_id != null;
     // Manual lines fold sub_label into the label — the sheet's spec columns
@@ -405,25 +411,43 @@ sellOrders.get('/:id/price-template', async (c) => {
     const part = (r.part_number ?? r.sol_part ?? null) as string | null;
     const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
     const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.qty += Number(r.sell_qty ?? 0);
-      if (!existing.imageUrl) existing.imageUrl = publicUrl(r.image_url);
-    } else {
-      groups.set(key, {
-        category, label, partNumber: part, condition,
-        qty: Number(r.sell_qty ?? 0),
-        imageUrl: publicUrl(r.image_url),
-        specs: hasInv ? {
-          brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
-          type: s(r.type), classification: s(r.classification), rank: s(r.rank),
-          speed: s(r.speed), chip: s(r.chip_number), interface: s(r.interface),
-          formFactor: s(r.form_factor),
-          health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
-        } : {},
-      });
-    }
+    const makeGroup = (): Group => ({
+      category, label, partNumber: part, condition,
+      qty: Number(r.sell_qty ?? 0),
+      imageUrl: publicUrl(r.image_url),
+      specs: hasInv ? {
+        brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
+        type: s(r.type), classification: s(r.classification), rank: s(r.rank),
+        speed: s(r.speed), chip: s(r.chip_number), interface: s(r.interface),
+        formFactor: s(r.form_factor),
+        health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
+      } : {},
+    });
+    const fold = (map: Map<string, Group>) => {
+      const existing = map.get(key);
+      if (existing) {
+        existing.qty += Number(r.sell_qty ?? 0);
+        if (!existing.imageUrl) existing.imageUrl = publicUrl(r.image_url);
+      } else {
+        map.set(key, makeGroup());
+      }
+    };
+    fold(groups);
+    const wh = s(r.warehouse_short) || 'Unassigned';
+    if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
+    fold(byWarehouse.get(wh)!);
   }
+
+  const warehouses = [...byWarehouse.keys()]
+    .sort((a, b) => {
+      if (a === 'Unassigned') return 1;
+      if (b === 'Unassigned') return -1;
+      return a.localeCompare(b);
+    })
+    .map((warehouse) => ({
+      warehouse,
+      products: [...byWarehouse.get(warehouse)!.values()],
+    }));
 
   const buf = await buildPriceTemplateWorkbook(
     {
@@ -432,6 +456,7 @@ sellOrders.get('/:id/price-template', async (c) => {
       currencyCode: head.currency_code,
     },
     [...groups.values()],
+    warehouses,
   );
   const slug = customerSlug(head.customer_name);
   return xlsxResponse(
