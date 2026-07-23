@@ -41,7 +41,7 @@ async function loadWorkbook(res: Response): Promise<ExcelJS.Workbook> {
   return wb;
 }
 
-// Vendor bid tabs only — warehouse packing tabs (LA1, NJ2…) have their own
+// Vendor bid tabs only — warehouse packing tabs (Pack - LA1…) have their own
 // layout ('Part #', no Unit Price) and are asserted separately.
 const CATEGORY_TABS = new Set(['RAM', 'SSD', 'HDD', 'Other']);
 const categoryTabs = (wb: ExcelJS.Workbook): ExcelJS.Worksheet[] =>
@@ -77,7 +77,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     const wb = await loadWorkbook(res);
     // RAM line + SSD line → a dedicated sub-sheet each, in fixed order, then
     // the packing-checklist tab of the one warehouse on the order.
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'LA1']);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'Pack - LA1']);
 
     const parts: string[] = [];
     for (const ws of categoryTabs(wb)) {
@@ -175,7 +175,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       ],
     });
     const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/price-template`, token));
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'Other', 'LA1']);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'Other', 'Pack - LA1']);
     const other = wb.worksheets.find(w => w.name === 'Other')!;
     const { row: headerRow, cols } = findHeaderRow(other);
     const itemCol = cols.get('Item')!;
@@ -284,7 +284,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       ],
     });
     const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/price-template`, token));
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'LA1', 'NJ2']);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'Pack - LA1', 'Pack - NJ2']);
 
     const cellStrings = (ws: ExcelJS.Worksheet): string[] => {
       const out: string[] = [];
@@ -296,7 +296,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
 
     // LA1 holds both categories as stacked sections with qty subtotals and a
     // warehouse total; the NJ2 split stays on its own tab.
-    const la1 = wb.worksheets.find(w => w.name === 'LA1')!;
+    const la1 = wb.worksheets.find(w => w.name === 'Pack - LA1')!;
     const la1Cells = cellStrings(la1);
     expect(la1Cells).toContain('RAM');
     expect(la1Cells).toContain('SSD');
@@ -325,7 +325,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(rowQty(la1, 'Subtotal')).toEqual([2, 1]);
     expect(rowQty(la1, 'Warehouse total')).toEqual([3]);
 
-    const nj2 = wb.worksheets.find(w => w.name === 'NJ2')!;
+    const nj2 = wb.worksheets.find(w => w.name === 'Pack - NJ2')!;
     const nj2Cells = cellStrings(nj2);
     expect(nj2Cells).toContain('WH-R1');
     expect(nj2Cells).not.toContain('WH-S1');

@@ -281,10 +281,9 @@ async function renderWarehouseSheet(
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
 ): Promise<void> {
-  // Category names are reserved tab names; a warehouse short that collides
-  // (or repeats) gets a suffix rather than corrupting the workbook.
-  const name = wb.getWorksheet(wh.warehouse) ? `${wh.warehouse} (WH)` : wh.warehouse;
-  const ws = wb.addWorksheet(name);
+  // "Pack - DEN" style: the prefix separates packing tabs from the category
+  // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
+  const ws = wb.addWorksheet(`Pack - ${wh.warehouse}`);
 
   const byCategory = groupByCategory(wh.products);
   const sections = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));

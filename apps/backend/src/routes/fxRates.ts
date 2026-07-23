@@ -95,4 +95,3 @@ fxRates.post('/fx-rates/refresh', async (c) => {
 });
 
 export { fxRates };
-export default fxRates;

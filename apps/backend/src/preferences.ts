@@ -55,7 +55,3 @@ export function validatePreferencePatch(body: unknown): PreferencePatchResult {
   }
   return { ok: true, cleaned };
 }
-
-export function preferenceKeys(): string[] {
-  return Object.keys(SCHEMA);
-}
