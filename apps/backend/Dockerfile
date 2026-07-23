@@ -18,9 +18,12 @@ WORKDIR /app/apps/backend
 # Build provenance, supplied by scripts/release.sh via --build-arg. Default to
 # dev/unknown so a plain `docker build` with no args still succeeds; the
 # release path overrides them and they surface at /api/health and as OCI
-# image labels.
-ARG APP_VERSION=dev
-ARG GIT_SHA=unknown
+# image labels. Defaults are EMPTY on purpose: a build that doesn't pass them
+# (Railway) must leave the env falsy so /api/health falls back to the root
+# package.json version + RAILWAY_GIT_COMMIT_SHA instead of freezing on a
+# baked "dev"/"unknown".
+ARG APP_VERSION=
+ARG GIT_SHA=
 LABEL org.opencontainers.image.version=$APP_VERSION \
       org.opencontainers.image.revision=$GIT_SHA
 # Image defaults: lowest precedence in Compose env merge order — anything in
