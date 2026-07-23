@@ -4,7 +4,7 @@ import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
-import { buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
+import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -140,22 +140,21 @@ inventory.get('/', async (c) => {
 // Excel export of the inventory list. Manager-only — the workbook carries
 // cost/profit/margin, which purchasers may never see. Reuses the exact list
 // filters but drops the 200-row UI cap so the file is the full filtered set.
+// One worksheet per category (RAM / SSD / HDD / Other), each with that
+// category's granular spec columns — same format as the sell-order download
+// (user-confirmed 2026-07-23; never re-merge specs into one composed field).
 // Registered before '/:id' so the literal path wins over the param route.
-const INV_EXPORT_COLS: XlsxColumn[] = [
+const INV_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
+
+const INV_EXPORT_HEAD: XlsxColumn[] = [
   { header: 'ID',           key: 'id',        width: 12 },
   { header: 'Date',         key: 'date',      width: 12 },
-  { header: 'Category',     key: 'category',  width: 10 },
-  { header: 'Item',         key: 'item',      width: 30 },
-  // RAM device type (Desktop/Server/Laptop) — its own column, like Rank/Speed.
-  // Blank for non-RAM categories, which don't carry a device type.
-  { header: 'Type',         key: 'type',      width: 10 },
-  { header: 'Spec',         key: 'spec',      width: 26 },
-  { header: 'Rank',         key: 'rank',      width: 10 },
-  { header: 'Speed',        key: 'speed',     width: 10 },
-  { header: 'Part #',       key: 'part',      width: 22 },
-  { header: 'Chip #',       key: 'chip',      width: 22 },
+];
+// `Item` (invLabel) keeps a human-scannable label next to the granular
+// columns. `Other` drops it: its Description column carries the same string.
+const INV_ITEM_COL: XlsxColumn = { header: 'Item', key: 'item', width: 30 };
+const INV_EXPORT_TAIL: XlsxColumn[] = [
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
-  { header: 'Condition',    key: 'condition', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
   { header: 'Unit cost',    key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
   { header: 'Sell price',   key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
@@ -166,8 +165,15 @@ const INV_EXPORT_COLS: XlsxColumn[] = [
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
-// Exported so the sell-order spreadsheet export can render the same Item/Spec
-// strings from a sold line's source inventory row.
+const invExportCols = (cat: (typeof INV_CATEGORY_ORDER)[number]): XlsxColumn[] => [
+  ...INV_EXPORT_HEAD,
+  ...(cat === 'Other' ? [] : [INV_ITEM_COL]),
+  ...GROUPED_LEAD_BY_CATEGORY[cat],
+  ...INV_EXPORT_TAIL,
+];
+
+// Exported so the sell-order price template can render the same Item string
+// from a sold line's source inventory row.
 export function invLabel(r: Record<string, unknown>): string {
   const s = (v: unknown) => (v == null ? '' : String(v));
   switch (r.category) {
@@ -177,25 +183,14 @@ export function invLabel(r: Record<string, unknown>): string {
     default:    return s(r.description);
   }
 }
-export function invSpec(r: Record<string, unknown>): string {
-  const s = (v: unknown) => (v == null ? '' : String(v));
-  switch (r.category) {
-    case 'RAM': return [s(r.classification), s(r.rank), r.speed ? `${r.speed}MHz` : ''].filter(Boolean).join(' · ');
-    case 'SSD': return [s(r.interface), s(r.form_factor), r.health != null ? `${r.health}%` : ''].filter(Boolean).join(' · ');
-    case 'HDD': return [s(r.interface), s(r.form_factor), r.rpm ? `${r.rpm}rpm` : '', r.health != null ? `${r.health}%` : ''].filter(Boolean).join(' · ');
-    default:    return s(r.condition);
-  }
-}
-
 // Grouped export (?view=grouped): one row per product — lines sharing a
 // canonical part number collapse together, mirroring the desktop grouped view.
 // Aggregates qty by status, counts POs/lots, and spreads cost min/avg/max.
 // Manager-only like the flat export, so cost columns are always present.
 //
-// The leading columns depend on the active category filter: a specific
-// category gets its granular attribute columns (one per submit-form field,
-// superseding the computed Item/Spec strings); "all" or an unknown category
-// falls back to the shared set. The aggregate tail is identical everywhere.
+// One worksheet per category, each leading with that category's granular
+// attribute columns (one per submit-form field). The aggregate tail is
+// identical on every tab.
 const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Warehouses',   key: 'warehouses', width: 18 },
   { header: 'Qty',          key: 'qty',        width: 8,  numFmt: '#,##0' },
@@ -250,12 +245,29 @@ const GROUPED_LEAD_BY_CATEGORY: Record<string, XlsxColumn[]> = {
   ],
 };
 
-const GROUPED_LEAD_SHARED: XlsxColumn[] = [
-  { header: 'Part #',       key: 'part',      width: 22 },
-  { header: 'Category',     key: 'category',  width: 10 },
-  { header: 'Item',         key: 'item',      width: 30 },
-  { header: 'Condition',    key: 'condition', width: 12 },
-];
+// One plain worksheet per category present, fixed order, unknown categories
+// folded into Other (same recipe as the sell-order download). An empty result
+// still needs a valid file — fall back to a single header-only sheet.
+async function buildCategoryTabs(
+  rows: Record<string, unknown>[],
+  colsFor: (cat: (typeof INV_CATEGORY_ORDER)[number]) => XlsxColumn[],
+): Promise<Buffer> {
+  const byCategory = new Map<string, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const cat = (INV_CATEGORY_ORDER as readonly string[]).includes(String(r.category))
+      ? String(r.category)
+      : 'Other';
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(r);
+  }
+  const sheets = INV_CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
+    name: cat as string,
+    columns: colsFor(cat),
+    rows: byCategory.get(cat)!,
+  }));
+  if (sheets.length === 0) sheets.push({ name: 'Inventory', columns: colsFor('Other'), rows: [] });
+  return buildXlsxWorkbook(sheets);
+}
 
 inventory.get('/export', async (c) => {
   const u = c.var.user;
@@ -267,12 +279,10 @@ inventory.get('/export', async (c) => {
   // matching the desktop grouped view. Same filters/cap-drop as the flat path.
   if (c.req.query('view') === 'grouped') {
     // Object.hasOwn: the category comes from the query string, so a value
-    // like 'constructor' must miss rather than hit a prototype key.
+    // like 'constructor' must miss rather than hit a prototype key. Only the
+    // filename cares — the tab split derives from the rows themselves.
     const category = c.req.query('category');
-    const lead = category && Object.hasOwn(GROUPED_LEAD_BY_CATEGORY, category)
-      ? GROUPED_LEAD_BY_CATEGORY[category]
-      : undefined;
-    const cols = [...(lead ?? GROUPED_LEAD_SHARED), ...GROUPED_TAIL_COLS];
+    const knownCategory = !!category && Object.hasOwn(GROUPED_LEAD_BY_CATEGORY, category);
     const canonCol = canonPartCol(sql, sql`l.part_number`);
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
@@ -367,10 +377,13 @@ inventory.get('/export', async (c) => {
       };
     });
 
-    const buf = await buildXlsxBuffer('Inventory', cols, grouped);
+    const buf = await buildCategoryTabs(grouped, (cat) => [
+      ...GROUPED_LEAD_BY_CATEGORY[cat],
+      ...GROUPED_TAIL_COLS,
+    ]);
     return xlsxResponse(
       buf,
-      datedFilename(lead ? `inventory-${category!.toLowerCase()}` : 'inventory-grouped'),
+      datedFilename(knownCategory ? `inventory-${category!.toLowerCase()}` : 'inventory-grouped'),
     );
   }
 
@@ -398,6 +411,8 @@ inventory.get('/export', async (c) => {
     ORDER BY l.created_at DESC
   `;
 
+  // Granular attribute keys are emitted unconditionally — each tab's column
+  // set picks the ones it declares, so the mapper stays branch-free.
   const data = (rows as Record<string, unknown>[]).map((r) => {
     const unitCost = Number(r.unit_cost ?? 0);
     const sellPrice = r.sell_price == null ? null : Number(r.sell_price);
@@ -409,10 +424,18 @@ inventory.get('/export', async (c) => {
       date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
       category: r.category ?? '',
       item: invLabel(r),
-      type: r.category === 'RAM' ? (r.type ?? '') : '',
-      spec: invSpec(r),
+      brand: r.brand ?? '',
+      capacity: r.capacity ?? '',
+      generation: r.generation ?? '',
+      type: r.type ?? '',
+      classification: r.classification ?? '',
       rank: r.rank ?? '',
       speed: r.speed ?? '',
+      interface: r.interface ?? '',
+      formFactor: r.form_factor ?? '',
+      health: r.health ?? null,
+      rpm: r.rpm ?? null,
+      description: r.description ?? '',
       part: r.part_number ?? '',
       chip: r.chip_number ?? '',
       warehouse: r.warehouse_short ?? '',
@@ -428,7 +451,7 @@ inventory.get('/export', async (c) => {
     };
   });
 
-  const buf = await buildXlsxBuffer('Inventory', INV_EXPORT_COLS, data);
+  const buf = await buildCategoryTabs(data, invExportCols);
   return xlsxResponse(buf, datedFilename('inventory'));
 });
 

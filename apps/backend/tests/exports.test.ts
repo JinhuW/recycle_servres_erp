@@ -19,9 +19,14 @@ function getRaw(path: string, token: string): Promise<Response> {
   );
 }
 
-async function loadSheet(res: Response) {
+async function loadWorkbook(res: Response): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await res.arrayBuffer());
+  return wb;
+}
+
+async function loadSheet(res: Response) {
+  const wb = await loadWorkbook(res);
   const ws = wb.worksheets[0];
   const cells: string[] = [];
   ws.eachRow((row) => {
@@ -41,7 +46,7 @@ function headerRow(ws: ExcelJS.Worksheet): string[] {
 describe('GET /api/inventory/export', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('streams a populated xlsx for a manager', async () => {
+  it('streams one tab per category with granular columns (same format as the sell-order download)', async () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export', token);
 
@@ -49,13 +54,33 @@ describe('GET /api/inventory/export', () => {
     expect(res.headers.get('content-type')).toContain(XLSX_MIME);
     expect(res.headers.get('content-disposition')).toContain('.xlsx');
 
-    const { ws, cells } = await loadSheet(res);
-    expect(cells).toContain('Item');       // header row present
-    expect(cells).toContain('Unit cost');  // manager-only column present
-    expect(cells).toContain('Rank');       // dedicated RAM attribute columns
-    expect(cells).toContain('Speed');
-    expect(cells).toContain('Image URL');  // label-scan delivery URL column
-    expect(ws.rowCount).toBeGreaterThan(1); // header + seeded lines
+    const wb = await loadWorkbook(res);
+    const names = wb.worksheets.map(w => w.name);
+    // Tab order is fixed; the seed populates every category.
+    const orderRef = ['RAM', 'SSD', 'HDD', 'Other'].filter(n => names.includes(n));
+    expect(names).toEqual(orderRef);
+    expect(names).toContain('RAM');
+    expect(names).toContain('SSD');
+
+    const ram = wb.worksheets.find(w => w.name === 'RAM')!;
+    const ramHeaders = headerRow(ram);
+    for (const h of ['ID', 'Date', 'Item', 'Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Condition', 'Warehouse', 'Qty', 'Unit cost', 'Sell price', 'Profit', 'Margin %', 'Submitted by', 'Status', 'Image URL']) {
+      expect(ramHeaders).toContain(h);
+    }
+    expect(ram.rowCount).toBeGreaterThan(1); // header + seeded lines
+
+    const ssd = wb.worksheets.find(w => w.name === 'SSD')!;
+    const ssdHeaders = headerRow(ssd);
+    for (const h of ['Interface', 'Form factor', 'Health %']) expect(ssdHeaders).toContain(h);
+    for (const h of ['Gen', 'Chip #', 'RPM']) expect(ssdHeaders).not.toContain(h);
+
+    // The composed Spec string and the Category column are gone everywhere —
+    // the tab name carries the category, attributes are one column each.
+    for (const ws of wb.worksheets) {
+      const headers = headerRow(ws);
+      expect(headers).not.toContain('Spec');
+      expect(headers).not.toContain('Category');
+    }
   });
 
   it('forbids purchasers (the workbook carries cost columns)', async () => {
@@ -68,32 +93,41 @@ describe('GET /api/inventory/export', () => {
 describe('GET /api/inventory/export?view=grouped', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('uses the shared column set when no category is filtered', async () => {
+  it('splits into per-category tabs with granular columns when no category is filtered', async () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export?view=grouped', token);
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-disposition')).toContain('inventory-grouped');
 
-    const { ws } = await loadSheet(res);
-    const headers = headerRow(ws);
-    for (const h of ['Part #', 'Category', 'Item', 'Condition', 'Warehouses', 'Qty', 'Cost avg', 'Submitted by']) {
-      expect(headers).toContain(h);
+    const wb = await loadWorkbook(res);
+    const names = wb.worksheets.map(w => w.name);
+    expect(names).toEqual(['RAM', 'SSD', 'HDD', 'Other'].filter(n => names.includes(n)));
+    expect(names).toContain('RAM');
+
+    for (const ws of wb.worksheets) {
+      const headers = headerRow(ws);
+      // Every tab is granular now — no shared Category/Item fallback set.
+      expect(headers).not.toContain('Category');
+      expect(headers).not.toContain('Item');
+      expect(headers).not.toContain('Spec');
+      for (const h of ['Part #', 'Condition', 'Warehouses', 'Qty', 'Cost avg', 'Submitted by']) {
+        expect(headers).toContain(h);
+      }
     }
-    for (const h of ['Brand', 'Spec', 'Gen', 'Interface', 'Chip #']) {
-      expect(headers).not.toContain(h);
-    }
-    expect(ws.rowCount).toBeGreaterThan(1);
+    expect(headerRow(wb.worksheets.find(w => w.name === 'RAM')!)).toContain('Gen');
   });
 
-  it('uses granular RAM columns when category=RAM', async () => {
+  it('narrows to a single granular RAM tab when category=RAM', async () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export?view=grouped&category=RAM', token);
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-disposition')).toContain('inventory-ram');
 
-    const { ws } = await loadSheet(res);
+    const wb = await loadWorkbook(res);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM']);
+    const ws = wb.worksheets[0];
     const headers = headerRow(ws);
     for (const h of ['Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Condition', 'Cost avg', 'Submitted by']) {
       expect(headers).toContain(h);
@@ -102,7 +136,7 @@ describe('GET /api/inventory/export?view=grouped', () => {
       expect(headers).not.toContain(h);
     }
 
-    // Data-level check that the new attribute keys are wired: the seeded RAM
+    // Data-level check that the attribute keys are wired: the seeded RAM
     // lines always carry a brand.
     expect(ws.rowCount).toBeGreaterThan(1);
     const brandCol = ws.getRow(1).values as unknown[];
@@ -114,8 +148,9 @@ describe('GET /api/inventory/export?view=grouped', () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export?view=grouped&category=SSD', token);
 
-    const { ws } = await loadSheet(res);
-    const headers = headerRow(ws);
+    const wb = await loadWorkbook(res);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['SSD']);
+    const headers = headerRow(wb.worksheets[0]);
     for (const h of ['Interface', 'Form factor', 'Health %']) expect(headers).toContain(h);
     for (const h of ['Chip #', 'Rank', 'RPM']) expect(headers).not.toContain(h);
   });
@@ -124,8 +159,9 @@ describe('GET /api/inventory/export?view=grouped', () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export?view=grouped&category=HDD', token);
 
-    const { ws } = await loadSheet(res);
-    const headers = headerRow(ws);
+    const wb = await loadWorkbook(res);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['HDD']);
+    const headers = headerRow(wb.worksheets[0]);
     for (const h of ['RPM', 'Health %']) expect(headers).toContain(h);
   });
 
@@ -133,25 +169,25 @@ describe('GET /api/inventory/export?view=grouped', () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export?view=grouped&category=Other', token);
 
-    const { ws } = await loadSheet(res);
-    const headers = headerRow(ws);
+    const wb = await loadWorkbook(res);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Other']);
+    const headers = headerRow(wb.worksheets[0]);
     for (const h of ['Description', 'Condition']) expect(headers).toContain(h);
     expect(headers).not.toContain('Brand');
   });
 
-  it('falls back to shared columns for an unknown category', async () => {
+  it('produces a header-only sheet for an unknown category', async () => {
     const { token } = await loginAs(ALEX);
     const res = await getRaw('/api/inventory/export?view=grouped&category=CPU', token);
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-disposition')).toContain('inventory-grouped');
 
-    const { ws } = await loadSheet(res);
-    const headers = headerRow(ws);
-    expect(headers).toContain('Item');
-    expect(headers).not.toContain('Brand');
-    // Nothing is seeded under CPU — the WHERE still filters, so header only.
-    expect(ws.rowCount).toBe(1);
+    // Nothing is seeded under CPU — the WHERE filters everything out and the
+    // empty-workbook guard emits a single header-only sheet.
+    const wb = await loadWorkbook(res);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Inventory']);
+    expect(wb.worksheets[0].rowCount).toBe(1);
   });
 });
 
