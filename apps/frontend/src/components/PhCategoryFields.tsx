@@ -87,7 +87,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
             <PhCatSelect className={selectClsFor('brand')} value={value.brand} options={RAM_BRANDS} onChange={v => onChange('brand', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('generation')}</label>
+            <label>{t('generation')}<Req /></label>
             <PhCatSelect className={selectClsFor('generation')} value={value.generation} options={RAM_GENERATIONS} onChange={v => onChange('generation', v)} />
           </div>
         </div>
@@ -97,7 +97,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
             <PhCatSelect className={selectClsFor('capacity')} value={value.capacity} options={RAM_CAP} onChange={v => onChange('capacity', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('speedMhz')}</label>
+            <label>{t('speedMhz')}<Req /></label>
             <input
               className={inputClsFor('speed')}
               value={value.speed ?? ''}
@@ -107,24 +107,24 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('klass')}</label>
+            <label>{t('klass')}<Req /></label>
             <PhCatSelect className={selectClsFor('classification')} value={value.classification} options={RAM_CLASS} onChange={v => onChange('classification', v)} />
           </div>
           <div className="ph-field">
-            <label>{t('rank')}</label>
+            <label>{t('rank')}<Req /></label>
             <PhCatSelect className={selectClsFor('rank')} value={value.rank} options={RAM_RANK} onChange={v => onChange('rank', v)} />
           </div>
         </div>
         <div className="ph-field">
-          <label>{t('type')}</label>
+          <label>{t('type')}<Req /></label>
           <PhCatSelect className={selectClsFor('type')} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
         </div>
         <div className="ph-field">
-          <label>{t('chipNumber')}</label>
+          <label>{t('chipNumber')}<Req /></label>
           <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value)} />
         </div>
         <div className="ph-field">
-          <label>{t('partNumber')}</label>
+          <label>{t('partNumber')}<Req /></label>
           <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
         </div>
       </>
