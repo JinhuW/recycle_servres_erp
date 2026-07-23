@@ -19,7 +19,7 @@ export const fmt0 = (n: number | null | undefined, locale = 'en-US') =>
 export const fmtUSD0 = (n: number | null | undefined, locale = 'en-US') =>
   n == null ? '—' : '$' + fmt0(n, locale);
 
-const CURRENCY_SYMBOL: Record<string, string> = { USD: '$', CNY: '¥' };
+export const CURRENCY_SYMBOL: Record<string, string> = { USD: '$', CNY: '¥' };
 
 export const fmtMoney = (
   n: number | null | undefined,

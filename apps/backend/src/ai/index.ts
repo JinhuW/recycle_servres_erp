@@ -14,7 +14,6 @@ import { openRouterScan } from './openrouter';
 import { ocrCallsTotal } from '../metrics';
 
 export type { ScanResult, OcrProvider } from './types';
-export { CONFIDENCE_FLOOR } from './types';
 
 let warnedAboutStub = false;
 export function pickProvider(env: Env): OcrProvider {

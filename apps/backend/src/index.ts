@@ -13,6 +13,7 @@ import { appendErrorRecord } from './lib/error-log';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { dbScope, getDb } from './db';
+import { readRootVersion } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
@@ -115,12 +116,14 @@ app.get('/', (c) =>
 // catch-all, which 200s every path even when the backend is dead and so
 // hides outages from the load balancer. Unauthenticated by design.
 app.get('/api/health', async (c) => {
-  // Build provenance, stamped into the image at release time (see
-  // scripts/release.sh + Dockerfile build args). 'dev'/'unknown' on an
-  // un-versioned local build. Read from process.env, not c.env: these are
-  // image-baked, not per-request.
-  const version = process.env.APP_VERSION ?? 'dev';
-  const commit = process.env.GIT_SHA ?? 'unknown';
+  // Build provenance. APP_VERSION/GIT_SHA are release-time Docker build args
+  // (scripts/release.sh) — Railway never passes them and the Dockerfile bakes
+  // them as EMPTY env strings, so use || (not ??) to fall back to the root
+  // package.json version (bumped on every dev push, present in the image)
+  // and Railway's injected commit sha. Read from process.env, not c.env:
+  // these are image/runtime-scoped, not per-request.
+  const version = process.env.APP_VERSION || readRootVersion();
+  const commit = process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
   try {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit });
@@ -142,7 +145,10 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/attachments' ||
-  /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path);
+  /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
+  // Vendor bid sheets round-trip our own template, which embeds item photos —
+  // they routinely exceed the JSON cap. The route enforces its own 8 MB limit.
+  /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path);
 
 // All other routes: apply the 1 MiB JSON cap.
 const jsonBodyLimit = bodyLimit({

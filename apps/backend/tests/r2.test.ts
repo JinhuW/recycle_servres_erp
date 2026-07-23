@@ -16,6 +16,7 @@ let send: ReturnType<typeof vi.fn>;
 let ctorCount = 0;
 let uploadAttachment: typeof import('../src/r2').uploadAttachment;
 let deleteAttachment: typeof import('../src/r2').deleteAttachment;
+let getAttachmentBytes: typeof import('../src/r2').getAttachmentBytes;
 
 const s3Env: Env = {
   JWT_SECRET: 'x',
@@ -39,10 +40,12 @@ beforeEach(async () => {
     S3Client: function () { ctorCount++; return { send }; },
     PutObjectCommand: function (input: unknown) { return { __type: 'Put', input }; },
     DeleteObjectCommand: function (input: unknown) { return { __type: 'Delete', input }; },
+    GetObjectCommand: function (input: unknown) { return { __type: 'Get', input }; },
   }));
   const r2 = await import('../src/r2');
   uploadAttachment = r2.uploadAttachment;
   deleteAttachment = r2.deleteAttachment;
+  getAttachmentBytes = r2.getAttachmentBytes;
 });
 
 afterEach(() => {
@@ -94,5 +97,33 @@ describe('r2 via S3 API', () => {
     const blob = new File([new Uint8Array([0x00])], 'x.bin', { type: 'application/octet-stream' });
     await expect(uploadAttachment(s3Env, blob, 'label-scans')).rejects.toThrow();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('fetches bytes for a real key via GetObject', async () => {
+    send.mockResolvedValue({
+      Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) },
+    });
+    const buf = await getAttachmentBytes(s3Env, 'label-scans/abc-x.jpg');
+    expect(buf).toEqual(Buffer.from([1, 2, 3]));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toMatchObject({
+      __type: 'Get',
+      input: { Bucket: 'recycle-erp-attachments', Key: 'label-scans/abc-x.jpg' },
+    });
+  });
+
+  it('returns null for stub keys without touching S3', async () => {
+    expect(await getAttachmentBytes(s3Env, 'stub-123')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('returns null when S3 is unconfigured', async () => {
+    expect(await getAttachmentBytes({ JWT_SECRET: 'x' } as Env, 'label-scans/a.jpg')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('returns null on SDK errors instead of throwing', async () => {
+    send.mockRejectedValue(new Error('NoSuchKey'));
+    expect(await getAttachmentBytes(s3Env, 'label-scans/missing.jpg')).toBeNull();
   });
 });

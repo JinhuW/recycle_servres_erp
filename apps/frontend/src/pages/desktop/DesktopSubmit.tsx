@@ -12,6 +12,7 @@ import { LineDrawer } from './submit/LineDrawer';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber } from '@recycle-erp/shared';
+import { missingRamFields } from '../../lib/ramRequired';
 
 // ─── Public component ────────────────────────────────────────────────────────
 // Two-step submit flow lifted from design/submit.jsx + design/app.jsx#SubmitView:
@@ -400,7 +401,15 @@ function OrderForm({
     const qty = Number(l.qty) || 0;
     const cost = Number(l.unitCost) || 0;
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
-    return qty > 0 && cost >= 0 && hasIdentity;
+    const specsComplete = l.category !== 'RAM' || missingRamFields(l).length === 0;
+    return qty > 0 && cost >= 0 && hasIdentity && specsComplete;
+  };
+
+  // Localized "Brand, Speed (MHz), …" list for missing-field messages.
+  const missingFieldNames = (l: Line): string | null => {
+    if (l.category !== 'RAM') return null;
+    const missing = missingRamFields(l);
+    return missing.length ? missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') : null;
   };
 
   const canSubmit = lines.every(lineReady);
@@ -469,7 +478,8 @@ function OrderForm({
     const l = lines[idx];
     if (l._confirmed) return;
     if (!lineReady(l)) {
-      setAiError('Fill in brand/description, quantity and unit cost before confirming this line.');
+      const fields = missingFieldNames(l);
+      setAiError(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
       return;
     }
     await persistLines([toWireLine(l)], wireMeta());
@@ -565,6 +575,12 @@ function OrderForm({
   : !canSubmit              ? (() => {
       const bad = lines.findIndex(l => !lineReady(l));
       if (bad < 0) return null;
+      const fields = missingFieldNames(lines[bad]);
+      if (fields) {
+        return lines.length === 1
+          ? t('subMissingFieldsThis', { fields })
+          : t('subMissingFieldsLine', { n: bad + 1, fields });
+      }
       return lines.length === 1
         ? t('subFillThisLine')
         : t('subFillLineN', { n: bad + 1 });

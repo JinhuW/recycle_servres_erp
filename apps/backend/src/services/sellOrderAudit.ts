@@ -16,6 +16,7 @@ export type SellOrderEventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'price_adjusted'
   | 'status_meta_changed'
   | 'archived'
   | 'unarchived'
@@ -31,7 +32,6 @@ export const META_FIELDS_SO = [
   'currency_code',
   'payment_received_by',
 ] as const;
-export type MetaFieldSO = typeof META_FIELDS_SO[number];
 
 // Per-line fields whose change we surface as line_edited. Excludes ids,
 // position (reorder is not a meaningful event), and sell_order_id.
@@ -46,7 +46,6 @@ export const LINE_FIELDS_SO = [
   'warehouse_id',
   'inventory_id',
 ] as const;
-export type LineFieldSO = typeof LINE_FIELDS_SO[number];
 
 export async function writeSellOrderEvent(
   tx: SqlLike,

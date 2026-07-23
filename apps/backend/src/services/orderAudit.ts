@@ -33,7 +33,6 @@ export const META_FIELDS = [
   'total_cost',
   'commission_rate',
 ] as const;
-export type MetaField = typeof META_FIELDS[number];
 
 // Line-level fields PATCH may update. Excludes ids/positions/scan refs and the
 // status column (which is driven by advance events, not free edits).
@@ -57,7 +56,6 @@ export const LINE_FIELDS = [
   'health',
   'rpm',
 ] as const;
-export type LineField = typeof LINE_FIELDS[number];
 
 export async function writeOrderEvent(
   tx: SqlLike,

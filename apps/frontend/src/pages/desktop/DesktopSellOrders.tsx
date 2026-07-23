@@ -12,7 +12,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort } from '../../lib/format';
+import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { sellOrderStatuses } from '../../lib/lookups';
 import { closeReasonLabelKey } from '../../lib/closeReasons';
@@ -23,6 +23,8 @@ import { CustomerPicker, CurrencyPicker, type Customer, type MemberOption } from
 import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
+import { PriceImportSection } from './SellOrderPriceImportDialog';
+import { applyPriceRows } from '../../lib/priceImport';
 
 type Currency = 'USD' | 'CNY';
 
@@ -63,6 +65,7 @@ type SellOrderSummary = {
   qty: number;
   subtotal: number;
   total: number;
+  adjusted: boolean;
 };
 
 type SellOrderLine = {
@@ -150,6 +153,13 @@ type SellOrderDetailType = {
   total: number;           // USD
   nativeSubtotal: number;  // order currency
   nativeTotal: number;
+  // Set once the final total was negotiated down (or up) via adjust-price.
+  // preAdjustNativeTotal is the first pre-negotiation total (badge baseline).
+  priceAdjustment: {
+    preAdjustNativeTotal: number;
+    adjustedAt: string;
+    adjustedBy: { id: string; name: string } | null;
+  } | null;
   statusMeta: StatusMetaMap;
 };
 
@@ -411,7 +421,18 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                   <td className="muted">{fmtDateShort(o.updatedAt, locale)}</td>
                   <td className="num mono">{o.lineCount}</td>
                   <td className="num mono">{o.qty}</td>
-                  <td className="num mono" style={{ fontWeight: 600 }}>{fmtUSD0(o.total, locale)}</td>
+                  <td className="num mono" style={{ fontWeight: 600 }}>
+                    {o.adjusted && (
+                      <span
+                        className="chip warn"
+                        title={t('soAdjustedListTooltip')}
+                        style={{ fontSize: 9.5, padding: '1px 5px', marginRight: 6, verticalAlign: 'middle' }}
+                      >
+                        {t('soAdjustedShort')}
+                      </span>
+                    )}
+                    {fmtUSD0(o.total, locale)}
+                  </td>
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -455,83 +476,30 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
           onSwitchToEdit={() => navigate('/sell-orders/' + open.id + '/edit')}
           onClose={() => navigate('/sell-orders')}
           onSaved={() => { reload(); navigate('/sell-orders'); }}
+          onAdjusted={reload}
         />
       )}
     </>
   );
 }
 
-// ─── Download split menu ─────────────────────────────────────────────────────
-// One trigger, two file types: the printable packing list (PDF) and the
-// per-warehouse spreadsheet (XLSX). Opens upward — it lives in the modal footer
-// pinned to the screen bottom. A transparent backdrop captures the outside
-// click; Escape closes the menu without bubbling up to close the whole modal.
+// ─── Download button ─────────────────────────────────────────────────────────
+// The vendor price template (bid sheet) is the only sell-order export.
 function DownloadMenu({ orderId }: { orderId: string }) {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open]);
-
-  const download = async (path: string, name: string) => {
-    setOpen(false);
+  const download = async () => {
     try {
-      await api.download(path, name);
+      await api.download(`/api/sell-orders/${orderId}/price-template`, `${orderId}-price-template.xlsx`);
     } catch (e) {
       handleFetchError(e);
     }
   };
 
   return (
-    <div className="popmenu-wrap">
-      <button
-        className="btn"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={t('soDownloadTooltip')}
-        onClick={() => setOpen(o => !o)}
-      >
-        <Icon name="download" size={14} /> {t('soDownload')}
-        <Icon name="chevronDown" size={13} className="caret" />
-      </button>
-      {open && (
-        <>
-          <div className="popmenu-backdrop" onClick={() => setOpen(false)} />
-          <div className="popmenu up" role="menu">
-            <button
-              type="button"
-              className="popmenu-item"
-              role="menuitem"
-              onClick={() => download(`/api/sell-orders/${orderId}/packing-list`, `${orderId}-packing-list.pdf`)}
-            >
-              <span className="ico"><Icon name="invoice" size={17} /></span>
-              <span className="txt">
-                <b>{t('soDownloadPackingPdf')}</b>
-                <small>{t('soPackingListTooltip')}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="popmenu-item"
-              role="menuitem"
-              onClick={() => download(`/api/sell-orders/${orderId}/spreadsheet`, `${orderId}.xlsx`)}
-            >
-              <span className="ico"><Icon name="analytics" size={17} /></span>
-              <span className="txt">
-                <b>{t('soDownloadSpreadsheet')}</b>
-                <small>{t('soDownloadSpreadsheetHint')}</small>
-              </span>
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+    <button className="btn" title={t('soDownloadPriceTemplateHint')} onClick={download}>
+      <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
+    </button>
   );
 }
 
@@ -540,13 +508,16 @@ function DownloadMenu({ orderId }: { orderId: string }) {
 // order): re-pick the customer, edit line qty / unit price, drop lines, plus
 // advance the status and edit internal notes. Saved via PATCH /sell-orders/:id.
 function SellOrderDetail({
-  id, mode, onClose, onSaved, onSwitchToEdit,
+  id, mode, onClose, onSaved, onSwitchToEdit, onAdjusted,
 }: {
   id: string;
   mode: 'view' | 'edit';
   onClose: () => void;
   onSaved: () => void;
   onSwitchToEdit: () => void;
+  // Price adjustment keeps the modal open (unlike onSaved, which navigates
+  // away); this only refreshes the list behind it.
+  onAdjusted?: () => void;
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -585,6 +556,14 @@ function SellOrderDetail({
   const [refreshKey, setRefreshKey] = useState(0);
   // Bumped after every successful mutation so <SellOrderHistory> re-fetches.
   const [historyKey, setHistoryKey] = useState(0);
+  // Inline negotiated-total editor. In the view modal an applied target hits
+  // the server immediately (the order is otherwise read-only there); in the
+  // edit modal it becomes part of the draft (`pendingAdjust`) and is applied
+  // on Save alongside the other edits — so it's never disabled.
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustInput, setAdjustInput] = useState('');
+  const [adjustSaving, setAdjustSaving] = useState(false);
+  const [pendingAdjust, setPendingAdjust] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -601,6 +580,7 @@ function SellOrderDetail({
           currency: r.order.currency,
           lines: r.order.lines.map(toEditLine),
         });
+        setPendingAdjust(null);
       })
       .catch(handleFetchError);
     return () => { alive = false; };
@@ -633,6 +613,13 @@ function SellOrderDetail({
 
   useEscapeKey(onClose);
 
+  // "locked" = no structural edits or status moves allowed. Done is the
+  // terminal happy path; Closed is the off-ramp (line set + customer + status
+  // are all frozen until the order is Reopened). Both the list-page edit
+  // pencil and the in-page status stepper / line inputs respect this guard.
+  const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
+  const editable = mode === 'edit' && !locked;
+
   const customerChanged = !!order && !!draft && draft.customerId !== order.customer.id;
   const currencyChanged = !!order && !!draft && draft.currency !== order.currency;
   const receiverChanged = !!order && !!draft
@@ -646,6 +633,7 @@ function SellOrderDetail({
     || receiverChanged
     || currencyChanged
     || linesChanged
+    || pendingAdjust != null
   );
 
   // The stepper shows only the forward lifecycle. Closed is an off-ramp
@@ -665,6 +653,76 @@ function SellOrderDetail({
       subtotalUsd,
     };
   }, [draft, order, draftRateToUsd]);
+
+  // Breakdown for the order-summary card: Subtotal / Adjustment / Total.
+  // A pending (unsaved) target wins in edit mode — subtotal tracks the live
+  // draft while the buyer's number stays fixed, so the delta recomputes as
+  // lines are edited. A saved adjustment shows the stored baseline, but only
+  // while the draft's priced set still matches what it describes (a line or
+  // currency rewrite clears it on save). subtotal === null → no adjustment
+  // row, just the Total.
+  const summary = useMemo(() => {
+    if (!order) return null;
+    if (editable && pendingAdjust != null && editTotals) {
+      return { subtotal: editTotals.subtotalNative, total: pendingAdjust, pending: true };
+    }
+    const liveTotal = editable && editTotals ? editTotals.subtotalNative : order.nativeTotal;
+    const saved = order.priceAdjustment;
+    if (saved && !(editable && (linesChanged || currencyChanged))) {
+      return { subtotal: saved.preAdjustNativeTotal, total: liveTotal, pending: false };
+    }
+    return { subtotal: null, total: liveTotal, pending: false };
+  }, [order, editable, editTotals, pendingAdjust, linesChanged, currencyChanged]);
+
+  const adjustDelta = summary?.subtotal != null
+    ? +(summary.total - summary.subtotal).toFixed(2)
+    : null;
+  // Sign-aware chip label: "−5%" for the usual talk-down, "+3%" for a markup.
+  const adjustPctLabel = useMemo(() => {
+    if (summary?.subtotal == null || summary.subtotal <= 0) return '';
+    const pct = (summary.total / summary.subtotal - 1) * 100;
+    const rounded = Math.abs(pct) < 0.1 ? pct.toFixed(2) : pct.toFixed(1);
+    return `${pct >= 0 ? '+' : '−'}${Math.abs(Number(rounded))}%`;
+  }, [summary]);
+
+  // USD-equiv line under the Total. For a pending target the saved order.total
+  // is stale, so it's re-derived from the live summary at the draft's rate.
+  const summaryUsd = !order || !summary
+    ? null
+    : editable
+      ? (draftRateToUsd != null ? +(summary.total * draftRateToUsd).toFixed(2) : null)
+      : order.total;
+
+  const applyAdjust = async () => {
+    if (!order) return;
+    const target = Number(adjustInput);
+    if (!Number.isFinite(target) || target <= 0) return;
+    const rounded = +target.toFixed(2);
+    // Edit mode: the target joins the draft and is applied on Save with the
+    // rest of the edits — nothing hits the server here.
+    if (editable) {
+      setPendingAdjust(rounded);
+      setAdjusting(false);
+      return;
+    }
+    setAdjustSaving(true);
+    try {
+      // The server prorates line prices and returns the achieved total (the
+      // typed value may be unreachable at 2dp granularity) — re-fetch instead
+      // of trusting the input.
+      await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
+        targetTotal: rounded,
+      });
+      setAdjusting(false);
+      setRefreshKey(k => k + 1);
+      setHistoryKey(k => k + 1);
+      onAdjusted?.();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setAdjustSaving(false);
+    }
+  };
 
   // Warehouse-grouped views of the line set — one card per warehouse, mirroring
   // the draft builder's rhythm.
@@ -733,24 +791,6 @@ function SellOrderDetail({
     setSaving(true);
     setSaveError(null);
     try {
-      // Status transitions live on the dedicated endpoint — it takes a row
-      // lock + an idempotency guard so a Done order can't be reverted, and so
-      // a double-submit can't fire the consume-stock side-effects twice. PATCH
-      // refuses to touch status outright.
-      const statusChanged = draft.status !== order.status;
-      if (statusChanged) {
-        await api.post(`/api/sell-orders/${order.id}/status`, {
-          to: draft.status,
-          // Evidence (note + attachments) is uploaded live by
-          // StatusChangeDialog into status-meta tables, so we just announce
-          // the transition here. Re-send the note so the /status upsert
-          // preserves the dialog's note instead of nulling it out — evidence
-          // itself is optional, but a captured note shouldn't be lost.
-          note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
-            ?.[draft.status]?.note ?? undefined,
-        });
-        setHistoryKey(k => k + 1);
-      }
       // Structural / notes edits go through PATCH. Skip the call entirely if
       // only status changed — saves a round trip and avoids touching
       // updated_at when nothing else moved.
@@ -779,6 +819,33 @@ function SellOrderDetail({
         await api.patch(`/api/sell-orders/${order.id}`, patchBody);
         setHistoryKey(k => k + 1);
       }
+      // A pending negotiated total applies AFTER the line rewrite (the server
+      // prorates the just-saved set) and BEFORE any status move — a Done
+      // transition consumes stock and records market datapoints from line
+      // prices, which must already be the negotiated ones.
+      if (pendingAdjust != null) {
+        await api.post(`/api/sell-orders/${order.id}/adjust-price`, {
+          targetTotal: pendingAdjust,
+        });
+        setHistoryKey(k => k + 1);
+      }
+      // Status transitions live on the dedicated endpoint — it takes a row
+      // lock + an idempotency guard so a Done order can't be reverted, and so
+      // a double-submit can't fire the consume-stock side-effects twice. PATCH
+      // refuses to touch status outright.
+      if (draft.status !== order.status) {
+        await api.post(`/api/sell-orders/${order.id}/status`, {
+          to: draft.status,
+          // Evidence (note + attachments) is uploaded live by
+          // StatusChangeDialog into status-meta tables, so we just announce
+          // the transition here. Re-send the note so the /status upsert
+          // preserves the dialog's note instead of nulling it out — evidence
+          // itself is optional, but a captured note shouldn't be lost.
+          note: (statusMeta as Record<string, { note: string | null } | undefined> | null)
+            ?.[draft.status]?.note ?? undefined,
+        });
+        setHistoryKey(k => k + 1);
+      }
       onSaved();
     } catch (e) {
       // Keep the editor open with the user's edits intact — calling onSaved
@@ -789,12 +856,6 @@ function SellOrderDetail({
     }
   };
 
-  // "locked" = no structural edits or status moves allowed. Done is the
-  // terminal happy path; Closed is the off-ramp (line set + customer + status
-  // are all frozen until the order is Reopened). Both the list-page edit
-  // pencil and the in-page status stepper / line inputs respect this guard.
-  const locked = !!order && (order.status === 'Done' || order.status === 'Closed');
-  const editable = mode === 'edit' && !locked;
   const closeReasonLabel = order?.closeReasonId
     ? t(closeReasonLabelKey(order.closeReasonId))
     : null;
@@ -953,51 +1014,53 @@ function SellOrderDetail({
                   }}>
                     <Icon name="user" size={12} /> Customer
                   </div>
-                  <div style={{ maxWidth: 360 }}>
-                    <CustomerPicker
-                      customers={customers.length ? customers : [{
-                        id: order.customer.id, name: order.customer.name,
-                        short_name: order.customer.short, region: order.customer.region,
-                      }]}
-                      value={draft.customerId}
-                      onChange={id => setDraft({ ...draft, customerId: id })}
-                      onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
-                    />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '0 1 340px', minWidth: 240 }}>
+                      <CustomerPicker
+                        customers={customers.length ? customers : [{
+                          id: order.customer.id, name: order.customer.name,
+                          short_name: order.customer.short, region: order.customer.region,
+                        }]}
+                        value={draft.customerId}
+                        onChange={id => setDraft({ ...draft, customerId: id })}
+                        onCreated={c => { setCustomers(prev => [...prev, c]); setDraft({ ...draft, customerId: c.id }); }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
+                      <CurrencyPicker
+                        value={draft.currency}
+                        onChange={cur => setDraft({ ...draft, currency: cur })}
+                        t={t}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
+                      <select
+                        className="select"
+                        style={{ maxWidth: 260 }}
+                        value={draft.paymentReceivedBy}
+                        onChange={e => setDraft({ ...draft, paymentReceivedBy: e.target.value })}
+                      >
+                        <option value="">{t('paymentReceiverNone')}</option>
+                        {/* A deactivated receiver isn't in the active-members list —
+                            keep them selectable so opening the editor doesn't
+                            silently clear the assignment. */}
+                        {order.paymentReceivedBy
+                          && !members.some(m => m.id === order.paymentReceivedBy!.id) && (
+                          <option value={order.paymentReceivedBy.id}>{order.paymentReceivedBy.name}</option>
+                        )}
+                        {members.map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('currency.label')}</span>
-                    <CurrencyPicker
-                      value={draft.currency}
-                      onChange={cur => setDraft({ ...draft, currency: cur })}
-                      t={t}
-                    />
-                    {currencyChanged && (
-                      <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                        {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>{t('paymentReceiverLabel')}</span>
-                    <select
-                      className="select"
-                      style={{ maxWidth: 260 }}
-                      value={draft.paymentReceivedBy}
-                      onChange={e => setDraft({ ...draft, paymentReceivedBy: e.target.value })}
-                    >
-                      <option value="">{t('paymentReceiverNone')}</option>
-                      {/* A deactivated receiver isn't in the active-members list —
-                          keep them selectable so opening the editor doesn't
-                          silently clear the assignment. */}
-                      {order.paymentReceivedBy
-                        && !members.some(m => m.id === order.paymentReceivedBy!.id) && (
-                        <option value={order.paymentReceivedBy.id}>{order.paymentReceivedBy.name}</option>
-                      )}
-                      {members.map(m => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {currencyChanged && (
+                    <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                      {t('soFxRateNote', { rate: fx ? fx.oneUsdInQuote.toFixed(4) : '…', currency: draft.currency, source: fx?.source ?? '…' })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1142,27 +1205,141 @@ function SellOrderDetail({
                 </div>
               )}
 
-              <div style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 280 }}>
-                <div className="so-row total">
-                  <span>{t('eoTotal')}</span>
-                  <span className="mono">
-                    {fmtMoney(
-                      editable && editTotals ? editTotals.subtotalNative : order.nativeTotal,
-                      draftCurrency, locale,
-                    )}
-                  </span>
+              {editable && (
+                <PriceImportSection
+                  orderId={order.id}
+                  currency={draft.currency}
+                  locale={locale}
+                  onApply={rows =>
+                    setDraft(d => d && { ...d, lines: applyPriceRows(d.lines, rows) })}
+                />
+              )}
+
+              {summary && (
+              <div className="so-summary" style={{ marginTop: 20, marginLeft: 'auto', maxWidth: 340 }}>
+                <div
+                  className="so-summary-head"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}
+                >
+                  <span>{t('soOrderSummary')}</span>
+                  {!locked && !adjusting && (
+                    <button
+                      className="btn ghost sm"
+                      style={{ padding: '2px 8px', fontSize: 11, color: 'var(--fg-muted)' }}
+                      onClick={() => {
+                        setAdjustInput(String(summary.total));
+                        setAdjusting(true);
+                      }}
+                    >
+                      <Icon name="edit" size={11} /> {t('soAdjustTotal')}
+                    </button>
+                  )}
                 </div>
-                {draftCurrency !== 'USD' && (
-                  <div className="so-row muted" style={{ fontSize: 11.5 }}>
-                    <span />
-                    <span className="mono">
-                      {t('soUsdEquiv', {
-                        usd: fmtUSD(editable && editTotals ? editTotals.subtotalUsd : order.total, locale),
-                      })}
+
+                {summary.subtotal != null && (
+                  <div className="so-row muted">
+                    <span>{t('soSubtotalRow')}</span>
+                    <span className="mono">{fmtMoney(summary.subtotal, draftCurrency, locale)}</span>
+                  </div>
+                )}
+                {adjustDelta != null && (
+                  <div
+                    className="so-row"
+                    title={!summary.pending && order.priceAdjustment
+                      ? t('soAdjustedTooltip', {
+                          name: order.priceAdjustment.adjustedBy?.name ?? '—',
+                          when: fmtDate(order.priceAdjustment.adjustedAt, locale),
+                        })
+                      : undefined}
+                  >
+                    <span>
+                      {t('soAdjustmentRow')}
+                      <span
+                        className={'chip ' + (adjustDelta <= 0 ? 'neg' : 'pos')}
+                        style={{ fontSize: 10, marginLeft: 6, padding: '1px 6px' }}
+                      >
+                        {adjustPctLabel}
+                      </span>
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <span
+                        className="mono"
+                        style={{ color: adjustDelta <= 0 ? 'var(--neg)' : 'var(--accent-strong)' }}
+                      >
+                        {adjustDelta >= 0 ? '+' : '−'}
+                        {fmtMoney(Math.abs(adjustDelta), draftCurrency, locale)}
+                      </span>
+                      {summary.pending && (
+                        <button
+                          className="btn icon sm"
+                          title={t('soAdjustRemove')}
+                          aria-label={t('soAdjustRemove')}
+                          style={{ padding: 2 }}
+                          onClick={() => setPendingAdjust(null)}
+                        >
+                          <Icon name="x" size={10} />
+                        </button>
+                      )}
                     </span>
                   </div>
                 )}
+
+                <div className="so-row total">
+                  <span>{t('eoTotal')}</span>
+                  {adjusting ? (
+                    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
+                        {CURRENCY_SYMBOL[draftCurrency] ?? draftCurrency}
+                      </span>
+                      <input
+                        className="mono so-mini-input"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        autoFocus
+                        value={adjustInput}
+                        disabled={adjustSaving}
+                        onChange={e => setAdjustInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') void applyAdjust();
+                          if (e.key === 'Escape') { e.stopPropagation(); setAdjusting(false); }
+                        }}
+                        style={{ width: 110, textAlign: 'right' }}
+                      />
+                      <button
+                        className="btn icon sm"
+                        title={t('soAdjustApply')}
+                        disabled={adjustSaving}
+                        onClick={() => void applyAdjust()}
+                      >
+                        <Icon name="check" size={12} />
+                      </button>
+                      <button
+                        className="btn icon sm"
+                        title={t('cancel')}
+                        disabled={adjustSaving}
+                        onClick={() => setAdjusting(false)}
+                      >
+                        <Icon name="x" size={12} />
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="mono">{fmtMoney(summary.total, draftCurrency, locale)}</span>
+                  )}
+                </div>
+                {draftCurrency !== 'USD' && (
+                  <div className="so-row muted" style={{ fontSize: 11.5, paddingTop: 0 }}>
+                    <span />
+                    <span className="mono">{t('soUsdEquiv', { usd: fmtUSD(summaryUsd, locale) })}</span>
+                  </div>
+                )}
+                {summary.pending && (
+                  <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                    {t('soAdjustAppliesOnSave')}
+                  </div>
+                )}
               </div>
+              )}
 
               {/* Tracking & evidence — read-only view of the per-status notes and
                   attachments. Edit mode reaches these via the stepper dialog; view

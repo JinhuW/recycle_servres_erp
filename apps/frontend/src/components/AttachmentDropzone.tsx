@@ -11,6 +11,8 @@ export function AttachmentDropzone({
   label,
   acceptHint,
   boxHint,
+  accept = '.pdf,.png,.jpg,.jpeg,image/*,application/pdf',
+  multiple = true,
 }: {
   onFiles: (files: FileList | null) => void;
   uploading?: boolean;
@@ -18,6 +20,8 @@ export function AttachmentDropzone({
   acceptHint?: string;
   // Hint rendered inside the dropzone box (replaces the default size hint).
   boxHint?: string;
+  accept?: string;
+  multiple?: boolean;
 }) {
   const { t } = useT();
   const [dragOver, setDragOver] = useState(false);
@@ -55,8 +59,8 @@ export function AttachmentDropzone({
         <input
           ref={inputRef}
           type="file"
-          multiple
-          accept=".pdf,.png,.jpg,.jpeg,image/*,application/pdf"
+          multiple={multiple}
+          accept={accept}
           style={{ display: 'none' }}
           onChange={e => { onFiles(e.target.files); e.target.value = ''; }}
         />

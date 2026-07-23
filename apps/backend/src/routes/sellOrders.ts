@@ -4,20 +4,27 @@ import { CLOSE_REASON_IDS } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
-import { getUploadLimits, getWorkspaceSetting } from '../lib/settings';
+import { getUploadLimits } from '../lib/settings';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
 } from '../services/sellOrderAudit';
 import { diffSellOrderLines, type SOLineSnap } from '../services/sellOrderLineMatch';
+import { prorateLines, validateTarget } from '../services/sellOrderPriceAdjust';
 import { validateSellLines, createSellOrderDraft } from '../services/sellOrderCreate';
+import {
+  parsePriceWorkbook, groupOrderProducts, PriceColumnsNotFoundError,
+  type SellOrderLineRow,
+} from '../services/sellOrderPriceImport';
+import {
+  buildPriceTemplateWorkbook,
+} from '../lib/sellOrderPriceTemplate';
+import { canonPartNumberJs } from '../lib/part-number';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
-  buildXlsxBuffer, buildXlsxWorkbook, xlsxResponse, datedFilename,
-  type XlsxColumn, type XlsxSheet,
+  buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
-import { invLabel, invSpec } from './inventory';
-import { buildSellOrderPackingListPdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
+import { invLabel } from './inventory';
 import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
@@ -72,6 +79,7 @@ sellOrders.get('/', async (c) => {
   const rows = await sql`
     SELECT
       so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.currency_code,
+      (so.adjusted_at IS NOT NULL) AS adjusted,
       c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short,
       pu.name AS payment_received_by_name,
       COUNT(sol.id)::int                                AS line_count,
@@ -106,6 +114,7 @@ sellOrders.get('/', async (c) => {
     // inbox sorts apples-to-apples regardless of each order's source currency.
     subtotal: r.subtotal,
     total: r.subtotal,
+    adjusted: r.adjusted as boolean,
   }));
   return c.json({
     rows: shaped,
@@ -199,14 +208,19 @@ sellOrders.get('/:id', async (c) => {
     customer_region: string;
     created_by: string | null;
     payment_received_by: string | null; payment_received_by_name: string | null;
+    pre_adjust_native_total: number | null; adjusted_at: string | null;
+    adjusted_by: string | null; adjusted_by_name: string | null;
   }[]>`
     SELECT so.id, so.status, so.notes, so.created_at, so.updated_at, so.archived_at, so.close_reason_id,
            so.currency_code, so.fx_rate_to_usd::float AS fx_rate_to_usd, so.fx_source,
            so.created_by, so.payment_received_by, pu.name AS payment_received_by_name,
+           so.pre_adjust_native_total::float AS pre_adjust_native_total,
+           so.adjusted_at, so.adjusted_by, au.name AS adjusted_by_name,
            c.id AS customer_id, c.name AS customer_name, c.short_name AS customer_short, c.region AS customer_region
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     LEFT JOIN users pu ON pu.id = so.payment_received_by
+    LEFT JOIN users au ON au.id = so.adjusted_by
     WHERE so.id = ${id} LIMIT 1
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
@@ -277,6 +291,15 @@ sellOrders.get('/:id', async (c) => {
       currency: head.currency_code,
       fxRateToUsd: head.fx_rate_to_usd,
       fxSource: head.fx_source,
+      priceAdjustment: head.pre_adjust_native_total != null
+        ? {
+            preAdjustNativeTotal: head.pre_adjust_native_total,
+            adjustedAt: head.adjusted_at,
+            adjustedBy: head.adjusted_by
+              ? { id: head.adjusted_by, name: head.adjusted_by_name }
+              : null,
+          }
+        : null,
       customer: { id: head.customer_id, name: head.customer_name, short: head.customer_short, region: head.customer_region },
       lines: lines.map(l => ({
         id: l.id, category: l.category, label: l.label, sub: l.sub_label, partNumber: l.part_number,
@@ -298,128 +321,30 @@ sellOrders.get('/:id', async (c) => {
   });
 });
 
-// Packing list — a price-free, printable pick/pack sheet for warehouse staff.
-// Lines are grouped by warehouse; lines with no warehouse fall into an
-// "Unassigned" group that sorts last. Manager-only like every route here.
-sellOrders.get('/:id/packing-list', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const id = c.req.param('id');
-  const sql = getDb(c.env);
+// Category buckets for the price template: unknown categories fold into
+// Other so every line lands somewhere.
+const SO_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
+type SoCategory = (typeof SO_CATEGORY_ORDER)[number];
 
-  const head = (await sql<{
-    id: string; created_at: string;
-    customer_name: string; customer_short: string;
-  }[]>`
-    SELECT so.id, so.created_at, c.name AS customer_name, c.short_name AS customer_short
-    FROM sell_orders so JOIN customers c ON c.id = so.customer_id
-    WHERE so.id = ${id} LIMIT 1
-  `)[0];
-  if (!head) return c.json({ error: 'Not found' }, 404);
+// Prefix download filenames with the customer so a downloads folder full of
+// exports is scannable by who, not just by order id. Strip filesystem/header-
+// hostile characters and collapse whitespace to a single dash. \p{L}\p{N}
+// (not \w) keeps CJK names — most customers here are Chinese.
+function customerSlug(name: string | null): string {
+  return (name ?? '')
+    .replace(/[^\p{L}\p{N}.\- ]+/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
 
-  const lines = await sql<{
-    label: string; sub_label: string | null; part_number: string | null;
-    qty: number; warehouse_short: string | null; position: number;
-  }[]>`
-    SELECT sol.label, sol.sub_label, sol.part_number, sol.qty,
-           w.short AS warehouse_short, sol.position
-    FROM sell_order_lines sol
-    LEFT JOIN warehouses w ON w.id = sol.warehouse_id
-    WHERE sol.sell_order_id = ${id}
-    ORDER BY sol.position
-  `;
-
-  // Group by warehouse, preserving line order within each group. 'Unassigned'
-  // sorts last; everything else alphabetically by warehouse code.
-  const UNASSIGNED = 'Unassigned';
-  const byWarehouse = new Map<string, (typeof lines)[number][]>();
-  for (const l of lines) {
-    const key = l.warehouse_short ?? UNASSIGNED;
-    if (!byWarehouse.has(key)) byWarehouse.set(key, []);
-    byWarehouse.get(key)!.push(l);
-  }
-  const groups = [...byWarehouse.keys()]
-    .sort((a, b) => {
-      if (a === UNASSIGNED) return 1;
-      if (b === UNASSIGNED) return -1;
-      return a.localeCompare(b);
-    })
-    .map((warehouse) => ({
-      warehouse,
-      lines: byWarehouse.get(warehouse)!.map((l) => ({
-        qty: l.qty,
-        label: l.label,
-        sub: l.sub_label ?? '',
-        partNumber: l.part_number ?? '',
-      })),
-    }));
-
-  const company = await getWorkspaceSetting<string>(sql, 'workspace_name', 'Recycle Servers');
-
-  const buf = await buildSellOrderPackingListPdf({
-    company,
-    soId: head.id,
-    date: new Date(head.created_at).toISOString().slice(0, 10),
-    customer: head.customer_name,
-    customerShort: head.customer_short ?? '',
-    groups,
-    logoPng: loadInvoiceLogo(),
-  });
-
-  return pdfResponse(buf, `${head.id}-packing-list.pdf`);
-});
-
-// Per-order spreadsheet. Mirrors the Inventory export's descriptive columns (so
-// a sold line reads identically to its source stock row) and appends the
-// realized sale Price / Line total. Workbook carries a Summary tab plus one tab
-// per warehouse — the warehouse staff open just their own. Manager-only like
-// every route here.
-const SO_DETAIL_COLS: XlsxColumn[] = [
-  { header: 'ID',           key: 'id',        width: 12 },
-  { header: 'Date',         key: 'date',      width: 12 },
-  { header: 'Category',     key: 'category',  width: 10 },
-  { header: 'Item',         key: 'item',      width: 30 },
-  { header: 'Type',         key: 'type',      width: 10 },
-  { header: 'Spec',         key: 'spec',      width: 26 },
-  { header: 'Rank',         key: 'rank',      width: 10 },
-  { header: 'Speed',        key: 'speed',     width: 10 },
-  { header: 'Part #',       key: 'part',      width: 22 },
-  { header: 'Chip #',       key: 'chip',      width: 22 },
-  { header: 'Warehouse',    key: 'warehouse', width: 12 },
-  { header: 'Condition',    key: 'condition', width: 12 },
-  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  // The realized sale price on this order.
-  { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
-  // Currency of the Price / Line total columns — USD, or CNY (native RMB) for
-  // foreign orders.
-  { header: 'Currency',     key: 'currency',  width: 9 },
-  { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
-];
-
-// Summary tab is an aggregate: one row per distinct part number with Qty / Line
-// total summed across every line (and warehouse). The per-line ID / Date /
-// Warehouse columns are dropped — they don't survive grouping — and live on the
-// per-warehouse detail tabs instead. Price shows the blended unit price
-// (Line total ÷ Qty) so it stays consistent with the summed quantity.
-const SO_SUMMARY_COLS: XlsxColumn[] = [
-  { header: 'Category',     key: 'category',  width: 10 },
-  { header: 'Item',         key: 'item',      width: 30 },
-  { header: 'Type',         key: 'type',      width: 10 },
-  { header: 'Spec',         key: 'spec',      width: 26 },
-  { header: 'Rank',         key: 'rank',      width: 10 },
-  { header: 'Speed',        key: 'speed',     width: 10 },
-  { header: 'Part #',       key: 'part',      width: 22 },
-  { header: 'Chip #',       key: 'chip',      width: 22 },
-  { header: 'Condition',    key: 'condition', width: 12 },
-  { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: 'Price',        key: 'price',     width: 12, numFmt: '#,##0.00' },
-  { header: 'Currency',     key: 'currency',  width: 9 },
-  { header: 'Line total',   key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Image URL',    key: 'imageUrl',  width: 52 },
-];
-
-sellOrders.get('/:id/spreadsheet', async (c) => {
+// Vendor bid sheet: the same product grouping the edit form prices by
+// (part|label|condition, qty summed across warehouses), one row each on its
+// category's worksheet (RAM/SSD/HDD/Other tabs), with a clickable item-photo
+// URL and a blank Unit Price column. The vendor fills it and the manager
+// round-trips it through POST /:id/price-import/preview — the parser reads
+// every tab. After the category tabs come per-warehouse packing-checklist
+// tabs (price-free, ignored by the parser — see lib/sellOrderPriceTemplate).
+sellOrders.get('/:id/price-template', async (c) => {
   const u = c.var.user;
   if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const id = c.req.param('id');
@@ -432,26 +357,17 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     WHERE so.id = ${id} LIMIT 1
   `)[0];
   if (!head) return c.json({ error: 'Not found' }, 404);
-  // CNY orders invoice in RMB: the realized Price / Line total columns show the
-  // native price (sol.source_unit_price), while Unit cost / Profit stay USD —
-  // cost comes from inventory, which is always USD. The Currency column flags it.
-  const isCny = head.currency_code === 'CNY';
 
-  // Root at the sold lines and reach back to each one's source inventory row
-  // (sol.inventory_id) for the descriptive columns. The joins are LEFT because a
-  // line can be added by hand or via MCP with no inventory link — those rows
-  // fall back to the line's own snapshot and leave cost-derived columns blank.
   const rows = (await sql`
     SELECT
-      sol.qty AS sell_qty, sol.unit_price::float AS sell_unit_price,
-      sol.source_unit_price::float AS source_unit_price,
+      sol.qty AS sell_qty,
       sol.label AS sol_label, sol.sub_label AS sol_sub, sol.part_number AS sol_part,
-      sol.category AS sol_category, sol.condition AS sol_condition, sol.position,
+      sol.category AS sol_category, sol.condition AS sol_condition,
       w.short AS warehouse_short,
       l.id AS inv_id, l.category, l.brand, l.capacity, l.generation, l.type,
       l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
       l.part_number, l.chip_number, l.condition, l.health::float AS health,
-      l.rpm, l.created_at,
+      l.rpm,
       img.delivery_url AS image_url
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
@@ -467,87 +383,144 @@ sellOrders.get('/:id/spreadsheet', async (c) => {
     ORDER BY sol.position
   `) as Record<string, unknown>[];
 
-  const data = rows.map((r) => {
+  type Group = {
+    category: SoCategory; label: string; partNumber: string | null;
+    condition: string | null; qty: number; imageUrl: string | null;
+    specs: Record<string, string | number>;
+  };
+  // Only real public URLs make the sheet — seeded/stub scans carry data: URLs
+  // that would render as garbage text in the cell.
+  const publicUrl = (v: unknown): string | null =>
+    typeof v === 'string' && /^https:\/\//i.test(v) ? v : null;
+  const s = (v: unknown) => (v == null ? '' : String(v));
+  const groups = new Map<string, Group>();
+  // Same aggregation scoped per warehouse — feeds the packing-checklist tabs.
+  // Warehouse-less lines land in an 'Unassigned' tab (old packing-list rule).
+  const byWarehouse = new Map<string, Map<string, Group>>();
+  for (const r of rows) {
     const hasInv = r.inv_id != null;
-    // displayPrice is what the Price / Line total cells show — native RMB on CNY
-    // orders, the USD realized price otherwise.
-    const usdPrice = Number(r.sell_unit_price ?? 0);
-    const displayPrice = isCny ? Number(r.source_unit_price ?? r.sell_unit_price ?? 0) : usdPrice;
-    const qty = Number(r.sell_qty ?? 0);
-    const category = (r.category ?? r.sol_category ?? '') as string;
-    return {
-      warehouse: (r.warehouse_short ?? '') as string,
-      id: hasInv ? String(r.inv_id).slice(0, 8) : '',
-      date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
-      category,
-      item: hasInv ? invLabel(r) : (r.sol_label ?? ''),
-      type: category === 'RAM' ? (r.type ?? '') : '',
-      spec: hasInv ? invSpec(r) : (r.sol_sub ?? ''),
-      rank: r.rank ?? '',
-      speed: r.speed ?? '',
-      part: r.part_number ?? r.sol_part ?? '',
-      chip: r.chip_number ?? '',
-      condition: r.condition ?? r.sol_condition ?? '',
-      qty,
-      price: displayPrice,
-      currency: head.currency_code,
-      lineTotal: +(qty * displayPrice).toFixed(2),
-      imageUrl: r.image_url ?? '',
+    // Manual lines fold sub_label into the label — the sheet's spec columns
+    // only fill from an inventory row.
+    const label = hasInv
+      ? invLabel(r)
+      : [r.sol_label, r.sol_sub].filter(Boolean).join(' — ');
+    const rawCategory = s(r.category ?? r.sol_category);
+    const category: SoCategory = (SO_CATEGORY_ORDER as readonly string[]).includes(rawCategory)
+      ? (rawCategory as SoCategory)
+      : 'Other';
+    const part = (r.part_number ?? r.sol_part ?? null) as string | null;
+    const condition = (r.condition ?? r.sol_condition ?? null) as string | null;
+    const key = `${part ? canonPartNumberJs(part) : ''}|${label}|${condition ?? ''}`;
+    const makeGroup = (): Group => ({
+      category, label, partNumber: part, condition,
+      qty: Number(r.sell_qty ?? 0),
+      imageUrl: publicUrl(r.image_url),
+      specs: hasInv ? {
+        brand: s(r.brand), capacity: s(r.capacity), generation: s(r.generation),
+        type: s(r.type), classification: s(r.classification), rank: s(r.rank),
+        speed: s(r.speed), chip: s(r.chip_number), interface: s(r.interface),
+        formFactor: s(r.form_factor),
+        health: (r.health as number | null) ?? '', rpm: (r.rpm as number | null) ?? '',
+      } : {},
+    });
+    const fold = (map: Map<string, Group>) => {
+      const existing = map.get(key);
+      if (existing) {
+        existing.qty += Number(r.sell_qty ?? 0);
+        if (!existing.imageUrl) existing.imageUrl = publicUrl(r.image_url);
+      } else {
+        map.set(key, makeGroup());
+      }
     };
-  });
-
-  // Summary tab groups by part number — one row per distinct part with Qty and
-  // Line total summed across lines/warehouses. Lines without a part number
-  // (hand- or MCP-added) key off their item label so distinct items don't merge
-  // into a single blank-part bucket. First occurrence wins for descriptive
-  // fields; Price is re-derived as the blended unit price.
-  type DataRow = (typeof data)[number];
-  const byPart = new Map<string, DataRow>();
-  for (const row of data) {
-    const key = row.part ? `pn:${row.part}` : `item:${row.item}`;
-    const existing = byPart.get(key);
-    if (existing) {
-      existing.qty += row.qty;
-      existing.lineTotal = +(existing.lineTotal + row.lineTotal).toFixed(2);
-    } else {
-      byPart.set(key, { ...row });
-    }
+    fold(groups);
+    const wh = s(r.warehouse_short) || 'Unassigned';
+    if (!byWarehouse.has(wh)) byWarehouse.set(wh, new Map());
+    fold(byWarehouse.get(wh)!);
   }
-  const summaryData = [...byPart.values()].map((g) => ({
-    ...g,
-    price: g.qty ? +(g.lineTotal / g.qty).toFixed(2) : 0,
-  }));
 
-  // Then one tab per warehouse, alphabetical with 'Unassigned' last — the same
-  // ordering the packing list uses. These keep the full per-line detail.
-  const UNASSIGNED = 'Unassigned';
-  const byWarehouse = new Map<string, typeof data>();
-  for (const row of data) {
-    const key = row.warehouse || UNASSIGNED;
-    if (!byWarehouse.has(key)) byWarehouse.set(key, []);
-    byWarehouse.get(key)!.push(row);
-  }
-  const warehouseSheets: XlsxSheet[] = [...byWarehouse.keys()]
+  const warehouses = [...byWarehouse.keys()]
     .sort((a, b) => {
-      if (a === UNASSIGNED) return 1;
-      if (b === UNASSIGNED) return -1;
+      if (a === 'Unassigned') return 1;
+      if (b === 'Unassigned') return -1;
       return a.localeCompare(b);
     })
-    .map((name) => ({ name, columns: SO_DETAIL_COLS, rows: byWarehouse.get(name)! }));
+    .map((warehouse) => ({
+      warehouse,
+      products: [...byWarehouse.get(warehouse)!.values()],
+    }));
 
-  const buf = await buildXlsxWorkbook([
-    { name: 'Summary', columns: SO_SUMMARY_COLS, rows: summaryData },
-    ...warehouseSheets,
-  ]);
-  // Prefix the file with the customer so a downloads folder full of exports is
-  // scannable by who, not just by order id. Strip filesystem/header-hostile
-  // characters and collapse whitespace to a single dash. \p{L}\p{N} (not \w)
-  // keeps CJK names — most customers here are Chinese, and \w would erase them.
-  const slug = (head.customer_name ?? '')
-    .replace(/[^\p{L}\p{N}.\- ]+/gu, '')
-    .trim()
-    .replace(/\s+/g, '-');
-  return xlsxResponse(buf, datedFilename(slug ? `${head.id}-${slug}` : head.id));
+  const buf = await buildPriceTemplateWorkbook(
+    {
+      id: head.id,
+      customerName: head.customer_name ?? '',
+      currencyCode: head.currency_code,
+    },
+    [...groups.values()],
+    warehouses,
+  );
+  const slug = customerSlug(head.customer_name);
+  return xlsxResponse(
+    buf,
+    datedFilename(`${slug ? `${head.id}-${slug}` : head.id}-price-template`),
+  );
+});
+
+// Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how
+// its rows match this order's products — by canonical part number, never by
+// cell position. Writes nothing; the manager applies the matched prices
+// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit.
+const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+
+sellOrders.post('/:id/price-import/preview', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  const head = (await sql<{ id: string; status: string; currency_code: string }[]>`
+    SELECT id, status, currency_code FROM sell_orders WHERE id = ${id} LIMIT 1
+  `)[0];
+  if (!head) return c.json({ error: 'Not found' }, 404);
+  // Same lock the edit form honors: a Done/Closed order's prices are final.
+  if (head.status === 'Done' || head.status === 'Closed') {
+    return c.json({ error: `prices are locked on a ${head.status} order` }, 409);
+  }
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+  if (file.size > PRICE_IMPORT_MAX_BYTES) {
+    return c.json({ error: `file too large (max ${PRICE_IMPORT_MAX_BYTES} bytes)` }, 413);
+  }
+
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  try {
+    await wb.xlsx.load(await file.arrayBuffer());
+  } catch {
+    return c.json({ error: 'not a valid .xlsx file' }, 400);
+  }
+
+  const lines = (await sql`
+    SELECT label, part_number, condition, qty,
+           unit_price::float AS unit_price,
+           source_unit_price::float AS source_unit_price
+    FROM sell_order_lines
+    WHERE sell_order_id = ${id}
+    ORDER BY position
+  `) as SellOrderLineRow[];
+  const products = groupOrderProducts(lines, head.currency_code === 'CNY');
+
+  try {
+    const preview = parsePriceWorkbook(wb, products);
+    return c.json({ currency: head.currency_code, ...preview });
+  } catch (e) {
+    if (e instanceof PriceColumnsNotFoundError) {
+      return c.json({ error: e.message, code: 'columns-not-found' }, 400);
+    }
+    throw e;
+  }
 });
 
 // Create a new sell order from a set of inventory lines. The manager picks
@@ -747,6 +720,15 @@ sellOrders.patch('/:id', async (c) => {
         payment_received_by = CASE WHEN ${body.paymentReceivedBy !== undefined}
                                    THEN ${body.paymentReceivedBy ?? null}::uuid
                                    ELSE payment_received_by END,
+        -- A line rewrite replaces the priced set wholesale, so the negotiated
+        -- baseline no longer describes this order — clear the adjustment badge.
+        -- The price_adjusted events stay in the immutable timeline.
+        pre_adjust_native_total = CASE WHEN ${body.lines !== undefined}
+                                       THEN NULL ELSE pre_adjust_native_total END,
+        adjusted_at    = CASE WHEN ${body.lines !== undefined}
+                              THEN NULL ELSE adjusted_at END,
+        adjusted_by    = CASE WHEN ${body.lines !== undefined}
+                              THEN NULL ELSE adjusted_by END,
         updated_at     = NOW()
       WHERE id = ${id}
     `;
@@ -1010,6 +992,110 @@ const META_STATUSES = new Set(['Shipped', 'Awaiting payment', 'Done', 'Closed'])
 // sell_orders.close_reason_id (migration 0057) must list the same values;
 // adding a reason means extending CLOSE_REASON_IDS and widening the CHECK.
 const CLOSE_REASONS = new Set<string>(CLOSE_REASON_IDS);
+
+// Statuses in which the negotiated final total may still change. Done is the
+// sold historical record and Closed is frozen until reopened — same reasoning
+// as the PATCH structural-edit lock, kept next to ALLOWED_TRANSITIONS per the
+// status-guard convention (CLAUDE.md).
+const ADJUSTABLE_STATUSES = new Set(['Draft', 'Shipped', 'Awaiting payment']);
+
+// Negotiated final-price adjustment: the buyer names one final total and we
+// prorate the delta across line unit prices server-side (client rounding
+// could break the total===Σlines invariant). Works on the read-only view
+// modal, so it deliberately does NOT require the caller to resend lines —
+// that's why this isn't part of PATCH /:id.
+sellOrders.post('/:id/adjust-price', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const id = c.req.param('id');
+  const body = (await c.req.json().catch(() => null)) as
+    | { targetTotal?: number }
+    | null;
+  if (!body || typeof body.targetTotal !== 'number') {
+    return c.json({ error: 'targetTotal is required' }, 400);
+  }
+  const targetTotal = body.targetTotal;
+  const sql = getDb(c.env);
+
+  type Outcome =
+    | { kind: 'notFound' }
+    | { kind: 'locked'; status: string }
+    | { kind: 'invalid'; msg: string }
+    | { kind: 'done'; fromTotal: number; achievedTotal: number };
+
+  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const cur = (await tx<{
+      status: string; currency_code: string; fx_rate_to_usd: number;
+    }[]>`
+      SELECT status, currency_code, fx_rate_to_usd::float AS fx_rate_to_usd
+      FROM sell_orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+    `)[0];
+    if (!cur) return { kind: 'notFound' };
+    if (!ADJUSTABLE_STATUSES.has(cur.status)) {
+      return { kind: 'locked', status: cur.status };
+    }
+
+    const lines = await tx<{
+      id: string; qty: number; unit_price: number; source_unit_price: number | null;
+    }[]>`
+      SELECT id, qty, unit_price::float AS unit_price,
+             source_unit_price::float AS source_unit_price
+      FROM sell_order_lines WHERE sell_order_id = ${id} ORDER BY position
+    `;
+    const native = lines.map(l => ({
+      qty: l.qty,
+      price: l.source_unit_price ?? l.unit_price,
+    }));
+    const invalid = validateTarget(native, targetTotal);
+    if (invalid) return { kind: 'invalid', msg: invalid };
+
+    const fromTotal = +native.reduce((a, l) => a + l.qty * l.price, 0).toFixed(2);
+    const { prices, achievedTotal } = prorateLines(native, targetTotal);
+
+    // In-place updates keep line ids, positions, and serial/chip snapshots.
+    // Non-USD lines re-derive the USD value at the header's frozen rate; the
+    // source_* columns keep carrying the native negotiation truth.
+    const isNonUsd = cur.currency_code !== 'USD';
+    for (let i = 0; i < lines.length; i++) {
+      const usd = isNonUsd
+        ? convertToUsd(prices[i], cur.fx_rate_to_usd)
+        : prices[i];
+      await tx`
+        UPDATE sell_order_lines
+        SET unit_price = ${usd},
+            source_unit_price = ${isNonUsd ? prices[i] : null}
+        WHERE id = ${lines[i].id}
+      `;
+    }
+
+    // Baseline is the first pre-negotiation total; later adjustments only move
+    // adjusted_at/by so the badge always compares first-quoted vs current.
+    await tx`
+      UPDATE sell_orders SET
+        pre_adjust_native_total = COALESCE(pre_adjust_native_total, ${fromTotal}),
+        adjusted_at = NOW(),
+        adjusted_by = ${u.id},
+        updated_at  = NOW()
+      WHERE id = ${id}
+    `;
+
+    const pct = +((achievedTotal / fromTotal - 1) * 100).toFixed(2);
+    await writeSellOrderEvent(tx, id, u.id, 'price_adjusted', {
+      fromTotal, toTotal: achievedTotal, requestedTotal: targetTotal,
+      currency: cur.currency_code, pct,
+    });
+    return { kind: 'done', fromTotal, achievedTotal };
+  });
+
+  switch (outcome.kind) {
+    case 'notFound': return c.json({ error: 'Not found' }, 404);
+    case 'locked':
+      return c.json({ error: `cannot adjust price of a ${outcome.status} order` }, 409);
+    case 'invalid': return c.json({ error: outcome.msg }, 400);
+    case 'done':
+      return c.json({ ok: true, achievedTotal: outcome.achievedTotal });
+  }
+});
 
 sellOrders.post('/:id/status', async (c) => {
   const u = c.var.user;
