@@ -10,6 +10,10 @@ one column per spec attribute (plus `Chip #` and a blank vendor-editable
 `Note / 备注` column) — **never re-merge spec attributes into one composed
 field** (that misread caused the v1.24.1 revert).
 >
+> v1.30.0 applied the same per-category-tab format to the INVENTORY export
+> (flat + grouped views): one tab per category with granular columns, composed
+> Spec/Category columns removed.
+>
 > v1.27.0 split the price template into one worksheet per category; v1.28.0
 > revived the warehouse view as per-warehouse **packing-checklist tabs** after
 > the category tabs (stacked per-category sections, "Packed ✓" tick column,
