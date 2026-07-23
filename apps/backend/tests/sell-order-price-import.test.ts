@@ -344,7 +344,7 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await dl.arrayBuffer());
     // Category bid tabs first, then the warehouse packing-checklist tab.
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'LA1']);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'Pack - LA1']);
 
     // ...fill the Unit Price cell of every product row, vendor-style. The
     // packing tab has no Unit Price column, so it is naturally skipped.

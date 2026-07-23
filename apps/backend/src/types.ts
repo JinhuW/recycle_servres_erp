@@ -57,54 +57,6 @@ export type User = {
 
 export type LineCategory = 'RAM' | 'SSD' | 'HDD' | 'Other';
 
-export type OrderLine = {
-  id: string;
-  orderId: string;
-  category: LineCategory;
-  brand: string | null;
-  capacity: string | null;
-  generation: string | null;
-  type: string | null;
-  classification: string | null;
-  rank: string | null;
-  speed: string | null;
-  interface: string | null;
-  formFactor: string | null;
-  description: string | null;
-  partNumber: string | null;
-  chipNumber: string | null;
-  condition: string;
-  qty: number;
-  unitCost: number;
-  sellPrice: number | null;
-  status: string;
-  scanImageId: string | null;
-  scanConfidence: number | null;
-  position: number;
-  health: number | null;
-  rpm: number | null;
-};
-
-export type Order = {
-  id: string;
-  userId: string;
-  userName: string;
-  userInitials: string;
-  category: LineCategory;
-  warehouse: { id: string; short: string; region: string } | null;
-  payment: 'company' | 'self';
-  notes: string | null;
-  totalCost: number;
-  lifecycle: string;
-  createdAt: string;
-  lines: OrderLine[];
-  // derived
-  qty: number;
-  revenue: number;
-  profit: number;
-  status: string;
-};
-
 export type OAuthScope =
   | 'market:read'
   | 'market:write'
