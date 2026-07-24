@@ -28,6 +28,24 @@ written by `POST /api/orders`, and backfilled `created` for existing orders in
 the old `does NOT write events while the order is still a draft` case was
 encoding this bug as intended behavior.
 
+**Three things the fix had to drag along.** None were obvious up front:
+
+1. `summary()` in `OrderActivityLog.tsx` had no `default:` branch. It is
+   exhaustive over the compile-time union, so an event kind the loaded bundle
+   has never seen returns `undefined` and `s.title` throws — and there is no
+   ErrorBoundary above it (`main.tsx` is a bare `createRoot`), so the *whole
+   app* goes blank, not just the panel. Railway and the Cloudflare Worker
+   deploy independently, so every backend that adds an event kind opens that
+   window. Adding a kind means adding a `default:` first.
+2. Auditing drafts exposed an amplifier: `DesktopSubmit.tsx`'s `persistLines`
+   re-sends the full `wireMeta()` — including a `totalCost` that grows with
+   each line — on every confirm. Measured: a 6-line build wrote 5 junk
+   `meta_changed` rows. Suppressed when `total_cost` is the only delta on a
+   draft.
+3. `0076` runs before `seed.mjs`, so on a fresh dev DB it backfills nothing
+   and every demo PO still showed an empty panel — the bug would look
+   unfixed to the next reviewer. `seed.mjs` now writes the event itself.
+
 **Traps for next time**
 
 - A test named "does NOT do X" is not proof that not-doing-X is correct. Read
@@ -39,3 +57,6 @@ encoding this bug as intended behavior.
   failed for user "<you>"` regardless of your change. Pre-existing env gap; it
   builds its own `sql` client instead of using `tests/helpers/db.ts`. Don't
   chase it.
+- `pnpm db:seed` on a DB you've been clicking around in dies on
+  `vendor_bid_lines_inventory_id_fkey` — the wipe order doesn't clear vendor
+  bids. Also pre-existing. Seed into a scratch database instead of debugging it.

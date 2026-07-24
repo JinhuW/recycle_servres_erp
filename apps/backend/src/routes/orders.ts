@@ -642,7 +642,7 @@ orders.post('/', async (c) => {
     await writeOrderEvent(tx, newId, u.id, 'created', {
       category: body.category,
       lineCount: body.lines.length,
-      qty: body.lines.reduce((s, l) => s + (l.qty ?? 0), 0),
+      qty: body.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
       totalCost: body.totalCost ?? null,
     });
   });
@@ -762,7 +762,7 @@ orders.patch('/:id', async (c) => {
     await sql.begin(async (tx) => {
       // Lock the order + read fields we need for audit-diffing. The lock keeps
       // a concurrent advance from changing lifecycle between our pre/post
-      // snapshots, so the "skip audit while draft" gate is race-free.
+      // snapshots, so the diff describes one settled state transition.
       const orderBefore = (await tx`
         SELECT id, lifecycle, notes, warehouse_id, payment,
                total_cost::float AS total_cost,
@@ -941,7 +941,15 @@ orders.patch('/:id', async (c) => {
           orderAfter,
           META_FIELDS,
         );
-        if (metaChanges.length) {
+        // While a PO is still being built, the submit form re-sends the whole
+        // meta blob on every line it appends, and total_cost is the running
+        // sum — so a 30-line draft would otherwise log 29 "Total cost: $X →
+        // $Y" rows and bury the real history. A lone total_cost delta on a
+        // draft is that recompute, not a decision.
+        const runningTotalOnly = orderBefore.lifecycle === 'draft'
+          && metaChanges.length === 1
+          && metaChanges[0].field === 'total_cost';
+        if (metaChanges.length && !runningTotalOnly) {
           await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
         }
       }

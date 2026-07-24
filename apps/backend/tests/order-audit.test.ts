@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
@@ -125,6 +128,39 @@ describe('PO audit log — lifecycle events', () => {
     expect(events.find(e => e.kind === 'line_removed')?.detail).toMatchObject({ partNumber: 'AUD-2' });
   });
 
+  // The submit form re-sends the whole meta blob (including the running
+  // total_cost) on every line it appends. Left alone that buries the timeline
+  // under one "Total cost: $X → $Y" row per line.
+  it('does not log a meta_changed when a draft append only moves total_cost', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    for (const [i, total] of [420, 500, 580].entries()) {
+      const r = await api('PATCH', `/api/orders/${id}`, {
+        token,
+        body: {
+          totalCost: total,
+          addLines: [{ category: 'RAM', partNumber: `AUD-APP-${i}`, qty: 1, unitCost: 80, condition: 'New' }],
+        },
+      });
+      expect(r.status).toBe(200);
+    }
+
+    const events = (await getEvents(id, token)).body.events;
+    expect(events.filter(e => e.kind === 'line_added')).toHaveLength(3);
+    expect(events.filter(e => e.kind === 'meta_changed')).toHaveLength(0);
+
+    // A real edit still logs, and carries the total_cost delta with it.
+    const r = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { notes: 'ready', totalCost: 600 },
+    });
+    expect(r.status).toBe(200);
+    const after = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
+    expect(after).toHaveLength(1);
+    const fields = (after[0].detail.changes as { field: string }[]).map(c => c.field).sort();
+    expect(fields).toEqual(['notes', 'total_cost']);
+  });
+
   // Auditing drafts means the draft-only hard delete now cascades into rows
   // guarded by the append-only trigger. 0038 permits that; keep it proven.
   it('still allows deleting a draft that has accumulated events', async () => {
@@ -241,6 +277,38 @@ describe('PO audit log — access control', () => {
     expect((await getEvents(id, pTok)).status).toBe(200);
     expect((await getEvents(id, mTok)).status).toBe(200);
     expect((await getEvents(id, otherTok)).status).toBe(403);
+  });
+
+  // 0076 runs before the seed, so it always sees an empty orders table in CI.
+  // deploy/railway-sync replaces dev's schema (and the migration ledger) with
+  // prod's every night, which re-runs it against real rows — the NOT EXISTS
+  // guard is load-bearing, so exercise it against data here.
+  it('0076 backfills a created event exactly once for orders that lack one', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    const db = getTestDb();
+
+    const backfill = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations',
+           '0076_backfill_order_created_events.sql'), 'utf8');
+
+    // Strip the event POST /api/orders already wrote so there's a row to fill.
+    await db`ALTER TABLE order_events DISABLE TRIGGER order_events_no_delete`;
+    await db`DELETE FROM order_events WHERE order_id = ${id}`;
+    await db`ALTER TABLE order_events ENABLE TRIGGER order_events_no_delete`;
+
+    await db.unsafe(backfill);
+    await db.unsafe(backfill); // re-run must be a no-op
+
+    const rows = await db<{ detail: Record<string, unknown>; created_at: Date }[]>`
+      SELECT detail, created_at FROM order_events
+      WHERE order_id = ${id} AND kind = 'created'`;
+    expect(rows.length, 'exactly one created row survives two runs').toBe(1);
+    expect(rows[0].detail).toMatchObject({ category: 'RAM', lineCount: 2, qty: 6, backfilled: true });
+
+    // Stamped from orders.created_at, not NOW(), so it sorts first.
+    const [order] = await db<{ created_at: Date }[]>`SELECT created_at FROM orders WHERE id = ${id}`;
+    expect(rows[0].created_at.getTime()).toBe(order.created_at.getTime());
   });
 
   it('order_events is append-only — direct UPDATE/DELETE raises', async () => {

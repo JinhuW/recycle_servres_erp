@@ -563,6 +563,18 @@ try {
         )
       `;
     }
+    // Migration 0076 backfills this for real data, but it runs before the seed
+    // and finds an empty table — without this every demo PO's Activity panel
+    // would be blank and the feature would look broken on a fresh DB.
+    await sql`
+      INSERT INTO order_events (order_id, actor_id, kind, detail, created_at)
+      VALUES (${o.id}, ${protoToUuid[o.user_id]}, 'created', ${sql.json({
+        category: o.category,
+        lineCount: o.lines.length,
+        qty: o.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
+        totalCost: o.total_cost ?? null,
+      })}, ${o.created_at})
+    `;
   }
   console.log(`  · ${orders.length} orders inserted`);
 
