@@ -92,6 +92,7 @@ export type OrderStatusMeta = Record<string, {
 export type Order = OrderSummary & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
 
 export type OrderEventKind =
+  | 'created'
   | 'submitted'
   | 'advanced'
   | 'line_added'

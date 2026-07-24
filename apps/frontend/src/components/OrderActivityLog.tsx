@@ -13,6 +13,7 @@ type Props = {
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
+  created:      'file',
   submitted:    'inventory',
   advanced:     'flag',
   line_added:   'plus',
@@ -26,6 +27,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
 const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
+  created:      'muted',
   submitted:    'pos',
   advanced:     'info',
   line_added:   'pos',
@@ -105,6 +107,18 @@ function changeLine(c: OrderEventChange, locale: string): string {
 function summary(ev: OrderEvent, locale: string): { title: string; lines: string[] } {
   const d = ev.detail as Record<string, unknown>;
   switch (ev.kind) {
+    case 'created': {
+      // Rows synthesised by migration 0076 counted the lines as they stood at
+      // backfill time, not at creation, so the numbers would contradict the
+      // line_added/line_removed events below them. Show the category only.
+      if (d.backfilled) return { title: 'Order created', lines: [String(d.category)] };
+      const lineCount = (d.lineCount as number) ?? 0;
+      const qty = (d.qty as number) ?? 0;
+      return {
+        title: 'Order created',
+        lines: [`${String(d.category)} · ${lineCount} line${lineCount === 1 ? '' : 's'} · ${qty} units`],
+      };
+    }
     case 'submitted': {
       const lineCount = (d.lineCount as number) ?? 0;
       const qty = (d.qty as number) ?? 0;
@@ -155,6 +169,12 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
     case 'unarchived': {
       return { title: 'Unarchived', lines: ['Restored to the active list'] };
     }
+    // The backend and this bundle deploy independently, so a browser holding
+    // an older build can be handed a kind it has never heard of. Returning
+    // undefined here would throw on `s.title` and unmount the whole app —
+    // there is no ErrorBoundary above us. Degrade to the raw kind instead.
+    default:
+      return { title: ev.kind, lines: [] };
   }
 }
 

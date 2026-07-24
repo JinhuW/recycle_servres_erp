@@ -1,19 +1,23 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
-// PO audit log — per-order activity stream that starts the moment a draft is
-// submitted for review (Draft → In Transit) and captures every subsequent
-// change: lifecycle advances, line edits, line add/remove, and meta changes.
+// PO audit log — per-order activity stream that starts when the order is
+// created and captures every subsequent change: lifecycle advances, line
+// edits, line add/remove, and meta changes.
 //
-// Why "after submit": drafts are throwaway scratch space; only the submitted
-// snapshot and the changes a manager makes against it are accountability-
-// relevant. The submitted event itself is the baseline (lineCount + totalCost).
+// Drafts are audited too. They used to be skipped (the append-only DELETE
+// trigger blocked the draft-only delete cascade), but 0038 let cascades
+// through, so the gate only served to leave freshly-created POs with an
+// empty timeline.
 
 type Ev = {
   id: string;
-  kind: 'submitted' | 'advanced' | 'line_added' | 'line_removed' | 'line_edited' | 'meta_changed';
+  kind: 'created' | 'submitted' | 'advanced' | 'line_added' | 'line_removed' | 'line_edited' | 'meta_changed';
   actor: { id: string; name: string; initials: string } | null;
   detail: Record<string, unknown>;
   createdAt: string;
@@ -71,7 +75,20 @@ describe('PO audit log — lifecycle events', () => {
     expect(advanced!.detail).toMatchObject({ from: 'in_transit', to: 'reviewing' });
   });
 
-  it('does NOT write events while the order is still a draft', async () => {
+  it('writes a created event as soon as the draft exists', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    const r = await getEvents(id, token);
+    expect(r.status).toBe(200);
+    expect(r.body.events.length, 'a brand-new PO must not have an empty timeline').toBeGreaterThan(0);
+    const created = r.body.events[0];
+    expect(created.kind).toBe('created');
+    expect(created.detail).toMatchObject({ category: 'RAM', lineCount: 2, qty: 6 });
+    expect(created.actor?.name).toBeTruthy();
+  });
+
+  it('records edits made while the order is still a draft', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createDraftWithLines(token);
 
@@ -83,7 +100,81 @@ describe('PO audit log — lifecycle events', () => {
     expect(patch.status).toBe(200);
 
     const events = (await getEvents(id, token)).body.events;
-    expect(events).toEqual([]);
+    const meta = events.find(e => e.kind === 'meta_changed');
+    expect(meta, 'draft edits belong in the timeline').toBeDefined();
+    const changes = meta!.detail.changes as { field: string; to: unknown }[];
+    expect(changes.map(c => c.field)).toEqual(['notes']);
+  });
+
+  it('records line add/remove made while the order is still a draft', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    const detail = await api<{ order: { lines: { id: string; partNumber: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token });
+    const removeId = detail.body.order.lines.find(l => l.partNumber === 'AUD-2')!.id;
+
+    const patch = await api('PATCH', `/api/orders/${id}`, {
+      token,
+      body: {
+        removeLineIds: [removeId],
+        addLines: [{ category: 'RAM', partNumber: 'AUD-DRAFT', qty: 3, unitCost: 15, condition: 'New' }],
+      },
+    });
+    expect(patch.status).toBe(200);
+
+    const events = (await getEvents(id, token)).body.events;
+    expect(events.find(e => e.kind === 'line_added')?.detail).toMatchObject({ partNumber: 'AUD-DRAFT' });
+    expect(events.find(e => e.kind === 'line_removed')?.detail).toMatchObject({ partNumber: 'AUD-2' });
+  });
+
+  // The submit form re-sends the whole meta blob (including the running
+  // total_cost) on every line it appends. Left alone that buries the timeline
+  // under one "Total cost: $X → $Y" row per line.
+  it('does not log a meta_changed when a draft append only moves total_cost', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    for (const [i, total] of [420, 500, 580].entries()) {
+      const r = await api('PATCH', `/api/orders/${id}`, {
+        token,
+        body: {
+          totalCost: total,
+          addLines: [{ category: 'RAM', partNumber: `AUD-APP-${i}`, qty: 1, unitCost: 80, condition: 'New' }],
+        },
+      });
+      expect(r.status).toBe(200);
+    }
+
+    const events = (await getEvents(id, token)).body.events;
+    expect(events.filter(e => e.kind === 'line_added')).toHaveLength(3);
+    expect(events.filter(e => e.kind === 'meta_changed')).toHaveLength(0);
+
+    // A real edit still logs, and carries the total_cost delta with it.
+    const r = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { notes: 'ready', totalCost: 600 },
+    });
+    expect(r.status).toBe(200);
+    const after = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
+    expect(after).toHaveLength(1);
+    const fields = (after[0].detail.changes as { field: string }[]).map(c => c.field).sort();
+    expect(fields).toEqual(['notes', 'total_cost']);
+  });
+
+  // Auditing drafts means the draft-only hard delete now cascades into rows
+  // guarded by the append-only trigger. 0038 permits that; keep it proven.
+  it('still allows deleting a draft that has accumulated events', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { notes: 'scratch' } });
+    expect((await getEvents(id, token)).body.events.length).toBeGreaterThan(1);
+
+    const del = await api('DELETE', `/api/orders/${id}`, { token });
+    expect(del.status).toBe(200);
+
+    const db = getTestDb();
+    const left = await db`SELECT 1 FROM order_events WHERE order_id = ${id}`;
+    expect(left.length).toBe(0);
   });
 });
 
@@ -186,6 +277,38 @@ describe('PO audit log — access control', () => {
     expect((await getEvents(id, pTok)).status).toBe(200);
     expect((await getEvents(id, mTok)).status).toBe(200);
     expect((await getEvents(id, otherTok)).status).toBe(403);
+  });
+
+  // 0076 runs before the seed, so it always sees an empty orders table in CI.
+  // deploy/railway-sync replaces dev's schema (and the migration ledger) with
+  // prod's every night, which re-runs it against real rows — the NOT EXISTS
+  // guard is load-bearing, so exercise it against data here.
+  it('0076 backfills a created event exactly once for orders that lack one', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    const db = getTestDb();
+
+    const backfill = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations',
+           '0076_backfill_order_created_events.sql'), 'utf8');
+
+    // Strip the event POST /api/orders already wrote so there's a row to fill.
+    await db`ALTER TABLE order_events DISABLE TRIGGER order_events_no_delete`;
+    await db`DELETE FROM order_events WHERE order_id = ${id}`;
+    await db`ALTER TABLE order_events ENABLE TRIGGER order_events_no_delete`;
+
+    await db.unsafe(backfill);
+    await db.unsafe(backfill); // re-run must be a no-op
+
+    const rows = await db<{ detail: Record<string, unknown>; created_at: Date }[]>`
+      SELECT detail, created_at FROM order_events
+      WHERE order_id = ${id} AND kind = 'created'`;
+    expect(rows.length, 'exactly one created row survives two runs').toBe(1);
+    expect(rows[0].detail).toMatchObject({ category: 'RAM', lineCount: 2, qty: 6, backfilled: true });
+
+    // Stamped from orders.created_at, not NOW(), so it sorts first.
+    const [order] = await db<{ created_at: Date }[]>`SELECT created_at FROM orders WHERE id = ${id}`;
+    expect(rows[0].created_at.getTime()).toBe(order.created_at.getTime());
   });
 
   it('order_events is append-only — direct UPDATE/DELETE raises', async () => {
