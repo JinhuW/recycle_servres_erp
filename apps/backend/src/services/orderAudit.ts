@@ -1,7 +1,7 @@
-// PO audit-log helpers — used by routes/orders.ts to record activity once an
-// order has been submitted for review. Lives outside the routes file so the
-// diffing logic is reusable from scripts/tests and the call sites in the
-// PATCH / advance handlers stay readable.
+// PO audit-log helpers — used by routes/orders.ts to record activity from the
+// moment an order is created. Lives outside the routes file so the diffing
+// logic is reusable from scripts/tests and the call sites in the PATCH /
+// advance handlers stay readable.
 //
 // All writes go through `writeOrderEvent` and assume they are running inside
 // the caller's transaction, so an audit row is committed only if the change
@@ -14,6 +14,7 @@ export { diff, type AuditChange } from './auditDiff';
 export type SqlLike = Sql | TransactionSql;
 
 export type EventKind =
+  | 'created'
   | 'submitted'
   | 'advanced'
   | 'line_added'

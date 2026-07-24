@@ -150,7 +150,7 @@ describe('PO status-meta — attachments', () => {
 describe('PO status-meta — drafts', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('evidence on a draft writes no audit events and keeps the draft deletable', async () => {
+  it('evidence on a draft is audited and keeps the draft deletable', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const { token: purchaser } = await loginAs(MARCUS);
     const id = await createOrder(purchaser, { advance: false });
@@ -164,10 +164,15 @@ describe('PO status-meta — drafts', () => {
     expect(up.status).toBe(200);
 
     const events = await getEvents(mgr, id);
-    expect(events.filter(e => e.kind === 'status_meta_changed')).toHaveLength(0);
+    const fields = events
+      .filter(e => e.kind === 'status_meta_changed')
+      .map(e => (e.detail as { field: string }).field);
+    expect(fields).toContain('note');
+    expect(fields).toContain('attachment_added');
 
-    // The order_events append-only trigger fires even on CASCADE — a draft
-    // with audit rows would make this DELETE blow up.
+    // The order_events append-only trigger fires even on CASCADE. 0038 lets
+    // the cascade through; without it this DELETE would blow up now that
+    // drafts carry audit rows.
     const del = await api('DELETE', `/api/orders/${id}`, { token: purchaser });
     expect(del.status).toBe(200);
   });

@@ -636,6 +636,15 @@ orders.post('/', async (c) => {
       health: l.health,
       rpm: l.rpm,
     })));
+
+    // Baseline of the timeline. Without it a freshly-created PO reads as an
+    // order with no history at all until someone submits it.
+    await writeOrderEvent(tx, newId, u.id, 'created', {
+      category: body.category,
+      lineCount: body.lines.length,
+      qty: body.lines.reduce((s, l) => s + (l.qty ?? 0), 0),
+      totalCost: body.totalCost ?? null,
+    });
   });
 
   return c.json({ id: newId }, 201);
@@ -783,7 +792,6 @@ orders.patch('/:id', async (c) => {
           throw new Error('__DONE_LOCKED__');
         }
       }
-      const auditable = orderBefore.lifecycle !== 'draft';
 
       // Snapshot the lines we'll edit / remove so we can diff after the writes.
       // NUMERIC columns come back as strings from postgres.js by default; cast
@@ -920,73 +928,71 @@ orders.patch('/:id', async (c) => {
         })));
       }
 
-      // ── Audit: only for orders that have left Draft. Each kind is written
-      // as its own event row so the timeline reads in the order it happened.
-      if (auditable) {
-        if (touchesOrder) {
-          const orderAfter = (await tx`
-            SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
-                   commission_rate::float AS commission_rate
-            FROM orders WHERE id = ${id} LIMIT 1
-          `)[0] as Record<string, unknown>;
-          const metaChanges = diff(
-            orderBefore as unknown as Record<string, unknown>,
-            orderAfter,
-            META_FIELDS,
-          );
-          if (metaChanges.length) {
-            await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
+      // ── Audit. Each kind is written as its own event row so the timeline
+      // reads in the order it happened.
+      if (touchesOrder) {
+        const orderAfter = (await tx`
+          SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
+                 commission_rate::float AS commission_rate
+          FROM orders WHERE id = ${id} LIMIT 1
+        `)[0] as Record<string, unknown>;
+        const metaChanges = diff(
+          orderBefore as unknown as Record<string, unknown>,
+          orderAfter,
+          META_FIELDS,
+        );
+        if (metaChanges.length) {
+          await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
+        }
+      }
+      // Fetch the post-write snapshot for every edited line in ONE query,
+      // then walk the in-memory map. The previous per-line SELECT was an
+      // N+1 inside the tx: a 50-line PATCH cost 50 sequential round trips
+      // just to render the audit diff.
+      const patches = body.lines ?? [];
+      if (patches.length > 0) {
+        const patchIds = patches.map(p => p.id);
+        const afters = (await tx`
+          SELECT id, status, qty, brand, capacity, type, generation, classification,
+                 rank, speed, interface, form_factor, description, part_number,
+                 chip_number, condition, rpm,
+                 unit_cost::float AS unit_cost,
+                 sell_price::float AS sell_price,
+                 health::float AS health
+          FROM order_lines WHERE id = ANY(${patchIds}::uuid[])
+        `) as Record<string, unknown>[];
+        const afterMap = new Map<string, Record<string, unknown>>(
+          afters.map(a => [a.id as string, a]),
+        );
+        for (const patch of patches) {
+          const before = beforeMap.get(patch.id);
+          const after = afterMap.get(patch.id);
+          if (!before || !after) continue;
+          const changes = diff(before, after, LINE_FIELDS);
+          if (changes.length) {
+            await writeOrderEvent(tx, id, u.id, 'line_edited', {
+              lineId: patch.id,
+              partNumber: after.part_number ?? null,
+              changes,
+            });
           }
         }
-        // Fetch the post-write snapshot for every edited line in ONE query,
-        // then walk the in-memory map. The previous per-line SELECT was an
-        // N+1 inside the tx: a 50-line PATCH cost 50 sequential round trips
-        // just to render the audit diff.
-        const patches = body.lines ?? [];
-        if (patches.length > 0) {
-          const patchIds = patches.map(p => p.id);
-          const afters = (await tx`
-            SELECT id, status, qty, brand, capacity, type, generation, classification,
-                   rank, speed, interface, form_factor, description, part_number,
-                   chip_number, condition, rpm,
-                   unit_cost::float AS unit_cost,
-                   sell_price::float AS sell_price,
-                   health::float AS health
-            FROM order_lines WHERE id = ANY(${patchIds}::uuid[])
-          `) as Record<string, unknown>[];
-          const afterMap = new Map<string, Record<string, unknown>>(
-            afters.map(a => [a.id as string, a]),
-          );
-          for (const patch of patches) {
-            const before = beforeMap.get(patch.id);
-            const after = afterMap.get(patch.id);
-            if (!before || !after) continue;
-            const changes = diff(before, after, LINE_FIELDS);
-            if (changes.length) {
-              await writeOrderEvent(tx, id, u.id, 'line_edited', {
-                lineId: patch.id,
-                partNumber: after.part_number ?? null,
-                changes,
-              });
-            }
-          }
-        }
-        for (const r of addedRows) {
-          await writeOrderEvent(tx, id, u.id, 'line_added', {
-            lineId: r.id,
-            partNumber: r.part_number,
-            qty: r.qty,
-            unitCost: r.unit_cost,
-          });
-        }
-        for (const r of removedSnapshots) {
-          await writeOrderEvent(tx, id, u.id, 'line_removed', {
-            lineId: r.id,
-            partNumber: r.part_number,
-            qty: r.qty,
-            unitCost: r.unit_cost,
-          });
-        }
+      }
+      for (const r of addedRows) {
+        await writeOrderEvent(tx, id, u.id, 'line_added', {
+          lineId: r.id,
+          partNumber: r.part_number,
+          qty: r.qty,
+          unitCost: r.unit_cost,
+        });
+      }
+      for (const r of removedSnapshots) {
+        await writeOrderEvent(tx, id, u.id, 'line_removed', {
+          lineId: r.id,
+          partNumber: r.part_number,
+          qty: r.qty,
+          unitCost: r.unit_cost,
+        });
       }
     });
   } catch (e) {
@@ -1187,9 +1193,6 @@ orders.put('/:id/status-meta/:status', async (c) => {
     | { user_id: string; lifecycle: string } | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
-  // Drafts must never accumulate order_events rows — the append-only trigger
-  // would block the draft-only DELETE cascade (see 0037). Same gate as PATCH.
-  const auditable = existing.lifecycle !== 'draft';
 
   const note = (body.note ?? '').trim() || null;
   await sql.begin(async (tx) => {
@@ -1204,7 +1207,7 @@ orders.put('/:id/status-meta/:status', async (c) => {
       DO UPDATE SET note = EXCLUDED.note, set_at = NOW(), set_by = EXCLUDED.set_by
     `;
     const fromNote = before?.note ?? null;
-    if (auditable && fromNote !== note) {
+    if (fromNote !== note) {
       await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
         status, field: 'note', from: fromNote, to: note,
       });
@@ -1225,8 +1228,6 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
     | { user_id: string; lifecycle: string } | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
-  // See the note PUT above: no audit rows on drafts.
-  const auditable = existing.lifecycle !== 'draft';
 
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
@@ -1268,12 +1269,10 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
          ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${u.id})
       RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
     `)[0];
-    if (auditable) {
-      await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
-        status, field: 'attachment_added',
-        attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
-      });
-    }
+    await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
+      status, field: 'attachment_added',
+      attachmentId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+    });
     return r;
   });
 
@@ -1302,8 +1301,6 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
     | { user_id: string; lifecycle: string } | undefined;
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (!canWriteMeta(u, status, existing)) return c.json({ error: 'Forbidden' }, 403);
-  // See the note PUT above: no audit rows on drafts.
-  const auditable = existing.lifecycle !== 'draft';
 
   const removed = await sql.begin(async (tx) => {
     const row = (await tx`
@@ -1313,12 +1310,10 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
     `)[0] as { storage_key: string; filename: string } | undefined;
     if (!row) return null;
     await tx`DELETE FROM order_status_attachments WHERE id = ${attachmentId}`;
-    if (auditable) {
-      await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
-        status, field: 'attachment_removed',
-        attachmentId, filename: row.filename,
-      });
-    }
+    await writeOrderEvent(tx, id, u.id, 'status_meta_changed', {
+      status, field: 'attachment_removed',
+      attachmentId, filename: row.filename,
+    });
     return row;
   });
 

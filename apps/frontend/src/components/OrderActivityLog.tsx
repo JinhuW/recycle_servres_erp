@@ -13,6 +13,7 @@ type Props = {
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
+  created:      'file',
   submitted:    'inventory',
   advanced:     'flag',
   line_added:   'plus',
@@ -26,6 +27,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
 const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
+  created:      'muted',
   submitted:    'pos',
   advanced:     'info',
   line_added:   'pos',
@@ -105,6 +107,14 @@ function changeLine(c: OrderEventChange, locale: string): string {
 function summary(ev: OrderEvent, locale: string): { title: string; lines: string[] } {
   const d = ev.detail as Record<string, unknown>;
   switch (ev.kind) {
+    case 'created': {
+      const lineCount = (d.lineCount as number) ?? 0;
+      const qty = (d.qty as number) ?? 0;
+      return {
+        title: 'Order created',
+        lines: [`${String(d.category ?? '')} · ${lineCount} line${lineCount === 1 ? '' : 's'} · ${qty} units`.trim()],
+      };
+    }
     case 'submitted': {
       const lineCount = (d.lineCount as number) ?? 0;
       const qty = (d.qty as number) ?? 0;

@@ -3,17 +3,18 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 
-// PO audit log — per-order activity stream that starts the moment a draft is
-// submitted for review (Draft → In Transit) and captures every subsequent
-// change: lifecycle advances, line edits, line add/remove, and meta changes.
+// PO audit log — per-order activity stream that starts when the order is
+// created and captures every subsequent change: lifecycle advances, line
+// edits, line add/remove, and meta changes.
 //
-// Why "after submit": drafts are throwaway scratch space; only the submitted
-// snapshot and the changes a manager makes against it are accountability-
-// relevant. The submitted event itself is the baseline (lineCount + totalCost).
+// Drafts are audited too. They used to be skipped (the append-only DELETE
+// trigger blocked the draft-only delete cascade), but 0038 let cascades
+// through, so the gate only served to leave freshly-created POs with an
+// empty timeline.
 
 type Ev = {
   id: string;
-  kind: 'submitted' | 'advanced' | 'line_added' | 'line_removed' | 'line_edited' | 'meta_changed';
+  kind: 'created' | 'submitted' | 'advanced' | 'line_added' | 'line_removed' | 'line_edited' | 'meta_changed';
   actor: { id: string; name: string; initials: string } | null;
   detail: Record<string, unknown>;
   createdAt: string;
@@ -71,7 +72,20 @@ describe('PO audit log — lifecycle events', () => {
     expect(advanced!.detail).toMatchObject({ from: 'in_transit', to: 'reviewing' });
   });
 
-  it('does NOT write events while the order is still a draft', async () => {
+  it('writes a created event as soon as the draft exists', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    const r = await getEvents(id, token);
+    expect(r.status).toBe(200);
+    expect(r.body.events.length, 'a brand-new PO must not have an empty timeline').toBeGreaterThan(0);
+    const created = r.body.events[0];
+    expect(created.kind).toBe('created');
+    expect(created.detail).toMatchObject({ category: 'RAM', lineCount: 2, qty: 6 });
+    expect(created.actor?.name).toBeTruthy();
+  });
+
+  it('records edits made while the order is still a draft', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createDraftWithLines(token);
 
@@ -83,7 +97,48 @@ describe('PO audit log — lifecycle events', () => {
     expect(patch.status).toBe(200);
 
     const events = (await getEvents(id, token)).body.events;
-    expect(events).toEqual([]);
+    const meta = events.find(e => e.kind === 'meta_changed');
+    expect(meta, 'draft edits belong in the timeline').toBeDefined();
+    const changes = meta!.detail.changes as { field: string; to: unknown }[];
+    expect(changes.map(c => c.field)).toEqual(['notes']);
+  });
+
+  it('records line add/remove made while the order is still a draft', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    const detail = await api<{ order: { lines: { id: string; partNumber: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token });
+    const removeId = detail.body.order.lines.find(l => l.partNumber === 'AUD-2')!.id;
+
+    const patch = await api('PATCH', `/api/orders/${id}`, {
+      token,
+      body: {
+        removeLineIds: [removeId],
+        addLines: [{ category: 'RAM', partNumber: 'AUD-DRAFT', qty: 3, unitCost: 15, condition: 'New' }],
+      },
+    });
+    expect(patch.status).toBe(200);
+
+    const events = (await getEvents(id, token)).body.events;
+    expect(events.find(e => e.kind === 'line_added')?.detail).toMatchObject({ partNumber: 'AUD-DRAFT' });
+    expect(events.find(e => e.kind === 'line_removed')?.detail).toMatchObject({ partNumber: 'AUD-2' });
+  });
+
+  // Auditing drafts means the draft-only hard delete now cascades into rows
+  // guarded by the append-only trigger. 0038 permits that; keep it proven.
+  it('still allows deleting a draft that has accumulated events', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { notes: 'scratch' } });
+    expect((await getEvents(id, token)).body.events.length).toBeGreaterThan(1);
+
+    const del = await api('DELETE', `/api/orders/${id}`, { token });
+    expect(del.status).toBe(200);
+
+    const db = getTestDb();
+    const left = await db`SELECT 1 FROM order_events WHERE order_id = ${id}`;
+    expect(left.length).toBe(0);
   });
 });
 
