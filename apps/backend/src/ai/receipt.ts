@@ -79,9 +79,12 @@ export function buildReceiptName(
 
 export async function maybeRenameReceipt(env: Env, file: File): Promise<File> {
   if (!env.OPENROUTER_API_KEY) return file;
-  // Images only: receipts here are app screenshots; PDF input needs a
-  // different OpenRouter content shape + parser plugin for marginal gain.
-  if (file.type === 'application/pdf') return file;
+  // Images only, as a positive check — the upload allowlist now carries
+  // spreadsheets, and anything non-image sent to the vision endpoint is a
+  // guaranteed-useless call we'd pay for on every attachment. (PDF is excluded
+  // for a different reason: it needs a different OpenRouter content shape and
+  // a parser plugin, for marginal gain.)
+  if (!file.type.startsWith('image/')) return file;
 
   const bytes = await file.arrayBuffer();
   let json: Record<string, unknown>;

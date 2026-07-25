@@ -86,12 +86,18 @@ export async function uploadAttachment(
   const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_');
   const key = `${prefix}/${crypto.randomUUID()}-${safeName}`;
   const body = new Uint8Array(await file.arrayBuffer());
+  // Images and PDFs are viewed in place (lightbox / inline PDF), so they keep
+  // the default disposition. Everything else — spreadsheets today — is forced
+  // to download, so the browser never gets to decide what to do with a type
+  // served from a public bucket.
+  const inline = declared.startsWith('image/') || declared === 'application/pdf';
   await s3.send(
     new PutObjectCommand({
       Bucket: env.R2_BUCKET,
       Key: key,
       Body: body,
       ContentType: declared,
+      ...(inline ? {} : { ContentDisposition: `attachment; filename="${safeName}"` }),
     }),
     { abortSignal: AbortSignal.timeout(15_000) },
   );

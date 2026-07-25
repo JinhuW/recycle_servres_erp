@@ -26,12 +26,22 @@ export const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 // the HTTP-level body-limit cap. Uploads are buffered fully in memory by
 // c.req.formData(), so an unbounded setting risks OOM-killing the container.
 export const UPLOAD_HARD_CAP_BYTES = 50 * 1024 * 1024;
+export const XLSX_MIME =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
 // Stored-XSS guard: attachments land in a public R2 bucket and are served with
 // their declared Content-Type. SVG and HTML render scripts in the browser, so
 // they're not on the list; PDFs render inline but are sandboxed by the browser
 // so they stay allowed.
+//
+// Spreadsheets ride along for vendor lot manifests. .xlsx is a ZIP container
+// and text/csv is not a type any browser parses as markup, so neither can
+// render script — and r2.ts forces Content-Disposition: attachment on both.
+// Legacy .xls and macro-enabled .xlsm stay off: they're OLE containers, the
+// standard macro-malware wrapper, and this bucket is public.
 export const DEFAULT_UPLOAD_ALLOWED_MIME = [
   'application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp',
+  XLSX_MIME, 'text/csv',
 ];
 // Hard allowlist enforced at the route layer AND on the R2 PutObject — the
 // workspace setting can only narrow this set, never widen it. Anything outside
@@ -40,6 +50,7 @@ export const DEFAULT_UPLOAD_ALLOWED_MIME = [
 // storage layer is cheap insurance against a future bypass).
 export const SAFE_UPLOAD_MIME = new Set([
   'application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp',
+  XLSX_MIME, 'text/csv',
 ]);
 
 export async function getUploadLimits(
