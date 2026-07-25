@@ -2,6 +2,7 @@ import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
+import { chipNumberRequired } from '../lib/ramRequired';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -120,7 +121,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
           <PhCatSelect className={selectClsFor('type')} value={value.type} options={RAM_DEVICE_TYPES} onChange={v => onChange('type', v)} />
         </div>
         <div className="ph-field">
-          <label>{t('chipNumber')}<Req /></label>
+          <label>{t('chipNumber')}{chipNumberRequired(value.brand) && <Req />}</label>
           <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value)} />
         </div>
         <div className="ph-field">
