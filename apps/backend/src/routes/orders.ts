@@ -801,7 +801,7 @@ orders.patch('/:id', async (c) => {
         ? await tx`
             SELECT id, status, qty, brand, capacity, type, generation, classification,
                    rank, speed, interface, form_factor, description, part_number,
-                   chip_number, condition, rpm,
+                   serial_number, chip_number, condition, rpm,
                    unit_cost::float AS unit_cost,
                    sell_price::float AS sell_price,
                    health::float AS health
@@ -941,15 +941,7 @@ orders.patch('/:id', async (c) => {
           orderAfter,
           META_FIELDS,
         );
-        // While a PO is still being built, the submit form re-sends the whole
-        // meta blob on every line it appends, and total_cost is the running
-        // sum — so a 30-line draft would otherwise log 29 "Total cost: $X →
-        // $Y" rows and bury the real history. A lone total_cost delta on a
-        // draft is that recompute, not a decision.
-        const runningTotalOnly = orderBefore.lifecycle === 'draft'
-          && metaChanges.length === 1
-          && metaChanges[0].field === 'total_cost';
-        if (metaChanges.length && !runningTotalOnly) {
+        if (metaChanges.length) {
           await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
         }
       }
@@ -963,7 +955,7 @@ orders.patch('/:id', async (c) => {
         const afters = (await tx`
           SELECT id, status, qty, brand, capacity, type, generation, classification,
                  rank, speed, interface, form_factor, description, part_number,
-                 chip_number, condition, rpm,
+                 serial_number, chip_number, condition, rpm,
                  unit_cost::float AS unit_cost,
                  sell_price::float AS sell_price,
                  health::float AS health
@@ -1047,6 +1039,12 @@ orders.post('/draft', async (c) => {
         ${null}, 'draft'
       )
     `;
+    await writeOrderEvent(tx, newId, u.id, 'created', {
+      category: body.category,
+      lineCount: 0,
+      qty: 0,
+      totalCost: null,
+    });
   });
 
   return c.json({ id: newId }, 201);

@@ -36,7 +36,8 @@ export const META_FIELDS = [
 ] as const;
 
 // Line-level fields PATCH may update. Excludes ids/positions/scan refs and the
-// status column (which is driven by advance events, not free edits).
+// status column (which is driven by advance events, not free edits) — every
+// other column PATCH can write is listed here, so no edit goes unrecorded.
 export const LINE_FIELDS = [
   'sell_price',
   'qty',
@@ -52,6 +53,7 @@ export const LINE_FIELDS = [
   'form_factor',
   'description',
   'part_number',
+  'serial_number',
   'chip_number',
   'condition',
   'health',
