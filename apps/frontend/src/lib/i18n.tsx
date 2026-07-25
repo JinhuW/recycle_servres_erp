@@ -1097,6 +1097,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     drawerConfirming: 'Confirming…',
     drawerConfirmLine: 'Confirm line',
     drawerConfirmFailed: 'Failed to confirm line',
+    drawerLineSaved: 'Line {n} saved',
 
     // Duplicate part-number guard (inline drawer warning + save-time modal).
     dupPartDrawerOne: 'This Part # already appears on line {line}.',
@@ -2424,6 +2425,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     drawerConfirming: '正在确认…',
     drawerConfirmLine: '确认明细',
     drawerConfirmFailed: '确认明细失败',
+    drawerLineSaved: '第 {n} 行已保存',
 
     selectPlaceholder: '请选择…',
     comboUseCustom: '使用“{value}”',
