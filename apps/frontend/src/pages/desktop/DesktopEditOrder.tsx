@@ -134,6 +134,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
+  // Line ids that exist in the DB. Seeded from the server's set and grown by
+  // the drawer's Confirm-line write-through — `order.lines` is a snapshot from
+  // page load and never learns about those, so a line added+confirmed and then
+  // removed would otherwise be missed by save()'s removeLineIds diff.
+  const [persistedIds, setPersistedIds] = useState<string[]>(() => order.lines.map(l => l.id));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
@@ -253,7 +258,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   }, [lines]);
 
   const statusDirty = status !== effectiveStatus;
-  const linesDirty = lines.some(l => l._dirty) || lines.length !== order.lines.length;
+  const linesDirty = lines.some(l => l._dirty) || lines.length !== persistedIds.length;
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
@@ -320,9 +325,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     setSaveError(null);
     try {
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
-      const removeLineIds = order.lines
-        .map(l => l.id)
-        .filter(id => !presentIds.has(id));
+      const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       await api.patch(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
@@ -363,6 +366,30 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       return;
     }
     await doSave();
+  };
+
+  // Drawer "Confirm line" writes that one line straight to the DB instead of
+  // parking it in local state until Save. Closing the tab after confirming
+  // therefore loses nothing — matching what Confirm already means on the
+  // new-order screen. Save still exists for order-level fields and the stage.
+  // Throws on failure so the drawer keeps itself open and shows the reason.
+  const confirmLine = async (i: number): Promise<void> => {
+    const l = lines[i];
+    if (!l) return;
+    if (!lineReady(l)) throw new Error(t('subFillThisLine'));
+    // Nothing to push for an untouched server line; skip the round trip.
+    if (l._id && !l._dirty) return;
+    const r = await api.patch<{ ok: true; addedLineIds: string[] }>(
+      `/api/orders/${order.id}`,
+      l._id
+        ? { lines: [editLineToPatch(l)] }
+        : { addLines: [editLineToInsert(l, status)] },
+    );
+    const newId = l._id ?? r.addedLineIds[0];
+    setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, _dirty: false } : x)));
+    if (!l._id && newId) setPersistedIds(ids => [...ids, newId]);
+    setActivityKey(k => k + 1);
+    window.__showToast?.(t('drawerLineSaved', { n: i + 1 }), 'success');
   };
 
   const itemLabel = (l: EditLine) =>
@@ -1034,6 +1061,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
+          onConfirmLine={() => confirmLine(activeIdx)}
+          onConfirmError={showErrorToast}
           duplicateOnLines={dupByIdx.get(activeIdx)}
         />
       )}
