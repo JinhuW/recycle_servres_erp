@@ -25,4 +25,16 @@ describe('GET /api/lookups', () => {
     // disabled categories (e.g. CPU) are still returned so the UI can show them
     expect(r.body.categories.some((x: { id: string }) => x.id === 'CPU')).toBe(true);
   });
+
+  // 1024GB is not how these drives are labelled; 1TB replaces it in the same
+  // slot so the list still reads in ascending size order.
+  it('offers 1TB and not 1024GB in the SSD capacity catalog', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/lookups', { token });
+    expect(r.status).toBe(200);
+    const caps: string[] = r.body.catalog.SSD_CAP;
+    expect(caps).toContain('1TB');
+    expect(caps).not.toContain('1024GB');
+    expect(caps.indexOf('1TB')).toBe(caps.indexOf('1000GB') + 1);
+  });
 });
