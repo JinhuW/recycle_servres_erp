@@ -5,6 +5,7 @@ import {
   CONDITIONS,
 } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
+import { chipNumberRequired } from '../../../lib/ramRequired';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
 import type { Line } from '../DesktopSubmit';
@@ -74,7 +75,7 @@ export function RamFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">{t('chipNumber')} <span className="req">*</span></label>
+        <label className="label">{t('chipNumber')} {chipNumberRequired(line.brand) && <span className="req">*</span>}</label>
         <input
           className="input mono"
           value={line.chipNumber ?? ''}
