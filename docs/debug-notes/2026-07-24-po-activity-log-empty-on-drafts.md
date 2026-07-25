@@ -39,12 +39,26 @@ encoding this bug as intended behavior.
    window. Adding a kind means adding a `default:` first.
 2. Auditing drafts exposed an amplifier: `DesktopSubmit.tsx`'s `persistLines`
    re-sends the full `wireMeta()` — including a `totalCost` that grows with
-   each line — on every confirm. Measured: a 6-line build wrote 5 junk
-   `meta_changed` rows. Suppressed when `total_cost` is the only delta on a
-   draft.
+   each line — on every confirm. Measured: a 6-line build writes 5 extra
+   `meta_changed` rows. v1.32.0 suppressed those; **v1.33.0 reinstated them on
+   the owner's call** — the timeline is a record, not a digest, so nothing is
+   filtered. If the noise ever needs addressing, fix it at the source
+   (`persistLines` shouldn't resend `totalCost` on the append path), not by
+   dropping audit rows.
 3. `0076` runs before `seed.mjs`, so on a fresh dev DB it backfills nothing
    and every demo PO still showed an empty panel — the bug would look
    unfixed to the next reviewer. `seed.mjs` now writes the event itself.
+
+**Two silent holes found only by enumerating the endpoints** (v1.33.0). Don't
+assume "drafts are audited now" means every path is covered — walk
+`grep -n "orders\.\(post\|patch\|put\|delete\)("` and check each one:
+
+- `POST /api/orders/draft` (the empty-draft "New order" button) is a *second*
+  creation path next to `POST /api/orders`, and it wrote no `created` event.
+- `serial_number` is patchable (`orders.ts` line-UPDATE) but was missing from
+  `LINE_FIELDS`, so edits to it vanished. Adding a field to `LINE_FIELDS` is
+  not enough on its own — the before/after snapshot `SELECT`s in the PATCH
+  handler must list the column too, or the diff never sees it.
 
 **Traps for next time**
 

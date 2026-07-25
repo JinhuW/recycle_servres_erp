@@ -128,10 +128,9 @@ describe('PO audit log — lifecycle events', () => {
     expect(events.find(e => e.kind === 'line_removed')?.detail).toMatchObject({ partNumber: 'AUD-2' });
   });
 
-  // The submit form re-sends the whole meta blob (including the running
-  // total_cost) on every line it appends. Left alone that buries the timeline
-  // under one "Total cost: $X → $Y" row per line.
-  it('does not log a meta_changed when a draft append only moves total_cost', async () => {
+  // Nothing is filtered out of a draft's timeline — including the running
+  // total_cost the submit form re-sends with every line it appends.
+  it('logs every total_cost move on a draft, one event per append', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createDraftWithLines(token);
 
@@ -148,17 +147,41 @@ describe('PO audit log — lifecycle events', () => {
 
     const events = (await getEvents(id, token)).body.events;
     expect(events.filter(e => e.kind === 'line_added')).toHaveLength(3);
-    expect(events.filter(e => e.kind === 'meta_changed')).toHaveLength(0);
+    const meta = events.filter(e => e.kind === 'meta_changed');
+    expect(meta).toHaveLength(3);
+    expect(meta.map(e => (e.detail.changes as { to: unknown }[])[0].to)).toEqual([420, 500, 580]);
+  });
 
-    // A real edit still logs, and carries the total_cost delta with it.
+  it('writes a created event for the empty-draft endpoint too', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders/draft', {
+      token, body: { category: 'SSD' },
+    });
+    expect(created.status).toBe(201);
+
+    const events = (await getEvents(created.body.id, token)).body.events;
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe('created');
+    expect(events[0].detail).toMatchObject({ category: 'SSD', lineCount: 0, qty: 0 });
+  });
+
+  it('records a serial_number edit — every patchable line column is audited', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    const detail = await api<{ order: { lines: { id: string; partNumber: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token });
+    const lineId = detail.body.order.lines.find(l => l.partNumber === 'AUD-1')!.id;
+
     const r = await api('PATCH', `/api/orders/${id}`, {
-      token, body: { notes: 'ready', totalCost: 600 },
+      token, body: { lines: [{ id: lineId, serialNumber: 'SN-99812' }] },
     });
     expect(r.status).toBe(200);
-    const after = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
-    expect(after).toHaveLength(1);
-    const fields = (after[0].detail.changes as { field: string }[]).map(c => c.field).sort();
-    expect(fields).toEqual(['notes', 'total_cost']);
+
+    const edits = (await getEvents(id, token)).body.events.filter(e => e.kind === 'line_edited');
+    expect(edits).toHaveLength(1);
+    const changes = edits[0].detail.changes as { field: string; to: unknown }[];
+    expect(changes.map(c => c.field)).toEqual(['serial_number']);
+    expect(changes[0].to).toBe('SN-99812');
   });
 
   // Auditing drafts means the draft-only hard delete now cascades into rows
