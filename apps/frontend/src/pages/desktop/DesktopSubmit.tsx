@@ -160,6 +160,15 @@ export type Line = {
   _cid: string;                  // stable client id for React keys (never sent to the API)
 };
 
+// Extensions and MIME types both: Safari populates neither consistently on
+// drag-and-drop, and Windows file dialogs filter on the extension.
+const SUBMIT_ATTACH_ACCEPT = [
+  '.pdf', '.png', '.jpg', '.jpeg', '.xlsx', '.csv',
+  'image/*', 'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+].join(',');
+
 type OrderMeta = {
   warehouseId: string;
   payment: 'Company' | 'Self';
@@ -780,8 +789,13 @@ function OrderForm({
         </div>
 
         <div style={{ padding: '0 16px 16px' }}>
+          {/* Vendors send lot manifests / price lists as spreadsheets, so this
+              dropzone takes sheets on top of the usual receipt formats. Other
+              attachment surfaces keep the narrower picker. */}
           <AttachmentDropzone
             label={t('poSubmitAttachLabel')}
+            boxHint={t('uploadHintSheets')}
+            accept={SUBMIT_ATTACH_ACCEPT}
             onFiles={addEvidenceFiles}
           />
           {evidencePreviews.length > 0 && (
