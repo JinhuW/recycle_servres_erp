@@ -30,8 +30,11 @@ export async function notify(tx: SqlLike, n: NotifyInput): Promise<void> {
 }
 
 export async function notifyManagers(tx: SqlLike, n: Omit<NotifyInput, 'userId'>): Promise<void> {
-  const mgrs = await tx<{ id: string }[]>`
-    SELECT id FROM users WHERE role = 'manager' AND COALESCE(active, true)
+  // One multi-row INSERT keyed off the manager query, rather than a SELECT then
+  // an INSERT per manager. Same rows, one round-trip.
+  await tx`
+    INSERT INTO notifications (user_id, kind, tone, icon, title, body, unread)
+    SELECT id, ${n.kind}, ${n.tone ?? 'info'}, ${n.icon ?? 'bell'}, ${n.title}, ${n.body ?? ''}, TRUE
+    FROM users WHERE role = 'manager' AND COALESCE(active, true)
   `;
-  for (const m of mgrs) await notify(tx, { ...n, userId: m.id });
 }

@@ -42,6 +42,24 @@ describe('api silent refresh', () => {
     expect(unauthorized).toBeGreaterThanOrEqual(1);
   });
 
+  it('a 401 from login is bad credentials, not an expired session', async () => {
+    const calls: string[] = [];
+    let unauthorized = 0;
+    const onUnauthorized = () => { unauthorized++; };
+    window.addEventListener('auth:unauthorized', onUnauthorized);
+    globalThis.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(url)}`);
+      return new Response('{"error":"Invalid credentials"}', { status: 401 });
+    }) as any;
+    const { api, ApiError } = await import('../src/lib/api');
+    await expect(api.post('/api/auth/login', { email: 'a@b.c', password: 'wrong' }))
+      .rejects.toBeInstanceOf(ApiError);
+    window.removeEventListener('auth:unauthorized', onUnauthorized);
+    expect(calls.filter(c => c === 'POST /api/auth/refresh').length).toBe(0);
+    expect(calls.filter(c => c === 'POST /api/auth/login').length).toBe(1);
+    expect(unauthorized).toBe(0);
+  });
+
   it('every request sends credentials + X-Requested-By', async () => {
     let seen: any = null;
     globalThis.fetch = vi.fn(async (_u: any, init: any) => { seen = init; return new Response('{}', { status: 200 }); }) as any;

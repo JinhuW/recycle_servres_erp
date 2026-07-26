@@ -40,6 +40,14 @@ async function tryRefresh(): Promise<boolean> {
   return refreshing;
 }
 
+// A 401 from login means "wrong password" and from refresh means "no session"
+// — neither is an expired access cookie. Running the refresh-and-retry path on
+// them fires a pointless refresh POST and an `auth:unauthorized` that wipes the
+// lookup/workspace caches on every mistyped password.
+function isSessionEndpoint(path: string): boolean {
+  return path.includes('/api/auth/refresh') || path.includes('/api/auth/login');
+}
+
 async function doFetch(method: string, path: string, opts: { isForm?: boolean }, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
 
@@ -64,10 +72,10 @@ async function request<T>(
 ): Promise<T> {
   let res = await doFetch(method, path, opts, body);
 
-  // A 401 on any call other than the refresh endpoint itself means the access
-  // cookie expired. Silently refresh once, then retry the original request a
-  // single time. The refresh call never recurses into this logic.
-  if (res.status === 401 && !path.includes('/api/auth/refresh')) {
+  // A 401 on any call other than the session-establishing endpoints means the
+  // access cookie expired. Silently refresh once, then retry the original
+  // request a single time. The refresh call never recurses into this logic.
+  if (res.status === 401 && !isSessionEndpoint(path)) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       res = await doFetch(method, path, opts, body);

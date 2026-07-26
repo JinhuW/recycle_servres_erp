@@ -4,7 +4,7 @@ import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
 import { fmtUSD0 } from '../../../lib/format';
 import { TableSkeleton } from '../../../components/Skeleton';
-import { SettingsHeader, StatTile, type Customer, type ToastFn } from './_shared';
+import { SettingsHeader, StatTile, Toggle, type Customer, type ToastFn } from './_shared';
 import { ConfirmDialog } from './dialogs';
 import { useT } from '../../../lib/i18n';
 
@@ -315,10 +315,7 @@ function CustomerEditModal({ customer, showToast, onClose, onSaved }: { customer
           </div>
           <div className="toggle-row">
             <span>{t('whActive')}</span>
-            <label className="toggle">
-              <input type="checkbox" checked={Boolean(draft.active ?? true)} onChange={e => set('active', e.target.checked)} />
-              <span className="toggle-track"><span className="toggle-thumb" /></span>
-            </label>
+            <Toggle checked={Boolean(draft.active ?? true)} onChange={v => set('active', v)} />
           </div>
         </div>
         <div className="modal-foot">
