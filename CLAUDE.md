@@ -45,10 +45,15 @@ switches the branch out from under the first.
   which is why creation is scripted rather than left to `EnterWorktree`.
 - Worktrees cost ~290 MB each (mostly `node_modules`; pnpm hardlinks from the
   store, so creation is only a few seconds).  Reclaim them with
-  `scripts/new-session.sh --prune`, which removes only worktrees that are both
-  clean and fully merged into `origin/dev` — anything with uncommitted changes
-  or unmerged commits is reported and left alone.  `--list` shows the state of
-  each one.
+  `scripts/new-session.sh --prune`; `--list` shows the state of each one
+  without touching anything.  Prune keeps — never removes — a worktree that
+  has uncommitted changes, is on a detached HEAD, or that you are currently
+  standing in.
+- **Prune compares file content, not commit ancestry.**  PRs land on `dev` as
+  squash commits, so a session branch's own commits are never ancestors of
+  `origin/dev`; an ancestry test (`git log origin/dev..HEAD`) would report
+  every worktree as unmerged forever and reclaim nothing.  See
+  [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md).
 - `.claude/` is gitignored **except** `settings.json`, so the hook config is
   shared but worktrees and `settings.local.json` are not.
 

@@ -8,7 +8,7 @@
 #   scripts/new-session.sh feat/orders-filter   # explicit branch name
 #   scripts/new-session.sh --print-only [name]  # create it, print the path, don't launch
 #   scripts/new-session.sh --list               # show current session worktrees
-#   scripts/new-session.sh --prune              # remove session worktrees that are clean + merged
+#   scripts/new-session.sh --prune              # remove session worktrees whose work is in dev
 #
 # Flags:
 #   --no-install     skip `pnpm install` in the new worktree
@@ -16,8 +16,8 @@
 #   -- <args...>     everything after `--` is passed through to `claude`
 #
 # What it does, in order:
-#   1. Fetch origin/dev (warn + fall back to the local copy if offline).
-#   2. `git worktree add -b <branch> .claude/worktrees/<slug> origin/dev`.
+#   1. Fetch the base ref (warn + fall back to the local copy if offline).
+#   2. `git worktree add -b <branch> .claude/worktrees/<slug> <base>`.
 #   3. Copy the gitignored local files a worktree needs to run (.env).
 #   4. `pnpm install` inside it (hardlinks from the pnpm store, so it is cheap).
 #   5. cd there and exec `claude`.
@@ -30,7 +30,21 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Where the caller invoked us from, captured before anything cd's.
+INVOKED_FROM="$PWD"
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve the MAIN checkout, not merely the tree this script happens to sit in.
+# A copy of this script exists inside every session worktree, and deriving the
+# root from $BASH_SOURCE there would point .claude/worktrees/ at the worktree's
+# own (empty) subdirectory, silently making --list/--prune no-ops. The common
+# git dir is shared by every worktree and always resolves to the main checkout.
+REPO_TOP="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" \
+  || { printf 'error: not a git repository: %s\n' "$SCRIPT_DIR" >&2; exit 1; }
+GIT_COMMON_DIR="$(cd -- "$REPO_TOP" && cd -- "$(git rev-parse --git-common-dir)" && pwd)"
+REPO_ROOT="$(dirname -- "$GIT_COMMON_DIR")"
+
 WORKTREE_ROOT="$REPO_ROOT/.claude/worktrees"
 BASE_REF="origin/dev"
 
@@ -60,51 +74,108 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Refresh whatever --base points at, rather than always origin/dev.
+fetch_base() {
+  case "$BASE_REF" in
+    */*)
+      local remote="${BASE_REF%%/*}" branch="${BASE_REF#*/}"
+      if git -C "$REPO_ROOT" remote get-url "$remote" >/dev/null 2>&1; then
+        git -C "$REPO_ROOT" fetch --quiet "$remote" "$branch" 2>/dev/null \
+          || warn "could not fetch $BASE_REF; using the local copy"
+      fi
+      ;;
+    *) : ;;  # a local ref — nothing to fetch
+  esac
+}
+
 # Path of every worktree git currently knows about, one per line.
 registered_worktrees() {
   git -C "$REPO_ROOT" worktree list --porcelain \
     | awk '/^worktree /{ print substr($0, 10) }'
 }
 
+# True when everything this worktree contains is already present in the base
+# ref's content.
+#
+# Deliberately compares FILE CONTENT rather than commit ancestry: PRs land on
+# dev as squash commits, so a session branch's own commits are never ancestors
+# of origin/dev and an ancestry test (`git log base..HEAD`) reports "unmerged"
+# forever — which would make --prune reclaim nothing, ever.
+#
+# Uses HEAD, not a branch name, so a DETACHED worktree carrying commits is
+# still evaluated instead of falling through the check unexamined.
+work_is_in_base() {
+  local wt="$1" merge_base file
+  merge_base="$(git -C "$wt" merge-base "$BASE_REF" HEAD 2>/dev/null)" || return 1
+  # No commits beyond the fork point at all.
+  [ "$merge_base" = "$(git -C "$wt" rev-parse HEAD)" ] && return 0
+  # Otherwise every file this worktree touched must match the base byte for byte.
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    cmp -s \
+      <(git -C "$wt" show "HEAD:$file" 2>/dev/null || true) \
+      <(git -C "$wt" show "$BASE_REF:$file" 2>/dev/null || true) \
+      || return 1
+  done < <(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)
+  return 0
+}
+
+describe_state() {
+  local wt="$1"
+  if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+    echo "uncommitted changes"
+  elif ! work_is_in_base "$wt"; then
+    echo "work not yet in $BASE_REF"
+  else
+    echo "clean — work is in $BASE_REF"
+  fi
+}
+
 list_sessions() {
-  local found=0 path branch state
-  while IFS= read -r path; do
-    case "$path" in "$WORKTREE_ROOT"/*) ;; *) continue ;; esac
+  local found=0 wt branch
+  fetch_base
+  while IFS= read -r wt; do
+    case "$wt" in "$WORKTREE_ROOT"/*) ;; *) continue ;; esac
     found=1
-    branch="$(git -C "$path" symbolic-ref --quiet --short HEAD 2>/dev/null || echo '(detached)')"
-    if [ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]; then
-      state="dirty"
-    elif [ -n "$(git -C "$path" log --oneline "$BASE_REF..HEAD" 2>/dev/null)" ]; then
-      state="unmerged commits"
-    else
-      state="clean + merged"
-    fi
-    printf '  %-34s %-44s %s\n' "$(basename "$path")" "$branch" "$state" >&2
+    branch="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || echo '(detached)')"
+    printf '  %-34s %-44s %s\n' "$(basename "$wt")" "$branch" "$(describe_state "$wt")" >&2
   done < <(registered_worktrees)
   [ "$found" -eq 1 ] || log "no session worktrees"
 }
 
-# Only ever removes worktrees that are BOTH clean and fully merged into the base
-# ref, so this can never discard work. Anything else is reported and left alone.
+# Only ever removes worktrees that are BOTH clean and whose content is already
+# in the base ref, so this cannot discard work. Anything else is reported and
+# left alone.
 prune_sessions() {
-  git -C "$REPO_ROOT" fetch --quiet origin dev 2>/dev/null || warn "could not fetch origin/dev; pruning against the local copy"
+  fetch_base
 
-  local removed=0 kept=0 path branch
-  while IFS= read -r path; do
-    case "$path" in "$WORKTREE_ROOT"/*) ;; *) continue ;; esac
+  local removed=0 kept=0 wt branch
+  while IFS= read -r wt; do
+    case "$wt" in "$WORKTREE_ROOT"/*) ;; *) continue ;; esac
 
-    branch="$(git -C "$path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    # Never yank the directory out from under the session running this command.
+    case "$INVOKED_FROM" in
+      "$wt"|"$wt"/*)
+        log "keep   $(basename "$wt") — you are in it"; kept=$((kept + 1)); continue ;;
+    esac
 
-    if [ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]; then
-      log "keep   $(basename "$path") — uncommitted changes"; kept=$((kept + 1)); continue
+    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+      log "keep   $(basename "$wt") — uncommitted changes"; kept=$((kept + 1)); continue
     fi
-    if [ -n "$branch" ] && [ -n "$(git -C "$path" log --oneline "$BASE_REF..$branch" 2>/dev/null)" ]; then
-      log "keep   $(basename "$path") — commits not in $BASE_REF"; kept=$((kept + 1)); continue
+    # A detached HEAD means something unusual is in flight (interrupted rebase,
+    # bisect, a hand checkout). There is no branch ref to keep its commits
+    # reachable, so removing the worktree can orphan them. Never automate that.
+    if ! git -C "$wt" symbolic-ref --quiet HEAD >/dev/null 2>&1; then
+      log "keep   $(basename "$wt") — detached HEAD, remove by hand"; kept=$((kept + 1)); continue
+    fi
+    if ! work_is_in_base "$wt"; then
+      log "keep   $(basename "$wt") — work not yet in $BASE_REF"; kept=$((kept + 1)); continue
     fi
 
-    git -C "$REPO_ROOT" worktree remove "$path"
+    branch="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    git -C "$REPO_ROOT" worktree remove "$wt"
     [ -n "$branch" ] && git -C "$REPO_ROOT" branch -D "$branch" >/dev/null
-    log "remove $(basename "$path")${branch:+ ($branch)}"
+    log "remove $(basename "$wt")${branch:+ ($branch)}"
     removed=$((removed + 1))
   done < <(registered_worktrees)
 
@@ -113,29 +184,28 @@ prune_sessions() {
 }
 
 create_session() {
-  local branch slug path timestamp
+  local branch slug wt timestamp
 
   timestamp="$(date +%Y%m%d-%H%M%S)"
   branch="${NAME:-session/$timestamp}"
   # One directory per branch; '/' is not usable in a directory name here.
   slug="$(printf '%s' "$branch" | tr '/' '-' | tr -cd '[:alnum:]._-')"
   [ -n "$slug" ] || die "branch name '$branch' has no usable characters"
-  path="$WORKTREE_ROOT/$slug"
+  wt="$WORKTREE_ROOT/$slug"
 
-  git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository: $REPO_ROOT"
   git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" && die "branch already exists: $branch"
-  [ -e "$path" ] && die "path already exists: $path"
+  [ -e "$wt" ] && die "path already exists: $wt"
 
-  git -C "$REPO_ROOT" fetch --quiet origin dev 2>/dev/null || warn "could not fetch origin/dev; branching from the local copy"
+  fetch_base
   git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASE_REF" >/dev/null || die "base ref not found: $BASE_REF"
 
   mkdir -p "$WORKTREE_ROOT"
-  git -C "$REPO_ROOT" worktree add -b "$branch" "$path" "$BASE_REF" >&2
+  git -C "$REPO_ROOT" worktree add -b "$branch" "$wt" "$BASE_REF" >&2
 
   local f
   for f in "${LOCAL_FILES[@]}"; do
     if [ -f "$REPO_ROOT/$f" ]; then
-      cp "$REPO_ROOT/$f" "$path/$f"
+      cp "$REPO_ROOT/$f" "$wt/$f"
       log "copied $f"
     else
       warn "$f not found in the main checkout — the worktree may not run without it"
@@ -144,11 +214,11 @@ create_session() {
 
   if [ "$DO_INSTALL" -eq 1 ]; then
     log "pnpm install…"
-    ( cd "$path" && pnpm install --prefer-offline --frozen-lockfile >&2 ) \
-      || warn "pnpm install failed — run it yourself in $path"
+    ( cd "$wt" && pnpm install --prefer-offline --frozen-lockfile >&2 ) \
+      || warn "pnpm install failed — run it yourself in $wt"
   fi
 
-  printf '%s\n' "$path"
+  printf '%s\n' "$wt"
 }
 
 case "$MODE" in
@@ -156,9 +226,9 @@ case "$MODE" in
   prune) prune_sessions ;;
   print) create_session ;;
   launch)
-    path="$(create_session)"
-    log "session branch ready — launching claude in $path"
-    cd "$path"
+    target="$(create_session)"
+    log "session branch ready — launching claude in $target"
+    cd "$target"
     exec claude ${CLAUDE_ARGS+"${CLAUDE_ARGS[@]}"}
     ;;
 esac
