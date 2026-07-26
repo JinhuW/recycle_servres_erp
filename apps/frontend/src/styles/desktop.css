@@ -252,7 +252,8 @@ html.desktop, body.desktop, .desktop #root {
   display: flex;
   flex-direction: column;
 }
-.page.page-history > .orders-card > .card-head {
+.page.page-history > .orders-card > .card-head,
+.page.page-history > .orders-card > .status-rail {
   flex-shrink: 0;
 }
 .page.page-history > .orders-card > .table-scroll {
@@ -463,6 +464,39 @@ html.desktop, body.desktop, .desktop #root {
 .card-sub   { font-size: 12px; color: var(--fg-subtle); }
 .card-body  { padding: 18px; }
 [data-density="compact"] .card-body { padding: 12px; }
+
+/* ===== Toolbar status rail =====
+   A second toolbar tier for status filtering. The head above it drops its rule
+   so the two rows read as one block rather than two stacked bars. */
+.card-head.has-rail { border-bottom: none; padding-bottom: 10px; }
+.status-rail {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 0 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.status-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.status-chip:hover { background: var(--bg-soft); color: var(--fg); }
+.status-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status-chip[aria-pressed="true"] {
+  background: var(--bg-soft);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+/* A stage with nothing in it stays clickable but recedes. */
+.status-chip.empty { opacity: 0.55; }
+.status-chip .sc-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-chip .sc-n { font-size: 11px; font-weight: 600; color: var(--fg-subtle); }
+.status-chip[aria-pressed="true"] .sc-n { color: var(--fg); }
 
 /* ===== KPIs ===== */
 .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap, 16px); }

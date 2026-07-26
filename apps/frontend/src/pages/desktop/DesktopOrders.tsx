@@ -251,73 +251,6 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
         <div className="page-actions" />
       </div>
 
-      {/* Manager-only workflow pipeline — click a card to filter the table by stage */}
-      {isManager && (
-        <div className="card" style={{ padding: 0 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '12px 16px 6px', gap: 12, flexWrap: 'wrap',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{
-                fontSize: 11, color: 'var(--fg-subtle)',
-                textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600,
-              }}>{t('statusFilters')}</div>
-              <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{t('clickToFilter')}</span>
-            </div>
-            {stageFilter !== 'all' && (
-              <button
-                className="btn sm ghost"
-                onClick={() => setStageFilter('all')}
-                style={{ fontSize: 11 }}
-              >
-                {t('clearFilter')}
-              </button>
-            )}
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${stages.length}, 1fr)`,
-            gap: 0, padding: '0 8px 12px',
-          }}>
-            {stages.map((s, i) => {
-              const agg = stageAgg[s.id] ?? { count: 0, revenue: 0 };
-              const active = stageFilter === s.id;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setStageFilter(active ? 'all' : s.id)}
-                  className="row-hover"
-                  style={{
-                    textAlign: 'left',
-                    background: active ? 'var(--bg-soft)' : 'transparent',
-                    border: 'none',
-                    borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
-                    padding: '10px 14px',
-                    cursor: 'pointer',
-                    minWidth: 0, fontFamily: 'inherit',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
-                    <span style={{
-                      width: 7, height: 7, borderRadius: '50%',
-                      background: TONE_VAR[s.tone] ?? 'var(--fg-subtle)',
-                      flexShrink: 0,
-                    }} />
-                    <span style={{
-                      fontSize: 11.5, fontWeight: 600, color: 'var(--fg)',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>{s.label}</span>
-                  </div>
-                  <div className="mono" style={{ fontSize: 19, fontWeight: 600, lineHeight: 1, color: 'var(--fg)' }}>{agg.count}</div>
-                  <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 4 }}>{fmtUSD0(agg.revenue, locale)}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       <div className="kpi-grid">
         <div className="kpi">
           <div className="kpi-label">{isManager ? t('totalOrders') : t('ordersSubmitted', { n: totals.orders })}</div>
@@ -338,7 +271,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       </div>
 
       <div className="card orders-card">
-        <div className="card-head" style={{ gap: 16 }}>
+        <div className={'card-head' + (isManager ? ' has-rail' : '')} style={{ gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div className="card-title">{t('allOrders')}</div>
             <div className="seg">
@@ -457,6 +390,45 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             </div>
           </div>
         </div>
+
+        {/* Manager-only stage filter. Second tier of the same toolbar as the
+            category/search/columns controls — every filter for this table lives
+            in one place. Per-stage revenue rides along in the tooltip; the KPI
+            row above already recomputes it for whatever stage is selected. */}
+        {isManager && (
+          <div className="status-rail" role="group" aria-label={t('statusFilters')}>
+            <button
+              type="button"
+              className="status-chip"
+              aria-pressed={stageFilter === 'all'}
+              onClick={() => setStageFilter('all')}
+            >
+              {t('all')}
+              <span className="mono sc-n">{visible.length}</span>
+            </button>
+            {stages.map(s => {
+              const agg = stageAgg[s.id] ?? { count: 0, revenue: 0 };
+              const active = stageFilter === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={'status-chip' + (agg.count === 0 ? ' empty' : '')}
+                  aria-pressed={active}
+                  title={`${s.label} · ${fmtUSD0(agg.revenue, locale)}`}
+                  onClick={() => setStageFilter(active ? 'all' : s.id)}
+                >
+                  {/* Dot colour comes from statusTone, not the stage's own `tone`
+                      — the rail now sits directly above the Status column, and
+                      the two disagree on Reviewing (accent vs warn). */}
+                  <span className="sc-dot" style={{ background: TONE_VAR[statusTone(s.label)] ?? 'var(--fg-subtle)' }} />
+                  {s.label}
+                  <span className="mono sc-n">{agg.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="table-scroll" ref={tableScrollRef}>
           {!loadedOnce ? (
