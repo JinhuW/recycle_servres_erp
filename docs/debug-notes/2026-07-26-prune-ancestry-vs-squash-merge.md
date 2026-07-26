@@ -63,6 +63,33 @@ unmerged work fails. Plus a hard refusal to auto-remove any detached-HEAD
 worktree — a detached HEAD means something unusual is in flight (interrupted
 rebase, bisect) and there is no ref keeping its commits alive.
 
+## Third variant: a failed git command read as "nothing changed"
+
+Found by security review of the fix above, and worse than either original bug.
+The content check ended:
+
+```bash
+  done < <(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)
+  return 0
+```
+
+In `done < <(cmd)` the command's **exit status is invisible** — bash does not
+propagate it, and `set -e` never sees it. When `git diff` failed, it produced no
+output, the loop body never ran, and control fell straight to `return 0`:
+*"all files match the base, safe to delete."*
+
+Reproduced with a `git` shim that exits 128 on `--name-only`: a worktree holding
+a committed, genuinely unmerged file was removed, and its branch deleted with
+it. The same shape applied to `[ -n "$(git status --porcelain 2>/dev/null)" ]` —
+a failed `status` is empty output, which reads as "clean".
+
+Fix: capture into a variable so the status is checked, and default to keep.
+
+```bash
+changed="$(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)" || return 1
+while IFS= read -r file; do … done <<< "$changed"
+```
+
 ## Rules of thumb
 
 - **Never use `git log base..branch` or `git branch --merged` to decide whether
@@ -74,3 +101,8 @@ rebase, bisect) and there is no ref keeping its commits alive.
   test and takes the destructive path. Test the empty case explicitly first.
 - `git worktree remove` is not a safety net. It checks the working tree for
   modifications, not whether commits would be orphaned.
+- **In a gate whose fallthrough deletes something, every command must be
+  status-checked and every error must take the KEEP path.** Empty output from a
+  failed command is indistinguishable from empty output meaning "nothing to do".
+  Never feed a destructive loop from `< <(cmd)` or `$(cmd)` without capturing
+  and testing the exit status first.

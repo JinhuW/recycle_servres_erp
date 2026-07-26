@@ -104,11 +104,21 @@ registered_worktrees() {
 #
 # Uses HEAD, not a branch name, so a DETACHED worktree carrying commits is
 # still evaluated instead of falling through the check unexamined.
+#
+# Every git invocation here is checked: a FAILED command must never be read as
+# "nothing changed, safe to delete". Returning 1 (keep) on any error is the only
+# safe default for a function whose false answer deletes a directory.
 work_is_in_base() {
-  local wt="$1" merge_base file
+  local wt="$1" merge_base head_sha changed file
   merge_base="$(git -C "$wt" merge-base "$BASE_REF" HEAD 2>/dev/null)" || return 1
+  head_sha="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
   # No commits beyond the fork point at all.
-  [ "$merge_base" = "$(git -C "$wt" rev-parse HEAD)" ] && return 0
+  [ "$merge_base" = "$head_sha" ] && return 0
+  # Captured into a variable rather than piped from a process substitution: in
+  # `done < <(git …)` the exit status is invisible, so a git failure produces an
+  # empty change set, the loop body never runs, and the function falls through
+  # to `return 0` — reporting unmerged work as safe to delete.
+  changed="$(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)" || return 1
   # Otherwise every file this worktree touched must match the base byte for byte.
   while IFS= read -r file; do
     [ -n "$file" ] || continue
@@ -116,13 +126,21 @@ work_is_in_base() {
       <(git -C "$wt" show "HEAD:$file" 2>/dev/null || true) \
       <(git -C "$wt" show "$BASE_REF:$file" 2>/dev/null || true) \
       || return 1
-  done < <(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)
+  done <<< "$changed"
   return 0
 }
 
+# Echoes the porcelain status, or fails if git cannot report it at all. An
+# unreadable status must not read as "clean".
+worktree_status() {
+  git -C "$1" status --porcelain 2>/dev/null
+}
+
 describe_state() {
-  local wt="$1"
-  if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+  local wt="$1" dirty
+  if ! dirty="$(worktree_status "$wt")"; then
+    echo "cannot read git status"
+  elif [ -n "$dirty" ]; then
     echo "uncommitted changes"
   elif ! work_is_in_base "$wt"; then
     echo "work not yet in $BASE_REF"
@@ -149,7 +167,7 @@ list_sessions() {
 prune_sessions() {
   fetch_base
 
-  local removed=0 kept=0 wt branch
+  local removed=0 kept=0 wt branch dirty
   while IFS= read -r wt; do
     case "$wt" in "$WORKTREE_ROOT"/*) ;; *) continue ;; esac
 
@@ -159,7 +177,10 @@ prune_sessions() {
         log "keep   $(basename "$wt") — you are in it"; kept=$((kept + 1)); continue ;;
     esac
 
-    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+    if ! dirty="$(worktree_status "$wt")"; then
+      log "keep   $(basename "$wt") — cannot read git status"; kept=$((kept + 1)); continue
+    fi
+    if [ -n "$dirty" ]; then
       log "keep   $(basename "$wt") — uncommitted changes"; kept=$((kept + 1)); continue
     fi
     # A detached HEAD means something unusual is in flight (interrupted rebase,
