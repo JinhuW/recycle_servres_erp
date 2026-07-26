@@ -166,6 +166,8 @@ export function DesktopActivity() {
   // Guards against a slow first request landing after a faster later one and
   // overwriting it with stale rows.
   const reqId = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   const params = useCallback((cursor?: string) => {
     const p = new URLSearchParams();
@@ -201,16 +203,34 @@ export function DesktopActivity() {
     return () => clearTimeout(handle);
   }, [params]);
 
-  const loadMore = () => {
+  const loadMore = useCallback(() => {
     if (!feed?.nextCursor || loadingMore) return;
+    const id = reqId.current;
     setLoadingMore(true);
     api.get<Feed>(`/api/activity?${params(feed.nextCursor)}`)
-      .then(r => setFeed(prev => prev && ({
+      // A filter change mid-flight bumps reqId and resets the feed; dropping
+      // the response here stops an older page appending under new filters.
+      .then(r => { if (id === reqId.current) setFeed(prev => prev && ({
         ...r, events: [...prev.events, ...r.events],
-      })))
+      })); })
       .catch(handleFetchError)
       .finally(() => setLoadingMore(false));
-  };
+  }, [feed?.nextCursor, loadingMore, params]);
+
+  // Auto-load the next page when the end of the list scrolls into the
+  // register. rootMargin starts the fetch a screenful early so the rows are
+  // usually already there by the time you reach the bottom.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    const root = scrollRef.current;
+    if (!el || !root || !feed?.nextCursor) return;
+    const io = new IntersectionObserver(
+      entries => { if (entries[0].isIntersecting) loadMore(); },
+      { root, rootMargin: '400px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore, feed?.nextCursor]);
 
   const reset = () => {
     setArea('all'); setAction(''); setActor(''); setDays(0); setSearch('');
@@ -304,7 +324,7 @@ export function DesktopActivity() {
       </div>
 
       <div className="ac-register">
-        <div className="ac-scroll">
+        <div className="ac-scroll" ref={scrollRef}>
           <div className="ac-inner">
             <div className="ac-lanes" aria-hidden="true">
               <span />
@@ -432,6 +452,16 @@ export function DesktopActivity() {
                 })}
               </div>
             ))}
+
+            {feed?.nextCursor && (
+              <div className="ac-more-row" aria-live="polite">
+                {loadingMore && <span className="busy-spinner" />}
+                <span>{loadingMore ? t('acLoading') : t('acScrollForMore')}</span>
+              </div>
+            )}
+            {/* Sits after the last row so the observer fires as the tail of
+                the list comes into view, not when the page first renders. */}
+            <div ref={sentinelRef} className="ac-sentinel" aria-hidden="true" />
           </div>
         </div>
 
@@ -442,17 +472,6 @@ export function DesktopActivity() {
               ? `${feed.events.length} / ${feed.counts.all} ${t('acEvents')}`
               : t('acLoading')}
           </span>
-          {feed?.nextCursor && (
-            <button
-              type="button"
-              className="btn sm"
-              style={{ marginLeft: 12 }}
-              onClick={loadMore}
-              disabled={loadingMore}
-            >
-              {loadingMore ? t('acLoading') : t('acLoadOlder')}
-            </button>
-          )}
           <span style={{ marginLeft: 'auto' }}>{t('acAppendOnly')}</span>
         </div>
       </div>
