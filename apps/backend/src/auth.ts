@@ -60,10 +60,11 @@ export async function signToken(env: Env, user: { id: string; email: string; rol
 
 export async function verifyToken(env: Env, token: string): Promise<{ sub: string; role?: string } | null> {
   try {
-    const ok = await jwt.verify(token, env.JWT_SECRET);
-    if (!ok) return null;
-    const { payload } = jwt.decode(token);
-    return payload as { sub: string; role?: string };
+    // verify() returns the decoded token when valid, undefined when not — no
+    // need for a second decode() parse.
+    const decoded = await jwt.verify<{ sub: string; role?: string }>(token, env.JWT_SECRET);
+    if (!decoded) return null;
+    return decoded.payload;
   } catch {
     return null;
   }

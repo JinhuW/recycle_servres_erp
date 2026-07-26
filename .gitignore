@@ -6,8 +6,12 @@ build/
 .cache/
 .vite/
 
-# Local agent worktrees / TS build cache (not source)
-.claude/
+# Local agent worktrees / TS build cache (not source).
+# `.claude/*` rather than `.claude/` so the negation below can take effect —
+# git will not descend into an excluded directory to re-include a child.
+.claude/*
+!.claude/settings.json
+.claude/settings.local.json
 *.tsbuildinfo
 
 # Env files

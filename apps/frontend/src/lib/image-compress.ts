@@ -6,6 +6,16 @@
 const MAX_EDGE = 2560; // ample for label OCR; 4K frames downscale to this
 const QUALITY = 75; // MozJPEG quality
 
+/** Read a Blob as a `data:` URL string (FileReader wrapper). */
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
 /** Fit (w, h) within a max long edge, scaling down only — never up. */
 export function fitWithin(
   w: number,

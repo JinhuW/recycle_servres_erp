@@ -1556,13 +1556,12 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
       return;
     }
 
-    for (const l of lines) {
-      await tx`UPDATE order_lines SET status = 'In Transit' WHERE id = ${l.id}`;
-      await tx`
-        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        VALUES (${l.id}, ${u.id}, 'reopened', ${tx.json({ transfer_order_id: id })})
-      `;
-    }
+    const ids = lines.map((l) => l.id);
+    await tx`UPDATE order_lines SET status = 'In Transit' WHERE id = ANY(${ids}::uuid[])`;
+    await tx`
+      INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+      SELECT unnest(${ids}::uuid[]), ${u.id}, 'reopened', ${tx.json({ transfer_order_id: id })}
+    `;
     await tx`
       UPDATE transfer_orders
          SET status = 'Pending', received_at = NULL, received_by = NULL

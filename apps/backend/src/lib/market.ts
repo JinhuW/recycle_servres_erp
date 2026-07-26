@@ -1,6 +1,12 @@
 // Shared row→DTO mapping for the Market Value surface. The HTTP route and
 // MCP tool both go through formatRefPrice so their payloads stay aligned.
 
+import postgres, { type TransactionSql } from 'postgres';
+import { canonPartCol } from './part-number';
+
+type Sql = ReturnType<typeof postgres>;
+type SqlLike = Sql | TransactionSql;
+
 export type MarketValueRow = {
   id: string;
   category: string;
@@ -121,4 +127,59 @@ export function formatRefPrice(r: MarketValueRow, targetMargin: number): MarketV
     lastPriceSource: r.last_price_source,
     recentPrices: r.recent_prices ?? [],
   };
+}
+
+// The Market Value SELECT, shared by the HTTP route and both MCP read tools so
+// the projection, the `internal_sales` last-30d aggregate, and the recent-price
+// lateral stay identical across all three. Callers supply only the `where`
+// predicate and the `tail` (ORDER BY / LIMIT / OFFSET) fragments. `internal_sales`
+// is keyed by canonical part_number via the shared canonPartCol.
+export function marketValueSelect(
+  sql: SqlLike,
+  where: postgres.Fragment,
+  tail: postgres.Fragment,
+) {
+  return sql<MarketValueRow[]>`
+    WITH internal_sales AS (
+      SELECT ${canonPartCol(sql, sql`l.part_number`)} AS canon,
+             AVG(l.sell_price)::float AS avg_price,
+             COUNT(*)::int AS samples
+      FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
+      WHERE o.created_at >= NOW() - INTERVAL '30 days'
+        AND l.sell_price IS NOT NULL
+        AND l.part_number IS NOT NULL
+        AND l.part_number <> ''
+      GROUP BY canon
+    )
+    SELECT rp.id, rp.category, rp.brand, rp.capacity, rp.type, rp.classification,
+           rp.rank, rp.speed, rp.interface, rp.form_factor, rp.description,
+           rp.part_number, rp.label, rp.sub_label,
+           rp.target::float AS target, rp.low_price::float AS low_price,
+           rp.high_price::float AS high_price, rp.avg_sell::float AS avg_sell,
+           rp.trend, rp.samples, rp.source, rp.stock, rp.demand, rp.history,
+           rp.updated_at, rp.health::float AS health, rp.rpm,
+           ils.avg_price AS internal_avg,
+           ils.samples   AS internal_samples,
+           rp.last_price::float AS last_price,
+           rp.last_price_at AS last_price_at,
+           rp.last_price_source AS last_price_source,
+           rec.recent AS recent_prices
+    FROM ref_prices rp
+    LEFT JOIN internal_sales ils
+      ON ils.canon = ${canonPartCol(sql, sql`rp.part_number`)}
+    LEFT JOIN LATERAL (
+      SELECT JSONB_AGG(
+               JSONB_BUILD_OBJECT('ts', e.created_at, 'price', e.price::float)
+               ORDER BY e.created_at
+             ) AS recent
+      FROM (
+        SELECT created_at, price FROM ref_price_events
+        WHERE ref_price_id = rp.id
+        ORDER BY created_at DESC LIMIT 12
+      ) e
+    ) rec ON TRUE
+    WHERE ${where}
+    ${tail}
+  `;
 }

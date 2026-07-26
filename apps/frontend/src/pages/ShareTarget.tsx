@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { navigate } from '../lib/route';
+import { blobToDataUrl } from '../lib/image-compress';
 
 // Hand-off key the desktop LineDrawer reads on mount to hydrate the AI
 // dropzone with the shared image. sessionStorage so reload-during-handoff
@@ -39,13 +40,4 @@ export function ShareTarget() {
   }, []);
 
   return null;
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
 }

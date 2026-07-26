@@ -11,15 +11,21 @@ export type SellLine = { inventoryId?: string | null; qty: number };
 // Validate every inventory-backed line of a sell order. MUST run inside the
 // caller's transaction: each source row is locked FOR UPDATE so a concurrent
 // sell order cannot pass the same qty/sellability check and oversell (TOCTOU).
-// Also enforces the one-active-sell-order-per-line invariant. `excludeOrderId`
-// is the sell order being edited (so a PATCH may keep its own already-committed
-// lines); null for a brand-new order. Returns a human error string, or null
-// when every line is sellable.
+// `excludeOrderId` is the sell order being edited (so a PATCH may keep its own
+// already-committed lines); null for a brand-new order. Returns a human error
+// string, or null when every line is sellable.
+//
+// `checkExistingSellOrders` (default true) also enforces the one-active-sell-
+// order-per-line invariant. The vendor-bid promote path passes false: a bid may
+// legitimately reference inventory that is already on a sell order, so it reuses
+// the qty/sellability locking here without the cross-sell-order conflict guard.
 export async function validateSellLines(
   tx: postgres.TransactionSql,
   lines: SellLine[],
   excludeOrderId: string | null,
+  opts: { checkExistingSellOrders?: boolean } = {},
 ): Promise<string | null> {
+  const checkConflicts = opts.checkExistingSellOrders !== false;
   const demand = new Map<string, number>();
   for (const l of lines) {
     if (!l.inventoryId) continue; // manual line — nothing to reserve
@@ -33,6 +39,7 @@ export async function validateSellLines(
     if (inv.status !== 'Reviewing' && inv.status !== 'Done')
       return `inventory line not sellable (status=${inv.status})`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
+    if (!checkConflicts) continue;
     const conflict = (await tx<{ so_id: string; label: string; part_number: string | null }[]>`
       SELECT so.id AS so_id, sol.label, sol.part_number
       FROM sell_order_lines sol
@@ -78,6 +85,44 @@ export type CreateDraftResult =
   | { ok: true; id: string; customerId: string; lineCount: number; currency: SupportedCurrency }
   | { ok: false; error: string };
 
+// One sell_order_lines INSERT, shared by createSellOrderDraft and the vendor-bid
+// promote path so the column list lives in one place. Callers pass the already
+// USD-converted unit price plus the source-currency snapshot (all null for USD).
+export interface SellOrderLineInsert {
+  inventoryId: string | null;
+  category: string;
+  label: string;
+  subLabel: string | null;
+  partNumber: string | null;
+  qty: number;
+  unitPriceUsd: number;
+  warehouseId: string | null;
+  condition: string | null;
+  position: number;
+  sourceCurrency: string | null;
+  sourceUnitPrice: number | null;
+  sourceFxRate: number | null;
+}
+
+export async function insertSellOrderLine(
+  tx: postgres.TransactionSql,
+  sellOrderId: string,
+  line: SellOrderLineInsert,
+): Promise<void> {
+  await tx`
+    INSERT INTO sell_order_lines
+      (sell_order_id, inventory_id, category, label, sub_label, part_number,
+       qty, unit_price, warehouse_id, condition, position,
+       source_currency, source_unit_price, source_fx_rate_to_usd)
+    VALUES
+      (${sellOrderId}, ${line.inventoryId}, ${line.category}, ${line.label},
+       ${line.subLabel}, ${line.partNumber},
+       ${line.qty}, ${line.unitPriceUsd},
+       ${line.warehouseId}, ${line.condition}, ${line.position},
+       ${line.sourceCurrency}, ${line.sourceUnitPrice}, ${line.sourceFxRate})
+  `;
+}
+
 // Shared draft-creation path used by POST /api/sell-orders and the
 // create_sell_order_draft MCP tool. Resolves the FX snapshot BEFORE opening the
 // transaction (getLatestRateToUsd may do an outbound fetch on a cold cache;
@@ -107,20 +152,21 @@ export async function createSellOrderDraft(
     for (let i = 0; i < input.lines.length; i++) {
       const l = input.lines[i];
       const unitPriceUsd = isNonUsd ? convertToUsd(l.unitPrice, fx.rate) : l.unitPrice;
-      await tx`
-        INSERT INTO sell_order_lines
-          (sell_order_id, inventory_id, category, label, sub_label, part_number,
-           qty, unit_price, warehouse_id, condition, position,
-           source_currency, source_unit_price, source_fx_rate_to_usd)
-        VALUES
-          (${nextId}, ${l.inventoryId ?? null}, ${l.category}, ${l.label},
-           ${l.subLabel ?? null}, ${l.partNumber ?? null},
-           ${l.qty}, ${unitPriceUsd},
-           ${l.warehouseId ?? null}, ${l.condition ?? null}, ${i},
-           ${isNonUsd ? input.currency : null},
-           ${isNonUsd ? l.unitPrice : null},
-           ${isNonUsd ? fx.rate : null})
-      `;
+      await insertSellOrderLine(tx, nextId, {
+        inventoryId: l.inventoryId ?? null,
+        category: l.category,
+        label: l.label,
+        subLabel: l.subLabel ?? null,
+        partNumber: l.partNumber ?? null,
+        qty: l.qty,
+        unitPriceUsd,
+        warehouseId: l.warehouseId ?? null,
+        condition: l.condition ?? null,
+        position: i,
+        sourceCurrency: isNonUsd ? input.currency : null,
+        sourceUnitPrice: isNonUsd ? l.unitPrice : null,
+        sourceFxRate: isNonUsd ? fx.rate : null,
+      });
     }
     await writeSellOrderEvent(tx, nextId, input.actorUserId, 'created', {
       source: input.source,
