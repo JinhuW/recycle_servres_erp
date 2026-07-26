@@ -161,7 +161,8 @@ export function DesktopApp() {
           + (view2 === 'market' ? ' page-market' : '')
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'analysis' ? ' page-analysis' : '')
-          + (view2 === 'dashboard' ? ' page-dashboard' : '')}>
+          + (view2 === 'dashboard' ? ' page-dashboard' : '')
+          + (view2 === 'activity' ? ' page-activity' : '')}>
           {/* Inventory ▸ Analysis tab strip — shown on the list and the
               analysis tab, but not while editing a single item. */}
           {((view2 === 'inventory' && !editingItemId) || view2 === 'analysis') && (

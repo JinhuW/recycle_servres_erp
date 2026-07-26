@@ -1965,17 +1965,39 @@ html.desktop, body.desktop, .desktop #root {
 }
 .ac-reset:hover { color: var(--fg); }
 
+/* Activity page variant — page-head, filter deck and the legend stay put;
+   only the register's inner .ac-scroll moves. Same shape as .page-history.
+
+   This is also what makes the column head pin. `.ac-scroll` sets overflow-x,
+   which forces overflow-y to `auto` too, so it is already a scroll container
+   and `position: sticky` inside it clamps to ITS box — with the page doing
+   the scrolling, the head just rode away with the register. Giving the
+   register a bounded height makes .ac-scroll the real scroller, and the head
+   and day rules stick where you'd expect. */
+.page.page-activity {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-activity > .ac-register {
+  flex: 1;
+  min-height: 0;
+}
 .ac-register {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
-  /* Without this the register is a shrinkable flex item inside .page and
-     `overflow: hidden` silently crops the tail of the register. */
-  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-.ac-scroll { overflow-x: auto; }
+.ac-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
 .ac-inner { min-width: 900px; }
 
 .ac-lanes {
@@ -2096,6 +2118,17 @@ html.desktop, body.desktop, .desktop #root {
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   font-size: 11.5px; color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+/* Sentinel the observer watches, plus the row that replaces "Load older".
+   Kept inside .ac-inner so it scrolls with the rows. */
+.ac-sentinel { height: 1px; }
+.ac-more-row {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 16px;
+  font-size: 12px; color: var(--fg-subtle);
+  border-top: 1px solid var(--border);
 }
 .ac-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; }
 .ac-legend span {
