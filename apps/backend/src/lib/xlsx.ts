@@ -14,7 +14,37 @@ export type XlsxSheet = {
   name: string;
   columns: XlsxColumn[];
   rows: Record<string, unknown>[];
+  // ARGB tint for the sheet tab, so a multi-tab workbook is navigable from the
+  // sheet strip alone. See lib/specColumns.ts for the assigned hues.
+  tabColor?: string;
 };
+
+// Money reads as money everywhere: two decimals, thousands separators, and
+// negatives in red so a loss-making line can't hide in a column of black
+// numbers. Percentages get the same signed treatment at one decimal.
+export const MONEY_FMT = '#,##0.00';
+export const SIGNED_MONEY_FMT = '#,##0.00;[Red]-#,##0.00';
+export const SIGNED_PCT_FMT = '#,##0.0;[Red]-#,##0.0';
+
+// Workbook palette. Every download the app emits — inventory, purchase orders,
+// sell orders — is styled from these, so the set reads as one designed family.
+// Excel gridlines are switched off and replaced by the hairline row rule below:
+// with the zebra banding doing the row tracking, the visible grid only adds
+// noise, and the result reads as a report rather than a raw dump.
+export const INK = 'FF16233A';   // header band (shared with the bid sheet)
+const INK_EDGE = 'FF0B7A62';     // brand emerald rule under the band
+const STRIPE = 'FFF5F7FA';       // zebra row
+const MONEY_TINT = 'FFF2F9F5';   // money column, plain row
+const MONEY_STRIPE = 'FFE9F3EC'; // money column, zebra row
+const HAIRLINE = 'FFE3E8EF';     // row separator
+
+const solid = (argb: string) =>
+  ({ type: 'pattern', pattern: 'solid', fgColor: { argb } }) as const;
+
+const STRIPE_FILL = solid(STRIPE);
+const MONEY_FILL = solid(MONEY_TINT);
+const MONEY_STRIPE_FILL = solid(MONEY_STRIPE);
+const ROW_RULE = { bottom: { style: 'hair', color: { argb: HAIRLINE } } } as const;
 
 // Excel forbids \ / ? * : [ ] in tab names and caps them at 31 chars. Warehouse
 // codes are clean, but sanitize anyway so a future odd code can't corrupt the
@@ -41,34 +71,57 @@ export async function buildXlsxWorkbook(sheets: XlsxSheet[]): Promise<Buffer> {
     } else {
       used.set(name, 1);
     }
-    const ws = wb.addWorksheet(name);
+    const ws = wb.addWorksheet(name, {
+      properties: sheet.tabColor ? { tabColor: { argb: sheet.tabColor } } : {},
+      views: [{ state: 'frozen', ySplit: 1, showGridLines: false }],
+      // These workbooks get printed and PDF'd for suppliers. Landscape, scaled
+      // to one page wide, with the header repeated on every sheet of paper —
+      // otherwise page 2 onward is a wall of unlabelled numbers.
+      pageSetup: {
+        orientation: 'landscape',
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+        printTitlesRow: '1:1',
+        margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 },
+      },
+    });
     ws.columns = sheet.columns.map((col) => ({
       header: col.header,
       key: col.key,
       width: col.width ?? 16,
       style: col.numFmt ? { numFmt: col.numFmt } : {},
     }));
-    // Styled header band (same dark slate as the sell-order bid sheet) +
-    // zebra-striped data rows, so every export reads as one designed set.
+    // A number column's header sits over right-aligned digits, so right-align
+    // it too — a left-hugging "Unit cost" over a right-hugging column of money
+    // is the single thing that makes a wide sheet look unmade.
     const header = ws.getRow(1);
-    header.height = 22;
+    header.height = 26;
     for (let cIdx = 1; cIdx <= sheet.columns.length; cIdx++) {
       const cell = header.getCell(cIdx);
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
-      cell.alignment = { vertical: 'middle' };
-      cell.border = { bottom: { style: 'medium', color: { argb: 'FF111827' } } };
+      cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+      cell.fill = solid(INK);
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: sheet.columns[cIdx - 1].numFmt ? 'right' : 'left',
+        wrapText: true,
+      };
+      cell.border = { bottom: { style: 'medium', color: { argb: INK_EDGE } } };
     }
-    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    // Cost/price/profit columns carry a faint emerald wash so the money block
+    // separates from the spec block at a glance. Detected off the decimal
+    // format rather than a per-column flag, so any new money column inherits it
+    // for free — and integer counts (Qty, RPM, Health %) stay untinted.
+    const isMoney = sheet.columns.map((col) => !!col.numFmt?.includes('0.00'));
     for (const r of sheet.rows) {
       const row = ws.addRow(r);
-      if (row.number % 2 === 1) {
-        // Odd sheet rows are even data rows (row 1 is the header).
-        for (let cIdx = 1; cIdx <= sheet.columns.length; cIdx++) {
-          row.getCell(cIdx).fill = {
-            type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' },
-          };
-        }
+      // Odd sheet rows are even data rows (row 1 is the header).
+      const striped = row.number % 2 === 1;
+      for (let cIdx = 1; cIdx <= sheet.columns.length; cIdx++) {
+        const cell = row.getCell(cIdx);
+        if (isMoney[cIdx - 1]) cell.fill = striped ? MONEY_STRIPE_FILL : MONEY_FILL;
+        else if (striped) cell.fill = STRIPE_FILL;
+        cell.border = ROW_RULE;
       }
     }
     if (sheet.columns.length > 0) {

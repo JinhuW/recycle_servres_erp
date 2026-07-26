@@ -27,6 +27,11 @@
 // findHeaders() requires BOTH, so the import skips them. Never add a header
 // containing price/unitprice/单价/价格 here.
 
+import { INK } from './xlsx';
+import {
+  CATEGORY_ORDER, CATEGORY_TAB_COLOR, groupByCategory, type SpecCategory,
+} from './specColumns';
+
 export type PriceTemplateProduct = {
   category: string;
   label: string;
@@ -86,23 +91,12 @@ const SPEC_COLS_BY_CATEGORY: Record<string, SpecCol[]> = {
 
 const HEADER_ROW = 5;
 
-const BAND_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } } as const;
+const BAND_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: INK } } as const;
+// Packing tabs sit after the category tabs; a neutral slate keeps them visibly
+// a different kind of sheet from the coloured bid tabs.
+const PACK_TAB_COLOR = 'FF475569';
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } } as const;
 const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7C2' } } as const;
-
-const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
-
-// Fold products into CATEGORY_ORDER buckets; unknown categories go to Other
-// so nothing can fall off the workbook.
-function groupByCategory(products: PriceTemplateProduct[]): Map<string, PriceTemplateProduct[]> {
-  const byCategory = new Map<string, PriceTemplateProduct[]>();
-  for (const p of products) {
-    const cat = (CATEGORY_ORDER as readonly string[]).includes(p.category) ? p.category : 'Other';
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat)!.push(p);
-  }
-  return byCategory;
-}
 
 export async function buildPriceTemplateWorkbook(
   head: PriceTemplateHead,
@@ -137,6 +131,7 @@ async function renderCategorySheet(
 ): Promise<void> {
   const ws = wb.addWorksheet(category, {
     views: [{ state: 'frozen', ySplit: HEADER_ROW }],
+    properties: { tabColor: { argb: CATEGORY_TAB_COLOR[category as SpecCategory] } },
   });
 
   const cur = head.currencyCode;
@@ -283,7 +278,9 @@ async function renderWarehouseSheet(
 ): Promise<void> {
   // "Pack - DEN" style: the prefix separates packing tabs from the category
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
-  const ws = wb.addWorksheet(`Pack - ${wh.warehouse}`);
+  const ws = wb.addWorksheet(`Pack - ${wh.warehouse}`, {
+    properties: { tabColor: { argb: PACK_TAB_COLOR } },
+  });
 
   const byCategory = groupByCategory(wh.products);
   const sections = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));

@@ -4,7 +4,14 @@ import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
-import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
+import {
+  buildXlsxWorkbook, xlsxResponse, datedFilename,
+  MONEY_FMT, SIGNED_MONEY_FMT, SIGNED_PCT_FMT, type XlsxColumn,
+} from '../lib/xlsx';
+import {
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, ITEM_COL, CATEGORY_TAB_COLOR,
+  groupByCategory, type SpecCategory,
+} from '../lib/specColumns';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -141,34 +148,30 @@ inventory.get('/', async (c) => {
 // cost/profit/margin, which purchasers may never see. Reuses the exact list
 // filters but drops the 200-row UI cap so the file is the full filtered set.
 // One worksheet per category (RAM / SSD / HDD / Other), each with that
-// category's granular spec columns — same format as the sell-order download
-// (user-confirmed 2026-07-23; never re-merge specs into one composed field).
+// category's granular spec columns — same format as the sell-order and
+// purchase-order downloads (user-confirmed 2026-07-23; never re-merge specs
+// into one composed field). The column vocabulary lives in lib/specColumns.
 // Registered before '/:id' so the literal path wins over the param route.
-const INV_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
-
 const INV_EXPORT_HEAD: XlsxColumn[] = [
   { header: 'ID',           key: 'id',        width: 12 },
   { header: 'Date',         key: 'date',      width: 12 },
 ];
-// `Item` (invLabel) keeps a human-scannable label next to the granular
-// columns. `Other` drops it: its Description column carries the same string.
-const INV_ITEM_COL: XlsxColumn = { header: 'Item', key: 'item', width: 30 };
 const INV_EXPORT_TAIL: XlsxColumn[] = [
   { header: 'Warehouse',    key: 'warehouse', width: 12 },
   { header: 'Qty',          key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: 'Unit cost',    key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
-  { header: 'Sell price',   key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
-  { header: 'Profit',       key: 'profit',    width: 12, numFmt: '#,##0.00' },
-  { header: 'Margin %',     key: 'margin',    width: 10, numFmt: '#,##0.0' },
+  { header: 'Unit cost',    key: 'unitCost',  width: 12, numFmt: MONEY_FMT },
+  { header: 'Sell price',   key: 'sellPrice', width: 12, numFmt: MONEY_FMT },
+  { header: 'Profit',       key: 'profit',    width: 12, numFmt: SIGNED_MONEY_FMT },
+  { header: 'Margin %',     key: 'margin',    width: 10, numFmt: SIGNED_PCT_FMT },
   { header: 'Submitted by', key: 'submitter', width: 18 },
   { header: 'Status',       key: 'status',    width: 14 },
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
-const invExportCols = (cat: (typeof INV_CATEGORY_ORDER)[number]): XlsxColumn[] => [
+const invExportCols = (cat: SpecCategory): XlsxColumn[] => [
   ...INV_EXPORT_HEAD,
-  ...(cat === 'Other' ? [] : [INV_ITEM_COL]),
-  ...GROUPED_LEAD_BY_CATEGORY[cat],
+  ...(cat === 'Other' ? [] : [ITEM_COL]),
+  ...SPEC_COLS_BY_CATEGORY[cat],
   ...INV_EXPORT_TAIL,
 ];
 
@@ -199,73 +202,35 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Reviewing',    key: 'reviewing',  width: 10, numFmt: '#,##0' },
   { header: 'POs',          key: 'poCount',    width: 7,  numFmt: '#,##0' },
   { header: 'Lots',         key: 'lotCount',   width: 7,  numFmt: '#,##0' },
-  { header: 'Cost min',     key: 'costMin',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Cost avg',     key: 'costAvg',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Cost max',     key: 'costMax',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Sell price',   key: 'sellPrice',  width: 12, numFmt: '#,##0.00' },
+  { header: 'Cost min',     key: 'costMin',    width: 11, numFmt: MONEY_FMT },
+  { header: 'Cost avg',     key: 'costAvg',    width: 11, numFmt: MONEY_FMT },
+  { header: 'Cost max',     key: 'costMax',    width: 11, numFmt: MONEY_FMT },
+  { header: 'Sell price',   key: 'sellPrice',  width: 12, numFmt: MONEY_FMT },
   { header: 'Submitted by', key: 'submitter',  width: 22 },
 ];
-
-const GROUPED_LEAD_BY_CATEGORY: Record<string, XlsxColumn[]> = {
-  RAM: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Chip #',      key: 'chip',           width: 22 },
-    { header: 'Brand',       key: 'brand',          width: 14 },
-    { header: 'Capacity',    key: 'capacity',       width: 10 },
-    { header: 'Gen',         key: 'generation',     width: 8 },
-    { header: 'Type',        key: 'type',           width: 10 },
-    { header: 'Class',       key: 'classification', width: 10 },
-    { header: 'Rank',        key: 'rank',           width: 8 },
-    { header: 'Speed',       key: 'speed',          width: 10 },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-  SSD: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Brand',       key: 'brand',          width: 14 },
-    { header: 'Capacity',    key: 'capacity',       width: 10 },
-    { header: 'Interface',   key: 'interface',      width: 12 },
-    { header: 'Form factor', key: 'formFactor',     width: 12 },
-    { header: 'Health %',    key: 'health',         width: 10, numFmt: '#,##0' },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-  HDD: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Brand',       key: 'brand',          width: 14 },
-    { header: 'Capacity',    key: 'capacity',       width: 10 },
-    { header: 'Interface',   key: 'interface',      width: 12 },
-    { header: 'Form factor', key: 'formFactor',     width: 12 },
-    { header: 'RPM',         key: 'rpm',            width: 8,  numFmt: '#,##0' },
-    { header: 'Health %',    key: 'health',         width: 10, numFmt: '#,##0' },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-  Other: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Description', key: 'description',    width: 30 },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-};
 
 // One plain worksheet per category present, fixed order, unknown categories
 // folded into Other (same recipe as the sell-order download). An empty result
 // still needs a valid file — fall back to a single header-only sheet.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
-  colsFor: (cat: (typeof INV_CATEGORY_ORDER)[number]) => XlsxColumn[],
+  colsFor: (cat: SpecCategory) => XlsxColumn[],
 ): Promise<Buffer> {
-  const byCategory = new Map<string, Record<string, unknown>[]>();
-  for (const r of rows) {
-    const cat = (INV_CATEGORY_ORDER as readonly string[]).includes(String(r.category))
-      ? String(r.category)
-      : 'Other';
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat)!.push(r);
-  }
-  const sheets = INV_CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
+  const byCategory = groupByCategory(rows);
+  const sheets = CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
     name: cat as string,
     columns: colsFor(cat),
     rows: byCategory.get(cat)!,
+    tabColor: CATEGORY_TAB_COLOR[cat],
   }));
-  if (sheets.length === 0) sheets.push({ name: 'Inventory', columns: colsFor('Other'), rows: [] });
+  if (sheets.length === 0) {
+    sheets.push({
+      name: 'Inventory',
+      columns: colsFor('Other'),
+      rows: [],
+      tabColor: CATEGORY_TAB_COLOR.Other,
+    });
+  }
   return buildXlsxWorkbook(sheets);
 }
 
@@ -296,7 +261,7 @@ inventory.get('/export', async (c) => {
     // like 'constructor' must miss rather than hit a prototype key. Only the
     // filename cares — the tab split derives from the rows themselves.
     const category = c.req.query('category');
-    const knownCategory = !!category && Object.hasOwn(GROUPED_LEAD_BY_CATEGORY, category);
+    const knownCategory = !!category && Object.hasOwn(SPEC_COLS_BY_CATEGORY, category);
     const canonCol = canonPartCol(sql, sql`l.part_number`);
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
@@ -392,7 +357,7 @@ inventory.get('/export', async (c) => {
     });
 
     const buf = await buildCategoryTabs(grouped, (cat) => [
-      ...GROUPED_LEAD_BY_CATEGORY[cat],
+      ...SPEC_COLS_BY_CATEGORY[cat],
       ...GROUPED_TAIL_COLS,
     ]);
     return xlsxResponse(

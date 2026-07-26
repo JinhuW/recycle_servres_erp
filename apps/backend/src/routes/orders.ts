@@ -11,7 +11,13 @@ import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
 import { getWorkspaceSetting, getUploadLimits } from '../lib/settings';
 import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
-import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
+import {
+  buildXlsxWorkbook, xlsxResponse, MONEY_FMT, SIGNED_MONEY_FMT, type XlsxColumn,
+} from '../lib/xlsx';
+import {
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, ITEM_COL, CATEGORY_TAB_COLOR,
+  SUMMARY_TAB_COLOR, groupByCategory, type SpecCategory,
+} from '../lib/specColumns';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
@@ -450,18 +456,26 @@ orders.get('/:id/invoice', async (c) => {
 // ── PO spreadsheet (XLSX). Same access rules and payment summary as the PDF
 // invoice, but as a workbook: a Payment tab with the header/payment fields and a
 // Line items tab with the costed lines. Reuses the shared exceljs builder.
-const PO_LINE_COLS: XlsxColumn[] = [
-  { header: 'Item',       key: 'item',      width: 34 },
-  { header: 'Part #',     key: 'part',      width: 18 },
-  { header: 'Chip #',     key: 'chip',      width: 18 },
-  { header: 'Category',   key: 'category',  width: 10 },
-  { header: 'Condition',  key: 'condition', width: 12 },
+//
+// The line tab carries the full granular spec set for the PO's category — the
+// same vocabulary as the inventory download (lib/specColumns), so a buyer can
+// paste PO lines straight against stock without re-typing attributes that only
+// ever existed inside the composed `Item` string. A PO is single-category by
+// construction, so this is normally one tab; a PO whose lines drifted across
+// categories splits per category rather than dropping the mismatched specs.
+const PO_COST_COLS: XlsxColumn[] = [
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
-  { header: 'Unit cost',  key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
-  { header: 'Line total', key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Sell price', key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
-  { header: 'Sell total', key: 'sellTotal', width: 13, numFmt: '#,##0.00' },
-  { header: 'Profit',     key: 'profit',    width: 12, numFmt: '#,##0.00' },
+  { header: 'Unit cost',  key: 'unitCost',  width: 12, numFmt: MONEY_FMT },
+  { header: 'Line total', key: 'lineTotal', width: 13, numFmt: MONEY_FMT },
+  { header: 'Sell price', key: 'sellPrice', width: 12, numFmt: MONEY_FMT },
+  { header: 'Sell total', key: 'sellTotal', width: 13, numFmt: MONEY_FMT },
+  { header: 'Profit',     key: 'profit',    width: 12, numFmt: SIGNED_MONEY_FMT },
+];
+
+const poLineCols = (cat: SpecCategory): XlsxColumn[] => [
+  ...(cat === 'Other' ? [] : [ITEM_COL]),
+  ...SPEC_COLS_BY_CATEGORY[cat],
+  ...PO_COST_COLS,
 ];
 
 const PO_PAYMENT_COLS: XlsxColumn[] = [
@@ -490,7 +504,8 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const lines = await sql`
     SELECT category, brand, capacity, generation, type, classification, rank, speed,
-           interface, form_factor, description, part_number, chip_number, condition, qty,
+           interface, form_factor, rpm, health::float AS health, description,
+           part_number, chip_number, condition, qty,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
   ` as unknown as Record<string, unknown>[];
@@ -500,6 +515,9 @@ orders.get('/:id/spreadsheet', async (c) => {
   // has no sell-side data of its own). Profit/commission here are the projected
   // figures the purchaser sees on their dashboard; lines without a sell price
   // set simply don't contribute (left blank, no profit).
+  // Every spec key is emitted unconditionally — each category tab's column set
+  // picks the ones it declares, so the mapper stays branch-free. Numeric specs
+  // emit null when absent so the cell stays blank rather than reading 0.
   const lineRows = lines.map((l) => {
     const qty = Number(l.qty ?? 0);
     const unitCost = Number(l.unit_cost ?? 0);
@@ -509,6 +527,18 @@ orders.get('/:id/spreadsheet', async (c) => {
       part: String(l.part_number ?? ''),
       chip: String(l.chip_number ?? ''),
       category: String(l.category ?? ''),
+      brand: l.brand ?? '',
+      capacity: l.capacity ?? '',
+      generation: l.generation ?? '',
+      type: l.type ?? '',
+      classification: l.classification ?? '',
+      rank: l.rank ?? '',
+      speed: l.speed ?? '',
+      interface: l.interface ?? '',
+      formFactor: l.form_factor ?? '',
+      rpm: l.rpm ?? null,
+      health: l.health ?? null,
+      description: l.description ?? '',
       condition: String(l.condition ?? ''),
       qty,
       unitCost,
@@ -551,9 +581,27 @@ orders.get('/:id/spreadsheet', async (c) => {
     { field: 'Notes',                 value: String(order.notes ?? '') },
   ];
 
+  // A single-category PO keeps the familiar `Line items` tab name; only a
+  // category-mixed one needs the suffix to tell its tabs apart. An emptied PO
+  // still has to produce a valid workbook, so fall back to a header-only tab
+  // in the order's own category.
+  const byCategory = groupByCategory(lineRows);
+  const cats = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
+  const orderCat = (CATEGORY_ORDER as readonly string[]).includes(String(order.category))
+    ? (String(order.category) as SpecCategory)
+    : 'Other';
+  const lineSheets = cats.length === 0
+    ? [{ name: 'Line items', columns: poLineCols(orderCat), rows: [], tabColor: CATEGORY_TAB_COLOR[orderCat] }]
+    : cats.map((cat) => ({
+        name: cats.length === 1 ? 'Line items' : `Line items — ${cat}`,
+        columns: poLineCols(cat),
+        rows: byCategory.get(cat)!,
+        tabColor: CATEGORY_TAB_COLOR[cat],
+      }));
+
   const buf = await buildXlsxWorkbook([
-    { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows },
-    { name: 'Line items', columns: PO_LINE_COLS, rows: lineRows },
+    { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows, tabColor: SUMMARY_TAB_COLOR },
+    ...lineSheets,
   ]);
   return xlsxResponse(buf, `${order.id}.xlsx`);
 });

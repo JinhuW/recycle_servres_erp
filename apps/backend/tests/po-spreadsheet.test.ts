@@ -138,6 +138,94 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     expect(String(ws.getRow(2).getCell(chipC).value)).toBe('K4A8G085WC-BCTD');
   });
 
+  it('gives the Line items tab the full granular spec set for its category', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Hynix', capacity: '64GB', generation: 'DDR4',
+          type: 'RDIMM', classification: '2Rx4', rank: '2Rx4', speed: '3200',
+          partNumber: 'HMAA8GR7AJR4N-XN', chipNumber: 'H5AN8G8NDJR-XNC',
+          condition: 'Pulled — Tested', qty: 4, unitCost: 90,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Line items')!;
+    const headers = ws.getRow(1).values as unknown[];
+
+    // Every RAM spec gets its own column — never re-merged into `Item`.
+    for (const h of [
+      'Item', 'Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type',
+      'Class', 'Rank', 'Speed', 'Condition',
+    ]) {
+      expect(headers).toContain(h);
+    }
+    // Category is redundant once the tab is category-scoped.
+    expect(headers).not.toContain('Category');
+
+    const row = ws.getRow(2);
+    const cell = (name: string) => row.getCell(headers.indexOf(name)).value;
+    expect(cell('Brand')).toBe('Hynix');
+    expect(cell('Capacity')).toBe('64GB');
+    expect(cell('Gen')).toBe('DDR4');
+    expect(cell('Type')).toBe('RDIMM');
+    expect(cell('Rank')).toBe('2Rx4');
+    expect(String(cell('Speed'))).toBe('3200');
+    expect(ws.properties.tabColor?.argb).toBe('FF2563EB');
+  });
+
+  it('gives an SSD PO the SSD spec columns, not the RAM ones', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'SSD',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'SSD', brand: 'Samsung', capacity: '1.92TB',
+          interface: 'SAS', formFactor: '2.5"', health: 97,
+          partNumber: 'MZILT1T9HBJR', condition: 'Pulled — Tested',
+          qty: 3, unitCost: 120,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Line items')!;
+    const headers = ws.getRow(1).values as unknown[];
+
+    for (const h of ['Interface', 'Form factor', 'Health %']) {
+      expect(headers).toContain(h);
+    }
+    for (const h of ['Gen', 'Rank', 'Speed', 'Chip #']) {
+      expect(headers).not.toContain(h);
+    }
+
+    const row = ws.getRow(2);
+    expect(row.getCell(headers.indexOf('Interface')).value).toBe('SAS');
+    expect(row.getCell(headers.indexOf('Form factor')).value).toBe('2.5"');
+    expect(Number(row.getCell(headers.indexOf('Health %')).value)).toBe(97);
+  });
+
   it('lets a purchaser download their OWN PO', async () => {
     const { token } = await loginAs(MARCUS);
     const ids = await listOrderIds(token); // purchaser list is already own-scoped

@@ -138,11 +138,36 @@ describe('GET /api/inventory/export', () => {
     const headerCell = ws.getRow(1).getCell(1);
     expect(headerCell.font?.bold).toBe(true);
     expect(headerCell.font?.color?.argb).toBe('FFFFFFFF');
-    expect((headerCell.fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBe('FF1F2937');
+    expect((headerCell.fill as { fgColor?: { argb?: string } }).fgColor?.argb).toBe('FF16233A');
     // Row 2 (first data row) is unstriped; row 3 carries the zebra fill.
     expect(ws.rowCount).toBeGreaterThan(2);
     const striped = ws.getRow(3).getCell(1).fill as { fgColor?: { argb?: string } };
-    expect(striped?.fgColor?.argb).toBe('FFF3F4F6');
+    expect(striped?.fgColor?.argb).toBe('FFF5F7FA');
+    // Gridlines off — the hairline row rule carries the structure instead.
+    expect(ws.views[0].showGridLines).toBe(false);
+  });
+
+  it('tints money columns and colours the category tabs', async () => {
+    const { token } = await loginAs(ALEX);
+    const res = await getRaw('/api/inventory/export', token);
+    const wb = await loadWorkbook(res);
+    const ws = wb.getWorksheet('RAM')!;
+
+    // headerRow() drops the leading hole, so resolve 1-based column numbers off
+    // the raw values array instead.
+    const colOf = (name: string) => (ws.getRow(1).values as unknown[]).indexOf(name);
+    const unitCostC = colOf('Unit cost');
+    expect(unitCostC).toBeGreaterThan(0);
+    const fillOf = (r: number, c: number) =>
+      (ws.getRow(r).getCell(c).fill as { fgColor?: { argb?: string } })?.fgColor?.argb;
+    // Money keeps its own wash on both the plain and the striped row, so the
+    // cost block stays a continuous band down the sheet.
+    expect(fillOf(2, unitCostC)).toBe('FFF2F9F5');
+    expect(fillOf(3, unitCostC)).toBe('FFE9F3EC');
+
+    expect(ws.properties.tabColor?.argb).toBe('FF2563EB');
+    // Negative profit prints red rather than blending into the column.
+    expect(ws.getRow(2).getCell(colOf('Profit')).numFmt).toContain('[Red]');
   });
 
   it('forbids purchasers (the workbook carries cost columns)', async () => {
