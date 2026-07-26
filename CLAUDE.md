@@ -23,6 +23,35 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - The `@recycle-erp/shared` package is imported as a workspace dep (`main:
   "./src/index.ts"`) — there's no build step.  Don't add one.
 
+## Session isolation (one branch per Claude Code session)
+
+Several Claude Code sessions run against this repo at once, so **every session
+works on its own branch inside its own git worktree**.  A single shared checkout
+can only have one branch checked out; without this, a second session silently
+switches the branch out from under the first.
+
+- **Start sessions with `scripts/new-session.sh`.**  It branches off
+  `origin/dev`, creates a worktree under `.claude/worktrees/`, copies `.env`,
+  runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
+  `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
+- **If a session starts in the main checkout anyway**, the `SessionStart` hook
+  in `.claude/settings.json` (`scripts/claude-session-hook.sh`) says so.  The
+  agent should then run `scripts/new-session.sh --print-only` and call
+  `EnterWorktree` with the path it prints.  Read-only sessions — answering a
+  question, reading history, no file edits — can skip this.
+- The base ref is **always `origin/dev`, never `main`**, matching the normal
+  branch workflow.  Claude Code's own `worktree.baseRef` setting can't express
+  this (it only offers `origin/<default-branch>`, i.e. `main`, or local HEAD),
+  which is why creation is scripted rather than left to `EnterWorktree`.
+- Worktrees cost ~290 MB each (mostly `node_modules`; pnpm hardlinks from the
+  store, so creation is only a few seconds).  Reclaim them with
+  `scripts/new-session.sh --prune`, which removes only worktrees that are both
+  clean and fully merged into `origin/dev` — anything with uncommitted changes
+  or unmerged commits is reported and left alone.  `--list` shows the state of
+  each one.
+- `.claude/` is gitignored **except** `settings.json`, so the hook config is
+  shared but worktrees and `settings.local.json` are not.
+
 ## Frontend
 
 - One bundle, three shells.  `apps/frontend/src/App.tsx` decides which to
