@@ -34,6 +34,7 @@ import workspaceRoutes from './routes/workspace';
 import { fxRates as fxRatesRoutes } from './routes/fxRates';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
+import activityRoutes from './routes/activity';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -211,6 +212,9 @@ app.use('/api/categories/*', authMiddleware);
 app.use('/api/attachments/*', authMiddleware);
 app.use('/api/workspace/*', authMiddleware);
 app.use('/api/vendor-bids/*', authMiddleware);
+// The feed lives at the bare /api/activity, which `/*` alone doesn't cover.
+app.use('/api/activity', authMiddleware);
+app.use('/api/activity/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
@@ -229,6 +233,7 @@ app.route('/api/attachments', attachmentsRoutes);
 app.route('/api/workspace', workspaceRoutes);
 app.route('/api/workspace', fxRatesRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
+app.route('/api/activity', activityRoutes);
 // /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
 // list above. csrfGuard still runs from the global stack.
