@@ -9,20 +9,18 @@ export type OrderStatus = 'Draft' | 'In Transit' | 'Reviewing' | 'Done';
 export const ORDER_STATUSES: OrderStatus[] = ['Draft', 'In Transit', 'Reviewing', 'Done'];
 
 // Canonical order lifecycle. `id` is the slug stored in orders.lifecycle;
-// `tone` keys map into DesktopOrders' TONE_VAR for the pipeline cards.
+// colour comes from statusTone(label) so the stage filter and the Status
+// column can never drift apart.
 export type WorkflowStage = {
   id: string;
   label: OrderStatus;
-  short: string;
-  tone: 'muted' | 'info' | 'accent' | 'pos';
-  icon: string;
 };
 
 export const WORKFLOW_STAGES: WorkflowStage[] = [
-  { id: 'draft',      label: 'Draft',      short: 'Draft',   tone: 'muted',  icon: 'edit' },
-  { id: 'in_transit', label: 'In Transit', short: 'Transit', tone: 'info',   icon: 'truck' },
-  { id: 'reviewing',  label: 'Reviewing',  short: 'Review',  tone: 'accent', icon: 'eye' },
-  { id: 'done',       label: 'Done',       short: 'Done',    tone: 'pos',    icon: 'check' },
+  { id: 'draft',      label: 'Draft' },
+  { id: 'in_transit', label: 'In Transit' },
+  { id: 'reviewing',  label: 'Reviewing' },
+  { id: 'done',       label: 'Done' },
 ];
 
 const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
