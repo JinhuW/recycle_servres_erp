@@ -508,19 +508,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
         <button className="ph-btn ghost" onClick={onCancel}>{t('cancel')}</button>
         <button
           className="ph-icon-btn"
-          onClick={() => api.download(`/api/orders/${order.id}/invoice`, `${order.id}.pdf`).catch(handleFetchError)}
-          aria-label={t('downloadPo')}
-          style={{
-            width: 50, height: 50, borderRadius: 14,
-            border: '1px solid var(--border-strong)',
-            background: 'var(--bg-elev)', color: 'var(--fg-muted)',
-            flex: '0 0 auto',
-          }}
-        >
-          <Icon name="download" size={16} />
-        </button>
-        <button
-          className="ph-icon-btn"
           onClick={() => api.download(`/api/orders/${order.id}/spreadsheet`, `${order.id}.xlsx`).catch(handleFetchError)}
           aria-label={t('downloadPoXlsx')}
           style={{
@@ -530,7 +517,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             flex: '0 0 auto',
           }}
         >
-          <Icon name="file" size={16} />
+          <Icon name="download" size={16} />
         </button>
         {canDelete && (
           <button

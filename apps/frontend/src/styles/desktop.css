@@ -252,7 +252,8 @@ html.desktop, body.desktop, .desktop #root {
   display: flex;
   flex-direction: column;
 }
-.page.page-history > .orders-card > .card-head {
+.page.page-history > .orders-card > .card-head,
+.page.page-history > .orders-card > .status-rail {
   flex-shrink: 0;
 }
 .page.page-history > .orders-card > .table-scroll {
@@ -463,6 +464,39 @@ html.desktop, body.desktop, .desktop #root {
 .card-sub   { font-size: 12px; color: var(--fg-subtle); }
 .card-body  { padding: 18px; }
 [data-density="compact"] .card-body { padding: 12px; }
+
+/* ===== Toolbar status rail =====
+   A second toolbar tier for status filtering. The head above it drops its rule
+   so the two rows read as one block rather than two stacked bars. */
+.card-head.has-rail { border-bottom: none; padding-bottom: 10px; }
+.status-rail {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 0 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.status-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.status-chip:hover { background: var(--bg-soft); color: var(--fg); }
+.status-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status-chip[aria-pressed="true"] {
+  background: var(--bg-soft);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+/* A stage with nothing in it stays clickable but recedes. */
+.status-chip.empty { opacity: 0.55; }
+.status-chip .sc-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-chip .sc-n { font-size: 11px; font-weight: 600; color: var(--fg-subtle); }
+.status-chip[aria-pressed="true"] .sc-n { color: var(--fg); }
 
 /* ===== KPIs ===== */
 .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap, 16px); }
@@ -1885,4 +1919,265 @@ html.desktop, body.desktop, .desktop #root {
 @keyframes busy-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .busy-spinner { animation-duration: 2s; }
+}
+
+/* ═══ Sidebar nav groups ═══
+   The sidebar is a flex column with its own gap; each group re-establishes it
+   so wrapping items in a group div doesn't collapse the spacing between them. */
+.nav-group { display: flex; flex-direction: column; gap: 4px; }
+.nav-group .nav-section { padding-top: 6px; }
+.nav-group + .nav-group .nav-section { padding-top: 16px; }
+
+/* ═══ Activity — the global audit register ═══
+   Deliberately not the dot-and-rail timeline used by OrderActivityLog and
+   DesktopActivityDrawer. Those are right for one record in a narrow column;
+   at full width they can't be scanned by actor and they bury the diff. Here
+   the five lanes stay aligned so any one of them reads straight down.
+
+   The lane grid is defined once, on .ac-lanes and .ac-row together, so the
+   column head and the rows can't drift apart. */
+.ac-lanes, .ac-row {
+  display: grid;
+  grid-template-columns: 3px 74px 148px 126px 132px minmax(240px, 1fr);
+  align-items: center;
+  gap: 0 14px;
+}
+
+.ac-deck {
+  position: sticky; top: 0; z-index: 20;
+  background: color-mix(in oklch, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 11px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  /* .page is a flex column with its own 18px gap — a margin here would stack
+     on top of it and open a 36px trench under the filters. */
+  flex-shrink: 0;
+}
+.ac-areas { display: flex; gap: 7px; flex-wrap: wrap; }
+.ac-area {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 11px 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  font-size: 12.5px; font-weight: 500; color: var(--fg-muted);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.ac-area:hover { background: var(--bg-soft); }
+/* The pill carries the ledger's own stripe, so the deck and the register speak
+   the same colour language before anything is clicked. */
+.ac-area .ac-bar { width: 3px; height: 13px; border-radius: 2px; background: var(--fg-subtle); }
+.ac-area[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: #fff; }
+.ac-area[aria-pressed="true"] .ac-n { color: rgba(255,255,255,0.62); }
+.ac-area[aria-pressed="true"][data-area="all"] .ac-bar { background: rgba(255,255,255,0.5); }
+.ac-n {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px; font-weight: 500;
+  color: var(--fg-subtle); font-variant-numeric: tabular-nums;
+}
+
+.ac-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ac-search { position: relative; flex: 1; min-width: 200px; }
+.ac-search > svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--fg-subtle); pointer-events: none;
+}
+.ac-search .input { padding-left: 30px; height: 32px; font-size: 12.5px; }
+/* .select is width:100% in tokens.css — left alone every dropdown claims a
+   full row and the control strip stacks instead of sitting on one line. */
+.ac-deck .select {
+  width: auto; min-width: 132px;
+  height: 32px; padding-top: 0; padding-bottom: 0; font-size: 12.5px;
+}
+.ac-reset {
+  border: none; background: none; color: var(--fg-subtle);
+  font-size: 12.5px; padding: 7px 4px;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.ac-reset:hover { color: var(--fg); }
+
+/* Activity page variant — page-head, filter deck and the legend stay put;
+   only the register's inner .ac-scroll moves. Same shape as .page-history.
+
+   This is also what makes the column head pin. `.ac-scroll` sets overflow-x,
+   which forces overflow-y to `auto` too, so it is already a scroll container
+   and `position: sticky` inside it clamps to ITS box — with the page doing
+   the scrolling, the head just rode away with the register. Giving the
+   register a bounded height makes .ac-scroll the real scroller, and the head
+   and day rules stick where you'd expect. */
+.page.page-activity {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-activity > .ac-register {
+  flex: 1;
+  min-height: 0;
+}
+.ac-register {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ac-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ac-inner { min-width: 900px; }
+
+.ac-lanes {
+  padding: 9px 16px 9px 0;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--fg-subtle);
+  position: sticky; top: 0; z-index: 5;
+}
+
+/* Day break — a full-bleed hairline carrying the date in the rule itself, the
+   way a ledger's page break does. The count gives the tape its rhythm. */
+.ac-day {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 16px 11px;
+  background: var(--bg-soft);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--fg-muted);
+  position: sticky; top: 32px; z-index: 4;
+}
+.ac-day .ac-line { flex: 1; height: 1px; background: var(--border); }
+.ac-day .ac-n { color: var(--fg-subtle); }
+
+.ac-row {
+  width: 100%; text-align: left;
+  padding: 0 16px 0 0;
+  border: none; border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  min-height: 42px;
+  transition: background 0.1s;
+}
+.ac-row:hover, .ac-row[aria-expanded="true"] { background: var(--bg-soft); }
+
+/* The signature: 3px of ledger hue at each row's leading edge, so a full
+   scroll shows the four ledgers braiding and a filter collapses the braid. */
+.ac-stripe { width: 3px; align-self: stretch; min-height: 42px; }
+.ac-area[data-area="po"]    .ac-bar,    .ac-row[data-area="po"]    .ac-stripe { background: var(--info); }
+.ac-area[data-area="so"]    .ac-bar,    .ac-row[data-area="so"]    .ac-stripe { background: var(--accent); }
+.ac-area[data-area="inv"]   .ac-bar,    .ac-row[data-area="inv"]   .ac-stripe { background: oklch(0.72 0.13 75); }
+.ac-area[data-area="price"] .ac-bar,    .ac-row[data-area="price"] .ac-stripe { background: oklch(0.55 0.16 295); }
+
+.ac-t {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px; color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums; padding-left: 13px;
+}
+.ac-who { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ac-who span {
+  font-size: 12.5px; color: var(--fg-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-target {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px; font-weight: 500; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-target.ac-dim { color: var(--fg-subtle); font-weight: 400; }
+
+/* The change lane — the reason this is a register and not a timeline. Diffs
+   align down the column, so a run of price moves reads like tape. */
+.ac-change {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px; color: var(--fg-muted);
+  min-width: 0; padding: 11px 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-change .ac-k { color: var(--fg-subtle); }
+.ac-change .ac-was { text-decoration: line-through; opacity: 0.55; }
+.ac-change .ac-now { color: var(--fg); font-weight: 500; }
+.ac-change .ac-arr { color: var(--fg-subtle); margin: 0 5px; }
+.ac-change .ac-plain { font-family: 'Inter', system-ui, sans-serif; font-size: 12.5px; }
+.ac-change .ac-more {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px; color: var(--fg-subtle); margin-left: 8px;
+}
+
+/* Expanded detail opens in place — a modal would cost the reader their
+   position, and losing your place in a long audit is the actual pain. */
+.ac-detail {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  padding: 2px 16px 16px 20px;
+}
+.ac-detail-inner {
+  border-left: 2px solid var(--border);
+  padding: 12px 0 2px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.ac-detail-grid { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.ac-field { display: flex; flex-direction: column; gap: 3px; }
+.ac-field-k {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--fg-subtle);
+}
+.ac-field-v {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px; color: var(--fg);
+}
+.ac-diffs { display: flex; flex-direction: column; gap: 5px; }
+.ac-diffs div {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px; color: var(--fg-muted);
+}
+
+.ac-empty { padding: 56px 20px; text-align: center; color: var(--fg-subtle); font-size: 13px; }
+.ac-empty .ac-big { font-size: 14px; color: var(--fg-muted); margin-bottom: 5px; font-weight: 500; }
+.ac-foot {
+  display: flex; align-items: center; gap: 7px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  font-size: 11.5px; color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+/* Sentinel the observer watches, plus the row that replaces "Load older".
+   Kept inside .ac-inner so it scrolls with the rows. */
+.ac-sentinel { height: 1px; }
+.ac-more-row {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 16px;
+  font-size: 12px; color: var(--fg-subtle);
+  border-top: 1px solid var(--border);
+}
+.ac-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; }
+.ac-legend span {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;
+}
+.ac-legend i { width: 3px; height: 12px; border-radius: 2px; display: inline-block; }
+.ac-note {
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px; color: var(--fg-subtle); max-width: 78ch;
+  flex-shrink: 0;
+}
+.ac-note b { color: var(--fg-muted); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-area, .ac-row { transition: none; }
 }

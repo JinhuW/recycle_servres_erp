@@ -23,6 +23,65 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - The `@recycle-erp/shared` package is imported as a workspace dep (`main:
   "./src/index.ts"`) — there's no build step.  Don't add one.
 
+## Session isolation (one branch per Claude Code session)
+
+Several Claude Code sessions run against this repo at once, so **every session
+works on its own branch inside its own git worktree**.  A single shared checkout
+can only have one branch checked out; without this, a second session silently
+switches the branch out from under the first.
+
+- **Start sessions with `scripts/new-session.sh`.**  It branches off
+  `origin/dev`, creates a worktree under `.claude/worktrees/`, copies `.env`,
+  runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
+  `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
+- **Every session in this repo runs with permission prompts off.**
+  `.claude/settings.json` sets `permissions.defaultMode: "bypassPermissions"`,
+  which covers all entry points; `scripts/new-session.sh` also passes
+  `--dangerously-skip-permissions` when it launches `claude` itself.  The CLI
+  flag alone was not enough: it only applies when the launcher execs `claude`,
+  so a session that started in the main checkout and moved in via
+  `EnterWorktree` kept normal prompts (permission mode is fixed at launch and
+  `EnterWorktree` only changes the working directory).
+- The worktree isolates the *branch*, not the machine: bypass mode still permits
+  any shell command, any file outside the worktree, and pushes to any remote.
+  To get prompts back, drop `defaultMode` from `.claude/settings.json` (or
+  override it in the gitignored `.claude/settings.local.json`).
+- **If a session starts in the main checkout anyway**, the `SessionStart` hook
+  in `.claude/settings.json` (`scripts/claude-session-hook.sh`) says so.  The
+  agent should then run `scripts/new-session.sh --print-only` and call
+  `EnterWorktree` with the path it prints.  Read-only sessions — answering a
+  question, reading history, no file edits — can skip this.
+- The base ref is **always `origin/dev`, never `main`**, matching the normal
+  branch workflow.  Claude Code's own `worktree.baseRef` setting can't express
+  this (it only offers `origin/<default-branch>`, i.e. `main`, or local HEAD),
+  which is why creation is scripted rather than left to `EnterWorktree`.
+- **Worktrees are recycled, not accumulated.**  Starting a session reuses an
+  idle slot (resetting it onto a fresh branch, keeping its `node_modules` so
+  startup stays a few seconds) and sweeps any other idle slots, so abandoned
+  sessions cannot pile up at ~290 MB each.  `--fresh` forces a new one.
+- A slot counts as idle only if it is clean, on a branch, holds nothing that is
+  not already in `origin/dev`, **and** carries a lock file from a session that
+  has since exited.  Locks live in `.claude/worktrees/.locks/` (outside the
+  checkouts, so they don't show up as untracked files): the launcher records the
+  PID that `exec claude` inherits, and the `--print-only` path records a
+  timestamp that expires after 8h.  A worktree with **no** lock is never touched
+  automatically — it predates the mechanism or was made by hand, so whether
+  someone is sitting in it is unknowable.
+- `scripts/new-session.sh --prune` reclaims idle slots on demand and `--list`
+  shows each one's state without touching anything.  Prune keeps — never
+  removes — a worktree that has uncommitted changes, is on a detached HEAD, is
+  held by a live session, or that you are currently standing in.  It *will*
+  remove a clean, fully-merged, unlocked worktree, so a session that was
+  created outside the launcher should be given a lock file if you want it
+  protected.
+- **Prune compares file content, not commit ancestry.**  PRs land on `dev` as
+  squash commits, so a session branch's own commits are never ancestors of
+  `origin/dev`; an ancestry test (`git log origin/dev..HEAD`) would report
+  every worktree as unmerged forever and reclaim nothing.  See
+  [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md).
+- `.claude/` is gitignored **except** `settings.json`, so the hook config is
+  shared but worktrees and `settings.local.json` are not.
+
 ## Frontend
 
 - One bundle, three shells.  `apps/frontend/src/App.tsx` decides which to

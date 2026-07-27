@@ -8,6 +8,7 @@
 // Must run inside a sql.begin tx so a failed insert rolls back the order.
 
 import type { Sql, TransactionSql } from 'postgres';
+import { canonPartCol, canonPartNumberJs } from './part-number';
 
 type SqlLike = Sql | TransactionSql;
 
@@ -36,13 +37,6 @@ function synthLabel(p: TrackablePart, partNumber: string): string {
   return parts.length ? parts.join(' ') : partNumber;
 }
 
-function canonClient(pn: string): string {
-  return pn
-    .replace(/^\s*(?:P\s*\/?\s*N|S\s*\/?\s*N|PART\s*(?:NO|NUMBER)?)\s*[:#]?\s*/i, '')
-    .replace(/\s+/g, '')
-    .toUpperCase();
-}
-
 export async function autoTrackParts(
   tx: SqlLike,
   parts: TrackablePart[],
@@ -54,28 +48,20 @@ export async function autoTrackParts(
   for (const p of parts) {
     const raw = (p.partNumber ?? '').trim();
     if (!raw) { skipped++; continue; }
-    const canon = canonClient(raw);
+    const canon = canonPartNumberJs(raw);
     if (!canon) { skipped++; continue; }
     if (!byCanon.has(canon)) byCanon.set(canon, { raw, part: p });
   }
   if (byCanon.size === 0) return { inserted: 0, skipped };
 
-  // 2. Find which canonical PNs already have a ref_prices row. The SQL
-  //    canonicaliser must match canonClient() above and the rule in
-  //    lib/part-number.ts — strip P/N|S/N prefix, drop whitespace, upper-case.
+  // 2. Find which canonical PNs already have a ref_prices row. Uses the shared
+  //    canonPartCol so the SQL key matches canonPartNumberJs above byte-for-byte
+  //    (see lib/part-number.ts on why the whitespace class must not be \s).
   const canons = Array.from(byCanon.keys());
-  const PREFIX_RE =
-    '^[[:space:]]*(P[[:space:]]*/?[[:space:]]*N|S[[:space:]]*/?[[:space:]]*N|PART[[:space:]]*(NO|NUMBER)?)[[:space:]]*[:#]?[[:space:]]*';
   const existing = await tx<{ canon: string }[]>`
-    SELECT UPPER(REGEXP_REPLACE(
-             REGEXP_REPLACE(COALESCE(part_number, ''), ${PREFIX_RE}, '', 'i'),
-             '[[:space:]]+', '', 'g'
-           )) AS canon
+    SELECT ${canonPartCol(tx, tx`part_number`)} AS canon
     FROM ref_prices
-    WHERE UPPER(REGEXP_REPLACE(
-             REGEXP_REPLACE(COALESCE(part_number, ''), ${PREFIX_RE}, '', 'i'),
-             '[[:space:]]+', '', 'g'
-           )) = ANY(${canons}::text[])
+    WHERE ${canonPartCol(tx, tx`part_number`)} = ANY(${canons}::text[])
   `;
   const taken = new Set(existing.map(r => r.canon));
 

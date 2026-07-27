@@ -3,13 +3,16 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
-describe('M2: GET /api/workspace is manager-only', () => {
+describe('M2: GET /api/workspace withholds pricing config from purchasers', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('forbids a purchaser from reading workspace settings', async () => {
+  it('hides pricing/upload config from a purchaser', async () => {
     const { token } = await loginAs(MARCUS);
-    const r = await api('GET', '/api/workspace', { token });
-    expect(r.status).toBe(403);
+    const r = await api<{ settings: Record<string, unknown> }>('GET', '/api/workspace', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.settings.target_margin).toBeUndefined();
+    expect(r.body.settings.low_margin_floor).toBeUndefined();
+    expect(r.body.settings.upload_max_bytes).toBeUndefined();
   });
 
   it('still allows a manager', async () => {

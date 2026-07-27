@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useT } from '../../../lib/i18n';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
+import { Toggle } from './_shared';
 import type { Lang } from '../../../lib/types';
 
 // ─── Language radio (used inside the General tab) ─────────────────────────────
@@ -203,10 +204,7 @@ export function GeneralPanel() {
                   {t('genFxAutoSub')}
                 </div>
               </span>
-              <label className="toggle">
-                <input type="checkbox" checked={data.fxAuto} onChange={e => { upd('fxAuto', e.target.checked); save('fxAuto', e.target.checked); }} />
-                <span className="toggle-track"><span className="toggle-thumb" /></span>
-              </label>
+              <Toggle checked={data.fxAuto} onChange={v => { upd('fxAuto', v); save('fxAuto', v); }} />
             </div>
           </div>
         </div>
@@ -230,14 +228,7 @@ export function GeneralPanel() {
                 <strong style={{ fontSize: 13 }}>{n.title}</strong>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>{n.sub}</div>
               </span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={data.notify[n.k]}
-                  onChange={e => updNotify(n.k, e.target.checked)}
-                />
-                <span className="toggle-track"><span className="toggle-thumb" /></span>
-              </label>
+              <Toggle checked={data.notify[n.k]} onChange={v => updNotify(n.k, v)} />
             </div>
           ))}
         </div>

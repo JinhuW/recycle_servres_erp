@@ -24,6 +24,7 @@ import { DesktopMarket } from './pages/desktop/DesktopMarket';
 import { DesktopSellOrders } from './pages/desktop/DesktopSellOrders';
 import { DesktopVendorBids } from './pages/desktop/DesktopVendorBids';
 import { DesktopTransfers } from './pages/desktop/DesktopTransfers';
+import { DesktopActivity } from './pages/desktop/DesktopActivity';
 import { DesktopSettings } from './pages/desktop/DesktopSettings';
 import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
@@ -123,7 +124,7 @@ export function DesktopApp() {
   if (isAuthorizePath(path)) return <Authorize />;
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'settings')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'settings')
     ? 'dashboard'
     : view;
 
@@ -160,7 +161,8 @@ export function DesktopApp() {
           + (view2 === 'market' ? ' page-market' : '')
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'analysis' ? ' page-analysis' : '')
-          + (view2 === 'dashboard' ? ' page-dashboard' : '')}>
+          + (view2 === 'dashboard' ? ' page-dashboard' : '')
+          + (view2 === 'activity' ? ' page-activity' : '')}>
           {/* Inventory ▸ Analysis tab strip — shown on the list and the
               analysis tab, but not while editing a single item. */}
           {((view2 === 'inventory' && !editingItemId) || view2 === 'analysis') && (
@@ -200,6 +202,7 @@ export function DesktopApp() {
             />
           )}
           {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
+          {view2 === 'activity'  && <DesktopActivity />}
           {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
         </div>
       </main>

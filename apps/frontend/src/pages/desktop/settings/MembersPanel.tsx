@@ -6,7 +6,7 @@ import { handleFetchError } from '../../../lib/errorToast';
 import { useEscapeKey } from '../../../lib/useEscapeKey';
 import { relTime } from '../../../lib/format';
 import { TableSkeleton } from '../../../components/Skeleton';
-import { SettingsHeader, lastSeenLabel, type Member, type ToastFn } from './_shared';
+import { SettingsHeader, lastSeenLabel, Toggle, type Member, type ToastFn } from './_shared';
 import { PasswordMeter } from '../../../components/PasswordMeter';
 import { pwStrengthLabels } from '../../../lib/passwordI18n';
 import { ConfirmDialog } from './dialogs';
@@ -547,10 +547,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
               </div>
               <div className="toggle-row">
                 <span>{t('memAccountActive')}</span>
-                <label className="toggle">
-                  <input type="checkbox" checked={Boolean(v('active'))} onChange={e => set('active', e.target.checked)} />
-                  <span className="toggle-track"><span className="toggle-thumb" /></span>
-                </label>
+                <Toggle checked={Boolean(v('active'))} onChange={val => set('active', val)} />
               </div>
             </>
           )}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
-import { compressForUpload } from '../lib/image-compress';
+import { compressForUpload, blobToDataUrl } from '../lib/image-compress';
 import type { Category, ScanResponse } from '../lib/types';
 
 type Props = {
@@ -12,13 +12,6 @@ type Props = {
   onBack?: () => void;
 };
 
-const blobToDataUrl = (b: Blob) =>
-  new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(b);
-  });
 
 // Phases:
 //   framing   — viewfinder open, waiting for shutter tap

@@ -1,9 +1,8 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { getWorkspaceSetting } from '../lib/settings';
-import { formatRefPrice, type MarketValueRow } from '../lib/market';
+import { formatRefPrice, marketValueSelect } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
-import { PART_PREFIX_RE } from '../lib/part-number';
 import { appendPriceEvent } from '../lib/refPriceEvents';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
@@ -51,66 +50,16 @@ market.get('/', async (c) => {
     )
   `;
 
-  // `internal_sales` aggregates the team's last-30d projected sell prices
-  // from PO order_lines, keyed by canonical part_number (same rule as
-  // lib/part-number.ts). Used by the "Internal sales (last 30d)" row in the
-  // Market Value detail's Price sources panel.
-  const rows = await sql<MarketValueRow[]>`
-    WITH internal_sales AS (
-      SELECT UPPER(REGEXP_REPLACE(
-               REGEXP_REPLACE(COALESCE(l.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
-               '[[:space:]]+', '', 'g'
-             )) AS canon,
-             AVG(l.sell_price)::float AS avg_price,
-             COUNT(*)::int AS samples
-      FROM order_lines l
-      JOIN orders o ON o.id = l.order_id
-      WHERE o.created_at >= NOW() - INTERVAL '30 days'
-        AND l.sell_price IS NOT NULL
-        AND l.part_number IS NOT NULL
-        AND l.part_number <> ''
-      GROUP BY canon
-    )
-    SELECT rp.id, rp.category, rp.brand, rp.capacity, rp.type, rp.classification,
-           rp.rank, rp.speed, rp.interface, rp.form_factor, rp.description,
-           rp.part_number, rp.label, rp.sub_label,
-           rp.target::float AS target, rp.low_price::float AS low_price,
-           rp.high_price::float AS high_price, rp.avg_sell::float AS avg_sell,
-           rp.trend, rp.samples, rp.source, rp.stock, rp.demand, rp.history,
-           rp.updated_at, rp.health::float AS health, rp.rpm,
-           ils.avg_price AS internal_avg,
-           ils.samples   AS internal_samples,
-           rp.last_price::float AS last_price,
-           rp.last_price_at AS last_price_at,
-           rp.last_price_source AS last_price_source,
-           rec.recent AS recent_prices
-    FROM ref_prices rp
-    LEFT JOIN internal_sales ils
-      ON ils.canon = UPPER(REGEXP_REPLACE(
-                       REGEXP_REPLACE(COALESCE(rp.part_number, ''), ${PART_PREFIX_RE}, '', 'i'),
-                       '[[:space:]]+', '', 'g'
-                     ))
-    LEFT JOIN LATERAL (
-      SELECT JSONB_AGG(
-               JSONB_BUILD_OBJECT('ts', e.created_at, 'price', e.price::float)
-               ORDER BY e.created_at
-             ) AS recent
-      FROM (
-        SELECT created_at, price FROM ref_price_events
-        WHERE ref_price_id = rp.id
-        ORDER BY created_at DESC LIMIT 12
-      ) e
-    ) rec ON TRUE
-    WHERE ${where}
-    ORDER BY ${orderBy}, rp.id DESC
-    LIMIT ${PAGE_SIZE} OFFSET ${offset}
-  `;
+  // `internal_sales` (inside marketValueSelect) aggregates the team's last-30d
+  // projected sell prices from PO order_lines, keyed by canonical part_number.
+  // The page query, the `total` count, and the target-margin lookup are
+  // independent, so fire them together.
+  const [rows, [{ total }], TARGET_MARGIN] = await Promise.all([
+    marketValueSelect(sql, where, sql`ORDER BY ${orderBy}, rp.id DESC LIMIT ${PAGE_SIZE} OFFSET ${offset}`),
+    sql<{ total: number }[]>`SELECT COUNT(*)::int AS total FROM ref_prices rp WHERE ${where}`,
+    getWorkspaceSetting(sql, 'target_margin', 0.30),
+  ]);
 
-  const [{ total }] = await sql<{ total: number }[]>`
-    SELECT COUNT(*)::int AS total FROM ref_prices rp WHERE ${where}
-  `;
-
-  const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
   return c.json({
     targetMargin: TARGET_MARGIN,
     total,

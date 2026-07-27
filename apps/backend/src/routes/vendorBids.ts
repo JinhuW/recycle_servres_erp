@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { nextHumanId } from '../lib/id-seq';
 import { writeSellOrderEvent } from '../services/sellOrderAudit';
-import { type SupportedCurrency } from '../lib/fx';
+import { validateSellLines, insertSellOrderLine } from '../services/sellOrderCreate';
+import { convertToUsd, type SupportedCurrency } from '../lib/fx';
 import type { Env, User } from '../types';
 
 const vendorBids = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -238,25 +239,19 @@ vendorBids.post('/:id/promote', async (c) => {
     if (lines.length === 0) { outcome = { code: 400, msg: 'no accepted lines to promote' }; return; }
 
     // accepted_qty was recorded at decide-time. Revalidate the underlying
-    // inventory under a row lock before creating sell-order lines, exactly
-    // like validateSellLines does for a normal sell order — otherwise stock
-    // consumed/closed since decide gets oversold. Manual lines (no
+    // inventory under a row lock before creating sell-order lines via the shared
+    // validateSellLines — same qty/sellability checks as a normal sell order, so
+    // stock consumed/closed since decide can't be oversold. The cross-sell-order
+    // conflict guard is intentionally off (checkExistingSellOrders: false): a bid
+    // may reference inventory already on a sell order. Manual lines (no
     // inventory_id) skip the check.
-    for (const l of lines) {
-      if (!l.inventory_id) continue;
-      const inv = (await tx<{ qty: number; status: string }[]>`
-        SELECT qty, status FROM order_lines WHERE id = ${l.inventory_id} LIMIT 1 FOR UPDATE
-      `)[0];
-      if (!inv) {
-        outcome = { code: 400, msg: `inventory line ${l.inventory_id} not found` }; return;
-      }
-      if (inv.status !== 'Reviewing' && inv.status !== 'Done') {
-        outcome = { code: 400, msg: `inventory line not sellable (status=${inv.status})` }; return;
-      }
-      if (l.accepted_qty > inv.qty) {
-        outcome = { code: 400, msg: `qty ${l.accepted_qty} exceeds inventory available ${inv.qty}` }; return;
-      }
-    }
+    const err = await validateSellLines(
+      tx,
+      lines.map(l => ({ inventoryId: l.inventory_id, qty: l.accepted_qty })),
+      null,
+      { checkExistingSellOrders: false },
+    );
+    if (err) { outcome = { code: 400, msg: err }; return; }
 
     await tx`
       INSERT INTO sell_orders (id, customer_id, status, notes, created_by,
@@ -267,22 +262,22 @@ vendorBids.post('/:id/promote', async (c) => {
     `;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
-      const unitPriceUsd = isNonUsd
-        ? Math.round(l.accepted_unit_price * fxRate * 100) / 100
-        : l.accepted_unit_price;
-      await tx`
-        INSERT INTO sell_order_lines
-          (sell_order_id, inventory_id, category, label, sub_label, part_number,
-           qty, unit_price, warehouse_id, condition, position,
-           source_currency, source_unit_price, source_fx_rate_to_usd)
-        VALUES
-          (${sellId}, ${l.inventory_id}, ${l.category}, ${l.label}, ${l.sub_label},
-           ${l.part_number}, ${l.accepted_qty}, ${unitPriceUsd},
-           NULL, NULL, ${i},
-           ${isNonUsd ? head.currency_code : null},
-           ${isNonUsd ? l.accepted_unit_price : null},
-           ${isNonUsd ? fxRate : null})
-      `;
+      const unitPriceUsd = isNonUsd ? convertToUsd(l.accepted_unit_price, fxRate) : l.accepted_unit_price;
+      await insertSellOrderLine(tx, sellId, {
+        inventoryId: l.inventory_id,
+        category: l.category,
+        label: l.label,
+        subLabel: l.sub_label,
+        partNumber: l.part_number,
+        qty: l.accepted_qty,
+        unitPriceUsd,
+        warehouseId: null,
+        condition: null,
+        position: i,
+        sourceCurrency: isNonUsd ? head.currency_code : null,
+        sourceUnitPrice: isNonUsd ? l.accepted_unit_price : null,
+        sourceFxRate: isNonUsd ? fxRate : null,
+      });
       await tx`UPDATE vendor_bid_lines SET sell_order_id=${sellId} WHERE id=${l.id}`;
     }
     await writeSellOrderEvent(tx, sellId, u.id, 'created', {

@@ -138,6 +138,102 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     expect(String(ws.getRow(2).getCell(chipC).value)).toBe('K4A8G085WC-BCTD');
   });
 
+  it('splits a RAM PO into the full RAM spec columns', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', generation: 'DDR4',
+          type: 'Server', classification: 'RDIMM', rank: '2Rx4', speed: '3200',
+          partNumber: 'M393A4K40DB3-CWE', chipNumber: 'K4A8G085WC-BCTD',
+          serialNumber: 'SN-001, SN-002',
+          condition: 'Pulled — Tested', qty: 4, unitCost: 60,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Line items')!;
+    const headers = ws.getRow(1).values as unknown[];
+
+    // Every RAM spec is its own column.
+    for (const h of [
+      'Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class',
+      'Rank', 'Speed', 'Condition', 'Serial #', 'Qty', 'Unit cost',
+    ]) {
+      expect(headers, `missing column ${h}`).toContain(h);
+    }
+    // No composed label column — the attributes above replaced it outright.
+    expect(headers).not.toContain('Item');
+    // SSD/HDD-only columns must not leak onto a RAM sheet.
+    for (const h of ['Interface', 'Form factor', 'Health %', 'RPM']) {
+      expect(headers).not.toContain(h);
+    }
+
+    const row = ws.getRow(2);
+    const cell = (name: string) => String(row.getCell(headers.indexOf(name)).value ?? '');
+    expect(cell('Brand')).toBe('Samsung');
+    expect(cell('Capacity')).toBe('32GB');
+    expect(cell('Gen')).toBe('DDR4');
+    expect(cell('Type')).toBe('Server');
+    expect(cell('Class')).toBe('RDIMM');
+    expect(cell('Rank')).toBe('2Rx4');
+    expect(cell('Speed')).toBe('3200');
+    expect(cell('Chip #')).toBe('K4A8G085WC-BCTD');
+    expect(cell('Serial #')).toBe('SN-001, SN-002');
+    expect(cell('Condition')).toBe('Pulled — Tested');
+  });
+
+  it("uses the SSD spec columns for an SSD PO", async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'SSD',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'SSD', brand: 'Intel', capacity: '1.92TB', interface: 'SATA',
+          formFactor: '2.5"', health: 97, partNumber: 'SSDSC2KB019T8',
+          condition: 'Pulled — Tested', qty: 3, unitCost: 85,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Line items')!;
+    const headers = ws.getRow(1).values as unknown[];
+
+    for (const h of ['Interface', 'Form factor', 'Health %']) {
+      expect(headers, `missing column ${h}`).toContain(h);
+    }
+    for (const h of ['Chip #', 'Rank', 'Gen', 'RPM']) {
+      expect(headers).not.toContain(h);
+    }
+
+    const row = ws.getRow(2);
+    const cell = (name: string) => row.getCell(headers.indexOf(name)).value;
+    expect(String(cell('Interface'))).toBe('SATA');
+    expect(String(cell('Form factor'))).toBe('2.5"');
+    expect(Number(cell('Health %'))).toBe(97);
+  });
+
   it('lets a purchaser download their OWN PO', async () => {
     const { token } = await loginAs(MARCUS);
     const ids = await listOrderIds(token); // purchaser list is already own-scoped

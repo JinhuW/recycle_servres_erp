@@ -23,14 +23,22 @@ const KNOWN_SETTINGS: Record<string, (v: unknown) => boolean> = {
   category_default_margin: v => typeof v === 'number' && Number.isFinite(v) && v >= 0,
 };
 
+// Most settings expose internal pricing/margin/upload config and stay
+// manager-only. These few are display thresholds the purchaser SPA reads at
+// boot (lib/workspace.ts) — blanket-403ing them didn't hide anything sensitive,
+// it just silently pinned purchasers to the SPA's hardcoded fallbacks while
+// managers saw the configured values. Add a key here only if a non-manager
+// screen actually renders it.
+const PURCHASER_VISIBLE_SETTINGS = new Set(['low_health_pct']);
+
 workspace.get('/', async (c) => {
-  // Workspace settings expose internal pricing/margin config — manager-only,
-  // matching the PATCH guard below.
-  if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
   const sql = getDb(c.env);
   const rows = await sql<{ key: string; value: unknown }[]>`SELECT key, value FROM workspace_settings`;
+  const isManager = c.var.user.role === 'manager';
   const settings: Record<string, unknown> = {};
-  for (const r of rows) settings[r.key] = r.value;
+  for (const r of rows) {
+    if (isManager || PURCHASER_VISIBLE_SETTINGS.has(r.key)) settings[r.key] = r.value;
+  }
   return c.json({ settings });
 });
 
