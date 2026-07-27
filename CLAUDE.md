@@ -55,12 +55,25 @@ switches the branch out from under the first.
   branch workflow.  Claude Code's own `worktree.baseRef` setting can't express
   this (it only offers `origin/<default-branch>`, i.e. `main`, or local HEAD),
   which is why creation is scripted rather than left to `EnterWorktree`.
-- Worktrees cost ~290 MB each (mostly `node_modules`; pnpm hardlinks from the
-  store, so creation is only a few seconds).  Reclaim them with
-  `scripts/new-session.sh --prune`; `--list` shows the state of each one
-  without touching anything.  Prune keeps — never removes — a worktree that
-  has uncommitted changes, is on a detached HEAD, or that you are currently
-  standing in.
+- **Worktrees are recycled, not accumulated.**  Starting a session reuses an
+  idle slot (resetting it onto a fresh branch, keeping its `node_modules` so
+  startup stays a few seconds) and sweeps any other idle slots, so abandoned
+  sessions cannot pile up at ~290 MB each.  `--fresh` forces a new one.
+- A slot counts as idle only if it is clean, on a branch, holds nothing that is
+  not already in `origin/dev`, **and** carries a lock file from a session that
+  has since exited.  Locks live in `.claude/worktrees/.locks/` (outside the
+  checkouts, so they don't show up as untracked files): the launcher records the
+  PID that `exec claude` inherits, and the `--print-only` path records a
+  timestamp that expires after 8h.  A worktree with **no** lock is never touched
+  automatically — it predates the mechanism or was made by hand, so whether
+  someone is sitting in it is unknowable.
+- `scripts/new-session.sh --prune` reclaims idle slots on demand and `--list`
+  shows each one's state without touching anything.  Prune keeps — never
+  removes — a worktree that has uncommitted changes, is on a detached HEAD, is
+  held by a live session, or that you are currently standing in.  It *will*
+  remove a clean, fully-merged, unlocked worktree, so a session that was
+  created outside the launcher should be given a lock file if you want it
+  protected.
 - **Prune compares file content, not commit ancestry.**  PRs land on `dev` as
   squash commits, so a session branch's own commits are never ancestors of
   `origin/dev`; an ancestry test (`git log origin/dev..HEAD`) would report
