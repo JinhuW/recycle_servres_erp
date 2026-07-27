@@ -20,7 +20,11 @@
 #   2. `git worktree add -b <branch> .claude/worktrees/<slug> <base>`.
 #   3. Copy the gitignored local files a worktree needs to run (.env).
 #   4. `pnpm install` inside it (hardlinks from the pnpm store, so it is cheap).
-#   5. cd there and exec `claude`.
+#   5. cd there and exec `claude --dangerously-skip-permissions`.
+#
+# Launched sessions run with permission prompts OFF. The worktree isolates the
+# branch, not the machine: bypass mode still permits any shell command, any file
+# outside the worktree, and pushes to any remote.
 #
 # Every session branches from origin/dev — never main — per the repo workflow.
 # Worktrees live under .claude/worktrees/ and are gitignored.
@@ -250,6 +254,10 @@ case "$MODE" in
     target="$(create_session)"
     log "session branch ready — launching claude in $target"
     cd "$target"
-    exec claude ${CLAUDE_ARGS+"${CLAUDE_ARGS[@]}"}
+    # Sessions launched this way run with permission prompts off. The worktree
+    # isolates the BRANCH, not the machine — bypass mode still allows any shell
+    # command, any file outside this directory, and pushes to any remote. Drop
+    # --dangerously-skip-permissions here if you want prompts back.
+    exec claude --dangerously-skip-permissions ${CLAUDE_ARGS+"${CLAUDE_ARGS[@]}"}
     ;;
 esac
