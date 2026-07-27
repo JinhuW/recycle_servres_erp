@@ -1,9 +1,17 @@
 # Postgres → Cloudflare R2 backups (Railway deployment)
 
-> **Status: documented, not yet provisioned.** This note + the committed files
-> (`infra/terraform/environments/experiment-backups/`, `deploy/railway-backup/`)
-> are a ready-to-apply procedure. Nothing has been `terraform apply`'d or
-> deployed to Railway yet.
+> **Status: superseded — kept for the Terraform half only.** Backups DO run
+> today, but not via the procedure below. The live implementation is the
+> `pg-r2-backup` Railway cron service built from [`backup/`](../backup/) (see
+> [`backup/README.md`](../backup/README.md)): `pg_dump --format=custom` →
+> integrity-check → `rclone copy` → prune to the newest 30, landing in
+> `recycle-db-backup/railway-erp/`. The `deploy/railway-backup/` files this note
+> used to reference were the unadopted first draft and have been deleted.
+>
+> What is still accurate here: the Terraform in
+> `infra/terraform/environments/experiment-backups/` and the rationale for a
+> dedicated bucket + bucket-scoped token. Note that it provisions
+> `recycle-erp-backups`, which is NOT the bucket the live job writes to.
 >
 > This started on the experimental Railway + Cloudflare deployment (see
 > [deployment-railway-cloudflare.md](./deployment-railway-cloudflare.md)) but is
@@ -40,8 +48,9 @@ attachments or the Terraform-state bucket, and vice versa.
 |------|---------|
 | `infra/terraform/environments/experiment-backups/main.tf` | R2 bucket + 30-day lifecycle + bucket-scoped R2 token + outputs |
 | `infra/terraform/environments/experiment-backups/backend.tf` | Terraform state in the `recycle-erp-tfstate` R2 bucket (key `experiment-backups/`) |
-| `deploy/railway-backup/Dockerfile` | `postgres:18-alpine` + `rclone` |
-| `deploy/railway-backup/backup.sh` | the dump→gzip→R2 stream |
+| `backup/Dockerfile` | `postgres:18` + `rclone` (the image that actually ships) |
+| `backup/backup.sh` | dump → integrity-check → upload → prune |
+| `backup/railway.toml` | build + cron config for the `pg-r2-backup` service |
 
 ## Provisioning steps (when ready)
 

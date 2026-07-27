@@ -1435,27 +1435,6 @@ html.desktop, body.desktop, .desktop #root {
   border-radius: 4px;
 }
 .pw-toggle:hover { color: var(--fg); background: var(--bg-soft); }
-.pw-meter { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
-.pw-meter-track {
-  display: flex;
-  gap: 3px;
-  flex: 1;
-}
-.pw-meter-seg {
-  flex: 1;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border);
-  transition: background 0.18s;
-}
-.pw-meter-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  min-width: 70px;
-  text-align: right;
-}
 
 .session-row {
   display: flex;

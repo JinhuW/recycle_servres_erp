@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { Sidebar, type DesktopView } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -94,11 +94,14 @@ export function DesktopApp() {
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
-  const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
+  // Stable identity: children put this in effect dep arrays (DesktopTransfers
+  // keys its reload on it). A fresh function each render makes any such effect
+  // re-run on every toast — and an error toast raised BY that effect then loops.
+  const showToast = useCallback((msg: string, kind: Toast['kind'] = 'success') => {
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2600);
-  };
+  }, []);
 
   // Register the global toast hook so `handleFetchError` / `showErrorToast` in
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
