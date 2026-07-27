@@ -34,11 +34,18 @@ switches the branch out from under the first.
   `origin/dev`, creates a worktree under `.claude/worktrees/`, copies `.env`,
   runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
   `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
-- Sessions launched that way run with `--dangerously-skip-permissions`, i.e.
-  **no permission prompts**.  The worktree isolates the *branch*, not the
-  machine: bypass mode still permits any shell command, any file outside the
-  worktree, and pushes to any remote.  Remove the flag from the `exec claude`
-  line in `scripts/new-session.sh` to get prompts back.
+- **Every session in this repo runs with permission prompts off.**
+  `.claude/settings.json` sets `permissions.defaultMode: "bypassPermissions"`,
+  which covers all entry points; `scripts/new-session.sh` also passes
+  `--dangerously-skip-permissions` when it launches `claude` itself.  The CLI
+  flag alone was not enough: it only applies when the launcher execs `claude`,
+  so a session that started in the main checkout and moved in via
+  `EnterWorktree` kept normal prompts (permission mode is fixed at launch and
+  `EnterWorktree` only changes the working directory).
+- The worktree isolates the *branch*, not the machine: bypass mode still permits
+  any shell command, any file outside the worktree, and pushes to any remote.
+  To get prompts back, drop `defaultMode` from `.claude/settings.json` (or
+  override it in the gitignored `.claude/settings.local.json`).
 - **If a session starts in the main checkout anyway**, the `SessionStart` hook
   in `.claude/settings.json` (`scripts/claude-session-hook.sh`) says so.  The
   agent should then run `scripts/new-session.sh --print-only` and call
