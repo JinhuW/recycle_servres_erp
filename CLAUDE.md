@@ -34,6 +34,11 @@ switches the branch out from under the first.
   `origin/dev`, creates a worktree under `.claude/worktrees/`, copies `.env`,
   runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
   `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
+- Sessions launched that way run with `--dangerously-skip-permissions`, i.e.
+  **no permission prompts**.  The worktree isolates the *branch*, not the
+  machine: bypass mode still permits any shell command, any file outside the
+  worktree, and pushes to any remote.  Remove the flag from the `exec claude`
+  line in `scripts/new-session.sh` to get prompts back.
 - **If a session starts in the main checkout anyway**, the `SessionStart` hook
   in `.claude/settings.json` (`scripts/claude-session-hook.sh`) says so.  The
   agent should then run `scripts/new-session.sh --print-only` and call
