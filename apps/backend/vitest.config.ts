@@ -12,10 +12,11 @@ export default defineConfig({
     // Test files run in PARALLEL, each fork against its own private database
     // (see global-setup.ts + db.ts → ensureWorkerDb). Cap the fork count so the
     // suite can't exhaust Postgres' connection limit — a handful of connections
-    // per worker, 12 workers by default. Override with VITEST_MAX_FORKS.
-    poolOptions: {
-      forks: { maxForks: Number(process.env.VITEST_MAX_FORKS) || 8, minForks: 1 },
-    },
+    // per worker, 8 workers by default. Override with VITEST_MAX_FORKS.
+    // These are top-level options: Vitest 4 removed `poolOptions`, so nesting
+    // them there silently drops the cap and lets the pool scale to CPU count.
+    maxWorkers: Number(process.env.VITEST_MAX_FORKS) || 8,
+    minWorkers: 1,
     testTimeout: 15_000,
     hookTimeout: 30_000,
   },

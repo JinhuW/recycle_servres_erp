@@ -81,19 +81,25 @@ describe('Tier 1 #2 — Done→Done is idempotent', () => {
   });
 });
 
-describe('Tier 1 #4 — order_lines committed to an open sell order are locked', () => {
+describe('Tier 1 #4 — order_lines committed to a sell order are locked', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('rejects qty and status edits on a line referenced by a non-Done sell order', async () => {
+  it('rejects qty and status edits once the sell order leaves Draft', async () => {
     const { token } = await loginAs(ALEX);
     const line = await sellableLine(token, 2);
     const customerId = await firstCustomerId(token);
 
-    await api('POST', '/api/sell-orders', {
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
       token,
       body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x',
         partNumber: 'pn', qty: 1, unitPrice: line.price }] },
     });
+
+    // A Draft is only a proposal — it must not freeze the line.
+    const draftEdit = await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: line.qty } });
+    expect(draftEdit.status).toBe(200);
+
+    await api('POST', `/api/sell-orders/${create.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
 
     const qtyEdit = await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: 1 } });
     expect(qtyEdit.status).toBe(409);
@@ -115,9 +121,32 @@ describe('Tier 1 #4 — order_lines committed to an open sell order are locked',
     expect(r.status).toBe(200);
     expect(await lineQty(token, line.id)).toBe(line.qty - 1);
   });
+
+  it('closing the sell order releases the line for editing again', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await sellableLine(token, 2);
+    const customerId = await firstCustomerId(token);
+
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x',
+        partNumber: 'pn', qty: 1, unitPrice: line.price }] },
+    });
+    await api('POST', `/api/sell-orders/${create.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
+    expect((await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: 1 } })).status).toBe(409);
+
+    await api('POST', `/api/sell-orders/${create.body.id}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'lost_deal', note: 'c' },
+    });
+
+    // Closed released the commitment — the line must not stay frozen forever.
+    const r = await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: 1 } });
+    expect(r.status).toBe(200);
+    expect(await lineQty(token, line.id)).toBe(1);
+  });
 });
 
-describe('Tier 1 #1 — one active sell order per inventory line (oversell guard)', () => {
+describe('Tier 1 #1 — one committed sell order per inventory line (oversell guard)', () => {
   beforeEach(async () => { await resetDb(); });
 
   async function newSellOrder(token: string, lineId: string, price: number, qty = 1) {
@@ -129,20 +158,83 @@ describe('Tier 1 #1 — one active sell order per inventory line (oversell guard
     });
   }
 
-  it('POST rejects a line already on another open sell order', async () => {
+  it('allows rival drafts on one line but blocks the second promotion', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await sellableLine(token, 2);
+
+    // Drafts are proposals — two may name the same line.
+    const first = await newSellOrder(token, line.id, line.price);
+    expect(first.status).toBe(201);
+    const second = await newSellOrder(token, line.id, line.price);
+    expect(second.status).toBe(201);
+
+    // The first to leave Draft claims the line.
+    const promoteFirst = await api('POST', `/api/sell-orders/${first.body.id}/status`, {
+      token, body: { to: 'Shipped', note: 's' },
+    });
+    expect(promoteFirst.status).toBe(200);
+
+    const promoteSecond = await api('POST', `/api/sell-orders/${second.body.id}/status`, {
+      token, body: { to: 'Shipped', note: 's' },
+    });
+    expect(promoteSecond.status).toBe(409);
+    // The message names the product and the order that won — not a raw
+    // inventory UUID — so the user can act on it.
+    const msg = (promoteSecond.body as { error?: string }).error ?? JSON.stringify(promoteSecond.body);
+    expect(msg).toContain('x (pn) is already on sell order');
+    expect(msg).toContain(first.body.id);
+  });
+
+  it('POST rejects a line already committed to another sell order', async () => {
     const { token } = await loginAs(ALEX);
     const line = await sellableLine(token, 2);
 
     const first = await newSellOrder(token, line.id, line.price);
-    expect(first.status).toBe(201);
+    await api('POST', `/api/sell-orders/${first.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
 
     const second = await newSellOrder(token, line.id, line.price);
     expect(second.status).toBe(400);
-    // The message names the product and the order it's already on — not a raw
-    // inventory UUID — so the user can act on it.
-    const msg = (second.body as { error?: string }).error ?? JSON.stringify(second.body);
-    expect(msg).toContain('x (pn) is already on sell order');
-    expect(msg).toContain(first.body.id);
+    expect(JSON.stringify(second.body)).toContain(first.body.id);
+  });
+
+  it('losing the race still leaves the draft closable, and reopening re-checks', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await sellableLine(token, 2);
+    const winner = await newSellOrder(token, line.id, line.price);
+    const loser = await newSellOrder(token, line.id, line.price);
+    await api('POST', `/api/sell-orders/${winner.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
+
+    // Closing claims nothing, so it must stay available to the loser.
+    const close = await api('POST', `/api/sell-orders/${loser.body.id}/status`, {
+      token, body: { to: 'Closed', closeReasonId: 'lost_deal', note: 'lost' },
+    });
+    expect(close.status).toBe(200);
+
+    // Reopen is free (Draft claims nothing) but re-promotion is not.
+    const reopen = await api('POST', `/api/sell-orders/${loser.body.id}/status`, {
+      token, body: { to: 'Draft', note: 'retry' },
+    });
+    expect(reopen.status).toBe(200);
+    const repromote = await api('POST', `/api/sell-orders/${loser.body.id}/status`, {
+      token, body: { to: 'Shipped', note: 's' },
+    });
+    expect(repromote.status).toBe(409);
+  });
+
+  it('re-checks qty at promotion when stock moved since the draft was written', async () => {
+    const { token } = await loginAs(ALEX);
+    const line = await sellableLine(token, 3);
+    const so = await newSellOrder(token, line.id, line.price, 3);
+    expect(so.status).toBe(201);
+
+    // Draft doesn't freeze the line, so stock can legitimately shrink under it.
+    expect((await api('PATCH', `/api/inventory/${line.id}`, { token, body: { qty: 1 } })).status).toBe(200);
+
+    const promote = await api('POST', `/api/sell-orders/${so.body.id}/status`, {
+      token, body: { to: 'Shipped', note: 's' },
+    });
+    expect(promote.status).toBe(409);
+    expect(JSON.stringify(promote.body)).toMatch(/qty/i);
   });
 
   it('PATCH may keep its own already-committed line (self excluded)', async () => {

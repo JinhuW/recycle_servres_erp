@@ -201,7 +201,12 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     } else {
       for (const k of legacyKeysToClear) window.localStorage.removeItem(k);
     }
-  }, [user]);
+    // Keyed on identity, not the object: `user.preferences` is only refreshed at
+    // sign-in (flush() updates local prefs, never AuthProvider), so re-running
+    // this for a same-user object churn — setLang does `setUser({...user})` —
+    // would reset every preference saved since login back to that snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const flush = useCallback(async () => {
     timerRef.current = null;
