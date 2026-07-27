@@ -9,9 +9,11 @@ import {
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
-import { getWorkspaceSetting, getUploadLimits } from '../lib/settings';
-import { buildPoInvoicePdf, pdfResponse, loadInvoiceLogo } from '../lib/pdf';
+import { getUploadLimits } from '../lib/settings';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
+import {
+  SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, type ExportCategory,
+} from '../lib/categoryColumns';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
@@ -353,9 +355,6 @@ orders.get('/:id/events', async (c) => {
   });
 });
 
-// ── PO document (PDF). Same access rules as GET /:id: owner + manager. Builds
-// a printable purchase-order document — header, warehouse address, line items
-// with costs, and a payment summary. Registered before any broader route.
 const LIFECYCLE_LABEL: Record<string, string> = {
   draft: 'Draft', in_transit: 'In Transit', reviewing: 'Reviewing', done: 'Done',
 };
@@ -373,95 +372,29 @@ function poLineLabel(l: Record<string, unknown>): string {
 const fmtTs = (v: unknown): string =>
   v ? new Date(v as string).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
 
-orders.get('/:id/invoice', async (c) => {
-  const u = c.var.user;
-  const id = c.req.param('id');
-  const sql = getDb(c.env);
-
-  const order = (await sql`
-    SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
-           o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
-           u.name AS user_name,
-           w.name AS warehouse_name, w.region AS warehouse_region, w.address AS warehouse_address
-    FROM orders o
-    JOIN users u ON u.id = o.user_id
-    LEFT JOIN warehouses w ON w.id = o.warehouse_id
-    WHERE o.id = ${id}
-    LIMIT 1
-  `)[0] as Record<string, unknown> | undefined;
-  if (!order) return c.json({ error: 'Not found' }, 404);
-  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
-
-  const [lines, company, companyDomain] = await Promise.all([
-    sql`
-      SELECT category, brand, capacity, generation, type, classification, rank, speed,
-             interface, form_factor, description, part_number, condition, qty,
-             unit_cost::float AS unit_cost
-      FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
-    ` as unknown as Promise<Record<string, unknown>[]>,
-    getWorkspaceSetting<string>(sql, 'workspace_name', 'Recycle Servers'),
-    getWorkspaceSetting<string>(sql, 'domain', ''),
-  ]);
-
-  // Payment summary. Subtotal is the sum of line costs; the order may carry a
-  // manual total_cost override (e.g. a negotiated lot price) — surface both when
-  // they differ. Commission is a manager-set rate on the PO; the dollar amount
-  // depends on realized profit (sell side), which this document doesn't carry,
-  // so we show the rate only.
-  const subtotal = lines.reduce((s, l) => s + Number(l.qty ?? 0) * Number(l.unit_cost ?? 0), 0);
-  const totalQty = lines.reduce((s, l) => s + Number(l.qty ?? 0), 0);
-  const totalCost = order.total_cost != null ? Number(order.total_cost) : subtotal;
-  const commissionRate = order.commission_rate != null ? Number(order.commission_rate) : null;
-
-  const buf = await buildPoInvoicePdf({
-    company,
-    companyDomain,
-    poId: String(order.id),
-    date: fmtTs(order.created_at).slice(0, 10),
-    status: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle),
-    buyer: String(order.user_name ?? ''),
-    category: String(order.category ?? ''),
-    notes: String(order.notes ?? ''),
-    warehouseName: String(order.warehouse_name ?? ''),
-    warehouseAddress: String(order.warehouse_address ?? ''),
-    warehouseRegion: String(order.warehouse_region ?? ''),
-    lines: lines.map((l) => ({
-      label: poLineLabel(l),
-      partNumber: String(l.part_number ?? ''),
-      condition: String(l.condition ?? ''),
-      qty: Number(l.qty ?? 0),
-      unitCost: Number(l.unit_cost ?? 0),
-    })),
-    payment: {
-      method: order.payment === 'self' ? 'Self pay' : 'Company pay',
-      totalQty,
-      subtotal,
-      totalCost,
-      commissionRate,
-      commissionAmount: null,
-    },
-    logoPng: loadInvoiceLogo(),
-    generatedAt: fmtTs(new Date().toISOString()),
-  });
-
-  return pdfResponse(buf, `${order.id}.pdf`);
-});
-
-// ── PO spreadsheet (XLSX). Same access rules and payment summary as the PDF
-// invoice, but as a workbook: a Payment tab with the header/payment fields and a
-// Line items tab with the costed lines. Reuses the shared exceljs builder.
-const PO_LINE_COLS: XlsxColumn[] = [
-  { header: 'Item',       key: 'item',      width: 34 },
-  { header: 'Part #',     key: 'part',      width: 18 },
-  { header: 'Chip #',     key: 'chip',      width: 18 },
-  { header: 'Category',   key: 'category',  width: 10 },
-  { header: 'Condition',  key: 'condition', width: 12 },
+// ── PO spreadsheet (XLSX). Same access rules as GET /:id: owner + manager.
+// A Payment tab with the header/payment fields, and a Line items tab with the
+// costed lines. Reuses the shared exceljs builder.
+//
+// The line columns are the order category's full spec set — the same table the
+// inventory export renders — so a RAM PO carries rank/gen/speed/chip # in their
+// own sortable columns rather than collapsed into the composed `Item` string.
+// An order is single-category (enforced on create), so one column set covers
+// the whole sheet. `Other` drops `Item`: its Description column is that string.
+const PO_LINE_TAIL_COLS: XlsxColumn[] = [
+  { header: 'Serial #',   key: 'serial',    width: 24 },
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
   { header: 'Unit cost',  key: 'unitCost',  width: 12, numFmt: '#,##0.00' },
   { header: 'Line total', key: 'lineTotal', width: 13, numFmt: '#,##0.00' },
   { header: 'Sell price', key: 'sellPrice', width: 12, numFmt: '#,##0.00' },
   { header: 'Sell total', key: 'sellTotal', width: 13, numFmt: '#,##0.00' },
   { header: 'Profit',     key: 'profit',    width: 12, numFmt: '#,##0.00' },
+];
+
+const poLineCols = (cat: ExportCategory): XlsxColumn[] => [
+  ...(cat === 'Other' ? [] : [{ header: 'Item', key: 'item', width: 34 }]),
+  ...SPEC_COLS_BY_CATEGORY[cat],
+  ...PO_LINE_TAIL_COLS,
 ];
 
 const PO_PAYMENT_COLS: XlsxColumn[] = [
@@ -490,7 +423,8 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const lines = await sql`
     SELECT category, brand, capacity, generation, type, classification, rank, speed,
-           interface, form_factor, description, part_number, chip_number, condition, qty,
+           interface, form_factor, description, part_number, chip_number, serial_number,
+           condition, qty, health::float AS health, rpm,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
   ` as unknown as Record<string, unknown>[];
@@ -505,11 +439,9 @@ orders.get('/:id/spreadsheet', async (c) => {
     const unitCost = Number(l.unit_cost ?? 0);
     const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
+      ...lineSpecFields(l),
       item: poLineLabel(l),
-      part: String(l.part_number ?? ''),
-      chip: String(l.chip_number ?? ''),
-      category: String(l.category ?? ''),
-      condition: String(l.condition ?? ''),
+      serial: String(l.serial_number ?? ''),
       qty,
       unitCost,
       lineTotal: +(qty * unitCost).toFixed(2),
@@ -553,7 +485,7 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const buf = await buildXlsxWorkbook([
     { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows },
-    { name: 'Line items', columns: PO_LINE_COLS, rows: lineRows },
+    { name: 'Line items', columns: poLineCols(exportCategory(order.category)), rows: lineRows },
   ]);
   return xlsxResponse(buf, `${order.id}.xlsx`);
 });

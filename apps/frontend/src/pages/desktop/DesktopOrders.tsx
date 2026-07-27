@@ -545,16 +545,6 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                         <div style={{ display: 'inline-flex', gap: 4 }}>
                           <button
                             className="btn icon sm"
-                            title={t('downloadPo')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              api.download(`/api/orders/${o.id}/invoice`, `${o.id}.pdf`).catch(handleFetchError);
-                            }}
-                          >
-                            <Icon name="download" size={12} />
-                          </button>
-                          <button
-                            className="btn icon sm"
                             title={t('downloadPoXlsx')}
                             onClick={(e) => {
                               e.stopPropagation();

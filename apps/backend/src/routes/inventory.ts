@@ -5,6 +5,10 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
+import {
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields,
+  type ExportCategory,
+} from '../lib/categoryColumns';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -144,8 +148,6 @@ inventory.get('/', async (c) => {
 // category's granular spec columns — same format as the sell-order download
 // (user-confirmed 2026-07-23; never re-merge specs into one composed field).
 // Registered before '/:id' so the literal path wins over the param route.
-const INV_CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
-
 const INV_EXPORT_HEAD: XlsxColumn[] = [
   { header: 'ID',           key: 'id',        width: 12 },
   { header: 'Date',         key: 'date',      width: 12 },
@@ -165,10 +167,10 @@ const INV_EXPORT_TAIL: XlsxColumn[] = [
   { header: 'Image URL',    key: 'imageUrl',  width: 52 },
 ];
 
-const invExportCols = (cat: (typeof INV_CATEGORY_ORDER)[number]): XlsxColumn[] => [
+const invExportCols = (cat: ExportCategory): XlsxColumn[] => [
   ...INV_EXPORT_HEAD,
   ...(cat === 'Other' ? [] : [INV_ITEM_COL]),
-  ...GROUPED_LEAD_BY_CATEGORY[cat],
+  ...SPEC_COLS_BY_CATEGORY[cat],
   ...INV_EXPORT_TAIL,
 ];
 
@@ -206,61 +208,20 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Submitted by', key: 'submitter',  width: 22 },
 ];
 
-const GROUPED_LEAD_BY_CATEGORY: Record<string, XlsxColumn[]> = {
-  RAM: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Chip #',      key: 'chip',           width: 22 },
-    { header: 'Brand',       key: 'brand',          width: 14 },
-    { header: 'Capacity',    key: 'capacity',       width: 10 },
-    { header: 'Gen',         key: 'generation',     width: 8 },
-    { header: 'Type',        key: 'type',           width: 10 },
-    { header: 'Class',       key: 'classification', width: 10 },
-    { header: 'Rank',        key: 'rank',           width: 8 },
-    { header: 'Speed',       key: 'speed',          width: 10 },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-  SSD: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Brand',       key: 'brand',          width: 14 },
-    { header: 'Capacity',    key: 'capacity',       width: 10 },
-    { header: 'Interface',   key: 'interface',      width: 12 },
-    { header: 'Form factor', key: 'formFactor',     width: 12 },
-    { header: 'Health %',    key: 'health',         width: 10, numFmt: '#,##0' },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-  HDD: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Brand',       key: 'brand',          width: 14 },
-    { header: 'Capacity',    key: 'capacity',       width: 10 },
-    { header: 'Interface',   key: 'interface',      width: 12 },
-    { header: 'Form factor', key: 'formFactor',     width: 12 },
-    { header: 'RPM',         key: 'rpm',            width: 8,  numFmt: '#,##0' },
-    { header: 'Health %',    key: 'health',         width: 10, numFmt: '#,##0' },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-  Other: [
-    { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Description', key: 'description',    width: 30 },
-    { header: 'Condition',   key: 'condition',      width: 12 },
-  ],
-};
-
 // One plain worksheet per category present, fixed order, unknown categories
 // folded into Other (same recipe as the sell-order download). An empty result
 // still needs a valid file — fall back to a single header-only sheet.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
-  colsFor: (cat: (typeof INV_CATEGORY_ORDER)[number]) => XlsxColumn[],
+  colsFor: (cat: ExportCategory) => XlsxColumn[],
 ): Promise<Buffer> {
   const byCategory = new Map<string, Record<string, unknown>[]>();
   for (const r of rows) {
-    const cat = (INV_CATEGORY_ORDER as readonly string[]).includes(String(r.category))
-      ? String(r.category)
-      : 'Other';
+    const cat = exportCategory(r.category);
     if (!byCategory.has(cat)) byCategory.set(cat, []);
     byCategory.get(cat)!.push(r);
   }
-  const sheets = INV_CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
+  const sheets = CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
     name: cat as string,
     columns: colsFor(cat),
     rows: byCategory.get(cat)!,
@@ -296,7 +257,7 @@ inventory.get('/export', async (c) => {
     // like 'constructor' must miss rather than hit a prototype key. Only the
     // filename cares — the tab split derives from the rows themselves.
     const category = c.req.query('category');
-    const knownCategory = !!category && Object.hasOwn(GROUPED_LEAD_BY_CATEGORY, category);
+    const knownCategory = !!category && Object.hasOwn(SPEC_COLS_BY_CATEGORY, category);
     const canonCol = canonPartCol(sql, sql`l.part_number`);
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
@@ -353,29 +314,17 @@ inventory.get('/export', async (c) => {
         if (repPn === null && l.part_number) repPn = String(l.part_number);
         if (repChip === null && l.chip_number) repChip = String(l.chip_number);
       }
-      // Attribute keys are emitted unconditionally — exceljs only renders the
-      // keys declared in the selected column set, so the mapper stays
-      // branch-free. Lines in a group share attributes by construction (same
-      // canonical part number), so the head is representative. Numeric attrs
-      // emit null when absent so the cell stays blank instead of showing 0.
+      // Lines in a group share their attributes by construction (same canonical
+      // part number), so the head row is representative — except for part/chip,
+      // where the head may be the row that left them blank, and condition,
+      // which legitimately varies across lots in one group.
       return {
+        ...lineSpecFields(head),
         part: repPn ?? '',
         chip: repChip ?? '',
+        condition: [...conds].join(', '),
         category: head.category ?? '',
         item: invLabel(head),
-        brand: head.brand ?? '',
-        capacity: head.capacity ?? '',
-        generation: head.generation ?? '',
-        type: head.type ?? '',
-        classification: head.classification ?? '',
-        rank: head.rank ?? '',
-        speed: head.speed ?? '',
-        interface: head.interface ?? '',
-        formFactor: head.form_factor ?? '',
-        rpm: head.rpm ?? null,
-        health: head.health ?? null,
-        description: head.description ?? '',
-        condition: [...conds].join(', '),
         warehouses: [...whs].join(', '),
         qty,
         inStock,
@@ -392,7 +341,7 @@ inventory.get('/export', async (c) => {
     });
 
     const buf = await buildCategoryTabs(grouped, (cat) => [
-      ...GROUPED_LEAD_BY_CATEGORY[cat],
+      ...SPEC_COLS_BY_CATEGORY[cat],
       ...GROUPED_TAIL_COLS,
     ]);
     return xlsxResponse(
@@ -425,8 +374,6 @@ inventory.get('/export', async (c) => {
     ORDER BY l.created_at DESC
   `;
 
-  // Granular attribute keys are emitted unconditionally — each tab's column
-  // set picks the ones it declares, so the mapper stays branch-free.
   const data = (rows as Record<string, unknown>[]).map((r) => {
     const unitCost = Number(r.unit_cost ?? 0);
     const sellPrice = r.sell_price == null ? null : Number(r.sell_price);
@@ -434,26 +381,12 @@ inventory.get('/export', async (c) => {
     const profit = sellPrice == null ? null : (sellPrice - unitCost) * qty;
     const margin = sellPrice != null && sellPrice > 0 ? ((sellPrice - unitCost) / sellPrice) * 100 : null;
     return {
+      ...lineSpecFields(r),
       id: String(r.id).slice(0, 8),
       date: r.created_at ? new Date(r.created_at as string).toISOString().slice(0, 10) : '',
       category: r.category ?? '',
       item: invLabel(r),
-      brand: r.brand ?? '',
-      capacity: r.capacity ?? '',
-      generation: r.generation ?? '',
-      type: r.type ?? '',
-      classification: r.classification ?? '',
-      rank: r.rank ?? '',
-      speed: r.speed ?? '',
-      interface: r.interface ?? '',
-      formFactor: r.form_factor ?? '',
-      health: r.health ?? null,
-      rpm: r.rpm ?? null,
-      description: r.description ?? '',
-      part: r.part_number ?? '',
-      chip: r.chip_number ?? '',
       warehouse: r.warehouse_short ?? '',
-      condition: r.condition ?? '',
       qty,
       unitCost,
       sellPrice,
