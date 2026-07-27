@@ -359,16 +359,6 @@ const LIFECYCLE_LABEL: Record<string, string> = {
   draft: 'Draft', in_transit: 'In Transit', reviewing: 'Reviewing', done: 'Done',
 };
 
-function poLineLabel(l: Record<string, unknown>): string {
-  const s = (v: unknown) => (v == null ? '' : String(v));
-  switch (l.category) {
-    case 'RAM': return [s(l.brand), s(l.capacity), s(l.generation), l.speed ? `${l.speed}MHz` : '', s(l.rank)].filter(Boolean).join(' ');
-    case 'SSD': return [s(l.brand), s(l.capacity), s(l.interface), s(l.form_factor)].filter(Boolean).join(' ');
-    case 'HDD': return [s(l.brand), s(l.capacity), l.rpm ? `${l.rpm}rpm` : '', s(l.interface)].filter(Boolean).join(' ');
-    default: return s(l.description);
-  }
-}
-
 const fmtTs = (v: unknown): string =>
   v ? new Date(v as string).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
 
@@ -378,9 +368,10 @@ const fmtTs = (v: unknown): string =>
 //
 // The line columns are the order category's full spec set — the same table the
 // inventory export renders — so a RAM PO carries rank/gen/speed/chip # in their
-// own sortable columns rather than collapsed into the composed `Item` string.
+// own sortable columns. There is deliberately no composed `Item` label column:
+// once every attribute has its own cell it only repeated them, unsorted.
 // An order is single-category (enforced on create), so one column set covers
-// the whole sheet. `Other` drops `Item`: its Description column is that string.
+// the whole sheet.
 const PO_LINE_TAIL_COLS: XlsxColumn[] = [
   { header: 'Serial #',   key: 'serial',    width: 24 },
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -392,7 +383,6 @@ const PO_LINE_TAIL_COLS: XlsxColumn[] = [
 ];
 
 const poLineCols = (cat: ExportCategory): XlsxColumn[] => [
-  ...(cat === 'Other' ? [] : [{ header: 'Item', key: 'item', width: 34 }]),
   ...SPEC_COLS_BY_CATEGORY[cat],
   ...PO_LINE_TAIL_COLS,
 ];
@@ -440,7 +430,6 @@ orders.get('/:id/spreadsheet', async (c) => {
     const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
       ...lineSpecFields(l),
-      item: poLineLabel(l),
       serial: String(l.serial_number ?? ''),
       qty,
       unitCost,

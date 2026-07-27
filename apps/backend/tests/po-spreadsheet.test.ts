@@ -166,13 +166,15 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     const ws = wb.getWorksheet('Line items')!;
     const headers = ws.getRow(1).values as unknown[];
 
-    // Every RAM spec is its own column — never collapsed into `Item` alone.
+    // Every RAM spec is its own column.
     for (const h of [
-      'Item', 'Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class',
+      'Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class',
       'Rank', 'Speed', 'Condition', 'Serial #', 'Qty', 'Unit cost',
     ]) {
       expect(headers, `missing column ${h}`).toContain(h);
     }
+    // No composed label column — the attributes above replaced it outright.
+    expect(headers).not.toContain('Item');
     // SSD/HDD-only columns must not leak onto a RAM sheet.
     for (const h of ['Interface', 'Form factor', 'Health %', 'RPM']) {
       expect(headers).not.toContain(h);

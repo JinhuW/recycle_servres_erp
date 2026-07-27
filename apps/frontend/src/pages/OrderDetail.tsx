@@ -517,7 +517,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             flex: '0 0 auto',
           }}
         >
-          <Icon name="file" size={16} />
+          <Icon name="download" size={16} />
         </button>
         {canDelete && (
           <button

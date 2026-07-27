@@ -551,7 +551,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                               api.download(`/api/orders/${o.id}/spreadsheet`, `${o.id}.xlsx`).catch(handleFetchError);
                             }}
                           >
-                            <Icon name="file" size={12} />
+                            <Icon name="download" size={12} />
                           </button>
                           <button
                             className="btn icon sm"
