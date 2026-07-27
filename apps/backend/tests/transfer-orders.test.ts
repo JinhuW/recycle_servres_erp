@@ -275,23 +275,40 @@ describe('POST /api/inventory/transfer-orders/:id/reopen', () => {
     expect(ev.detail.transfer_order_id).toBe(orderId);
   });
 
-  it('409 (no writes) when a line is committed to a sell order', async () => {
-    const { token } = await loginAs(ALEX);
-    const moved = await transferOne(token);
-    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
-    // Reuse a seeded sell order (avoids fabricating sell_orders + its FKs);
-    // just add a sell_order_lines row pointing at our received line.
+  // Reuse a seeded sell order (avoids fabricating sell_orders + its FKs); just
+  // force its status and add a sell_order_lines row pointing at our line.
+  async function attachSellOrder(inventoryId: string, status: string): Promise<string> {
     const db = getTestDb();
     const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as
       { id: string } | undefined;
     expect(so).toBeDefined(); // seed has sell orders
+    await db`UPDATE sell_orders SET status = ${status} WHERE id = ${so!.id}`;
     await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
-             VALUES (${so!.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
+             VALUES (${so!.id}, ${inventoryId}, 'RAM', 'x', 1, 1)`;
+    return so!.id;
+  }
+
+  it('409 (no writes) when a line is committed to a sell order', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    await attachSellOrder(moved.id, 'Shipped');
     const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
     expect(r.status).toBe(409);
+    const db = getTestDb();
     const ord = (await db`SELECT status FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as
       { status: string };
     expect(ord.status).toBe('Received'); // unchanged — no writes
+  });
+
+  it('reopens despite a line sitting on a mere Draft sell order', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/receive`, { token });
+    // A draft is a proposal, not a claim — it must not strand the transfer order.
+    await attachSellOrder(moved.id, 'Draft');
+    const r = await api('POST', `/api/inventory/transfer-orders/${moved.orderId}/reopen`, { token });
+    expect(r.status).toBe(200);
   });
 
   it('409 (no writes) when every line was re-transferred away', async () => {
@@ -492,11 +509,24 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
     const moved = await transferOne(token);
     const db = getTestDb();
     const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as { id: string };
+    await db`UPDATE sell_orders SET status = 'Shipped' WHERE id = ${so.id}`;
     await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
              VALUES (${so.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
     const r = await api('DELETE', `/api/inventory/transfer-orders/${moved.orderId}`, { token });
     expect(r.status).toBe(409);
     const ord = (await db`SELECT status FROM transfer_orders WHERE id = ${moved.orderId}`)[0] as { status: string };
     expect(ord.status).toBe('Pending'); // unchanged — no writes
+  });
+
+  it('discards despite a line sitting on a mere Draft sell order', async () => {
+    const { token } = await loginAs(ALEX);
+    const moved = await transferOne(token);
+    const db = getTestDb();
+    const so = (await db`SELECT id FROM sell_orders ORDER BY created_at LIMIT 1`)[0] as { id: string };
+    await db`UPDATE sell_orders SET status = 'Draft' WHERE id = ${so.id}`;
+    await db`INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price)
+             VALUES (${so.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${moved.orderId}`, { token });
+    expect(r.status).toBe(200);
   });
 });

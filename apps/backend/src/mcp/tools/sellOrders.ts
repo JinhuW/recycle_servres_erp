@@ -10,10 +10,13 @@ export const SELL_ORDER_TOOL_DEFS = [
     name: 'search_sellable_inventory',
     description:
       'Read-only. List inventory lines that can currently be put on a sell order — status Reviewing or Done and ' +
-      'not already committed to an open sell order — newest first. Use this to find the inventoryId values that ' +
-      'create_sell_order_draft requires. Each row includes: inventoryId (pass this to create_sell_order_draft), ' +
+      'not committed to a Shipped or Awaiting payment sell order — newest first. Use this to find the inventoryId ' +
+      'values that create_sell_order_draft requires. Each row includes: inventoryId (pass this to ' +
+      'create_sell_order_draft), ' +
       'category, label and subLabel (the display name the draft will store), partNumber, condition, warehouseId ' +
-      'and warehouseName, availableQty (the full sellable quantity of the line), and sellPrice (the price already ' +
+      'and warehouseName, availableQty (the full sellable quantity of the line), draftCount (how many other ' +
+      'drafts already propose this line — drafts are proposals, so a line may appear on several and only the ' +
+      'first one promoted keeps it), and sellPrice (the price already ' +
       'assigned to the line, in USD — advisory; you still choose each line\'s unitPrice). Filter with query ' +
       '(matches brand / part number / description / category) and warehouseId. Requires the sellorder:read scope.',
     inputSchema: {

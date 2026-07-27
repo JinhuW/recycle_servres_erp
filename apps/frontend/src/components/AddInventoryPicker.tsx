@@ -22,12 +22,16 @@ export type SellableItem = {
   warehouseName: string | null;
   availableQty: number;
   sellPrice: number | null;
+  // Other drafts holding this lot. Drafts are proposals, so a contended lot is
+  // still offered — the count just warns that promoting will be a race.
+  draftCount: number;
 };
 
 type Props = {
   // Inventory ids already on the in-progress draft (saved or just-added). The
-  // server only excludes lots on *saved* open orders, so session-local adds must
-  // be filtered client-side to avoid duplicates.
+  // server only excludes lots committed to a shipped/awaiting-payment order, so
+  // this order's own lots must be filtered client-side to avoid duplicates —
+  // which also means a listed lot's draftCount never counts this order.
   excludeIds: Set<string>;
   locale: string;
   onClose: () => void;
@@ -149,6 +153,11 @@ export function AddInventoryPicker({ excludeIds, locale, onClose, onAdd }: Props
                         <div style={{ fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', gap: 8, marginTop: 1 }}>
                           <span>{it.warehouseName ?? t('sodNoWarehouse')}</span>
                           {it.condition && (<><span>·</span><span>{it.condition}</span></>)}
+                          {it.draftCount > 0 && (
+                            <><span>·</span><span style={{ color: 'var(--warn)' }}>
+                              {t('soAddInventoryOnDrafts', { n: it.draftCount })}
+                            </span></>
+                          )}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>

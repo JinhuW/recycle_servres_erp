@@ -12,6 +12,7 @@ type SellableItem = {
   warehouseId: string | null;
   availableQty: number;
   sellPrice: number | null;
+  draftCount: number;
 };
 
 const getSellable = (token: string, qs = '') =>
@@ -36,7 +37,7 @@ describe('GET /api/sell-orders/sellable', () => {
     expect(item.availableQty).toBeGreaterThan(0);
   });
 
-  it('excludes a line once it is on an open sell order', async () => {
+  it('keeps a line on a rival draft listed, then drops it once committed', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
 
@@ -58,7 +59,16 @@ describe('GET /api/sell-orders/sellable', () => {
     });
     expect(created.status).toBe(201);
 
-    // Now on an open (Draft) order, it must drop out of the sellable set.
+    // A Draft is a proposal — the line stays offered, flagged as contended.
+    const onDraft = await getSellable(token);
+    const still = onDraft.body.items.find(i => i.inventoryId === line.id);
+    expect(still).toBeDefined();
+    expect(still!.draftCount).toBe(1);
+
+    // Promoting the order commits the line, which drops it from the set.
+    await api('POST', `/api/sell-orders/${created.body.id}/status`, {
+      token, body: { to: 'Shipped', note: 's' },
+    });
     const after = await getSellable(token);
     expect(after.body.items.some(i => i.inventoryId === line.id)).toBe(false);
   });

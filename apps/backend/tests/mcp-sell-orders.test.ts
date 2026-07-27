@@ -69,7 +69,7 @@ describe('MCP search_sellable_inventory', () => {
     expect(typeof rows[0].availableQty).toBe('number');
   });
 
-  it('excludes lines already on an open sell order', async () => {
+  it('flags lines on a rival draft, excludes them once committed', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
     const customerId = (await api<{ items: { id: string }[] }>('GET', '/api/customers', { token })).body.items[0].id;
@@ -78,6 +78,13 @@ describe('MCP search_sellable_inventory', () => {
       body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x', qty: 1, unitPrice: line.sell_price }] },
     });
     expect(created.status).toBe(201);
+
+    // Drafts are proposals — still listed, with the contention reported.
+    const onDraft = await call(bearerRead, { limit: 200 });
+    const draftRows = JSON.parse((onDraft.body as any).result.content[0].text);
+    expect(draftRows.find((x: any) => x.inventoryId === line.id)?.draftCount).toBe(1);
+
+    await api('POST', `/api/sell-orders/${created.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
     const r = await call(bearerRead, { limit: 200 });
     const rows = JSON.parse((r.body as any).result.content[0].text);
     expect(rows.some((x: any) => x.inventoryId === line.id)).toBe(false);
