@@ -268,10 +268,16 @@ sellOrders.get('/:id', async (c) => {
   const statusMeta: Record<string, { note: string | null; when: string | null; attachments: unknown[] }> = {};
   const metaStatusSet = await loadMetaStatuses(sql);
   for (const s of metaStatusSet) statusMeta[s] = { note: null, when: null, attachments: [] };
+  // Seed on demand as well as from needs_meta: a status can carry a meta row or
+  // an attachment without being flagged needs_meta (the writer keys off the
+  // hardcoded META_STATUSES), and spreading an absent entry would yield a row
+  // with no `attachments` array for the push below to reach.
   for (const r of metaRows) {
+    statusMeta[r.status] ??= { note: null, when: null, attachments: [] };
     statusMeta[r.status] = { ...statusMeta[r.status], note: r.note, when: r.set_at };
   }
   for (const a of attRows) {
+    statusMeta[a.status] ??= { note: null, when: null, attachments: [] };
     statusMeta[a.status].attachments.push({
       id: a.id, filename: a.filename, size: a.size_bytes, mime: a.mime_type,
       url: a.delivery_url, uploadedAt: a.uploaded_at,
@@ -1132,6 +1138,7 @@ sellOrders.post('/:id/status', async (c) => {
     | { kind: 'idempotent'; status: string }
     | { kind: 'notCreator' }
     | { kind: 'reopenNeedsNote' }
+    | { kind: 'conflict'; msg: string }
     | { kind: 'done' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -1161,6 +1168,23 @@ sellOrders.post('/:id/status', async (c) => {
     // is a meta status".
     if (cur.status === 'Closed' && body.to === 'Draft' && !hasNote) {
       return { kind: 'reopenNeedsNote' };
+    }
+
+    // Leaving Draft is where the order actually claims its inventory, so it's
+    // where the one-committed-order-per-line rule is enforced. Drafts are
+    // proposals: rivals may name the same line, and the qty they were written
+    // against may have been sold since, so both checks run here rather than at
+    // create time. Closing claims nothing.
+    if (cur.status === 'Draft' && body.to !== 'Closed') {
+      const own = await tx<{ inventory_id: string | null; qty: number }[]>`
+        SELECT inventory_id, qty FROM sell_order_lines WHERE sell_order_id = ${id}
+      `;
+      const err = await validateSellLines(
+        tx,
+        own.map(l => ({ inventoryId: l.inventory_id, qty: l.qty })),
+        id,
+      );
+      if (err) return { kind: 'conflict', msg: err };
     }
 
     // Apply the status update + (for close) the denormalized reason; (for
@@ -1293,6 +1317,7 @@ sellOrders.post('/:id/status', async (c) => {
   if (outcome.kind === 'reopenNeedsNote') {
     return c.json({ error: 'note required to reopen' }, 400);
   }
+  if (outcome.kind === 'conflict') return c.json({ error: outcome.msg }, 409);
   return c.json({ ok: true, status: body.to });
 });
 

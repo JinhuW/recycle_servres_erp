@@ -4,6 +4,7 @@ import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
+import { committedSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields,
@@ -1095,18 +1096,19 @@ inventory.patch('/:id', async (c) => {
     `)[0];
     if (!before) return { kind: 'notFound' };
 
-    // A line committed to an open (non-Done) sell order is "spoken for":
-    // editing its qty or status out from under the deal silently corrupts
-    // that sell order's totals/sellability. Mirrors the reopen guard
-    // (sell_count > 0) and the one-active-sell-order-per-line invariant.
-    // Other fields stay editable. Run under the row lock so a concurrent
-    // sell-order create can't slip an attachment in between.
+    // A line committed to a sell order (COMMITTED_SELL_STATUSES) is "spoken
+    // for": editing its qty or status out from under the deal silently
+    // corrupts that sell order's totals/sellability. A line on a mere Draft
+    // stays editable — the draft is a proposal and is re-validated when it is
+    // promoted. Other fields stay editable. Run under the row lock so a
+    // concurrent promotion can't slip a claim in between.
     if (body.qty !== undefined || body.status !== undefined) {
       const open = (await tx<{ n: number }[]>`
         SELECT COUNT(*)::int AS n
         FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = ${id} AND so.status <> 'Done'
+        WHERE sol.inventory_id = ${id}
+          AND so.status = ANY(${committedSellStatuses()}::text[])
       `)[0];
       if (open.n > 0) return { kind: 'committed' };
     }
@@ -1473,7 +1475,11 @@ inventory.post('/transfer-orders/:id/reopen', async (c) => {
 
     const lines = (await tx`
       SELECT l.id, l.status,
-             (SELECT COUNT(*)::int FROM sell_order_lines sl WHERE sl.inventory_id = l.id) AS sell_count
+             (SELECT COUNT(*)::int
+                FROM sell_order_lines sl
+                JOIN sell_orders so ON so.id = sl.sell_order_id
+               WHERE sl.inventory_id = l.id
+                 AND so.status = ANY(${committedSellStatuses()}::text[])) AS sell_count
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
@@ -1537,7 +1543,11 @@ inventory.delete('/transfer-orders/:id', async (c) => {
 
     const lines = (await tx`
       SELECT l.id, l.status, l.qty,
-             (SELECT COUNT(*)::int FROM sell_order_lines sl WHERE sl.inventory_id = l.id) AS sell_count
+             (SELECT COUNT(*)::int
+                FROM sell_order_lines sl
+                JOIN sell_orders so ON so.id = sl.sell_order_id
+               WHERE sl.inventory_id = l.id
+                 AND so.status = ANY(${committedSellStatuses()}::text[])) AS sell_count
       FROM order_lines l
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l

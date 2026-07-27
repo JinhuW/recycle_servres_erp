@@ -1,6 +1,7 @@
 import type postgres from 'postgres';
 import type { Sql } from 'postgres';
 import { nextHumanId } from '../lib/id-seq';
+import { committedSellStatuses } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import {
   convertToUsd, getLatestRateToUsd, type SupportedCurrency,
@@ -15,8 +16,9 @@ export type SellLine = { inventoryId?: string | null; qty: number };
 // already-committed lines); null for a brand-new order. Returns a human error
 // string, or null when every line is sellable.
 //
-// `checkExistingSellOrders` (default true) also enforces the one-active-sell-
-// order-per-line invariant. The vendor-bid promote path passes false: a bid may
+// `checkExistingSellOrders` (default true) also rejects lines already committed
+// to another sell order (COMMITTED_SELL_STATUSES — Draft rivals are allowed,
+// they're only proposals). The vendor-bid promote path passes false: a bid may
 // legitimately reference inventory that is already on a sell order, so it reuses
 // the qty/sellability locking here without the cross-sell-order conflict guard.
 export async function validateSellLines(
@@ -45,7 +47,7 @@ export async function validateSellLines(
       FROM sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
       WHERE sol.inventory_id = ${inventoryId}
-        AND so.status NOT IN ('Done', 'Closed')
+        AND so.status = ANY(${committedSellStatuses()}::text[])
         AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
       LIMIT 1
     `)[0];

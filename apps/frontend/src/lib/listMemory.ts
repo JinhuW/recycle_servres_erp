@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 
 /**
  * In-memory (per page load) cache for list-page UI state so that returning
@@ -30,17 +30,23 @@ export function useScrollMemory(key: string, ready: boolean): (el: HTMLElement |
   const elRef = useRef<HTMLElement | null>(null);
   const restored = useRef(false);
 
-  const setRef = (el: HTMLElement | null) => {
+  const detach = useRef<(() => void) | null>(null);
+
+  // Identity must be stable. React re-runs a callback ref whose identity changed
+  // — old(null) then new(el) — so an inline function here re-attaches on every
+  // render, and since the old element is cleared first the `===` guard can never
+  // short-circuit: one more scroll listener per render, none ever removed.
+  const setRef = useCallback((el: HTMLElement | null) => {
     if (elRef.current === el) return;
+    detach.current?.();
+    detach.current = null;
     elRef.current = el;
     if (el) {
-      el.addEventListener(
-        'scroll',
-        () => { mem.set(sk, el.scrollTop); },
-        { passive: true },
-      );
+      const onScroll = () => { mem.set(sk, el.scrollTop); };
+      el.addEventListener('scroll', onScroll, { passive: true });
+      detach.current = () => el.removeEventListener('scroll', onScroll);
     }
-  };
+  }, [sk]);
 
   useLayoutEffect(() => {
     if (restored.current || !ready) return;

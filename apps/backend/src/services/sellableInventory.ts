@@ -1,8 +1,12 @@
 import type postgres from 'postgres';
 import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../lib/inventoryLabel';
+import { committedSellStatuses } from '../lib/sellCommitment';
 
 // Inventory lines that can currently be placed on a sell order: status
-// Reviewing or Done and not already committed to an open sell order. Shared by
+// Reviewing or Done and not committed to another sell order
+// (COMMITTED_SELL_STATUSES). Lines merely sitting on a rival *draft* are still
+// listed — drafts are proposals, several may name the same line — with
+// `draftCount` reporting the contention so the caller can flag it. Shared by
 // the search_sellable_inventory MCP tool and the GET /sell-orders/sellable
 // REST endpoint (the desktop "add inventory to an order" picker) so both run
 // the exact same sellability rule — keep the predicate here, not duplicated.
@@ -18,6 +22,7 @@ export type SellableItem = {
   warehouseName: string | null;
   availableQty: number;
   sellPrice: number | null;
+  draftCount: number;
 };
 
 type SellableRow = InventoryAttrs & {
@@ -27,6 +32,7 @@ type SellableRow = InventoryAttrs & {
   sell_price: number | null;
   warehouse_id: string | null;
   warehouse_short: string | null;
+  draft_count: number;
 };
 
 export async function searchSellableInventory(
@@ -43,7 +49,11 @@ export async function searchSellableInventory(
            l.sell_price::float AS sell_price,
            l.health::float AS health, l.rpm,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
-           w.short AS warehouse_short
+           w.short AS warehouse_short,
+           (SELECT COUNT(DISTINCT sol.sell_order_id)::int
+              FROM sell_order_lines sol
+              JOIN sell_orders so ON so.id = sol.sell_order_id
+             WHERE sol.inventory_id = l.id AND so.status = 'Draft') AS draft_count
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
@@ -51,7 +61,8 @@ export async function searchSellableInventory(
       AND NOT EXISTS (
         SELECT 1 FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = l.id AND so.status NOT IN ('Done', 'Closed')
+        WHERE sol.inventory_id = l.id
+          AND so.status = ANY(${committedSellStatuses()}::text[])
       )
       AND (${q}::text IS NULL
            OR LOWER(COALESCE(l.brand,'')) LIKE '%' || ${q ?? ''} || '%'
@@ -73,5 +84,6 @@ export async function searchSellableInventory(
     warehouseName: r.warehouse_short,
     availableQty: r.qty,
     sellPrice: r.sell_price,
+    draftCount: r.draft_count,
   }));
 }
