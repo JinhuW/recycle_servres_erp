@@ -111,11 +111,28 @@ switches the branch out from under the first.
   fields like `module` or `requestId` onto a scope.  `LOG_LEVEL` (default
   `info`) filters.  `releaseVersion()`/`releaseCommit()` from the same module
   are the single source of build provenance — `/api/health` uses them too.
-  **Keep `log.ts` free of intra-repo imports**: `scripts/migrate.mjs` and
-  `scripts/init-admin.mjs` are plain-`node` `.mjs` that import it directly and
-  lean on Node 24's TypeScript type-stripping, which cannot resolve the
-  extensionless specifiers the rest of `src/` uses.  (`scripts/seed.mjs` stays
-  on `console` — it is a dev/test CLI and never runs in a deployed container.)
+- **`requestId` and `userId` are ambient, not passed.**  The outermost
+  middleware in `index.ts` opens an `AsyncLocalStorage` context
+  (`runWithLogContext`), so *every* line emitted during a request carries the
+  id — including from `r2.ts`, `image-shrink.ts` and the MCP tools, which never
+  see a Hono `Context`, and including a `.catch()` that settles after the
+  response (the context follows a promise reaction from where it was
+  *registered*).  `addLogContext({ userId })` fills in what auth learns later
+  (`auth.ts`, `oauth/guard.ts`).  Precedence is ambient < `log.child` < the
+  call's own fields.  Keep the store to scalars — a detached promise holds it
+  alive, so a `Context` or request body parked there pins the request's memory.
+- **Keep `log.ts` free of intra-repo imports** (`node:` builtins only):
+  `scripts/migrate.mjs` and `scripts/init-admin.mjs` are plain-`node` `.mjs`
+  that import it directly and lean on Node 24's TypeScript type-stripping,
+  which cannot resolve the extensionless specifiers the rest of `src/` uses —
+  breaking it fails *container boot*.  `tests/log-import-purity.test.ts`
+  enforces this.  (`scripts/seed.mjs` stays on `console` — it is a dev/test CLI
+  and never runs in a deployed container.)
+- **Don't log attacker-controlled parse failures** — cursor decode
+  (`lib/pagination.ts`), JWT verify (`auth.ts`), the `c.req.json().catch()`
+  body parses.  They are a free log-flood and, through the error sink, a
+  disk-fill; the 4xx is the record.  Same for OCR model output
+  (`ai/prompts.ts`): it is a transcription of a customer receipt.
 - **One shared Postgres pool**, lazily created (`apps/backend/src/db.ts`).
   Do not new-up `postgres()` clients inline; call `getDb(env)`.  The historical
   per-request pool design caused connection exhaustion under load — don't
@@ -137,7 +154,7 @@ switches the branch out from under the first.
   DB setting can't widen the surface.  Keep it that way.
 - **Migrations** are plain SQL under `apps/backend/migrations/`, numbered
   `NNNN_…sql`.  The backend runs them on startup via `scripts/migrate.mjs`,
-  recorded in `_migration_ledger`.  Always add the next number; never edit
+  recorded in `schema_migrations`.  Always add the next number; never edit
   a migration that's been deployed.
 
 ## Auth & CSRF
@@ -167,6 +184,10 @@ switches the branch out from under the first.
   most likely to break), so the DB dependency is intentional, not a smell.
   They need `127.0.0.1:5432` reachable — `docker-compose.override.yml` does
   that for local dev.  Production compose doesn't ship the override.
+  CI runs them against a `postgres:16` service container
+  (`.github/workflows/backend-tests.yml`), which must set `TEST_DATABASE_URL`
+  in the job env: `global-setup.ts` otherwise falls back to the repo-root
+  `.env`, which doesn't exist on a runner, and throws.
 - **Test files run in PARALLEL** (`vitest.config.ts`: `pool: 'forks'`, files
   parallel, `maxForks` 8 by default — override with `VITEST_MAX_FORKS`).  Each
   fork owns a **private database**: `global-setup.ts` hands every worker a
