@@ -16,6 +16,7 @@
 // only while every import here is a node: builtin — the rest of src/ uses
 // extensionless specifiers, which bare node cannot resolve.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +34,35 @@ export interface Logger {
   error(message: string, detail?: unknown): void;
   /** Returns a logger that stamps `fields` onto every line it emits. */
   child(fields: LogFields): Logger;
+}
+
+// Ambient per-request fields, merged into every line emitted anywhere inside
+// the request — including a `.catch()` that settles AFTER the response, because
+// AsyncLocalStorage propagates to a promise reaction when it is *registered*,
+// not when it settles. That is what lets a route keep calling plain
+// `log.error(err)` and still get a requestId, with no context threaded through
+// r2.ts, image-shrink.ts or the MCP tools, none of which ever see a Hono
+// Context.
+//
+// The cost is action at a distance: reading a call site tells you nothing about
+// the fields it will carry. And keep the store to SCALARS — a detached promise
+// chain holds it alive, so parking a Context, a User row or a request body here
+// would pin the whole request's memory behind the slowest fire-and-forget.
+const requestContext = new AsyncLocalStorage<LogFields>();
+
+/** Runs `fn` with `fields` stamped on every log line it (transitively) emits. */
+export function runWithLogContext<T>(fields: LogFields, fn: () => T): T {
+  return requestContext.run({ ...fields }, fn);
+}
+
+/**
+ * Adds fields to the current request's context — for values not known when it
+ * opened, like the user id after auth. A no-op outside a request (background
+ * loops, the boot scripts). Only affects lines emitted after this call.
+ */
+export function addLogContext(fields: LogFields): void {
+  const store = requestContext.getStore();
+  if (store) Object.assign(store, fields);
 }
 
 const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -89,12 +119,15 @@ function toFields(detail: unknown): LogFields {
 function emit(level: LogLevel, base: LogFields, message: string, detail: unknown): void {
   if (LEVEL_RANK[level] < threshold()) return;
 
+  // Ambient first, then the logger's own fields, then the call's — explicit
+  // always beats inherited, so a caller can override a stale context value.
   const line = JSON.stringify({
     ts: new Date().toISOString(),
     level,
     version: releaseVersion(),
     commit: releaseCommit(),
     message,
+    ...requestContext.getStore(),
     ...base,
     ...toFields(detail),
   });

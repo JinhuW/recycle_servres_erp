@@ -8,7 +8,7 @@ import { bodyLimit } from 'hono/body-limit';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord } from './lib/error-log';
-import { log, releaseCommit, releaseVersion } from './lib/log';
+import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
 
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
@@ -44,26 +44,50 @@ const app = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string
 // ── Request ID ───────────────────────────────────────────────────────────────
 // Attach a per-request UUID so every log line and error can be correlated.
 // Returned in X-Request-Id so clients can surface it in bug reports.
-app.use('*', async (c, next) => {
+//
+// Everything downstream runs inside the log context, so any log.* call in a
+// route — or in a .catch() that route registers and never awaits — carries this
+// id without being handed anything. Must stay the OUTERMOST middleware: the
+// request-log middleware below has to run inside the store.
+app.use('*', (c, next) => {
   const id = crypto.randomUUID();
   c.set('requestId', id);
   c.header('X-Request-Id', id);
-  await next();
+  return runWithLogContext({ requestId: id }, () => next());
 });
 
-// One structured line per completed request, version-stamped like every other
-// log line. The path is redacted the same way the error sink redacts it —
-// vendor portal tokens travel in the URL and must not land in stdout.
+// One structured line per completed request. requestId (and userId, once auth
+// runs) arrive from the log context opened above. The path is redacted the same
+// way the error sink redacts it — vendor portal tokens travel in the URL and
+// must not land in stdout.
+//
+// This deliberately overlaps metricsMiddleware on status and duration: the
+// histogram labels by c.req.routePath to bound cardinality, while this carries
+// the real path plus a requestId — neither of which can ever be a Prometheus
+// label. Aggregate view vs. forensic view; don't merge them.
+//
+// try/finally because a throw from bodyLimit, the CORS origin callback, or
+// app.onError itself escapes past this middleware, and a request that blew up
+// is exactly the one you want a line for.
 app.use('*', async (c, next) => {
   const startedAt = performance.now();
-  await next();
-  log.info('request', {
-    requestId: c.var.requestId,
-    method: c.req.method,
-    path: redactSensitivePath(c.req.path),
-    status: c.res.status,
-    ms: Math.round(performance.now() - startedAt),
-  });
+  let failed = false;
+  try {
+    await next();
+  } catch (e) {
+    failed = true;
+    throw e;
+  } finally {
+    log.info('request', {
+      method: c.req.method,
+      path: redactSensitivePath(c.req.path),
+      // On the thrown path this can still read 200 — the error response hasn't
+      // been installed yet, which is what `failed` disambiguates.
+      status: c.res.status,
+      ms: Math.round(performance.now() - startedAt),
+      ...(failed && { failed: true }),
+    });
+  }
 });
 
 // ── Origin lockdown ──────────────────────────────────────────────────────────
@@ -276,7 +300,7 @@ app.onError((err, c) => {
   const requestId = c.var.requestId ?? 'unknown';
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? err.stack : undefined;
-  log.error('Unhandled error', { requestId, error: message, stack });
+  log.error('Unhandled error', { error: message, stack });
 
   // Also persist to the dedicated error-log file (separate from Docker's
   // stdout stream). Mounted via ERROR_LOG_DIR so an operator can grep

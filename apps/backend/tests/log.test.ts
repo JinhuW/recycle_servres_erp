@@ -3,9 +3,13 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { log, releaseCommit, releaseVersion } from '../src/lib/log';
+import { log, releaseCommit, releaseVersion, runWithLogContext, addLogContext } from '../src/lib/log';
 import { appendErrorRecord, _resetForTests } from '../src/lib/error-log';
 import { api } from './helpers/app';
+import { resetDb } from './helpers/db';
+import { loginAs, ALEX } from './helpers/auth';
+
+const DEAD_DB = 'postgres://nobody:nobody@127.0.0.1:1/none';
 
 // The point of the module: no caller ever passes a version, yet no line can
 // ship without one. These tests guard that invariant, not the formatting.
@@ -155,6 +159,87 @@ describe('request logging', () => {
     const line = JSON.parse(out.at(-1)!);
     expect(line.path).toBe('/api/public/vendor/<redacted>/does-not-exist');
     expect(out.join('\n')).not.toContain('s3cr3t-token');
+  });
+});
+
+describe('request correlation', () => {
+  it('ties a handler error line to the request line and the X-Request-Id header', async () => {
+    // /api/health logs from inside the handler without threading anything —
+    // the requestId can only come from the ambient context.
+    const r = await api('GET', '/api/health', { env: { DATABASE_URL: DEAD_DB } });
+    expect(r.status).toBe(503);
+
+    const requestLine = JSON.parse(out.at(-1)!);
+    const errorLine = JSON.parse(err.at(-1)!);
+    expect(errorLine.message).toBe('health check failed');
+    expect(errorLine.requestId).toBe(requestLine.requestId);
+    expect(r.headers.get('x-request-id')).toBe(requestLine.requestId);
+  });
+
+  it('correlates the unhandled-error line, and still logs the request that threw', async () => {
+    await resetDb();
+    const { cookies } = await loginAs(ALEX);
+    // A dead DB makes authMiddleware's lookup throw — a genuine 500 through
+    // app.onError, not a handled error path.
+    const r = await api('GET', '/api/orders', { cookies, env: { DATABASE_URL: DEAD_DB } });
+    expect(r.status).toBe(500);
+
+    const requestLine = JSON.parse(out.at(-1)!);
+    expect(requestLine).toMatchObject({ message: 'request', status: 500 });
+    const errorLine = JSON.parse(err.at(-1)!);
+    expect(errorLine.message).toBe('Unhandled error');
+    expect(errorLine.requestId).toBe(requestLine.requestId);
+  });
+
+  it('carries userId once auth has run, and not before', async () => {
+    await resetDb();
+    const login = out.length;
+    const { cookies } = await loginAs(ALEX);
+    // The login request itself authenticates by password, not by cookie, so
+    // authMiddleware never runs and nothing should claim a user.
+    expect(JSON.parse(out[login]).userId).toBeUndefined();
+
+    await api('GET', '/api/me', { cookies });
+    expect(typeof JSON.parse(out.at(-1)!).userId).toBe('string');
+  });
+
+  it('reaches a .catch() registered inside the request but settled after it', async () => {
+    // The route-level version of this is racy; the guarantee is that the
+    // context follows the promise reaction from where it was REGISTERED. This
+    // is what gives the fire-and-forget R2 deletes their requestId.
+    let settle: (e: Error) => void = () => {};
+    const pending = new Promise<void>((_, reject) => { settle = reject; });
+
+    runWithLogContext({ requestId: 'req-detached' }, () => {
+      pending.catch((e) => log.error('r2 delete failed', e));
+    });
+
+    settle(new Error('boom'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(JSON.parse(err.at(-1)!)).toMatchObject({
+      requestId: 'req-detached',
+      message: 'r2 delete failed',
+      error: 'boom',
+    });
+  });
+
+  it('omits the context fields entirely outside a request', () => {
+    // Guards the fx refresh loop, server startup and the .mjs boot scripts.
+    log.info('background tick');
+    expect(JSON.parse(out.at(-1)!)).not.toHaveProperty('requestId');
+    addLogContext({ userId: 'nobody' }); // no store — must not throw
+    log.info('still background');
+    expect(JSON.parse(out.at(-1)!)).not.toHaveProperty('userId');
+  });
+
+  it('lets an explicit field override the ambient one', () => {
+    runWithLogContext({ requestId: 'ambient' }, () => {
+      log.child({ requestId: 'child' }).info('a');
+      log.info('b', { requestId: 'explicit' });
+    });
+    expect(JSON.parse(out.at(-2)!).requestId).toBe('child');
+    expect(JSON.parse(out.at(-1)!).requestId).toBe('explicit');
   });
 });
 

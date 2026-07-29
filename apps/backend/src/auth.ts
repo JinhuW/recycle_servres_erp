@@ -11,6 +11,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
 import type postgres from 'postgres';
 import { getDb } from './db';
+import { addLogContext } from './lib/log';
 import type { Env, User } from './types';
 
 const isProd = (env: Env) => env.NODE_ENV === 'production';
@@ -93,6 +94,7 @@ export const authMiddleware: MiddlewareHandler<{
   if (rows.length === 0) return c.json({ error: 'User not found' }, 401);
 
   c.set('user', rows[0]);
+  addLogContext({ userId: rows[0].id });
   await next();
 };
 
