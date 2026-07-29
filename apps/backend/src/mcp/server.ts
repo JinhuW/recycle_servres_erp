@@ -4,6 +4,7 @@
 
 import type { Context } from 'hono';
 import { getDb } from '../db';
+import { log } from '../lib/log';
 import { readPackageVersion } from '../lib/version';
 import { TOOL_DEFS, callListMarketValues, callGetMarketValue, callSetMarketPrice } from './tools/market';
 import {
@@ -11,6 +12,8 @@ import {
 } from './tools/sellOrders';
 import type { OAuthCtx, OAuthScope, Env } from '../types';
 import { mcpToolCallsTotal } from '../metrics';
+
+const mcpLog = log.child({ module: 'mcp' });
 
 type JsonRpcReq = { jsonrpc: '2.0'; id: number | string; method: string; params?: Record<string, unknown> };
 
@@ -40,7 +43,12 @@ function rpcErr(id: number | string | null, code: number, message: string, data?
 export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): Promise<Response> {
   let req: JsonRpcReq;
   try { req = await c.req.json() as JsonRpcReq; }
-  catch { return c.json(rpcErr(null, -32700, 'parse error')); }
+  catch {
+    // Body deliberately not logged. Safe to log at all only because
+    // bearerGuard fronts this route, so volume is bounded by issued tokens.
+    mcpLog.warn('parse error');
+    return c.json(rpcErr(null, -32700, 'parse error'));
+  }
 
   const sql = getDb(c.env);
   const ctx = c.get('oauthCtx') as OAuthCtx | undefined;
@@ -90,6 +98,10 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
         }));
       } catch (e) {
         mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
+        // The wire reply says "invalid params" for every failure, including a
+        // DB outage, and rides an HTTP 200 — without this line a broken write
+        // tool leaves no trace anywhere.
+        mcpLog.child({ tool: toolLabel, clientId: ctx?.clientId }).error('tool call failed', e);
         return c.json(rpcErr(req.id, -32602, e instanceof Error ? e.message : 'invalid params'));
       }
     }

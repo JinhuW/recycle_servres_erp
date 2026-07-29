@@ -9,6 +9,7 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { SAFE_UPLOAD_MIME } from './lib/settings';
+import { log } from './lib/log';
 import type { Env } from './types';
 
 export type UploadResult = {
@@ -121,7 +122,11 @@ export async function getAttachmentBytes(env: Env, storageKey: string): Promise<
     );
     if (!res.Body) return null;
     return Buffer.from(await res.Body.transformToByteArray());
-  } catch {
+  } catch (e) {
+    log.warn('attachment fetch failed; degrading to no image', {
+      storageKey,
+      error: e instanceof Error ? e.message : String(e),
+    });
     return null;
   }
 }

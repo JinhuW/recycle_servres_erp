@@ -116,7 +116,8 @@ async function pruneOldest(dir: string, maxFiles: number): Promise<void> {
   );
   withMtime.sort((a, b) => a.mtime - b.mtime);
   const toDelete = withMtime.slice(0, withMtime.length - maxFiles);
-  await Promise.all(toDelete.map((e) => fs.unlink(e.path).catch(() => {})));
+  await Promise.all(toDelete.map((e) =>
+    fs.unlink(e.path).catch((err) => log.warn('error-log prune failed', err))));
 }
 
 function timestamp(): string {
