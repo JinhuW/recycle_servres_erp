@@ -1,9 +1,14 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import postgres from 'postgres';
 import { canonPartArg, canonPartNumberJs } from '../src/lib/part-number';
+import { TEST_DATABASE_URL } from './helpers/db';
 
-// Uses the test Postgres directly (same DATABASE_URL the app uses in tests).
-const sql = postgres(process.env.DATABASE_URL as string, { prepare: false, max: 2 });
+// Talks to this worker's database directly — it needs the SQL canon function,
+// not the HTTP surface. Must be TEST_DATABASE_URL, not process.env.DATABASE_URL:
+// the latter only happens to work when the repo-root .env points it at the test
+// database, and is absent in CI (and may point at an unrelated project's
+// database on a developer's machine).
+const sql = postgres(TEST_DATABASE_URL, { prepare: false, max: 2 });
 
 async function canon(raw: string): Promise<string> {
   const rows = await sql<{ c: string }[]>`SELECT ${canonPartArg(sql, raw)} AS c`;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { api } from './helpers/app';
-import { resetDb } from './helpers/db';
+import { resetDb, TEST_DATABASE_URL } from './helpers/db';
 
 describe('GET /metrics', () => {
   beforeAll(async () => {
@@ -31,7 +31,7 @@ describe('ocr_calls_total counter', () => {
   it('increments on every scanLabel call', async () => {
     // Call the stub provider directly so the test doesn't need a real model.
     const { scanLabel } = await import('../src/ai');
-    const env = { DATABASE_URL: process.env.DATABASE_URL! } as never;
+    const env = { DATABASE_URL: TEST_DATABASE_URL } as never;
     await scanLabel(env, 'RAM', new ArrayBuffer(8));
     await scanLabel(env, 'RAM', new ArrayBuffer(8));
 
