@@ -55,6 +55,14 @@ const val = <T,>(f?: FieldUpdate<T>): T | null => {
 // True when managerUserId was supplied with a non-null value that does not
 // match an existing user (covers unknown ids and malformed uuids). Lets us
 // 400 before mutating instead of surfacing a raw FK violation.
+//
+// Only 22P02 (invalid_text_representation) means "malformed uuid" — the
+// only failure that is genuinely the caller's fault. Swallowing everything
+// else turned a dead pool into "manager not found", i.e. a 400 telling the
+// user their perfectly valid id was invalid. Let those through to a 500,
+// where the error log records them.
+const PG_INVALID_TEXT_REPRESENTATION = '22P02';
+
 async function managerUserMissing(
   sql: ReturnType<typeof getDb>,
   input: DetailInput,
@@ -64,8 +72,9 @@ async function managerUserMissing(
   try {
     const rows = await sql`SELECT 1 FROM users WHERE id = ${f.value}::uuid`;
     return rows.length === 0;
-  } catch {
-    return true;
+  } catch (e) {
+    if ((e as { code?: string }).code === PG_INVALID_TEXT_REPRESENTATION) return true;
+    throw e;
   }
 }
 
