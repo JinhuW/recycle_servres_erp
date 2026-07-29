@@ -3,6 +3,14 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
+// process.env coerces its values to strings, so assigning back an undefined
+// snapshot writes the literal "undefined" — which then shows up as the version
+// on every log line the worker emits afterwards.
+function restore(key: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
 describe('smoke', () => {
   beforeAll(async () => { await resetDb(); });
 
@@ -30,8 +38,8 @@ describe('smoke', () => {
       expect(body.version).toBe('9.9.9');
       expect(body.commit).toBe('deadbee');
     } finally {
-      process.env.APP_VERSION = prev.v;
-      process.env.GIT_SHA = prev.c;
+      restore('APP_VERSION', prev.v);
+      restore('GIT_SHA', prev.c);
     }
   });
 
@@ -53,10 +61,9 @@ describe('smoke', () => {
       expect(body.version).toMatch(/^\d+\.\d+\.\d+$/);
       expect(body.commit).toBe('railwaysha123');
     } finally {
-      process.env.APP_VERSION = prev.v;
-      process.env.GIT_SHA = prev.c;
-      if (prev.r === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
-      else process.env.RAILWAY_GIT_COMMIT_SHA = prev.r;
+      restore('APP_VERSION', prev.v);
+      restore('GIT_SHA', prev.c);
+      restore('RAILWAY_GIT_COMMIT_SHA', prev.r);
     }
   });
 

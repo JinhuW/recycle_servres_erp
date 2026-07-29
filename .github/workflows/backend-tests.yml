@@ -11,6 +11,9 @@ name: backend-tests
 
 on:
   push:
+    # Branch-limited so a PR doesn't run the suite twice — the pull_request
+    # trigger below already covers every topic branch.
+    branches: [dev, main]
     paths:
       - "apps/backend/**"
       - "packages/shared/**"
