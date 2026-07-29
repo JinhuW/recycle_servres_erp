@@ -18,6 +18,7 @@ import { synthesizePartNumber } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
+import { log } from '../lib/log';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -930,7 +931,7 @@ orders.patch('/:id', async (c) => {
   // Best-effort R2 cleanup after a successful commit (stub/CF-era keys are
   // no-ops in deleteAttachment; a missing object delete is idempotent).
   for (const key of removedScanKeys) {
-    await deleteAttachment(c.env, key).catch(e => console.error('r2 delete (line removed)', e));
+    await deleteAttachment(c.env, key).catch(e => log.error('r2 delete (line removed)', e));
   }
 
   return c.json({ ok: true, addedLineIds });
@@ -1021,7 +1022,7 @@ orders.delete('/:id', async (c) => {
 
   // Best-effort: drop the label-scan images from R2 too (after the commit).
   for (const r of outcome.scanned) {
-    await deleteAttachment(c.env, r.scan_image_id).catch(e => console.error('r2 delete (order deleted)', e));
+    await deleteAttachment(c.env, r.scan_image_id).catch(e => log.error('r2 delete (order deleted)', e));
   }
 
   return c.json({ ok: true });
@@ -1183,7 +1184,7 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
   // a separate concern.
   const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
-    .catch(e => { console.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   const row = await sql.begin(async (tx) => {
@@ -1247,7 +1248,7 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   if (!removed) return c.json({ error: 'Not found' }, 404);
   // R2 delete outside the tx — slow side effect, kept out of the lock window.
   // Best-effort.
-  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
   return c.json({ ok: true });
 });
 

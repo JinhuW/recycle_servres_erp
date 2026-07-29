@@ -103,6 +103,19 @@ switches the branch out from under the first.
 
 - Hono on `@hono/node-server` (Node 24).  Entry: `apps/backend/src/server.ts`
   → `index.ts` mounts all routes under `/api/*`.
+- **All logging goes through `lib/log.ts`** — `log.info/warn/error/debug(msg,
+  detail)`, never `console.*`.  Every line is one JSON object stamped with the
+  release `version` and `commit`, so a log excerpt identifies its build without
+  cross-referencing the deploy history.  `detail` may be an `Error` (unwrapped
+  to `error`/`stack`) or any object (merged as fields); `log.child({…})` pins
+  fields like `module` or `requestId` onto a scope.  `LOG_LEVEL` (default
+  `info`) filters.  `releaseVersion()`/`releaseCommit()` from the same module
+  are the single source of build provenance — `/api/health` uses them too.
+  **Keep `log.ts` free of intra-repo imports**: `scripts/migrate.mjs` and
+  `scripts/init-admin.mjs` are plain-`node` `.mjs` that import it directly and
+  lean on Node 24's TypeScript type-stripping, which cannot resolve the
+  extensionless specifiers the rest of `src/` uses.  (`scripts/seed.mjs` stays
+  on `console` — it is a dev/test CLI and never runs in a deployed container.)
 - **One shared Postgres pool**, lazily created (`apps/backend/src/db.ts`).
   Do not new-up `postgres()` clients inline; call `getDb(env)`.  The historical
   per-request pool design caused connection exhaustion under load — don't
@@ -213,7 +226,8 @@ switches the branch out from under the first.
   Rotates at 10 MB, keeps last 10.  Pre-create the host dir with
   `mkdir -p data/errors && sudo chown 1000:1000 data/errors` — without it
   the backend (UID 1000) can't write and the sink silently degrades to
-  stdout-only.  See `apps/backend/src/lib/error-log.ts`.
+  stdout-only.  Records are version/commit-stamped by `appendErrorRecord`
+  itself — callers never pass them.  See `apps/backend/src/lib/error-log.ts`.
 
 ## Cloudflare Worker deploys
 

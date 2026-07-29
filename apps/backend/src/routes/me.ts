@@ -6,6 +6,7 @@ import { getDb } from '../db';
 import { hashPassword, verifyPassword } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
+import { log } from '../lib/log';
 import type { Env, User } from '../types';
 
 const me = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -147,7 +148,7 @@ me.post('/password', async (c) => {
 
   const recordAttempt = (success: boolean) =>
     sql`INSERT INTO login_attempts (email, ip, success) VALUES (${u.email}, ${ip}, ${success})`
-      .catch((e) => console.error('login_attempts write failed', e));
+      .catch((e) => log.error('login_attempts write failed', e));
 
   const row = (await sql<{ password_hash: string }[]>`
     SELECT password_hash FROM users WHERE id = ${u.id} AND active = TRUE LIMIT 1

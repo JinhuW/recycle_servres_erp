@@ -5,6 +5,7 @@ import { scanLabel } from '../ai';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
 import { appendErrorRecord } from '../lib/error-log';
+import { log } from '../lib/log';
 import { getUploadLimits } from '../lib/settings';
 import type { Env, LineCategory, User } from '../types';
 
@@ -69,7 +70,7 @@ scan.post('/label', async (c) => {
   // Upload first, then OCR. If upload fails the user retries with the same
   // shot — no orphan rows in the DB.
   const uploaded = await uploadAttachment(c.env, file, 'label-scans').catch((e) => {
-    console.error('label image upload error', e);
+    log.error('label image upload error', e);
     return null;
   });
   if (!uploaded) return c.json({ error: 'image upload failed' }, 502);
@@ -86,7 +87,7 @@ scan.post('/label', async (c) => {
   try {
     result = await scanLabel(c.env, category, bytes);
   } catch (e) {
-    console.error('ocr error', e);
+    log.error('ocr error', e);
     return c.json({ error: 'label OCR failed — retry the shot' }, 502);
   }
 

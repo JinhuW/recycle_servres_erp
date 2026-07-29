@@ -4,16 +4,15 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import { bodyLimit } from 'hono/body-limit';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord } from './lib/error-log';
+import { log, releaseCommit, releaseVersion } from './lib/log';
 
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { dbScope, getDb } from './db';
-import { readRootVersion } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
@@ -52,7 +51,20 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-app.use('*', logger());
+// One structured line per completed request, version-stamped like every other
+// log line. The path is redacted the same way the error sink redacts it —
+// vendor portal tokens travel in the URL and must not land in stdout.
+app.use('*', async (c, next) => {
+  const startedAt = performance.now();
+  await next();
+  log.info('request', {
+    requestId: c.var.requestId,
+    method: c.req.method,
+    path: redactSensitivePath(c.req.path),
+    status: c.res.status,
+    ms: Math.round(performance.now() - startedAt),
+  });
+});
 
 // ── Origin lockdown ──────────────────────────────────────────────────────────
 // When PROXY_SECRET is set, only requests carrying it in X-Proxy-Secret are
@@ -117,19 +129,15 @@ app.get('/', (c) =>
 // catch-all, which 200s every path even when the backend is dead and so
 // hides outages from the load balancer. Unauthenticated by design.
 app.get('/api/health', async (c) => {
-  // Build provenance. APP_VERSION/GIT_SHA are release-time Docker build args
-  // (scripts/release.sh) — Railway never passes them and the Dockerfile bakes
-  // them as EMPTY env strings, so use || (not ??) to fall back to the root
-  // package.json version (bumped on every dev push, present in the image)
-  // and Railway's injected commit sha. Read from process.env, not c.env:
-  // these are image/runtime-scoped, not per-request.
-  const version = process.env.APP_VERSION || readRootVersion();
-  const commit = process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
+  // Build provenance — the same resolution every log line uses, so the health
+  // payload and the logs can never disagree about which build is running.
+  const version = releaseVersion();
+  const commit = releaseCommit();
   try {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit });
   } catch (e) {
-    console.error('health check failed', e);
+    log.error('health check failed', e);
     return c.json({ status: 'error', error: 'database unreachable', version, commit }, 503);
   }
 });
@@ -268,13 +276,7 @@ app.onError((err, c) => {
   const requestId = c.var.requestId ?? 'unknown';
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? err.stack : undefined;
-  console.error(JSON.stringify({
-    level: 'error',
-    requestId,
-    message: 'Unhandled error',
-    error: message,
-    stack,
-  }));
+  log.error('Unhandled error', { requestId, error: message, stack });
 
   // Also persist to the dedicated error-log file (separate from Docker's
   // stdout stream). Mounted via ERROR_LOG_DIR so an operator can grep

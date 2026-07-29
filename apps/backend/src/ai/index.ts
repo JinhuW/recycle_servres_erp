@@ -12,6 +12,9 @@ import type { ScanResult, OcrProvider } from './types';
 import { stubScan } from './stub';
 import { openRouterScan } from './openrouter';
 import { ocrCallsTotal } from '../metrics';
+import { log } from '../lib/log';
+
+const aiLog = log.child({ module: 'ai' });
 
 export type { ScanResult, OcrProvider } from './types';
 
@@ -22,8 +25,8 @@ export function pickProvider(env: Env): OcrProvider {
   // — prod boot already refuses (see env.ts), this catches dev/CI.
   if (!warnedAboutStub) {
     warnedAboutStub = true;
-    console.warn(
-      '[ai] OPENROUTER_API_KEY is not set — falling back to STUB OCR. Extractions will be canned data with a hardcoded confidence. Set OPENROUTER_API_KEY to enable real label scanning.',
+    aiLog.warn(
+      'OPENROUTER_API_KEY is not set — falling back to STUB OCR. Extractions will be canned data with a hardcoded confidence. Set OPENROUTER_API_KEY to enable real label scanning.',
     );
   }
   return 'stub';

@@ -7,13 +7,18 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import './load-env.mjs';
+// Plain-node import of a .ts module: Node strips the types. log.ts is kept
+// free of intra-repo imports so this resolves without a transpiler.
+import { log as rootLog } from '../src/lib/log.ts';
+
+const log = rootLog.child({ module: 'migrate' });
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, '..', 'migrations');
 
 const url = process.env.DATABASE_URL;
 if (!url) {
-  console.error('DATABASE_URL is not set. Add it to the repo-root .env');
+  log.error('DATABASE_URL is not set. Add it to the repo-root .env');
   process.exit(1);
 }
 
@@ -21,9 +26,9 @@ const sql = postgres(url, { onnotice: () => {} });
 const reset = process.argv.includes('--reset');
 
 if (reset && process.env.NODE_ENV === 'production' && process.env.ALLOW_DESTRUCTIVE_RESET !== 'true') {
-  console.error(
-    '✗ --reset is not allowed in production (NODE_ENV=production).\n' +
-    '  If you really mean it, re-run with ALLOW_DESTRUCTIVE_RESET=true as well.',
+  log.error(
+    '--reset is not allowed in production (NODE_ENV=production). ' +
+    'If you really mean it, re-run with ALLOW_DESTRUCTIVE_RESET=true as well.',
   );
   process.exit(1);
 }
@@ -35,7 +40,7 @@ const MIGRATE_LOCK_KEY = 778423; // arbitrary, dedicated to this runner
 try {
   await sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
   if (reset) {
-    console.log('· Dropping existing tables…');
+    log.warn('dropping existing tables');
     // Drop everything in the public schema (dev-only). Older versions of this
     // script hard-coded a fixed table list which silently went stale every time
     // we added a migration — switch to discovering tables at runtime so reset
@@ -67,12 +72,13 @@ try {
   );
 
   const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  let appliedNow = 0;
   for (const file of files) {
     if (applied.has(file)) {
-      console.log('↻ skip (already applied) ' + file);
+      log.info('skip (already applied)', { file });
       continue;
     }
-    console.log('→ ' + file);
+    log.info('applying migration', { file });
     const ddl = readFileSync(join(migrationsDir, file), 'utf8');
     // One transaction per file: a mid-file failure rolls the whole file
     // back, and the ledger row is only written if the DDL fully succeeded —
@@ -82,10 +88,11 @@ try {
       await tx`INSERT INTO schema_migrations (filename) VALUES (${file})
                ON CONFLICT (filename) DO NOTHING`;
     });
+    appliedNow++;
   }
-  console.log('✓ migrations applied');
+  log.info('migrations applied', { applied: appliedNow, total: files.length });
 } catch (e) {
-  console.error('✗ migration failed:', e);
+  log.error('migration failed', e);
   process.exitCode = 1;
 } finally {
   try { await sql`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`; } catch { /* session ending anyway */ }
