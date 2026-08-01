@@ -571,15 +571,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 const lossy = sp > 0 && sp < lCost;
                 const filled = !!l.brand || !!l.description;
                 const isActive = i === activeIdx;
+                // Rows open the drawer at every stage — a locked order gets a
+                // read-only drawer, not an unreachable one.
                 return (
                   <tr
                     key={l._id ?? l._cid}
-                    className={canEditOrder ? 'row-hover' : ''}
+                    className="row-hover"
                     style={{
-                      cursor: canEditOrder ? 'pointer' : 'default',
+                      cursor: 'pointer',
                       background: isActive ? 'var(--accent-soft)' : undefined,
                     }}
-                    onClick={canEditOrder ? () => setActiveIdx(i) : undefined}
+                    onClick={() => setActiveIdx(i)}
                   >
                     <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
                     <td>
@@ -1099,6 +1101,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onConfirmLine={() => confirmLine(activeIdx)}
           onConfirmError={showErrorToast}
           duplicateOnLines={dupByIdx.get(activeIdx)}
+          readOnly={!canEditOrder}
         />
       )}
 
