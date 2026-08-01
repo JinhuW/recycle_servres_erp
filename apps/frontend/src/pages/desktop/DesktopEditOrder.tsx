@@ -12,6 +12,8 @@ import {
   type Line, type DuplicatePartGroup,
 } from './DesktopSubmit';
 import { ImageLightbox } from '../../components/ImageLightbox';
+import { serialIssue } from '@recycle-erp/shared';
+import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
@@ -173,6 +175,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Filled when save() detects duplicate part numbers; the modal then drives a
   // "Save anyway" path that bypasses the check.
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
+  // Serial-rule violations (DDR5 requires serials; serial count must equal
+  // qty) caught at save time — shown as a blocking dialog, nothing persists.
+  const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -307,6 +312,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const canSave = dirty && !saving && !orderLocked && lines.every(lineReady);
 
+  // Serial rules fire only where the backend's will: on new lines, and on
+  // edits that change serial/qty/generation from what the server holds.
+  // Untouched legacy serial-less lines stay saveable for price/status.
+  const originalById = useMemo(() => {
+    const m = new Map<string, EditLine>();
+    for (const ol of order.lines) m.set(ol.id, orderLineToEditLine(ol));
+    return m;
+  }, [order.lines]);
+  const changesSerialFields = (l: EditLine): boolean => {
+    const o = l._id ? originalById.get(l._id) : undefined;
+    if (!o) return true;
+    return (l.generation ?? null) !== (o.generation ?? null)
+      || Number(l.qty) !== Number(o.qty)
+      || (l.serialNumber ?? '') !== (o.serialNumber ?? '');
+  };
+  const serialIssueFor = (l: EditLine) => (changesSerialFields(l) ? serialIssue(l) : null);
+
   // Inline hint near the Save button — explains why it's disabled instead of
   // leaving the user clicking a dead button. Order matches the canSave gates.
   const saveDisabledReason: string | null =
@@ -361,6 +383,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
 
   const save = async () => {
+    const issues = lines
+      .map((l, idx) => ({ lineNo: idx + 1, label: l.partNumber || itemLabel(l), issue: serialIssueFor(l) }))
+      .filter((x): x is SerialLineIssue => x.issue !== null);
+    if (issues.length) {
+      setSerialIssues(issues);
+      return;
+    }
     if (dupGroups.length > 0) {
       setDupConfirm(dupGroups);
       return;
@@ -379,6 +408,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     if (!lineReady(l)) throw new Error(t('subFillThisLine'));
     // Nothing to push for an untouched server line; skip the round trip.
     if (l._id && !l._dirty) return;
+    const issue = serialIssueFor(l);
+    if (issue) {
+      setSerialIssues([{ lineNo: i + 1, label: l.partNumber || itemLabel(l), issue }]);
+      // Thrown so the drawer keeps itself open for the fix.
+      throw new Error(t('serialCheckTitle'));
+    }
     const r = await api.patch<{ ok: true; addedLineIds: string[] }>(
       `/api/orders/${order.id}`,
       l._id
@@ -1182,6 +1217,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {serialIssues && (
+        <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
       )}
 
       {dupConfirm && (

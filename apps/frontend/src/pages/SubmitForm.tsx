@@ -11,8 +11,9 @@ import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { parseSerials } from '../components/SerialNumbers';
 import { showErrorToast } from '../lib/errorToast';
-import { synthesizePartNumber } from '@recycle-erp/shared';
+import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../lib/ramRequired';
+import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
 
 type Props = {
   category: Category;
@@ -139,6 +140,9 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [unreadableDismissed, setUnreadableDismissed] = useState(false);
   // Holds the auto-generated part # awaiting the user's confirm (blank-PN save).
   const [pnGen, setPnGen] = useState<string | null>(null);
+  // Serial-rule violation (DDR5 requires serials; serial count must equal
+  // qty) caught at save time — shown as a blocking dialog, nothing persists.
+  const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -195,6 +199,15 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         showErrorToast(t('fillRequiredFields', { fields }));
         return;
       }
+    }
+    const issue = serialIssue(line);
+    if (issue) {
+      setSerialIssues([{
+        lineNo: (editingLineIdx ?? lineCount) + 1,
+        label: buildLabel(),
+        issue,
+      }]);
+      return;
     }
     const typed = (line.partNumber ?? '').trim();
     if (typed) { persist(typed); return; }
@@ -422,7 +435,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
             {t('serialNumbers')}
-            <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>· {t('optional')}</span>
+            {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5' ? (
+              <span style={{ color: 'var(--neg)', fontWeight: 400 }}>* {t('serialRequiredDdr5')}</span>
+            ) : (
+              <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>· {t('optional')}</span>
+            )}
             {snCount > 0 && (
               <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>{t('serialCount', { n: snCount })}</span>
             )}
@@ -435,7 +452,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             placeholder={t('serialNumbersPh')}
             style={{ resize: 'vertical', lineHeight: 1.6 }}
           />
-          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>{t('serialNumbersHint')}</div>
+          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
+            {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
+              ? t('serialNumbersHintDdr5')
+              : t('serialNumbersHint')}
+          </div>
         </div>
 
         {/* Pricing row mirrors desktop LineDrawer: qty → unit → total
@@ -511,6 +532,9 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>
       </div>
+      {serialIssues && (
+        <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
+      )}
       {pnGen && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setPnGen(null); }}>
           <div className="modal-shell" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>

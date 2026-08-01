@@ -172,8 +172,10 @@ describe('PO audit log — lifecycle events', () => {
       'GET', `/api/orders/${id}`, { token });
     const lineId = detail.body.order.lines.find(l => l.partNumber === 'AUD-1')!.id;
 
+    // AUD-1 is a qty-4 line, so the serial rules demand exactly four serials.
+    const serials = 'SN-99812\nSN-99813\nSN-99814\nSN-99815';
     const r = await api('PATCH', `/api/orders/${id}`, {
-      token, body: { lines: [{ id: lineId, serialNumber: 'SN-99812' }] },
+      token, body: { lines: [{ id: lineId, serialNumber: serials }] },
     });
     expect(r.status).toBe(200);
 
@@ -181,7 +183,7 @@ describe('PO audit log — lifecycle events', () => {
     expect(edits).toHaveLength(1);
     const changes = edits[0].detail.changes as { field: string; to: unknown }[];
     expect(changes.map(c => c.field)).toEqual(['serial_number']);
-    expect(changes[0].to).toBe('SN-99812');
+    expect(changes[0].to).toBe(serials);
   });
 
   // Auditing drafts means the draft-only hard delete now cascades into rows

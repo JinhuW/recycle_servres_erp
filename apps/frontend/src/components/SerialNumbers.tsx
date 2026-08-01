@@ -1,15 +1,9 @@
 import { Icon } from './Icon';
+import { parseSerials } from '@recycle-erp/shared';
 
-// Serial numbers are stored as a single free-text blob (the entry UI is a
-// multi-line textarea — one SN per line). Split on newlines / commas /
-// semicolons, trim, and drop blanks so the display never shows empty pills.
-export function parseSerials(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(/[\n,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+// Parsing lives in @recycle-erp/shared so the backend validates the same
+// serial format the UI displays; re-exported here for existing importers.
+export { parseSerials };
 
 type Props = {
   raw: string | null | undefined;
