@@ -342,7 +342,11 @@ export function LineDrawer({
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
                 {t('serialNumbers')}
-                <span className="muted" style={{ fontWeight: 400 }}>· {t('optional')}</span>
+                {cat === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5' ? (
+                  <span style={{ color: 'var(--neg)', fontWeight: 400 }}>* {t('serialRequiredDdr5')}</span>
+                ) : (
+                  <span className="muted" style={{ fontWeight: 400 }}>· {t('optional')}</span>
+                )}
                 {snCount > 0 && (
                   <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>
                     {t('serialCount', { n: snCount })}
@@ -357,7 +361,11 @@ export function LineDrawer({
                 placeholder={t('serialNumbersPh')}
                 style={{ resize: 'vertical', lineHeight: 1.6 }}
               />
-              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t('serialNumbersHint')}</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                {cat === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
+                  ? t('serialNumbersHintDdr5')
+                  : t('serialNumbersHint')}
+              </div>
             </div>
 
             <div style={{

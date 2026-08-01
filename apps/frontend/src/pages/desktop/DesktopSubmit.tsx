@@ -11,8 +11,9 @@ import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/
 import { LineDrawer } from './submit/LineDrawer';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { useAuth } from '../../lib/auth';
-import { synthesizePartNumber } from '@recycle-erp/shared';
+import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../../lib/ramRequired';
+import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 
 // ─── Public component ────────────────────────────────────────────────────────
 // Two-step submit flow lifted from design/submit.jsx + design/app.jsx#SubmitView:
@@ -368,6 +369,9 @@ function OrderForm({
   // Lines submitted with a blank part number that can be auto-filled (e.g.
   // Mixed-brand SSDs). Holds the proposed value per line for the confirm modal.
   const [pnConfirm, setPnConfirm] = useState<{ idx: number; value: string }[] | null>(null);
+  // Serial-rule violations (DDR5 requires serials; serial count must equal
+  // qty) caught at save time — shown as a blocking dialog, nothing persists.
+  const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -422,6 +426,16 @@ function OrderForm({
   };
 
   const canSubmit = lines.every(lineReady);
+
+  const lineLabel = (l: Line): string => l.partNumber || l.brand || l.description || '';
+
+  // Serial rules for a set of lines; null when everything passes.
+  const collectSerialIssues = (ls: Line[]): SerialLineIssue[] | null => {
+    const found = ls
+      .map((l, idx) => ({ lineNo: idx + 1, label: lineLabel(l), issue: serialIssue(l) }))
+      .filter((x): x is SerialLineIssue => x.issue !== null);
+    return found.length ? found : null;
+  };
 
   // Maps a local Line to the wire shape expected by PATCH /api/orders/:id addLines.
   const toWireLine = (l: Line) => ({
@@ -491,8 +505,18 @@ function OrderForm({
       setAiError(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
       return;
     }
+    const issue = serialIssue(l);
+    if (issue) {
+      setSerialIssues([{ lineNo: idx + 1, label: lineLabel(l), issue }]);
+      // Thrown (not returned) so the drawer's confirm handler keeps the
+      // drawer open for the fix instead of closing on apparent success.
+      throw new Error(t('serialCheckTitle'));
+    }
     await persistLines([toWireLine(l)], wireMeta());
     updateLine(idx, { _confirmed: true });
+    // A successful confirm supersedes any banner left by an earlier failed
+    // attempt on this line (e.g. the serial-check throw above).
+    setAiError(null);
   };
 
   // Escape closes the drawer.
@@ -562,6 +586,8 @@ function OrderForm({
   };
 
   const attemptSubmit = () => {
+    const issues = collectSerialIssues(lines);
+    if (issues) { setSerialIssues(issues); return; }
     const blanks = lines
       .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
       .filter(x => !(x.l.partNumber ?? '').trim());
@@ -941,6 +967,10 @@ function OrderForm({
             </div>
           </div>
         </div>
+      )}
+
+      {serialIssues && (
+        <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
       )}
 
       {dupConfirm && (

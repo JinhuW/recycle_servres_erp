@@ -417,10 +417,11 @@ inventory.get('/events/all', async (c) => {
   const kindFrag   = kind ? sql`e.kind = ${kind}` : sql`TRUE`;
   const searchFrag = search
     ? sql`(
-        LOWER(COALESCE(l.part_number, '')) LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.brand, ''))       LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.description, '')) LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(act.name, ''))      LIKE '%' || ${search} || '%'
+        LOWER(COALESCE(l.part_number, ''))   LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(l.brand, ''))         LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(l.serial_number, '')) LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(l.description, ''))   LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(act.name, ''))        LIKE '%' || ${search} || '%'
       )`
     : sql`TRUE`;
 

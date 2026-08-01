@@ -14,7 +14,7 @@ import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import {
   SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, type ExportCategory,
 } from '../lib/categoryColumns';
-import { synthesizePartNumber } from '@recycle-erp/shared';
+import { synthesizePartNumber, serialIssue, type SerialIssue } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -34,6 +34,15 @@ function resolvePartNumber(
   const typed = l.partNumber?.trim();
   if (typed) return typed;
   return synthesizePartNumber(category ?? '', l);
+}
+
+// Serial rules (shared with the frontend forms via @recycle-erp/shared):
+// DDR5 RAM must carry serials, and any entered serials must match qty.
+// Enforced here too so no client can write a violating line.
+function serialErr(label: string, issue: SerialIssue): string {
+  return issue.kind === 'ddr5Required'
+    ? `${label}: DDR5 RAM lines require serial numbers`
+    : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
 }
 
 type LineInput = {
@@ -510,6 +519,12 @@ orders.post('/', async (c) => {
   if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
   if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
 
+  for (let i = 0; i < body.lines.length; i++) {
+    const l = body.lines[i];
+    const issue = serialIssue({ ...l, category: l.category ?? body.category });
+    if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
+  }
+
   // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
@@ -668,6 +683,49 @@ orders.patch('/:id', async (c) => {
   for (const l of body.addLines ?? []) {
     const e = badLine(l);
     if (e) return c.json({ error: e }, 400);
+  }
+
+  // Serial rules. New rows are validated outright (defaults mirror the
+  // INSERT below); existing-row patches only when the merged value (patch ??
+  // stored — the same null-keeps-old semantics as the COALESCE in the UPDATE)
+  // actually CHANGES serial/qty/generation. The edit forms echo every field
+  // back on save, so a mere "touched" test would retro-block price/status
+  // edits on legacy serial-less lines.
+  for (let i = 0; i < (body.addLines ?? []).length; i++) {
+    const l = body.addLines![i];
+    const issue = serialIssue({
+      ...l,
+      category: l.category ?? (existing.category as string),
+      qty: l.qty ?? 1,
+    });
+    if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
+  }
+  const serialTouched = (body.lines ?? []).filter(
+    l => l.serialNumber != null || l.qty != null || l.generation != null,
+  );
+  if (serialTouched.length) {
+    const rows = await sql`
+      SELECT id, category, generation, qty, serial_number
+      FROM order_lines
+      WHERE order_id = ${id} AND id = ANY(${serialTouched.map(l => l.id)}::uuid[])
+    ` as { id: string; category: string | null; generation: string | null; qty: number; serial_number: string | null }[];
+    const byId = new Map(rows.map(r => [r.id, r]));
+    for (const l of serialTouched) {
+      const row = byId.get(l.id);
+      if (!row) continue; // unknown ids no-op in the UPDATE below too
+      const merged = {
+        generation: l.generation ?? row.generation,
+        qty: l.qty ?? row.qty,
+        serialNumber: l.serialNumber ?? row.serial_number,
+      };
+      const changes =
+        (merged.generation ?? null) !== (row.generation ?? null) ||
+        Number(merged.qty) !== Number(row.qty) ||
+        (merged.serialNumber ?? '') !== (row.serial_number ?? '');
+      if (!changes) continue;
+      const issue = serialIssue({ category: row.category, ...merged });
+      if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
+    }
   }
 
   // R2 keys of label scans whose lines get removed — deleted after the tx
