@@ -18,7 +18,7 @@ import { parseSerials } from '../../../components/SerialNumbers';
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
-  onConfirmLine, onConfirmError, duplicateOnLines,
+  onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
 }: {
   line: Line;
   idx: number;
@@ -31,6 +31,9 @@ export function LineDrawer({
   onConfirmError?: (msg: string) => void;
   // 1-based line numbers (excluding this one) that share this line's part #.
   duplicateOnLines?: number[];
+  // Locked order (Done, or a purchaser past their stage): the drawer still
+  // opens so the line's full spec stays lookup-able, but nothing can change.
+  readOnly?: boolean;
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -199,7 +202,29 @@ export function LineDrawer({
             </div>
           </div>
 
-          <div style={{ padding: 16, display: 'grid', gap: 14 }}>
+          {/* A disabled fieldset is what actually freezes the form: the
+              Combobox's chevron and menu rows are buttons sitting outside its
+              input, so a pointer-events rule on inputs alone leaves the
+              dropdown live. `order-readonly` only supplies the muted look. */}
+          <fieldset
+            disabled={readOnly}
+            className={readOnly ? 'order-readonly' : undefined}
+            style={{ padding: 16, display: 'grid', gap: 14, border: 'none', margin: 0, minInlineSize: 0 }}
+          >
+            {readOnly && (
+              <div
+                role="status"
+                style={{
+                  padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+                  background: 'var(--bg-soft)', border: '1px solid var(--border)',
+                  color: 'var(--fg-muted)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                <Icon name="lock" size={13} />
+                <span>{t('drawerReadOnly')}</span>
+              </div>
+            )}
             {showDropzone && (
               <>
                 <input
@@ -437,48 +462,56 @@ export function LineDrawer({
                 {lossy && <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠ {t('drawerLossyWarn')}</span>}
               </div>
             )}
-          </div>
+          </fieldset>
 
+          {/* Outside the fieldset — Close must stay live while the form is
+              disabled. */}
           <div style={{
-            display: 'flex', justifyContent: 'space-between', gap: 8,
+            display: 'flex', justifyContent: readOnly ? 'flex-end' : 'space-between', gap: 8,
             padding: '12px 18px',
             borderTop: '1px solid var(--border)', background: 'var(--bg-soft)',
           }}>
-            <button
-              className="btn"
-              onClick={() => { onRemove(); onClose(); }}
-              disabled={!canRemove}
-              style={canRemove ? { color: 'var(--neg)' } : undefined}
-            >
-              <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
-            </button>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {line._confirmed && (
-                <span className="chip pos" style={{ fontSize: 11 }}>
-                  <Icon name="check" size={10} /> {t('drawerConfirmed')}
-                </span>
-              )}
-              <button className="btn" onClick={onClose}>{t('cancel')}</button>
-              <button
-                className="btn accent"
-                disabled={confirming || line._confirmed}
-                onClick={async () => {
-                  if (line._confirmed) { onClose(); return; }
-                  if (!onConfirmLine) { onClose(); return; }
-                  setConfirming(true);
-                  try {
-                    await onConfirmLine();
-                    onClose();
-                  } catch (e) {
-                    onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
-                  } finally {
-                    setConfirming(false);
-                  }
-                }}
-              >
-                <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
-              </button>
-            </div>
+            {readOnly ? (
+              <button className="btn" onClick={onClose}>{t('close')}</button>
+            ) : (
+              <>
+                <button
+                  className="btn"
+                  onClick={() => { onRemove(); onClose(); }}
+                  disabled={!canRemove}
+                  style={canRemove ? { color: 'var(--neg)' } : undefined}
+                >
+                  <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
+                </button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {line._confirmed && (
+                    <span className="chip pos" style={{ fontSize: 11 }}>
+                      <Icon name="check" size={10} /> {t('drawerConfirmed')}
+                    </span>
+                  )}
+                  <button className="btn" onClick={onClose}>{t('cancel')}</button>
+                  <button
+                    className="btn accent"
+                    disabled={confirming || line._confirmed}
+                    onClick={async () => {
+                      if (line._confirmed) { onClose(); return; }
+                      if (!onConfirmLine) { onClose(); return; }
+                      setConfirming(true);
+                      try {
+                        await onConfirmLine();
+                        onClose();
+                      } catch (e) {
+                        onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
+                      } finally {
+                        setConfirming(false);
+                      }
+                    }}
+                  >
+                    <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
