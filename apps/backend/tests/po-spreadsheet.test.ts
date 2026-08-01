@@ -151,7 +151,7 @@ describe('GET /api/orders/:id/spreadsheet', () => {
           type: 'Server', classification: 'RDIMM', rank: '2Rx4', speed: '3200',
           partNumber: 'M393A4K40DB3-CWE', chipNumber: 'K4A8G085WC-BCTD',
           serialNumber: 'SN-001, SN-002',
-          condition: 'Pulled — Tested', qty: 4, unitCost: 60,
+          condition: 'Pulled — Tested', qty: 2, unitCost: 60,
         }],
       },
     });
