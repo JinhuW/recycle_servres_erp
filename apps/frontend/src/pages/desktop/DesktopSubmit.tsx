@@ -765,6 +765,58 @@ function OrderForm({
             })}
           </tbody>
         </table>
+
+        {/* Same cost ledger as the edit page: goods + fees = cost, with the
+            fee — a cost that never was a line — as the one editable cell.
+            No revenue/profit terms here; a PO being captured has no sell
+            prices yet. */}
+        <div className="oe-ledger">
+          <div className="oe-ledger-eq">
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('goodsTotal')}</div>
+              <div className="oe-ledger-value mono">{fmtUSD(cost.goods, locale)}</div>
+            </div>
+
+            <div className="oe-ledger-op mono" aria-hidden="true">+</div>
+
+            <div className="oe-ledger-cell oe-ledger-fee oe-ledger-fee-edit">
+              <label className="oe-ledger-label" htmlFor="sub-other-fees">{t('otherFees')}</label>
+              <div className="oe-ledger-fee-inputs">
+                <div style={{ position: 'relative', width: 104, flexShrink: 0 }}>
+                  <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
+                  <input
+                    id="sub-other-fees"
+                    className="input mono oe-ledger-input"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={meta.otherFees}
+                    placeholder="0.00"
+                    onChange={e => setMeta(m => ({ ...m, otherFees: e.target.value }))}
+                    onFocus={e => e.target.select()}
+                    style={{ paddingLeft: 22 }}
+                  />
+                </div>
+                <input
+                  className="input oe-ledger-input oe-ledger-note"
+                  type="text"
+                  maxLength={280}
+                  value={meta.otherFeesNote}
+                  placeholder={t('otherFeesPh')}
+                  onChange={e => setMeta(m => ({ ...m, otherFeesNote: e.target.value }))}
+                  aria-label={t('otherFeesNote')}
+                />
+              </div>
+            </div>
+
+            <div className="oe-ledger-op mono" aria-hidden="true">=</div>
+
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('eoCost')}</div>
+              <div className="oe-ledger-value mono oe-ledger-total">{fmtUSD(cost.total, locale)}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Sticky bottom: meta + totals + submit */}
@@ -831,50 +883,6 @@ function OrderForm({
                 onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
                 placeholder={t('subOptional')}
               />
-            </div>
-            {/* Fees get their own full-width row under the 4-up meta grid: the
-                amount is narrow because it's money, the note is wide because
-                it's a sentence. The arithmetic strip replaces the hint once
-                there's a fee to explain. */}
-            <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '180px 1fr', gap: 14 }}>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="label">{t('otherFees')}</label>
-                <div style={{ position: 'relative' }}>
-                  <span className="mono" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)', pointerEvents: 'none' }}>$</span>
-                  <input
-                    className="input mono"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={meta.otherFees}
-                    placeholder="0.00"
-                    onChange={e => setMeta(m => ({ ...m, otherFees: e.target.value }))}
-                    onFocus={e => e.target.select()}
-                    style={{ paddingLeft: 24, fontWeight: 500 }}
-                  />
-                </div>
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="label">{t('otherFeesNote')}</label>
-                <input
-                  className="input"
-                  maxLength={280}
-                  value={meta.otherFeesNote}
-                  placeholder={t('otherFeesPh')}
-                  onChange={e => setMeta(m => ({ ...m, otherFeesNote: e.target.value }))}
-                />
-              </div>
-              <div className="help" style={{ gridColumn: '1 / -1', marginTop: -4 }}>
-                {cost.fees > 0 ? (
-                  <span className="mono">
-                    {t('otherFeesMath', {
-                      goods: fmtUSD(cost.goods, locale),
-                      fees: fmtUSD(cost.fees, locale),
-                      total: fmtUSD(cost.total, locale),
-                    })}
-                  </span>
-                ) : t('otherFeesHint')}
-              </div>
             </div>
           </div>
         </div>
