@@ -34,7 +34,9 @@ export function PhDraftPickerSheet({ category, drafts, onResume, onStartNew, onC
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {drafts.map(d => {
             const itemsLabel = `${d.lineCount} ${d.lineCount === 1 ? t('item') : t('items')}`;
-            const totalLabel = d.totalCost != null && d.totalCost > 0 ? fmtUSD0(d.totalCost, locale) : null;
+            // All-in, matching the total the draft's own review screen shows.
+            const draftTotal = (d.totalCost ?? 0) + d.otherFees;
+            const totalLabel = draftTotal > 0 ? fmtUSD0(draftTotal, locale) : null;
             return (
               <button
                 key={d.id}

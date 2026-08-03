@@ -70,7 +70,11 @@ export type OrderSummary = {
   lifecycle: string;
   archivedAt: string | null;
   createdAt: string;
+  // The goods cost — a negotiated override of the line subtotal, or null for
+  // none. `otherFees` is charged on top of it, never folded into it.
   totalCost: number | null;
+  otherFees: number;
+  otherFeesNote: string | null;
   warehouse: Warehouse | null;
   qty: number;
   revenue: number;

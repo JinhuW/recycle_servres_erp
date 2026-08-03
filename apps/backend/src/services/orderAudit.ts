@@ -33,6 +33,8 @@ export const META_FIELDS = [
   'payment',
   'total_cost',
   'commission_rate',
+  'other_fees',
+  'other_fees_note',
 ] as const;
 
 // Line-level fields PATCH may update. Excludes ids/positions/scan refs and the

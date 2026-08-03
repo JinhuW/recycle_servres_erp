@@ -87,11 +87,13 @@ const FIELD_LABEL: Record<string, string> = {
   notes:           'Notes',
   warehouse_id:    'Warehouse',
   payment:         'Payment',
-  total_cost:      'Total cost',
+  total_cost:      'Goods total',
   commission_rate: 'Commission rate',
+  other_fees:      'Other fees',
+  other_fees_note: 'Other fees note',
 };
 
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost']);
+const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);
 
 function renderValue(field: string, v: unknown, locale: string): string {
   if (v === null || v === undefined || v === '') return '—';

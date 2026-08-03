@@ -6,6 +6,7 @@ import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
+import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
@@ -154,6 +155,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.totalCost != null ? order.totalCost.toFixed(2) : '',
   );
   const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
+  // Fees are charged on top of the goods total, so they get their own input
+  // rather than being folded into the override. '' renders as no fee.
+  const [otherFeesInput, setOtherFeesInput] = useState<string>(
+    order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
+  );
+  const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -286,15 +293,26 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     !Number.isNaN(parsedTotalCost as number) &&
     (parsedTotalCost ?? null) !== (order.totalCost ?? null);
 
+  // Non-numeric intermediate input ("5e") must not read as a change — same
+  // guard as totalCostDirty above.
+  const parsedOtherFees = parseFeeInput(otherFeesInput);
+  const otherFeesDirty = parsedOtherFees !== order.otherFees;
+  const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
   // (effectiveTotalCost) AND earns commission on profit. Company pay → only
-  // the commission on profit. When the manager/purchaser overrides Total cost,
-  // that override is the authoritative cost for EVERY part of the formula —
-  // including (Revenue − Cost), so the commission preview reconciles cleanly
-  // with the Self-pay reimbursement instead of mixing two cost figures.
-  const effectiveTotalCost =
-    totalCostOverride && parsedTotalCost != null ? parsedTotalCost : totals.cost;
+  // the commission on profit. When the manager/purchaser overrides Goods total,
+  // that override is the authoritative goods cost for EVERY part of the formula
+  // — including (Revenue − Cost), so the commission preview reconciles cleanly
+  // with the Self-pay reimbursement instead of mixing two cost figures. Fees
+  // land on top of it, so they reduce profit and therefore commission.
+  const cost = poEffectiveCost({
+    lineSubtotal: totals.cost,
+    totalCostOverride: totalCostOverride ? parsedTotalCost : null,
+    otherFees: parsedOtherFees,
+  });
+  const effectiveTotalCost = cost.total;
   const effectiveProfit = totals.revenue - effectiveTotalCost;
   const commissionRateApplied = commissionRateValue ?? 0;
   const commissionOnProfit = effectiveProfit * commissionRateApplied;
@@ -302,7 +320,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
 
   const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty || commissionDirty;
+    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty
+    || commissionDirty || otherFeesDirty || otherFeesNoteDirty;
 
   const lineReady = (l: EditLine) => {
     const qty = Number(l.qty) || 0;
@@ -354,6 +373,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         totalCost:     totalCostDirty ? parsedTotalCost        : undefined,
+        otherFees:     otherFeesDirty ? parsedOtherFees        : undefined,
+        otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
@@ -655,10 +676,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             {t('revenue')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue, locale)}</span>
           </span>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('eoCost')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.cost, locale)}</span>
+            {/* All-in, so every "Cost" on this page means the same thing. */}
+            {t('eoCost')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(effectiveTotalCost, locale)}</span>
           </span>
           <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('profit')} <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.profit, locale)}</span>
+            {t('profit')} <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(effectiveProfit, locale)}</span>
           </span>
         </div>
       </div>
@@ -736,6 +758,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               <span style={{ color: 'var(--fg-subtle)' }}>{t('eoCost')}</span>
               <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
             </div>
+            {/* Cost above is all-in. Break the fee out beneath it so the number
+                is never an unexplained jump — indented, so it reads as part of
+                the row above rather than a fourth peer figure. */}
+            {cost.fees > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                marginTop: -3, paddingLeft: 10, fontSize: 11.5, color: 'var(--fg-subtle)',
+              }}>
+                <span>{t('otherFees')}{otherFeesNote.trim() ? ` · ${otherFeesNote.trim()}` : ''}</span>
+                <span className="mono">{fmtUSD(cost.fees, locale)}</span>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--fg-subtle)' }}>{t('profit')}</span>
               <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
@@ -969,7 +1003,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <span>{t('totalCost')}</span>
+                <span>{t('goodsTotal')}</span>
                 {totalCostOverride && canEditOrder && (
                   <button
                     onClick={() => {
@@ -997,6 +1031,57 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   disabled={!canEditOrder}
                   style={{ paddingLeft: 24, fontWeight: 500 }}
                 />
+              </div>
+            </div>
+            {/* Fees sit on their own full-width row directly under Goods total:
+                the amount is narrow because it's money, the note is wide
+                because it's a sentence. The arithmetic strip only appears once
+                there's a fee to explain. */}
+            <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '180px 1fr', gap: 14 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">{t('otherFees')}</label>
+                <div style={{ position: 'relative' }}>
+                  <span className="mono" style={{
+                    position: 'absolute', left: 12, top: '50%',
+                    transform: 'translateY(-50%)', color: 'var(--fg-subtle)',
+                    pointerEvents: 'none',
+                  }}>$</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={otherFeesInput}
+                    placeholder="0.00"
+                    onChange={e => setOtherFeesInput(e.target.value)}
+                    onFocus={e => e.target.select()}
+                    disabled={!canEditOrder}
+                    style={{ paddingLeft: 24, fontWeight: 500 }}
+                  />
+                </div>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">{t('otherFeesNote')}</label>
+                <input
+                  className="input"
+                  type="text"
+                  maxLength={280}
+                  value={otherFeesNote}
+                  placeholder={t('otherFeesPh')}
+                  onChange={e => setOtherFeesNote(e.target.value)}
+                  disabled={!canEditOrder}
+                />
+              </div>
+              <div className="help" style={{ gridColumn: '1 / -1', marginTop: -4 }}>
+                {cost.fees > 0 ? (
+                  <span className="mono">
+                    {t('otherFeesMath', {
+                      goods: fmtUSD(cost.goods, locale),
+                      fees: fmtUSD(cost.fees, locale),
+                      total: fmtUSD(cost.total, locale),
+                    })}
+                  </span>
+                ) : t('otherFeesHint')}
               </div>
             </div>
             {/* Notes gets its own row and spans the full grid so there's
@@ -1059,8 +1144,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
-              {fmtUSD(totalCostOverride ? (parsedTotalCost ?? 0) : totals.cost, locale)}
+              {fmtUSD(cost.total, locale)}
             </div>
+            {cost.fees > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--accent-strong)', marginTop: 1 }}>
+                {t('inclFees', { fees: fmtUSD(cost.fees, locale) })}
+              </div>
+            )}
           </div>
           {saveError && (
             <div className="form-error" role="alert" style={{ marginRight: 'auto', alignSelf: 'center', color: 'var(--neg, #c0392b)', fontSize: 13 }}>

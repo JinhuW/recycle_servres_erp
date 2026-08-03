@@ -12,6 +12,7 @@ import { useAuth } from '../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { poEffectiveCost } from '../lib/poTotals';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
 import type { Order, OrderLine, Warehouse } from '../lib/types';
 
@@ -98,6 +99,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     }
     return { qty, cost };
   }, [order.lines]);
+
+  const cost = poEffectiveCost({
+    lineSubtotal: totals.cost,
+    totalCostOverride: order.totalCost,
+    otherFees: order.otherFees,
+  });
 
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
@@ -485,10 +492,27 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
               {order.commissionRate != null ? (order.commissionRate * 100).toFixed(2) + '%' : '—'}
             </span>
           </div>
+          {/* Goods, then fees, then the total they add up to — the same stack
+              the desktop edit page shows, so the number is never a surprise. */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
-            <span style={{ color: 'var(--fg-subtle)' }}>{t('totalCost')}</span>
+            <span style={{ color: 'var(--fg-subtle)' }}>{t('goodsTotal')}</span>
+            <span className="mono">{fmtUSD(cost.goods, locale)}</span>
+          </div>
+          {cost.fees > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: 12, marginTop: 6 }}>
+              <span style={{ color: 'var(--fg-subtle)', minWidth: 0, paddingRight: 10 }}>
+                {t('otherFees')}
+                {order.otherFeesNote && (
+                  <span style={{ display: 'block', fontSize: 11, opacity: 0.8 }}>{order.otherFeesNote}</span>
+                )}
+              </span>
+              <span className="mono">{fmtUSD(cost.fees, locale)}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+            <span>{t('totalCost')}</span>
             <span className="mono" style={{ fontWeight: 600 }}>
-              {fmtUSD(order.totalCost ?? totals.cost, locale)}
+              {fmtUSD(cost.total, locale)}
             </span>
           </div>
         </div>

@@ -100,6 +100,51 @@ describe('GET /api/dashboard — realized financials', () => {
     expect(r.body.kpis.prev.profit).toBeCloseTo(200 - unitCost, 2);
   });
 
+  // The realized lens recognises an order-level fee AS THE GOODS SELL — pure
+  // COGS. Half the PO sold, half the fee lands; the unsold half's share is
+  // never counted, not deferred. Docking a purchaser the whole PayPal fee on
+  // the first shipment of a big PO would be wrong.
+  it('recognises other fees only on the sold share of a PO', async () => {
+    const db = getTestDb();
+    await db`DELETE FROM sell_order_lines`;
+    await db`DELETE FROM sell_orders`;
+    await db`UPDATE orders SET commission_rate = NULL`;
+
+    // 10 units @ 100 = 1000 goods, fee 50 → 5.00 of fee per unit (eff 105).
+    const owner = (await db<{ id: string }[]>`SELECT id FROM users WHERE email = ${MARCUS}`)[0].id;
+    await db`
+      INSERT INTO orders (id, user_id, category, lifecycle, commission_rate, other_fees, created_at)
+      VALUES ('PO-FEE-PARTIAL', ${owner}, 'HDD', 'done', 0.1, 50, NOW())
+    `;
+    const lineId = (await db<{ id: string }[]>`
+      INSERT INTO order_lines (order_id, category, qty, unit_cost, sell_price, position)
+      VALUES ('PO-FEE-PARTIAL', 'HDD', 10, 100, 200, 0)
+      RETURNING id
+    `)[0].id;
+    const customerId = (await db<{ id: string }[]>`SELECT id FROM customers LIMIT 1`)[0].id;
+
+    const sell = async (soId: string, qty: number) => {
+      await db`
+        INSERT INTO sell_orders (id, customer_id, status, created_by, created_at, updated_at)
+        VALUES (${soId}, ${customerId}, 'Done', ${owner}, NOW(), NOW())
+      `;
+      await db`
+        INSERT INTO sell_order_lines (sell_order_id, inventory_id, category, label, qty, unit_price, position)
+        VALUES (${soId}, ${lineId}, 'HDD', 'x', ${qty}, 200, 0)
+      `;
+    };
+
+    const { token } = await loginAs(ALEX);
+    await sell('SO-FEE-HALF-1', 5);
+    const half = await api<{ kpis: { cost: number; profit: number } }>('GET', '/api/dashboard?range=30d', { token });
+    expect(half.body.kpis.cost).toBeCloseTo(525, 2);   // 5 * 105, NOT 5*100 + 50
+    expect(half.body.kpis.profit).toBeCloseTo(200 * 5 - 525, 2);
+
+    await sell('SO-FEE-HALF-2', 5);
+    const full = await api<{ kpis: { cost: number } }>('GET', '/api/dashboard?range=30d', { token });
+    expect(full.body.kpis.cost).toBeCloseTo(1050, 2);  // whole fee lands once fully sold
+  });
+
   it('range windows on the sell-order Done date (updated_at), not PO created_at', async () => {
     await setupOneDoneSale({ rate: 0.1, unitPrice: 100, soldQty: 1 });
     // Backdate the Done transition beyond the 7d window.
