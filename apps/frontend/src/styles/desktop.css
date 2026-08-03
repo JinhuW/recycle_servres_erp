@@ -1467,6 +1467,100 @@ html.desktop, body.desktop, .desktop #root {
 .order-readonly .field .select,
 .order-readonly .field .textarea { user-select: none; }
 
+/* ── PO cost ledger — the footer of the line-items table.
+   Reads as the arithmetic it describes: goods + fees = cost, then revenue and
+   profit as the separate outcome lens. The `+` and `=` are content, not
+   ornament, so they sit on the value baseline rather than centred on the cell.
+   The fee is the only editable cell in the chain. */
+.oe-ledger {
+  padding: 9px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 28px;
+  flex-wrap: wrap;
+}
+.oe-ledger-eq,
+.oe-ledger-out {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+/* Revenue and profit are a different lens, not another term in the sum. The
+   space-between void already says so louder than a rule could, so there is
+   no divider here. */
+.oe-ledger-out { gap: 28px; }
+/* Figures never shrink below their own width — otherwise the fee cell's
+   flex-grow squeezes them and the operators collide with the numbers. */
+.oe-ledger-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.oe-ledger-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+/* Every value cell is as tall as the fee input, so the eyebrows land on one
+   line and the figures share a centre — the rail reads as a row, not as cells
+   of differing height stacked next to each other. */
+.oe-ledger-value {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.oe-ledger-total { font-size: 15px; }
+.oe-ledger-op {
+  display: flex;
+  align-items: center;
+  /* Skip the eyebrow row so the operator sits on the figures it joins. */
+  margin-top: 16px;
+  min-height: 28px;
+  font-size: 13px;
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+/* Only the editable fee cell claims slack — a locked one is just a figure. */
+.oe-ledger-fee-edit { flex: 1 1 260px; }
+.oe-ledger-fee-inputs { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Denser than a standard .input — this is a table footer, not a form. */
+.oe-ledger-input {
+  padding: 4px 9px;
+  font-size: 12.5px;
+  border-radius: var(--radius-sm);
+}
+.oe-ledger-input.mono { font-size: 12.5px; }
+.oe-ledger-note { flex: 1; min-width: 96px; max-width: 240px; }
+.oe-ledger-currency {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  pointer-events: none;
+  font-size: 12px;
+}
+.oe-ledger-fee-note {
+  margin-left: 7px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--fg-subtle);
+}
+
 @media (max-width: 600px) {
   .role-picker { grid-template-columns: 1fr; }
 }

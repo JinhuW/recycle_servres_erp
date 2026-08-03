@@ -667,21 +667,84 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </tbody>
           </table>
         </div>
-        <div className="oe-items-foot" style={{
-          padding: '12px 18px', borderTop: '1px solid var(--border)',
-          display: 'flex', justifyContent: 'flex-end', gap: 24,
-          fontSize: 13, background: 'var(--bg-soft)',
-        }}>
-          <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('revenue')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue, locale)}</span>
-          </span>
-          <span style={{ color: 'var(--fg-subtle)' }}>
-            {/* All-in, so every "Cost" on this page means the same thing. */}
-            {t('eoCost')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(effectiveTotalCost, locale)}</span>
-          </span>
-          <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('profit')} <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(effectiveProfit, locale)}</span>
-          </span>
+        {/* Cost ledger. The three figures used to sit here as equal peers,
+            which misstates the content: goods and fees ADD UP to cost, and
+            revenue is a separate lens. So the rail spells the arithmetic —
+            the operators carry meaning, they aren't decoration — and the fee,
+            a cost that never was a line, is the one editable cell in it. */}
+        <div className="oe-items-foot oe-ledger">
+          <div className="oe-ledger-eq">
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('goodsTotal')}</div>
+              <div className="oe-ledger-value mono">{fmtUSD(cost.goods, locale)}</div>
+            </div>
+
+            <div className="oe-ledger-op mono" aria-hidden="true">+</div>
+
+            <div className={'oe-ledger-cell oe-ledger-fee' + (canEditOrder ? ' oe-ledger-fee-edit' : '')}>
+              <label className="oe-ledger-label" htmlFor="oe-other-fees">{t('otherFees')}</label>
+              {canEditOrder ? (
+                <div className="oe-ledger-fee-inputs">
+                  <div style={{ position: 'relative', width: 104, flexShrink: 0 }}>
+                    <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
+                    <input
+                      id="oe-other-fees"
+                      className="input mono oe-ledger-input"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={otherFeesInput}
+                      placeholder="0.00"
+                      onChange={e => setOtherFeesInput(e.target.value)}
+                      onFocus={e => e.target.select()}
+                      style={{ paddingLeft: 22 }}
+                    />
+                  </div>
+                  <input
+                    className="input oe-ledger-input oe-ledger-note"
+                    type="text"
+                    maxLength={280}
+                    value={otherFeesNote}
+                    placeholder={t('otherFeesPh')}
+                    onChange={e => setOtherFeesNote(e.target.value)}
+                    aria-label={t('otherFeesNote')}
+                  />
+                </div>
+              ) : (
+                // Locked: the equation still reads, it just isn't editable.
+                <div className="oe-ledger-value mono">
+                  {fmtUSD(cost.fees, locale)}
+                  {otherFeesNote.trim() && (
+                    <span className="oe-ledger-fee-note">{otherFeesNote.trim()}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="oe-ledger-op mono" aria-hidden="true">=</div>
+
+            <div className="oe-ledger-cell">
+              {/* All-in, so every "Cost" on this page means the same thing. */}
+              <div className="oe-ledger-label">{t('eoCost')}</div>
+              <div className="oe-ledger-value mono oe-ledger-total">{fmtUSD(effectiveTotalCost, locale)}</div>
+            </div>
+          </div>
+
+          <div className="oe-ledger-out">
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('revenue')}</div>
+              <div className="oe-ledger-value mono">{fmtUSD(totals.revenue, locale)}</div>
+            </div>
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('profit')}</div>
+              <div
+                className="oe-ledger-value mono"
+                style={{ color: effectiveProfit >= 0 ? 'var(--pos)' : 'var(--neg)' }}
+              >
+                {fmtUSD(effectiveProfit, locale)}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1031,57 +1094,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   disabled={!canEditOrder}
                   style={{ paddingLeft: 24, fontWeight: 500 }}
                 />
-              </div>
-            </div>
-            {/* Fees sit on their own full-width row directly under Goods total:
-                the amount is narrow because it's money, the note is wide
-                because it's a sentence. The arithmetic strip only appears once
-                there's a fee to explain. */}
-            <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '180px 1fr', gap: 14 }}>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="label">{t('otherFees')}</label>
-                <div style={{ position: 'relative' }}>
-                  <span className="mono" style={{
-                    position: 'absolute', left: 12, top: '50%',
-                    transform: 'translateY(-50%)', color: 'var(--fg-subtle)',
-                    pointerEvents: 'none',
-                  }}>$</span>
-                  <input
-                    className="input mono"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={otherFeesInput}
-                    placeholder="0.00"
-                    onChange={e => setOtherFeesInput(e.target.value)}
-                    onFocus={e => e.target.select()}
-                    disabled={!canEditOrder}
-                    style={{ paddingLeft: 24, fontWeight: 500 }}
-                  />
-                </div>
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="label">{t('otherFeesNote')}</label>
-                <input
-                  className="input"
-                  type="text"
-                  maxLength={280}
-                  value={otherFeesNote}
-                  placeholder={t('otherFeesPh')}
-                  onChange={e => setOtherFeesNote(e.target.value)}
-                  disabled={!canEditOrder}
-                />
-              </div>
-              <div className="help" style={{ gridColumn: '1 / -1', marginTop: -4 }}>
-                {cost.fees > 0 ? (
-                  <span className="mono">
-                    {t('otherFeesMath', {
-                      goods: fmtUSD(cost.goods, locale),
-                      fees: fmtUSD(cost.fees, locale),
-                      total: fmtUSD(cost.total, locale),
-                    })}
-                  </span>
-                ) : t('otherFeesHint')}
               </div>
             </div>
             {/* Notes gets its own row and spans the full grid so there's
