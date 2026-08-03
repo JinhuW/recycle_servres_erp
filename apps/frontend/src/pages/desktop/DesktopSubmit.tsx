@@ -6,6 +6,7 @@ import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
+import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
@@ -175,6 +176,10 @@ type OrderMeta = {
   payment: 'Company' | 'Self';
   notes: string;
   totalCostOverride: string | null;
+  // Charged on top of the goods total, so it is its own field rather than
+  // something folded into the override.
+  otherFees: string;
+  otherFeesNote: string;
 };
 
 
@@ -260,6 +265,8 @@ function OrderForm({
     payment: 'Company',
     notes: '',
     totalCostOverride: null,
+    otherFees: '',
+    otherFeesNote: '',
   });
 
   // Order-level error banner — populated by submit/confirm failures. AI scan
@@ -350,6 +357,13 @@ function OrderForm({
     });
     return { units, cost };
   }, [lines]);
+
+  // Goods (line sum, or the negotiated override) plus fees charged on top.
+  const cost = poEffectiveCost({
+    lineSubtotal: totals.cost,
+    totalCostOverride: meta.totalCostOverride !== null ? (Number(meta.totalCostOverride) || 0) : null,
+    otherFees: parseFeeInput(meta.otherFees),
+  });
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   const dupByIdx = useMemo(() => {
@@ -468,6 +482,8 @@ function OrderForm({
     payment: 'company' | 'self';
     notes: string | null;
     totalCost: number;
+    otherFees: number;
+    otherFeesNote: string | null;
   };
 
   // Lazily create-or-append. The first persist creates the PO already carrying
@@ -490,6 +506,8 @@ function OrderForm({
     payment: meta.payment === 'Company' ? 'company' : 'self',
     notes: meta.notes || null,
     totalCost: meta.totalCostOverride != null ? (Number(meta.totalCostOverride) || 0) : totals.cost,
+    otherFees: parseFeeInput(meta.otherFees),
+    otherFeesNote: meta.otherFeesNote.trim() || null,
   });
 
   // Confirms a single line AND auto-saves the current order metadata in the
@@ -555,6 +573,9 @@ function OrderForm({
       await api.patch('/api/orders/' + target.id, {
         addLines: submitLines.map(toWireLine),
         totalCost: (target.totalCost ?? 0) + totals.cost,
+        // Fees accumulate the same way the goods total does — the target PO
+        // keeps whatever it was already charged, plus what this batch carries.
+        otherFees: target.otherFees + parseFeeInput(meta.otherFees),
       });
       const evidenceOk = evidenceFiles.length === 0 || await uploadEvidence(target.id);
       // Best-effort cleanup of the throwaway draft IF one was created — lazy
@@ -780,7 +801,7 @@ function OrderForm({
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <span>{t('totalCost')}</span>
+                <span>{t('goodsTotal')}</span>
                 {meta.totalCostOverride !== null && (
                   <button
                     onClick={() => setMeta(m => ({ ...m, totalCostOverride: null }))}
@@ -810,6 +831,50 @@ function OrderForm({
                 onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
                 placeholder={t('subOptional')}
               />
+            </div>
+            {/* Fees get their own full-width row under the 4-up meta grid: the
+                amount is narrow because it's money, the note is wide because
+                it's a sentence. The arithmetic strip replaces the hint once
+                there's a fee to explain. */}
+            <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '180px 1fr', gap: 14 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">{t('otherFees')}</label>
+                <div style={{ position: 'relative' }}>
+                  <span className="mono" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)', pointerEvents: 'none' }}>$</span>
+                  <input
+                    className="input mono"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={meta.otherFees}
+                    placeholder="0.00"
+                    onChange={e => setMeta(m => ({ ...m, otherFees: e.target.value }))}
+                    onFocus={e => e.target.select()}
+                    style={{ paddingLeft: 24, fontWeight: 500 }}
+                  />
+                </div>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">{t('otherFeesNote')}</label>
+                <input
+                  className="input"
+                  maxLength={280}
+                  value={meta.otherFeesNote}
+                  placeholder={t('otherFeesPh')}
+                  onChange={e => setMeta(m => ({ ...m, otherFeesNote: e.target.value }))}
+                />
+              </div>
+              <div className="help" style={{ gridColumn: '1 / -1', marginTop: -4 }}>
+                {cost.fees > 0 ? (
+                  <span className="mono">
+                    {t('otherFeesMath', {
+                      goods: fmtUSD(cost.goods, locale),
+                      fees: fmtUSD(cost.fees, locale),
+                      total: fmtUSD(cost.total, locale),
+                    })}
+                  </span>
+                ) : t('otherFeesHint')}
+              </div>
             </div>
           </div>
         </div>
@@ -854,8 +919,13 @@ function OrderForm({
               )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
-              {fmtUSD(meta.totalCostOverride !== null ? (Number(meta.totalCostOverride) || 0) : totals.cost, locale)}
+              {fmtUSD(cost.total, locale)}
             </div>
+            {cost.fees > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--accent-strong)', marginTop: 1 }}>
+                {t('inclFees', { fees: fmtUSD(cost.fees, locale) })}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <div style={{ display: 'flex', gap: 8 }}>

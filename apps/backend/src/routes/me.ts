@@ -6,6 +6,7 @@ import { getDb } from '../db';
 import { hashPassword, verifyPassword } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
+import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Env, User } from '../types';
 
 const me = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -23,13 +24,14 @@ me.get('/', async (c) => {
     SELECT
       COUNT(*)::int                                                                AS count,
       COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                            AS revenue,
-      COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float           AS profit,
-      COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+      COALESCE(SUM((sol.unit_price - ${effUnitCost(sql)}) * sol.qty), 0)::float    AS profit,
+      COALESCE(SUM((sol.unit_price - ${effUnitCost(sql)}) * sol.qty
                    * COALESCE(po.commission_rate, 0)), 0)::float                   AS commission
     FROM sell_order_lines sol
     JOIN sell_orders so ON so.id = sol.sell_order_id
     JOIN order_lines ol ON ol.id = sol.inventory_id
     JOIN orders po      ON po.id = ol.order_id
+    ${poFeeBasis(sql)}
     WHERE so.status = 'Done' AND po.user_id = ${u.id}
   `)[0] as { count: number; revenue: number; profit: number; commission: number };
 

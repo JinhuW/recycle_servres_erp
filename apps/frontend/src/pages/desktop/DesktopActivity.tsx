@@ -68,11 +68,12 @@ const FIELD_LABEL: Record<string, string> = {
   form_factor: 'Form factor', description: 'Description', part_number: 'Part number',
   serial_number: 'Serial number', chip_number: 'Chip number', condition: 'Condition',
   health: 'Health', rpm: 'RPM', notes: 'Notes', warehouse_id: 'Warehouse',
-  payment: 'Payment', total_cost: 'Total cost', commission_rate: 'Commission rate',
+  payment: 'Payment', total_cost: 'Goods total', commission_rate: 'Commission rate',
+  other_fees: 'Other fees', other_fees_note: 'Other fees note',
   customer_id: 'Customer', currency_code: 'Currency', payment_received_by: 'Payment received by',
   label: 'Label', sub_label: 'Sub-label', inventory_id: 'Inventory item', status: 'Status',
 };
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'unit_price', 'total_cost', 'price']);
+const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'unit_price', 'total_cost', 'price', 'other_fees']);
 
 type Change = { field: string; from: unknown; to: unknown };
 

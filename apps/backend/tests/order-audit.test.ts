@@ -152,6 +152,47 @@ describe('PO audit log — lifecycle events', () => {
     expect(meta.map(e => (e.detail.changes as { to: unknown }[])[0].to)).toEqual([420, 500, 580]);
   });
 
+  it('logs an other_fees change as meta_changed, with numeric from/to', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    const r = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 25, otherFeesNote: 'PayPal processing fee' },
+    });
+    expect(r.status).toBe(200);
+
+    const meta = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
+    expect(meta).toHaveLength(1);
+    const changes = meta[0].detail.changes as { field: string; from: unknown; to: unknown }[];
+    const fee = changes.find(c => c.field === 'other_fees')!;
+    // Numbers, not "0.00"/"25.00" — a missing ::float in the before/after
+    // snapshots shows up here first.
+    expect(typeof fee.from).toBe('number');
+    expect(typeof fee.to).toBe('number');
+    expect(fee.from).toBe(0);
+    expect(fee.to).toBe(25);
+    expect(changes.find(c => c.field === 'other_fees_note')).toMatchObject({
+      from: null, to: 'PayPal processing fee',
+    });
+  });
+
+  // Regression guard for the NUMERIC-as-string trap: postgres.js returns
+  // NUMERIC as a string, so an uncast other_fees would diff "25.00" against a
+  // JS 25 and report a phantom change on every unrelated PATCH.
+  it('does not report a phantom fee change on a notes-only PATCH', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 25 } });
+
+    const r = await api('PATCH', `/api/orders/${id}`, { token, body: { notes: 'just a note' } });
+    expect(r.status).toBe(200);
+
+    const meta = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
+    const latest = meta[meta.length - 1];
+    const changes = latest.detail.changes as { field: string }[];
+    expect(changes.map(c => c.field)).toEqual(['notes']);
+  });
+
   it('writes a created event for the empty-draft endpoint too', async () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders/draft', {

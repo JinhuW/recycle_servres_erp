@@ -345,6 +345,28 @@ describe('PATCH /api/orders/:id — Done is read-only', () => {
     expect(after.body.order.lines[0].qty).toBe(1);
   });
 
+  // Fees are money on a closed-book record, so both the amount and the note
+  // that explains it are frozen — unlike `notes`, which stays appendable.
+  it('rejects other-fee edits with 409, amount and note alike', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await makeDoneOrder(mgr);
+
+    const feeEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { otherFees: 12.5 },
+    });
+    expect(feeEdit.status).toBe(409);
+
+    const noteEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { otherFeesNote: 'PayPal processing fee' },
+    });
+    expect(noteEdit.status).toBe(409);
+
+    const after = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(after.body.order.otherFees).toBe(0);
+    expect(after.body.order.otherFeesNote).toBeNull();
+  });
+
   it('allows notes-only PATCH on a Done order', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id } = await makeDoneOrder(mgr);
@@ -355,6 +377,91 @@ describe('PATCH /api/orders/:id — Done is read-only', () => {
     const after = await api<{ order: { notes: string | null } }>(
       'GET', `/api/orders/${id}`, { token: mgr });
     expect(after.body.order.notes).toBe('archive: case closed');
+  });
+});
+
+describe('other fees on a purchase order', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function draftPO(token: string): Promise<string> {
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New' }] },
+    });
+    expect(r.status).toBe(201);
+    return r.body.id;
+  }
+
+  it('round-trips an amount and note set by the owner on their draft', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+
+    const patched = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 7.5, otherFeesNote: 'PayPal processing fee' },
+    });
+    expect(patched.status).toBe(200);
+
+    const detail = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(detail.body.order.otherFees).toBe(7.5);
+    expect(detail.body.order.otherFeesNote).toBe('PayPal processing fee');
+  });
+
+  it('accepts them at create time', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1', otherFees: 3.25, otherFeesNote: 'wire fee',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    expect(created.status).toBe(201);
+    const detail = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${created.body.id}`, { token });
+    expect(detail.body.order.otherFees).toBe(3.25);
+    expect(detail.body.order.otherFeesNote).toBe('wire fee');
+  });
+
+  // other_fees is NOT NULL — a client clearing the box sends null and means 0.
+  it('clears to 0 (not null) when sent null', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 9, otherFeesNote: 'x' } });
+
+    const cleared = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: null, otherFeesNote: null },
+    });
+    expect(cleared.status).toBe(200);
+
+    const detail = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(detail.body.order.otherFees).toBe(0);
+    expect(detail.body.order.otherFeesNote).toBeNull();
+  });
+
+  it('stores a whitespace-only note as null', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFeesNote: '   ' } });
+    const detail = await api<{ order: { otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(detail.body.order.otherFeesNote).toBeNull();
+  });
+
+  it('nets the fee out of the list row profit', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, {
+      token,
+      body: { otherFees: 20, lines: [] , addLines: [] },
+    });
+
+    const list = await api<{ orders: { id: string; otherFees: number; profit: number }[] }>(
+      'GET', '/api/orders?limit=100', { token });
+    const row = list.body.orders.find(o => o.id === id)!;
+    expect(row.otherFees).toBe(20);
+    // Lines carry no sell_price, so line margin is 0 — profit is the fee alone.
+    expect(row.profit).toBeCloseTo(-20, 2);
   });
 });
 

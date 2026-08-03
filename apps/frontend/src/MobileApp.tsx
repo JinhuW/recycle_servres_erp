@@ -31,7 +31,7 @@ import {
   MOBILE_VIEW_TO_PATH, pathToMobileView,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderSummary, ScanResponse } from './lib/types';
-import { buildOrderSubmit } from './lib/orderSubmit';
+import { buildOrderSubmit, type SubmitMeta } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
 
 type ReturnTo = 'idle' | 'review';
@@ -401,7 +401,7 @@ function Shell() {
     setCapture(c => c.phase === 'review' ? { ...c, lines: c.lines.filter((_, i) => i !== idx) } : c);
   };
 
-  const submitOrder = async (meta: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => {
+  const submitOrder = async (meta: SubmitMeta) => {
     if (capture.phase !== 'review') return;
 
     // Editing an existing order PATCHes that order; finalizing a new draft

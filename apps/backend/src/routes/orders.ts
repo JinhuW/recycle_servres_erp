@@ -45,6 +45,34 @@ function serialErr(label: string, issue: SerialIssue): string {
     : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
 }
 
+// Order-level fees, shared by POST / and PATCH /:id so the two can't drift.
+// Rejected rather than clamped: other_fees carries a CHECK (>= 0), so a
+// negative slipping through would surface as a 500 from inside the transaction
+// instead of a 400 at the door. null means "clear" and must be excluded before
+// Number.isFinite is asked anything, since Number(null) is 0.
+const FEE_NOTE_MAX = 280;
+
+function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | null {
+  if (b.otherFees !== undefined && b.otherFees !== null) {
+    if (typeof b.otherFees !== 'number' || !Number.isFinite(b.otherFees) || b.otherFees < 0) {
+      return 'otherFees must be a number >= 0';
+    }
+  }
+  if (b.otherFeesNote !== undefined && b.otherFeesNote !== null) {
+    if (typeof b.otherFeesNote !== 'string') return 'otherFeesNote must be a string or null';
+    if (b.otherFeesNote.length > FEE_NOTE_MAX) {
+      return `otherFeesNote must be ${FEE_NOTE_MAX} characters or fewer`;
+    }
+  }
+  return null;
+}
+
+// '' means the user cleared the box — the edit forms echo every field back on
+// save — so store NULL rather than an empty string.
+function normFeeNote(v: string | null | undefined): string | null {
+  return v == null ? null : (v.trim() || null);
+}
+
 type LineInput = {
   category?: LineCategory;
   brand?: string | null;
@@ -151,12 +179,18 @@ orders.get('/', async (c) => {
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
       o.archived_at,
       o.total_cost::float AS total_cost,
+      o.other_fees::float AS other_fees,
+      o.other_fees_note,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
       COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float         AS revenue,
-      COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)::float AS profit,
+      -- Fees are a cost, so the row's profit nets them. No per-line
+      -- amortisation needed here (unlike lib/po-cost.ts): the group holds every
+      -- line of the PO, so the shares would sum to o.other_fees anyway.
+      (COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)
+         - o.other_fees)::float                                                     AS profit,
       COUNT(l.id)::int                                                              AS line_count
     FROM orders o
     JOIN users u      ON u.id = o.user_id
@@ -193,6 +227,8 @@ orders.get('/', async (c) => {
       archivedAt: r.archived_at,
       createdAt: r.created_at,
       totalCost: r.total_cost,
+      otherFees: r.other_fees,
+      otherFeesNote: r.other_fees_note,
       warehouse: r.warehouse_id ? { id: r.warehouse_id, short: r.warehouse_short, region: r.warehouse_region } : null,
       qty: r.qty,
       revenue: r.revenue,
@@ -217,6 +253,8 @@ orders.get('/:id', async (c) => {
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
            o.archived_at,
            o.total_cost::float AS total_cost,
+           o.other_fees::float AS other_fees,
+           o.other_fees_note,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region
@@ -286,6 +324,8 @@ orders.get('/:id', async (c) => {
       statusMeta,
       createdAt: order.created_at,
       totalCost: order.total_cost,
+      otherFees: order.other_fees,
+      otherFeesNote: order.other_fees_note,
       commissionRate: order.commission_rate,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
@@ -409,6 +449,7 @@ orders.get('/:id/spreadsheet', async (c) => {
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
            o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
+           o.other_fees::float AS other_fees, o.other_fees_note,
            u.name AS user_name,
            w.short AS warehouse_short, w.region AS warehouse_region
     FROM orders o
@@ -428,6 +469,21 @@ orders.get('/:id/spreadsheet', async (c) => {
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
   ` as unknown as Record<string, unknown>[];
 
+  // Mirror the invoice's payment summary: subtotal is the sum of line costs;
+  // total_cost may be a manual override (negotiated lot price), and other_fees
+  // is charged on top of whichever of the two applies.
+  const subtotal = +lines.reduce((s, l) => s + Number(l.qty ?? 0) * Number(l.unit_cost ?? 0), 0).toFixed(2);
+  const totalQty = lines.reduce((s, l) => s + Number(l.qty ?? 0), 0);
+  const otherFees = Number(order.other_fees ?? 0);
+
+  // Same allocation rule as lib/po-cost.ts — keep the two in sync. Cost-weighted
+  // share of the order-level fee, with a flat per-unit fallback for a free lot
+  // (every unit_cost 0) so the fee can't silently disappear.
+  const effUnitCost = (unitCost: number): number =>
+    subtotal > 0 ? unitCost + (otherFees * unitCost) / subtotal
+    : totalQty > 0 ? unitCost + otherFees / totalQty
+    : unitCost;
+
   // Projected economics. The PO carries a manager-set `sell_price` per line (a
   // target, not a realized sale — the spreadsheet is purchaser-facing and a PO
   // has no sell-side data of its own). Profit/commission here are the projected
@@ -445,15 +501,17 @@ orders.get('/:id/spreadsheet', async (c) => {
       lineTotal: +(qty * unitCost).toFixed(2),
       sellPrice,
       sellTotal: sellPrice != null ? +(qty * sellPrice).toFixed(2) : null,
-      profit: sellPrice != null ? +(qty * (sellPrice - unitCost)).toFixed(2) : null,
+      // unitCost / lineTotal stay raw — those columns are what was paid for the
+      // goods, and the fee is disclosed on its own Payment row. Only profit
+      // carries the fee share, per line rather than as one subtraction at the
+      // bottom, so an unpriced line's share drops out the same way it does on
+      // the dashboard.
+      profit: sellPrice != null ? +(qty * (sellPrice - effUnitCost(unitCost))).toFixed(2) : null,
     };
   });
 
-  // Mirror the invoice's payment summary: subtotal is the sum of line costs;
-  // total_cost may be a manual override (negotiated lot price).
-  const subtotal = +lines.reduce((s, l) => s + Number(l.qty ?? 0) * Number(l.unit_cost ?? 0), 0).toFixed(2);
-  const totalQty = lines.reduce((s, l) => s + Number(l.qty ?? 0), 0);
-  const totalCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
+  const goodsCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
+  const totalCost = +(goodsCost + otherFees).toFixed(2);
   const commissionRate = order.commission_rate != null ? Number(order.commission_rate) : null;
   const warehouse = [order.warehouse_short, order.warehouse_region].filter(Boolean).join(' — ');
 
@@ -472,7 +530,11 @@ orders.get('/:id/spreadsheet', async (c) => {
     { field: 'Warehouse',             value: warehouse },
     { field: 'Payment method',        value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
     { field: 'Total quantity',        value: totalQty },
+    // Subtotal -> Other fees -> Total cost reads as an arithmetic column, which
+    // is why the fee rows sit here rather than at the bottom.
     { field: 'Subtotal (line costs)', value: subtotal },
+    { field: 'Other fees',            value: otherFees },
+    { field: 'Other fees note',       value: String(order.other_fees_note ?? '') },
     { field: 'Total cost',            value: totalCost },
     { field: 'Projected sell value',  value: projectedRevenue },
     { field: 'Projected profit',      value: projectedProfit },
@@ -499,6 +561,8 @@ orders.post('/', async (c) => {
         payment?: 'company' | 'self';
         notes?: string;
         totalCost?: number;
+        otherFees?: number;
+        otherFeesNote?: string | null;
         lines: LineInput[];
       }
     | null;
@@ -519,6 +583,9 @@ orders.post('/', async (c) => {
   if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
   if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
 
+  const feeErr = badFees(body);
+  if (feeErr) return c.json({ error: feeErr }, 400);
+
   for (let i = 0; i < body.lines.length; i++) {
     const l = body.lines[i];
     const issue = serialIssue({ ...l, category: l.category ?? body.category });
@@ -531,11 +598,15 @@ orders.post('/', async (c) => {
   await sql.begin(async (tx) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
-      INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
+      INSERT INTO orders (
+        id, user_id, category, warehouse_id, payment, notes, total_cost,
+        other_fees, other_fees_note, lifecycle
+      )
       VALUES (
         ${newId}, ${u.id}, ${body.category},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
-        ${body.totalCost ?? null}, 'draft'
+        ${body.totalCost ?? null},
+        ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
       )
     `;
     for (let i = 0; i < body.lines.length; i++) {
@@ -580,6 +651,7 @@ orders.post('/', async (c) => {
       lineCount: body.lines.length,
       qty: body.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
       totalCost: body.totalCost ?? null,
+      otherFees: body.otherFees ?? 0,
     });
   });
 
@@ -631,6 +703,8 @@ orders.patch('/:id', async (c) => {
         addLines?: (LineFields & { category?: string })[];
         removeLineIds?: string[];
         totalCost?: number | null;
+        otherFees?: number | null;
+        otherFeesNote?: string | null;
         notes?: string | null;
         warehouseId?: string | null;
         payment?: 'company' | 'self';
@@ -659,6 +733,9 @@ orders.patch('/:id', async (c) => {
     body.commissionRate === undefined ? undefined
     : body.commissionRate === null ? null
     : Math.min(1, Math.max(0, Number(body.commissionRate)));
+
+  const feeErr = badFees(body);
+  if (feeErr) return c.json({ error: feeErr }, 400);
 
   // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
   // a malformed value hits the order_lines CHECK constraint inside the tx
@@ -745,11 +822,14 @@ orders.patch('/:id', async (c) => {
       const orderBefore = (await tx`
         SELECT id, lifecycle, notes, warehouse_id, payment,
                total_cost::float AS total_cost,
-               commission_rate::float AS commission_rate
+               commission_rate::float AS commission_rate,
+               other_fees::float AS other_fees,
+               other_fees_note
         FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
       `)[0] as
         | { id: string; lifecycle: string; notes: string | null; warehouse_id: string | null;
-            payment: string; total_cost: number | null; commission_rate: number | null }
+            payment: string; total_cost: number | null; commission_rate: number | null;
+            other_fees: number; other_fees_note: string | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
       // A Done PO is the closed-book record of what was bought / sold. Any
@@ -763,6 +843,10 @@ orders.patch('/:id', async (c) => {
           (Array.isArray(body.addLines) && body.addLines.length > 0) ||
           (Array.isArray(body.removeLineIds) && body.removeLineIds.length > 0) ||
           body.totalCost !== undefined ||
+          // The fee note is frozen alongside the amount: it is metadata on a
+          // closed-book cost, not the free-append `notes` field.
+          body.otherFees !== undefined ||
+          body.otherFeesNote !== undefined ||
           body.commissionRate !== undefined;
         if (touchesFrozen) {
           // Outcome thrown out of the tx callback — the surrounding try/catch
@@ -793,6 +877,8 @@ orders.patch('/:id', async (c) => {
 
       const touchesOrder =
         body.totalCost !== undefined ||
+        body.otherFees !== undefined ||
+        body.otherFeesNote !== undefined ||
         body.notes !== undefined ||
         body.warehouseId !== undefined ||
         body.payment !== undefined ||
@@ -806,12 +892,20 @@ orders.patch('/:id', async (c) => {
         const setNotes     = body.notes       !== undefined ? 1 : 0;
         const setWarehouse = body.warehouseId !== undefined ? 1 : 0;
         const setCommission = body.commissionRate !== undefined ? 1 : 0;
+        const setOtherFees = body.otherFees     !== undefined ? 1 : 0;
+        const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         await tx`
           UPDATE orders SET
             total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${body.totalCost ?? null}   ELSE total_cost   END,
             notes        = CASE WHEN ${setNotes}::int     = 1 THEN ${body.notes ?? null}       ELSE notes        END,
             warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
             commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${clampedRate ?? null} ELSE commission_rate END,
+            -- other_fees is NOT NULL: a client clearing the field sends null and
+            -- means 0, so the sentinel writes 0 rather than passing the null
+            -- through into the constraint. The note is nullable and follows the
+            -- same clear-with-null contract as notes/warehouse_id.
+            other_fees      = CASE WHEN ${setOtherFees}::int = 1 THEN ${Number(body.otherFees ?? 0)}    ELSE other_fees      END,
+            other_fees_note = CASE WHEN ${setFeesNote}::int  = 1 THEN ${normFeeNote(body.otherFeesNote)} ELSE other_fees_note END,
             payment      = COALESCE(${body.payment ?? null}, payment)
           WHERE id = ${id}
         `;
@@ -912,7 +1006,8 @@ orders.patch('/:id', async (c) => {
       if (touchesOrder) {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
-                 commission_rate::float AS commission_rate
+                 commission_rate::float AS commission_rate,
+                 other_fees::float AS other_fees, other_fees_note
           FROM orders WHERE id = ${id} LIMIT 1
         `)[0] as Record<string, unknown>;
         const metaChanges = diff(
