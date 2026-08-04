@@ -28,7 +28,7 @@ import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorToast } from './lib/errorToast';
 import {
   navigate, useRoute, match,
-  MOBILE_VIEW_TO_PATH, pathToMobileView,
+  MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, type SubmitMeta } from './lib/orderSubmit';
@@ -91,6 +91,16 @@ function Shell() {
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [user?.id]);
+
+  // Resume an OAuth authorize that bounced through the login screen. Must be a
+  // real navigation, not navigate(), because the target is a backend route.
+  // Fires ahead of the RolePicker gate below, which would otherwise strand a
+  // manager mid-connect.
+  useEffect(() => {
+    if (!user) return;
+    const next = readSafeNext(window.location.search);
+    if (next) window.location.replace(next);
+  }, [user]);
 
   // Drive the order-detail screen from the URL. Suspended while a capture
   // flow is active so the camera/form/review screens take over the shell.

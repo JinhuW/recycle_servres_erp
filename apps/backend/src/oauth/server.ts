@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { getCookie } from 'hono/cookie';
 import type { Context } from 'hono';
 import type { Env, OAuthScope, User } from '../types';
-import { authorizationServerMetadata, protectedResourceMetadata, resolvePublicOrigin } from './metadata';
+import { authorizationServerMetadata, protectedResourceMetadata, resolvePublicOrigin, dcrEnabled } from './metadata';
 import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
@@ -22,13 +22,25 @@ const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write', 'sellorder:
 
 const wellKnown = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-wellKnown.get('/oauth-authorization-server', (c) =>
-  c.json(authorizationServerMetadata(resolvePublicOrigin(c))),
-);
+type WellKnownCtx = Context<{ Bindings: Env; Variables: { user: User } }>;
+const asMeta = (c: WellKnownCtx) =>
+  c.json(authorizationServerMetadata(resolvePublicOrigin(c), { dcr: dcrEnabled(c.env) }));
+const prsMeta = (c: WellKnownCtx) => c.json(protectedResourceMetadata(resolvePublicOrigin(c)));
 
-wellKnown.get('/oauth-protected-resource', (c) =>
-  c.json(protectedResourceMetadata(resolvePublicOrigin(c))),
-);
+wellKnown.get('/oauth-authorization-server', asMeta);
+wellKnown.get('/oauth-protected-resource', prsMeta);
+
+// RFC 9728 §3.1 inserts the resource's path into the well-known URL, so the
+// metadata for `https://host/api/mcp` lives at
+// `/.well-known/oauth-protected-resource/api/mcp`. MCP clients probe that form
+// first and only some of them fall back to the bare path. Registered as a
+// literal rather than a wildcard so we can never advertise a resource we don't
+// actually host, and so the Prometheus `route` label stays bounded.
+wellKnown.get('/oauth-protected-resource/api/mcp', prsMeta);
+// RFC 8414 §3.1's equivalent path-insertion form. Our issuer has no path
+// component, so the bare URL above is the canonical one and this exists only
+// because clients walk the same suffixed chain for the AS document.
+wellKnown.get('/oauth-authorization-server/api/mcp', asMeta);
 
 export default wellKnown;
 
@@ -36,18 +48,86 @@ export default wellKnown;
 
 export const oauth = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-function isValidRedirectUri(uri: string): boolean {
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+export function isValidRedirectUri(uri: string): boolean {
   try {
     const u = new URL(uri);
+    if (u.hash) return false;  // RFC 6749 §3.1.2 — redirect URIs carry no fragment.
     if (u.protocol === 'https:') return true;
-    if (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return true;
+    if (u.protocol === 'http:' && LOOPBACK_HOSTS.has(u.hostname)) return true;
     return false;
   } catch { return false; }
 }
 
+// RFC 8252 §7.3: a native app binds an ephemeral loopback port it can't know at
+// registration time, so the AS must compare loopback redirect URIs ignoring the
+// port. Claude Code is exactly this case — register `http://localhost/callback`
+// once and every run's random port matches. Everything else stays an exact
+// string comparison.
+//
+// This governs only the registration allowlist. The token endpoint separately
+// re-checks redirect_uri against the concrete value recorded on the
+// authorization code, which already carries the real port — RFC 6749 §4.1.3
+// requires that one to stay exact, so don't route it through here.
+export function redirectUriMatches(registered: string[], presented: string): boolean {
+  if (registered.includes(presented)) return true;
+  let p: URL;
+  try { p = new URL(presented); } catch { return false; }
+  if (p.protocol !== 'http:' || !LOOPBACK_HOSTS.has(p.hostname) || p.hash) return false;
+  return registered.some((r) => {
+    let u: URL;
+    try { u = new URL(r); } catch { return false; }
+    return u.protocol === 'http:'
+      // localhost and 127.0.0.1 stay distinct — they're different hosts to a
+      // cookie jar, so register whichever the client actually uses.
+      && u.hostname === p.hostname
+      && u.pathname === p.pathname
+      && u.search === p.search;
+  });
+}
+
+// Registration is unauthenticated by design (RFC 7591), so it needs its own
+// brakes. Registering grants no access, but unchecked it would let anyone fill
+// oauth_clients and bury the real connectors in the Settings list.
+const DCR_PER_IP_HOUR = 10;
+const DCR_GLOBAL_HOUR = 60;
+const DCR_UNUSED_CAP = 200;
+
 oauth.post('/register', async (c) => {
-  if (c.env.OAUTH_DCR_OPEN !== 'true') {
+  if (!dcrEnabled(c.env)) {
     return c.json({ error: 'registration disabled' }, 403);
+  }
+  const sql = getDb(c.env);
+  const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    || c.req.header('x-real-ip')?.trim()
+    || null;
+  // Counted before any work, mirroring the windowed-COUNT throttle on login.
+  // `unused` reclaims the case where a script registers repeatedly but never
+  // completes a flow — those clients never mint a refresh token.
+  const [counts] = await sql<{ per_ip: number; global_n: number; unused: number }[]>`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE created_ip IS NOT DISTINCT FROM ${ip}
+          AND created_at > NOW() - INTERVAL '1 hour'
+      )::int AS per_ip,
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour')::int AS global_n,
+      COUNT(*) FILTER (
+        WHERE NOT EXISTS (
+          SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = oauth_clients.id
+        )
+      )::int AS unused
+    FROM oauth_clients
+    WHERE created_by IS NULL AND revoked_at IS NULL
+  `;
+  if ((ip !== null && counts.per_ip >= DCR_PER_IP_HOUR)
+    || counts.global_n >= DCR_GLOBAL_HOUR
+    || counts.unused >= DCR_UNUSED_CAP) {
+    c.header('Retry-After', '3600');
+    return c.json({
+      error: 'temporarily_unavailable',
+      error_description: 'registration rate limit reached',
+    }, 429);
   }
   const body = (await c.req.json().catch(() => null)) as null | {
     client_name?: string;
@@ -70,28 +150,44 @@ oauth.post('/register', async (c) => {
   // interactive code flow, where market:write survives only if the consenting
   // user is a manager (see /authorize + /authorize/consent). RFC 7591 §3.2.1
   // lets the AS return a narrower scope than requested.
-  const requested = body.scope?.split(' ').filter(Boolean) ?? ['market:read'];
+  //
+  // A client that names no scope gets all of them. Defaulting to market:read
+  // silently hid the sell-order and write tools from every connector that
+  // registered without asking, which reads as "the server only has two tools"
+  // rather than as a permissions issue.
+  const requested = body.scope?.split(' ').filter(Boolean) ?? [...KNOWN_SCOPES];
   const scopes = requested.filter(s => KNOWN_SCOPES.has(s));
-  if (scopes.length === 0) scopes.push('market:read');
+  if (scopes.length === 0) scopes.push(...KNOWN_SCOPES);
   // token_endpoint_auth_method: "none" = public client (PKCE only, no secret).
   // Honour it so the SDK that asked for it isn't handed a secret it'll discard.
-  const isPublic = body.token_endpoint_auth_method === 'none';
-  const sql = getDb(c.env);
+  const authMethod = body.token_endpoint_auth_method === 'none' ? 'none'
+    : body.token_endpoint_auth_method === 'client_secret_post' ? 'client_secret_post'
+    : 'client_secret_basic';
+  const isPublic = authMethod === 'none';
   const out = await createOAuthClient(sql, {
     name: body.client_name,
     redirectUris: body.redirect_uris,
     grantTypes: grants,
     scopes,
     createdBy: null,
+    createdIp: ip,
     public: isPublic,
   });
   return c.json({
     client_id: out.clientId,
-    ...(out.clientSecret ? { client_secret: out.clientSecret } : {}),
+    client_id_issued_at: Math.floor(Date.now() / 1000),
+    // client_secret_expires_at is REQUIRED alongside a secret (RFC 7591
+    // §3.2.1); 0 means it never expires. Strict registrants reject the
+    // response without it.
+    ...(out.clientSecret
+      ? { client_secret: out.clientSecret, client_secret_expires_at: 0 }
+      : {}),
+    client_name: body.client_name,
     redirect_uris: body.redirect_uris,
     grant_types: grants,
+    response_types: ['code'],
     scope: scopes.join(' '),
-    token_endpoint_auth_method: isPublic ? 'none' : 'client_secret_basic',
+    token_endpoint_auth_method: authMethod,
   }, 201);
 });
 
@@ -101,8 +197,14 @@ oauth.get('/authorize', async (c) => {
   const sql = getDb(c.env);
   const client = await findOAuthClient(sql, q.client_id);
   if (!client) return c.json({ error: 'invalid_client' }, 400);
-  if (!q.redirect_uri || !client.redirect_uris.includes(q.redirect_uri)) {
-    return c.json({ error: 'invalid_redirect_uri' }, 400);
+  if (!q.redirect_uri || !redirectUriMatches(client.redirect_uris, q.redirect_uri)) {
+    // Echo what was presented — it's the caller's own input, so nothing leaks,
+    // and a connector whose callback URL we guessed wrong is otherwise a silent
+    // dead end for whoever has to fix the client's registration.
+    return c.json({
+      error: 'invalid_redirect_uri',
+      presented: q.redirect_uri ?? null,
+    }, 400);
   }
   // Per RFC 6749 §4.1.2.1, once client_id + redirect_uri are validated,
   // subsequent errors must redirect back so the client sees a structured
@@ -346,6 +448,11 @@ oauth.post('/token', async (c) => {
       `)[0];
       if (!r || r.consumed_at || r.expired) return null;
       if (r.client_id !== client.id) return null;
+      // Stays an exact comparison even for loopback clients (RFC 6749 §4.1.3):
+      // this is against the concrete URI recorded at /authorize, which already
+      // carries the real ephemeral port. Don't route it through
+      // redirectUriMatches — that would let a code minted for one port be
+      // redeemed against another.
       if (r.redirect_uri !== redirect_uri) return null;
       if (!verifyChallenge(r.code_challenge, code_verifier)) return null;
       await tx`
@@ -555,15 +662,26 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
         return c.json({ error: `invalid scope: ${s}` }, 400);
       }
     }
+    // Same allowlist DCR enforces — being a manager shouldn't buy the ability to
+    // point a client at a javascript: or data: URI.
+    const redirectUris = body.redirectUris ?? [];
+    for (const r of redirectUris) {
+      if (!isValidRedirectUri(r)) return c.json({ error: `invalid redirect_uri: ${r}` }, 400);
+    }
+    // A connector client with no callback can never complete a code flow, so
+    // reject it here rather than at the first confusing /authorize 400.
+    if (grantTypes.includes('authorization_code') && redirectUris.length === 0) {
+      return c.json({ error: 'redirectUris required for authorization_code clients' }, 400);
+    }
     const out = await createOAuthClient(getDb(c.env), {
       name: body.name,
-      redirectUris: body.redirectUris ?? [],
+      redirectUris,
       grantTypes,
       scopes,
       createdBy: c.var.user.id,
       public: body.public ?? false,
     });
-    return c.json(out, 201);
+    return c.json({ ...out, name: body.name, grantTypes, scopes, redirectUris }, 201);
   })
   .delete('/:id', async (c) => {
     await revokeOAuthClient(getDb(c.env), c.req.param('id'));

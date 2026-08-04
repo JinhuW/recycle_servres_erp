@@ -39,3 +39,27 @@ describe('CORS allowlist', () => {
     expect(acao).not.toBe('*');
   });
 });
+
+describe('CORS headers for MCP clients', () => {
+  it('allows the Streamable HTTP transport headers on preflight', async () => {
+    const r = await api('OPTIONS', '/api/mcp', {
+      headers: {
+        Origin: 'http://localhost:5173',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'mcp-protocol-version',
+      },
+    });
+    expect((r.headers.get('access-control-allow-headers') ?? '').toLowerCase())
+      .toContain('mcp-protocol-version');
+  });
+
+  it('exposes WWW-Authenticate so a browser client can find the AS', async () => {
+    const r = await api('POST', '/api/mcp', {
+      headers: { Origin: 'http://localhost:5173' },
+      body: { jsonrpc: '2.0', id: 1, method: 'initialize' },
+    });
+    expect(r.status).toBe(401);
+    expect((r.headers.get('access-control-expose-headers') ?? '').toLowerCase())
+      .toContain('www-authenticate');
+  });
+});

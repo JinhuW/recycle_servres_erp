@@ -93,7 +93,16 @@ app.use(
       return null;
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-By'],
+    allowHeaders: [
+      'Content-Type', 'Authorization', 'X-Requested-By',
+      // Streamable HTTP transport headers, for browser-hosted MCP clients and
+      // the MCP Inspector. claude.ai and chatgpt.com call server-to-server and
+      // never preflight, so these matter only for the in-browser case.
+      'MCP-Protocol-Version', 'Mcp-Session-Id', 'Last-Event-ID',
+    ],
+    // Without this an in-browser client can't read the WWW-Authenticate
+    // challenge and so can't discover where to start the OAuth flow.
+    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id'],
     credentials: true,
   }),
 );

@@ -24,6 +24,19 @@ export default {
     // hits to its public Railway origin. PROXY_SECRET is a Worker secret; when
     // it's unset the backend gate is off, so this header is simply omitted.
     if (env.PROXY_SECRET) proxied.headers.set('X-Proxy-Secret', env.PROXY_SECRET);
+    // Preserve the hostname the user actually reached us on. `new Request(target,
+    // request)` rewrites Host to the Railway origin, so without this the backend
+    // cannot tell which of our custom domains was used and its OAuth discovery
+    // documents advertise whichever origin happens to sit first in
+    // CORS_ALLOWED_ORIGINS — breaking the RFC 8414 issuer and RFC 9728 resource
+    // for every other domain. `set` (not `append`) overwrites anything a caller
+    // sent, and the backend still only ever emits an allowlisted origin.
+    proxied.headers.set('X-Forwarded-Host', url.host);
+    proxied.headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
+    // Without this the backend sees the Worker as the peer and records a null IP
+    // for every login attempt and DCR registration it tries to rate-limit.
+    const clientIp = request.headers.get('CF-Connecting-IP');
+    if (clientIp) proxied.headers.set('X-Forwarded-For', clientIp);
     return fetch(proxied, { redirect: 'manual' });
   },
 };

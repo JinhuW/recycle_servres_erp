@@ -26,6 +26,32 @@ const SCOPE_OPTIONS = [
   { scope: 'sellorder:write', labelKey: 'connectorsScopeSellOrderWrite' },
 ] as const;
 
+// Callback URLs each host uses for MCP connector OAuth. Presets, not
+// validation — they're a vendor's implementation detail and can change, so the
+// field stays editable and /oauth/authorize echoes back the URI it rejected.
+const REDIRECT_PRESETS = [
+  {
+    key: 'claude',
+    labelKey: 'connectorsPresetClaude',
+    uris: [
+      'https://claude.ai/api/mcp/auth_callback',
+      'https://claude.com/api/mcp/auth_callback',
+    ],
+  },
+  {
+    // Claude Code binds a fresh loopback port every run, so a portless URI is
+    // enough — the backend matches loopback redirects ignoring the port.
+    key: 'claudeCode',
+    labelKey: 'connectorsPresetClaudeCode',
+    uris: ['http://localhost/callback', 'http://127.0.0.1/callback'],
+  },
+  {
+    key: 'chatgpt',
+    labelKey: 'connectorsPresetChatGPT',
+    uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+  },
+] as const;
+
 export function DesktopSettingsConnectors() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -33,9 +59,17 @@ export function DesktopSettingsConnectors() {
   const [newName, setNewName] = useState('');
   const [newScopes, setNewScopes] = useState<string[]>(['market:read']);
   const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [newClientId, setNewClientId] = useState<string | null>(null);
+  // Which form minted the credentials on screen, so the panel renders under the
+  // card the manager just used rather than always under the service-client one.
+  const [credFrom, setCredFrom] = useState<'connector' | 'service' | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [idCopied, setIdCopied] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
+  const [connName, setConnName] = useState('');
+  const [connScopes, setConnScopes] = useState<string[]>(['market:read', 'sellorder:read']);
+  const [redirectUris, setRedirectUris] = useState('');
 
   // Same-origin: the backend mounts the MCP endpoint at /api/mcp behind the
   // same host that serves this app, so the URL an MCP client needs is derivable
@@ -47,6 +81,13 @@ export function DesktopSettingsConnectors() {
     await navigator.clipboard.writeText(newSecret);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function copyClientId() {
+    if (!newClientId) return;
+    await navigator.clipboard.writeText(newClientId);
+    setIdCopied(true);
+    setTimeout(() => setIdCopied(false), 1500);
   }
 
   async function copyMcpUrl() {
@@ -76,7 +117,38 @@ export function DesktopSettingsConnectors() {
         },
       );
       setNewSecret(r.clientSecret);
+      setNewClientId(r.clientId);
+      setCredFrom('service');
       setNewName('');
+      await load();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function createConnectorClient() {
+    const name = connName.trim();
+    const uris = redirectUris.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (!name || uris.length === 0) return;
+    setCreating(true);
+    try {
+      const r = await api.post<{ clientId: string; clientSecret: string }>(
+        '/api/oauth/clients',
+        {
+          name,
+          grantTypes: ['authorization_code', 'refresh_token'],
+          scopes: connScopes,
+          redirectUris: uris,
+          public: false,
+        },
+      );
+      setNewClientId(r.clientId);
+      setNewSecret(r.clientSecret);
+      setCredFrom('connector');
+      setConnName('');
+      setRedirectUris('');
       await load();
     } catch (e) {
       handleFetchError(e);
@@ -91,6 +163,12 @@ export function DesktopSettingsConnectors() {
     );
   }
 
+  function toggleConnScope(scope: string) {
+    setConnScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
+    );
+  }
+
   async function revoke(id: string) {
     if (!confirm(t('connectorsRevokeConfirm'))) return;
     try {
@@ -100,6 +178,55 @@ export function DesktopSettingsConnectors() {
       handleFetchError(e);
     }
   }
+
+  const codeBox: React.CSSProperties = {
+    display: 'block',
+    wordBreak: 'break-all',
+    padding: '6px 8px',
+    borderRadius: 4,
+    background: 'var(--bg-soft)',
+    border: '1px solid var(--border)',
+  };
+
+  // Rendered under whichever form minted it. The secret is unrecoverable after
+  // dismissal — only the bcrypt hash is stored — hence the one-shot warning.
+  const credentialPanel = newSecret && (
+    <div
+      role="alert"
+      style={{
+        marginTop: 12,
+        padding: 12,
+        borderRadius: 8,
+        border: '1px solid var(--warn)',
+        background: 'var(--warn-soft, rgba(255, 196, 0, 0.08))',
+        fontSize: 13,
+      }}
+    >
+      {newClientId && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('connectorsClientIdLabel')}</div>
+          <code className="mono" style={codeBox}>{newClientId}</code>
+          <button type="button" className="btn sm" style={{ marginTop: 8 }} onClick={copyClientId}>
+            {idCopied ? t('connectorsCopied') : t('connectorsCopy')}
+          </button>
+        </div>
+      )}
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('connectorsSecretOnce')}</div>
+      <code className="mono" style={codeBox}>{newSecret}</code>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button type="button" className="btn sm" onClick={copySecret}>
+          {copied ? t('connectorsCopied') : t('connectorsCopy')}
+        </button>
+        <button
+          type="button"
+          className="btn sm ghost"
+          onClick={() => { setNewSecret(null); setNewClientId(null); setCredFrom(null); }}
+        >
+          {t('connectorsSecretDismiss')}
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -161,6 +288,101 @@ export function DesktopSettingsConnectors() {
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
           <div>
+            <div className="card-title">{t('connectorsAddConnectorTitle')}</div>
+            <div className="card-sub">{t('connectorsAddConnectorSub')}</div>
+          </div>
+        </div>
+        <div className="card-body">
+          <div style={{ display: 'grid', gap: 14, maxWidth: 560 }}>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <label
+                htmlFor="conn-name"
+                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}
+              >
+                {t('connectorsNameLabel')}
+              </label>
+              <input
+                id="conn-name"
+                className="input mono"
+                placeholder="Claude"
+                value={connName}
+                onChange={(e) => setConnName(e.target.value)}
+                disabled={creating}
+              />
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <label
+                htmlFor="conn-redirects"
+                style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}
+              >
+                {t('connectorsRedirectLabel')}
+              </label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {REDIRECT_PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    className="btn sm ghost"
+                    disabled={creating}
+                    onClick={() => setRedirectUris(p.uris.join('\n'))}
+                  >
+                    {t(p.labelKey)}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                id="conn-redirects"
+                className="input mono"
+                rows={3}
+                style={{ resize: 'vertical' }}
+                placeholder="https://claude.ai/api/mcp/auth_callback"
+                value={redirectUris}
+                onChange={(e) => setRedirectUris(e.target.value)}
+                disabled={creating}
+              />
+              <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
+                {t('connectorsRedirectHelp')}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-subtle)' }}>
+                {t('connectorsScopeLabel')}
+              </span>
+              <div style={{ display: 'grid', gap: 8, marginTop: 2 }}>
+                {SCOPE_OPTIONS.map(({ scope, labelKey }) => (
+                  <label
+                    key={scope}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: creating ? 'default' : 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={connScopes.includes(scope)}
+                      onChange={() => toggleConnScope(scope)}
+                      disabled={creating}
+                    />
+                    {t(labelKey)}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <button
+                type="button"
+                className="btn accent"
+                onClick={createConnectorClient}
+                disabled={creating || !connName.trim() || !redirectUris.trim() || connScopes.length === 0}
+              >
+                {t('connectorsCreateConnector')}
+              </button>
+            </div>
+          </div>
+          {credFrom === 'connector' && credentialPanel}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
+        <div className="card-head">
+          <div>
             <div className="card-title">{t('connectorsAddServiceTitle')}</div>
             <div className="card-sub">{t('connectorsAddServiceSub')}</div>
           </div>
@@ -216,50 +438,7 @@ export function DesktopSettingsConnectors() {
               </button>
             </div>
           </div>
-          {newSecret && (
-            <div
-              role="alert"
-              style={{
-                marginTop: 12,
-                padding: 12,
-                borderRadius: 8,
-                border: '1px solid var(--warn)',
-                background: 'var(--warn-soft, rgba(255, 196, 0, 0.08))',
-                fontSize: 13,
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('connectorsSecretOnce')}</div>
-              <code
-                className="mono"
-                style={{
-                  display: 'block',
-                  wordBreak: 'break-all',
-                  padding: '6px 8px',
-                  borderRadius: 4,
-                  background: 'var(--bg-soft)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                {newSecret}
-              </code>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="btn sm"
-                  onClick={copySecret}
-                >
-                  {copied ? t('connectorsCopied') : t('connectorsCopy')}
-                </button>
-                <button
-                  type="button"
-                  className="btn sm ghost"
-                  onClick={() => setNewSecret(null)}
-                >
-                  {t('connectorsSecretDismiss')}
-                </button>
-              </div>
-            </div>
-          )}
+          {credFrom === 'service' && credentialPanel}
         </div>
       </div>
 

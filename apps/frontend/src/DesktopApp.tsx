@@ -9,7 +9,7 @@ import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, navigate,
-  DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath,
+  DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath, readSafeNext,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
 import { showErrorToast } from './lib/errorToast';
@@ -113,6 +113,16 @@ export function DesktopApp() {
     };
     return () => { delete window.__showToast; };
   }, []);
+
+  // Resume an OAuth authorize that bounced through the login screen. Must be a
+  // real navigation, not navigate(), because the target is a backend route.
+  // Lives up here with the other effects (hook order) and fires ahead of the
+  // RolePicker gate below, which would otherwise strand a manager mid-connect.
+  useEffect(() => {
+    if (!user) return;
+    const next = readSafeNext(window.location.search);
+    if (next) window.location.replace(next);
+  }, [user]);
 
   if (loading) {
     return <div style={{ padding: 60, color: 'var(--fg-subtle)' }}>{t('loadingApp')}</div>;

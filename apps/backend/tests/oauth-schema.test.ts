@@ -47,4 +47,13 @@ describe('0046_oauth migration', () => {
     expect(inames.has('oauth_refresh_tokens_user_idx')).toBe(true);
     expect(inames.has('oauth_refresh_tokens_client_idx')).toBe(true);
   });
+  it('records the DCR registrant IP and indexes the throttle lookup', async () => {
+    const cols = await tableColumns('oauth_clients');
+    expect(cols.has('created_ip')).toBe(true);
+    const db = getTestDb();
+    const idx = await db<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='oauth_clients'
+    `;
+    expect(new Set(idx.map(i => i.indexname)).has('oauth_clients_dcr_recent_idx')).toBe(true);
+  });
 });
