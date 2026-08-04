@@ -9,17 +9,24 @@ substitute your own host throughout.
 
 ## What is the MCP server
 
-The ERP exposes its `ref_prices` table to external LLM agents over the
-[Model Context Protocol](https://modelcontextprotocol.io). Two tools
+The ERP exposes market values and sellable inventory to external LLM agents
+over the [Model Context Protocol](https://modelcontextprotocol.io). Five tools
 are advertised:
 
-| Tool | Args | Returns |
-|---|---|---|
-| `list_market_values` | `{ category?, q?, limit? }` | `MarketValue[]` |
-| `get_market_value` | `{ id?, partNumber? }` (exactly one) | `MarketValue \| null` |
+| Tool | Scope | Args | Returns |
+|---|---|---|---|
+| `list_market_values` | `market:read` | `{ category?, q?, limit? }` | `MarketValue[]` |
+| `get_market_value` | `market:read` | `{ id?, partNumber? }` (exactly one) | `MarketValue \| null` |
+| `set_market_price` | `market:write` | `{ partNumber, price }` | updated `MarketValue` |
+| `search_sellable_inventory` | `sellorder:read` | `{ q?, category?, limit? }` | `InventoryLine[]` |
+| `create_sell_order_draft` | `sellorder:write` | `{ lines[] }` | created draft |
 
-The MCP server is mounted at `/api/mcp` and protected by OAuth 2.1
-Bearer tokens with scope `market:read`.
+The MCP server is mounted at `/api/mcp` and protected by OAuth 2.1 Bearer
+tokens. The mount requires only a **valid** token — per-tool scope gating lives
+in `TOOL_SCOPES` (`src/mcp/server.ts`), which filters both `tools/list` and
+`tools/call`. A token therefore only ever sees the tools its scopes permit, so
+a connector that looks like it "only has two tools" is a scope problem, not a
+missing-tool one.
 
 A second surface, `POST /api/market/values`, accepts pushes from an
 external scraper service. It uses scope `market:write` and is the only
@@ -86,23 +93,33 @@ OAUTH_DCR_OPEN=false                                     # see DCR section below
 The backend refuses to boot in production without
 `OAUTH_SIGNING_KEY_CURRENT`. Missing or empty value → startup error.
 
-### 3. Verify Caddy proxies the OAuth surface
+### 3. Verify the edge proxies the OAuth surface
 
-`apps/frontend/Caddyfile` must include these blocks (already in repo
-since commit `2fb8844`):
+Production is the Cloudflare Worker in front of Railway (the self-hosted
+Caddy stack is retired). `deploy/cloudflare/worker.js` reverse-proxies three
+prefixes — `/api`, `/oauth`, `/.well-known` — and **must** forward the public
+hostname:
 
-```caddyfile
-handle /oauth/* {
-  reverse_proxy backend:8787
-}
-handle /.well-known/* {
-  reverse_proxy backend:8787
-}
+```js
+proxied.headers.set('X-Forwarded-Host', url.host);
+proxied.headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
 ```
 
-Without these, requests to `/.well-known/oauth-authorization-server`
-fall through to the SPA's HTML, and OAuth clients can't discover the
-AS.
+`new Request(target, request)` rewrites `Host` to the Railway origin, so
+without those the backend cannot tell which custom domain the caller used.
+`resolvePublicOrigin` then falls through to the **first** entry of
+`CORS_ALLOWED_ORIGINS` and every discovery document advertises that host —
+which is how `inventory.recycleservers.com` spent time serving
+`issuer: https://inventory-prod.recycleservers.com` and breaking the RFC 9728
+resource match for MCP clients.
+
+Two consequences worth remembering:
+
+- Every public hostname must be in **both** `wrangler.toml` routes and
+  `CORS_ALLOWED_ORIGINS`. In one but not the other, discovery silently
+  advertises a different domain.
+- Put the canonical hostname **first** in `CORS_ALLOWED_ORIGINS`; it is the
+  fallback when no forwarded host matches.
 
 ### 4. Rebuild + redeploy
 
@@ -140,39 +157,52 @@ config — recheck step 4.
 
 ## Registering a connector
 
-### Option A: through the Settings UI (recommended for first setup)
+Most clients register themselves (DCR, below) and you never touch this. Mint a
+client by hand only when a client asks for an explicit OAuth client ID.
 
-1. Sign in to the ERP as a **manager** in your browser.
-2. Open **Settings → Connectors**.
-3. Click **"Add a service client"**, enter a descriptive name
-   (e.g. `claude-code-jinhu` or `ebay-scraper-prod`), submit.
-4. Copy the `clientSecret` from the one-time dialog (Copy button is
-   provided). The secret is shown exactly once and stored only as a
-   bcrypt hash server-side.
+### Option A: Dynamic Client Registration (RFC 7591) — the default
 
-The Settings UI is sufficient for both interactive Claude clients
-(`grant_types = [authorization_code, refresh_token]`, default in the
-UI uses `client_credentials` because the dialog is shaped for scrapers
-— for an interactive client, register via DCR below or extend the UI).
+DCR is **open by default**; `/oauth/register` answers unless
+`OAUTH_DCR_OPEN=false`. Claude and ChatGPT both use it to create a client for a
+custom connector, so leaving it on is what makes "paste the URL and go" work.
 
-### Option B: Dynamic Client Registration (RFC 7591)
-
-Turn on DCR by setting `OAUTH_DCR_OPEN=true` in `.env` and restarting
-the backend. Then any client can self-register:
+It is safe to leave open because registering grants nothing on its own: a DCR
+client is restricted to `authorization_code`/`refresh_token`, so a token exists
+only after a human signs in and consents, and `:write` scopes survive only a
+**manager's** consent. Registration is rate-limited per IP (10/hr), globally
+(60/hr), and capped at 200 never-used clients.
 
 ```sh
 curl -X POST https://inventory.recycleservers.com/oauth/register \
   -H 'Content-Type: application/json' \
   -d '{
     "client_name": "claude-ai-connector",
-    "redirect_uris": ["https://claude.ai/oauth/callback"],
-    "grant_types": ["authorization_code","refresh_token"],
-    "scope": "market:read"
+    "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+    "grant_types": ["authorization_code","refresh_token"]
   }'
 ```
 
-DCR is gated by `OAUTH_DCR_OPEN` because anyone can register otherwise.
-For a managed deployment, keep it `false` and use the Settings UI.
+Omitting `scope` now yields **all four** scopes rather than `market:read` alone
+— the narrow default silently hid the sell-order and write tools from every
+connector that didn't ask.
+
+Setting `OAUTH_DCR_OPEN=false` also drops `registration_endpoint` from the AS
+metadata, so clients fall back to the manual client ID below instead of failing
+with *"couldn't register with the sign-in service"*.
+
+### Option B: mint a client in the Settings UI
+
+For a client that wants an explicit OAuth client ID, or when DCR is off.
+
+1. Sign in as a **manager** → **Settings → Connectors**.
+2. Under **"Add a connector client"**, enter a name, click the **Claude**,
+   **Claude Code**, or **ChatGPT** preset to fill in that host's callback URL
+   (editable — they're vendor details and can change), tick the scopes.
+3. Copy the **client ID** and **client secret** from the one-time panel. The
+   secret is shown exactly once and stored only as a bcrypt hash.
+
+The separate **"Add a service client"** card is for non-interactive
+integrations (the scraper): `client_credentials`, no redirect URI, no user.
 
 ### Allowed values
 
@@ -224,13 +254,33 @@ After connection, in any Claude Code session:
 
 > Get the market value for part number M393A4K40DB2-CWE.
 
-## Using it from Claude.ai (web)
+## Using it from Claude.ai / Claude.com (web)
 
-Claude.ai supports custom MCP connectors. Settings → Connectors → Add
-custom connector. The URL is the same:
-`https://inventory.recycleservers.com/api/mcp`. The OAuth flow is
-identical; on approve, you're returned to Claude.ai with the connector
-authorized.
+Settings → Connectors → **Add custom connector** → paste
+`https://inventory.recycleservers.com/api/mcp`. Claude discovers the AS from
+the 401's `WWW-Authenticate` header, self-registers, and opens a sign-in
+window; approve and you're returned with the connector authorized.
+
+If it asks for an **OAuth Client ID**, DCR is off or unreachable — mint one via
+Settings → Connectors (Option B above) and paste it into the connector's
+advanced settings.
+
+Note the sign-in window may land on the ERP login screen first: `/oauth/authorize`
+only accepts the 15-minute `at` cookie and bounces to `/login?next=…`, and the
+SPA resumes the flow from `next` after sign-in. That resume is what makes the
+popup complete rather than dead-end on the dashboard.
+
+## Using it from ChatGPT
+
+Settings → Connectors → **Create** → MCP server URL
+`https://inventory.recycleservers.com/api/mcp`, auth **OAuth**. ChatGPT
+registers via DCR against `/oauth/register`; its callback is
+`https://chatgpt.com/connector_platform_oauth_redirect`.
+
+This covers ChatGPT's standard custom connectors. **Deep Research** connectors
+are a different contract — they require tools literally named `search` and
+`fetch`, which this server does not expose. Supporting them would mean adding
+thin aliases over `list_market_values` / `get_market_value`; not done today.
 
 ## Scraper integration
 
@@ -331,8 +381,10 @@ revocation just blocks future refreshes.
 | Path | Method | Auth | Purpose |
 |---|---|---|---|
 | `/.well-known/oauth-authorization-server` | GET | public | RFC 8414 AS metadata |
+| `/.well-known/oauth-authorization-server/api/mcp` | GET | public | RFC 8414 §3.1 path-suffixed form |
 | `/.well-known/oauth-protected-resource` | GET | public | RFC 9728 resource metadata |
-| `/oauth/register` | POST | none (gated by `OAUTH_DCR_OPEN`) | RFC 7591 DCR |
+| `/.well-known/oauth-protected-resource/api/mcp` | GET | public | RFC 9728 §3.1 form — **clients probe this first** |
+| `/oauth/register` | POST | none (open unless `OAUTH_DCR_OPEN=false`) | RFC 7591 DCR |
 | `/oauth/authorize` | GET | cookie | Start auth-code flow |
 | `/oauth/authorize/consent` | POST | cookie | User clicks Approve |
 | `/oauth/authorize/deny` | POST | cookie | User clicks Deny |
@@ -340,7 +392,7 @@ revocation just blocks future refreshes.
 | `/oauth/token` | POST | client creds | Mint tokens (3 grants) |
 | `/oauth/revoke` | POST | client creds | RFC 7009 revoke a refresh token |
 | `/api/oauth/clients` | GET/POST/DELETE | cookie + manager role | Admin client mgmt |
-| `/api/mcp` | POST | Bearer `market:read` | MCP JSON-RPC tools |
+| `/api/mcp` | POST | Bearer (any valid token) | MCP JSON-RPC tools; per-tool scope gate in `TOOL_SCOPES` |
 | `/api/market/values` | POST | Bearer `market:write` | Scraper push |
 
 ### Scopes
@@ -348,7 +400,14 @@ revocation just blocks future refreshes.
 | Scope | Grants |
 |---|---|
 | `market:read` | Call `list_market_values`, `get_market_value` over MCP |
-| `market:write` | Push to `/api/market/values` |
+| `market:write` | Call `set_market_price`; push to `/api/market/values` |
+| `sellorder:read` | Call `search_sellable_inventory` |
+| `sellorder:write` | Call `create_sell_order_draft` |
+
+`:write` scopes are granted through the interactive flow **only when the
+consenting user is a manager** — a non-manager's approval yields a read-only
+grant, and the rule is re-applied on every refresh rotation. The write tools
+then simply do not appear in that token's `tools/list`.
 
 ### OAuth error codes returned
 

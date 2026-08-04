@@ -57,6 +57,42 @@ describe('OAuth discovery', () => {
     expect(scopes).toContain('market:read'); // unchanged
   });
 
+  it('serves the RFC 9728 path-suffixed protected-resource document', async () => {
+    // Clients probe /.well-known/oauth-protected-resource/api/mcp first and only
+    // some fall back to the bare path.
+    const r = await api('GET', '/.well-known/oauth-protected-resource/api/mcp', {
+      headers: { 'X-Forwarded-Host': 'inventory.recycleservers.com', 'X-Forwarded-Proto': 'https' },
+    });
+    expect(r.status).toBe(200);
+    const body = r.body as Record<string, unknown>;
+    expect(body.resource).toBe('https://inventory.recycleservers.com/api/mcp');
+    expect((body.authorization_servers as string[])[0]).toBe('https://inventory.recycleservers.com');
+    expect(body.resource_name).toBe('Recycle Servers ERP');
+  });
+
+  it('serves the path-suffixed AS document with the same issuer as the bare one', async () => {
+    const suffixed = await api('GET', '/.well-known/oauth-authorization-server/api/mcp');
+    const bare = await api('GET', '/.well-known/oauth-authorization-server');
+    expect(suffixed.status).toBe(200);
+    expect((suffixed.body as Record<string, unknown>).issuer)
+      .toBe((bare.body as Record<string, unknown>).issuer);
+  });
+
+  it('prefers the requested host over the first allowlist entry', async () => {
+    // Regression: without X-Forwarded-Host from the edge, the resolver fell
+    // through to allow[0] and advertised inventory-prod to callers who had
+    // reached us on inventory — breaking the RFC 9728 resource match.
+    const r = await api('GET', '/.well-known/oauth-protected-resource', {
+      env: {
+        CORS_ALLOWED_ORIGINS:
+          'https://inventory-prod.recycleservers.com,https://inventory.recycleservers.com',
+      },
+      headers: { 'X-Forwarded-Host': 'inventory.recycleservers.com', 'X-Forwarded-Proto': 'https' },
+    });
+    expect((r.body as Record<string, unknown>).resource)
+      .toBe('https://inventory.recycleservers.com/api/mcp');
+  });
+
   it('never emits a Host outside CORS_ALLOWED_ORIGINS (injection-proof)', async () => {
     const r = await api('GET', '/.well-known/oauth-authorization-server', {
       env: { CORS_ALLOWED_ORIGINS: 'https://inventory.recycleservers.com' },
@@ -69,66 +105,141 @@ describe('OAuth discovery', () => {
 });
 
 describe('DCR /oauth/register', () => {
-  it('rejects DCR by default (OAUTH_DCR_OPEN=false)', async () => {
+  it('registers by default and returns client_id + secret', async () => {
     const r = await api('POST', '/oauth/register', {
-      body: { client_name: 'x', redirect_uris: ['https://example.com/cb'] },
+      body: {
+        client_name: 'claude-ai connector',
+        redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+        grant_types: ['authorization_code','refresh_token'],
+        scope: 'market:read',
+      },
     });
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(201);
+    const body = r.body as Record<string, unknown>;
+    expect(typeof body.client_id).toBe('string');
+    expect(typeof body.client_secret).toBe('string');
+    expect((body.redirect_uris as string[])[0]).toBe('https://claude.ai/api/mcp/auth_callback');
   });
 
-  it('with OAUTH_DCR_OPEN=true, registers and returns client_id + secret', async () => {
+  it('returns the RFC 7591 §3.2.1 fields a strict registrant requires', async () => {
+    const r = await api('POST', '/oauth/register', {
+      body: {
+        client_name: 'strict',
+        redirect_uris: ['https://chatgpt.com/connector_platform_oauth_redirect'],
+      },
+    });
+    expect(r.status).toBe(201);
+    const body = r.body as Record<string, unknown>;
+    // REQUIRED alongside a secret; 0 means "never expires".
+    expect(body.client_secret_expires_at).toBe(0);
+    expect(typeof body.client_id_issued_at).toBe('number');
+    expect(body.response_types).toEqual(['code']);
+    expect(body.client_name).toBe('strict');
+    expect(body.token_endpoint_auth_method).toBe('client_secret_basic');
+  });
+
+  it('honours token_endpoint_auth_method=none (public PKCE client)', async () => {
+    const r = await api('POST', '/oauth/register', {
+      body: {
+        client_name: 'public',
+        redirect_uris: ['http://localhost/callback'],
+        token_endpoint_auth_method: 'none',
+      },
+    });
+    expect(r.status).toBe(201);
+    const body = r.body as Record<string, unknown>;
+    expect(body.token_endpoint_auth_method).toBe('none');
+    expect(body.client_secret).toBeUndefined();
+    expect(body.client_secret_expires_at).toBeUndefined();
+  });
+
+  it('echoes client_secret_post when the client asks for it', async () => {
+    const r = await api('POST', '/oauth/register', {
+      body: {
+        client_name: 'post-auth',
+        redirect_uris: ['https://example.com/cb'],
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+    });
+    expect((r.body as Record<string, unknown>).token_endpoint_auth_method).toBe('client_secret_post');
+  });
+
+  it('defaults an unscoped registration to every advertised scope', async () => {
+    // Defaulting to market:read alone made a connector look like it only had
+    // two tools, since tools/list filters on granted scopes.
+    const r = await api('POST', '/oauth/register', {
+      body: { client_name: 'unscoped', redirect_uris: ['https://example.com/cb'] },
+    });
+    expect(r.status).toBe(201);
+    expect(((r.body as Record<string, unknown>).scope as string).split(' ')).toEqual(
+      expect.arrayContaining(['market:read', 'market:write', 'sellorder:read', 'sellorder:write']),
+    );
+  });
+
+  it('rejects DCR when OAUTH_DCR_OPEN=false', async () => {
     const prev = process.env.OAUTH_DCR_OPEN;
-    process.env.OAUTH_DCR_OPEN = 'true';
+    process.env.OAUTH_DCR_OPEN = 'false';
     try {
       const r = await api('POST', '/oauth/register', {
-        body: {
-          client_name: 'claude-ai connector',
-          redirect_uris: ['https://claude.ai/oauth/callback'],
-          grant_types: ['authorization_code','refresh_token'],
-          scope: 'market:read',
-        },
+        body: { client_name: 'x', redirect_uris: ['https://example.com/cb'] },
       });
-      expect(r.status).toBe(201);
-      const body = r.body as Record<string, unknown>;
-      expect(typeof body.client_id).toBe('string');
-      expect(typeof body.client_secret).toBe('string');
-      expect((body.redirect_uris as string[])[0]).toBe('https://claude.ai/oauth/callback');
+      expect(r.status).toBe(403);
     } finally {
       process.env.OAUTH_DCR_OPEN = prev;
     }
+  });
+
+  it('stops advertising registration_endpoint when DCR is off', async () => {
+    // A registration_endpoint that 403s makes clients fail hard instead of
+    // falling back to a manually-issued client_id.
+    const prev = process.env.OAUTH_DCR_OPEN;
+    process.env.OAUTH_DCR_OPEN = 'false';
+    try {
+      const r = await api('GET', '/.well-known/oauth-authorization-server');
+      expect((r.body as Record<string, unknown>).registration_endpoint).toBeUndefined();
+    } finally {
+      process.env.OAUTH_DCR_OPEN = prev;
+    }
+  });
+
+  it('throttles repeat registrations from one IP', async () => {
+    const ip = '203.0.113.77';
+    const register = () => api('POST', '/oauth/register', {
+      headers: { 'X-Forwarded-For': ip },
+      body: { client_name: 'flood', redirect_uris: ['https://example.com/cb'] },
+    });
+    let last = await register();
+    for (let i = 0; i < 12 && last.status === 201; i++) last = await register();
+    expect(last.status).toBe(429);
+    expect((last.body as Record<string, unknown>).error).toBe('temporarily_unavailable');
   });
 
   it('rejects non-https + non-localhost redirect URIs', async () => {
-    const prev = process.env.OAUTH_DCR_OPEN;
-    process.env.OAUTH_DCR_OPEN = 'true';
-    try {
-      const r = await api('POST', '/oauth/register', {
-        body: { client_name: 'evil', redirect_uris: ['http://evil.example.com/cb'] },
-      });
-      expect(r.status).toBe(400);
-    } finally {
-      process.env.OAUTH_DCR_OPEN = prev;
-    }
+    const r = await api('POST', '/oauth/register', {
+      body: { client_name: 'evil', redirect_uris: ['http://evil.example.com/cb'] },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('rejects a redirect URI carrying a fragment', async () => {
+    const r = await api('POST', '/oauth/register', {
+      body: { client_name: 'frag', redirect_uris: ['https://example.com/cb#x'] },
+    });
+    expect(r.status).toBe(400);
   });
 
   it('keeps market:write when requested (granted only to managers at consent)', async () => {
-    const prev = process.env.OAUTH_DCR_OPEN;
-    process.env.OAUTH_DCR_OPEN = 'true';
-    try {
-      const r = await api('POST', '/oauth/register', {
-        body: {
-          client_name: 'claude-ai write',
-          redirect_uris: ['https://claude.ai/oauth/callback'],
-          grant_types: ['authorization_code','refresh_token'],
-          scope: 'market:read market:write',
-        },
-      });
-      expect(r.status).toBe(201);
-      expect(((r.body as Record<string, unknown>).scope as string).split(' '))
-        .toEqual(expect.arrayContaining(['market:read', 'market:write']));
-    } finally {
-      process.env.OAUTH_DCR_OPEN = prev;
-    }
+    const r = await api('POST', '/oauth/register', {
+      body: {
+        client_name: 'claude-ai write',
+        redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+        grant_types: ['authorization_code','refresh_token'],
+        scope: 'market:read market:write',
+      },
+    });
+    expect(r.status).toBe(201);
+    expect(((r.body as Record<string, unknown>).scope as string).split(' '))
+      .toEqual(expect.arrayContaining(['market:read', 'market:write']));
   });
 });
 
@@ -211,6 +322,62 @@ describe('/oauth/authorize', () => {
     expect(loc.origin + loc.pathname).toBe('https://example.com/cb');
     expect(loc.searchParams.get('error')).toBe('unsupported_response_type');
     expect(loc.searchParams.get('state')).toBe('s1');
+  });
+});
+
+describe('/oauth/authorize loopback redirect matching (RFC 8252 §7.3)', () => {
+  // Claude Code binds a fresh port each run, so a portless registration has to
+  // match whatever port shows up at authorize time.
+  const mkClient = async (redirectUris: string[]) => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    return createOAuthClient(sql, {
+      name: 'loopback', redirectUris,
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+  };
+  const authorize = async (clientId: string, redirectUri: string) => {
+    const { token } = await loginAs(ALEX);
+    return api('GET',
+      `/oauth/authorize?response_type=code&client_id=${clientId}`
+      + `&redirect_uri=${encodeURIComponent(redirectUri)}`
+      + '&code_challenge=ch&code_challenge_method=S256&scope=market:read',
+      { token },
+    );
+  };
+
+  it('accepts any port on a registered loopback redirect', async () => {
+    const c = await mkClient(['http://localhost/callback']);
+    const r = await authorize(c.clientId, 'http://localhost:53521/callback');
+    expect(r.status).toBe(302);
+    expect(r.headers.get('location') ?? '').toContain('/authorize?req=');
+  });
+
+  it('still requires the path to match', async () => {
+    const c = await mkClient(['http://localhost/callback']);
+    const r = await authorize(c.clientId, 'http://localhost:53521/other');
+    expect(r.status).toBe(400);
+  });
+
+  it('does not extend port-insensitivity to non-loopback hosts', async () => {
+    const c = await mkClient(['https://example.com/cb']);
+    const r = await authorize(c.clientId, 'https://example.com:8443/cb');
+    expect(r.status).toBe(400);
+  });
+
+  it('keeps localhost and 127.0.0.1 distinct', async () => {
+    const c = await mkClient(['http://localhost/callback']);
+    const r = await authorize(c.clientId, 'http://127.0.0.1:9000/callback');
+    expect(r.status).toBe(400);
+  });
+
+  it('echoes the rejected URI so the real callback can be recovered', async () => {
+    const c = await mkClient(['https://example.com/cb']);
+    const r = await authorize(c.clientId, 'https://example.com/wrong');
+    expect(r.status).toBe(400);
+    expect((r.body as Record<string, unknown>).presented).toBe('https://example.com/wrong');
   });
 });
 
@@ -361,6 +528,43 @@ describe('/oauth/token', () => {
   it('interactive flow drops market:write for a non-manager consenter', async () => {
     const scope = await interactiveGrant(MARCUS);
     expect(scope).toBe('market:read');
+  });
+
+  it('token exchange stays port-exact even for a loopback client', async () => {
+    // The authorize-time allowlist ignores loopback ports, but the code records
+    // the concrete URI — redeeming it against a different port must fail, or a
+    // code minted for one local listener could be replayed against another.
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'tk-loopback', redirectUris: ['http://localhost/callback'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const verifier = generateVerifier();
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}`
+      + `&redirect_uri=${encodeURIComponent('http://localhost:5000/callback')}`
+      + `&code_challenge=${challengeS256(verifier)}&code_challenge_method=S256&scope=market:read`,
+      { token },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const consent = await api('POST', '/oauth/authorize/consent', {
+      body: { req }, token, headers: { Accept: 'application/json' },
+    });
+    const code = new URL((consent.body as any).redirectUri).searchParams.get('code')!;
+
+    const r = await api('POST', '/oauth/token', {
+      form: {
+        grant_type: 'authorization_code', code, code_verifier: verifier,
+        redirect_uri: 'http://localhost:5001/callback',  // different port
+        client_id: c.clientId, client_secret: c.clientSecret!, // pragma: allowlist secret
+      },
+    });
+    expect(r.status).toBe(400);
+    expect((r.body as Record<string, unknown>).error).toBe('invalid_grant');
   });
 
   it('client_credentials grant issues every scope a multi-scope service client holds', async () => {
@@ -681,6 +885,46 @@ describe('/api/oauth/clients (admin)', () => {
     const r = await api('POST', '/api/oauth/clients', {
       token,
       body: { name: 'bad-scope', scopes: ['market.read'] },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('mints a connector client with redirect URIs', async () => {
+    const { token } = await loginAs(ALEX);
+    const redirectUris = ['https://claude.ai/api/mcp/auth_callback'];
+    const r = await api('POST', '/api/oauth/clients', {
+      token,
+      body: {
+        name: 'claude-connector',
+        grantTypes: ['authorization_code', 'refresh_token'],
+        scopes: ['market:read', 'sellorder:read'],
+        redirectUris,
+      },
+    });
+    expect(r.status).toBe(201);
+    const body = r.body as any;
+    expect(typeof body.clientId).toBe('string');
+    expect(typeof body.clientSecret).toBe('string');
+    expect(body.redirectUris).toEqual(redirectUris);
+  });
+
+  it('400s when an authorization_code client has no redirect URIs', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/oauth/clients', {
+      token,
+      body: { name: 'no-callback', grantTypes: ['authorization_code'], scopes: ['market:read'] },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('400s on a redirect URI outside the allowlist', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('POST', '/api/oauth/clients', {
+      token,
+      body: {
+        name: 'xss', grantTypes: ['authorization_code'], scopes: ['market:read'],
+        redirectUris: ['javascript:alert(1)'],
+      },
     });
     expect(r.status).toBe(400);
   });

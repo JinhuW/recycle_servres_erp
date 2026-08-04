@@ -137,6 +137,33 @@ switches the branch out from under the first.
   — they use URL tokens, not cookies, so CSRF doesn't apply).
 - Refresh-token reuse revokes the whole family.  Don't relax that.
 
+## MCP & OAuth (connectors)
+
+- `/api/mcp` is **Bearer-only and CSRF-exempt**, mounted with
+  `bearerGuard({ scopes: [] })` — it requires a *valid* token, nothing more.
+  Per-tool gating lives in `TOOL_SCOPES` (`src/mcp/server.ts`) and filters both
+  `tools/list` and `tools/call`.  A connector that seems to be missing tools is
+  a scope problem, not a missing-tool one.
+- **The public origin in every OAuth document comes from `resolvePublicOrigin`**
+  (`src/oauth/metadata.ts`), which needs the Cloudflare Worker to forward
+  `X-Forwarded-Host` **and** the hostname to be in `CORS_ALLOWED_ORIGINS`.  Add
+  a hostname to `wrangler.toml` without adding it to `CORS_ALLOWED_ORIGINS` and
+  discovery silently advertises `allow[0]` instead — which breaks the RFC 9728
+  `resource` match and every MCP client with it.  Canonical host goes first.
+- **DCR is open by default** (`OAUTH_DCR_OPEN !== 'false'`), rate-limited per IP
+  and globally.  `registration_endpoint` is advertised only when it's on — an
+  endpoint that 403s makes clients fail hard instead of falling back to a
+  manual client ID.
+- `:write` scopes survive only a **manager's** consent (`dropWriteUnlessManager`),
+  re-derived on every refresh rotation.
+- Loopback redirect URIs match **ignoring the port** (RFC 8252 §7.3) so Claude
+  Code's ephemeral port works.  That applies to the `/authorize` allowlist only —
+  the token endpoint stays an exact match against the URI recorded on the code.
+- `/oauth/authorize` accepts only the 15-min `at` cookie and bounces to
+  `/login?next=…`.  The SPA **must** honour `next` (`readSafeNext` in
+  `lib/route.ts`, consumed in `DesktopApp.tsx`/`MobileApp.tsx`) or the connector
+  popup dead-ends on the dashboard.
+
 ## Database & migrations
 
 - Postgres 16.  41 migrations as of writing — the highest-numbered file in

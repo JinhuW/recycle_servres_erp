@@ -98,6 +98,21 @@ export function isAuthorizePath(path: string): boolean {
   return path === '/authorize';
 }
 
+// Post-login continuation for the OAuth bounce: `/oauth/authorize` sends an
+// unauthenticated (or 15-min-expired) caller to `/login?next=…`, and without
+// something reading `next` back the user lands on the dashboard and the
+// connector's popup waits forever.
+//
+// Only same-origin absolute paths are honoured. `//host` and `/\host` are
+// browser-relative-protocol forms that would navigate off-origin, so an
+// attacker-supplied `next` can't turn the login page into an open redirect.
+export function readSafeNext(search: string): string | null {
+  const raw = new URLSearchParams(search).get('next');
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return null;
+  return raw;
+}
+
 // Mobile view ids ↔ URL paths.
 export const MOBILE_VIEW_TO_PATH = {
   dashboard: '/dashboard',
