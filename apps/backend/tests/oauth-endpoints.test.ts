@@ -78,6 +78,35 @@ describe('OAuth discovery', () => {
       .toBe((bare.body as Record<string, unknown>).issuer);
   });
 
+  it('prefers X-Public-Host, which survives the Railway edge', async () => {
+    // Railway rewrites X-Forwarded-Host to its own hostname, so the Worker's
+    // value only arrives in the private header. Trusting the standard one alone
+    // shipped a prod issuer pointing at the wrong domain.
+    const r = await api('GET', '/.well-known/oauth-authorization-server', {
+      env: {
+        CORS_ALLOWED_ORIGINS:
+          'https://inventory-prod.recycleservers.com,https://inventory.recycleservers.com',
+      },
+      headers: {
+        'X-Public-Host': 'inventory.recycleservers.com',
+        'X-Public-Proto': 'https',
+        'X-Forwarded-Host': 'backend-production-7b10.up.railway.app',
+        'X-Forwarded-Proto': 'https',
+      },
+    });
+    expect((r.body as Record<string, unknown>).issuer)
+      .toBe('https://inventory.recycleservers.com');
+  });
+
+  it('still refuses a non-allowlisted X-Public-Host', async () => {
+    const r = await api('GET', '/.well-known/oauth-authorization-server', {
+      env: { CORS_ALLOWED_ORIGINS: 'https://inventory.recycleservers.com' },
+      headers: { 'X-Public-Host': 'evil.example.com', 'X-Public-Proto': 'https' },
+    });
+    expect((r.body as Record<string, unknown>).issuer)
+      .toBe('https://inventory.recycleservers.com');
+  });
+
   it('prefers the requested host over the first allowlist entry', async () => {
     // Regression: without X-Forwarded-Host from the edge, the resolver fell
     // through to allow[0] and advertised inventory-prod to callers who had

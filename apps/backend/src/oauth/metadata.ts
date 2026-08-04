@@ -46,11 +46,15 @@ export function resolvePublicOrigin(c: OriginCtx): string {
   const explicitOk = nonLoopbackExplicit(explicit);
   const allow = parseOrigins(c.env.CORS_ALLOWED_ORIGINS);
 
-  const fwdHost = c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
+  // X-Public-Host first: Railway's edge overwrites X-Forwarded-Host with its
+  // own hostname, so the Worker's value only survives in a private header.
+  const fwdHost = c.req.header('x-public-host')?.split(',')[0]?.trim()
+    || c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
   const host = fwdHost || c.req.header('host');
   let candidate: string | undefined;
   if (host) {
-    const fwdProto = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
+    const fwdProto = c.req.header('x-public-proto')?.split(',')[0]?.trim()
+      || c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
     const proto = fwdProto || (isLoopback(host) ? 'http' : 'https');
     candidate = `${proto}://${host}`;
   }
