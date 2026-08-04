@@ -34,6 +34,14 @@ switches the branch out from under the first.
   `origin/dev`, creates a worktree under `.claude/worktrees/`, copies `.env`,
   runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
   `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
+- **To pick work back up, `scripts/new-session.sh --checkout <branch>`.**  It
+  puts an *existing* branch in a worktree instead of cutting a new one — local
+  or remote-only (`origin/<branch>` is fetched and tracked, and either spelling
+  is accepted).  The branch is taken as it stands: never rebased, never reset
+  onto `origin/dev`.  If a session worktree already holds that branch, that
+  worktree is handed back with its uncommitted work intact, unless a live
+  session is still in it.  Because git allows a branch in only one worktree,
+  a branch checked out in the main checkout is refused rather than stolen.
 - **Every session in this repo runs with permission prompts off.**
   `.claude/settings.json` sets `permissions.defaultMode: "bypassPermissions"`,
   which covers all entry points; `scripts/new-session.sh` also passes

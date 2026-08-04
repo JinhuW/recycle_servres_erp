@@ -4,16 +4,23 @@
 # the single shared checkout.
 #
 # Usage:
-#   scripts/new-session.sh                      # branch session/<timestamp>, then launch claude
-#   scripts/new-session.sh feat/orders-filter   # explicit branch name
-#   scripts/new-session.sh --print-only [name]  # create it, print the path, don't launch
-#   scripts/new-session.sh --list               # show current session worktrees
-#   scripts/new-session.sh --prune              # remove idle session worktrees
+#   scripts/new-session.sh                       # branch session/<timestamp>, then launch claude
+#   scripts/new-session.sh feat/orders-filter    # explicit NEW branch name
+#   scripts/new-session.sh --checkout feat/x     # resume an EXISTING branch
+#   scripts/new-session.sh --print-only [name]   # create it, print the path, don't launch
+#   scripts/new-session.sh --list                # show current session worktrees
+#   scripts/new-session.sh --prune               # remove idle session worktrees
 #
 # Flags:
+#   --checkout <br>  work on an existing branch instead of creating one. Takes
+#                    `feat/x` or `origin/feat/x`; a branch that only exists on
+#                    the remote is fetched and tracked. If a session worktree
+#                    already has it checked out, that worktree is handed back
+#                    as is — uncommitted work included.
 #   --no-install     skip `pnpm install` in the new worktree
 #   --fresh          force a brand-new worktree instead of reusing an idle one
-#   --base <ref>     branch from <ref> instead of origin/dev
+#   --base <ref>     branch from <ref> instead of origin/dev (new branches only;
+#                    with --checkout it only decides which slots count as idle)
 #   -- <args...>     everything after `--` is passed through to `claude`
 #
 # Worktrees are RECYCLED, not accumulated. An idle slot — clean, on a branch,
@@ -25,6 +32,7 @@
 # What it does, in order:
 #   1. Fetch the base ref (warn + fall back to the local copy if offline).
 #   2. Reuse an idle worktree, or `git worktree add -b <branch> … <base>`.
+#      (--checkout instead adopts, or checks out, the branch you named.)
 #   3. Sweep any remaining idle worktrees.
 #   4. Copy the gitignored local files a worktree needs to run (.env).
 #   5. `pnpm install` inside it (hardlinks from the pnpm store, so it is cheap).
@@ -36,7 +44,8 @@
 # still permits any shell command, any file outside the worktree, and pushes to
 # any remote.
 #
-# Every session branches from origin/dev — never main — per the repo workflow.
+# A NEW session branches from origin/dev — never main — per the repo workflow.
+# --checkout takes the branch as it stands and does not rebase or reset it.
 # Worktrees live under .claude/worktrees/ and are gitignored.
 #
 # All progress output goes to stderr; the worktree path is the only thing
@@ -69,6 +78,7 @@ MODE="launch"
 DO_INSTALL=1
 FORCE_FRESH=0
 NAME=""
+CHECKOUT=""
 CLAUDE_ARGS=()
 
 # Where in-use markers live. Deliberately OUTSIDE the worktrees themselves: a
@@ -92,12 +102,21 @@ while [ $# -gt 0 ]; do
     --no-install) DO_INSTALL=0; shift ;;
     --fresh)      FORCE_FRESH=1; shift ;;
     --base)       [ $# -ge 2 ] || die "--base needs a ref"; BASE_REF="$2"; shift 2 ;;
-    --help|-h)    sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
+    --checkout)   [ $# -ge 2 ] || die "--checkout needs a branch"; CHECKOUT="$2"; shift 2 ;;
+    # Prints the whole leading comment block, so the help text cannot drift out
+    # of a hardcoded line range as the header is edited.
+    --help|-h)    awk 'NR==1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' \
+                    "${BASH_SOURCE[0]}" >&2; exit 0 ;;
     --)           shift; CLAUDE_ARGS=("$@"); break ;;
     -*)           die "unknown flag: $1" ;;
     *)            [ -z "$NAME" ] || die "unexpected argument: $1"; NAME="$1"; shift ;;
   esac
 done
+
+# One names a branch to create, the other a branch that already exists; taking
+# both would leave it ambiguous which one the session lands on.
+[ -n "$CHECKOUT" ] && [ -n "$NAME" ] \
+  && die "--checkout $CHECKOUT and the branch name '$NAME' are mutually exclusive"
 
 # Refresh whatever --base points at, rather than always origin/dev.
 fetch_base() {
@@ -117,6 +136,46 @@ fetch_base() {
 registered_worktrees() {
   git -C "$REPO_ROOT" worktree list --porcelain \
     | awk '/^worktree /{ print substr($0, 10) }'
+}
+
+# Path of the worktree that currently has <branch> checked out, empty if none.
+# Git allows a branch in only one worktree at a time, so this is what decides
+# whether --checkout can hand out a slot at all.
+worktree_holding_branch() {
+  git -C "$REPO_ROOT" worktree list --porcelain \
+    | awk -v ref="refs/heads/$1" '
+        /^worktree /{ wt = substr($0, 10) }
+        $0 == "branch " ref { print wt; exit }'
+}
+
+# Echoes the local branch name for what the caller asked --checkout for, or
+# dies. Accepts `feat/x` and `origin/feat/x` alike, and creates the local
+# tracking branch when only the remote has it — resuming someone else's pushed
+# branch is the main reason to reach for --checkout in the first place.
+resolve_branch() {
+  local want="$1" bare="$1" remote="origin" head
+  case "$want" in
+    */*) head="${want%%/*}"
+         if git -C "$REPO_ROOT" remote get-url "$head" >/dev/null 2>&1; then
+           remote="$head"; bare="${want#*/}"
+         fi ;;
+  esac
+
+  git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$want" \
+    && { printf '%s\n' "$want"; return 0; }
+  git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$bare" \
+    && { printf '%s\n' "$bare"; return 0; }
+
+  git -C "$REPO_ROOT" remote get-url "$remote" >/dev/null 2>&1 \
+    || die "no such branch: $want"
+  git -C "$REPO_ROOT" fetch --quiet "$remote" "$bare" 2>/dev/null || true
+  git -C "$REPO_ROOT" rev-parse --verify --quiet "refs/remotes/$remote/$bare" >/dev/null \
+    || die "no such branch: $want (looked for a local branch and $remote/$bare)"
+
+  git -C "$REPO_ROOT" branch --quiet --track "$bare" "$remote/$bare" >&2 \
+    || die "could not create local branch $bare from $remote/$bare"
+  log "created $bare tracking $remote/$bare"
+  printf '%s\n' "$bare"
 }
 
 # True when everything this worktree contains is already present in the base
@@ -309,18 +368,47 @@ provision_worktree() {
 }
 
 create_session() {
-  local branch slug wt timestamp reused old_branch
+  local branch slug wt timestamp reused old_branch holder
 
-  timestamp="$(date +%Y%m%d-%H%M%S)"
-  branch="${NAME:-session/$timestamp}"
+  fetch_base
+
+  if [ -n "$CHECKOUT" ]; then
+    # `|| exit 1` is load-bearing: create_session already runs inside a command
+    # substitution, so a die() in resolve_branch kills only its own subshell and
+    # this function would otherwise carry on with an empty branch name.
+    branch="$(resolve_branch "$CHECKOUT")" || exit 1
+  else
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    branch="${NAME:-session/$timestamp}"
+    git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" \
+      && die "branch already exists: $branch — use --checkout $branch to work on it"
+    git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASE_REF" >/dev/null || die "base ref not found: $BASE_REF"
+  fi
+
   # One directory per branch; '/' is not usable in a directory name here.
   slug="$(printf '%s' "$branch" | tr '/' '-' | tr -cd '[:alnum:]._-')"
   [ -n "$slug" ] || die "branch name '$branch' has no usable characters"
 
-  git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" && die "branch already exists: $branch"
-
-  fetch_base
-  git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASE_REF" >/dev/null || die "base ref not found: $BASE_REF"
+  # A branch lives in at most one worktree, so an existing checkout of it has to
+  # be resolved before anything else — git would simply refuse a second one.
+  # Handing that worktree back is also the behaviour you want: it is where the
+  # branch's uncommitted work is.
+  if [ -n "$CHECKOUT" ]; then
+    holder="$(worktree_holding_branch "$branch")"
+    if [ -n "$holder" ]; then
+      case "$holder" in
+        "$WORKTREE_ROOT"/*) ;;
+        *) die "$branch is checked out at $holder — switch it away, or work there directly" ;;
+      esac
+      ! session_is_live "$holder" \
+        || die "$branch is in use by a session at $holder (if that session is gone: rm $(lock_file "$holder"))"
+      log "adopting $(basename "$holder") — already on $branch"
+      reap_idle_except "$holder"
+      provision_worktree "$holder"
+      printf '%s\n' "$holder"
+      return 0
+    fi
+  fi
 
   # Prefer an idle worktree over a new one: each costs ~290 MB and a pnpm
   # install, and an abandoned session leaves one behind every time. Directory
@@ -330,9 +418,15 @@ create_session() {
     wt="$reused"
     old_branch="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     log "reusing $(basename "$wt") — nothing in it${old_branch:+ (was $old_branch)}"
-    # Safe: reusable_worktree already proved the tree is clean and carries
-    # nothing that is not already in the base ref.
-    git -C "$wt" checkout -q -B "$branch" "$BASE_REF"
+    if [ -n "$CHECKOUT" ]; then
+      # Plain checkout, never `-B`: the branch already carries work, and
+      # resetting it onto the base ref would throw that work away.
+      git -C "$wt" checkout -q "$branch"
+    else
+      # Safe: reusable_worktree already proved the tree is clean and carries
+      # nothing that is not already in the base ref.
+      git -C "$wt" checkout -q -B "$branch" "$BASE_REF"
+    fi
     if [ -n "$old_branch" ] && [ "$old_branch" != "$branch" ]; then
       case "$old_branch" in
         session/*) git -C "$REPO_ROOT" branch -D "$old_branch" >/dev/null 2>&1 || true ;;
@@ -342,7 +436,11 @@ create_session() {
     wt="$WORKTREE_ROOT/$slug"
     [ -e "$wt" ] && die "path already exists: $wt"
     mkdir -p "$WORKTREE_ROOT"
-    git -C "$REPO_ROOT" worktree add -b "$branch" "$wt" "$BASE_REF" >&2
+    if [ -n "$CHECKOUT" ]; then
+      git -C "$REPO_ROOT" worktree add "$wt" "$branch" >&2
+    else
+      git -C "$REPO_ROOT" worktree add -b "$branch" "$wt" "$BASE_REF" >&2
+    fi
   fi
 
   # One idle slot is enough to keep around; sweep any others so abandoned
@@ -382,14 +480,16 @@ case "$MODE" in
   list)  list_sessions ;;
   prune) prune_sessions ;;
   print)
-    target="$(create_session)"
+    target="$(create_session)" || exit 1
+    [ -n "$target" ] || exit 1
     # No PID to watch — the caller is an already-running session that will
     # EnterWorktree into this path — so the claim expires on a timer instead.
     claim_worktree "$target" "claimed:$(date +%s)"
     printf '%s\n' "$target"
     ;;
   launch)
-    target="$(create_session)"
+    target="$(create_session)" || exit 1
+    [ -n "$target" ] || exit 1
     log "session branch ready — launching claude in $target"
     cd "$target"
     # `exec` keeps this PID, so the lock names the claude process itself and the
