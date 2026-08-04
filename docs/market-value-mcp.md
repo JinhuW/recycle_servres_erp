@@ -101,9 +101,13 @@ prefixes — `/api`, `/oauth`, `/.well-known` — and **must** forward the publi
 hostname:
 
 ```js
-proxied.headers.set('X-Forwarded-Host', url.host);
-proxied.headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
+proxied.headers.set('X-Public-Host', url.host);
+proxied.headers.set('X-Public-Proto', url.protocol.replace(':', ''));
 ```
+
+It has to be a **private** header. Railway's edge rewrites the standard
+`X-Forwarded-*` set to its own hostname before the backend sees them, so a
+value the Worker puts in `X-Forwarded-Host` never survives the hop.
 
 `new Request(target, request)` rewrites `Host` to the Railway origin, so
 without those the backend cannot tell which custom domain the caller used.

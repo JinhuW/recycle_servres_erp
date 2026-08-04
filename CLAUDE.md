@@ -146,7 +146,10 @@ switches the branch out from under the first.
   a scope problem, not a missing-tool one.
 - **The public origin in every OAuth document comes from `resolvePublicOrigin`**
   (`src/oauth/metadata.ts`), which needs the Cloudflare Worker to forward
-  `X-Forwarded-Host` **and** the hostname to be in `CORS_ALLOWED_ORIGINS`.  Add
+  `X-Public-Host` **and** the hostname to be in `CORS_ALLOWED_ORIGINS`.
+  It must be `X-Public-Host`, not `X-Forwarded-Host` — **Railway's edge rewrites
+  the standard `X-Forwarded-*` headers to its own hostname**, so a value the
+  Worker sets there never reaches the backend.  Add
   a hostname to `wrangler.toml` without adding it to `CORS_ALLOWED_ORIGINS` and
   discovery silently advertises `allow[0]` instead — which breaks the RFC 9728
   `resource` match and every MCP client with it.  Canonical host goes first.
