@@ -3,6 +3,8 @@ import { Icon, type IconName } from '../../../components/Icon';
 import { api } from '../../../lib/api';
 import { handleFetchError } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
+import { useAuth } from '../../../lib/auth';
+import { itemLabels, addItemLabel } from '../../../lib/lookups';
 import { SettingsHeader, Toggle } from './_shared';
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -110,6 +112,85 @@ export function CategoriesPanel() {
             </div>
           </div>
         ))}
+      </div>
+
+      <ItemLabelsPanel />
+    </>
+  );
+}
+
+// ─── Item labels ──────────────────────────────────────────────────────────────
+// The `Other` line vocabulary (migration 0081). Purchasers add to it from the
+// line drawer; this panel is where a manager tidies it up. Renaming rewrites
+// every line carrying the old name, so the usage count is shown next to each
+// one — that number is what a rename or retire touches.
+type LabelRow = { id: string; name: string; active: boolean; uses: number };
+
+function ItemLabelsPanel() {
+  const { t } = useT();
+  const { user } = useAuth();
+  const [rows, setRows] = useState<LabelRow[]>([]);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+
+  const reload = () =>
+    api.get<{ items: LabelRow[] }>('/api/item-labels')
+      .then(r => setRows(r.items))
+      .catch(handleFetchError);
+  useEffect(() => { if (user?.role === 'manager') reload(); }, [user?.role]);
+
+  if (user?.role !== 'manager') return null;
+
+  const persist = (row: LabelRow, body: Record<string, unknown>) =>
+    api.patch<LabelRow>(`/api/item-labels/${row.id}`, body)
+      .then(updated => {
+        setRows(p => p.map(r => r.id === row.id ? { ...r, ...updated } : r));
+        // The picker reads the boot cache, so keep it in step with the rename
+        // rather than making everyone reload to see it.
+        if (updated.name !== row.name) {
+          const cached = itemLabels.find(l => l.id === row.id);
+          if (cached) cached.name = updated.name;
+          else addItemLabel({ id: updated.id, name: updated.name });
+        }
+      })
+      .catch(err => { handleFetchError(err); reload(); });
+
+  const rename = (row: LabelRow) => {
+    const next = (draft[row.id] ?? row.name).trim();
+    setDraft(d => { const { [row.id]: _drop, ...rest } = d; return rest; });
+    if (!next || next === row.name) return;
+    persist(row, { name: next });
+  };
+
+  return (
+    <>
+      <SettingsHeader title={t('ilPanelTitle')} sub={t('ilPanelSub')} />
+      <div className="cat-list">
+        {rows.map(r => (
+          <div key={r.id} className={'cat-row card' + (r.active ? '' : ' disabled')}>
+            <div className="cat-row-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+                <div className="cat-icon"><Icon name="box" size={18} /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <input
+                    className="input"
+                    value={draft[r.id] ?? r.name}
+                    onChange={e => setDraft(d => ({ ...d, [r.id]: e.target.value }))}
+                    onBlur={() => rename(r)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    style={{ fontWeight: 600, fontSize: 15, maxWidth: 280 }}
+                  />
+                  <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
+                    {t('ilUses', { n: r.uses })} · {r.active ? t('ilActive') : t('ilRetired')}
+                  </div>
+                </div>
+              </div>
+              <Toggle checked={r.active} onChange={(v) => persist(r, { active: v })} />
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 && (
+          <div className="muted" style={{ fontSize: 13, padding: 12 }}>{t('ilPanelEmpty')}</div>
+        )}
       </div>
     </>
   );

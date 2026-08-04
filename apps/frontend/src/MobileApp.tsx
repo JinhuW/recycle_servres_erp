@@ -261,6 +261,7 @@ function Shell() {
   const lineSyncBlock = (l: DraftLine): string | null => {
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
     if (!hasIdentity) return l.category === 'Other' ? t('syncNeedDescription') : t('syncNeedBrand');
+    if (l.category === 'Other' && !(l.itemLabel ?? '').trim()) return t('syncNeedItemLabel');
     if (!((Number(l.qty) || 0) > 0)) return t('syncNeedQty');
     if (!(Number(l.unitCost) >= 0)) return t('syncNeedCost');
     return null;

@@ -268,7 +268,12 @@ export function Orders({ onEdit, onToast }: Props) {
                           {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`}
                           {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`}
                           {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`}
-                          {l.category === 'Other' && (l.description ?? '')}
+                          {l.category === 'Other' && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              {!!(l.itemLabel ?? '').trim() && <span className="chip">{l.itemLabel}</span>}
+                              {l.description ?? ''}
+                            </span>
+                          )}
                         </div>
                         <span className={'chip ' + statusTone(l.status) + ' dot'} style={{ fontSize: 10 }}>{l.status}</span>
                       </div>

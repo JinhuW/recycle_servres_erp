@@ -425,8 +425,11 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   </button>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {itemLabel(l) || '—'}
+                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {l.category === 'Other' && !!(l.itemLabel ?? '').trim() && (
+                      <span className="chip">{l.itemLabel}</span>
+                    )}
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemLabel(l) || '—'}</span>
                   </div>
                   {lineHasSpecChips(l)
                     ? <LineSpecChips line={l} />

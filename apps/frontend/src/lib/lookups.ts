@@ -59,6 +59,19 @@ export type CategoryInfo = {
 };
 export const categories: CategoryInfo[] = [];
 
+// ── Item labels (the `Other` line type vocabulary) ──────────────────────────
+// Anyone may add one from the line drawer, so this list grows during a session
+// — `addItemLabel` folds a freshly created label into the cache rather than
+// re-fetching every lookup.
+export type ItemLabel = { id: string; name: string };
+export const itemLabels: ItemLabel[] = [];
+
+export function addItemLabel(label: ItemLabel): void {
+  if (itemLabels.some(l => l.id === label.id)) return;
+  itemLabels.push(label);
+  itemLabels.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
 /** Filter-chip options: 'all' followed by the enabled category ids in order. */
 export function categoryFilterOptions(): string[] {
   return ['all', ...categories.filter(c => c.enabled).map(c => c.id)];
@@ -69,6 +82,7 @@ type LookupsResponse = {
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
   categories: CategoryInfo[];
+  itemLabels: ItemLabel[];
 };
 
 let loaded = false;
@@ -88,6 +102,7 @@ export function loadLookups(): Promise<void> {
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
       categories.splice(0, categories.length, ...data.categories);
+      itemLabels.splice(0, itemLabels.length, ...(data.itemLabels ?? []));
       loaded = true;
     } finally {
       inflight = null;
@@ -106,4 +121,5 @@ export function resetLookups(): void {
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
   categories.length = 0;
+  itemLabels.length = 0;
 }

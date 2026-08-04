@@ -8,6 +8,7 @@ import { useT } from '../../../lib/i18n';
 import { chipNumberRequired } from '../../../lib/ramRequired';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
+import { ItemLabelPicker } from '../../../components/ItemLabelPicker';
 import type { Line } from '../DesktopSubmit';
 
 // ─── Field groups ────────────────────────────────────────────────────────────
@@ -202,6 +203,13 @@ export function OtherFields({ line, set }: FieldsProps) {
   const { t } = useT();
   return (
     <div className="grid-2">
+      {/* Type first, then the specific detail — the same broad-to-narrow order
+          the spec'd categories read in (brand → capacity → …). */}
+      <div className="field" style={{ gridColumn: 'span 2' }}>
+        <label className="label">{t('lfItemLabel')} <span className="req">*</span></label>
+        <ItemLabelPicker value={line.itemLabel} onChange={v => set({ itemLabel: v })} />
+        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t('lfItemLabelHint')}</div>
+      </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('lfItemDescription')} <span className="req">*</span></label>
         <input
