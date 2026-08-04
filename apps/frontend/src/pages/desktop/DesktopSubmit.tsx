@@ -6,7 +6,7 @@ import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
-import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
+import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
@@ -364,6 +364,25 @@ function OrderForm({
     totalCostOverride: meta.totalCostOverride !== null ? (Number(meta.totalCostOverride) || 0) : null,
     otherFees: parseFeeInput(meta.otherFees),
   });
+
+  // A purchaser types the one number off the supplier's invoice. Anything above
+  // the line sum is a fee, so on blur it moves there and Goods total returns to
+  // the line sum — the all-in total is untouched, the money is just classified.
+  // On blur rather than on change: the first keystroke of "11610.30" is "1",
+  // which would read as a huge negative gap.
+  const [movedToFees, setMovedToFees] = useState<number | null>(null);
+  const applyGoodsOverflow = () => {
+    if (meta.totalCostOverride === null) return;
+    const typed = Number(meta.totalCostOverride);
+    const { goods, overflow } = splitGoodsOverflow(typed, totals.cost);
+    if (overflow <= 0) return;
+    setMeta(m => ({
+      ...m,
+      totalCostOverride: goods.toFixed(2),
+      otherFees: (parseFeeInput(m.otherFees) + overflow).toFixed(2),
+    }));
+    setMovedToFees(overflow);
+  };
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   const dupByIdx = useMemo(() => {
@@ -792,7 +811,7 @@ function OrderForm({
                     step="0.01"
                     value={meta.otherFees}
                     placeholder="0.00"
-                    onChange={e => setMeta(m => ({ ...m, otherFees: e.target.value }))}
+                    onChange={e => { setMeta(m => ({ ...m, otherFees: e.target.value })); setMovedToFees(null); }}
                     onFocus={e => e.target.select()}
                     style={{ paddingLeft: 22 }}
                   />
@@ -869,11 +888,20 @@ function OrderForm({
                   type="number"
                   step="0.01"
                   value={meta.totalCostOverride !== null ? meta.totalCostOverride : totals.cost.toFixed(2)}
-                  onChange={e => setMeta(m => ({ ...m, totalCostOverride: e.target.value }))}
+                  onChange={e => { setMeta(m => ({ ...m, totalCostOverride: e.target.value })); setMovedToFees(null); }}
                   onFocus={e => e.target.select()}
+                  onBlur={applyGoodsOverflow}
+                  onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
                   style={{ paddingLeft: 24, fontWeight: 500 }}
                 />
               </div>
+              {/* The field just changed under them, and the ledger that shows
+                  the result is further up the page — so say what happened here. */}
+              {movedToFees != null && (
+                <div className="help" style={{ color: 'var(--accent-strong)' }}>
+                  ↓ {t('movedToFees', { amount: fmtUSD(movedToFees, locale) })}
+                </div>
+              )}
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('orderNotes')}</label>
@@ -922,7 +950,7 @@ function OrderForm({
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
               {t('totalCost')}
-              {meta.totalCostOverride !== null && Math.abs((Number(meta.totalCostOverride) || 0) - totals.cost) > 0.01 && (
+              {meta.totalCostOverride !== null && Math.abs((Number(meta.totalCostOverride) || 0) - totals.cost) > GOODS_EPSILON && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>

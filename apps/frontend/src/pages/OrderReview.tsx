@@ -7,7 +7,7 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError, showErrorToast } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
-import { parseFeeInput } from '../lib/poTotals';
+import { parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 
 /** Strip thousands-separator commas, then parse — handles "1,234.56" correctly. */
@@ -63,6 +63,20 @@ export function OrderReview({
   const [otherFees, setOtherFees] = useState('');
   const [otherFeesNote, setOtherFeesNote] = useState('');
   const feesValue = parseFeeInput(otherFees);
+
+  // A purchaser types the one number off the supplier's invoice. Anything above
+  // the line sum is a fee, so on blur it moves there and the goods total returns
+  // to the line sum — the all-in total is untouched, the money is just
+  // classified. On blur rather than on change: the first keystroke of
+  // "11610.30" is "1", which would read as a huge negative gap.
+  const [movedToFees, setMovedToFees] = useState<number | null>(null);
+  const applyGoodsOverflow = () => {
+    const { goods, overflow } = splitGoodsOverflow(parseDecimal(totalCost), computedCost);
+    if (overflow <= 0) return;
+    setTotalCost(goods.toFixed(2));
+    setOtherFees((feesValue + overflow).toFixed(2));
+    setMovedToFees(overflow);
+  };
 
   const submit = async () => {
     const parsed = parseDecimal(totalCost);
@@ -216,7 +230,9 @@ export function OrderReview({
         </div>
 
         {(() => {
-          const edited = parseDecimal(totalCost) !== computedCost;
+          // One shared threshold for "differs from the line sum" — this used to
+          // be an exact compare here and > 0.01 on desktop.
+          const edited = Math.abs(parseDecimal(totalCost) - computedCost) > GOODS_EPSILON;
           return (
             <div className="ph-card" style={{ marginTop: 16, background: 'var(--accent-soft)', borderColor: 'color-mix(in oklch, var(--accent) 30%, transparent)', overflow: 'hidden' }}>
               <div style={{ padding: '14px 14px 12px' }}>
@@ -238,7 +254,9 @@ export function OrderReview({
                   <input
                     className="mono"
                     value={totalCost}
-                    onChange={e => setTotalCost(e.target.value)}
+                    onChange={e => { setTotalCost(e.target.value); setMovedToFees(null); }}
+                    onBlur={applyGoodsOverflow}
+                    onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
                     inputMode="decimal"
                     style={{
                       flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent',
@@ -275,6 +293,16 @@ export function OrderReview({
                   </div>
                 )}
 
+                {/* The hero number just changed under them — say why. */}
+                {movedToFees != null && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, fontSize: 11.5, color: 'var(--accent-strong)' }}>
+                    <span style={{ opacity: 0.75 }}>↓ {t('otherFees')}</span>
+                    <span className="mono" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                      +{fmtUSD(movedToFees, locale)}
+                    </span>
+                  </div>
+                )}
+
                 {/* Fees are money the supplier charged on top of the goods, so
                     they sit below the goods hero and roll into a separate
                     total rather than editing the number above. */}
@@ -293,7 +321,7 @@ export function OrderReview({
                         inputMode="decimal"
                         value={otherFees}
                         placeholder="0.00"
-                        onChange={e => setOtherFees(e.target.value)}
+                        onChange={e => { setOtherFees(e.target.value); setMovedToFees(null); }}
                       />
                     </div>
                     <div className="ph-field" style={{ marginTop: 0 }}>

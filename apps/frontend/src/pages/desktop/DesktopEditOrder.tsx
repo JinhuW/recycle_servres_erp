@@ -6,7 +6,7 @@ import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
-import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
+import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../../lib/poTotals';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
@@ -303,6 +303,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const parsedOtherFees = parseFeeInput(otherFeesInput);
   const otherFeesDirty = parsedOtherFees !== order.otherFees;
   const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+
+  // A purchaser types the one number off the supplier's invoice. Anything above
+  // the line sum is a fee, so on blur it moves there and Goods total returns to
+  // the line sum — the all-in total is untouched, the money is just classified.
+  // On blur rather than on change: the first keystroke of "11610.30" is "1",
+  // which would read as a huge negative gap.
+  const [movedToFees, setMovedToFees] = useState<number | null>(null);
+  const applyGoodsOverflow = () => {
+    if (!canEditOrder || !totalCostOverride || parsedTotalCost == null) return;
+    const { goods, overflow } = splitGoodsOverflow(parsedTotalCost, totals.cost);
+    if (overflow <= 0) return;
+    setTotalCostInput(goods.toFixed(2));
+    setOtherFeesInput((parsedOtherFees + overflow).toFixed(2));
+    setMovedToFees(overflow);
+  };
 
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
@@ -710,7 +725,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       step="0.01"
                       value={otherFeesInput}
                       placeholder="0.00"
-                      onChange={e => setOtherFeesInput(e.target.value)}
+                      onChange={e => { setOtherFeesInput(e.target.value); setMovedToFees(null); }}
                       onFocus={e => e.target.select()}
                       style={{ paddingLeft: 22 }}
                     />
@@ -1104,12 +1119,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   type="number"
                   step="0.01"
                   value={totalCostOverride ? totalCostInput : totals.cost.toFixed(2)}
-                  onChange={e => { setTotalCostOverride(true); setTotalCostInput(e.target.value); }}
+                  onChange={e => {
+                    setTotalCostOverride(true);
+                    setTotalCostInput(e.target.value);
+                    setMovedToFees(null);
+                  }}
                   onFocus={e => e.target.select()}
+                  onBlur={applyGoodsOverflow}
+                  onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
                   disabled={!canEditOrder}
                   style={{ paddingLeft: 24, fontWeight: 500 }}
                 />
               </div>
+              {/* The field just changed under them, and the ledger that shows
+                  the result is in another card — so say what happened here. */}
+              {movedToFees != null && (
+                <div className="help" style={{ color: 'var(--accent-strong)' }}>
+                  ↓ {t('movedToFees', { amount: fmtUSD(movedToFees, locale) })}
+                </div>
+              )}
             </div>
             {/* Notes gets its own row and spans the full grid so there's
                 room to write more than a single short phrase. */}
@@ -1166,7 +1194,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > 0.01 && (
+              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > GOODS_EPSILON && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>
