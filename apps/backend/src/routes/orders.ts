@@ -660,8 +660,8 @@ orders.post('/', async (c) => {
 
 // ── Edit — update order meta + line item details. The order owner
 // (purchaser) or a manager may PATCH. Draft is purchaser-editable; later
-// stages are manager-only — enforced here, not just in the client, so a
-// purchaser can't rewrite costs/lines on an order under review.
+// stages are manager-only apart from `notes` — enforced here, not just in the
+// client, so a purchaser can't rewrite costs/lines on an order under review.
 //
 // Line shape on the wire:
 //   lines:          updates for existing lines (each carries `id`)
@@ -716,8 +716,19 @@ orders.patch('/:id', async (c) => {
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  // Post-submission the purchaser hands pricing and line edits to the manager,
+  // but the paper trail stays theirs: a note can still be added at any stage
+  // short of Done (receipts and shipping details keep arriving after the goods
+  // leave). Anything beyond `notes` remains manager-only.
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
-    return c.json({ error: 'Only managers can edit an order after submission' }, 403);
+    const editsBeyondNotes =
+      !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
+      body.totalCost !== undefined || body.otherFees !== undefined ||
+      body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
+      body.payment !== undefined || body.commissionRate !== undefined;
+    if (existing.lifecycle === 'done' || editsBeyondNotes || body.notes === undefined) {
+      return c.json({ error: 'Only managers can edit an order after submission' }, 403);
+    }
   }
   if (body.commissionRate !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can set the commission rate' }, 403);
@@ -1255,7 +1266,10 @@ const PO_META_STATUSES = new Set(['Submission', 'Done']);
 // Every other meta status (Done) remains manager-only.
 function canWriteMeta(u: User, status: string, order: { user_id: string; lifecycle: string }): boolean {
   if (effectiveRole(u) === 'manager') return true;
-  return status === 'Submission' && order.user_id === u.id && order.lifecycle === 'draft';
+  // Submission evidence belongs to the purchaser who raised the PO and stays
+  // theirs until it's Done — a receipt or a photo of the goods routinely shows
+  // up after the order has already moved to In Transit or Reviewing.
+  return status === 'Submission' && order.user_id === u.id && order.lifecycle !== 'done';
 }
 
 // Upsert the text note for a single (order, status).

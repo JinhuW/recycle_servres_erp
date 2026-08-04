@@ -69,6 +69,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const purchaserCanEdit =
     !isPurchaser || effectiveStatus === 'Draft' || effectiveStatus === 'In Transit';
   const canEditOrder = purchaserCanEdit && !orderLocked;
+  // Notes and submission evidence outlive the purchaser's edit window: the
+  // manager owns pricing from Reviewing on, but whoever raised the PO can keep
+  // documenting it until Done. Mirrors the backend's notes-only gate.
+  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
+  const canAnnotate = !orderLocked && isOwnerOrManager;
   const allowedStatuses = isPurchaser
     ? effectiveStatus === 'Draft'      ? ['Draft', 'In Transit']
     : effectiveStatus === 'In Transit' ? ['In Transit', 'Reviewing']
@@ -87,8 +92,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.statusMeta?.['Submission']?.attachments ?? [],
   );
   const [submissionUploading, setSubmissionUploading] = useState(false);
-  // Owner may edit while Draft; managers always. Mirrors the backend gate.
-  const canEditSubmission = !isPurchaser || (order.userId === user?.id && effectiveStatus === 'Draft');
+  // Owner may edit until the order is Done; managers always. Mirrors the
+  // backend gate.
+  const canEditSubmission = canAnnotate;
 
   const addSubmissionFiles = async (fl: FileList | null) => {
     const files = Array.from(fl || []);
@@ -175,7 +181,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Archive: owner-or-manager, any non-Draft stage. Either flips to the other.
   // (Draft uses Delete instead; the backend enforces the same split.)
   const isArchived = !!order.archivedAt;
-  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -329,7 +334,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
     return qty > 0 && cost >= 0 && hasIdentity;
   };
-  const canSave = dirty && !saving && !orderLocked && lines.every(lineReady);
+  // A note-only save (purchaser past In Transit) sends no lines, so an
+  // incomplete legacy line must not block it — they can't fix it at that stage.
+  const canSave =
+    dirty && !saving && !orderLocked && (!canEditOrder || lines.every(lineReady));
 
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.
@@ -365,6 +373,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     setSaving(true);
     setSaveError(null);
     try {
+      // Past the purchaser's edit window only the note is theirs to change;
+      // sending the line/pricing keys too would trip the backend's 403.
+      if (!canEditOrder) {
+        if (notesDirty) await api.patch(`/api/orders/${order.id}`, { notes });
+        onSaved('Saved ' + order.id);
+        return;
+      }
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       await api.patch(`/api/orders/${order.id}`, {
@@ -1106,7 +1121,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 placeholder={t('orderNotesPh')}
-                disabled={!canEditOrder}
+                disabled={!canAnnotate}
                 style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
               />
             </div>

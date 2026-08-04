@@ -740,26 +740,39 @@ describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
     return created.body.id;
   }
 
-  it('owner edits a draft, loses edit access after submission; manager keeps it', async () => {
+  it('owner keeps notes after submission but loses pricing edits; manager keeps both', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const id = await createDraft(pur);
 
     // Draft: owner can edit.
     expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'draft note' } })).status).toBe(200);
 
-    // Submit → in_transit: owner is frozen out, including cost/line rewrites.
+    // Submit → in_transit: the note stays the owner's, everything else doesn't.
     await api('POST', `/api/orders/${id}/advance`, { token: pur });
-    const denied = await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'late edit' } });
-    expect(denied.status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'late edit' } })).status).toBe(200);
     const lines = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${id}`, { token: pur });
     const deniedLines = await api('PATCH', `/api/orders/${id}`, {
       token: pur,
       body: { lines: [{ id: lines.body.order.lines[0].id, unitCost: 0.01 }] },
     });
     expect(deniedLines.status).toBe(403);
+    // A note riding alongside a line rewrite doesn't smuggle the rewrite through.
+    const deniedMixed = await api('PATCH', `/api/orders/${id}`, {
+      token: pur,
+      body: { notes: 'nice try', lines: [{ id: lines.body.order.lines[0].id, unitCost: 0.01 }] },
+    });
+    expect(deniedMixed.status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { payment: 'self' } })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { notes: 'fees', otherFees: 250 },
+    })).status).toBe(403);
 
     // Manager still edits post-submission.
     const { token: mgr } = await loginAs(ALEX);
     expect((await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { notes: 'manager note' } })).status).toBe(200);
+
+    // Done: the order is closed to the owner entirely, note included.
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'done' } })).status).toBe(200);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'too late' } })).status).toBe(403);
   });
 });

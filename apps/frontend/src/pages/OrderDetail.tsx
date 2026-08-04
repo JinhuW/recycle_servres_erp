@@ -3,14 +3,15 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
-import { StatusChangeDialog } from '../components/StatusChangeDialog';
+import { StatusChangeDialog, type StatusAttachment } from '../components/StatusChangeDialog';
 import { AttachmentChip } from '../components/AttachmentChip';
+import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
-import { handleFetchError } from '../lib/errorToast';
+import { handleFetchError, showErrorToast } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { poEffectiveCost } from '../lib/poTotals';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
@@ -51,6 +52,11 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     !isPurchaser || effectiveStatus === 'Draft' || effectiveStatus === 'In Transit';
   const canEditOrder = purchaserCanEdit && !orderLocked;
   const canDelete = canEditOrder && effectiveStatus === 'Draft';
+  // The note outlives the purchaser's edit window — the manager owns pricing
+  // from Reviewing on, but whoever raised the PO keeps documenting it until
+  // Done. Mirrors the backend's notes-only gate.
+  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
+  const canAnnotate = !orderLocked && isOwnerOrManager;
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
@@ -66,12 +72,15 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [submissionAtts, setSubmissionAtts] = useState<StatusAttachment[]>(
+    order.statusMeta?.['Submission']?.attachments ?? [],
+  );
+  const [submissionUploading, setSubmissionUploading] = useState(false);
 
   // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
   // archive is reversible so we keep the gesture short, matching the
   // platform's "one tap, one sheet" rhythm.
   const isArchived = !!order.archivedAt;
-  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -81,7 +90,8 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     setWarehouseId(order.warehouse?.id ?? '');
     setPayment(order.payment);
     setNotes(order.notes ?? '');
-  }, [order.id, order.warehouse?.id, order.payment, order.notes]);
+    setSubmissionAtts(order.statusMeta?.['Submission']?.attachments ?? []);
+  }, [order.id, order.warehouse?.id, order.payment, order.notes, order.statusMeta]);
 
   useEffect(() => {
     let alive = true;
@@ -124,15 +134,17 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   };
 
   const save = async () => {
-    if (!canEditOrder) return;
+    if (!canAnnotate) return;
     setSaving(true);
     setSaveError(null);
     try {
-      await api.patch(`/api/orders/${order.id}`, {
+      // Past the purchaser's edit window only the note is theirs to change;
+      // warehouse/payment would trip the backend's 403.
+      await api.patch(`/api/orders/${order.id}`, canEditOrder ? {
         notes:       notesDirty     ? notes                 : undefined,
         warehouseId: warehouseDirty ? (warehouseId || null) : undefined,
         payment:     paymentDirty   ? payment               : undefined,
-      });
+      } : { notes });
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
       onSaved(t('savedShort'));
@@ -172,6 +184,41 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     // attachments); confirming there fires the actual advance.
     if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
     await doAdvance();
+  };
+
+  const addSubmissionFiles = async (fl: FileList | null) => {
+    const files = Array.from(fl || []);
+    if (!files.length) return;
+    setSubmissionUploading(true);
+    try {
+      for (const f of files) {
+        // 50 MiB server hard cap; oversized images are shrunk server-side.
+        if (f.size > 50 * 1024 * 1024) {
+          showErrorToast(t('fileTooLarge', { name: f.name }));
+          continue;
+        }
+        const form = new FormData();
+        form.append('file', f);
+        const r = await api.upload<{ attachment: StatusAttachment }>(
+          `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
+        setSubmissionAtts(prev => [...prev, r.attachment]);
+      }
+      setActivityRefreshKey(k => k + 1);
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setSubmissionUploading(false);
+    }
+  };
+
+  const removeSubmissionAtt = async (attachmentId: string) => {
+    try {
+      await api.delete(`/api/orders/${order.id}/status-meta/Submission/attachments/${attachmentId}`);
+      setSubmissionAtts(prev => prev.filter(a => a.id !== attachmentId));
+      setActivityRefreshKey(k => k + 1);
+    } catch (e) {
+      handleFetchError(e);
+    }
   };
 
   const removeDoneAtt = async (attachmentId: string) => {
@@ -480,10 +527,34 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             onChange={e => setNotes(e.target.value)}
             placeholder={t('orderNotesPh')}
             rows={3}
-            disabled={!canEditOrder}
+            disabled={!canAnnotate}
             style={{ width: '100%', resize: 'vertical', minHeight: 70, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, padding: '10px 12px' }}
           />
         </div>
+
+        {(submissionAtts.length > 0 || canAnnotate) && (
+          <div className="ph-field">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
+            </label>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {submissionAtts.map(a => (
+                <AttachmentChip
+                  key={a.id}
+                  a={a}
+                  onRemove={canAnnotate ? () => removeSubmissionAtt(a.id) : undefined}
+                />
+              ))}
+              {canAnnotate && (
+                <AttachmentDropzone
+                  boxHint={t('poSubmitAttachHint')}
+                  uploading={submissionUploading}
+                  onFiles={addSubmissionFiles}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="ph-card" style={{ marginTop: 14, padding: '12px 14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
@@ -589,7 +660,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             <Icon name={isArchived ? 'rotate' : 'box'} size={16} />
           </button>
         )}
-        {dirty && canEditOrder && (
+        {dirty && canAnnotate && (
           <button
             className="ph-btn dark"
             onClick={save}
