@@ -7,6 +7,7 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError, showErrorToast } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 
 /** Strip thousands-separator commas, then parse — handles "1,234.56" correctly. */
@@ -22,7 +23,10 @@ type Props = {
   onAddItem: () => void;
   onEditLine: (idx: number) => void;
   onRemoveLine: (idx: number) => void;
-  onSubmit: (payload: { warehouseId: string; payment: 'company' | 'self'; notes: string; totalCost: number }) => Promise<void>;
+  onSubmit: (payload: {
+    warehouseId: string; payment: 'company' | 'self'; notes: string;
+    totalCost: number; otherFees: number; otherFeesNote: string | null;
+  }) => Promise<void>;
   onCancel: () => void;
 };
 
@@ -56,6 +60,23 @@ export function OrderReview({
   const totalQty = lines.reduce((a, l) => a + l.qty, 0);
   const [totalCost, setTotalCost] = useState(computedCost.toFixed(2));
   useEffect(() => { setTotalCost(computedCost.toFixed(2)); }, [computedCost]);
+  const [otherFees, setOtherFees] = useState('');
+  const [otherFeesNote, setOtherFeesNote] = useState('');
+  const feesValue = parseFeeInput(otherFees);
+
+  // A purchaser types the one number off the supplier's invoice. Anything above
+  // the line sum is a fee, so on blur it moves there and the goods total returns
+  // to the line sum — the all-in total is untouched, the money is just
+  // classified. On blur rather than on change: the first keystroke of
+  // "11610.30" is "1", which would read as a huge negative gap.
+  const [movedToFees, setMovedToFees] = useState<number | null>(null);
+  const applyGoodsOverflow = () => {
+    const { goods, overflow } = splitGoodsOverflow(parseDecimal(totalCost), computedCost);
+    if (overflow <= 0) return;
+    setTotalCost(goods.toFixed(2));
+    setOtherFees((feesValue + overflow).toFixed(2));
+    setMovedToFees(overflow);
+  };
 
   const submit = async () => {
     const parsed = parseDecimal(totalCost);
@@ -65,7 +86,11 @@ export function OrderReview({
     }
     setSubmitting(true);
     try {
-      await onSubmit({ warehouseId, payment, notes, totalCost: parsed });
+      await onSubmit({
+        warehouseId, payment, notes, totalCost: parsed,
+        otherFees: feesValue,
+        otherFeesNote: otherFeesNote.trim() || null,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -205,13 +230,15 @@ export function OrderReview({
         </div>
 
         {(() => {
-          const edited = parseDecimal(totalCost) !== computedCost;
+          // One shared threshold for "differs from the line sum" — this used to
+          // be an exact compare here and > 0.01 on desktop.
+          const edited = Math.abs(parseDecimal(totalCost) - computedCost) > GOODS_EPSILON;
           return (
             <div className="ph-card" style={{ marginTop: 16, background: 'var(--accent-soft)', borderColor: 'color-mix(in oklch, var(--accent) 30%, transparent)', overflow: 'hidden' }}>
               <div style={{ padding: '14px 14px 12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ fontSize: 10.5, color: 'var(--accent-strong)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    {t('totalCost')}
+                    {t('goodsTotal')}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--accent-strong)', opacity: 0.75, fontVariantNumeric: 'tabular-nums' }}>
                     {totalQty} {totalQty === 1 ? t('unit') : t('units2')} · {lines.length} {lines.length === 1 ? t('item') : t('items')}
@@ -227,7 +254,9 @@ export function OrderReview({
                   <input
                     className="mono"
                     value={totalCost}
-                    onChange={e => setTotalCost(e.target.value)}
+                    onChange={e => { setTotalCost(e.target.value); setMovedToFees(null); }}
+                    onBlur={applyGoodsOverflow}
+                    onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
                     inputMode="decimal"
                     style={{
                       flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent',
@@ -263,6 +292,63 @@ export function OrderReview({
                     </span>
                   </div>
                 )}
+
+                {/* The hero number just changed under them — say why. */}
+                {movedToFees != null && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, fontSize: 11.5, color: 'var(--accent-strong)' }}>
+                    <span style={{ opacity: 0.75 }}>↓ {t('otherFees')}</span>
+                    <span className="mono" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                      +{fmtUSD(movedToFees, locale)}
+                    </span>
+                  </div>
+                )}
+
+                {/* Fees are money the supplier charged on top of the goods, so
+                    they sit below the goods hero and roll into a separate
+                    total rather than editing the number above. */}
+                <div style={{
+                  marginTop: 12, paddingTop: 12,
+                  borderTop: '1px solid color-mix(in oklch, var(--accent) 22%, transparent)',
+                }}>
+                  <div className="ph-field-row" style={{ gridTemplateColumns: '110px 1fr', marginTop: 0 }}>
+                    <div className="ph-field" style={{ marginTop: 0 }}>
+                      <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFees')}</label>
+                      <input
+                        className="input mono"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        inputMode="decimal"
+                        value={otherFees}
+                        placeholder="0.00"
+                        onChange={e => { setOtherFees(e.target.value); setMovedToFees(null); }}
+                      />
+                    </div>
+                    <div className="ph-field" style={{ marginTop: 0 }}>
+                      <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFeesNote')}</label>
+                      <input
+                        className="input"
+                        maxLength={280}
+                        value={otherFeesNote}
+                        placeholder={t('otherFeesPh')}
+                        onChange={e => setOtherFeesNote(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {feesValue > 0 && (
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      marginTop: 12, paddingTop: 8,
+                      borderTop: '1px dashed color-mix(in oklch, var(--accent) 30%, transparent)',
+                      fontSize: 12.5, fontWeight: 700, color: 'var(--accent-strong)',
+                    }}>
+                      <span>{t('totalCost')}</span>
+                      <span className="mono" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {fmtUSD(parseDecimal(totalCost) + feesValue, locale)}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
               <div style={{
                 padding: '10px 14px',

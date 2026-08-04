@@ -197,7 +197,7 @@ describe('PO advance to done — evidence stays optional', () => {
   });
 });
 
-describe('PO status-meta — Submission (owner-editable while Draft)', () => {
+describe('PO status-meta — Submission (owner-editable until Done)', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('owner can upload + delete a Submission attachment on their own Draft', async () => {
@@ -233,10 +233,27 @@ describe('PO status-meta — Submission (owner-editable while Draft)', () => {
     expect(mgrUp.status).toBe(200);
   });
 
-  it('after the order leaves Draft, the owner is locked out but a manager is not', async () => {
-    const { token: mgr } = await loginAs(ALEX);
+  it('the owner keeps uploading and noting after the order leaves Draft', async () => {
     const { token: owner } = await loginAs(MARCUS);
     const id = await createOrder(owner); // advances out of Draft
+
+    const ownerUp = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
+      { file: PNG() }, { token: owner });
+    expect(ownerUp.status).toBe(200);
+
+    const note = await api('PUT', `/api/orders/${id}/status-meta/Submission`, {
+      token: owner, body: { note: 'receipt arrived late' },
+    });
+    expect(note.status).toBe(200);
+  });
+
+  it('once the order is Done the owner is locked out but a manager is not', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { token: owner } = await loginAs(MARCUS);
+    const id = await createOrder(owner);
+    expect((await api('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'done' },
+    })).status).toBe(200);
 
     const ownerUp = await multipart(`/api/orders/${id}/status-meta/Submission/attachments`,
       { file: PNG() }, { token: owner });

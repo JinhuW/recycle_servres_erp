@@ -169,3 +169,67 @@ describe('MCP set_market_price tool', () => {
     expect((r.body as any).error).toBeDefined();
   });
 });
+
+describe('MCP JSON-RPC transport conformance', () => {
+  let bearer: string;
+  beforeAll(async () => {
+    const key = process.env.__TEST_OAUTH_KEY__ ?? await generateSigningKey();
+    process.env.__TEST_OAUTH_KEY__ = key;
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const c = await createOAuthClient(sql, {
+      name: 'mcp-conformance', redirectUris: [],
+      grantTypes: ['client_credentials'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    bearer = await signAccessToken({
+      OAUTH_ISSUER_URL: 'http://localhost:8787',
+      OAUTH_SIGNING_KEY_CURRENT: key,
+      OAUTH_ACCESS_TOKEN_TTL_SEC: '900',
+    } as any, { clientId: c.clientId, userId: null, scopes: ['market:read'] });
+  });
+
+  const post = (body: unknown) => api('POST', '/api/mcp', {
+    headers: { authorization: `Bearer ${bearer}` },
+    body: body as any,
+  });
+
+  it('answers a notification with 202 and no body', async () => {
+    // Every client sends notifications/initialized right after initialize.
+    // Replying with a JSON-RPC error object carrying an undefined id is not a
+    // valid response and trips strict clients.
+    const r = await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    expect(r.status).toBe(202);
+    expect(r.body).toBeUndefined();
+  });
+
+  it('echoes a protocol version it speaks', async () => {
+    const r = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+    expect((r.body as any).result.protocolVersion).toBe('2025-06-18');
+  });
+
+  it('answers with its newest version when asked for one it does not speak', async () => {
+    const r = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '1999-01-01' } });
+    expect((r.body as any).result.protocolVersion).toBe('2025-06-18');
+  });
+
+  it('responds to ping', async () => {
+    const r = await post({ jsonrpc: '2.0', id: 7, method: 'ping' });
+    expect((r.body as any).result).toEqual({});
+    expect((r.body as any).id).toBe(7);
+  });
+
+  it('rejects a JSON-RPC batch with id null, not undefined', async () => {
+    // JSON.stringify drops an undefined id, producing a response with no id
+    // field at all — which is itself malformed.
+    const r = await post([{ jsonrpc: '2.0', id: 1, method: 'ping' }]);
+    const body = r.body as any;
+    expect(body.error.code).toBe(-32600);
+    expect(body.id).toBeNull();
+  });
+
+  it('rejects a body with no method', async () => {
+    const r = await post({ jsonrpc: '2.0', id: 1 });
+    expect((r.body as any).error.code).toBe(-32600);
+  });
+});

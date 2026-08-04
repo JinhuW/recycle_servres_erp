@@ -61,12 +61,53 @@ describe('GET /api/orders/:id/spreadsheet', () => {
     ws.eachRow((row) => fields.add(String(row.getCell(1).value ?? '')));
 
     for (const expected of [
-      'Payment method', 'Subtotal (line costs)', 'Total cost',
-      'Commission rate', 'Total quantity',
+      'Payment method', 'Subtotal (line costs)', 'Other fees', 'Other fees note',
+      'Total cost', 'Commission rate', 'Total quantity',
       'Projected sell value', 'Projected profit', 'Commission amount',
     ]) {
       expect(fields.has(expected)).toBe(true);
     }
+  });
+
+  // Subtotal -> Other fees -> Total cost must read as an arithmetic column, and
+  // the fee has to come back out of the projected profit and its commission.
+  it('adds other fees to Total cost and subtracts them from projected profit', async () => {
+    const { token } = await loginAs(ALEX);
+    const FEE = 40, QTY = 2, UNIT_COST = 60, SELL = 100, RATE = 0.1;
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        otherFees: FEE, otherFeesNote: 'PayPal processing fee',
+        lines: [{ category: 'RAM', brand: 'Samsung', condition: 'New',
+          qty: QTY, unitCost: UNIT_COST, sellPrice: SELL }],
+      },
+    });
+    expect(created.status).toBe(201);
+    expect((await api('PATCH', `/api/orders/${created.body.id}`, {
+      token, body: { commissionRate: RATE },
+    })).status).toBe(200);
+
+    const res = await getRaw(`/api/orders/${created.body.id}/spreadsheet`, token);
+    expect(res.status).toBe(200);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await res.arrayBuffer());
+    const ws = wb.getWorksheet('Payment')!;
+    const byField = new Map<string, unknown>();
+    ws.eachRow(row => byField.set(String(row.getCell(1).value ?? ''), row.getCell(2).value));
+
+    const subtotal = Number(byField.get('Subtotal (line costs)'));
+    expect(subtotal).toBeCloseTo(UNIT_COST * QTY, 2);
+    expect(Number(byField.get('Other fees'))).toBeCloseTo(FEE, 2);
+    expect(String(byField.get('Other fees note'))).toBe('PayPal processing fee');
+    expect(Number(byField.get('Total cost'))).toBeCloseTo(subtotal + FEE, 2);
+
+    const expProfit = (SELL - UNIT_COST) * QTY - FEE;
+    expect(Number(byField.get('Projected sell value'))).toBeCloseTo(SELL * QTY, 2);
+    expect(Number(byField.get('Projected profit'))).toBeCloseTo(expProfit, 2);
+    expect(Number(byField.get('Commission amount'))).toBeCloseTo(expProfit * RATE, 2);
   });
 
   it('includes sell price, sell total and profit per line item', async () => {

@@ -6,6 +6,7 @@ import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
+import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../../lib/poTotals';
 import type { Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
@@ -68,6 +69,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const purchaserCanEdit =
     !isPurchaser || effectiveStatus === 'Draft' || effectiveStatus === 'In Transit';
   const canEditOrder = purchaserCanEdit && !orderLocked;
+  // Notes and submission evidence outlive the purchaser's edit window: the
+  // manager owns pricing from Reviewing on, but whoever raised the PO can keep
+  // documenting it until Done. Mirrors the backend's notes-only gate.
+  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
+  const canAnnotate = !orderLocked && isOwnerOrManager;
   const allowedStatuses = isPurchaser
     ? effectiveStatus === 'Draft'      ? ['Draft', 'In Transit']
     : effectiveStatus === 'In Transit' ? ['In Transit', 'Reviewing']
@@ -86,8 +92,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.statusMeta?.['Submission']?.attachments ?? [],
   );
   const [submissionUploading, setSubmissionUploading] = useState(false);
-  // Owner may edit while Draft; managers always. Mirrors the backend gate.
-  const canEditSubmission = !isPurchaser || (order.userId === user?.id && effectiveStatus === 'Draft');
+  // Owner may edit until the order is Done; managers always. Mirrors the
+  // backend gate.
+  const canEditSubmission = canAnnotate;
 
   const addSubmissionFiles = async (fl: FileList | null) => {
     const files = Array.from(fl || []);
@@ -154,6 +161,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.totalCost != null ? order.totalCost.toFixed(2) : '',
   );
   const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
+  // Fees are charged on top of the goods total, so they get their own input
+  // rather than being folded into the override. '' renders as no fee.
+  const [otherFeesInput, setOtherFeesInput] = useState<string>(
+    order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
+  );
+  const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -168,7 +181,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Archive: owner-or-manager, any non-Draft stage. Either flips to the other.
   // (Draft uses Delete instead; the backend enforces the same split.)
   const isArchived = !!order.archivedAt;
-  const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -286,15 +298,41 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     !Number.isNaN(parsedTotalCost as number) &&
     (parsedTotalCost ?? null) !== (order.totalCost ?? null);
 
+  // Non-numeric intermediate input ("5e") must not read as a change — same
+  // guard as totalCostDirty above.
+  const parsedOtherFees = parseFeeInput(otherFeesInput);
+  const otherFeesDirty = parsedOtherFees !== order.otherFees;
+  const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+
+  // A purchaser types the one number off the supplier's invoice. Anything above
+  // the line sum is a fee, so on blur it moves there and Goods total returns to
+  // the line sum — the all-in total is untouched, the money is just classified.
+  // On blur rather than on change: the first keystroke of "11610.30" is "1",
+  // which would read as a huge negative gap.
+  const [movedToFees, setMovedToFees] = useState<number | null>(null);
+  const applyGoodsOverflow = () => {
+    if (!canEditOrder || !totalCostOverride || parsedTotalCost == null) return;
+    const { goods, overflow } = splitGoodsOverflow(parsedTotalCost, totals.cost);
+    if (overflow <= 0) return;
+    setTotalCostInput(goods.toFixed(2));
+    setOtherFeesInput((parsedOtherFees + overflow).toFixed(2));
+    setMovedToFees(overflow);
+  };
+
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
   // (effectiveTotalCost) AND earns commission on profit. Company pay → only
-  // the commission on profit. When the manager/purchaser overrides Total cost,
-  // that override is the authoritative cost for EVERY part of the formula —
-  // including (Revenue − Cost), so the commission preview reconciles cleanly
-  // with the Self-pay reimbursement instead of mixing two cost figures.
-  const effectiveTotalCost =
-    totalCostOverride && parsedTotalCost != null ? parsedTotalCost : totals.cost;
+  // the commission on profit. When the manager/purchaser overrides Goods total,
+  // that override is the authoritative goods cost for EVERY part of the formula
+  // — including (Revenue − Cost), so the commission preview reconciles cleanly
+  // with the Self-pay reimbursement instead of mixing two cost figures. Fees
+  // land on top of it, so they reduce profit and therefore commission.
+  const cost = poEffectiveCost({
+    lineSubtotal: totals.cost,
+    totalCostOverride: totalCostOverride ? parsedTotalCost : null,
+    otherFees: parsedOtherFees,
+  });
+  const effectiveTotalCost = cost.total;
   const effectiveProfit = totals.revenue - effectiveTotalCost;
   const commissionRateApplied = commissionRateValue ?? 0;
   const commissionOnProfit = effectiveProfit * commissionRateApplied;
@@ -302,7 +340,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
 
   const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty || commissionDirty;
+    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty
+    || commissionDirty || otherFeesDirty || otherFeesNoteDirty;
 
   const lineReady = (l: EditLine) => {
     const qty = Number(l.qty) || 0;
@@ -310,7 +349,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
     return qty > 0 && cost >= 0 && hasIdentity;
   };
-  const canSave = dirty && !saving && !orderLocked && lines.every(lineReady);
+  // A note-only save (purchaser past In Transit) sends no lines, so an
+  // incomplete legacy line must not block it — they can't fix it at that stage.
+  const canSave =
+    dirty && !saving && !orderLocked && (!canEditOrder || lines.every(lineReady));
 
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.
@@ -346,6 +388,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     setSaving(true);
     setSaveError(null);
     try {
+      // Past the purchaser's edit window only the note is theirs to change;
+      // sending the line/pricing keys too would trip the backend's 403.
+      if (!canEditOrder) {
+        if (notesDirty) await api.patch(`/api/orders/${order.id}`, { notes });
+        onSaved('Saved ' + order.id);
+        return;
+      }
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       await api.patch(`/api/orders/${order.id}`, {
@@ -354,6 +403,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         totalCost:     totalCostDirty ? parsedTotalCost        : undefined,
+        otherFees:     otherFeesDirty ? parsedOtherFees        : undefined,
+        otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
@@ -646,20 +697,84 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </tbody>
           </table>
         </div>
-        <div className="oe-items-foot" style={{
-          padding: '12px 18px', borderTop: '1px solid var(--border)',
-          display: 'flex', justifyContent: 'flex-end', gap: 24,
-          fontSize: 13, background: 'var(--bg-soft)',
-        }}>
-          <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('revenue')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.revenue, locale)}</span>
-          </span>
-          <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('eoCost')} <span className="mono" style={{ color: 'var(--fg)', fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.cost, locale)}</span>
-          </span>
-          <span style={{ color: 'var(--fg-subtle)' }}>
-            {t('profit')} <span className="mono pos" style={{ fontWeight: 600, marginLeft: 4 }}>{fmtUSD(totals.profit, locale)}</span>
-          </span>
+        {/* Cost ledger. The three figures used to sit here as equal peers,
+            which misstates the content: goods and fees ADD UP to cost, and
+            revenue is a separate lens. So the rail spells the arithmetic —
+            the operators carry meaning, they aren't decoration — and the fee,
+            a cost that never was a line, is the one editable cell in it. */}
+        <div className="oe-items-foot oe-ledger">
+          <div className="oe-ledger-eq">
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('goodsTotal')}</div>
+              <div className="oe-ledger-value mono">{fmtUSD(cost.goods, locale)}</div>
+            </div>
+
+            <div className="oe-ledger-op mono" aria-hidden="true">+</div>
+
+            <div className={'oe-ledger-cell oe-ledger-fee' + (canEditOrder ? ' oe-ledger-fee-edit' : '')}>
+              <label className="oe-ledger-label" htmlFor="oe-other-fees">{t('otherFees')}</label>
+              {canEditOrder ? (
+                <div className="oe-ledger-fee-inputs">
+                  <div style={{ position: 'relative', width: 104, flexShrink: 0 }}>
+                    <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
+                    <input
+                      id="oe-other-fees"
+                      className="input mono oe-ledger-input"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={otherFeesInput}
+                      placeholder="0.00"
+                      onChange={e => { setOtherFeesInput(e.target.value); setMovedToFees(null); }}
+                      onFocus={e => e.target.select()}
+                      style={{ paddingLeft: 22 }}
+                    />
+                  </div>
+                  <input
+                    className="input oe-ledger-input oe-ledger-note"
+                    type="text"
+                    maxLength={280}
+                    value={otherFeesNote}
+                    placeholder={t('otherFeesPh')}
+                    onChange={e => setOtherFeesNote(e.target.value)}
+                    aria-label={t('otherFeesNote')}
+                  />
+                </div>
+              ) : (
+                // Locked: the equation still reads, it just isn't editable.
+                <div className="oe-ledger-value mono">
+                  {fmtUSD(cost.fees, locale)}
+                  {otherFeesNote.trim() && (
+                    <span className="oe-ledger-fee-note">{otherFeesNote.trim()}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="oe-ledger-op mono" aria-hidden="true">=</div>
+
+            <div className="oe-ledger-cell">
+              {/* All-in, so every "Cost" on this page means the same thing. */}
+              <div className="oe-ledger-label">{t('eoCost')}</div>
+              <div className="oe-ledger-value mono oe-ledger-total">{fmtUSD(effectiveTotalCost, locale)}</div>
+            </div>
+          </div>
+
+          <div className="oe-ledger-out">
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('revenue')}</div>
+              <div className="oe-ledger-value mono">{fmtUSD(totals.revenue, locale)}</div>
+            </div>
+            <div className="oe-ledger-cell">
+              <div className="oe-ledger-label">{t('profit')}</div>
+              <div
+                className="oe-ledger-value mono"
+                style={{ color: effectiveProfit >= 0 ? 'var(--pos)' : 'var(--neg)' }}
+              >
+                {fmtUSD(effectiveProfit, locale)}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -736,6 +851,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               <span style={{ color: 'var(--fg-subtle)' }}>{t('eoCost')}</span>
               <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
             </div>
+            {/* Cost above is all-in. Break the fee out beneath it so the number
+                is never an unexplained jump — indented, so it reads as part of
+                the row above rather than a fourth peer figure. */}
+            {cost.fees > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                marginTop: -3, paddingLeft: 10, fontSize: 11.5, color: 'var(--fg-subtle)',
+              }}>
+                <span>{t('otherFees')}{otherFeesNote.trim() ? ` · ${otherFeesNote.trim()}` : ''}</span>
+                <span className="mono">{fmtUSD(cost.fees, locale)}</span>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--fg-subtle)' }}>{t('profit')}</span>
               <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
@@ -969,7 +1096,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <span>{t('totalCost')}</span>
+                <span>{t('goodsTotal')}</span>
                 {totalCostOverride && canEditOrder && (
                   <button
                     onClick={() => {
@@ -992,12 +1119,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   type="number"
                   step="0.01"
                   value={totalCostOverride ? totalCostInput : totals.cost.toFixed(2)}
-                  onChange={e => { setTotalCostOverride(true); setTotalCostInput(e.target.value); }}
+                  onChange={e => {
+                    setTotalCostOverride(true);
+                    setTotalCostInput(e.target.value);
+                    setMovedToFees(null);
+                  }}
                   onFocus={e => e.target.select()}
+                  onBlur={applyGoodsOverflow}
+                  onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
                   disabled={!canEditOrder}
                   style={{ paddingLeft: 24, fontWeight: 500 }}
                 />
               </div>
+              {/* The field just changed under them, and the ledger that shows
+                  the result is in another card — so say what happened here. */}
+              {movedToFees != null && (
+                <div className="help" style={{ color: 'var(--accent-strong)' }}>
+                  ↓ {t('movedToFees', { amount: fmtUSD(movedToFees, locale) })}
+                </div>
+              )}
             </div>
             {/* Notes gets its own row and spans the full grid so there's
                 room to write more than a single short phrase. */}
@@ -1009,7 +1149,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 placeholder={t('orderNotesPh')}
-                disabled={!canEditOrder}
+                disabled={!canAnnotate}
                 style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
               />
             </div>
@@ -1054,13 +1194,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > 0.01 && (
+              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > GOODS_EPSILON && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
-              {fmtUSD(totalCostOverride ? (parsedTotalCost ?? 0) : totals.cost, locale)}
+              {fmtUSD(cost.total, locale)}
             </div>
+            {cost.fees > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--accent-strong)', marginTop: 1 }}>
+                {t('inclFees', { fees: fmtUSD(cost.fees, locale) })}
+              </div>
+            )}
           </div>
           {saveError && (
             <div className="form-error" role="alert" style={{ marginRight: 'auto', alignSelf: 'center', color: 'var(--neg, #c0392b)', fontSize: 13 }}>

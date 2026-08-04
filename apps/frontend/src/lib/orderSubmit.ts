@@ -13,7 +13,10 @@ export type SubmitMeta = {
   warehouseId: string;
   payment: 'company' | 'self';
   notes: string;
+  // The goods cost. Fees are charged on top of it, never folded into it.
   totalCost: number;
+  otherFees: number;
+  otherFeesNote: string | null;
 };
 
 export type SubmitState = {
@@ -74,6 +77,8 @@ export function buildOrderSubmit(
     payment: meta.payment,
     notes: meta.notes || null,
     totalCost: meta.totalCost,
+    otherFees: meta.otherFees,
+    otherFeesNote: meta.otherFeesNote,
   };
 
   if (state.editingId) {
