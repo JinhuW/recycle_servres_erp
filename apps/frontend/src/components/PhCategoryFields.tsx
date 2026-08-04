@@ -2,6 +2,7 @@ import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
+import { ItemTypePicker } from './ItemTypePicker';
 import { chipNumberRequired } from '../lib/ramRequired';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
@@ -234,6 +235,10 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
   // Other
   return (
     <>
+      <div className="ph-field">
+        <label>{t('lfItemType')}<Req /></label>
+        <ItemTypePicker value={value.itemType} onChange={v => onChange('itemType', v)} />
+      </div>
       <div className="ph-field">
         <label>{t('description')}<Req /></label>
         <input className={inputClsFor('description')} value={value.description ?? ''} onChange={e => onChange('description', e.target.value)} />

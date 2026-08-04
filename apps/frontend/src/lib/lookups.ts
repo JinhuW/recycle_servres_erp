@@ -59,6 +59,19 @@ export type CategoryInfo = {
 };
 export const categories: CategoryInfo[] = [];
 
+// ── Item types (the `Other` line classifier vocabulary) ─────────────────────
+// Anyone may add one from the line drawer, so this list grows during a session
+// — `addItemType` folds a freshly created type into the cache rather than
+// re-fetching every lookup.
+export type ItemType = { id: string; name: string };
+export const itemTypes: ItemType[] = [];
+
+export function addItemType(type: ItemType): void {
+  if (itemTypes.some(t => t.id === type.id)) return;
+  itemTypes.push(type);
+  itemTypes.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
 /** Filter-chip options: 'all' followed by the enabled category ids in order. */
 export function categoryFilterOptions(): string[] {
   return ['all', ...categories.filter(c => c.enabled).map(c => c.id)];
@@ -69,6 +82,7 @@ type LookupsResponse = {
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
   categories: CategoryInfo[];
+  itemTypes: ItemType[];
 };
 
 let loaded = false;
@@ -88,6 +102,7 @@ export function loadLookups(): Promise<void> {
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
       categories.splice(0, categories.length, ...data.categories);
+      itemTypes.splice(0, itemTypes.length, ...(data.itemTypes ?? []));
       loaded = true;
     } finally {
       inflight = null;
@@ -106,4 +121,5 @@ export function resetLookups(): void {
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
   categories.length = 0;
+  itemTypes.length = 0;
 }

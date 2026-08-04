@@ -54,6 +54,7 @@ export const LINE_FIELDS = [
   'interface',
   'form_factor',
   'description',
+  'item_type',
   'part_number',
   'serial_number',
   'chip_number',
