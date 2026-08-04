@@ -102,7 +102,7 @@ while [ $# -gt 0 ]; do
     --no-install) DO_INSTALL=0; shift ;;
     --fresh)      FORCE_FRESH=1; shift ;;
     --base)       [ $# -ge 2 ] || die "--base needs a ref"; BASE_REF="$2"; shift 2 ;;
-    --checkout|-c) [ $# -ge 2 ] || die "--checkout needs a branch"; CHECKOUT="$2"; shift 2 ;;
+    --checkout)   [ $# -ge 2 ] || die "--checkout needs a branch"; CHECKOUT="$2"; shift 2 ;;
     # Prints the whole leading comment block, so the help text cannot drift out
     # of a hardcoded line range as the header is edited.
     --help|-h)    awk 'NR==1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' \
