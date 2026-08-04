@@ -145,7 +145,7 @@ export type Line = {
   interface?: string;
   formFactor?: string;
   description?: string;
-  itemLabel?: string;
+  itemType?: string;
   partNumber?: string;
   serialNumber?: string;
   chipNumber?: string;
@@ -448,7 +448,7 @@ function OrderForm({
     const qty = Number(l.qty) || 0;
     const cost = Number(l.unitCost) || 0;
     const hasIdentity = l.category === 'Other'
-      ? !!l.description && !!(l.itemLabel ?? '').trim()
+      ? !!l.description && !!(l.itemType ?? '').trim()
       : !!l.brand;
     const specsComplete = l.category !== 'RAM' || missingRamFields(l).length === 0;
     return qty > 0 && cost >= 0 && hasIdentity && specsComplete;
@@ -486,7 +486,7 @@ function OrderForm({
     interface: l.interface ?? null,
     formFactor: l.formFactor ?? null,
     description: l.description ?? null,
-    itemLabel: l.itemLabel ?? null,
+    itemType: l.itemType ?? null,
     partNumber: l.partNumber ?? null,
     serialNumber: l.serialNumber ?? null,
     chipNumber: l.chipNumber ?? null,
@@ -754,7 +754,7 @@ function OrderForm({
                           {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()}
                           {l.category === 'Other' && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {!!(l.itemLabel ?? '').trim() && <span className="chip">{l.itemLabel}</span>}
+                              {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
                               {l.description ?? '—'}
                             </span>
                           )}

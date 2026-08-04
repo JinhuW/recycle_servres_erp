@@ -45,7 +45,7 @@ export const SPEC_COLS_BY_CATEGORY: Record<ExportCategory, XlsxColumn[]> = {
   ],
   Other: [
     { header: 'Part #',      key: 'part',           width: 22 },
-    { header: 'Label',       key: 'itemLabel',      width: 16 },
+    { header: 'Type',        key: 'itemType',       width: 16 },
     { header: 'Description', key: 'description',    width: 30 },
     { header: 'Condition',   key: 'condition',      width: 12 },
   ],
@@ -79,7 +79,7 @@ export function lineSpecFields(l: Record<string, unknown>) {
     health: l.health ?? null,
     rpm: l.rpm ?? null,
     description: l.description ?? '',
-    itemLabel: l.item_label ?? '',
+    itemType: l.item_type ?? '',
     condition: l.condition ?? '',
   };
 }

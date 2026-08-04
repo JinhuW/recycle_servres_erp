@@ -182,8 +182,8 @@ export function LineDrawer({
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
-                {cat === 'Other' && !!(line.itemLabel ?? '').trim() && (
-                  <span className="chip">{line.itemLabel}</span>
+                {cat === 'Other' && !!(line.itemType ?? '').trim() && (
+                  <span className="chip">{line.itemType}</span>
                 )}
                 <span>
                   {cat === 'RAM' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.generation ?? ''}`.trim()}

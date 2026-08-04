@@ -45,12 +45,12 @@ function serialErr(label: string, issue: SerialIssue): string {
     : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
 }
 
-// An `Other` line has no spec fields to identify it, so its label carries the
+// An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
 // description, and only for that category — the rest are self-describing.
-function itemLabelErr(label: string, category: string | undefined, l: { itemLabel?: string | null }): string | null {
+function itemTypeErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
   if (category !== 'Other') return null;
-  return (l.itemLabel ?? '').trim() ? null : `${label}: Other lines require an item label`;
+  return (l.itemType ?? '').trim() ? null : `${label}: Other lines require an item type`;
 }
 
 // Order-level fees, shared by POST / and PATCH /:id so the two can't drift.
@@ -93,7 +93,7 @@ type LineInput = {
   interface?: string | null;
   formFactor?: string | null;
   description?: string | null;
-  itemLabel?: string | null;
+  itemType?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
   chipNumber?: string | null;
@@ -279,7 +279,7 @@ orders.get('/:id', async (c) => {
 
   const lines = await sql`
     SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
-           ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description, ol.item_label,
+           ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description, ol.item_type,
            ol.part_number, ol.serial_number, ol.chip_number, ol.condition, ol.qty,
            ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
            ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
@@ -352,7 +352,7 @@ orders.get('/:id', async (c) => {
         interface: l.interface,
         formFactor: l.form_factor,
         description: l.description,
-        itemLabel: l.item_label,
+        itemType: l.item_type,
         partNumber: l.part_number,
         serialNumber: l.serial_number,
         chipNumber: l.chip_number,
@@ -473,7 +473,7 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const lines = await sql`
     SELECT category, brand, capacity, generation, type, classification, rank, speed,
-           interface, form_factor, description, item_label, part_number, chip_number, serial_number,
+           interface, form_factor, description, item_type, part_number, chip_number, serial_number,
            condition, qty, health::float AS health, rpm,
            unit_cost::float AS unit_cost, sell_price::float AS sell_price
     FROM order_lines WHERE order_id = ${id} ORDER BY position ASC
@@ -600,7 +600,7 @@ orders.post('/', async (c) => {
     const l = body.lines[i];
     const issue = serialIssue({ ...l, category: l.category ?? body.category });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemLabelErr(`line ${i + 1}`, l.category ?? body.category, l);
+    const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? body.category, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
 
@@ -626,13 +626,13 @@ orders.post('/', async (c) => {
       await tx`
         INSERT INTO order_lines (
           order_id, category, brand, capacity, generation, type, classification, rank, speed,
-          interface, form_factor, description, item_label, part_number, serial_number, chip_number, condition, qty,
+          interface, form_factor, description, item_type, part_number, serial_number, chip_number, condition, qty,
           unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
           health, rpm
         ) VALUES (
           ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
-          ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemLabel?.trim() || null},
+          ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
           ${resolvePartNumber(l.category ?? body.category, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
           ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
@@ -693,7 +693,7 @@ type LineFields = {
   interface?: string | null;
   formFactor?: string | null;
   description?: string | null;
-  itemLabel?: string | null;
+  itemType?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
   chipNumber?: string | null;
@@ -800,17 +800,17 @@ orders.patch('/:id', async (c) => {
       qty: l.qty ?? 1,
     });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemLabelErr(`line ${i + 1}`, l.category ?? (existing.category as string), l);
+    const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? (existing.category as string), l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
   // Existing lines are checked only when the patch actually carries the field.
-  // Lines predating item labels hold NULL, and a status or price edit must not
+  // Lines predating item types hold NULL, and a status or price edit must not
   // retro-block on them — but an edit that submits the field blank is a real
   // attempt to clear it.
   if (existing.category === 'Other') {
     for (const l of body.lines ?? []) {
-      if (l.itemLabel === undefined) continue;
-      const labelErr = itemLabelErr(`line ${l.id}`, 'Other', l);
+      if (l.itemType === undefined) continue;
+      const labelErr = itemTypeErr(`line ${l.id}`, 'Other', l);
       if (labelErr) return c.json({ error: labelErr }, 400);
     }
   }
@@ -900,7 +900,7 @@ orders.patch('/:id', async (c) => {
       const linesBefore = editIds.length
         ? await tx`
             SELECT id, status, qty, brand, capacity, type, generation, classification,
-                   rank, speed, interface, form_factor, description, item_label, part_number,
+                   rank, speed, interface, form_factor, description, item_type, part_number,
                    serial_number, chip_number, condition, rpm,
                    unit_cost::float AS unit_cost,
                    sell_price::float AS sell_price,
@@ -980,7 +980,7 @@ orders.patch('/:id', async (c) => {
               interface      = COALESCE(${l.interface ?? null}, interface),
               form_factor    = COALESCE(${l.formFactor ?? null}, form_factor),
               description    = COALESCE(${l.description ?? null}, description),
-              item_label     = COALESCE(${l.itemLabel?.trim() || null}, item_label),
+              item_type     = COALESCE(${l.itemType?.trim() || null}, item_type),
               part_number    = COALESCE(${l.partNumber ?? null}, part_number),
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
               -- '' means "cleared by the user" (the edit forms always send the
@@ -1003,14 +1003,14 @@ orders.patch('/:id', async (c) => {
           const inserted = await tx`
             INSERT INTO order_lines (
               order_id, category, brand, capacity, generation, type, classification, rank, speed,
-              interface, form_factor, description, item_label, part_number, serial_number, chip_number, condition, qty,
+              interface, form_factor, description, item_type, part_number, serial_number, chip_number, condition, qty,
               unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
               health, rpm
             ) VALUES (
               ${id}, ${l.category ?? (existing.category as string)},
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
-              ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemLabel?.trim() || null},
+              ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
               ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
               ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
@@ -1066,7 +1066,7 @@ orders.patch('/:id', async (c) => {
         const patchIds = patches.map(p => p.id);
         const afters = (await tx`
           SELECT id, status, qty, brand, capacity, type, generation, classification,
-                 rank, speed, interface, form_factor, description, item_label, part_number,
+                 rank, speed, interface, form_factor, description, item_type, part_number,
                  serial_number, chip_number, condition, rpm,
                  unit_cost::float AS unit_cost,
                  sell_price::float AS sell_price,

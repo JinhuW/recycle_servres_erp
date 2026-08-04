@@ -38,7 +38,7 @@ export type ProductGroup = {
   interface: string | null;
   form_factor: string | null;
   description: string | null;
-  item_label: string | null;
+  item_type: string | null;
   rpm: number | null;
   mixed_spec: boolean;
   qty: number;

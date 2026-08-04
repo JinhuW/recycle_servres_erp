@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
-import { itemLabels, addItemLabel, type ItemLabel } from '../lib/lookups';
+import { itemTypes, addItemType, type ItemType } from '../lib/lookups';
 
 /**
- * The type classifier for `Other` lines: pick a label, or create one and pick
+ * The type classifier for `Other` lines: pick a type, or create one and pick
  * it in the same gesture.
  *
  * Deliberately NOT the shared Combobox, whose contract is "the typed text is
@@ -15,7 +15,7 @@ import { itemLabels, addItemLabel, type ItemLabel } from '../lib/lookups';
  * either picked or created, so the vocabulary can't quietly re-fragment into
  * "CPU" / "cpu" / "Cpu".
  */
-export function ItemLabelPicker({
+export function ItemTypePicker({
   value, onChange, disabled = false, invalid = false, onError,
 }: {
   value: string | null | undefined;
@@ -48,25 +48,25 @@ export function ItemLabelPicker({
   const close = () => { setOpen(false); setQuery(''); setActive(-1); };
 
   const q = query.trim().toLowerCase();
-  const filtered = q ? itemLabels.filter(l => l.name.toLowerCase().includes(q)) : itemLabels;
-  const exact = itemLabels.some(l => l.name.toLowerCase() === q);
+  const filtered = q ? itemTypes.filter(l => l.name.toLowerCase().includes(q)) : itemTypes;
+  const exact = itemTypes.some(l => l.name.toLowerCase() === q);
   const offerCreate = !!q && !exact;
 
   useEffect(() => { setActive(-1); }, [q, open]);
 
-  const pick = (l: ItemLabel) => { onChange(l.name); close(); };
+  const pick = (l: ItemType) => { onChange(l.name); close(); };
 
   const create = async () => {
     const name = query.trim();
     if (!name || creating) return;
     setCreating(true);
     try {
-      const label = await api.post<ItemLabel>('/api/item-labels', { name });
-      addItemLabel(label);
+      const label = await api.post<ItemType>('/api/item-types', { name });
+      addItemType(label);
       onChange(label.name);
       close();
     } catch (err) {
-      onError?.(err instanceof Error ? err.message : t('ilpCreateFailed'));
+      onError?.(err instanceof Error ? err.message : t('itpCreateFailed'));
     } finally {
       setCreating(false);
     }
@@ -101,7 +101,7 @@ export function ItemLabelPicker({
         className="input"
         value={shown}
         disabled={disabled}
-        placeholder={t('ilpPlaceholder')}
+        placeholder={t('itpPlaceholder')}
         onChange={e => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => { if (!disabled) { setQuery(''); setOpen(true); } }}
         onKeyDown={onKeyDown}
@@ -117,7 +117,7 @@ export function ItemLabelPicker({
         type="button"
         tabIndex={-1}
         disabled={disabled}
-        aria-label={open ? t('ilpClose') : t('ilpOpen')}
+        aria-label={open ? t('itpClose') : t('itpOpen')}
         onMouseDown={e => {
           e.preventDefault();
           if (open) close();
@@ -161,7 +161,7 @@ export function ItemLabelPicker({
               }}
             >
               <Icon name="plus" size={13} />
-              {creating ? t('ilpCreating') : t('ilpCreate', { value: query.trim() })}
+              {creating ? t('itpCreating') : t('itpCreate', { value: query.trim() })}
             </button>
           )}
           <div style={{ maxHeight: 240, overflowY: 'auto' }}>
@@ -191,7 +191,7 @@ export function ItemLabelPicker({
             })}
             {filtered.length === 0 && !offerCreate && (
               <div style={{ padding: 16, fontSize: 12.5, color: 'var(--fg-subtle)', textAlign: 'center' }}>
-                {t('ilpEmpty')}
+                {t('itpEmpty')}
               </div>
             )}
           </div>

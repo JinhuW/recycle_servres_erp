@@ -270,7 +270,7 @@ export function Orders({ onEdit, onToast }: Props) {
                           {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`}
                           {l.category === 'Other' && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {!!(l.itemLabel ?? '').trim() && <span className="chip">{l.itemLabel}</span>}
+                              {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
                               {l.description ?? ''}
                             </span>
                           )}

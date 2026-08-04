@@ -42,7 +42,7 @@ export type OrderLine = {
   interface: string | null;
   formFactor: string | null;
   description: string | null;
-  itemLabel: string | null;
+  itemType: string | null;
   partNumber: string | null;
   serialNumber: string | null;
   chipNumber: string | null;
@@ -155,7 +155,7 @@ export type DraftLine = {
   interface?: string | null;
   formFactor?: string | null;
   description?: string | null;
-  itemLabel?: string | null;
+  itemType?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
   chipNumber?: string | null;

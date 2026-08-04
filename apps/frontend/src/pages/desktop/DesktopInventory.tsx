@@ -32,7 +32,7 @@ type InventoryRow = {
   interface: string | null;
   form_factor: string | null;
   description: string | null;
-  item_label: string | null;
+  item_type: string | null;
   part_number: string | null;
   serial_number: string | null;
   condition: string;
@@ -94,9 +94,9 @@ const ATTR_SCHEMA: Record<'RAM' | 'SSD' | 'HDD' | 'Other', AttrSpec[]> = {
     { key: 'form_factor', param: 'form',      label: 'Form factor' },
     { key: 'rpm',         param: 'rpm',       label: 'RPM', format: v => `${v} RPM` },
   ],
-  // `Other` has no spec columns; its item label is the only thing to facet on.
+  // `Other` has no spec columns; its item type is the only thing to facet on.
   Other: [
-    { key: 'item_label',  param: 'label',     label: 'Item label' },
+    { key: 'item_type',  param: 'itemType',  label: 'Item type' },
   ],
 };
 // Numeric attrs need natural sort (2400 before 16000); the rest collate as
@@ -343,7 +343,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           brand: g.brand, capacity: g.capacity, generation: g.generation,
           type: g.type, classification: g.classification, rank: g.rank,
           speed: g.speed, interface: g.interface, form_factor: g.form_factor,
-          description: g.description, item_label: g.item_label, part_number: g.part_number,
+          description: g.description, item_type: g.item_type, part_number: g.part_number,
           serial_number: lot.serial_number,
           condition: lot.condition, qty: lot.qty,
           unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,
@@ -420,7 +420,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       r.category === 'RAM' ? [r.classification, r.rank, r.speed && `${r.speed}MHz`].filter(Boolean).join(' · ')
     : r.category === 'SSD' ? [r.interface, r.form_factor, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
     : r.category === 'HDD' ? [r.interface, r.form_factor, r.rpm && `${r.rpm}rpm`, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
-    : [r.item_label, r.condition].filter(Boolean).join(' · ');
+    : [r.item_type, r.condition].filter(Boolean).join(' · ');
 
   // Draft-modal state: holds the items we hand off to the modal. Snapshotted
   // when the user clicks "Create sell order" so further selection changes on

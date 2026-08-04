@@ -59,17 +59,17 @@ export type CategoryInfo = {
 };
 export const categories: CategoryInfo[] = [];
 
-// ── Item labels (the `Other` line type vocabulary) ──────────────────────────
+// ── Item types (the `Other` line classifier vocabulary) ─────────────────────
 // Anyone may add one from the line drawer, so this list grows during a session
-// — `addItemLabel` folds a freshly created label into the cache rather than
+// — `addItemType` folds a freshly created type into the cache rather than
 // re-fetching every lookup.
-export type ItemLabel = { id: string; name: string };
-export const itemLabels: ItemLabel[] = [];
+export type ItemType = { id: string; name: string };
+export const itemTypes: ItemType[] = [];
 
-export function addItemLabel(label: ItemLabel): void {
-  if (itemLabels.some(l => l.id === label.id)) return;
-  itemLabels.push(label);
-  itemLabels.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+export function addItemType(type: ItemType): void {
+  if (itemTypes.some(t => t.id === type.id)) return;
+  itemTypes.push(type);
+  itemTypes.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
 /** Filter-chip options: 'all' followed by the enabled category ids in order. */
@@ -82,7 +82,7 @@ type LookupsResponse = {
   priceSources: PriceSource[];
   sellOrderStatuses: SellOrderStatusInfo[];
   categories: CategoryInfo[];
-  itemLabels: ItemLabel[];
+  itemTypes: ItemType[];
 };
 
 let loaded = false;
@@ -102,7 +102,7 @@ export function loadLookups(): Promise<void> {
       priceSources.splice(0, priceSources.length, ...data.priceSources);
       sellOrderStatuses.splice(0, sellOrderStatuses.length, ...data.sellOrderStatuses);
       categories.splice(0, categories.length, ...data.categories);
-      itemLabels.splice(0, itemLabels.length, ...(data.itemLabels ?? []));
+      itemTypes.splice(0, itemTypes.length, ...(data.itemTypes ?? []));
       loaded = true;
     } finally {
       inflight = null;
@@ -121,5 +121,5 @@ export function resetLookups(): void {
   priceSources.length = 0;
   sellOrderStatuses.length = 0;
   categories.length = 0;
-  itemLabels.length = 0;
+  itemTypes.length = 0;
 }

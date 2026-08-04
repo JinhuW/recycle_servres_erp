@@ -25,7 +25,7 @@ type AttrFilters = {
   classification: string[]; rank: string[]; speed: string[];
   interface: string[]; form_factor: string[]; rpm: number[];
   // `Other` lines have no spec columns to facet on — the label is their one.
-  item_label: string[];
+  item_type: string[];
 };
 function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
   const list = (k: string) => (q(k) ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -35,7 +35,7 @@ function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
     brand: list('brand'), capacity: list('capacity'), generation: list('generation'),
     type: list('type'), classification: list('classification'), rank: list('rank'),
     speed: numericStrings('speed'), interface: list('interface'), form_factor: list('form'),
-    rpm: ints('rpm'), item_label: list('label'),
+    rpm: ints('rpm'), item_type: list('itemType'),
   };
 }
 function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
@@ -50,7 +50,7 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
     ${a.interface.length      ? sql`l.interface = ANY(${a.interface}::text[])`           : sql`TRUE`} AND
     ${a.form_factor.length    ? sql`l.form_factor = ANY(${a.form_factor}::text[])`       : sql`TRUE`} AND
     ${a.rpm.length            ? sql`l.rpm = ANY(${a.rpm}::int[])`                        : sql`TRUE`} AND
-    ${a.item_label.length     ? sql`l.item_label = ANY(${a.item_label}::text[])`         : sql`TRUE`}
+    ${a.item_type.length     ? sql`l.item_type = ANY(${a.item_type}::text[])`         : sql`TRUE`}
   `;
 }
 
@@ -100,7 +100,7 @@ function inventoryWhereFrag(
   // without rewriting the order.
   const whFrag       = warehouse ? sql`COALESCE(l.warehouse_id, o.warehouse_id) = ${warehouse}` : sql`TRUE`;
   const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_label,'')) LIKE '%' || ${search} || '%')`
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
@@ -117,7 +117,7 @@ inventory.get('/', async (c) => {
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.item_label, l.part_number, l.serial_number, l.condition,
+           l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.position,
            l.health::float AS health, l.rpm,
@@ -266,7 +266,7 @@ inventory.get('/export', async (c) => {
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
              l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-             l.item_label, l.part_number, l.chip_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
+             l.item_type, l.part_number, l.chip_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
              l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
              l.status, l.health::float AS health, l.created_at,
              w.short AS warehouse_short, u.name AS user_name
@@ -356,7 +356,7 @@ inventory.get('/export', async (c) => {
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.item_label, l.part_number, l.chip_number, l.condition,
+           l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.chip_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.health::float AS health, l.rpm,
            u.name AS user_name, w.short AS warehouse_short,
@@ -763,7 +763,7 @@ inventory.get('/products', async (c) => {
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
   const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_label,'')) LIKE '%' || ${search} || '%')`
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
 
@@ -785,7 +785,7 @@ inventory.get('/products', async (c) => {
   const rows = (await sql`
     SELECT l.id, l.order_id, o.user_id,
            l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
-           l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_label,
+           l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type,
            l.part_number, l.serial_number, ${canonCol} AS canon, l.rpm,
            l.condition, l.qty, l.unit_cost::float AS unit_cost,
            l.sell_price::float AS sell_price, l.status, l.health::float AS health,
@@ -846,7 +846,7 @@ inventory.get('/products', async (c) => {
   };
   const facets: Record<FacetKey, Record<string, number>> = {
     brand: {}, capacity: {}, generation: {}, type: {}, classification: {},
-    rank: {}, speed: {}, interface: {}, form_factor: {}, rpm: {}, item_label: {},
+    rank: {}, speed: {}, interface: {}, form_factor: {}, rpm: {}, item_type: {},
   };
   for (const key of order) {
     const lots = groups.get(key)!;
@@ -871,7 +871,7 @@ inventory.get('/products', async (c) => {
     groupMatchesWarehouse(lots) && groupMatchesAttr(lots, null);
   const filteredOrder = order.filter((k) => applyAll(groups.get(k)!));
 
-  const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_label','rpm'] as const;
+  const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
   const products = filteredOrder.slice(0, GROUP_CAP).map((key) => {
     const lots = groups.get(key)!;
@@ -1254,7 +1254,7 @@ inventory.post('/transfer', async (c) => {
     interface: string | null;
     form_factor: string | null;
     description: string | null;
-    item_label: string | null;
+    item_type: string | null;
     part_number: string | null;
     condition: string;
     qty: number;
@@ -1287,7 +1287,7 @@ inventory.post('/transfer', async (c) => {
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const sources = (await tx`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
-             l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_label, l.part_number,
+             l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
              l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
              COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh
@@ -1354,7 +1354,7 @@ inventory.post('/transfer', async (c) => {
         const inserted = (await tx`
           INSERT INTO order_lines (
             order_id, category, brand, capacity, generation, type, classification, rank, speed,
-            interface, form_factor, description, item_label, part_number, condition,
+            interface, form_factor, description, item_type, part_number, condition,
             qty, unit_cost, sell_price, status,
             scan_image_id, scan_confidence, position,
             health, rpm, warehouse_id, transfer_order_id
@@ -1362,7 +1362,7 @@ inventory.post('/transfer', async (c) => {
           VALUES (
             ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.generation}, ${s.type},
             ${s.classification}, ${s.rank}, ${s.speed}, ${s.interface},
-            ${s.form_factor}, ${s.description}, ${s.item_label}, ${s.part_number}, ${s.condition},
+            ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
             ${s.scan_image_id}, ${s.scan_confidence}, ${s.position},
             ${s.health}, ${s.rpm}, ${toWarehouseId}, ${transferOrderId}

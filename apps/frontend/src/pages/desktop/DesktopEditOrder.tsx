@@ -347,7 +347,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     const qty = Number(l.qty) || 0;
     const cost = Number(l.unitCost) || 0;
     const hasIdentity = l.category === 'Other'
-      ? !!l.description && !!(l.itemLabel ?? '').trim()
+      ? !!l.description && !!(l.itemType ?? '').trim()
       : !!l.brand;
     return qty > 0 && cost >= 0 && hasIdentity;
   };
@@ -437,7 +437,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   const save = async () => {
     const issues = lines
-      .map((l, idx) => ({ lineNo: idx + 1, label: l.partNumber || itemLabel(l), issue: serialIssueFor(l) }))
+      .map((l, idx) => ({ lineNo: idx + 1, label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
       .filter((x): x is SerialLineIssue => x.issue !== null);
     if (issues.length) {
       setSerialIssues(issues);
@@ -463,7 +463,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     if (l._id && !l._dirty) return;
     const issue = serialIssueFor(l);
     if (issue) {
-      setSerialIssues([{ lineNo: i + 1, label: l.partNumber || itemLabel(l), issue }]);
+      setSerialIssues([{ lineNo: i + 1, label: l.partNumber || itemType(l), issue }]);
       // Thrown so the drawer keeps itself open for the fix.
       throw new Error(t('serialCheckTitle'));
     }
@@ -480,7 +480,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     window.__showToast?.(t('drawerLineSaved', { n: i + 1 }), 'success');
   };
 
-  const itemLabel = (l: EditLine) =>
+  const itemType = (l: EditLine) =>
       l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
     : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
     : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
@@ -660,7 +660,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                         <div style={{ minWidth: 0 }}>
                           {filled ? (
                             <>
-                              <div style={{ fontWeight: 500 }}>{itemLabel(l)}</div>
+                              <div style={{ fontWeight: 500 }}>{itemType(l)}</div>
                               <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{itemSpec(l)}</div>
                             </>
                           ) : (
@@ -1462,7 +1462,7 @@ function orderLineToEditLine(l: OrderLine): EditLine {
     interface:      l.interface ?? undefined,
     formFactor:     l.formFactor ?? undefined,
     description:    l.description ?? undefined,
-    itemLabel:      l.itemLabel ?? undefined,
+    itemType:      l.itemType ?? undefined,
     partNumber:     l.partNumber ?? undefined,
     serialNumber:   l.serialNumber ?? undefined,
     chipNumber:     l.chipNumber ?? undefined,
@@ -1495,7 +1495,7 @@ function editLineToPatch(l: EditLine, status?: string) {
     interface:      l.interface ?? null,
     formFactor:     l.formFactor ?? null,
     description:    l.description ?? null,
-    itemLabel:      l.itemLabel ?? null,
+    itemType:      l.itemType ?? null,
     partNumber:     l.partNumber ?? null,
     serialNumber:   l.serialNumber ?? null,
     chipNumber:     l.chipNumber ?? null,
@@ -1523,7 +1523,7 @@ function editLineToInsert(l: EditLine, status: string) {
     interface:      l.interface ?? null,
     formFactor:     l.formFactor ?? null,
     description:    l.description ?? null,
-    itemLabel:      l.itemLabel ?? null,
+    itemType:      l.itemType ?? null,
     partNumber:     l.partNumber ?? null,
     serialNumber:   l.serialNumber ?? null,
     chipNumber:     l.chipNumber ?? null,

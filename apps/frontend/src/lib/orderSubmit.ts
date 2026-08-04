@@ -46,7 +46,7 @@ const toAddLine = (l: DraftLine) => ({
   interface: l.interface ?? null,
   formFactor: l.formFactor ?? null,
   description: l.description ?? null,
-  itemLabel: l.itemLabel ?? null,
+  itemType: l.itemType ?? null,
   partNumber: l.partNumber ?? null,
   serialNumber: l.serialNumber ?? null,
   chipNumber: l.chipNumber ?? null,
