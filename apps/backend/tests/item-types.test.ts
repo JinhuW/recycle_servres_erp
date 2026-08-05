@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { UNTYPED_ITEM } from '@recycle-erp/shared';
 
 type ItemTypeRow = { id: string; name: string; active: boolean; uses: number };
 
@@ -217,13 +218,72 @@ describe('item types', () => {
       'GET', '/api/inventory/products?category=Other', { token },
     );
     expect(all.status).toBe(200);
-    expect(Object.keys(all.body.facets.item_type ?? {}).sort()).toEqual(['CPU', 'PSU']);
+    expect(Object.keys(all.body.facets.item_type ?? {})).toEqual(expect.arrayContaining(['CPU', 'PSU']));
 
     const psu = await api<{ products: { item_type: string }[] }>(
       'GET', '/api/inventory/products?category=Other&itemType=PSU', { token },
     );
     expect(psu.body.products.length).toBe(1);
     expect(psu.body.products[0].item_type).toBe('PSU');
+  });
+
+  // Lines predating item types hold NULL. They are the backlog a manager needs
+  // to find, so they get their own chip rather than silently vanishing from
+  // every facet.
+  it('offers an Untyped bucket for lines with no type', async () => {
+    const { token: purchaser } = await loginAs(MARCUS);
+    await createOther(purchaser, otherLine('CPU'));
+    const legacy = await createOther(purchaser, otherLine('PSU', { description: 'Legacy part' }));
+
+    // Simulate a pre-feature row: the API won't accept a blank type, so clear
+    // it the way the migration left existing data.
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET item_type = NULL WHERE order_id = ${legacy.body.id}`;
+
+    const { token } = await loginAs(ALEX);
+    const grouped = await api<{ facets: Record<string, Record<string, number>> }>(
+      'GET', '/api/inventory/products?category=Other', { token },
+    );
+    // The seed fixture already carries untyped Other lines; the point is that
+    // the bucket exists and counts the one we just cleared among them.
+    expect(grouped.body.facets.item_type[UNTYPED_ITEM]).toBeGreaterThanOrEqual(1);
+    expect(grouped.body.facets.item_type.CPU).toBe(1);
+
+    // Grouped view: the sentinel selects untyped lines and nothing else.
+    const groupedUntyped = await api<{ products: { item_type: string | null; description: string }[] }>(
+      'GET', `/api/inventory/products?category=Other&itemType=${UNTYPED_ITEM}`, { token },
+    );
+    expect(groupedUntyped.body.products.length).toBeGreaterThanOrEqual(1);
+    expect(groupedUntyped.body.products.every(p => p.item_type == null)).toBe(true);
+    expect(groupedUntyped.body.products.some(p => p.description === 'Legacy part')).toBe(true);
+
+    // Flat list honours it the same way.
+    const flat = await api<{ items: { item_type: string | null; description: string }[] }>(
+      'GET', `/api/inventory?category=Other&itemType=${UNTYPED_ITEM}`, { token },
+    );
+    expect(flat.body.items.every(i => i.item_type == null)).toBe(true);
+    expect(flat.body.items.some(i => i.description === 'Legacy part')).toBe(true);
+  });
+
+  it('ORs Untyped alongside a named type', async () => {
+    const { token: purchaser } = await loginAs(MARCUS);
+    await createOther(purchaser, otherLine('CPU'));
+    await createOther(purchaser, otherLine('PSU', { description: 'Delta 1600W' }));
+    const legacy = await createOther(purchaser, otherLine('Fan', { description: 'Legacy part' }));
+
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET item_type = NULL WHERE order_id = ${legacy.body.id}`;
+
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ items: { item_type: string | null; description: string }[] }>(
+      'GET', `/api/inventory?category=Other&itemType=CPU,${UNTYPED_ITEM}`, { token },
+    );
+    // Both arms are present, and nothing outside them leaks in — notably the
+    // PSU line, which is neither CPU nor untyped.
+    expect(r.body.items.every(i => i.item_type === 'CPU' || i.item_type == null)).toBe(true);
+    expect(r.body.items.some(i => i.item_type === 'CPU')).toBe(true);
+    expect(r.body.items.some(i => i.description === 'Legacy part')).toBe(true);
+    expect(r.body.items.some(i => i.item_type === 'PSU')).toBe(false);
   });
 
   it('records a type change in the order audit trail', async () => {

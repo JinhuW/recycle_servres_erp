@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
@@ -59,6 +60,10 @@ export function DesktopSettingsConnectors() {
   // Connectors self-register when DCR is on, which makes the manual
   // connector-client form dead UI. Only surface it when it's the only way in.
   const [dcrOpen, setDcrOpen] = useState(true);
+  // Collapsed by default: service clients are for a non-interactive scraper,
+  // which is a rare, deliberate setup step — not something to put in the way of
+  // the connector instructions above.
+  const [serviceOpen, setServiceOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newScopes, setNewScopes] = useState<string[]>(['market:read']);
   const [newSecret, setNewSecret] = useState<string | null>(null);
@@ -170,6 +175,23 @@ export function DesktopSettingsConnectors() {
     setConnScopes((prev) =>
       prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
     );
+  }
+
+  // Same rule the backend sweep uses (never minted a refresh token, and older
+  // than the grace window), so the count on the button matches what it removes.
+  const UNUSED_GRACE_MS = 60 * 60 * 1000;
+  const unusedCount = (clients ?? []).filter(
+    (c) => c.lastUsedAt === null && Date.now() - new Date(c.createdAt).getTime() > UNUSED_GRACE_MS,
+  ).length;
+
+  async function cleanUpUnused() {
+    if (!confirm(t('connectorsCleanupConfirm', { n: unusedCount }))) return;
+    try {
+      await api.delete<{ revoked: number }>('/api/oauth/clients/unused');
+      await load();
+    } catch (e) {
+      handleFetchError(e);
+    }
   }
 
   async function revoke(id: string) {
@@ -391,7 +413,18 @@ export function DesktopSettingsConnectors() {
             <div className="card-title">{t('connectorsAddServiceTitle')}</div>
             <div className="card-sub">{t('connectorsAddServiceSub')}</div>
           </div>
+          <button
+            type="button"
+            className="btn sm"
+            aria-expanded={serviceOpen}
+            onClick={() => setServiceOpen(o => !o)}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            {serviceOpen ? t('connectorsHide') : t('connectorsShow')}
+            <Icon name={serviceOpen ? 'chevronUp' : 'chevronDown'} size={12} />
+          </button>
         </div>
+        {serviceOpen && (
         <div className="card-body">
           <div style={{ display: 'grid', gap: 14, maxWidth: 560 }}>
             <div style={{ display: 'grid', gap: 6 }}>
@@ -445,6 +478,7 @@ export function DesktopSettingsConnectors() {
           </div>
           {credFrom === 'service' && credentialPanel}
         </div>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
@@ -452,6 +486,11 @@ export function DesktopSettingsConnectors() {
           <div>
             <div className="card-title">{t('connectorsListTitle')}</div>
           </div>
+          {unusedCount > 0 && (
+            <button type="button" className="btn sm" onClick={cleanUpUnused} style={{ whiteSpace: 'nowrap' }}>
+              {t('connectorsCleanupBtn', { n: unusedCount })}
+            </button>
+          )}
         </div>
         <div className="card-body" style={{ padding: 0 }}>
           <table className="data-table members-table">

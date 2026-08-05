@@ -1071,6 +1071,68 @@ describe('/api/oauth/clients (admin)', () => {
     expect(r.status).toBe(400);
   });
 
+  it('DELETE /unused revokes clients that never minted a refresh token', async () => {
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const stale = await createOAuthClient(sql, {
+      name: 'never-used', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    // Age it past the grace window.
+    await sql`UPDATE oauth_clients SET created_at = NOW() - INTERVAL '2 hours' WHERE id = ${stale.clientId}`;
+
+    const r = await api('DELETE', '/api/oauth/clients/unused', { token });
+    expect(r.status).toBe(200);
+    expect((r.body as { revoked: number }).revoked).toBeGreaterThanOrEqual(1);
+    const row = (await sql<{ revoked_at: Date | null }[]>`
+      SELECT revoked_at FROM oauth_clients WHERE id = ${stale.clientId}
+    `)[0];
+    expect(row.revoked_at).not.toBeNull();
+  });
+
+  it('DELETE /unused spares a client registered within the grace window', async () => {
+    // A connector that has registered but not finished consent yet has no
+    // refresh token — sweeping it would break the flow the user is mid-way through.
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const fresh = await createOAuthClient(sql, {
+      name: 'mid-setup', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    await api('DELETE', '/api/oauth/clients/unused', { token });
+    const row = (await sql<{ revoked_at: Date | null }[]>`
+      SELECT revoked_at FROM oauth_clients WHERE id = ${fresh.clientId}
+    `)[0];
+    expect(row.revoked_at).toBeNull();
+  });
+
+  it('DELETE /unused keeps a client that has a live refresh token', async () => {
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const { issueRefreshToken } = await import('../src/oauth/tokens');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const used = await createOAuthClient(sql, {
+      name: 'in-use', redirectUris: [], grantTypes: ['client_credentials'],
+      scopes: ['market:read'], createdBy: u, public: false,
+    });
+    await sql`UPDATE oauth_clients SET created_at = NOW() - INTERVAL '2 hours' WHERE id = ${used.clientId}`;
+    await issueRefreshToken(sql, { OAUTH_REFRESH_TOKEN_TTL_SEC: '2592000' } as any, {
+      clientId: used.clientId, userId: null, scopes: ['market:read'],
+    });
+    await api('DELETE', '/api/oauth/clients/unused', { token });
+    const row = (await sql<{ revoked_at: Date | null }[]>`
+      SELECT revoked_at FROM oauth_clients WHERE id = ${used.clientId}
+    `)[0];
+    expect(row.revoked_at).toBeNull();
+  });
+
   it('list response includes lastUsedAt (null when no live refresh tokens)', async () => {
     const { token } = await loginAs(ALEX);
     const list = await api('GET', '/api/oauth/clients', { token });
