@@ -774,7 +774,7 @@ inventory.get('/products', async (c) => {
     category: string; brand: string | null; capacity: string | null;
     generation: string | null; type: string | null; classification: string | null;
     rank: string | null; speed: string | null; interface: string | null;
-    form_factor: string | null; description: string | null;
+    form_factor: string | null; description: string | null; item_type: string | null;
     part_number: string | null; serial_number: string | null; canon: string; rpm: number | null;
     condition: string; qty: number; unit_cost: number; sell_price: number | null;
     status: string; health: number | null; created_at: string;
@@ -825,7 +825,7 @@ inventory.get('/products', async (c) => {
   // are computed with that facet's OWN filter dropped (drop-self) so picking
   // DDR4 doesn't make DDR5 vanish from the bar — same applies to warehouses.
   type FacetKey = keyof AttrFilters;
-  const FACET_KEYS: FacetKey[] = ['brand','capacity','generation','type','classification','rank','speed','interface','form_factor','rpm'];
+  const FACET_KEYS: FacetKey[] = ['brand','capacity','generation','type','classification','rank','speed','interface','form_factor','rpm','item_type'];
   const groupMatchesWarehouse = (lots: Row[]): boolean => {
     if (!warehouse) return true;
     return lots.some((l) => l.warehouse_id === warehouse);
@@ -907,7 +907,8 @@ inventory.get('/products', async (c) => {
       category: head.category, brand: head.brand, capacity: head.capacity,
       generation: head.generation, type: head.type, classification: head.classification,
       rank: head.rank, speed: head.speed, interface: head.interface,
-      form_factor: head.form_factor, description: head.description, rpm: head.rpm,
+      form_factor: head.form_factor, description: head.description,
+      item_type: head.item_type, rpm: head.rpm,
       mixed_spec: isSingleton ? false : mixed,
       qty,
       qty_in_transit: inTransit, qty_in_stock: inStock, qty_reviewing: reviewing,
