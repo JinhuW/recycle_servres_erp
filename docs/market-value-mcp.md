@@ -265,6 +265,12 @@ Settings → Connectors → **Add custom connector** → paste
 the 401's `WWW-Authenticate` header, self-registers, and opens a sign-in
 window; approve and you're returned with the connector authorized.
 
+The consent screen lists the permissions the client asked for as **checkboxes**,
+all ticked by default. Untick any you don't want to grant — the backend
+intersects your selection with what the client requested and with what your role
+allows, so it can only ever narrow the grant. The tools tied to a scope you
+declined simply won't appear in that connector's `tools/list`.
+
 If it asks for an **OAuth Client ID**, DCR is off or unreachable — mint one via
 Settings → Connectors (Option B above) and paste it into the connector's
 advanced settings.
