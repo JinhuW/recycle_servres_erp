@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { activityRecordHref } from '../../lib/route';
 
 // The global audit register — every change made across all four ledgers, in
 // one record. Read-only; the source tables are append-only by trigger.
@@ -357,6 +358,7 @@ export function DesktopActivity() {
                 {g.events.map(e => {
                   const s = summarise(e, locale, t);
                   const isOpen = open.has(e.id);
+                  const recordHref = activityRecordHref(e.area, e.targetRef);
                   const time = new Date(e.createdAt)
                     .toLocaleTimeString(locale, { hour12: false });
                   return (
@@ -431,20 +433,14 @@ export function DesktopActivity() {
                                 ))}
                               </div>
                             )}
-                            <div>
-                              <a
-                                className="btn sm"
-                                href={
-                                  e.area === 'po'  ? `/purchase-orders/${e.targetRef}`
-                                  : e.area === 'so' ? `/sell-orders/${e.targetRef}`
-                                  : e.area === 'inv' ? `/inventory/${e.targetRef}`
-                                  : '/market'
-                                }
-                              >
-                                <Icon name={AREA_ICON[e.area]} size={12} />
-                                {t('acOpenRecord')}
-                              </a>
-                            </div>
+                            {recordHref && (
+                              <div>
+                                <a className="btn sm" href={recordHref}>
+                                  <Icon name={AREA_ICON[e.area]} size={12} />
+                                  {t('acOpenRecord')}
+                                </a>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}

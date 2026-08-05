@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pathToDesktopView, match } from '../src/lib/route';
+import { pathToDesktopView, match, activityRecordHref } from '../src/lib/route';
 
 describe('match', () => {
   it('matches a single param segment', () => {
@@ -37,5 +37,30 @@ describe('pathToDesktopView — unchanged behaviour', () => {
 describe('pathToDesktopView — transfers', () => {
   it('resolves the transfers path', () => {
     expect(pathToDesktopView('/transfers')).toBe('transfers');
+  });
+});
+
+describe('activityRecordHref', () => {
+  it('hash-prefixes a purchase-order link', () => {
+    expect(activityRecordHref('po', 'PO-1366')).toBe('#/purchase-orders/PO-1366');
+  });
+  it('hash-prefixes a sell-order link', () => {
+    expect(activityRecordHref('so', 'SO-1289')).toBe('#/sell-orders/SO-1289');
+  });
+  it('hash-prefixes an inventory link', () => {
+    expect(activityRecordHref('inv', 'a1b2')).toBe('#/inventory/a1b2');
+  });
+  it('sends price events to the market page', () => {
+    expect(activityRecordHref('price', 'rp-1')).toBe('#/market');
+  });
+  it('lands on a route the desktop shell recognises', () => {
+    const href = activityRecordHref('po', 'PO-1366')!;
+    expect(pathToDesktopView(href.slice(1))).toBe('history');
+  });
+  it('encodes ids that carry URL-significant characters', () => {
+    expect(activityRecordHref('po', 'PO/1?2')).toBe('#/purchase-orders/PO%2F1%3F2');
+  });
+  it('has no link when the event carries no target', () => {
+    expect(activityRecordHref('po', null)).toBeNull();
   });
 });
