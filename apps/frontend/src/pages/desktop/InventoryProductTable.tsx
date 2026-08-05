@@ -103,6 +103,8 @@ function productSpec(g: ProductGroup): string {
     return [g.type, g.classification, g.rank, g.speed ? `${g.speed} MHz` : null]
       .filter(Boolean).join(' · ');
   }
+  // `Other` carries no spec columns — its item type is the whole subtitle.
+  if (g.category === 'Other') return g.item_type ?? '';
   return [g.interface, g.form_factor, g.speed, g.rpm ? `${g.rpm} RPM` : null]
     .filter(Boolean).join(' · ');
 }
