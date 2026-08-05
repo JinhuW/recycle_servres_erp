@@ -10,6 +10,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields,
   type ExportCategory,
 } from '../lib/categoryColumns';
+import { UNTYPED_ITEM } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -38,6 +39,17 @@ function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
     rpm: ints('rpm'), item_type: list('itemType'),
   };
 }
+// `Untyped` is a real chip in the item-type facet, but it means IS NULL rather
+// than a value — every line that predates item types, plus anything nobody has
+// classified yet. Split it out so it can OR alongside the named types.
+function itemTypeFrag(sql: ReturnType<typeof getDb>, selected: string[]) {
+  const named = selected.filter(v => v !== UNTYPED_ITEM);
+  const untyped = selected.length !== named.length;
+  if (!named.length) return sql`l.item_type IS NULL`;
+  if (!untyped) return sql`l.item_type = ANY(${named}::text[])`;
+  return sql`(l.item_type = ANY(${named}::text[]) OR l.item_type IS NULL)`;
+}
+
 function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
   return sql`
     ${a.brand.length          ? sql`l.brand = ANY(${a.brand}::text[])`                   : sql`TRUE`} AND
@@ -50,7 +62,7 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
     ${a.interface.length      ? sql`l.interface = ANY(${a.interface}::text[])`           : sql`TRUE`} AND
     ${a.form_factor.length    ? sql`l.form_factor = ANY(${a.form_factor}::text[])`       : sql`TRUE`} AND
     ${a.rpm.length            ? sql`l.rpm = ANY(${a.rpm}::int[])`                        : sql`TRUE`} AND
-    ${a.item_type.length     ? sql`l.item_type = ANY(${a.item_type}::text[])`         : sql`TRUE`}
+    ${a.item_type.length      ? itemTypeFrag(sql, a.item_type)                          : sql`TRUE`}
   `;
 }
 
@@ -837,7 +849,10 @@ inventory.get('/products', async (c) => {
       if (!sel.length) continue;
       const ok = lots.some((l) => {
         const v = (l as unknown as Record<string, unknown>)[fk];
-        if (v == null) return false;
+        // A missing value matches only the Untyped chip, never a named one.
+        if (v == null || v === '') {
+          return fk === 'item_type' && sel.includes(UNTYPED_ITEM);
+        }
         return (sel as Array<string | number>).some((s) => String(s) === String(v));
       });
       if (!ok) return false;
@@ -856,8 +871,12 @@ inventory.get('/products', async (c) => {
       const seen = new Set<string>();
       for (const l of lots) {
         const v = (l as unknown as Record<string, unknown>)[fk];
-        if (v == null || v === '') continue;
-        const sv = String(v);
+        // Absent values are noise on a spec facet, but on item type they are
+        // the backlog worth surfacing — count them under the Untyped chip.
+        if (v == null || v === '') {
+          if (fk !== 'item_type') continue;
+        }
+        const sv = v == null || v === '' ? UNTYPED_ITEM : String(v);
         if (seen.has(sv)) continue;
         seen.add(sv);
         facets[fk][sv] = (facets[fk][sv] ?? 0) + 1;

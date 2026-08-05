@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
 import { usePersisted, useScrollMemory } from '../../lib/listMemory';
 import { api } from '../../lib/api';
+import { UNTYPED_ITEM } from '@recycle-erp/shared';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
@@ -71,7 +72,7 @@ const GROUPED_COL_IDS = new Set<ColId>([
 // backend returns; `param` is what the query string sends (the backend uses
 // `form` as the param shortcut for the `form_factor` column).
 type AttrSpec = { key: string; param: string; label: string; format?: (v: string) => string };
-const ATTR_SCHEMA: Record<'RAM' | 'SSD' | 'HDD' | 'Other', AttrSpec[]> = {
+const ATTR_SCHEMA: Record<'RAM' | 'SSD' | 'HDD', AttrSpec[]> = {
   RAM: [
     { key: 'generation',     param: 'generation',     label: 'Generation' },
     { key: 'speed',          param: 'speed',          label: 'Speed', format: v => `${v} MHz` },
@@ -94,10 +95,6 @@ const ATTR_SCHEMA: Record<'RAM' | 'SSD' | 'HDD' | 'Other', AttrSpec[]> = {
     { key: 'form_factor', param: 'form',      label: 'Form factor' },
     { key: 'rpm',         param: 'rpm',       label: 'RPM', format: v => `${v} RPM` },
   ],
-  // `Other` has no spec columns; its item type is the only thing to facet on.
-  Other: [
-    { key: 'item_type',  param: 'itemType',  label: 'Item type' },
-  ],
 };
 // Numeric attrs need natural sort (2400 before 16000); the rest collate as
 // strings so e.g. 4GB/8GB/16GB still go in catalog-natural order on chips.
@@ -106,9 +103,13 @@ function sortAttrValues(key: string, values: string[]): string[] {
   if (NUMERIC_ATTRS.has(key)) {
     return [...values].sort((a, b) => Number(a) - Number(b));
   }
-  return [...values].sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
-  );
+  return [...values].sort((a, b) => {
+    // Untyped is a backlog bucket, not a type — it sits after the real ones
+    // rather than wherever its sentinel happens to collate.
+    if (a === UNTYPED_ITEM) return 1;
+    if (b === UNTYPED_ITEM) return -1;
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  });
 }
 
 export function DesktopInventory({ onEditItem, showToast }: Props) {
@@ -180,10 +181,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     useState<Record<string, number>>({});
   const [whProductTotal, setWhProductTotal] = useState<number>(0);
 
-  const attrSchema: AttrSpec[] =
-    filter === 'RAM' || filter === 'SSD' || filter === 'HDD' || filter === 'Other'
-      ? ATTR_SCHEMA[filter as 'RAM' | 'SSD' | 'HDD' | 'Other']
+  // `Other` carries no spec columns, so its item type is the only facet — and
+  // the only one whose chips are localized, hence built here rather than in
+  // the module-level table.
+  const attrSchema: AttrSpec[] = useMemo(() => {
+    if (filter === 'Other') {
+      return [{
+        key: 'item_type',
+        param: 'itemType',
+        label: t('itPanelTitle'),
+        format: (v: string) => (v === UNTYPED_ITEM ? t('itUntyped') : v),
+      }];
+    }
+    return filter === 'RAM' || filter === 'SSD' || filter === 'HDD'
+      ? ATTR_SCHEMA[filter as 'RAM' | 'SSD' | 'HDD']
       : [];
+  }, [filter, t]);
   const activeAttrCount = Object.values(attrFilters).reduce(
     (n, vs) => n + (vs?.length ?? 0), 0,
   );
