@@ -442,6 +442,119 @@ describe('/oauth/authorize/consent', () => {
     expect(loc).toMatch(/[?&]state=s1\b/);
   });
 
+  it('grants only the scopes the user ticked', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'consent-subset', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'],
+      scopes: ['market:read', 'market:write', 'sellorder:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);   // manager, so :write survives the role gate
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb`
+      + '&code_challenge=ch&code_challenge_method=S256&scope=market:read market:write sellorder:read',
+      { token },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/consent', {
+      body: { req, scopes: ['market:read'] }, token,
+      headers: { Accept: 'application/json' },
+    });
+    expect(r.status).toBe(200);
+    const code = new URL((r.body as any).redirectUri).searchParams.get('code')!;
+    const { createHash } = await import('node:crypto');
+    const row = (await sql<{ scopes: string[] }[]>`
+      SELECT scopes FROM oauth_authorization_codes
+      WHERE code_hash = ${createHash('sha256').update(code).digest('hex')}
+    `)[0];
+    expect(row.scopes).toEqual(['market:read']);
+  });
+
+  it('cannot widen the grant past what was parked at /authorize', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'consent-widen', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb`
+      + '&code_challenge=ch&code_challenge_method=S256&scope=market:read',
+      { token },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/consent', {
+      // Asking for more than the client was ever granted must be ignored.
+      body: { req, scopes: ['market:read', 'market:write', 'sellorder:write'] }, token,
+      headers: { Accept: 'application/json' },
+    });
+    const code = new URL((r.body as any).redirectUri).searchParams.get('code')!;
+    const { createHash } = await import('node:crypto');
+    const row = (await sql<{ scopes: string[] }[]>`
+      SELECT scopes FROM oauth_authorization_codes
+      WHERE code_hash = ${createHash('sha256').update(code).digest('hex')}
+    `)[0];
+    expect(row.scopes).toEqual(['market:read']);
+  });
+
+  it('400s when the user ticks nothing', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'consent-empty', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb`
+      + '&code_challenge=ch&code_challenge_method=S256&scope=market:read',
+      { token },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/consent', {
+      body: { req, scopes: [] }, token, headers: { Accept: 'application/json' },
+    });
+    expect(r.status).toBe(400);
+    expect((r.body as Record<string, unknown>).error).toBe('invalid_scope');
+  });
+
+  it('omitting scopes still grants everything requested (back-compat)', async () => {
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'consent-omit', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code','refresh_token'],
+      scopes: ['market:read', 'sellorder:read'],
+      createdBy: u, public: false,
+    });
+    const { token } = await loginAs(ALEX);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb`
+      + '&code_challenge=ch&code_challenge_method=S256&scope=market:read sellorder:read',
+      { token },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const r = await api('POST', '/oauth/authorize/consent', {
+      body: { req }, token, headers: { Accept: 'application/json' },
+    });
+    const code = new URL((r.body as any).redirectUri).searchParams.get('code')!;
+    const { createHash } = await import('node:crypto');
+    const row = (await sql<{ scopes: string[] }[]>`
+      SELECT scopes FROM oauth_authorization_codes
+      WHERE code_hash = ${createHash('sha256').update(code).digest('hex')}
+    `)[0];
+    expect(row.scopes).toEqual(expect.arrayContaining(['market:read', 'sellorder:read']));
+  });
+
   it('consent returns JSON redirectUri when Accept: application/json', async () => {
     const sql = getTestDb();
     const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;

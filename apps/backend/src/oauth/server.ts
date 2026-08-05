@@ -255,10 +255,14 @@ oauth.get('/authorize', async (c) => {
 });
 
 oauth.post('/authorize/consent', authMiddleware, async (c) => {
-  const body = (await c.req.json().catch(() => null)) as null | { req?: string };
+  const body = (await c.req.json().catch(() => null)) as null | { req?: string; scopes?: string[] };
   if (!body?.req) return c.json({ error: 'invalid_request', detail: 'req required' }, 400);
   // Capture into a local so the narrowed string survives the async closure.
   const reqHandle = body.req;
+  // The consent screen lets the user tick a subset. Absent means "everything
+  // parked at /authorize" — the old all-or-nothing behaviour, kept so a client
+  // that posts only { req } still works.
+  const chosen = Array.isArray(body.scopes) ? body.scopes : null;
   const sql = getDb(c.env);
   const user = c.var.user;
 
@@ -287,7 +291,12 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
     // Authoritative scope gate: the pending row was frozen at /authorize using
     // the JWT's role; re-derive against the live DB role so a demotion (or a
     // tampered row) can't leak market:write to a non-manager.
-    const scopes = dropWriteUnlessManager(row.scopes, user.role);
+    const allowed = dropWriteUnlessManager(row.scopes, user.role);
+    // Intersect, never union: the user can only narrow what /authorize already
+    // parked, so a tampered request body can't widen the grant past what the
+    // client asked for or past what the role permits.
+    const scopes = chosen ? allowed.filter(s => chosen.includes(s)) : allowed;
+    if (scopes.length === 0) return { ok: false, status: 400, error: 'invalid_scope' };
     const code = randomBytes(32).toString('base64url');
     const expires = new Date(Date.now() + CODE_TTL_SEC * 1000);
     await tx`
@@ -631,6 +640,9 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
     `;
     const lastUsedByClient = new Map(lastUsed.map(r => [r.client_id, r.last_used_at]));
     return c.json({
+      // With DCR on, connectors mint their own client and the Settings form for
+      // doing it by hand is dead UI — so the page hides it unless it's needed.
+      dcrOpen: dcrEnabled(c.env),
       clients: rows.map(r => ({
         id: r.id,
         name: r.name,

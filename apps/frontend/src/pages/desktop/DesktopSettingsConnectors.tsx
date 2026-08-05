@@ -56,6 +56,9 @@ export function DesktopSettingsConnectors() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [clients, setClients] = useState<Client[] | null>(null);
+  // Connectors self-register when DCR is on, which makes the manual
+  // connector-client form dead UI. Only surface it when it's the only way in.
+  const [dcrOpen, setDcrOpen] = useState(true);
   const [newName, setNewName] = useState('');
   const [newScopes, setNewScopes] = useState<string[]>(['market:read']);
   const [newSecret, setNewSecret] = useState<string | null>(null);
@@ -97,8 +100,8 @@ export function DesktopSettingsConnectors() {
   }
 
   const load = () =>
-    api.get<{ clients: Client[] }>('/api/oauth/clients')
-      .then((r) => setClients(r.clients))
+    api.get<{ clients: Client[]; dcrOpen: boolean }>('/api/oauth/clients')
+      .then((r) => { setClients(r.clients); setDcrOpen(r.dcrOpen); })
       .catch(handleFetchError);
   useEffect(() => { load(); }, []);
 
@@ -285,6 +288,7 @@ export function DesktopSettingsConnectors() {
         </div>
       </div>
 
+      {!dcrOpen && (
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
           <div>
@@ -379,6 +383,7 @@ export function DesktopSettingsConnectors() {
           {credFrom === 'connector' && credentialPanel}
         </div>
       </div>
+      )}
 
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
