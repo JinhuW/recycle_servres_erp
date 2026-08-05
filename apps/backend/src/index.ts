@@ -13,7 +13,7 @@ import { appendErrorRecord } from './lib/error-log';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { dbScope, getDb } from './db';
-import { readRootVersion } from './lib/version';
+import { readBuildTime, readRootVersion } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
@@ -135,12 +135,15 @@ app.get('/api/health', async (c) => {
   // these are image/runtime-scoped, not per-request.
   const version = process.env.APP_VERSION || readRootVersion();
   const commit = process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
+  // ISO-8601 UTC or null; the frontend shows this instead of the sha, which
+  // means nothing to the people reading the footer.
+  const builtAt = process.env.BUILD_TIME || readBuildTime();
   try {
     await getDb(c.env)`SELECT 1`;
-    return c.json({ status: 'ok', version, commit });
+    return c.json({ status: 'ok', version, commit, builtAt });
   } catch (e) {
     console.error('health check failed', e);
-    return c.json({ status: 'error', error: 'database unreachable', version, commit }, 503);
+    return c.json({ status: 'error', error: 'database unreachable', version, commit, builtAt }, 503);
   }
 });
 

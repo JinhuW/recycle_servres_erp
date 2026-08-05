@@ -14,6 +14,13 @@ RUN pnpm install --frozen-lockfile --filter recycle-erp-backend...
 COPY packages/shared packages/shared
 COPY apps/backend apps/backend
 
+# Build date, surfaced at /api/health and shown in the UI footer. Stamped by
+# the build itself because no builder hands one in — Railway passes no build
+# args at all. This sits after the source COPY on purpose: the layer (and the
+# date) is re-made whenever the source changes, and an unchanged image keeps
+# the date its code was actually built on.
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD_TIME
+
 WORKDIR /app/apps/backend
 # Build provenance, supplied by scripts/release.sh via --build-arg. Default to
 # dev/unknown so a plain `docker build` with no args still succeeds; the
