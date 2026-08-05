@@ -695,6 +695,24 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
     });
     return c.json({ ...out, name: body.name, grantTypes, scopes, redirectUris }, 201);
   })
+  // Registered before '/:id' — Hono matches in order, so the param route would
+  // otherwise swallow this and try to revoke a client literally named "unused".
+  .delete('/unused', async (c) => {
+    const sql = getDb(c.env);
+    // "Never used" = never minted a refresh token. The hour of grace protects a
+    // connector that has registered but not finished its consent yet; without
+    // it, cleaning up mid-setup silently breaks the flow the user is in.
+    const stale = await sql<{ id: string }[]>`
+      SELECT id FROM oauth_clients c
+      WHERE c.revoked_at IS NULL
+        AND c.created_at < NOW() - INTERVAL '1 hour'
+        AND NOT EXISTS (
+          SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = c.id
+        )
+    `;
+    for (const { id } of stale) await revokeOAuthClient(sql, id);
+    return c.json({ revoked: stale.length });
+  })
   .delete('/:id', async (c) => {
     await revokeOAuthClient(getDb(c.env), c.req.param('id'));
     return c.json({ ok: true });
