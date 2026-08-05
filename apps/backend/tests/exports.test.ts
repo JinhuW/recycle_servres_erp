@@ -173,8 +173,12 @@ describe('GET /api/inventory/export?view=grouped', () => {
       expect(headers).not.toContain('Category');
       expect(headers).not.toContain('Item');
       expect(headers).not.toContain('Spec');
-      for (const h of ['Part #', 'Condition', 'Warehouses', 'Qty', 'Cost avg', 'Submitted by']) {
+      for (const h of ['Part #', 'Condition', 'Warehouses', 'Qty', 'Lots']) {
         expect(headers).toContain(h);
+      }
+      // The grouped sheet is the shareable one — no money, no submitter.
+      for (const h of ['Cost min', 'Cost avg', 'Cost max', 'Sell price', 'Submitted by']) {
+        expect(headers).not.toContain(h);
       }
     }
     expect(headerRow(wb.worksheets.find(w => w.name === 'RAM')!)).toContain('Gen');
@@ -191,10 +195,10 @@ describe('GET /api/inventory/export?view=grouped', () => {
     expect(wb.worksheets.map(w => w.name)).toEqual(['RAM']);
     const ws = wb.worksheets[0];
     const headers = headerRow(ws);
-    for (const h of ['Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Condition', 'Cost avg', 'Submitted by']) {
+    for (const h of ['Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Condition', 'Lots']) {
       expect(headers).toContain(h);
     }
-    for (const h of ['Item', 'Spec', 'Category', 'Interface']) {
+    for (const h of ['Item', 'Spec', 'Category', 'Interface', 'Cost avg', 'Sell price', 'Submitted by']) {
       expect(headers).not.toContain(h);
     }
 

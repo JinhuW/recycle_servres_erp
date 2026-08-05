@@ -203,8 +203,9 @@ export function invLabel(r: Record<string, unknown>): string {
 }
 // Grouped export (?view=grouped): one row per product — lines sharing a
 // canonical part number collapse together, mirroring the desktop grouped view.
-// Aggregates qty by status, counts POs/lots, and spreads cost min/avg/max.
-// Manager-only like the flat export, so cost columns are always present.
+// Aggregates qty by status and counts POs/lots. Carries no money and no
+// submitter (user-confirmed 2026-08-05): the grouped sheet is the one that
+// gets shared outward, so cost/price stay in the flat export.
 //
 // One worksheet per category, each leading with that category's granular
 // attribute columns (one per submit-form field). The aggregate tail is
@@ -217,11 +218,6 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Reviewing',    key: 'reviewing',  width: 10, numFmt: '#,##0' },
   { header: 'POs',          key: 'poCount',    width: 7,  numFmt: '#,##0' },
   { header: 'Lots',         key: 'lotCount',   width: 7,  numFmt: '#,##0' },
-  { header: 'Cost min',     key: 'costMin',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Cost avg',     key: 'costAvg',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Cost max',     key: 'costMax',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Sell price',   key: 'sellPrice',  width: 12, numFmt: '#,##0.00' },
-  { header: 'Submitted by', key: 'submitter',  width: 22 },
 ];
 
 // One plain worksheet per category present, fixed order, unknown categories
@@ -279,12 +275,10 @@ inventory.get('/export', async (c) => {
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
              l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
              l.item_type, l.part_number, l.chip_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
-             l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
              l.status, l.health::float AS health, l.created_at,
-             w.short AS warehouse_short, u.name AS user_name
+             w.short AS warehouse_short
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
-      JOIN users  u ON u.id = o.user_id
       LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
       WHERE ${whereFrag}
       ORDER BY l.created_at DESC
@@ -304,9 +298,7 @@ inventory.get('/export', async (c) => {
       const lots = groups.get(key)!;
       const head = lots[0];
       let qty = 0, inTransit = 0, inStock = 0, reviewing = 0;
-      let costMin = Infinity, costMax = -Infinity, costWeighted = 0;
       const whs = new Set<string>();
-      const submitters = new Set<string>();
       const pos = new Set<string>();
       // Lots of the same part can arrive in different conditions (New vs
       // Used), so condition aggregates to a distinct join like Warehouses.
@@ -315,16 +307,11 @@ inventory.get('/export', async (c) => {
       let repChip: string | null = null;
       for (const l of lots) {
         const lqty = Number(l.qty ?? 0);
-        const cost = Number(l.unit_cost ?? 0);
         qty += lqty;
         if (l.status === 'In Transit') inTransit += lqty;
         else if (l.status === 'Done') inStock += lqty;
         else if (l.status === 'Reviewing') reviewing += lqty;
-        costMin = Math.min(costMin, cost);
-        costMax = Math.max(costMax, cost);
-        costWeighted += cost * lqty;
         if (l.warehouse_short) whs.add(String(l.warehouse_short));
-        if (l.user_name) submitters.add(String(l.user_name));
         if (l.condition) conds.add(String(l.condition));
         pos.add(String(l.order_id));
         if (repPn === null && l.part_number) repPn = String(l.part_number);
@@ -348,11 +335,6 @@ inventory.get('/export', async (c) => {
         reviewing,
         poCount: pos.size,
         lotCount: lots.length,
-        costMin: costMin === Infinity ? 0 : costMin,
-        costAvg: qty > 0 ? costWeighted / qty : 0,
-        costMax: costMax === -Infinity ? 0 : costMax,
-        sellPrice: head.sell_price == null ? null : Number(head.sell_price),
-        submitter: [...submitters].join(', '),
       };
     });
 
