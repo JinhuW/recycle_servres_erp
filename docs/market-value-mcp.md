@@ -428,11 +428,31 @@ Standard RFC 6749 §5.2 codes: `invalid_request`, `invalid_client`,
 
 ### JSON-RPC error codes (MCP)
 
+Reserved for *protocol* failures — the call never reached a tool:
+
 | Code | Meaning |
 |---|---|
 | -32700 | Parse error |
 | -32601 | Method or tool not found |
-| -32602 | Invalid params |
+| -32600 | Invalid request (e.g. a batch) |
+| -32001 | `insufficient_scope` — the token lacks the tool's scope |
+
+A tool that ran and failed (`not_found`, `invalid_price`, an unsellable
+inventory line) is **not** an error response. It comes back as a normal
+result carrying `isError: true` and a text explanation, per the MCP spec's
+tool error-handling rules, so the model sees the message and can correct its
+arguments. Returning those as JSON-RPC errors is what made ChatGPT report the
+write tool as disabled — see
+[the debug note](./debug-notes/2026-08-05-mcp-tool-errors-as-json-rpc-errors.md).
+
+### Tool annotations
+
+Every tool ships `annotations`. They're advisory in the spec, but a client
+that gets none applies the MCP defaults (`readOnlyHint: false`,
+`destructiveHint: true`, `openWorldHint: true`), which is how ChatGPT came to
+label all five tools "public write / destructive / open world". Reads carry
+`readOnlyHint: true`; the two writes carry `destructiveHint: false` (nothing
+is deleted or overwritten beyond the value being set).
 
 ### Metrics
 

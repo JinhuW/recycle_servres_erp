@@ -157,16 +157,62 @@ describe('MCP set_market_price tool', () => {
     expect(ev.latest_source).toMatch(/^mcp:/);
   });
 
-  it('returns not_found for an unknown part number', async () => {
+  // A tool that ran and failed must come back as an isError *result*, never a
+  // JSON-RPC error: ChatGPT relays a protocol error to the model as
+  // `{"type":"json_rpc_error",…}`, which it read as "the write endpoint is
+  // down" and stopped writing after a single mistyped part number.
+  it('returns not_found as a tool result, not a protocol error', async () => {
     const r = await callWrite(bearerWrite, { partNumber: 'NEVER-EXISTS-XYZ', price: 10 });
     const body = r.body as any;
-    expect(body.error).toBeDefined();
-    expect(body.error.message).toMatch(/not_found/);
+    expect(body.error).toBeUndefined();
+    expect(body.result.isError).toBe(true);
+    const text = body.result.content[0].text;
+    expect(text).toMatch(/not_found/);
+    // Naming the part back is what makes the failure correctable.
+    expect(text).toMatch(/NEVER-EXISTS-XYZ/);
   });
 
-  it('rejects a negative price', async () => {
+  it('rejects a negative price as a tool result', async () => {
     const r = await callWrite(bearerWrite, { partNumber: knownPartNumber, price: -1 });
-    expect((r.body as any).error).toBeDefined();
+    const body = r.body as any;
+    expect(body.error).toBeUndefined();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/invalid_price/);
+  });
+
+  it('keeps insufficient_scope a protocol error', async () => {
+    const r = await callWrite(bearerRead, { partNumber: knownPartNumber, price: 1 });
+    const body = r.body as any;
+    expect(body.result).toBeUndefined();
+    expect(body.error.message).toMatch(/insufficient_scope/);
+  });
+
+  it('keeps an unknown tool a protocol error', async () => {
+    const r = await api('POST', '/api/mcp', {
+      headers: { authorization: `Bearer ${bearerWrite}` },
+      body: { jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'no_such_tool', arguments: {} } },
+    });
+    const body = r.body as any;
+    expect(body.result).toBeUndefined();
+    expect(body.error.code).toBe(-32601);
+  });
+
+  // Absent annotations mean the MCP defaults — destructive, open-world, not
+  // read-only — which is how ChatGPT came to label every tool here a
+  // destructive public write and gate the read tools behind elevated risk.
+  it('advertises annotations that separate the read tools from the write one', async () => {
+    const r = await api('POST', '/api/mcp', {
+      headers: { authorization: `Bearer ${bearerWrite}` },
+      body: { jsonrpc: '2.0', id: 12, method: 'tools/list', params: {} },
+    });
+    const tools = (r.body as any).result.tools as Array<{ name: string; annotations?: Record<string, boolean> }>;
+    for (const t of tools) expect(t.annotations, `${t.name} has no annotations`).toBeDefined();
+    const byName = new Map(tools.map(t => [t.name, t.annotations!]));
+    expect(byName.get('list_market_values')!.readOnlyHint).toBe(true);
+    expect(byName.get('get_market_value')!.readOnlyHint).toBe(true);
+    expect(byName.get('set_market_price')!.readOnlyHint).toBe(false);
+    expect(byName.get('set_market_price')!.destructiveHint).toBe(false);
+    for (const t of tools) expect(t.annotations!.openWorldHint).toBe(false);
   });
 });
 
