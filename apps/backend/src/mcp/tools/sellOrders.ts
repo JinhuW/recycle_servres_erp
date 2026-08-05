@@ -28,6 +28,7 @@ export const SELL_ORDER_TOOL_DEFS = [
       },
       additionalProperties: false,
     },
+    annotations: { title: 'Search sellable inventory', readOnlyHint: true, openWorldHint: false },
   },
   {
     name: 'create_sell_order_draft',
@@ -38,8 +39,10 @@ export const SELL_ORDER_TOOL_DEFS = [
       'referenced inventory line — do not supply them. customerId defaults to the MCP customer when omitted. ' +
       'currency is USD (default) or CNY; unitPrice is the native price and is converted to USD on store. On ' +
       'success returns { id, status, customerId, lineCount, currency }. Errors (insufficient stock, an ' +
-      'inventoryId that is unknown or already on an open sell order, an unknown customerId) are returned as the ' +
-      'JSON-RPC error message. Requires the sellorder:write scope (a sellorder:read-only token is rejected).',
+      'inventoryId that is unknown or already on an open sell order, an unknown customerId) come back as a ' +
+      'normal tool result with isError set and a message explaining which line failed — fix the arguments and ' +
+      'retry rather than treating the tool as unavailable. Requires the sellorder:write scope (a ' +
+      'sellorder:read-only token is rejected).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -64,6 +67,15 @@ export const SELL_ORDER_TOOL_DEFS = [
       },
       required: ['lines'],
       additionalProperties: false,
+    },
+    // Creates a Draft and nothing else — no existing record is overwritten or
+    // removed — but calling it twice makes two drafts, so not idempotent.
+    annotations: {
+      title: 'Create sell order draft',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
 ] as const;

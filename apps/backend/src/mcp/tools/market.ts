@@ -3,6 +3,12 @@ import { formatRefPrice, marketValueSelect } from '../../lib/market';
 import { getWorkspaceSetting } from '../../lib/settings';
 import { appendPriceEvent } from '../../lib/refPriceEvents';
 
+// Annotations are advisory, but ChatGPT applies the MCP defaults when they're
+// absent — readOnlyHint false, destructiveHint true, openWorldHint true — so
+// every tool showed up in its connector panel as a destructive open-world
+// write and the read tools were gated behind elevated-risk confirmations.
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
+
 export const TOOL_DEFS = [
   {
     name: 'list_market_values',
@@ -25,6 +31,7 @@ export const TOOL_DEFS = [
       },
       additionalProperties: false,
     },
+    annotations: { title: 'List market values', ...READ_ONLY },
   },
   {
     name: 'get_market_value',
@@ -41,6 +48,7 @@ export const TOOL_DEFS = [
       },
       additionalProperties: false,
     },
+    annotations: { title: 'Get market value', ...READ_ONLY },
   },
   {
     name: 'set_market_price',
@@ -50,9 +58,11 @@ export const TOOL_DEFS = [
       'current value with get_market_value first. The match is case-insensitive; if several rows share the part ' +
       'number the most recently updated one is used. Records a price event (attributed to the calling MCP client) ' +
       'and updates lastPrice/lastPriceAt/lastPriceSource. price is in the workspace base currency (USD) and must ' +
-      'be >= 0. On success returns { id, lastPrice, lastPriceAt }. Errors: "not_found" when no product matches the ' +
-      'part number, "invalid_price" for a negative or non-numeric price. Requires the market:write scope (a ' +
-      'market:read-only token is rejected with insufficient_scope).',
+      'be >= 0. On success returns { id, lastPrice, lastPriceAt }. A failure comes back as a normal tool result ' +
+      'with isError set and a message explaining it — "not_found" means no product carries that part number, so ' +
+      'look the product up with list_market_values and retry with the exact part number rather than treating the ' +
+      'tool as unavailable; "invalid_price" means the price was negative or non-numeric. Requires the ' +
+      'market:write scope (a market:read-only token is rejected with insufficient_scope).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -62,6 +72,15 @@ export const TOOL_DEFS = [
       },
       required: ['partNumber', 'price'],
       additionalProperties: false,
+    },
+    // Re-pricing the same part twice with the same price is a no-op beyond the
+    // event trail, and nothing is ever deleted — so idempotent, not destructive.
+    annotations: {
+      title: 'Set market price',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
     },
   },
 ] as const;
@@ -134,6 +153,8 @@ export async function callSetMarketPrice(
       actorUserId: ctx.actorUserId,
     });
   });
-  if (!ev) throw new Error('not_found');
+  // Naming the part back is what lets a client tell "I mistyped the part
+  // number" apart from "the write endpoint is down".
+  if (!ev) throw new Error(`not_found: no product carries part number "${partNumber}"`);
   return { id: ev.id, lastPrice: ev.price, lastPriceAt: ev.createdAt.toISOString() };
 }
