@@ -8,10 +8,22 @@ const WAREHOUSES = ['WH-LA1', 'WH-DAL', 'WH-NJ2', 'WH-HK', 'WH-AMS'];
 
 async function transferOne(token: string): Promise<{ id: string; from: string; to: string; orderId: string }> {
   const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
-  const line = inv.body.items.find(
-    (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id,
+  // The seed already commits some lines to Shipped sell orders, and transfer
+  // reopen/discard correctly 409 on those. Seed ids are random, so which line
+  // sorts first varies per run — without this the suite passed or failed by
+  // luck of the draw.
+  const committed = new Set(
+    (await getTestDb()`
+      SELECT sl.inventory_id AS id
+        FROM sell_order_lines sl
+        JOIN sell_orders so ON so.id = sl.sell_order_id
+       WHERE so.status = ANY(${['Shipped', 'Awaiting payment']}::text[])
+    ` as unknown as Array<{ id: string }>).map((r) => r.id),
   );
-  if (!line) throw new Error('no sellable line in seed');
+  const line = inv.body.items.find(
+    (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id && !committed.has(i.id),
+  );
+  if (!line) throw new Error('no uncommitted sellable line in seed');
   const to = WAREHOUSES.find((w) => w !== line.warehouse_id)!;
   const r = await api<{ ok: true; transferOrderId: string }>(
     'POST', '/api/inventory/transfer',
