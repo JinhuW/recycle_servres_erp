@@ -204,6 +204,28 @@ describe('item types', () => {
     expect(psu.body.items[0].item_type).toBe('PSU');
   });
 
+  // The grouped view builds its own filter/facet path, separate from the flat
+  // list — a type missing from FACET_KEYS there renders an empty Refine panel
+  // even though the flat list filters fine.
+  it('facets and filters the grouped product view by type', async () => {
+    const { token: purchaser } = await loginAs(MARCUS);
+    await createOther(purchaser, otherLine('CPU'));
+    await createOther(purchaser, otherLine('PSU', { description: 'Delta 1600W' }));
+
+    const { token } = await loginAs(ALEX);
+    const all = await api<{ facets: Record<string, Record<string, number>>; products: unknown[] }>(
+      'GET', '/api/inventory/products?category=Other', { token },
+    );
+    expect(all.status).toBe(200);
+    expect(Object.keys(all.body.facets.item_type ?? {}).sort()).toEqual(['CPU', 'PSU']);
+
+    const psu = await api<{ products: { item_type: string }[] }>(
+      'GET', '/api/inventory/products?category=Other&itemType=PSU', { token },
+    );
+    expect(psu.body.products.length).toBe(1);
+    expect(psu.body.products[0].item_type).toBe('PSU');
+  });
+
   it('records a type change in the order audit trail', async () => {
     const { token } = await loginAs(MARCUS);
     const created = await createOther(token, otherLine('CPU'));

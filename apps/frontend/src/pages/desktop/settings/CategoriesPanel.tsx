@@ -109,36 +109,38 @@ export function CategoriesPanel() {
                   <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>%</span>
                 </div>
               </div>
+              {c.id === 'Other' && <ItemTypesOption enabled={c.enabled} />}
             </div>
           </div>
         ))}
       </div>
-
-      <ItemTypesPanel />
     </>
   );
 }
 
 // ─── Item types ───────────────────────────────────────────────────────────────
-// The `Other` line vocabulary (migration 0082). Purchasers add to it from the
-// line drawer; this panel is where a manager tidies it up. Renaming rewrites
-// every line carrying the old name, so the usage count is shown next to each
-// one — that number is what a rename or retire touches.
+// The `Other` line vocabulary (migration 0082). It belongs to that one
+// category, so it lives inside the Other row rather than as a page-level
+// section — a dozen types would otherwise dominate a page about categories.
+// Collapsed by default: purchasers grow this list from the line drawer, and a
+// manager only opens it to rename or retire something.
 type TypeRow = { id: string; name: string; active: boolean; uses: number };
 
-function ItemTypesPanel() {
+function ItemTypesOption({ enabled }: { enabled: boolean }) {
   const { t } = useT();
   const { user } = useAuth();
   const [rows, setRows] = useState<TypeRow[]>([]);
+  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const isManager = user?.role === 'manager';
 
   const reload = () =>
     api.get<{ items: TypeRow[] }>('/api/item-types')
       .then(r => setRows(r.items))
       .catch(handleFetchError);
-  useEffect(() => { if (user?.role === 'manager') reload(); }, [user?.role]);
+  useEffect(() => { if (isManager) reload(); }, [isManager]);
 
-  if (user?.role !== 'manager') return null;
+  if (!isManager) return null;
 
   const persist = (row: TypeRow, body: Record<string, unknown>) =>
     api.patch<TypeRow>(`/api/item-types/${row.id}`, body)
@@ -161,37 +163,59 @@ function ItemTypesPanel() {
     persist(row, { name: next });
   };
 
+  const activeCount = rows.filter(r => r.active).length;
+
   return (
     <>
-      <SettingsHeader title={t('itPanelTitle')} sub={t('itPanelSub')} />
-      <div className="cat-list">
-        {rows.map(r => (
-          <div key={r.id} className={'cat-row card' + (r.active ? '' : ' disabled')}>
-            <div className="cat-row-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
-                <div className="cat-icon"><Icon name="box" size={18} /></div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <input
-                    className="input"
-                    value={draft[r.id] ?? r.name}
-                    onChange={e => setDraft(d => ({ ...d, [r.id]: e.target.value }))}
-                    onBlur={() => rename(r)}
-                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                    style={{ fontWeight: 600, fontSize: 15, maxWidth: 280 }}
-                  />
-                  <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                    {t('itUses', { n: r.uses })} · {r.active ? t('itActive') : t('itRetired')}
-                  </div>
-                </div>
-              </div>
+      <div className="cat-opt">
+        <div>
+          <div className="cat-opt-label">{t('itPanelTitle')}</div>
+          <div className="cat-opt-sub">{t('itPanelSub')}</div>
+        </div>
+        <button
+          className="btn sm"
+          disabled={!enabled}
+          aria-expanded={open}
+          onClick={() => setOpen(o => !o)}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {t('itCount', { n: activeCount })}
+          <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
+        </button>
+      </div>
+      {open && (
+        <div style={{ gridColumn: '1 / -1', padding: '0 0 4px 0' }}>
+          <div className="cat-opt-sub" style={{ marginBottom: 8 }}>{t('itEditHint')}</div>
+          {rows.map(r => (
+            <div
+              key={r.id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0',
+                borderTop: '1px solid var(--border)', opacity: r.active ? 1 : 0.55,
+              }}
+            >
+              <input
+                className="input"
+                value={draft[r.id] ?? r.name}
+                onChange={e => setDraft(d => ({ ...d, [r.id]: e.target.value }))}
+                onBlur={() => rename(r)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                style={{ flex: 1, minWidth: 0, maxWidth: 240, padding: '4px 8px', fontSize: 13 }}
+              />
+              <span
+                className="muted"
+                style={{ fontSize: 11.5, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+              >
+                {t('itUses', { n: r.uses })}
+              </span>
               <Toggle checked={r.active} onChange={(v) => persist(r, { active: v })} />
             </div>
-          </div>
-        ))}
-        {rows.length === 0 && (
-          <div className="muted" style={{ fontSize: 13, padding: 12 }}>{t('itPanelEmpty')}</div>
-        )}
-      </div>
+          ))}
+          {rows.length === 0 && (
+            <div className="cat-opt-sub">{t('itPanelEmpty')}</div>
+          )}
+        </div>
+      )}
     </>
   );
 }
