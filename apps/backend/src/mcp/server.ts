@@ -114,7 +114,16 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
         }));
       } catch (e) {
         mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
-        return c.json(rpcErr(req.id, -32602, e instanceof Error ? e.message : 'invalid params'));
+        // A tool that ran and failed is a tool *result*, not a protocol error
+        // (MCP spec, Tools → Error handling): the model has to see the message
+        // to correct itself. ChatGPT hands a JSON-RPC error to the model as
+        // `{"type":"json_rpc_error",…}`, which reads as a dead endpoint — one
+        // mistyped part number made it declare set_market_price disabled and
+        // stop writing altogether.
+        return c.json(rpcOk(req.id, {
+          content: [{ type: 'text', text: e instanceof Error ? e.message : 'tool call failed' }],
+          isError: true,
+        }));
       }
     }
     default:
