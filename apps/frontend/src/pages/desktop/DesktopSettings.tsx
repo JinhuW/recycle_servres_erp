@@ -3,6 +3,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { useAppVersion } from '../../lib/useAppVersion';
+import { fmtDate } from '../../lib/format';
 // The settings panels + their modals/dialogs/shared primitives were extracted
 // verbatim into ./settings/* — pure code-motion, no logic or JSX changes.
 import { MembersPanel } from './settings/MembersPanel';
@@ -32,7 +33,8 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const [section, setSection] = useState<SectionId>('account');
   const sections = SECTIONS.filter(s => !s.managerOnly || user?.role === 'manager');
@@ -63,8 +65,11 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             </button>
           ))}
           {build && (
+            // The sha stays reachable on hover — it's what a deploy check needs
+            // and what the date can't tell you.
             <div className="settings-nav-version mono" title={build.commit}>
-              v{build.version} · {build.commit}
+              v{build.version}
+              {build.builtAt && ` · ${fmtDate(build.builtAt, locale)}`}
             </div>
           )}
         </nav>

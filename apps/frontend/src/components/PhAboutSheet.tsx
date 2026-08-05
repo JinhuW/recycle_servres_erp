@@ -1,6 +1,7 @@
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { useAppVersion } from '../lib/useAppVersion';
+import { fmtDate } from '../lib/format';
 
 type Props = {
   onClose: () => void;
@@ -9,9 +10,10 @@ type Props = {
 const SUPPORT_EMAIL = 'support@recycleservers.io';
 
 export function PhAboutSheet({ onClose }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const build = useAppVersion();
   const version = build ? `v${build.version}` : '…';
+  const updated = build ? (build.builtAt ? fmtDate(build.builtAt, lang === 'zh' ? 'zh-CN' : 'en-US') : '—') : '…';
   return (
     <>
       <div className="ph-sheet-backdrop" onClick={onClose} />
@@ -29,7 +31,7 @@ export function PhAboutSheet({ onClose }: Props) {
 
         <div className="ph-card" style={{ padding: '4px 0' }}>
           <Row label={t('aboutVersion')} value={version} />
-          <Row label={t('aboutBuild')} value={build?.commit ?? '…'} divider={false} />
+          <Row label={t('aboutUpdated')} value={updated} divider={false} />
         </div>
 
         <a

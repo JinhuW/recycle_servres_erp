@@ -60,6 +60,22 @@ describe('smoke', () => {
     }
   });
 
+  it('GET /api/health reports the build date, and null when nothing stamped it', async () => {
+    const prev = process.env.BUILD_TIME;
+    process.env.BUILD_TIME = '2026-08-04T21:15:00Z';
+    try {
+      const r = await api('GET', '/api/health');
+      expect((r.body as { builtAt: string | null }).builtAt).toBe('2026-08-04T21:15:00Z');
+    } finally {
+      if (prev === undefined) delete process.env.BUILD_TIME;
+      else process.env.BUILD_TIME = prev;
+    }
+    // Host runs have no image stamp — the UI drops the date rather than
+    // inventing one.
+    const bare = await api('GET', '/api/health');
+    expect((bare.body as { builtAt: string | null }).builtAt).toBeNull();
+  });
+
   it('GET /api/health returns 503 when the DB is unreachable', async () => {
     const r = await api('GET', '/api/health', {
       env: { DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/none' },
