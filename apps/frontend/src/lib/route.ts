@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ActivityArea } from '@recycle-erp/shared';
 
 /**
  * Tiny hash-based router. No external deps. The app's "URL" is the part after
@@ -89,6 +90,20 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/activity') return 'activity';
   if (path === '/settings') return 'settings';
   return 'dashboard';
+}
+
+// Deep link from an activity row back to the record it describes. Anchors —
+// unlike navigate() — need the `#` written out: a bare `/purchase-orders/<id>`
+// is a real navigation, and the index.html served back has no hash, so the
+// shell resolves it to the dashboard instead of the record.
+// Null when the event has no target to open.
+export function activityRecordHref(area: ActivityArea, targetRef: string | null): string | null {
+  if (area === 'price') return '#/market';
+  if (!targetRef) return null;
+  const base = area === 'po' ? '/purchase-orders/'
+    : area === 'so' ? '/sell-orders/'
+    : '/inventory/';
+  return '#' + base + encodeURIComponent(targetRef);
 }
 
 // OAuth consent screen — a real-path route (not hash) because the backend
