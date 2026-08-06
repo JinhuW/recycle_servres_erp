@@ -137,17 +137,22 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     expect(after.body.kpis.count).toBe(1);
   });
 
-  it('a line with no sell_price contributes zero margin (falls back to unit_cost)', async () => {
+  // An unpriced line is not a sale at cost — it is a line nobody has priced.
+  // Counting its cost as revenue inflated the KPI by the entire cost of every
+  // unpriced line, which on a fresh PO is all of it. The spreadsheet
+  // (routes/orders.ts) and the edit screen always excluded them; this is the
+  // dashboard agreeing with them.
+  it('a line with no sell_price contributes neither revenue nor profit', async () => {
     await clearWindow();
     await insertDonePO('PO-PROJ-NULLP', MARCUS, { rate: 0.2 }, [
-      { unitCost: 50, sellPrice: null, qty: 2 }, // no margin set
+      { unitCost: 50, sellPrice: null, qty: 2 }, // never priced
       { unitCost: 50, sellPrice: 80,   qty: 2 }, // +60 margin
     ]);
 
     const { token } = await loginAs(MARCUS);
     const r = await api<{ kpis: { profit: number; revenue: number } }>('GET', '/api/dashboard?range=30d', { token });
-    expect(r.body.kpis.profit).toBeCloseTo((80 - 50) * 2, 2);          // only the priced line
-    expect(r.body.kpis.revenue).toBeCloseTo(50 * 2 + 80 * 2, 2);       // null line bills at cost
+    expect(r.body.kpis.profit).toBeCloseTo((80 - 50) * 2, 2);
+    expect(r.body.kpis.revenue).toBeCloseTo(80 * 2, 2);
   });
 
   // Order-level other_fees are a cost, spread across the PO's lines pro-rata by

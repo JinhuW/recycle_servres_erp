@@ -226,13 +226,21 @@ orders.get('/', async (c) => {
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
-      COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float         AS revenue,
+      -- A line with no sell price contributes nothing: NULL drops out of SUM.
+      -- It used to fall back to unit_cost, which invented revenue equal to the
+      -- cost — so a PO nobody had priced yet reported its full cost as
+      -- projected revenue. The spreadsheet and the edit screen never did that;
+      -- this is the list catching up to them.
+      COALESCE(SUM(l.sell_price * l.qty), 0)::float                                 AS revenue,
       -- Fees are a cost, so the row's profit nets them. No per-line
       -- amortisation needed here (unlike lib/po-cost.ts): the group holds every
       -- line of the PO, so the shares would sum to o.other_fees anyway.
-      (COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)
+      (COALESCE(SUM((l.sell_price - l.unit_cost) * l.qty), 0)
          - o.other_fees)::float                                                     AS profit,
       COUNT(l.id)::int                                                              AS line_count,
+      -- So the UI can explain a revenue figure that looks low rather than
+      -- leaving the reader to wonder.
+      COUNT(l.id) FILTER (WHERE l.sell_price IS NULL)::int                           AS unpriced_line_count,
       -- The row chip needs every category present, not just the derived header
       -- value, so a mixed PO can show what it actually holds. Free here: the
       -- query already groups by o.id over the joined lines.
@@ -280,6 +288,7 @@ orders.get('/', async (c) => {
       revenue: r.revenue,
       profit: r.profit,
       lineCount: r.line_count,
+      unpricedLineCount: r.unpriced_line_count,
       // PO status is authoritative — derive from o.lifecycle, not from line
       // aggregation. Per-line `Sold` (set when inventory ships out via a sell
       // order) is intentional divergence and must not surface as "Mixed".

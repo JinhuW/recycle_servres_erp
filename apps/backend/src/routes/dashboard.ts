@@ -71,10 +71,10 @@ dashboard.get('/', async (c) => {
           `
         : sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
             SELECT
-              COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
+              COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
               COALESCE(SUM(${eff} * ol.qty), 0)::float                                                 AS cost,
-              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty), 0)::float       AS profit,
-              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty
+              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float       AS profit,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
                            * COALESCE(po.commission_rate, 0)), 0)::float                               AS commission
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
@@ -96,8 +96,8 @@ dashboard.get('/', async (c) => {
           `
         : sql<{ revenue: number; profit: number }[]>`
             SELECT
-              COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float            AS revenue,
-              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty), 0)::float AS profit
+              COALESCE(SUM(ol.sell_price * ol.qty), 0)::float            AS revenue,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
             ${feeBasis}
@@ -151,7 +151,7 @@ dashboard.get('/', async (c) => {
               ) AS week_start
             )
             SELECT to_char(s.week_start,'IW') AS label,
-                   COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty), 0)::float AS profit
+                   COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM series s
             LEFT JOIN orders po
               ON po.lifecycle = 'done'
@@ -173,9 +173,9 @@ dashboard.get('/', async (c) => {
         WITH per_user AS (
           SELECT po.user_id,
                  COUNT(*)::int                                                                          AS count,
-                 COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                AS revenue,
-                 COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty), 0)::float     AS profit,
-                 COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty
+                 COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                AS revenue,
+                 COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float     AS profit,
+                 COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
                               * COALESCE(po.commission_rate, 0)), 0)::float                             AS commission
           FROM order_lines ol
           JOIN orders po ON po.id = ol.order_id
@@ -210,8 +210,8 @@ dashboard.get('/', async (c) => {
           `
         : sql<{ category: string; count: number; revenue: number; profit: number }[]>`
             SELECT ol.category, COUNT(*)::int AS count,
-                   COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
-                   COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ${eff}) * ol.qty), 0)::float AS profit
+                   COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
+                   COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
             ${feeBasis}
