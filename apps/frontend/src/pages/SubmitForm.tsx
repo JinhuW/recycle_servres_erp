@@ -129,6 +129,9 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
+  // Unit cost is typed as raw text so an unpriced line starts blank instead of
+  // a literal 0 the user has to select and delete before typing.
+  const [costRaw, setCostRaw] = useState(() => (initial.unitCost ? String(initial.unitCost) : ''));
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   // Tracks which fields the user has touched since the AI populated them.
@@ -466,7 +469,19 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         <div className="ph-field-row" style={{ gridTemplateColumns: isEditing ? '1fr 1fr 1fr' : '1fr 1fr' }}>
           <div className="ph-field">
             <label>{t('unitCost')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input className="input mono" type="number" step="0.01" min={0} value={line.unitCost} onChange={e => set('unitCost', parseFloat(e.target.value) || 0)} />
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              placeholder="0.00"
+              value={costRaw}
+              onChange={e => {
+                setCostRaw(e.target.value);
+                set('unitCost', parseFloat(e.target.value) || 0);
+              }}
+            />
           </div>
           <div className="ph-field">
             <label>{t('totalCost')}</label>
@@ -476,11 +491,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               step="0.01"
               min={0}
               inputMode="decimal"
-              value={(line.qty * line.unitCost).toFixed(2)}
+              placeholder="0.00"
+              value={line.qty * line.unitCost ? (line.qty * line.unitCost).toFixed(2) : ''}
               onChange={e => {
                 const newTotal = parseFloat(e.target.value);
                 if (!Number.isFinite(newTotal) || line.qty <= 0) return;
-                set('unitCost', +(newTotal / line.qty).toFixed(2));
+                const unit = +(newTotal / line.qty).toFixed(2);
+                set('unitCost', unit);
+                setCostRaw(String(unit));
               }}
             />
           </div>
