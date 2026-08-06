@@ -15,6 +15,7 @@ import {
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { linePhotos, uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
+import { groupLines, shouldGroup, catTone } from '../../lib/lineGroups';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
@@ -270,6 +271,59 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
 
   const marketFor = useMarketLookup(lines.map(l => l.partNumber));
+
+  // ── Category grouping ──────────────────────────────────────────────────
+  // Only when the PO actually spans categories: a single-category order gets
+  // one header restating a total the ledger already shows, which is noise.
+  const groups = useMemo(() => groupLines(lines), [lines]);
+  const grouped = useMemo(() => shouldGroup(lines), [lines]);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFold = (cat: string) => setFolded(prev => {
+    const next = new Set(prev);
+    if (next.has(cat)) next.delete(cat); else next.add(cat);
+    return next;
+  });
+
+  // The table walks this instead of `lines`, so grouped rows come out
+  // contiguous (position order interleaves categories) while every row keeps
+  // the index its handlers were written against.
+  const displayRows = useMemo(() => {
+    if (!grouped) return lines.map((line, index) => ({ line, index, head: null as React.ReactNode }));
+    return groups.flatMap(g => g.lines.map(({ line, index }, k) => ({
+      line,
+      index,
+      head: k === 0 ? (
+        <tr className="grp-row" style={catTone(g.category)}>
+          <td colSpan={canEditOrder ? 9 : 8}>
+            <button
+              type="button"
+              className="grp-hd"
+              aria-expanded={!folded.has(g.category)}
+              onClick={e => { e.stopPropagation(); toggleFold(g.category); }}
+            >
+              <span className={'grp-tw' + (folded.has(g.category) ? ' closed' : '')}>
+                <Icon name="chevronDown" size={13} />
+              </span>
+              <span className="grp-chip">{g.category}</span>
+              <span className="grp-meta">
+                {g.lines.length === 1
+                  ? t('historyLineCountOne', { n: g.lines.length })
+                  : t('historyLineCountMany', { n: g.lines.length })}
+                {' · '}{t('grpUnits', { n: g.units.toLocaleString(locale) })}
+                {g.unpriced > 0 && <span className="grp-unpriced"> · {t('grpUnpriced', { n: g.unpriced })}</span>}
+              </span>
+              <span className="grp-amt mono">{fmtUSD(g.goods, locale)}</span>
+              <span className={'grp-pl mono ' + (g.profit > 0 ? 'pos' : g.profit < 0 ? 'neg' : 'muted')}>
+                {g.profit ? (g.profit > 0 ? '+' : '−') + fmtUSD(Math.abs(g.profit), locale) : '—'}
+              </span>
+            </button>
+          </td>
+        </tr>
+      ) : null,
+    })));
+  // toggleFold is stable enough for this render-derived list.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grouped, groups, lines, folded, canEditOrder, locale, t]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   // Lookup table keyed by line index → other 1-based line numbers sharing its
@@ -646,7 +700,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </tr>
             </thead>
             <tbody>
-              {lines.map((l, i) => {
+              {displayRows.map(({ line: l, index: i, head }) => {
                 const qty = Number(l.qty) || 0;
                 const lCost = Number(l.unitCost) || 0;
                 const sp = l.sellPrice == null || l.sellPrice === '' ? 0 : Number(l.sellPrice);
@@ -654,11 +708,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 const lossy = sp > 0 && sp < lCost;
                 const filled = !!l.brand || !!l.description;
                 const isActive = i === activeIdx;
+                // A folded group still emits its header row, just none of its
+                // lines — otherwise the group would vanish along with them.
+                // Every member drops out, not only the one carrying the head.
+                if (folded.has(l.category)) {
+                  return head ? <Fragment key={'g-' + l.category}>{head}</Fragment> : null;
+                }
                 // Rows open the drawer at every stage — a locked order gets a
                 // read-only drawer, not an unreachable one.
                 return (
+                  <Fragment key={l._id ?? l._cid}>
+                  {head}
                   <tr
-                    key={l._id ?? l._cid}
                     className="row-hover"
                     style={{
                       cursor: 'pointer',
@@ -739,6 +800,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       </td>
                     )}
                   </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -750,6 +812,27 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             the operators carry meaning, they aren't decoration — and the fee,
             a cost that never was a line, is the one editable cell in it. */}
         <div className="oe-items-foot oe-ledger">
+          {/* What the goods total is made of, when it is made of more than one
+              thing. The purchaser is reconciling against a supplier invoice —
+              "RAM 5,200 + SSD 860 + Other 210" is the shape they can check
+              line for line; a single figure is not. Dot leaders because this
+              is a receipt, not a table. */}
+          {grouped && (
+            <div className="oe-breakdown">
+              <div className="oe-breakdown-cap">{t('costBreakdown')}</div>
+              {groups.map(g => (
+                <div className="oe-breakdown-row" key={g.category} style={catTone(g.category)}>
+                  <span className="oe-breakdown-k">
+                    <span className="oe-breakdown-dot" />
+                    {g.category}
+                    <span className="muted"> ×{g.lines.length}</span>
+                  </span>
+                  <span className="oe-breakdown-lead" />
+                  <span className="oe-breakdown-v mono">{fmtUSD(g.goods, locale)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="oe-ledger-eq">
             <div className="oe-ledger-cell">
               <div className="oe-ledger-label">{t('goodsTotal')}</div>

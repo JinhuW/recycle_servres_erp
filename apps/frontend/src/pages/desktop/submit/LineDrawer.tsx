@@ -63,6 +63,9 @@ export function LineDrawer({
   const cat = line.category;
   // Pre-switch snapshot for the undo, held only until the next switch or save.
   const [undo, setUndo] = useState<{ line: Line; cleared: string[] } | null>(null);
+  // The category was already chosen by the button that created this line, so
+  // the switch stays out of the way until someone says they filed it wrong.
+  const [catOpen, setCatOpen] = useState(false);
   const set = (patch: Partial<Line>) => onChange(patch);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -206,6 +209,11 @@ export function LineDrawer({
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
+                {!readOnly && !catOpen && (
+                  <button type="button" className="dw-cat-link" onClick={() => setCatOpen(true)}>
+                    {t('changeCategory')}
+                  </button>
+                )}
                 {cat === 'Other' && !!(line.itemType ?? '').trim() && (
                   <span className="chip">{line.itemType}</span>
                 )}
@@ -390,22 +398,28 @@ export function LineDrawer({
                 category owned — announced with an undo, since the values are
                 gone from the form the moment the select changes. */}
             <div className="dw-cat-switch">
-              <label className="label" htmlFor={`dw-cat-${idx}`}>{t('category')}</label>
-              <select
-                id={`dw-cat-${idx}`}
-                className="select"
-                value={cat}
-                disabled={readOnly}
-                onChange={e => {
-                  const next = e.target.value as Category;
-                  if (next === cat) return;
-                  const cleared = clearedBySwitch(line as unknown as Record<string, unknown>, next);
-                  setUndo(cleared.length ? { line, cleared } : null);
-                  onChange(switchLineCategory(line, next) as Partial<Line>);
-                }}
-              >
-                {addableCategories().map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              {catOpen && (
+                <>
+                  <label className="label" htmlFor={`dw-cat-${idx}`}>{t('category')}</label>
+                  <select
+                    id={`dw-cat-${idx}`}
+                    className="select"
+                    value={cat}
+                    disabled={readOnly}
+                    autoFocus
+                    onChange={e => {
+                      const next = e.target.value as Category;
+                      setCatOpen(false);
+                      if (next === cat) return;
+                      const cleared = clearedBySwitch(line as unknown as Record<string, unknown>, next);
+                      setUndo(cleared.length ? { line, cleared } : null);
+                      onChange(switchLineCategory(line, next) as Partial<Line>);
+                    }}
+                  >
+                    {addableCategories().map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </>
+              )}
               {undo && (
                 <div className="dw-cat-note" role="status">
                   <Icon name="alert" size={13} style={{ marginTop: 1, flexShrink: 0 }} />
