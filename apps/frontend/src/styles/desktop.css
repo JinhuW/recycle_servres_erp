@@ -2348,3 +2348,91 @@ html.desktop, body.desktop, .desktop #root {
   text-decoration: underline; cursor: pointer;
 }
 .dw-cat-link:hover { color: var(--fg); }
+
+/* ===== Cost tape =====
+   The PO's money laid out as a receipt: one figure per line, dot leaders to a
+   right-aligned column, rules where the arithmetic changes gear. Replaces a
+   horizontal strip that stood goods, fees and cost beside each other as peers
+   — they aren't; the first two add up to the third. */
+.tape-wrap {
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.06)) drop-shadow(0 4px 12px rgba(15, 23, 42, 0.05));
+}
+.tape {
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  padding: 16px 20px 26px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  /* Torn bottom edge — this is a receipt you check against a supplier's
+     invoice, not a summary panel. Two mask layers that union: the body, plus a
+     row of half-discs hanging off the bottom. */
+  --tooth: 8px;
+  -webkit-mask:
+    radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
+    linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
+  mask:
+    radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
+    linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
+}
+.tape-cap {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 12px;
+}
+.tape-cap-r { text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
+
+.tape-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+.tape-k { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-muted); white-space: nowrap; }
+.tape-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--cat); }
+.tape-lead { flex: 1; border-bottom: 1px dotted var(--border-strong); transform: translateY(-4px); min-width: 12px; }
+.tape-v { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.tape-row.sum { border-top: 1px solid var(--border); margin-top: 9px; padding-top: 10px; font-weight: 600; }
+.tape-row.sum .tape-k { color: var(--fg); }
+.tape-row.total {
+  border-top: 2px solid var(--fg); margin-top: 10px; padding-top: 12px;
+  font-weight: 700;
+}
+.tape-row.total .tape-k {
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg);
+}
+.tape-row.total .tape-v { font-size: 21px; letter-spacing: -0.02em; }
+
+.tape-edit { display: inline-flex; align-items: center; gap: 8px; }
+.tape-edit .input { font-size: 12.5px; padding: 5px 9px; }
+.tape-edit .tape-money { width: 110px; text-align: right; }
+.tape-edit .tape-note { width: 190px; }
+.tape-reset {
+  background: none; border: none; padding: 0; margin-left: 8px;
+  color: var(--accent-strong); font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10.5px; font-weight: 500; text-decoration: underline; cursor: pointer;
+}
+
+.tape-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
+.tape-block-cap {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 10px;
+}
+.tape-row.profit {
+  border-top: 1px solid var(--border); margin-top: 9px; padding-top: 11px;
+  font-weight: 700; font-size: 13px;
+}
+.tape-row.profit .tape-k {
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg);
+}
+.tape-row.profit .tape-v { font-size: 18px; letter-spacing: -0.02em; }
+.tape-foot {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11.5px; color: var(--fg-subtle); margin-top: 10px; line-height: 1.5;
+}
+
+/* The tape's torn edge only reads if there is something behind it to reveal.
+   Inside the items card it was cutting white out of white, so the strip below
+   the teeth carries the page ground — the receipt then looks like it is lying
+   on the card rather than being part of it. */
+.oe-items-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
+/* Same ground for the submit screen's tape. */
+.oe-submit-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
