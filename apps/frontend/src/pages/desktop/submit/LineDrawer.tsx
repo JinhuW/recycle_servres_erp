@@ -424,17 +424,26 @@ export function LineDrawer({
               )}
             </div>
 
-            {photoCtx && (
-              <LinePhotoStrip
-                photos={linePhotos(line as unknown as Parameters<typeof linePhotos>[0])}
-                pending={photoCtx.pending}
-                onAdd={photoCtx.onAddFiles}
-                onRemove={photoCtx.onRemoveSaved}
-                onRemovePending={photoCtx.onRemovePending}
-                readOnly={readOnly}
-                busy={photoCtx.busy}
-              />
-            )}
+            {photoCtx && (() => {
+              const shots = linePhotos(line as unknown as Parameters<typeof linePhotos>[0]);
+              // The AI capture dropzone sits directly above and produces this
+              // line's photo, so an empty "add a photo" slot underneath asks
+              // for something the flow is about to supply. Once a picture
+              // exists — scanned or uploaded — the strip earns its place: it
+              // shows what was captured and takes more.
+              if (showDropzone && shots.length === 0 && photoCtx.pending.length === 0) return null;
+              return (
+                <LinePhotoStrip
+                  photos={shots}
+                  pending={photoCtx.pending}
+                  onAdd={photoCtx.onAddFiles}
+                  onRemove={photoCtx.onRemoveSaved}
+                  onRemovePending={photoCtx.onRemovePending}
+                  readOnly={readOnly}
+                  busy={photoCtx.busy}
+                />
+              );
+            })()}
 
             {cat === 'RAM' && <RamFields line={line} set={set} />}
             {cat === 'SSD' && <SsdFields line={line} set={set} />}

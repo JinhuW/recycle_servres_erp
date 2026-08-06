@@ -54,6 +54,9 @@ export function LinePhotoStrip({
         <span className="label" style={{ marginBottom: 0 }}>
           <Icon name="camera" size={12} style={{ marginRight: 5, verticalAlign: -1 }} />
           {t('linePhotos')}
+          {/* Never required, on any category — same phrasing the serial-number
+              field uses, so "optional" reads the same way everywhere. */}
+          <span className="muted" style={{ fontWeight: 400 }}> · {t('optional')}</span>
         </span>
         {total > 0 && <span className="lp-count">{total}</span>}
       </div>
@@ -89,7 +92,6 @@ export function LinePhotoStrip({
           </>
         )}
       </div>
-      {total === 0 && <div className="lp-empty">{t('linePhotosEmpty')}</div>}
       {lightbox && <ImageLightbox url={lightbox} alt={t('linePhotos')} onClose={() => setLightbox(null)} />}
     </div>
   );
