@@ -72,6 +72,11 @@ export function addItemType(type: ItemType): void {
   itemTypes.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
+// Display order for categories, matching the backend's CATEGORY_ORDER (used by
+// every export) so a grouped table and a downloaded workbook list them the same
+// way. Unknown ids sort after these.
+export const CATEGORY_ORDER: readonly string[] = ['RAM', 'SSD', 'HDD', 'Other'];
+
 /** Filter-chip options: 'all' followed by the enabled category ids in order. */
 export function categoryFilterOptions(): string[] {
   return ['all', ...categories.filter(c => c.enabled).map(c => c.id)];

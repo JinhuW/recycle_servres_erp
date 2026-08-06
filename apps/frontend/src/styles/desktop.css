@@ -2295,3 +2295,56 @@ html.desktop, body.desktop, .desktop #root {
   padding: 6px 18px 12px;
   grid-column: 1 / -1;
 }
+
+/* ===== Category group headers (mixed purchase orders) =====
+   A PO spanning categories groups its lines, each group folding away with its
+   own subtotal. Rendered as a full-width row inside the existing table rather
+   than a nested list, so the money columns stay aligned across every group. */
+.grp-row > td { padding: 0 !important; background: var(--bg-soft); }
+.grp-hd {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 12px;
+  border: none; border-left: 3px solid var(--cat);
+  background: transparent; color: var(--fg);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.grp-hd:hover { background: var(--cat-soft); }
+.grp-tw { display: inline-flex; color: var(--fg-subtle); transition: transform 0.15s; }
+.grp-tw.closed { transform: rotate(-90deg); }
+.grp-chip {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--cat); background: var(--cat-soft);
+  padding: 2px 8px; border-radius: 999px;
+}
+.grp-meta { font-size: 11.5px; color: var(--fg-subtle); }
+.grp-unpriced { color: var(--warn); }
+.grp-amt { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.grp-pl { width: 104px; text-align: right; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Per-category goods breakdown above the ledger. Dot leaders because the
+   purchaser reads this against a supplier invoice, not as a data table. */
+.oe-breakdown {
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.oe-breakdown-cap {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 8px;
+}
+.oe-breakdown-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 2px 0; }
+.oe-breakdown-k { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-muted); white-space: nowrap; }
+.oe-breakdown-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--cat); }
+.oe-breakdown-lead { flex: 1; border-bottom: 1px dotted var(--border-strong); transform: translateY(-4px); min-width: 12px; }
+.oe-breakdown-v { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* "Change category" — a quiet link beside the chip that already states the
+   category. The four ADD buttons decide it at creation, so the switch exists
+   only to correct a mis-filed line and shouldn't occupy a form row. */
+.dw-cat-link {
+  background: none; border: none; padding: 0;
+  color: var(--accent-strong); font: inherit; font-size: 11.5px;
+  text-decoration: underline; cursor: pointer;
+}
+.dw-cat-link:hover { color: var(--fg); }
