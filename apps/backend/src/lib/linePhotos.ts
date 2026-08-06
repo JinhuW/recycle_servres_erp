@@ -19,10 +19,16 @@ export type LinePhoto = {
   uploadedAt: string | null;
 };
 
-// The dev/stub R2 fallback returns a data: URL that is not a real image.
-// Rendering it produces a broken thumbnail, so it never becomes a photo.
+// Without R2 credentials the upload path returns a payload-less data: URL
+// (`data:image/png;name=x.png`, r2.ts) and the scan path normalises to
+// `data:image/placeholder`. Neither renders — a broken thumbnail is worse than
+// no thumbnail. A genuine inline data: image always carries a `,` before its
+// payload, so that is the discriminator.
 export const isRealPhotoUrl = (u: unknown): u is string =>
-  typeof u === 'string' && u.length > 0 && !u.startsWith('data:image/placeholder');
+  typeof u === 'string'
+  && u.length > 0
+  && !u.startsWith('data:image/placeholder')
+  && !(u.startsWith('data:') && !u.includes(','));
 
 export function linePhotos(
   line: { scan_image_id?: unknown; scan_image_url?: unknown },

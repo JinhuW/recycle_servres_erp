@@ -52,6 +52,9 @@ const toAddLine = (l: DraftLine) => ({
   condition: l.condition ?? 'Pulled — Tested',
   qty: Number(l.qty) || 1,
   unitCost: Number(l.unitCost) || 0,
+  // The purchaser's projected sell price, set at intake. Omitted here until
+  // now, so pricing done on the capture screen was silently discarded.
+  sellPrice: l.sellPrice == null ? null : Number(l.sellPrice),
   health: l.health ?? null,
   rpm: l.rpm ?? null,
   status: 'In Transit' as const,

@@ -15,6 +15,7 @@ import {
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { linePhotos, uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
+import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
@@ -268,6 +269,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     });
   };
 
+  const marketFor = useMarketLookup(lines.map(l => l.partNumber));
+
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   // Lookup table keyed by line index → other 1-based line numbers sharing its
   // part #. Drives the inline drawer warning.
@@ -285,7 +288,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     let qty = 0, cost = 0, revenue = 0, profit = 0;
     // "Priced" = lines that have a sell price set, which is the subset that
     // can actually contribute to a realised commission.
-    let pricedCount = 0, pricedProfit = 0;
+    let pricedCount = 0, pricedProfit = 0, pricedCost = 0;
     for (const l of lines) {
       const q = Number(l.qty) || 0;
       const c = Number(l.unitCost) || 0;
@@ -299,9 +302,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       if (hasPrice) {
         pricedCount += 1;
         pricedProfit += q * (sp - c);
+        pricedCost += q * c;
       }
     }
-    return { qty, cost, revenue, profit, pricedCount, pricedProfit };
+    return { qty, cost, revenue, profit, pricedCount, pricedProfit, pricedCost };
   }, [lines]);
 
   const statusDirty = status !== effectiveStatus;
@@ -809,14 +813,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               <div className="oe-ledger-value mono">{fmtUSD(totals.revenue, locale)}</div>
             </div>
             <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('profit')}</div>
+              <div className="oe-ledger-label">{t('eoProfitPriced')}</div>
               <div
                 className="oe-ledger-value mono"
-                style={{ color: effectiveProfit >= 0 ? 'var(--pos)' : 'var(--neg)' }}
+                style={{ color: totals.pricedProfit >= 0 ? 'var(--pos)' : 'var(--neg)' }}
               >
-                {fmtUSD(effectiveProfit, locale)}
+                {totals.pricedCount > 0 ? fmtUSD(totals.pricedProfit, locale) : '—'}
               </div>
             </div>
+          </div>
+          {/* An untouched PO reported its entire cost as a loss, which read as
+              a disaster rather than as "nobody has priced this yet". */}
+          <div className="oe-ledger-coverage">
+            {totals.pricedCount === 0
+              ? t('eoNoLinePriced')
+              : t('eoPricedCoverage', {
+                  n: totals.pricedCount,
+                  of: lines.length,
+                  pct: totals.cost > 0 ? Math.round((totals.pricedCost / totals.cost) * 100) : 100,
+                })}
           </div>
         </div>
       </div>
@@ -907,7 +922,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('profit')}</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoProfitAllLines', { n: lines.length })}</span>
               <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1290,6 +1305,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onConfirmError={showErrorToast}
           duplicateOnLines={dupByIdx.get(activeIdx)}
           readOnly={!canEditOrder}
+          market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
             orderId: order.id,
             // A line added in this session isn't persisted until Save, so it

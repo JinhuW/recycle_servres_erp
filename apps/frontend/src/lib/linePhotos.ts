@@ -25,9 +25,16 @@ type PhotoBearingLine = {
   scanImageUrl?: string | null;
 };
 
-/** Stub R2 hands back a `data:image/placeholder…` URL that renders broken. */
+// Without R2 credentials the upload path returns a payload-less data: URL
+// (`data:image/png;name=x.png`, r2.ts) and the scan path normalises to
+// `data:image/placeholder`. Neither renders — a broken thumbnail is worse than
+// no thumbnail. A genuine inline data: image always carries a `,` before its
+// payload, so that is the discriminator.
 export const isRealPhotoUrl = (u: unknown): u is string =>
-  typeof u === 'string' && u.length > 0 && !u.startsWith('data:image/placeholder');
+  typeof u === 'string'
+  && u.length > 0
+  && !u.startsWith('data:image/placeholder')
+  && !(u.startsWith('data:') && !u.includes(','));
 
 export function linePhotos(line: PhotoBearingLine | null | undefined): LinePhoto[] {
   if (!line) return [];

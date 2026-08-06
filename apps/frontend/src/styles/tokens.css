@@ -676,3 +676,30 @@ button { font-family: inherit; cursor: pointer; }
 .lp-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
 .lp-add:disabled { opacity: 0.5; cursor: wait; }
 .lp-empty { font-size: 11.5px; color: var(--fg-subtle); margin-top: 6px; }
+
+/* ===== Market assist (PO capture) ===== */
+.mkt-assist {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.mkt-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--fg-subtle);
+}
+.mkt-age { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.mkt-age.stale { color: var(--warn); }
+.mkt-figs { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 9px; }
+.mkt-fig { display: flex; align-items: baseline; gap: 8px; }
+.mkt-k { font-size: 11.5px; color: var(--fg-muted); }
+.mkt-v { font-size: 14px; font-weight: 600; }
+.mkt-foot { font-size: 11px; color: var(--fg-subtle); margin-top: 8px; }
+.mkt-warn {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 9px; padding: 7px 9px; border-radius: 8px;
+  background: var(--warn-soft); color: var(--warn-strong, #92400e);
+  font-size: 11.5px; font-weight: 550;
+}
