@@ -1468,7 +1468,9 @@ function orderLineToEditLine(l: OrderLine): EditLine {
     chipNumber:     l.chipNumber ?? undefined,
     condition:      l.condition,
     qty:            l.qty,
-    unitCost:       l.unitCost,
+    // An unpriced line (purchaser raised it, manager prices it at Reviewing)
+    // opens the drawer blank rather than with a 0 to clear first.
+    unitCost:       l.unitCost || '',
     sellPrice:      l.sellPrice ?? undefined,
     scanImageId:    l.scanImageId ?? undefined,
     scanImageUrl:   l.scanImageUrl ?? undefined,
