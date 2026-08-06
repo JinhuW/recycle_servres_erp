@@ -675,7 +675,6 @@ button { font-family: inherit; cursor: pointer; }
 }
 .lp-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
 .lp-add:disabled { opacity: 0.5; cursor: wait; }
-.lp-empty { font-size: 11.5px; color: var(--fg-subtle); margin-top: 6px; }
 
 /* ===== Market assist (PO capture) ===== */
 .mkt-assist {
