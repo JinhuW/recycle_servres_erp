@@ -7,7 +7,7 @@ import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { committedSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
-  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields,
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
 import { UNTYPED_ITEM } from '@recycle-erp/shared';
@@ -221,25 +221,14 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
 ];
 
 // One plain worksheet per category present, fixed order, unknown categories
-// folded into Other (same recipe as the sell-order download). An empty result
-// still needs a valid file — fall back to a single header-only sheet.
+// folded into Other (same recipe as the sell-order download). The split itself
+// lives in lib/categoryColumns so the PO workbook — which now also spans
+// categories — uses the same one.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
   colsFor: (cat: ExportCategory) => XlsxColumn[],
 ): Promise<Buffer> {
-  const byCategory = new Map<string, Record<string, unknown>[]>();
-  for (const r of rows) {
-    const cat = exportCategory(r.category);
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat)!.push(r);
-  }
-  const sheets = CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
-    name: cat as string,
-    columns: colsFor(cat),
-    rows: byCategory.get(cat)!,
-  }));
-  if (sheets.length === 0) sheets.push({ name: 'Inventory', columns: colsFor('Other'), rows: [] });
-  return buildXlsxWorkbook(sheets);
+  return buildXlsxWorkbook(categoryTabSheets(rows, colsFor, { emptySheetName: 'Inventory' }));
 }
 
 inventory.get('/export', async (c) => {

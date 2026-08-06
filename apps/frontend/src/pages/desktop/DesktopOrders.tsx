@@ -14,6 +14,7 @@ import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
+import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
 // design's lifecycleTone helper.
@@ -517,7 +518,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                         </div>
                       </td>
                       <td style={{ display: isVis('category') ? undefined : 'none' }}>
-                        <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')}>{o.category}</span>
+                        <OrderCategoryChips categories={o.categories} max={2} />
                       </td>
                       <td className="muted" style={{ display: isVis('warehouse') ? undefined : 'none' }}>
                         {o.warehouse ? (

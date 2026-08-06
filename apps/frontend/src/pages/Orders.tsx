@@ -14,6 +14,7 @@ import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
 import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { OrderCategoryChips } from '../components/OrderCategoryChips';
 
 const realScan = (u?: string | null): u is string =>
   !!u && !u.startsWith('data:image/placeholder');
@@ -183,9 +184,7 @@ export function Orders({ onEdit, onToast }: Props) {
           return (
             <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }} style={o.archivedAt ? { opacity: 0.6 } : undefined}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
-                <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
-                  {o.category}
-                </span>
+                <OrderCategoryChips categories={o.categories} max={1} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{o.id}</span>

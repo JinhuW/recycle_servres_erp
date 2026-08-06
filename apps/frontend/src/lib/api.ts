@@ -186,15 +186,18 @@ export async function rawFetch(
   });
 }
 
+// The category is optional: an empty draft has no lines to derive one from,
+// and each line carries its own once they arrive.
 export const createDraftOrder = (
-  category: Category,
+  category?: Category,
   meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
-) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
+) => api.post<{ id: string }>('/api/orders/draft', { ...(category ? { category } : {}), ...meta });
 
 // Create a PO already carrying its first line(s). The desktop submit form uses
 // this so a draft is never written empty — the order is born with content.
 export const createOrder = (body: {
-  category: Category;
+  // Only a fallback for lines that don't name their own — a PO may mix them.
+  category?: Category;
   warehouseId?: string;
   payment?: OrderSummary['payment'];
   notes?: string | null;

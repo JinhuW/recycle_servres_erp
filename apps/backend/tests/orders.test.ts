@@ -34,19 +34,65 @@ describe('POST /api/orders defaults', () => {
     expect(got.body.order.lines[0].status).toBe('Draft');
   });
 
-  it('rejects mixed-category lines with 400', async () => {
+  it('accepts mixed-category lines and derives category = Mixed', async () => {
     const { token } = await loginAs(MARCUS);
-    const r = await api('POST', '/api/orders', {
+    const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
-        category: 'RAM',
         lines: [
           { category: 'RAM', qty: 1, unitCost: 10, condition: 'New' },
           { category: 'SSD', qty: 1, unitCost: 10, condition: 'New' },
         ],
       },
     });
+    expect(r.status).toBe(201);
+
+    const got = await api<{ order: { category: string; categories: string[]; lines: { category: string }[] } }>(
+      'GET', '/api/orders/' + r.body.id, { token },
+    );
+    expect(got.body.order.category).toBe('Mixed');
+    expect(got.body.order.categories).toEqual(['RAM', 'SSD']);
+    expect(got.body.order.lines.map(l => l.category).sort()).toEqual(['RAM', 'SSD']);
+  });
+
+  it('derives the sole category when every line agrees', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        lines: [
+          { category: 'SSD', qty: 1, unitCost: 10, condition: 'New' },
+          { category: 'SSD', qty: 2, unitCost: 12, condition: 'New' },
+        ],
+      },
+    });
+    expect(r.status).toBe(201);
+    const got = await api<{ order: { category: string; categories: string[] } }>(
+      'GET', '/api/orders/' + r.body.id, { token },
+    );
+    expect(got.body.order.category).toBe('SSD');
+    expect(got.body.order.categories).toEqual(['SSD']);
+  });
+
+  it('lets lines inherit a body-level category', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'HDD', lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    expect(r.status).toBe(201);
+    const got = await api<{ order: { category: string } }>('GET', '/api/orders/' + r.body.id, { token });
+    expect(got.body.order.category).toBe('HDD');
+  });
+
+  it('rejects a line with no category anywhere', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token,
+      body: { lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
+    });
     expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/category is required/);
   });
 });
 

@@ -7,11 +7,13 @@ import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../../lib/poTotals';
-import type { Order, OrderLine, Warehouse } from '../../lib/types';
+import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
   type Line, type DuplicatePartGroup,
 } from './DesktopSubmit';
+import { AddLineMenu } from './submit/AddLineMenu';
+import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
@@ -223,8 +225,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
 
-  const addLine = () => {
-    setLines(ls => [...ls, { ...blankLine(order.category), _dirty: true }]);
+  const addLine = (cat: Category) => {
+    setLines(ls => [...ls, { ...blankLine(cat), _dirty: true }]);
     setActiveIdx(lines.length);
   };
 
@@ -513,9 +515,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               borderRadius: 5, background: 'var(--bg-soft)',
               border: '1px solid var(--border)', whiteSpace: 'nowrap',
             }}>{order.id}</span>
-            <span className={'chip ' + (order.category === 'RAM' ? 'info' : order.category === 'SSD' ? 'pos' : order.category === 'HDD' ? 'cool' : 'warn')}>
-              {order.category}
-            </span>
+            <OrderCategoryChips categories={order.categories} max={3} />
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
             {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
@@ -588,15 +588,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         <div className="card-head">
           <div>
             <div className="card-title">{t('orderDetails')}</div>
-            <div className="card-sub">{t('orderContainsMultiple', { cat: order.category })}</div>
+            <div className="card-sub">{t('subOrderContainsMixed')}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span className="chip mono">{t('subUnitsCost', { n: totals.qty, cost: fmtUSD(totals.cost, locale) })}</span>
             <span className="chip mono">{order.id} · {t('subStatusEditing')}</span>
             {canEditOrder && (
-              <button className="btn accent" style={{ marginLeft: 'auto' }} onClick={addLine}>
-                <Icon name="plus" size={13} /> {t('subAddLine', { cat: order.category })}
-              </button>
+              <span style={{ marginLeft: 'auto' }}><AddLineMenu onAdd={addLine} /></span>
             )}
           </div>
         </div>
@@ -1484,6 +1482,9 @@ function editLineToPatch(l: EditLine, status?: string) {
   return {
     id:             l._id!,
     status,
+    // Sent so a recategorisation made in the drawer survives Save. Without it
+    // the backend keeps the stored category and silently drops the change.
+    category:       l.category,
     sellPrice:      sp == null || sp === '' ? null : Number(sp),
     qty:            Number(l.qty) || 0,
     unitCost:       Number(l.unitCost) || 0,

@@ -10,7 +10,9 @@ import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } fro
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
+import { AddLineMenu } from './submit/AddLineMenu';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
+import { usePreference } from '../../lib/preferences';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../../lib/ramRequired';
@@ -31,100 +33,16 @@ type Props = {
 
 export function DesktopSubmit({ onDone }: Props) {
   const { t } = useT();
-  const [cat, setCat] = useState<Category | null>(null);
-
-  if (!cat) {
-    return (
-      <>
-        <div className="page-head">
-          <div>
-            <h1 className="page-title">{t('submitNewOrder')}</h1>
-            <div className="page-sub">{t('submitNewOrderSub')}</div>
-          </div>
-        </div>
-
-        <div style={{ maxWidth: 720, margin: '24px auto 0' }}>
-          <div style={{
-            fontSize: 11, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12,
-          }}>
-            {t('chooseItemType')}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-            {([
-              { id: 'RAM',   icon: 'chip',  sub: t('ramSub'),   tag: t('aiLabelCapture') },
-              { id: 'SSD',   icon: 'drive', sub: t('ssdSub'),   tag: t('manualEntry') },
-              { id: 'HDD',   icon: 'drive', sub: t('hddSub'),   tag: t('manualEntry') },
-              { id: 'Other', icon: 'box',   sub: t('otherSub'), tag: t('manualEntry') },
-            ] as const).map(c => (
-              <button
-                key={c.id}
-                onClick={() => setCat(c.id as Category)}
-                className="card"
-                style={{
-                  padding: 22, display: 'flex', flexDirection: 'column',
-                  alignItems: 'flex-start', gap: 14,
-                  background: 'var(--bg-elev)', cursor: 'pointer',
-                  textAlign: 'left', fontFamily: 'inherit',
-                  border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                  transition: 'transform 0.12s, border-color 0.12s, box-shadow 0.12s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(15,23,42,0.06)'; }}
-                onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.borderColor = ''; e.currentTarget.style.boxShadow = ''; }}
-              >
-                <div style={{
-                  width: 44, height: 44, borderRadius: 10,
-                  background: 'var(--accent-soft)', color: 'var(--accent-strong)',
-                  display: 'grid', placeItems: 'center',
-                }}>
-                  <Icon name={c.icon} size={22} />
-                </div>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 17, marginBottom: 4 }}>{c.id}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>{c.sub}</div>
-                </div>
-                <span className={'chip ' + (c.id === 'RAM' ? 'pos' : '')} style={{ fontSize: 10 }}>
-                  {c.id === 'RAM' && <Icon name="sparkles" size={9} />} {c.tag}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div style={{ marginTop: 18, fontSize: 12, color: 'var(--fg-subtle)', textAlign: 'center' }}>
-            {t('multipleLineItems')}
-          </div>
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">{t('submitNewCatOrder', { cat })}</h1>
-          <div className="page-sub">
-            {t('submitNewCatOrderSub', { cat })}{' '}
-            <button
-              onClick={() => setCat(null)}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--accent-strong)', padding: 0,
-                fontSize: 'inherit', textDecoration: 'underline',
-                fontFamily: 'inherit',
-              }}
-            >
-              {t('changeItemType')}
-            </button>
-          </div>
+          <h1 className="page-title">{t('submitNewOrder')}</h1>
+          <div className="page-sub">{t('submitNewOrderSub')}</div>
         </div>
       </div>
 
-      <OrderForm
-        key={cat}
-        category={cat}
-        onCancel={() => setCat(null)}
-        onDone={onDone}
-      />
+      <OrderForm onDone={onDone} />
     </>
   );
 }
@@ -241,12 +159,8 @@ export function scanToLinePatch(scan: ScanResponse): Partial<Line> {
 }
 
 function OrderForm({
-  category,
-  onCancel,
   onDone,
 }: {
-  category: Category;
-  onCancel: () => void;
   onDone: (toast?: { msg: string; kind?: 'success' | 'error' }) => void;
 }) {
   const { t, lang } = useT();
@@ -259,7 +173,11 @@ function OrderForm({
       .catch(handleFetchError);
   }, []);
 
-  const [lines, setLines] = useState<Line[]>([blankLine(category)]);
+  // Which category the next line defaults to. Persisted so a purchaser who
+  // works through a pallet of drives doesn't re-pick on every session; the
+  // add control offers all four regardless, so this only sets the first line.
+  const [lastCat, setLastCat] = usePreference('submit.lastCategory', 'RAM');
+  const [lines, setLines] = useState<Line[]>([blankLine(lastCat as Category)]);
   const [activeIdx, setActiveIdx] = useState<number | null>(0);
   const [meta, setMeta] = useState<OrderMeta>({
     warehouseId: '',
@@ -326,19 +244,20 @@ function OrderForm({
   // Existing same-category Draft POs the user can append to instead of creating
   // a fresh PO. Fetched once on mount, before any order exists; excludeId keeps
   // this session's own order out of the list once it's been created.
+  // Any Draft PO of the user's own is a valid append target now that a PO may
+  // mix categories — there is nothing left for a category filter to protect.
   const [allDrafts, setAllDrafts] = useState<OrderSummary[]>([]);
   useEffect(() => {
     let alive = true;
-    api.get<{ orders: OrderSummary[] }>(`/api/orders?category=${category}&status=Draft`)
+    api.get<{ orders: OrderSummary[] }>('/api/orders?status=Draft')
       .then(r => { if (alive) setAllDrafts(r.orders); })
       .catch(() => { /* non-fatal: just means no "add to existing" option */ });
     return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category]);
+  }, []);
 
   const targets = useMemo(
-    () => eligibleDraftTargets(allDrafts, { category, meId: user?.id, excludeId: orderId }),
-    [allDrafts, category, user?.id, orderId],
+    () => eligibleDraftTargets(allDrafts, { meId: user?.id, excludeId: orderId }),
+    [allDrafts, user?.id, orderId],
   );
 
   // Default the warehouse to the first one once they load.
@@ -414,7 +333,7 @@ function OrderForm({
   // so they don't lose work by forgetting to press Confirm. If the active line
   // isn't ready yet, surface the reason and don't append — otherwise the user
   // ends up with a silent half-saved row.
-  const addLine = async () => {
+  const addLine = async (cat: Category) => {
     if (activeIdx != null) {
       const cur = lines[activeIdx];
       if (cur && !cur._confirmed) {
@@ -430,7 +349,8 @@ function OrderForm({
         }
       }
     }
-    setLines(ls => [...ls, blankLine(category)]);
+    setLastCat(cat);
+    setLines(ls => [...ls, blankLine(cat)]);
     setActiveIdx(lines.length);
   };
 
@@ -519,7 +439,7 @@ function OrderForm({
       await api.patch('/api/orders/' + orderId, { addLines: wireLines, ...m });
       return orderId;
     }
-    const r = await createOrder({ category, lines: wireLines, ...m });
+    const r = await createOrder({ lines: wireLines, ...m });
     setOrderId(r.id);
     return r.id;
   };
@@ -672,7 +592,7 @@ function OrderForm({
         <div className="card-head">
           <div>
             <div className="card-title">{t('orderDetails')}</div>
-            <div className="card-sub">{t('subOrderContainsMultiple', { cat: category })}</div>
+            <div className="card-sub">{t('subOrderContainsMixed')}</div>
           </div>
           <span className="chip mono">
             {(orderId ?? t('subDrafting'))} · {t('lifecycleDraft')}
@@ -690,14 +610,12 @@ function OrderForm({
               {t('subItemsInOrder')} <span style={{ fontWeight: 500, color: 'var(--fg-subtle)', marginLeft: 4 }}>({lines.length})</span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2 }}>
-              {t('subItemsClickRow', { cat: category })}
+              {t('subItemsClickRowAny')}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="chip mono">{t('subUnitsCost', { n: totals.units, cost: fmtUSD(totals.cost, locale) })}</span>
-            <button className="btn" onClick={addLine}>
-              <Icon name="plus" size={13} /> {t('subAddLine', { cat: category })}
-            </button>
+            <AddLineMenu onAdd={addLine} />
           </div>
         </div>
         {aiError && (
@@ -974,7 +892,9 @@ function OrderForm({
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+              {/* Leaves the form. Confirmed lines are already persisted to the
+                  draft, so nothing entered is lost — this is not a discard. */}
+              <button className="btn" onClick={() => onDone()}>{t('cancel')}</button>
               <button
                 className="btn accent"
                 disabled={!canSubmit || !meta.warehouseId || submitting}
@@ -1037,7 +957,7 @@ function OrderForm({
               <div className="card" style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{t('subChoiceExistingPo')}</div>
                 <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 2, marginBottom: 10 }}>
-                  {t('subChoiceExistingPoSub', { cat: category })}
+                  {t('subChoiceExistingPoSubAny')}
                 </div>
                 <div style={{ display: 'grid', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
                   {targets.map(o => {

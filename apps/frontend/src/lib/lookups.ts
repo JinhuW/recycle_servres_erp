@@ -77,6 +77,16 @@ export function categoryFilterOptions(): string[] {
   return ['all', ...categories.filter(c => c.enabled).map(c => c.id)];
 }
 
+/**
+ * Categories a new line may be filed under. Falls back to the built-in four
+ * before the lookups fetch lands, so the add control is never empty on first
+ * paint — the backend re-checks `enabled` on write either way.
+ */
+export function addableCategories(): string[] {
+  const enabled = categories.filter(c => c.enabled).map(c => c.id);
+  return enabled.length ? enabled : ['RAM', 'SSD', 'HDD', 'Other'];
+}
+
 type LookupsResponse = {
   catalog: Record<string, string[]>;
   priceSources: PriceSource[];

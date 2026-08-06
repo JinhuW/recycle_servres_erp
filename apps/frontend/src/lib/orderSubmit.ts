@@ -7,7 +7,7 @@
 //     originals the user removed.
 //   - Finalizing a new draft (`draftId` set): PATCH the draft, appending the
 //     lines that weren't already autosaved.
-import type { Category, DraftLine } from './types';
+import type { DraftLine } from './types';
 
 export type SubmitMeta = {
   warehouseId: string;
@@ -22,7 +22,6 @@ export type SubmitMeta = {
 export type SubmitState = {
   editingId?: string | null;
   draftId?: string;
-  category: Category;
   lines: DraftLine[];
   // DB ids of the lines present when an existing order was opened for edit.
   // Used to compute which lines the user removed.
