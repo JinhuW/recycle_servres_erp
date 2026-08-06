@@ -14,6 +14,8 @@ import { showErrorToast } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../lib/ramRequired';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { MarketAssist } from '../components/MarketAssist';
+import { useMarketLookup } from '../lib/useMarketLookup';
 
 type Props = {
   category: Category;
@@ -156,6 +158,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !thumbBroken;
 
   const snCount = parseSerials(line.serialNumber).length;
+  const marketFor = useMarketLookup([line.partNumber]);
 
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
     setLine(prev => ({ ...prev, [k]: v }));
@@ -466,7 +469,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             (always shown so a purchaser can enter the negotiated bulk total
             instead of computing per-unit). Sell price only appears in edit
             mode, matching the desktop drawer. */}
-        <div className="ph-field-row" style={{ gridTemplateColumns: isEditing ? '1fr 1fr 1fr' : '1fr 1fr' }}>
+        <div className="ph-field-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
           <div className="ph-field">
             <label>{t('unitCost')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
             <input
@@ -502,23 +505,35 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               }}
             />
           </div>
-          {isEditing && (
-            <div className="ph-field">
-              <label>{t('sellPrice')}</label>
-              <input
-                className="input mono"
-                type="number"
-                step="0.01"
-                min={0}
-                value={line.sellPrice ?? ''}
-                placeholder="—"
-                onChange={e => set('sellPrice', e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
-              />
-            </div>
-          )}
+          <div className="ph-field">
+            <label>{t('sellPrice')}</label>
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              value={line.sellPrice ?? ''}
+              placeholder="—"
+              onChange={e => set('sellPrice', e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+            />
+          </div>
         </div>
 
-        {isEditing && (() => {
+        {/* Same recorded-market panel the desktop drawer shows — the phone is
+            where most capture actually happens, so it needs the buy guidance
+            more, not less. */}
+        <MarketAssist
+          market={marketFor(line.partNumber)}
+          unitCost={line.unitCost || 0}
+          locale={locale}
+          // costRaw is what the input actually renders, so applying a price has
+          // to move both — same pairing the total-cost field does above.
+          onUseMaxBuy={v => { set('unitCost', v); setCostRaw(String(v)); }}
+          onUseSellPrice={v => set('sellPrice', v)}
+        />
+
+        {(isEditing || line.sellPrice != null) && (() => {
           const qty = line.qty || 0;
           const cost = line.unitCost || 0;
           const sell = line.sellPrice ?? 0;

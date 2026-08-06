@@ -12,6 +12,8 @@ import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
 import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../../../lib/lineCategorySwitch';
 import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhotoStrip';
 import { linePhotos, type LinePhoto } from '../../../lib/linePhotos';
+import { MarketAssist } from '../../../components/MarketAssist';
+import { type MarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
@@ -23,7 +25,7 @@ import { parseSerials } from '../../../components/SerialNumbers';
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
-  photoCtx,
+  photoCtx, market,
 }: {
   line: Line;
   idx: number;
@@ -42,6 +44,9 @@ export function LineDrawer({
   // Where this line's photos live. `lineId` is null until the line is
   // persisted, in which case files are buffered by the parent and uploaded
   // once the id exists — the same deferral the order-level evidence uses.
+  // Recorded market value for this line's part number, if the parent looked
+  // one up. Optional so surfaces that don't fetch it still render.
+  market?: MarketValue | null;
   photoCtx?: {
     orderId: string | null;
     lineId: string | null;
@@ -468,7 +473,7 @@ export function LineDrawer({
 
             <div style={{
               display: 'grid',
-              gridTemplateColumns: editing ? '90px 1fr 1fr 1fr' : '120px 1fr 1fr',
+              gridTemplateColumns: '90px 1fr 1fr 1fr',
               gap: 14, alignItems: 'end',
               padding: 14, background: 'var(--bg-soft)', borderRadius: 10,
             }}>
@@ -509,22 +514,33 @@ export function LineDrawer({
                   placeholder="0.00"
                 />
               </div>
-              {editing && (
-                <div className="field">
-                  <label className="label">{t('sellUnit')}</label>
-                  <input
-                    className="input mono"
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={line.sellPrice ?? ''}
-                    onChange={e => set({ sellPrice: e.target.value })}
-                    placeholder="0.00"
-                  />
-                </div>
-              )}
+              <div className="field">
+                <label className="label">{t('sellUnit')}</label>
+                <input
+                  className="input mono"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={line.sellPrice ?? ''}
+                  onChange={e => set({ sellPrice: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
             </div>
-            {editing && (
+
+            {/* What the recorded market says, while the buy can still change.
+                Rendered below the cost fields so the numbers it offers sit
+                next to the ones they'd replace. */}
+            <MarketAssist
+              market={market ?? null}
+              unitCost={cost}
+              locale={locale}
+              disabled={readOnly}
+              onUseMaxBuy={v => set({ unitCost: String(v), totalCost: undefined })}
+              onUseSellPrice={v => set({ sellPrice: String(v) })}
+            />
+
+            {(editing || line.sellPrice != null) && (
               <div style={{
                 display: 'flex', gap: 18, fontSize: 12, color: 'var(--fg-subtle)',
                 padding: '0 4px', flexWrap: 'wrap',

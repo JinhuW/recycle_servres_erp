@@ -2286,3 +2286,12 @@ html.desktop, body.desktop, .desktop #root {
   margin-left: auto; flex-shrink: 0; background: none; border: none; padding: 0;
   color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer;
 }
+
+/* Coverage line under the PO ledger: says which lines the profit above covers,
+   so a low figure reads as "not priced yet" rather than "losing money". */
+.oe-ledger-coverage {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  padding: 6px 18px 12px;
+  grid-column: 1 / -1;
+}

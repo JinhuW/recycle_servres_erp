@@ -259,6 +259,7 @@ function Shell() {
   // Maps a DraftLine to the wire shape for PATCH /api/orders/:id addLines.
   const toWireLine = (l: DraftLine) => ({
     category: l.category,
+    sellPrice: l.sellPrice == null ? null : Number(l.sellPrice),
     brand: l.brand ?? null,
     capacity: l.capacity ?? null,
     type: l.type ?? null,

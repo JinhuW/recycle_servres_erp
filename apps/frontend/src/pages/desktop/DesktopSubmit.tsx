@@ -13,6 +13,7 @@ import { LineDrawer } from './submit/LineDrawer';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { usePreference } from '../../lib/preferences';
+import { useMarketLookup } from '../../lib/useMarketLookup';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../../lib/ramRequired';
@@ -358,6 +359,10 @@ function OrderForm({
     setMovedToFees(overflow);
   };
 
+  // One batched lookup for every part number on the form, so the drawer can
+  // show what the part is worth while the buy price is still being decided.
+  const marketFor = useMarketLookup(lines.map(l => l.partNumber));
+
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   const dupByIdx = useMemo(() => {
     const m = new Map<number, number[]>();
@@ -450,6 +455,7 @@ function OrderForm({
   // Maps a local Line to the wire shape expected by PATCH /api/orders/:id addLines.
   const toWireLine = (l: Line) => ({
     category: l.category,
+    sellPrice: l.sellPrice == null || l.sellPrice === '' ? null : Number(l.sellPrice),
     brand: l.brand ?? null,
     capacity: l.capacity ?? null,
     type: l.type ?? null,
@@ -987,6 +993,7 @@ function OrderForm({
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
+          market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
             orderId,
             lineId: lines[activeIdx]._dbId ?? null,
