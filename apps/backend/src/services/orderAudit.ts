@@ -22,6 +22,8 @@ export type EventKind =
   | 'line_edited'
   | 'meta_changed'
   | 'status_meta_changed'
+  | 'line_photo_added'
+  | 'line_photo_removed'
   | 'archived'
   | 'unarchived';
 

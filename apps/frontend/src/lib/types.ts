@@ -29,7 +29,19 @@ export type Warehouse = {
   active?: boolean; // false = archived: hidden from every UI surface (DB row kept)
 };
 
+export type LinePhoto = {
+  id: string;
+  url: string;
+  source: 'scan' | 'upload';
+  filename?: string | null;
+  mime?: string | null;
+  uploadedAt?: string | null;
+};
+
 export type OrderLine = {
+  // Merged AI-scan + uploaded photos. Read it through lib/linePhotos, which
+  // also synthesizes the scan entry for payloads that predate this field.
+  photos?: LinePhoto[];
   id: string;
   category: Category;
   brand: string | null;

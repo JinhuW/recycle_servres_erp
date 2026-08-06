@@ -14,6 +14,7 @@ import {
 } from './DesktopSubmit';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
+import { linePhotos, uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
@@ -22,8 +23,7 @@ import { StatusChangeDialog, type StatusAttachment } from '../../components/Stat
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 
-const realScan = (u?: string | null): u is string =>
-  !!u && !u.startsWith('data:image/placeholder');
+
 
 // `order.status` is derived from the SET of line statuses and collapses to
 // 'Mixed' when a (still-open) order's lines disagree — e.g. a draft whose
@@ -145,6 +145,34 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  // Photos upload immediately here: unlike the submit screen, every line on an
+  // existing order already has a DB id to attach them to.
+  const addLinePhotos = async (idx: number, files: FileList | null) => {
+    const l = lines[idx];
+    const picked = Array.from(files ?? []).filter(f => f.type.startsWith('image/'));
+    if (!l?._id || !picked.length) return;
+    setPhotoBusy(true);
+    try {
+      for (const f of picked) {
+        try {
+          const r = await uploadLinePhoto(order.id, l._id, f);
+          setLines(ls => ls.map((x, j) => (j === idx ? { ...x, photos: [...(x.photos ?? []), r.photo] } : x)));
+        } catch { showErrorToast(t('linePhotoUploadFailed')); }
+      }
+    } finally { setPhotoBusy(false); }
+  };
+
+  const removeLinePhoto = async (idx: number, photo: LinePhoto) => {
+    const l = lines[idx];
+    if (!l?._id) return;
+    try {
+      await deleteLinePhoto(order.id, l._id, photo.id);
+      setLines(ls => ls.map((x, j) =>
+        (j === idx ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x)));
+    } catch { showErrorToast(t('linePhotoDeleteFailed')); }
+  };
   // Line ids that exist in the DB. Seeded from the server's set and grown by
   // the drawer's Confirm-line write-through — `order.lines` is a snapshot from
   // page load and never learns about those, so a line added+confirmed and then
@@ -637,24 +665,39 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {realScan(l.scanImageUrl) && (
-                          <button
-                            type="button"
-                            onClick={e => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
-                            title={t('aiPhotoLabel')}
-                            style={{
-                              width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-                              border: '1px solid var(--border)', overflow: 'hidden',
-                              padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                            }}
-                          >
-                            <img
-                              src={l.scanImageUrl}
-                              alt={t('aiPhotoLabel')}
-                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                            />
-                          </button>
-                        )}
+                        {(() => {
+                          // Any line may carry photos now, not just the RAM
+                          // ones an AI scan happened to produce. Shows the
+                          // first with a +N when there are more.
+                          const shots = linePhotos(l);
+                          if (!shots.length) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); setLightboxUrl(shots[0].url); }}
+                              title={t('linePhotos')}
+                              style={{
+                                width: 40, height: 40, borderRadius: 8, flexShrink: 0, position: 'relative',
+                                border: '1px solid var(--border)', overflow: 'hidden',
+                                padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                              }}
+                            >
+                              <img
+                                src={shots[0].url}
+                                alt={t('linePhotos')}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                              />
+                              {shots.length > 1 && (
+                                <span style={{
+                                  position: 'absolute', right: 0, bottom: 0,
+                                  background: 'rgba(15,23,42,0.72)', color: 'white',
+                                  fontSize: 9, fontWeight: 700, padding: '1px 4px',
+                                  borderTopLeftRadius: 5,
+                                }}>+{shots.length - 1}</span>
+                              )}
+                            </button>
+                          );
+                        })()}
                         <div style={{ minWidth: 0 }}>
                           {filled ? (
                             <>
@@ -1247,6 +1290,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onConfirmError={showErrorToast}
           duplicateOnLines={dupByIdx.get(activeIdx)}
           readOnly={!canEditOrder}
+          photoCtx={{
+            orderId: order.id,
+            // A line added in this session isn't persisted until Save, so it
+            // has no id to hang a photo off yet — the strip goes read-only
+            // rather than silently dropping the file.
+            lineId: lines[activeIdx]._id ?? null,
+            pending: [],
+            onAddFiles: files => void addLinePhotos(activeIdx, files),
+            onRemovePending: () => { /* nothing is buffered on this screen */ },
+            onRemoveSaved: photo => void removeLinePhoto(activeIdx, photo),
+            busy: photoBusy,
+          }}
         />
       )}
 
@@ -1450,6 +1505,7 @@ function orderLineToEditLine(l: OrderLine): EditLine {
     _id:            l.id,
     _status:        l.status,
     category:       l.category,
+    photos:         l.photos ?? [],
     brand:          l.brand ?? undefined,
     capacity:       l.capacity ?? undefined,
     type:           l.type ?? undefined,

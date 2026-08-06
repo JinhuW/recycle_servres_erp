@@ -16,6 +16,7 @@ import {
   type ExportCategory,
 } from '../lib/categoryColumns';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
+import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
   synthesizePartNumber, serialIssue, staleSpecDbCols, type SerialIssue,
 } from '@recycle-erp/shared';
@@ -338,6 +339,26 @@ orders.get('/:id', async (c) => {
     SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
     FROM order_status_attachments WHERE order_id = ${id} ORDER BY uploaded_at
   `;
+  // One flat select stitched in JS rather than a lateral per line — same shape
+  // as the status-meta rows above.
+  const photoRows = await sql`
+    SELECT id, order_line_id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+    FROM order_line_photos WHERE order_id = ${id}
+    ORDER BY order_line_id, position, uploaded_at
+  `;
+  const photosByLine = new Map<string, LinePhoto[]>();
+  for (const p of photoRows) {
+    const key = p.order_line_id as string;
+    if (!photosByLine.has(key)) photosByLine.set(key, []);
+    photosByLine.get(key)!.push({
+      id: p.id as string,
+      url: p.delivery_url as string,
+      source: 'upload',
+      filename: p.filename as string,
+      mime: p.mime_type as string,
+      uploadedAt: String(p.uploaded_at),
+    });
+  }
   const statusMeta: Record<string, {
     note: string | null; when: string;
     attachments: { id: string; filename: string; size: number; mime: string; url: string; uploadedAt: string }[];
@@ -379,6 +400,7 @@ orders.get('/:id', async (c) => {
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
+        photos: linePhotos(l, photosByLine.get(l.id as string)),
         brand: l.brand,
         capacity: l.capacity,
         generation: l.generation,
@@ -658,6 +680,10 @@ orders.post('/', async (c) => {
   // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
+  // Returned so the client can attach per-line photos, which are buffered
+  // locally until the line it belongs to actually exists. Aligned 1:1 with
+  // the request's `lines` ordering, the same contract PATCH's addedLineIds has.
+  const newLineIds: string[] = [];
   let derived: { category: string | null; categories: string[] } = { category: null, categories: [] };
   await sql.begin(async (tx) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
@@ -675,7 +701,7 @@ orders.post('/', async (c) => {
     `;
     for (let i = 0; i < body.lines.length; i++) {
       const l = body.lines[i];
-      await tx`
+      const inserted = await tx`
         INSERT INTO order_lines (
           order_id, category, brand, capacity, generation, type, classification, rank, speed,
           interface, form_factor, description, item_type, part_number, serial_number, chip_number, condition, qty,
@@ -690,7 +716,9 @@ orders.post('/', async (c) => {
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
         )
-      `;
+        RETURNING id
+      ` as { id: string }[];
+      newLineIds.push(inserted[0].id);
     }
     await autoTrackParts(tx, body.lines.map((l, i) => ({
       category: lineCats[i],
@@ -724,7 +752,7 @@ orders.post('/', async (c) => {
     });
   });
 
-  return c.json({ id: newId }, 201);
+  return c.json({ id: newId, lineIds: newLineIds }, 201);
 });
 
 // ── Edit — update order meta + line item details. The order owner
@@ -1057,6 +1085,13 @@ orders.patch('/:id', async (c) => {
         ` as { id: string; category: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
         removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
         for (const r of doomed) if (r.scan_image_id) removedScanKeys.push(r.scan_image_id);
+        // Read before the DELETE cascades the rows away. Same list as the scan
+        // keys, so the existing post-commit sweep covers both.
+        const doomedPhotos = await tx`
+          SELECT storage_key FROM order_line_photos
+          WHERE order_line_id = ANY(${body.removeLineIds}::uuid[])
+        ` as { storage_key: string }[];
+        for (const p of doomedPhotos) removedScanKeys.push(p.storage_key);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
       }
       if (Array.isArray(body.lines)) {
@@ -1333,7 +1368,7 @@ orders.delete('/:id', async (c) => {
     | { kind: 'forbidden' }
     | { kind: 'notDraft' }
     | { kind: 'sold' }
-    | { kind: 'ok'; scanned: { scan_image_id: string }[] };
+    | { kind: 'ok'; scanned: { k: string }[] };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const existing = (await tx`
@@ -1350,10 +1385,13 @@ orders.delete('/:id', async (c) => {
     `)[0];
     if (sold) return { kind: 'sold' };
 
+    // Both R2 sources for this order: label scans and explicit line photos.
     const scanned = await tx`
-      SELECT scan_image_id FROM order_lines
+      SELECT scan_image_id AS k FROM order_lines
       WHERE order_id = ${id} AND scan_image_id IS NOT NULL
-    ` as { scan_image_id: string }[];
+      UNION ALL
+      SELECT storage_key AS k FROM order_line_photos WHERE order_id = ${id}
+    ` as { k: string }[];
 
     await tx`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
     return { kind: 'ok', scanned };
@@ -1366,9 +1404,9 @@ orders.delete('/:id', async (c) => {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
   }
 
-  // Best-effort: drop the label-scan images from R2 too (after the commit).
+  // Best-effort: drop the images from R2 too (after the commit).
   for (const r of outcome.scanned) {
-    await deleteAttachment(c.env, r.scan_image_id).catch(e => console.error('r2 delete (order deleted)', e));
+    await deleteAttachment(c.env, r.k).catch(e => console.error('r2 delete (order deleted)', e));
   }
 
   return c.json({ ok: true });
@@ -1598,6 +1636,153 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   // R2 delete outside the tx — slow side effect, kept out of the lock window.
   // Best-effort.
   await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  return c.json({ ok: true });
+});
+
+// ─── Per-line photos ───────────────────────────────────────────────────────
+// A picture of the actual goods, attached to one line. Distinct from the
+// order-level Submission evidence above (that is the receipt for the whole
+// PO) and from the AI label scan (that is a by-product of OCR, and only RAM
+// lines ever get one). Any line may carry photos.
+const LINE_PHOTO_CAP = 6;
+
+// order_lines.id is uuid-typed, so a mangled id would make Postgres throw and
+// 500 the route rather than 404 cleanly.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The purchaser who raised the PO photographs the goods, and pictures keep
+// arriving after it has moved to In Transit — so ownership lasts until Done,
+// mirroring the Submission-evidence rule in canWriteMeta.
+function canWritePhotos(u: User, order: { user_id: string; lifecycle: string }): boolean {
+  if (effectiveRole(u) === 'manager') return true;
+  return order.user_id === u.id && order.lifecycle !== 'done';
+}
+
+// Resolves the order + verifies the line belongs to it. A lineId from another
+// order must 404, not silently attach across POs.
+async function loadPhotoTarget(
+  sql: ReturnType<typeof getDb>,
+  orderId: string,
+  lineId: string,
+): Promise<{ user_id: string; lifecycle: string } | null> {
+  if (!UUID_RE.test(lineId)) return null;
+  const order = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${orderId} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
+  if (!order) return null;
+  const line = (await sql`
+    SELECT 1 FROM order_lines WHERE id = ${lineId}::uuid AND order_id = ${orderId} LIMIT 1
+  `)[0];
+  return line ? order : null;
+}
+
+orders.post('/:id/lines/:lineId/photos', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const lineId = c.req.param('lineId');
+  const sql = getDb(c.env);
+
+  const order = await loadPhotoTarget(sql, id, lineId);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (!canWritePhotos(u, order)) return c.json({ error: 'Forbidden' }, 403);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+
+  // Images only. The workspace allow-list also permits PDF/XLSX for receipts,
+  // but a spreadsheet is not a photo of a DIMM — narrowing here keeps the
+  // thumbnail grid renderable, the same way routes/scan.ts does.
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  if (!file.type || !file.type.startsWith('image/') || !allowedMime.has(file.type)) {
+    return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
+  }
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
+  }
+
+  // No maybeRenameReceipt — that AI rename reads payment receipts, and these
+  // are pictures of hardware.
+  const uploaded = await uploadAttachment(c.env, fitted, `orders/${id}/lines/${lineId}`)
+    .catch(e => { console.error('line photo upload', e); return null; });
+  if (!uploaded) return c.json({ error: 'upload failed' }, 502);
+
+  try {
+    const row = await sql.begin(async (tx) => {
+      // Serialise concurrent uploads on the parent line — two racing requests
+      // would otherwise both see room under the cap and both insert. The lock
+      // goes on order_lines because FOR UPDATE can't be combined with the
+      // aggregate below.
+      await tx`SELECT 1 FROM order_lines WHERE id = ${lineId}::uuid FOR UPDATE`;
+      const existing = (await tx`
+        SELECT COALESCE(MAX(position), -1) AS max_pos, COUNT(*)::int AS n
+        FROM order_line_photos WHERE order_line_id = ${lineId}::uuid
+      `)[0] as { max_pos: number; n: number };
+      if (existing.n >= LINE_PHOTO_CAP) throw new Error('__PHOTO_CAP__');
+      const r = (await tx`
+        INSERT INTO order_line_photos
+          (order_line_id, order_id, filename, size_bytes, mime_type, storage_key, delivery_url, position, uploaded_by)
+        VALUES
+          (${lineId}::uuid, ${id}, ${fitted.name}, ${fitted.size},
+           ${fitted.type || 'image/jpeg'},
+           ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${existing.max_pos + 1}, ${u.id})
+        RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      `)[0];
+      await writeOrderEvent(tx, id, u.id, 'line_photo_added', {
+        lineId, photoId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+      });
+      return r;
+    });
+    return c.json({
+      photo: {
+        id: row.id, url: row.delivery_url, source: 'upload',
+        filename: row.filename, size: row.size_bytes, mime: row.mime_type,
+        uploadedAt: row.uploaded_at,
+      },
+    });
+  } catch (e) {
+    if ((e as { message?: string })?.message?.includes('__PHOTO_CAP__')) {
+      // The object is already in R2; drop it rather than leave an orphan the
+      // row would have owned.
+      await deleteAttachment(c.env, uploaded.storageKey).catch(() => { /* best-effort */ });
+      return c.json({ error: `at most ${LINE_PHOTO_CAP} photos per line` }, 409);
+    }
+    throw e;
+  }
+});
+
+orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const lineId = c.req.param('lineId');
+  const photoId = c.req.param('photoId');
+  const sql = getDb(c.env);
+
+  // A scan-sourced photo is addressed as `scan:<key>`, which is not a UUID —
+  // it belongs to label_scans and is removed by re-scanning, not from here.
+  if (!UUID_RE.test(photoId)) return c.json({ error: 'Not found' }, 404);
+
+  const order = await loadPhotoTarget(sql, id, lineId);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (!canWritePhotos(u, order)) return c.json({ error: 'Forbidden' }, 403);
+
+  const removed = await sql.begin(async (tx) => {
+    const row = (await tx`
+      SELECT storage_key, filename FROM order_line_photos
+      WHERE id = ${photoId}::uuid AND order_line_id = ${lineId}::uuid AND order_id = ${id}
+      LIMIT 1
+    `)[0] as { storage_key: string; filename: string } | undefined;
+    if (!row) return null;
+    await tx`DELETE FROM order_line_photos WHERE id = ${photoId}::uuid`;
+    await writeOrderEvent(tx, id, u.id, 'line_photo_removed', {
+      lineId, photoId, filename: row.filename,
+    });
+    return row;
+  });
+
+  if (!removed) return c.json({ error: 'Not found' }, 404);
+  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete (line photo)', e));
   return c.json({ ok: true });
 });
 

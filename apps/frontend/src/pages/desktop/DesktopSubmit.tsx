@@ -17,6 +17,8 @@ import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../../lib/ramRequired';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
+import { type PendingPhoto } from '../../components/LinePhotoStrip';
+import { uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
 
 // ─── Public component ────────────────────────────────────────────────────────
 // Two-step submit flow lifted from design/submit.jsx + design/app.jsx#SubmitView:
@@ -79,6 +81,10 @@ export type Line = {
   scanImageUrl?: string | null;
   _confirmed?: boolean;
   _cid: string;                  // stable client id for React keys (never sent to the API)
+  // DB id, once the line has been persisted. Null before that — which is why
+  // photos are buffered rather than uploaded as they're picked.
+  _dbId?: string | null;
+  photos?: LinePhoto[];
 };
 
 // Extensions and MIME types both: Safari populates neither consistently on
@@ -187,6 +193,54 @@ function OrderForm({
     otherFees: '',
     otherFeesNote: '',
   });
+
+  // Photos picked before their line exists. Keyed by _cid because that is the
+  // only stable handle a line has before it is persisted; flushed by
+  // flushPhotos once the DB id lands. Mirrors the evidenceFiles deferral below.
+  const [pendingPhotos, setPendingPhotos] = useState<Record<string, PendingPhoto[]>>({});
+  const [photoBusy, setPhotoBusy] = useState(false);
+  useEffect(() => () => {
+    for (const list of Object.values(pendingPhotos)) for (const p of list) URL.revokeObjectURL(p.url);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addPendingPhotos = (cid: string, files: FileList | null) => {
+    const picked = Array.from(files ?? []).filter(f => f.type.startsWith('image/'));
+    if (!picked.length) return;
+    setPendingPhotos(prev => ({
+      ...prev,
+      [cid]: [...(prev[cid] ?? []), ...picked.map(f => ({ file: f, url: URL.createObjectURL(f) }))],
+    }));
+  };
+  const removePendingPhoto = (cid: string, p: PendingPhoto) => {
+    URL.revokeObjectURL(p.url);
+    setPendingPhotos(prev => ({ ...prev, [cid]: (prev[cid] ?? []).filter(x => x !== p) }));
+  };
+
+  // Upload whatever was buffered for this line, now that it has an id.
+  // Non-fatal: the line itself is already saved, so a failed photo is a
+  // warning, not a lost line.
+  const flushPhotos = async (cid: string, poId: string, lineId: string): Promise<void> => {
+    const queued = pendingPhotos[cid];
+    if (!queued?.length) return;
+    setPhotoBusy(true);
+    const saved: LinePhoto[] = [];
+    try {
+      for (const p of queued) {
+        try {
+          const r = await uploadLinePhoto(poId, lineId, p.file);
+          saved.push(r.photo);
+          URL.revokeObjectURL(p.url);
+        } catch { setAiError(t('linePhotoUploadFailed')); }
+      }
+    } finally {
+      setPhotoBusy(false);
+    }
+    setPendingPhotos(prev => { const next = { ...prev }; delete next[cid]; return next; });
+    if (saved.length) {
+      setLines(ls => ls.map(l => (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l)));
+    }
+  };
 
   // Order-level error banner — populated by submit/confirm failures. AI scan
   // failures live inside the LineDrawer, alongside the dropzone that produces
@@ -434,14 +488,18 @@ function OrderForm({
   // PO is therefore never written — if the first POST fails, orderId stays null
   // and a retry creates it fresh. Returns the resolved id so callers can chain
   // (e.g. evidence upload).
-  const persistLines = async (wireLines: ReturnType<typeof toWireLine>[], m: WireMeta): Promise<string> => {
+  const persistLines = async (
+    wireLines: ReturnType<typeof toWireLine>[],
+    m: WireMeta,
+  ): Promise<{ orderId: string; lineIds: string[] }> => {
     if (orderId) {
-      await api.patch('/api/orders/' + orderId, { addLines: wireLines, ...m });
-      return orderId;
+      const r = await api.patch<{ ok: true; addedLineIds?: string[] }>(
+        '/api/orders/' + orderId, { addLines: wireLines, ...m });
+      return { orderId, lineIds: r.addedLineIds ?? [] };
     }
     const r = await createOrder({ lines: wireLines, ...m });
     setOrderId(r.id);
-    return r.id;
+    return { orderId: r.id, lineIds: r.lineIds ?? [] };
   };
 
   const wireMeta = (): WireMeta => ({
@@ -473,8 +531,12 @@ function OrderForm({
       // drawer open for the fix instead of closing on apparent success.
       throw new Error(t('serialCheckTitle'));
     }
-    await persistLines([toWireLine(l)], wireMeta());
-    updateLine(idx, { _confirmed: true });
+    const saved = await persistLines([toWireLine(l)], wireMeta());
+    const dbId = saved.lineIds[0] ?? null;
+    updateLine(idx, { _confirmed: true, _dbId: dbId });
+    // The line only just acquired an id, so this is the first moment its
+    // buffered photos can be attached to anything.
+    if (dbId) void flushPhotos(l._cid, saved.orderId, dbId);
     // A successful confirm supersedes any banner left by an earlier failed
     // attempt on this line (e.g. the serial-check throw above).
     setAiError(null);
@@ -492,7 +554,11 @@ function OrderForm({
     try {
       // Creates the PO if no line was ever confirmed (single-line straight
       // submit); otherwise appends any still-unconfirmed lines + refreshes meta.
-      const finalId = await persistLines(unconfirmedLines.map(toWireLine), wireMeta());
+      const saved = await persistLines(unconfirmedLines.map(toWireLine), wireMeta());
+      const finalId = saved.orderId;
+      // Same deferral as a per-line confirm, for lines submitted without one.
+      await Promise.all(unconfirmedLines.map((l, i) =>
+        saved.lineIds[i] ? flushPhotos(l._cid, finalId, saved.lineIds[i]) : Promise.resolve()));
       if (evidenceFiles.length > 0) {
         const ok = await uploadEvidence(finalId);
         onDone(ok
@@ -921,6 +987,23 @@ function OrderForm({
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
+          photoCtx={{
+            orderId,
+            lineId: lines[activeIdx]._dbId ?? null,
+            pending: pendingPhotos[lines[activeIdx]._cid] ?? [],
+            onAddFiles: files => addPendingPhotos(lines[activeIdx]._cid, files),
+            onRemovePending: p => removePendingPhoto(lines[activeIdx]._cid, p),
+            onRemoveSaved: async photo => {
+              const l = lines[activeIdx];
+              if (!orderId || !l._dbId) return;
+              try {
+                await deleteLinePhoto(orderId, l._dbId, photo.id);
+                setLines(ls => ls.map(x =>
+                  x._cid === l._cid ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x));
+              } catch { setAiError(t('linePhotoDeleteFailed')); }
+            },
+            busy: photoBusy,
+          }}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={setAiError}
           duplicateOnLines={dupByIdx.get(activeIdx)}

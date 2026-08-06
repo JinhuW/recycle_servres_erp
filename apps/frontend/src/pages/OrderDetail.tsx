@@ -10,6 +10,7 @@ import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
+import { primaryPhoto } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { handleFetchError, showErrorToast } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
@@ -27,8 +28,9 @@ const LIFECYCLE_STATUS: Record<string, string> = {
   done: 'Done',
 };
 
-const realScan = (u?: string | null): u is string =>
-  !!u && !u.startsWith('data:image/placeholder');
+// Shared with the desktop shell so the two can't disagree on what counts as
+// a real photo — the stub R2 fallback emits a data: URL that renders broken.
+const firstPhoto = (l: Parameters<typeof primaryPhoto>[0]) => primaryPhoto(l);
 
 type Props = {
   order: Order;
@@ -406,11 +408,11 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             <div key={l.id} className="ph-line">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
-                {realScan(l.scanImageUrl) && (
+                {firstPhoto(l) && (
                   <button
                     type="button"
-                    onClick={() => setLightboxUrl(l.scanImageUrl!)}
-                    title={t('aiPhotoLabel')}
+                    onClick={() => setLightboxUrl(firstPhoto(l)!.url)}
+                    title={t('linePhotos')}
                     style={{
                       width: 40, height: 40, borderRadius: 8, flexShrink: 0,
                       border: '1px solid var(--border)', overflow: 'hidden',
@@ -418,8 +420,8 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                     }}
                   >
                     <img
-                      src={l.scanImageUrl}
-                      alt={t('aiPhotoLabel')}
+                      src={firstPhoto(l)!.url}
+                      alt={t('linePhotos')}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     />
                   </button>
