@@ -36,13 +36,27 @@ import { findDuplicateLine } from './lib/dupParts';
 
 type ReturnTo = 'idle' | 'review';
 
+// Everything the review screen owns, carried through the category sheet so an
+// "add another" that gets cancelled can put the session back exactly as it was.
+type LineCtx = {
+  lines: DraftLine[];
+  editingId?: string | null;
+  originalLineIds?: string[];
+  draftId?: string;
+};
+
 type CaptureState =
   | { phase: 'idle' }
-  | { phase: 'category' }
-  | { phase: 'draftPicker'; category: Category; drafts: OrderSummary[] }
+  // ctx null → a fresh session; non-null → adding another line to one already
+  // open, which must be handed back intact if the sheet is cancelled.
+  | { phase: 'category'; ctx: LineCtx | null }
+  | { phase: 'draftPicker'; category: Category; drafts: OrderSummary[] }   // category = the first line's, held across resume-or-new
   | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
-  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; draftId?: string };
+  // Review holds a heterogeneous list, so it has no single category — each
+  // line carries its own. `camera` and `form` keep theirs: they edit ONE line,
+  // and both the scan endpoint and the field groups need to know which kind.
+  | { phase: 'review';  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; draftId?: string };
 
 type Toast = { msg: string; kind: 'success' | 'error' };
 
@@ -150,7 +164,7 @@ function Shell() {
   }, []);
 
   // ── Capture flow handlers ────────────────────────────────────────────────
-  const startSubmit = () => setCapture({ phase: 'category' });
+  const startSubmit = () => setCapture({ phase: 'category', ctx: null });
   const cancelCapture = () => {
     // Best-effort delete an abandoned empty draft (nothing confirmed = no real
     // inventory rows were written). Safe: backend 409s if lifecycle != 'draft'.
@@ -170,13 +184,25 @@ function Shell() {
     }
   };
 
-  // Probe for in-progress drafts in this category before silently spawning a
-  // fresh one. Without this gate every scan session piles up another empty
-  // draft on the server.
+  // Probe for in-progress drafts before silently spawning a fresh one. Without
+  // this gate every scan session piles up another empty draft on the server.
+  // Not category-scoped: a PO may mix categories, so any open draft of the
+  // user's own can take this line.
   const pickCategory = async (cat: Category) => {
+    // Adding to a session already underway skips the probe entirely — the
+    // draft it belongs to is already open.
+    if (capture.phase === 'category' && capture.ctx) {
+      const ctx = capture.ctx;
+      setCapture({
+        phase: 'form', category: cat, detected: null,
+        lines: ctx.lines, editingId: ctx.editingId, originalLineIds: ctx.originalLineIds,
+        editingLineIdx: null, returnTo: 'review', draftId: ctx.draftId,
+      });
+      return;
+    }
     try {
       const r = await api.get<{ orders: OrderSummary[] }>(
-        `/api/orders?category=${encodeURIComponent(cat)}&status=Draft&limit=20`,
+        '/api/orders?status=Draft&limit=20&mine=true',
       );
       if (r.orders.length > 0) {
         setCapture({ phase: 'draftPicker', category: cat, drafts: r.orders });
@@ -191,7 +217,9 @@ function Shell() {
 
   const startNewDraft = (cat: Category) => {
     setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
-    draftIdPromise.current = createDraftOrder(cat)
+    // No category on the draft: it has no lines to derive one from yet, and the
+    // first line will carry its own.
+    draftIdPromise.current = createDraftOrder()
       .then(r => {
         setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id });
         return r.id;
@@ -281,7 +309,6 @@ function Shell() {
     // Move to review immediately (optimistic UI).
     setCapture({
       phase: 'review',
-      category,
       detected: null,
       lines: newLines,
       editingId,
@@ -360,10 +387,16 @@ function Shell() {
     }
   };
 
-  const addAnotherItem = () => {
+  // `cat` comes from the four-button row on the review screen, so adding a
+  // different kind of item is still one tap. Called without one (the header
+  // link) it opens the picker sheet, carrying the session so cancelling it
+  // returns to the list rather than discarding the draft.
+  const addAnotherItem = (cat?: Category) => {
     setCapture(c => {
       if (c.phase !== 'review') return c;
-      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, editingLineIdx: null, returnTo: 'review', draftId: c.draftId };
+      const ctx = { lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, draftId: c.draftId };
+      if (!cat) return { phase: 'category', ctx };
+      return { phase: 'form', category: cat, detected: null, ...ctx, editingLineIdx: null, returnTo: 'review' };
     });
   };
 
@@ -372,7 +405,8 @@ function Shell() {
       if (c.phase !== 'review') return c;
       return {
         phase: 'form',
-        category: c.category,
+        // From the LINE, not the session — the list is mixed.
+        category: c.lines[idx]?.category ?? 'RAM',
         detected: null,
         lines: c.lines,
         editingId: c.editingId,
@@ -388,7 +422,7 @@ function Shell() {
     setCapture(c => {
       if (c.phase !== 'camera' && c.phase !== 'form') return c;
       if (c.returnTo === 'review') {
-        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, draftId: c.draftId };
+        return { phase: 'review', detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, draftId: c.draftId };
       }
       return { phase: 'idle' };
     });
@@ -421,7 +455,6 @@ function Shell() {
       {
         editingId: capture.editingId,
         draftId: capture.draftId,
-        category: capture.category,
         lines: capture.lines,
         originalLineIds: capture.originalLineIds,
       },
@@ -451,7 +484,6 @@ function Shell() {
   const startEdit = (o: Order) => {
     setCapture({
       phase: 'review',
-      category: o.category,
       detected: null,
       editingId: o.id,
       originalLineIds: o.lines.map(l => l.id),
@@ -554,7 +586,6 @@ function Shell() {
     return (
       <>
         <OrderReview
-          category={capture.category}
           lines={capture.lines}
           editingId={capture.editingId}
           onAddItem={addAnotherItem}
@@ -604,7 +635,16 @@ function Shell() {
       )}
 
       {capture.phase === 'category' && (
-        <PhCategorySheet onPick={pickCategory} onClose={cancelCapture} />
+        <PhCategorySheet
+          onPick={pickCategory}
+          onClose={() => {
+            // Adding another item to an open session: cancelling means "never
+            // mind", not "discard the draft". Hand the lines back to review.
+            const ctx = capture.phase === 'category' ? capture.ctx : null;
+            if (ctx) setCapture({ phase: 'review', detected: null, ...ctx });
+            else cancelCapture();
+          }}
+        />
       )}
 
       {capture.phase === 'draftPicker' && (

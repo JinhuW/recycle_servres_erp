@@ -2254,3 +2254,35 @@ html.desktop, body.desktop, .desktop #root {
 @media (prefers-reduced-motion: reduce) {
   .ac-area, .ac-row { transition: none; }
 }
+
+/* ===== Add-line control (PO submit + edit) =====
+   Four equal category buttons rather than one primary that names a category —
+   a PO is not in a category mode, and a button labelled "Add RAM" reads as
+   though it were. */
+.add-line-bar {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 3px 3px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.add-line-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-right: 2px;
+}
+.add-line-cat { gap: 6px; font-weight: 600; }
+.add-line-cat:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+.add-line-swatch { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+
+/* Category selector at the top of the line drawer. */
+.dw-cat-switch { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.dw-cat-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; font-size: 11.5px;
+  background: var(--warn-soft); color: var(--warn-strong, #92400e);
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, transparent);
+}
+.dw-cat-note button {
+  margin-left: auto; flex-shrink: 0; background: none; border: none; padding: 0;
+  color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer;
+}

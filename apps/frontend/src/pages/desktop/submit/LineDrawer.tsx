@@ -4,11 +4,13 @@ import { ImageLightbox } from '../../../components/ImageLightbox';
 import { api } from '../../../lib/api';
 import { fmtUSD } from '../../../lib/format';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
-import type { ScanResponse } from '../../../lib/types';
+import type { Category, ScanResponse } from '../../../lib/types';
 import type { Line } from '../DesktopSubmit';
 import { scanToLinePatch } from '../DesktopSubmit';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
+import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../../../lib/lineCategorySwitch';
+import { addableCategories } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
@@ -39,6 +41,8 @@ export function LineDrawer({
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [confirming, setConfirming] = useState(false);
   const cat = line.category;
+  // Pre-switch snapshot for the undo, held only until the next switch or save.
+  const [undo, setUndo] = useState<{ line: Line; cleared: string[] } | null>(null);
   const set = (patch: Partial<Line>) => onChange(patch);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -361,6 +365,45 @@ export function LineDrawer({
                 style={{ maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)', marginBottom: 12 }}
               />
             )}
+            {/* A line filed under the wrong category is corrected here rather
+                than deleted and retyped. Switching blanks the fields the old
+                category owned — announced with an undo, since the values are
+                gone from the form the moment the select changes. */}
+            <div className="dw-cat-switch">
+              <label className="label" htmlFor={`dw-cat-${idx}`}>{t('category')}</label>
+              <select
+                id={`dw-cat-${idx}`}
+                className="select"
+                value={cat}
+                disabled={readOnly}
+                onChange={e => {
+                  const next = e.target.value as Category;
+                  if (next === cat) return;
+                  const cleared = clearedBySwitch(line as unknown as Record<string, unknown>, next);
+                  setUndo(cleared.length ? { line, cleared } : null);
+                  onChange(switchLineCategory(line, next) as Partial<Line>);
+                }}
+              >
+                {addableCategories().map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              {undo && (
+                <div className="dw-cat-note" role="status">
+                  <Icon name="alert" size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                  <span>
+                    {t('drawerCatCleared', {
+                      fields: undo.cleared
+                        .map(f => t(SPEC_FIELD_LABEL_KEY[f] ?? f))
+                        .join(lang === 'zh' ? '、' : ', '),
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { onChange(undo.line); setUndo(null); }}
+                  >{t('undo')}</button>
+                </div>
+              )}
+            </div>
+
             {cat === 'RAM' && <RamFields line={line} set={set} />}
             {cat === 'SSD' && <SsdFields line={line} set={set} />}
             {cat === 'HDD' && <HddFields line={line} set={set} />}

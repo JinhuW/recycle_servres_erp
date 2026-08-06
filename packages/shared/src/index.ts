@@ -4,3 +4,4 @@ export * from "./partNumberSynth.js";
 export * from "./activity.js";
 export * from "./serials.js";
 export * from "./itemTypes.js";
+export * from "./lineSpecFields.js";

@@ -59,6 +59,41 @@ export function exportCategory(v: unknown): ExportCategory {
     : 'Other';
 }
 
+export type CategorySheet = { name: string; columns: XlsxColumn[]; rows: Record<string, unknown>[] };
+
+// One worksheet per category present, in CATEGORY_ORDER, unknown categories
+// folded into Other. The spec column sets are disjoint, so a sheet holding two
+// categories would silently drop the off-sheet ones' specs — exceljs renders
+// only the keys its column set declares.
+//
+// `singleSheetName`, when given, keeps a uniform result on ONE sheet under that
+// name: the PO workbook must stay byte-identical for a single-category order.
+// An empty result still needs a valid file, so it falls back to that sheet too.
+export function categoryTabSheets(
+  rows: Record<string, unknown>[],
+  colsFor: (cat: ExportCategory) => XlsxColumn[],
+  opts: { singleSheetName?: string; emptySheetName: string },
+): CategorySheet[] {
+  const byCategory = new Map<ExportCategory, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const cat = exportCategory(r.category);
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat)!.push(r);
+  }
+  const present = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
+  if (present.length === 0) {
+    return [{ name: opts.emptySheetName, columns: colsFor('Other'), rows: [] }];
+  }
+  if (present.length === 1 && opts.singleSheetName) {
+    return [{ name: opts.singleSheetName, columns: colsFor(present[0]), rows: byCategory.get(present[0])! }];
+  }
+  return present.map((cat) => ({
+    name: cat as string,
+    columns: colsFor(cat),
+    rows: byCategory.get(cat)!,
+  }));
+}
+
 // Maps a raw order_lines row onto the spec keys above. Every key is emitted
 // unconditionally — exceljs renders only the keys the selected column set
 // declares, which keeps callers branch-free. Numeric attrs stay null (not 0)

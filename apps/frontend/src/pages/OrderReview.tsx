@@ -9,6 +9,15 @@ import { handleFetchError, showErrorToast } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
+import { addableCategories } from '../lib/lookups';
+
+// Matches the chip tones used for categories elsewhere in the app.
+const CAT_TINT: Record<string, string> = {
+  RAM: 'var(--info)',
+  SSD: 'var(--pos)',
+  HDD: 'var(--cool, oklch(0.58 0.13 305))',
+  Other: 'var(--warn)',
+};
 
 /** Strip thousands-separator commas, then parse — handles "1,234.56" correctly. */
 const parseDecimal = (s: string) => {
@@ -17,10 +26,10 @@ const parseDecimal = (s: string) => {
 };
 
 type Props = {
-  category: Category;
   lines: DraftLine[];
   editingId?: string | null;
-  onAddItem: () => void;
+  /** Called with the category to add. Omitted → open the picker sheet. */
+  onAddItem: (cat?: Category) => void;
   onEditLine: (idx: number) => void;
   onRemoveLine: (idx: number) => void;
   onSubmit: (payload: {
@@ -31,7 +40,7 @@ type Props = {
 };
 
 export function OrderReview({
-  category, lines, editingId,
+  lines, editingId,
   onAddItem, onEditLine, onRemoveLine,
   onSubmit, onCancel,
 }: Props) {
@@ -112,8 +121,8 @@ export function OrderReview({
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
         <div className="ph-section-h" style={{ paddingTop: 10 }}>
-          <span>{t('lineItems', { cat: category })}</span>
-          <span className="more" onClick={onAddItem} style={{ cursor: 'pointer' }}>{t('addAnother')}</span>
+          <span>{t('products')}</span>
+          <span className="more" onClick={() => onAddItem()} style={{ cursor: 'pointer' }}>{t('addAnother')}</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -163,19 +172,37 @@ export function OrderReview({
           ))}
         </div>
 
-        <button
-          onClick={onAddItem}
-          style={{
-            width: '100%', marginTop: 10, padding: 12,
-            background: 'transparent',
-            border: '1.5px dashed var(--border-strong)',
-            borderRadius: 12, color: 'var(--fg-muted)',
-            fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-          }}
-        >
-          <Icon name="plus" size={14} /> {t('addAnotherCat', { cat: category })}
-        </button>
+        {/* One target per category. A single "Add another RAM" button would put
+            the old category lock back in the user's head — the PO is not in a
+            mode, and every kind has to look equally available. */}
+        <div style={{ marginTop: 14 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.09em',
+            textTransform: 'uppercase', color: 'var(--fg-subtle)', marginBottom: 8,
+          }}>
+            {t('addToThisOrder')}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
+            {addableCategories().map(cat => (
+              <button
+                key={cat}
+                onClick={() => onAddItem(cat as Category)}
+                aria-label={t('subAddCatLine', { cat })}
+                style={{
+                  minHeight: 54, borderRadius: 13,
+                  border: '1.5px dashed ' + (CAT_TINT[cat] ?? 'var(--border-strong)'),
+                  background: 'var(--bg-elev)', color: CAT_TINT[cat] ?? 'var(--fg-muted)',
+                  fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
+                  display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
+                  padding: '6px 2px', cursor: 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 15, lineHeight: 1, opacity: 0.75 }}>+</span>
+                <span>{cat}</span>
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="ph-section-h"><span>{t('orderDetails')}</span></div>
         <div className="ph-field" style={{ marginTop: 0 }}>

@@ -398,7 +398,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
         </div>
 
         <div className="ph-section-h">
-          <span>{t('lineItems', { cat: order.category })} · {order.lines.length}</span>
+          <span>{t('products')} · {order.lines.length}</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

@@ -65,7 +65,13 @@ export type OrderSummary = {
   userName: string;
   userInitials: string;
   commissionRate: number | null;
-  category: Category;
+  // Derived from the lines: the sole category when they agree, 'Mixed' when
+  // they don't. Widened from `Category` for that reason — render chips from
+  // `categories` rather than switching on this.
+  category: string;
+  // Every category the order's lines hold, in display order. Empty on a draft
+  // with no lines yet.
+  categories: Category[];
   payment: 'company' | 'self';
   notes: string | null;
   lifecycle: string;

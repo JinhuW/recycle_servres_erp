@@ -12,9 +12,13 @@ import { effectiveRole } from '../lib/role';
 import { getUploadLimits } from '../lib/settings';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import {
-  SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, type ExportCategory,
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
+  type ExportCategory,
 } from '../lib/categoryColumns';
-import { synthesizePartNumber, serialIssue, type SerialIssue } from '@recycle-erp/shared';
+import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
+import {
+  synthesizePartNumber, serialIssue, staleSpecDbCols, type SerialIssue,
+} from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -43,6 +47,27 @@ function serialErr(label: string, issue: SerialIssue): string {
   return issue.kind === 'ddr5Required'
     ? `${label}: DDR5 RAM lines require serial numbers`
     : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
+}
+
+// Every category a write touches must exist and be enabled. Checked per line
+// rather than once per order — a PO may span categories — and only over the
+// categories the request actually names, so a category disabled after the fact
+// can't retro-block an unrelated edit to a legacy line.
+async function assertCategoriesEnabled(
+  sql: ReturnType<typeof getDb>,
+  cats: readonly string[],
+): Promise<string | null> {
+  const wanted = [...new Set(cats.filter(Boolean))];
+  if (wanted.length === 0) return null;
+  const rows = await sql<{ id: string; enabled: boolean }[]>`
+    SELECT id, enabled FROM categories WHERE id = ANY(${wanted})
+  `;
+  const known = new Map(rows.map(r => [r.id, r.enabled]));
+  for (const cat of wanted) {
+    if (!known.has(cat)) return `unknown category: ${cat}`;
+    if (!known.get(cat)) return `category ${cat} is disabled`;
+  }
+  return null;
 }
 
 // An `Other` line has no spec fields to identify it, so its type carries the
@@ -138,7 +163,13 @@ orders.get('/', async (c) => {
   const scopeFrag    = isManager && !mineOnly
     ? sql`TRUE`
     : sql`o.user_id = ${u.id}`;
-  const categoryFrag = category ? sql`o.category = ${category}` : sql`TRUE`;
+  // Matched against the LINES, not the order header: a PO may mix categories,
+  // and header-matching would hide every mixed PO from every chip. Served by
+  // order_lines_category_order_idx (migration 0083). A zero-line draft matches
+  // no category, which is correct — it contains nothing.
+  const categoryFrag = category
+    ? sql`EXISTS (SELECT 1 FROM order_lines ocf WHERE ocf.order_id = o.id AND ocf.category = ${category})`
+    : sql`TRUE`;
   // The mobile filter chip sends the order's stage label — map to lifecycle.
   // Filtering on per-line status (an earlier design) silently hid empty drafts
   // and drafts whose lines had already advanced past 'Draft'.
@@ -200,7 +231,11 @@ orders.get('/', async (c) => {
       -- line of the PO, so the shares would sum to o.other_fees anyway.
       (COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)
          - o.other_fees)::float                                                     AS profit,
-      COUNT(l.id)::int                                                              AS line_count
+      COUNT(l.id)::int                                                              AS line_count,
+      -- The row chip needs every category present, not just the derived header
+      -- value, so a mixed PO can show what it actually holds. Free here: the
+      -- query already groups by o.id over the joined lines.
+      ARRAY_REMOVE(ARRAY_AGG(DISTINCT l.category), NULL)                            AS categories
     FROM orders o
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
@@ -230,6 +265,7 @@ orders.get('/', async (c) => {
       userInitials: r.user_initials,
       commissionRate: r.commission_rate,
       category: r.category,
+      categories: sortCategories((r.categories as string[] | null) ?? []),
       payment: r.payment,
       notes: r.notes,
       lifecycle: r.lifecycle,
@@ -325,6 +361,7 @@ orders.get('/:id', async (c) => {
       userName: order.user_name,
       userInitials: order.user_initials,
       category: order.category,
+      categories: sortCategories([...new Set(lines.map(l => l.category as string).filter(Boolean))]),
       payment: order.payment,
       notes: order.notes,
       lifecycle: order.lifecycle,
@@ -425,12 +462,14 @@ const fmtTs = (v: unknown): string =>
 // A Payment tab with the header/payment fields, and a Line items tab with the
 // costed lines. Reuses the shared exceljs builder.
 //
-// The line columns are the order category's full spec set — the same table the
+// The line columns are a category's full spec set — the same table the
 // inventory export renders — so a RAM PO carries rank/gen/speed/chip # in their
 // own sortable columns. There is deliberately no composed `Item` label column:
 // once every attribute has its own cell it only repeated them, unsorted.
-// An order is single-category (enforced on create), so one column set covers
-// the whole sheet.
+//
+// The sets are disjoint, so a PO spanning categories splits into one sheet per
+// category (categoryTabSheets). A single-category PO keeps its one 'Line items'
+// sheet exactly as before.
 const PO_LINE_TAIL_COLS: XlsxColumn[] = [
   { header: 'Serial #',   key: 'serial',    width: 24 },
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -505,6 +544,9 @@ orders.get('/:id/spreadsheet', async (c) => {
     const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
       ...lineSpecFields(l),
+      // Read by categoryTabSheets to pick the sheet; not a declared column on
+      // any of them, so it never renders.
+      category: l.category,
       serial: String(l.serial_number ?? ''),
       qty,
       unitCost,
@@ -519,6 +561,11 @@ orders.get('/:id/spreadsheet', async (c) => {
       profit: sellPrice != null ? +(qty * (sellPrice - effUnitCost(unitCost))).toFixed(2) : null,
     };
   });
+
+  // Derived from the LINES, so a legacy PO whose header disagrees with its sole
+  // line still renders that line's columns.
+  const lineCats = [...new Set(lines.map(l => exportCategory(l.category)))]
+    .sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b));
 
   const goodsCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
   const totalCost = +(goodsCost + otherFees).toFixed(2);
@@ -536,7 +583,7 @@ orders.get('/:id/spreadsheet', async (c) => {
     { field: 'Date',                  value: fmtTs(order.created_at).slice(0, 10) },
     { field: 'Status',                value: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle) },
     { field: 'Buyer',                 value: String(order.user_name ?? '') },
-    { field: 'Category',              value: String(order.category ?? '') },
+    { field: 'Category',              value: lineCats.length > 1 ? lineCats.join(' · ') : String(order.category ?? '') },
     { field: 'Warehouse',             value: warehouse },
     { field: 'Payment method',        value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
     { field: 'Total quantity',        value: totalQty },
@@ -555,7 +602,10 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const buf = await buildXlsxWorkbook([
     { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows },
-    { name: 'Line items', columns: poLineCols(exportCategory(order.category)), rows: lineRows },
+    ...categoryTabSheets(lineRows, poLineCols, {
+      singleSheetName: 'Line items',
+      emptySheetName: 'Line items',
+    }),
   ]);
   return xlsxResponse(buf, `${order.id}.xlsx`);
 });
@@ -566,7 +616,10 @@ orders.post('/', async (c) => {
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
     | {
-        category: LineCategory;
+        // Optional since a PO may mix categories: it is only a fallback for
+        // lines that don't name their own. The stored order category is
+        // derived from the lines (see syncOrderCategory).
+        category?: LineCategory;
         warehouseId?: string;
         payment?: 'company' | 'self';
         notes?: string;
@@ -576,37 +629,36 @@ orders.post('/', async (c) => {
         lines: LineInput[];
       }
     | null;
-  if (!body || !body.category || !Array.isArray(body.lines) || body.lines.length === 0) {
-    return c.json({ error: 'category and at least one line are required' }, 400);
+  if (!body || !Array.isArray(body.lines) || body.lines.length === 0) {
+    return c.json({ error: 'at least one line is required' }, 400);
   }
-  // An order is single-category: every line must match the order category
-  // (a line may omit its category and inherit the order's). Completes the
-  // intent of the lifecycle-default fix (parallel commit 64b885d).
-  if (!body.lines.every(l => !l.category || l.category === body.category)) {
-    return c.json({ error: 'all lines must match the order category' }, 400);
+  const lineCats: string[] = [];
+  for (let i = 0; i < body.lines.length; i++) {
+    const cat = body.lines[i].category ?? body.category;
+    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    lineCats.push(cat);
   }
 
-  // Enforce the category exists and is enabled (prd-gaps categories table).
-  const catRow = (await sql<{ enabled: boolean }[]>`
-    SELECT enabled FROM categories WHERE id = ${body.category} LIMIT 1
-  `)[0];
-  if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
-  if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
+  // Every category a line claims must exist and be enabled — checked per line,
+  // not once on the order, now that one PO can span several.
+  const catErr = await assertCategoriesEnabled(sql, lineCats);
+  if (catErr) return c.json({ error: catErr }, 400);
 
   const feeErr = badFees(body);
   if (feeErr) return c.json({ error: feeErr }, 400);
 
   for (let i = 0; i < body.lines.length; i++) {
     const l = body.lines[i];
-    const issue = serialIssue({ ...l, category: l.category ?? body.category });
+    const issue = serialIssue({ ...l, category: lineCats[i] });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? body.category, l);
+    const labelErr = itemTypeErr(`line ${i + 1}`, lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
 
   // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
+  let derived: { category: string | null; categories: string[] } = { category: null, categories: [] };
   await sql.begin(async (tx) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
@@ -615,7 +667,7 @@ orders.post('/', async (c) => {
         other_fees, other_fees_note, lifecycle
       )
       VALUES (
-        ${newId}, ${u.id}, ${body.category},
+        ${newId}, ${u.id}, ${deriveCategory(lineCats) ?? lineCats[0]},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
@@ -630,19 +682,19 @@ orders.post('/', async (c) => {
           unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
           health, rpm
         ) VALUES (
-          ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
+          ${newId}, ${lineCats[i]}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-          ${resolvePartNumber(l.category ?? body.category, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
+          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
           ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
         )
       `;
     }
-    await autoTrackParts(tx, body.lines.map(l => ({
-      category: l.category ?? body.category,
-      partNumber: resolvePartNumber(l.category ?? body.category, l),
+    await autoTrackParts(tx, body.lines.map((l, i) => ({
+      category: lineCats[i],
+      partNumber: resolvePartNumber(lineCats[i], l),
       brand: l.brand,
       capacity: l.capacity,
       type: l.type,
@@ -656,10 +708,15 @@ orders.post('/', async (c) => {
       rpm: l.rpm,
     })));
 
+    // Written before the event so `created` carries the value the order
+    // actually ended up with rather than whatever the client proposed.
+    derived = await syncOrderCategory(tx, newId);
+
     // Baseline of the timeline. Without it a freshly-created PO reads as an
     // order with no history at all until someone submits it.
     await writeOrderEvent(tx, newId, u.id, 'created', {
-      category: body.category,
+      category: derived.category,
+      categories: derived.categories,
       lineCount: body.lines.length,
       qty: body.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
       totalCost: body.totalCost ?? null,
@@ -680,6 +737,10 @@ orders.post('/', async (c) => {
 //   addLines:       new line rows to INSERT (no `id`)
 //   removeLineIds:  ids to DELETE (will 409 if referenced by sell_order_lines)
 type LineFields = {
+  // Editable: a line filed under the wrong category is corrected in place
+  // rather than deleted and retyped. Switching clears the spec fields the old
+  // category owned — see staleSpecDbCols.
+  category?: LineCategory;
   sellPrice?: number | null;
   qty?: number;
   unitCost?: number;
@@ -704,6 +765,25 @@ type LineFields = {
   scanConfidence?: number | null;
 };
 type LinePatch = LineFields & { id: string };
+
+// The stored shape PATCH reads before writing: enough to merge a patch against
+// (category/serial/item-type rules) and to tell a synthetic part number from a
+// typed one when a line changes category.
+type StoredLine = {
+  id: string;
+  category: string | null;
+  generation: string | null;
+  qty: number;
+  serial_number: string | null;
+  item_type: string | null;
+  part_number: string | null;
+  brand: string | null;
+  capacity: string | null;
+  interface: string | null;
+  form_factor: string | null;
+  speed: string | null;
+  rpm: number | null;
+};
 
 orders.patch('/:id', async (c) => {
   const u = c.var.user;
@@ -792,6 +872,15 @@ orders.patch('/:id', async (c) => {
   // actually CHANGES serial/qty/generation. The edit forms echo every field
   // back on save, so a mere "touched" test would retro-block price/status
   // edits on legacy serial-less lines.
+  // Only the categories this request actually names. An untouched legacy line
+  // whose category was disabled since must not block a price edit elsewhere.
+  const patchedCats = [
+    ...(body.addLines ?? []).map(l => l.category).filter(Boolean),
+    ...(body.lines ?? []).map(l => l.category).filter(Boolean),
+  ] as string[];
+  const patchCatErr = await assertCategoriesEnabled(sql, patchedCats);
+  if (patchCatErr) return c.json({ error: patchCatErr }, 400);
+
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
     const issue = serialIssue({
@@ -803,43 +892,57 @@ orders.patch('/:id', async (c) => {
     const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? (existing.category as string), l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
-  // Existing lines are checked only when the patch actually carries the field.
-  // Lines predating item types hold NULL, and a status or price edit must not
-  // retro-block on them — but an edit that submits the field blank is a real
-  // attempt to clear it.
-  if (existing.category === 'Other') {
-    for (const l of body.lines ?? []) {
-      if (l.itemType === undefined) continue;
-      const labelErr = itemTypeErr(`line ${l.id}`, 'Other', l);
+
+  // One pre-read covering both the item-type and the serial rules. Each is
+  // evaluated against the line's OWN category merged with the patch — the
+  // order's category is derived from its lines and says nothing about any
+  // individual one.
+  const patchIds = (body.lines ?? []).map(l => l.id);
+  const storedById = new Map<string, StoredLine>();
+  if (patchIds.length) {
+    const rows = await sql`
+      SELECT id, category, generation, qty, serial_number, item_type, part_number,
+             brand, capacity, interface, form_factor, speed, rpm
+      FROM order_lines
+      WHERE order_id = ${id} AND id = ANY(${patchIds}::uuid[])
+    ` as StoredLine[];
+    for (const r of rows) storedById.set(r.id, r);
+  }
+
+  for (const l of body.lines ?? []) {
+    const row = storedById.get(l.id);
+    if (!row) continue; // unknown ids no-op in the UPDATE below too
+    const mergedCat = l.category ?? row.category ?? undefined;
+
+    // Checked when the patch carries the item type, and when it moves the line
+    // between categories — switching INTO Other without naming a type in the
+    // same patch would otherwise land an unidentifiable line. Lines predating
+    // item types hold NULL, so an untouched one is left alone.
+    if (l.itemType !== undefined || l.category !== undefined) {
+      const merged = l.itemType !== undefined ? l : { itemType: row.item_type };
+      const labelErr = itemTypeErr(`line ${l.id}`, mergedCat, merged);
       if (labelErr) return c.json({ error: labelErr }, 400);
     }
-  }
-  const serialTouched = (body.lines ?? []).filter(
-    l => l.serialNumber != null || l.qty != null || l.generation != null,
-  );
-  if (serialTouched.length) {
-    const rows = await sql`
-      SELECT id, category, generation, qty, serial_number
-      FROM order_lines
-      WHERE order_id = ${id} AND id = ANY(${serialTouched.map(l => l.id)}::uuid[])
-    ` as { id: string; category: string | null; generation: string | null; qty: number; serial_number: string | null }[];
-    const byId = new Map(rows.map(r => [r.id, r]));
-    for (const l of serialTouched) {
-      const row = byId.get(l.id);
-      if (!row) continue; // unknown ids no-op in the UPDATE below too
-      const merged = {
-        generation: l.generation ?? row.generation,
-        qty: l.qty ?? row.qty,
-        serialNumber: l.serialNumber ?? row.serial_number,
-      };
-      const changes =
-        (merged.generation ?? null) !== (row.generation ?? null) ||
-        Number(merged.qty) !== Number(row.qty) ||
-        (merged.serialNumber ?? '') !== (row.serial_number ?? '');
-      if (!changes) continue;
-      const issue = serialIssue({ category: row.category, ...merged });
-      if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
-    }
+
+    // Generation belongs to RAM alone, so a line leaving RAM has it cleared —
+    // evaluate the post-clear value, or switching a DDR5 line to SSD would
+    // still demand serials for a generation the line no longer has.
+    const clearing = l.category !== undefined && l.category !== row.category
+      ? new Set(staleSpecDbCols(l.category))
+      : new Set<string>();
+    const merged = {
+      generation: clearing.has('generation') ? null : (l.generation ?? row.generation),
+      qty: l.qty ?? row.qty,
+      serialNumber: l.serialNumber ?? row.serial_number,
+    };
+    const changes =
+      l.category !== undefined && l.category !== row.category ||
+      (merged.generation ?? null) !== (row.generation ?? null) ||
+      Number(merged.qty) !== Number(row.qty) ||
+      (merged.serialNumber ?? '') !== (row.serial_number ?? '');
+    if (!changes) continue;
+    const issue = serialIssue({ category: mergedCat ?? null, ...merged });
+    if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
   }
 
   // R2 keys of label scans whose lines get removed — deleted after the tx
@@ -899,7 +1002,7 @@ orders.patch('/:id', async (c) => {
       const editIds = Array.isArray(body.lines) ? body.lines.map(l => l.id) : [];
       const linesBefore = editIds.length
         ? await tx`
-            SELECT id, status, qty, brand, capacity, type, generation, classification,
+            SELECT id, status, qty, category, brand, capacity, type, generation, classification,
                    rank, speed, interface, form_factor, description, item_type, part_number,
                    serial_number, chip_number, condition, rpm,
                    unit_cost::float AS unit_cost,
@@ -910,7 +1013,7 @@ orders.patch('/:id', async (c) => {
       const beforeMap = new Map<string, Record<string, unknown>>(
         linesBefore.map(l => [l.id as string, l as Record<string, unknown>]));
 
-      let removedSnapshots: Array<{ id: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+      let removedSnapshots: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
 
       const touchesOrder =
         body.totalCost !== undefined ||
@@ -949,15 +1052,52 @@ orders.patch('/:id', async (c) => {
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
-          SELECT id, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
+          SELECT id, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
-        ` as { id: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
-        removedSnapshots = doomed.map(r => ({ id: r.id, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
+        ` as { id: string; category: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
+        removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
         for (const r of doomed) if (r.scan_image_id) removedScanKeys.push(r.scan_image_id);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
       }
       if (Array.isArray(body.lines)) {
-        for (const l of body.lines) {
+        for (let l of body.lines) {
+          const stored = storedById.get(l.id);
+          // Clear-then-apply. A line moving to a new category first has the old
+          // category's spec columns NULLed (the COALESCE update below can only
+          // write values, never clear them), then the normal update re-applies
+          // whatever the patch carries for the new one.
+          if (stored && l.category !== undefined && l.category !== stored.category) {
+            const stale = staleSpecDbCols(l.category);
+            if (stale.length) {
+              await tx`
+                UPDATE order_lines SET ${tx(Object.fromEntries(stale.map(col => [col, null])))}
+                WHERE id = ${l.id} AND order_id = ${id}
+              `;
+            }
+            // A synthetic part number describes the specs of the category it was
+            // built from, so it has to be rebuilt — while a typed/OCR one is the
+            // manufacturer's and stays. Never written back as NULL: inventory
+            // grouping and reference pricing are both keyed on this column.
+            const wasSynthetic = !!stored.part_number
+              && stored.part_number === synthesizePartNumber(stored.category ?? '', {
+                brand: stored.brand, capacity: stored.capacity, interface: stored.interface,
+                formFactor: stored.form_factor, generation: stored.generation,
+                speed: stored.speed, rpm: stored.rpm,
+              });
+            if (wasSynthetic) {
+              const keep = (col: string) => !stale.includes(col);
+              const rebuilt = synthesizePartNumber(l.category, {
+                brand:       l.brand      ?? (keep('brand')       ? stored.brand : null),
+                capacity:    l.capacity   ?? (keep('capacity')    ? stored.capacity : null),
+                interface:   l.interface  ?? (keep('interface')   ? stored.interface : null),
+                formFactor:  l.formFactor ?? (keep('form_factor') ? stored.form_factor : null),
+                generation:  l.generation ?? (keep('generation')  ? stored.generation : null),
+                speed:       l.speed      ?? (keep('speed')       ? stored.speed : null),
+                rpm:         l.rpm        ?? (keep('rpm')         ? stored.rpm : null),
+              });
+              if (rebuilt) l = { ...l, partNumber: rebuilt };
+            }
+          }
           const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
           // `status` is deliberately NOT settable here. Line status is driven
           // by the lifecycle (advance handler) and 'Sold' is a protected
@@ -967,6 +1107,7 @@ orders.patch('/:id', async (c) => {
           // route layer is the gate.
           await tx`
             UPDATE order_lines SET
+              category       = COALESCE(${l.category ?? null}, category),
               sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${l.sellPrice ?? null} ELSE sell_price END,
               qty            = COALESCE(${l.qty ?? null}, qty),
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
@@ -993,7 +1134,7 @@ orders.patch('/:id', async (c) => {
           `;
         }
       }
-      let addedRows: Array<{ id: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+      let addedRows: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
       if (Array.isArray(body.addLines) && body.addLines.length) {
         // New lines default to the order's category. Position appends after
         // current max so they sort to the end.
@@ -1017,8 +1158,8 @@ orders.patch('/:id', async (c) => {
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
             )
-            RETURNING id, part_number, qty, unit_cost::float AS unit_cost
-          ` as { id: string; part_number: string | null; qty: number; unit_cost: number }[];
+            RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost
+          ` as { id: string; category: string; part_number: string | null; qty: number; unit_cost: number }[];
           addedRows.push(inserted[0]);
           addedLineIds.push(inserted[0].id);
         }
@@ -1065,7 +1206,7 @@ orders.patch('/:id', async (c) => {
       if (patches.length > 0) {
         const patchIds = patches.map(p => p.id);
         const afters = (await tx`
-          SELECT id, status, qty, brand, capacity, type, generation, classification,
+          SELECT id, status, qty, category, brand, capacity, type, generation, classification,
                  rank, speed, interface, form_factor, description, item_type, part_number,
                  serial_number, chip_number, condition, rpm,
                  unit_cost::float AS unit_cost,
@@ -1093,6 +1234,7 @@ orders.patch('/:id', async (c) => {
       for (const r of addedRows) {
         await writeOrderEvent(tx, id, u.id, 'line_added', {
           lineId: r.id,
+          category: r.category,
           partNumber: r.part_number,
           qty: r.qty,
           unitCost: r.unit_cost,
@@ -1101,10 +1243,17 @@ orders.patch('/:id', async (c) => {
       for (const r of removedSnapshots) {
         await writeOrderEvent(tx, id, u.id, 'line_removed', {
           lineId: r.id,
+          category: r.category,
           partNumber: r.part_number,
           qty: r.qty,
           unitCost: r.unit_cost,
         });
+      }
+
+      // Last write of the transaction: the order's category is a denormalization
+      // of its lines, so it is recomputed after every add, remove and switch.
+      if (body.lines || body.addLines || body.removeLineIds) {
+        await syncOrderCategory(tx, id);
       }
     });
   } catch (e) {
@@ -1133,10 +1282,16 @@ orders.post('/draft', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    | { category: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
+    | { category?: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
     | null;
-  if (!body || !body.category) {
-    return c.json({ error: 'category is required' }, 400);
+
+  // No category required: the draft is empty, and the order's category is
+  // derived from lines that don't exist yet. The column is NOT NULL, so an
+  // uncommitted draft holds 'Mixed' as a placeholder — clients render the chip
+  // from `categories`, which is empty, so the placeholder never surfaces.
+  if (body?.category) {
+    const catErr = await assertCategoriesEnabled(sql, [body.category]);
+    if (catErr) return c.json({ error: catErr }, 400);
   }
 
   // Allocated inside the transaction so a rollback also rolls back the counter.
@@ -1146,13 +1301,14 @@ orders.post('/draft', async (c) => {
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
-        ${newId}, ${u.id}, ${body.category},
-        ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+        ${newId}, ${u.id}, ${body?.category ?? 'Mixed'},
+        ${body?.warehouseId ?? null}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
         ${null}, 'draft'
       )
     `;
     await writeOrderEvent(tx, newId, u.id, 'created', {
-      category: body.category,
+      category: body?.category ?? null,
+      categories: [],
       lineCount: 0,
       qty: 0,
       totalCost: null,
