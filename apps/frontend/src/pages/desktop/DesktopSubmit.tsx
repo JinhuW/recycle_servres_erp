@@ -14,6 +14,8 @@ import { AddLineMenu } from './submit/AddLineMenu';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { usePreference } from '../../lib/preferences';
 import { useMarketLookup } from '../../lib/useMarketLookup';
+import { groupLines, shouldGroup } from '../../lib/lineGroups';
+import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../../lib/ramRequired';
@@ -362,6 +364,24 @@ function OrderForm({
   // One batched lookup for every part number on the form, so the drawer can
   // show what the part is worth while the buy price is still being decided.
   const marketFor = useMarketLookup(lines.map(l => l.partNumber));
+
+  const groups = useMemo(() => groupLines(lines), [lines]);
+  const grouped = useMemo(() => shouldGroup(lines), [lines]);
+
+  // Revenue and profit over the lines that actually carry a sell price. An
+  // unpriced line contributes nothing rather than being scored as a loss.
+  const priced = useMemo(() => {
+    let revenue = 0, cost = 0, count = 0;
+    for (const l of lines) {
+      const sp = Number(l.sellPrice);
+      if (!(sp > 0)) continue;
+      const q = Number(l.qty) || 0;
+      revenue += q * sp;
+      cost += q * (Number(l.unitCost) || 0);
+      count += 1;
+    }
+    return { revenue, cost, profit: revenue - cost, count };
+  }, [lines]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   const dupByIdx = useMemo(() => {
@@ -788,52 +808,50 @@ function OrderForm({
             fee — a cost that never was a line — as the one editable cell.
             No revenue/profit terms here; a PO being captured has no sell
             prices yet. */}
-        <div className="oe-ledger">
-          <div className="oe-ledger-eq">
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('goodsTotal')}</div>
-              <div className="oe-ledger-value mono">{fmtUSD(cost.goods, locale)}</div>
-            </div>
-
-            <div className="oe-ledger-op mono" aria-hidden="true">+</div>
-
-            <div className="oe-ledger-cell oe-ledger-fee oe-ledger-fee-edit">
-              <label className="oe-ledger-label" htmlFor="sub-other-fees">{t('otherFees')}</label>
-              <div className="oe-ledger-fee-inputs">
-                <div style={{ position: 'relative', width: 104, flexShrink: 0 }}>
-                  <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
-                  <input
-                    id="sub-other-fees"
-                    className="input mono oe-ledger-input"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={meta.otherFees}
-                    placeholder="0.00"
-                    onChange={e => { setMeta(m => ({ ...m, otherFees: e.target.value })); setMovedToFees(null); }}
-                    onFocus={e => e.target.select()}
-                    style={{ paddingLeft: 22 }}
-                  />
-                </div>
+        <div className="oe-submit-foot">
+          <CostTape
+            groups={groups}
+            grouped={grouped}
+            lineCount={lines.length}
+            units={totals.units}
+            goods={cost.goods}
+            fees={cost.fees}
+            total={cost.total}
+            revenue={priced.revenue}
+            pricedCost={priced.cost}
+            pricedProfit={priced.profit}
+            pricedCount={priced.count}
+            coveragePct={totals.cost > 0 ? (priced.cost / totals.cost) * 100 : 100}
+            locale={locale}
+            feeField={
+              <span style={{ position: 'relative', display: 'inline-block' }}>
+                <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
                 <input
-                  className="input oe-ledger-input oe-ledger-note"
-                  type="text"
-                  maxLength={280}
-                  value={meta.otherFeesNote}
-                  placeholder={t('otherFeesPh')}
-                  onChange={e => setMeta(m => ({ ...m, otherFeesNote: e.target.value }))}
-                  aria-label={t('otherFeesNote')}
+                  id="sub-other-fees"
+                  className="input mono tape-money"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={meta.otherFees}
+                  placeholder="0.00"
+                  onChange={e => { setMeta(m => ({ ...m, otherFees: e.target.value })); setMovedToFees(null); }}
+                  onFocus={e => e.target.select()}
+                  style={{ paddingLeft: 22 }}
                 />
-              </div>
-            </div>
-
-            <div className="oe-ledger-op mono" aria-hidden="true">=</div>
-
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('eoCost')}</div>
-              <div className="oe-ledger-value mono oe-ledger-total">{fmtUSD(cost.total, locale)}</div>
-            </div>
-          </div>
+              </span>
+            }
+            feeNoteField={
+              <input
+                className="input tape-note"
+                type="text"
+                maxLength={280}
+                value={meta.otherFeesNote}
+                placeholder={t('otherFeesPh')}
+                onChange={e => setMeta(m => ({ ...m, otherFeesNote: e.target.value }))}
+                aria-label={t('otherFeesNote')}
+              />
+            }
+          />
         </div>
       </div>
 

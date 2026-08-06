@@ -16,6 +16,7 @@ import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { linePhotos, uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
 import { groupLines, shouldGroup, catTone } from '../../lib/lineGroups';
+import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { serialIssue } from '@recycle-erp/shared';
@@ -806,116 +807,52 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </tbody>
           </table>
         </div>
-        {/* Cost ledger. The three figures used to sit here as equal peers,
-            which misstates the content: goods and fees ADD UP to cost, and
-            revenue is a separate lens. So the rail spells the arithmetic —
-            the operators carry meaning, they aren't decoration — and the fee,
-            a cost that never was a line, is the one editable cell in it. */}
-        <div className="oe-items-foot oe-ledger">
-          {/* What the goods total is made of, when it is made of more than one
-              thing. The purchaser is reconciling against a supplier invoice —
-              "RAM 5,200 + SSD 860 + Other 210" is the shape they can check
-              line for line; a single figure is not. Dot leaders because this
-              is a receipt, not a table. */}
-          {grouped && (
-            <div className="oe-breakdown">
-              <div className="oe-breakdown-cap">{t('costBreakdown')}</div>
-              {groups.map(g => (
-                <div className="oe-breakdown-row" key={g.category} style={catTone(g.category)}>
-                  <span className="oe-breakdown-k">
-                    <span className="oe-breakdown-dot" />
-                    {g.category}
-                    <span className="muted"> ×{g.lines.length}</span>
-                  </span>
-                  <span className="oe-breakdown-lead" />
-                  <span className="oe-breakdown-v mono">{fmtUSD(g.goods, locale)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="oe-ledger-eq">
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('goodsTotal')}</div>
-              <div className="oe-ledger-value mono">{fmtUSD(cost.goods, locale)}</div>
-            </div>
-
-            <div className="oe-ledger-op mono" aria-hidden="true">+</div>
-
-            <div className={'oe-ledger-cell oe-ledger-fee' + (canEditOrder ? ' oe-ledger-fee-edit' : '')}>
-              <label className="oe-ledger-label" htmlFor="oe-other-fees">{t('otherFees')}</label>
-              {canEditOrder ? (
-                <div className="oe-ledger-fee-inputs">
-                  <div style={{ position: 'relative', width: 104, flexShrink: 0 }}>
-                    <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
-                    <input
-                      id="oe-other-fees"
-                      className="input mono oe-ledger-input"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={otherFeesInput}
-                      placeholder="0.00"
-                      onChange={e => { setOtherFeesInput(e.target.value); setMovedToFees(null); }}
-                      onFocus={e => e.target.select()}
-                      style={{ paddingLeft: 22 }}
-                    />
-                  </div>
-                  <input
-                    className="input oe-ledger-input oe-ledger-note"
-                    type="text"
-                    maxLength={280}
-                    value={otherFeesNote}
-                    placeholder={t('otherFeesPh')}
-                    onChange={e => setOtherFeesNote(e.target.value)}
-                    aria-label={t('otherFeesNote')}
-                  />
-                </div>
-              ) : (
-                // Locked: the equation still reads, it just isn't editable.
-                <div className="oe-ledger-value mono">
-                  {fmtUSD(cost.fees, locale)}
-                  {otherFeesNote.trim() && (
-                    <span className="oe-ledger-fee-note">{otherFeesNote.trim()}</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="oe-ledger-op mono" aria-hidden="true">=</div>
-
-            <div className="oe-ledger-cell">
-              {/* All-in, so every "Cost" on this page means the same thing. */}
-              <div className="oe-ledger-label">{t('eoCost')}</div>
-              <div className="oe-ledger-value mono oe-ledger-total">{fmtUSD(effectiveTotalCost, locale)}</div>
-            </div>
-          </div>
-
-          <div className="oe-ledger-out">
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('revenue')}</div>
-              <div className="oe-ledger-value mono">{fmtUSD(totals.revenue, locale)}</div>
-            </div>
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('eoProfitPriced')}</div>
-              <div
-                className="oe-ledger-value mono"
-                style={{ color: totals.pricedProfit >= 0 ? 'var(--pos)' : 'var(--neg)' }}
-              >
-                {totals.pricedCount > 0 ? fmtUSD(totals.pricedProfit, locale) : '—'}
-              </div>
-            </div>
-          </div>
-          {/* An untouched PO reported its entire cost as a loss, which read as
-              a disaster rather than as "nobody has priced this yet". */}
-          <div className="oe-ledger-coverage">
-            {totals.pricedCount === 0
-              ? t('eoNoLinePriced')
-              : t('eoPricedCoverage', {
-                  n: totals.pricedCount,
-                  of: lines.length,
-                  pct: totals.cost > 0 ? Math.round((totals.pricedCost / totals.cost) * 100) : 100,
-                })}
-          </div>
+        {/* The PO's money as a receipt — see components/CostTape. The fee is
+            the one editable cell in it: a cost that never was a line. */}
+        <div className="oe-items-foot">
+          <CostTape
+            groups={groups}
+            grouped={grouped}
+            lineCount={lines.length}
+            units={totals.qty}
+            goods={cost.goods}
+            fees={cost.fees}
+            total={effectiveTotalCost}
+            revenue={totals.revenue}
+            pricedCost={totals.pricedCost}
+            pricedProfit={totals.pricedProfit}
+            pricedCount={totals.pricedCount}
+            coveragePct={totals.cost > 0 ? (totals.pricedCost / totals.cost) * 100 : 100}
+            locale={locale}
+            feeField={canEditOrder ? (
+              <span style={{ position: 'relative', display: 'inline-block' }}>
+                <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
+                <input
+                  id="oe-other-fees"
+                  className="input mono tape-money"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={otherFeesInput}
+                  placeholder="0.00"
+                  onChange={e => { setOtherFeesInput(e.target.value); setMovedToFees(null); }}
+                  onFocus={e => e.target.select()}
+                  style={{ paddingLeft: 22 }}
+                />
+              </span>
+            ) : undefined}
+            feeNoteField={canEditOrder ? (
+              <input
+                className="input tape-note"
+                type="text"
+                maxLength={280}
+                value={otherFeesNote}
+                placeholder={t('otherFeesPh')}
+                onChange={e => setOtherFeesNote(e.target.value)}
+                aria-label={t('otherFeesNote')}
+              />
+            ) : (otherFeesNote.trim() ? <span className="muted" style={{ fontSize: 11.5 }}>{otherFeesNote.trim()}</span> : undefined)}
+          />
         </div>
       </div>
 
