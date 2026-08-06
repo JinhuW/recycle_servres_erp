@@ -203,7 +203,9 @@ export const createOrder = (body: {
   notes?: string | null;
   totalCost?: number;
   lines: unknown[];
-}) => api.post<{ id: string }>('/api/orders', body);
+  // lineIds comes back aligned 1:1 with `lines`, so the caller can attach
+  // per-line photos that were buffered while the lines had no id yet.
+}) => api.post<{ id: string; lineIds: string[] }>('/api/orders', body);
 
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);

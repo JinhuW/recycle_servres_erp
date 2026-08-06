@@ -637,3 +637,42 @@ button { font-family: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; background: var(--bg-soft); }
 }
+
+/* ===== Line photo strip (PO submit + edit, both shells) ===== */
+.lp-wrap { margin: 14px 0; }
+.lp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.lp-count {
+  font-size: 10.5px; font-weight: 600; color: var(--fg-subtle);
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 7px;
+}
+.lp-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.lp-tile { position: relative; width: 62px; height: 62px; flex-shrink: 0; }
+.lp-thumb {
+  width: 100%; height: 100%; padding: 0; border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg-soft);
+  cursor: zoom-in; display: block;
+}
+.lp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lp-badge {
+  position: absolute; left: 3px; bottom: 3px;
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--accent); color: white;
+}
+.lp-x {
+  position: absolute; top: -5px; right: -5px;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg-elev);
+  color: var(--fg-muted); display: grid; place-items: center;
+  cursor: pointer; padding: 0; line-height: 1;
+}
+.lp-x:hover { color: var(--neg); border-color: var(--neg); }
+.lp-add {
+  width: 62px; height: 62px; border-radius: 9px;
+  border: 1.5px dashed var(--border-strong); background: transparent;
+  color: var(--fg-subtle); display: grid; place-items: center; cursor: pointer;
+}
+.lp-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+.lp-add:disabled { opacity: 0.5; cursor: wait; }
+.lp-empty { font-size: 11.5px; color: var(--fg-subtle); margin-top: 6px; }

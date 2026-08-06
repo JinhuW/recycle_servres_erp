@@ -10,6 +10,8 @@ import { scanToLinePatch } from '../DesktopSubmit';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
 import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../../../lib/lineCategorySwitch';
+import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhotoStrip';
+import { linePhotos, type LinePhoto } from '../../../lib/linePhotos';
 import { addableCategories } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
@@ -21,6 +23,7 @@ import { parseSerials } from '../../../components/SerialNumbers';
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
+  photoCtx,
 }: {
   line: Line;
   idx: number;
@@ -36,6 +39,18 @@ export function LineDrawer({
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
+  // Where this line's photos live. `lineId` is null until the line is
+  // persisted, in which case files are buffered by the parent and uploaded
+  // once the id exists — the same deferral the order-level evidence uses.
+  photoCtx?: {
+    orderId: string | null;
+    lineId: string | null;
+    pending: PendingPhoto[];
+    onAddFiles: (files: FileList | null) => void;
+    onRemovePending: (p: PendingPhoto) => void;
+    onRemoveSaved: (photo: LinePhoto) => void;
+    busy?: boolean;
+  };
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -403,6 +418,18 @@ export function LineDrawer({
                 </div>
               )}
             </div>
+
+            {photoCtx && (
+              <LinePhotoStrip
+                photos={linePhotos(line as unknown as Parameters<typeof linePhotos>[0])}
+                pending={photoCtx.pending}
+                onAdd={photoCtx.onAddFiles}
+                onRemove={photoCtx.onRemoveSaved}
+                onRemovePending={photoCtx.onRemovePending}
+                readOnly={readOnly}
+                busy={photoCtx.busy}
+              />
+            )}
 
             {cat === 'RAM' && <RamFields line={line} set={set} />}
             {cat === 'SSD' && <SsdFields line={line} set={set} />}
