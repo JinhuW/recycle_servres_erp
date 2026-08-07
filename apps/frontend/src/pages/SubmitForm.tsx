@@ -131,8 +131,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
-  // Unit cost is typed as raw text so an unpriced line starts blank instead of
-  // a literal 0 the user has to select and delete before typing.
+  // Qty and unit cost are typed as raw text so a new line starts blank instead
+  // of a literal 0 the user has to select and delete before typing. The number
+  // the form works with is parsed off these, so a half-typed value never
+  // rewrites what's on screen.
+  const [qtyRaw, setQtyRaw] = useState(() => (initial.qty ? String(initial.qty) : ''));
   const [costRaw, setCostRaw] = useState(() => (initial.unitCost ? String(initial.unitCost) : ''));
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -206,6 +209,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         return;
       }
     }
+    // Qty can now be left blank, so say so rather than letting the wire's
+    // fallback quietly book one unit.
+    if (!(Number(line.qty) > 0)) {
+      showErrorToast(t('fillRequiredFields', { fields: t('quantity') }));
+      return;
+    }
     const issue = serialIssue(line);
     if (issue) {
       setSerialIssues([{
@@ -226,11 +235,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   //   - Edit mode:  "Edit RAM item" / sub = existing label
   //   - First-item new order: "New RAM order" / sub = AI-review or fill-in
   //   - Nth-item new order:  "Add RAM item" / sub = "Item N · adding..."
+  // The first line no longer names the order — a PO holds whatever kinds the
+  // purchaser adds — so it is titled like every other line.
   const title = isEditing
     ? (category === 'RAM' ? t('editRamItem') : category === 'SSD' ? t('editSsdItem') : category === 'HDD' ? t('editHddItem') : t('editOtherItem'))
-    : isFirst
-      ? (category === 'RAM' ? t('newRamOrder') : category === 'SSD' ? t('newSsdOrder') : category === 'HDD' ? t('newHddOrder') : t('newOtherOrder'))
-      : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
+    : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
 
   const sub = isEditing
     ? buildLabel()
@@ -421,7 +430,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('quantity')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input className="input" type="number" min={1} value={line.qty} onChange={e => set('qty', parseInt(e.target.value, 10) || 0)} />
+            <input
+              className="input"
+              type="number"
+              min={1}
+              inputMode="numeric"
+              placeholder="1"
+              value={qtyRaw}
+              onChange={e => {
+                setQtyRaw(e.target.value);
+                set('qty', parseInt(e.target.value, 10) || 0);
+              }}
+            />
           </div>
           <div className="ph-field">
             <label>{t('condition')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
