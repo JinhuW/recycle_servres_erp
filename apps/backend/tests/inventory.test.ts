@@ -142,6 +142,52 @@ describe('low-margin notification', () => {
   });
 });
 
+// A sell price of 0 means "nobody has priced this line", not "priced at
+// nothing" — the same rule the PO drawer writes by (shared/sellPrice). This
+// endpoint used to COALESCE it, which read 0 as "no change" and silently kept
+// whatever price was already there.
+describe('unpricing a line from the inventory editor', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const priced = async (token: string) => {
+    const list = await api<{ items: { id: string; unit_cost: number }[] }>(
+      'GET', '/api/inventory?status=Reviewing', { token });
+    const target = list.body.items[0];
+    const r = await api('PATCH', `/api/inventory/${target.id}`, {
+      token, body: { sellPrice: +(target.unit_cost * 2).toFixed(2) },
+    });
+    expect(r.status).toBe(200);
+    return target.id;
+  };
+
+  const storedPrice = async (id: string) => {
+    const { getTestDb } = await import('./helpers/db');
+    const [row] = await getTestDb()<{ sell_price: number | null }[]>`
+      SELECT sell_price::float AS sell_price FROM order_lines WHERE id = ${id}::uuid
+    `;
+    return row.sell_price;
+  };
+
+  it('clears the stored price rather than keeping the old one', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await priced(token);
+    expect(await storedPrice(id)).not.toBeNull();
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { sellPrice: 0 } });
+    expect(r.status).toBe(200);
+    expect(await storedPrice(id)).toBeNull();
+  });
+
+  it('does not warn about margin on a line it just unpriced', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await priced(token);
+    const r = await api<{ warnings?: string[] }>('PATCH', `/api/inventory/${id}`, {
+      token, body: { sellPrice: 0 },
+    });
+    expect(r.body.warnings ?? []).toEqual([]);
+  });
+});
+
 describe('audit log is append-only', () => {
   beforeEach(async () => { await resetDb(); });
 

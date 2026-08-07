@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, MARCUS } from './helpers/auth';
 
@@ -63,6 +63,55 @@ describe('unpriced lines in the orders list', () => {
     const row = await listRow(token, r.body.id);
     expect(row.lineCount).toBe(3);
     expect(row.unpricedLineCount).toBe(2);
+  });
+
+  // Two spellings of unpriced is one too many: this SQL asks `sell_price IS
+  // NULL` while every client gates on `> 0`, so a line saved at 0 counted as
+  // priced here and unpriced in the tape — the same PO reporting "2 of 3
+  // priced" on one screen and 3 of 3 on the next.
+  it('stores a sell price of 0 as NULL, so both sides agree it is unpriced', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        lines: [
+          line({ qty: 1, unitCost: 10, sellPrice: 0 }),
+          line({ qty: 1, unitCost: 10, sellPrice: 30 }),
+        ],
+      },
+    });
+    expect(await getTestDb()`
+      SELECT 1 FROM order_lines WHERE order_id = ${r.body.id} AND sell_price = 0
+    `).toHaveLength(0);
+
+    const row = await listRow(token, r.body.id);
+    expect(row.unpricedLineCount).toBe(1);
+  });
+
+  it('clears a stored sell price when an edit sets it back to 0', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token, body: { lines: [line({ qty: 1, unitCost: 10, sellPrice: 30 })] },
+    });
+    const detail = await api<{ order: { lines: { id: string }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token });
+
+    const r = await api('PATCH', '/api/orders/' + created.body.id, {
+      token, body: { lines: [{ id: detail.body.order.lines[0].id, sellPrice: 0 }] },
+    });
+    expect(r.status).toBe(200);
+    expect(await listRow(token, created.body.id)).toMatchObject({ unpricedLineCount: 1, revenue: 0 });
+  });
+
+  it('also normalises a sell price of 0 on PATCH addLines', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token, body: { lines: [line({ qty: 1, unitCost: 10, sellPrice: 30 })] },
+    });
+    await api('PATCH', '/api/orders/' + created.body.id, {
+      token, body: { addLines: [line({ qty: 1, unitCost: 10, sellPrice: 0 })] },
+    });
+    expect(await listRow(token, created.body.id)).toMatchObject({ lineCount: 2, unpricedLineCount: 1 });
   });
 
   it('still nets order-level fees out of profit', async () => {

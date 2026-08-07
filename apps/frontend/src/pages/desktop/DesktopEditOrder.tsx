@@ -15,7 +15,7 @@ import {
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { linePhotos, uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
-import { groupLines, shouldGroup, catTone } from '../../lib/lineGroups';
+import { groupLines, shouldGroup, displayRows, catTone } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
@@ -190,10 +190,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // suppressed below by treating null and 0 as equivalent.
   const [commissionPct, setCommissionPct] = useState<string>(
     order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '0');
-  const [totalCostInput, setTotalCostInput] = useState<string>(
-    order.totalCost != null ? order.totalCost.toFixed(2) : '',
-  );
-  const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
   // Fees are charged on top of the goods total, so they get their own input
   // rather than being folded into the override. '' renders as no fee.
   const [otherFeesInput, setOtherFeesInput] = useState<string>(
@@ -285,46 +281,49 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     return next;
   });
 
-  // The table walks this instead of `lines`, so grouped rows come out
-  // contiguous (position order interleaves categories) while every row keeps
-  // the index its handlers were written against.
-  const displayRows = useMemo(() => {
-    if (!grouped) return lines.map((line, index) => ({ line, index, head: null as React.ReactNode }));
-    return groups.flatMap(g => g.lines.map(({ line, index }, k) => ({
-      line,
-      index,
-      head: k === 0 ? (
-        <tr className="grp-row" style={catTone(g.category)}>
-          <td colSpan={canEditOrder ? 9 : 8}>
-            <button
-              type="button"
-              className="grp-hd"
-              aria-expanded={!folded.has(g.category)}
-              onClick={e => { e.stopPropagation(); toggleFold(g.category); }}
-            >
-              <span className={'grp-tw' + (folded.has(g.category) ? ' closed' : '')}>
-                <Icon name="chevronDown" size={13} />
-              </span>
-              <span className="grp-chip">{g.category}</span>
-              <span className="grp-meta">
-                {g.lines.length === 1
-                  ? t('historyLineCountOne', { n: g.lines.length })
-                  : t('historyLineCountMany', { n: g.lines.length })}
-                {' · '}{t('grpUnits', { n: g.units.toLocaleString(locale) })}
-                {g.unpriced > 0 && <span className="grp-unpriced"> · {t('grpUnpriced', { n: g.unpriced })}</span>}
-              </span>
-              <span className="grp-amt mono">{fmtUSD(g.goods, locale)}</span>
-              <span className={'grp-pl mono ' + (g.profit > 0 ? 'pos' : g.profit < 0 ? 'neg' : 'muted')}>
-                {g.profit ? (g.profit > 0 ? '+' : '−') + fmtUSD(Math.abs(g.profit), locale) : '—'}
-              </span>
-            </button>
-          </td>
-        </tr>
-      ) : null,
-    })));
-  // toggleFold is stable enough for this render-derived list.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grouped, groups, lines, folded, canEditOrder, locale, t]);
+  // Which rows the table walks, and which the fold hides — see lib/lineGroups.
+  // Kept out of the render so it can be tested without one.
+  const rows = useMemo(
+    () => displayRows(lines, groups, grouped, folded),
+    [lines, groups, grouped, folded],
+  );
+  const groupByCat = useMemo(
+    () => new Map(groups.map(g => [g.category, g])),
+    [groups],
+  );
+
+  const groupHead = (category: string) => {
+    const g = groupByCat.get(category);
+    if (!g) return null;
+    return (
+      <tr className="grp-row" style={catTone(category)}>
+        <td colSpan={canEditOrder ? 9 : 8}>
+          <button
+            type="button"
+            className="grp-hd"
+            aria-expanded={!folded.has(category)}
+            onClick={e => { e.stopPropagation(); toggleFold(category); }}
+          >
+            <span className={'grp-tw' + (folded.has(category) ? ' closed' : '')}>
+              <Icon name="chevronDown" size={13} />
+            </span>
+            <span className="grp-chip">{category}</span>
+            <span className="grp-meta">
+              {g.lines.length === 1
+                ? t('historyLineCountOne', { n: g.lines.length })
+                : t('historyLineCountMany', { n: g.lines.length })}
+              {' · '}{t('grpUnits', { n: g.units.toLocaleString(locale) })}
+              {g.unpriced > 0 && <span className="grp-unpriced"> · {t('grpUnpriced', { n: g.unpriced })}</span>}
+            </span>
+            <span className="grp-amt mono">{fmtUSD(g.goods, locale)}</span>
+            <span className={'grp-pl mono ' + (g.profit > 0 ? 'pos' : g.profit < 0 ? 'neg' : 'muted')}>
+              {g.profit ? (g.profit > 0 ? '+' : '−') + fmtUSD(Math.abs(g.profit), locale) : '—'}
+            </span>
+          </button>
+        </td>
+      </tr>
+    );
+  };
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   // Lookup table keyed by line index → other 1-based line numbers sharing its
@@ -381,14 +380,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // flagged as a pending change.
   const commissionDirty =
     commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
-  const parsedTotalCost = totalCostInput.trim() === '' ? null : Number(totalCostInput);
-  const totalCostDirty =
-    totalCostOverride &&
-    !Number.isNaN(parsedTotalCost as number) &&
-    (parsedTotalCost ?? null) !== (order.totalCost ?? null);
-
-  // Non-numeric intermediate input ("5e") must not read as a change — same
-  // guard as totalCostDirty above.
+  // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
   const otherFeesDirty = parsedOtherFees !== order.otherFees;
   const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
@@ -396,9 +388,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // The goods total is no longer editable here: it is the sum of the lines, and
   // anything paid on top of the goods is the fee — so line costs + fee is what
   // the purchaser actually paid, with nothing to reconcile between two fields.
-  // A legacy order that carries a stored override keeps it (totalCostOverride
-  // is seeded from the record and never set again), so historical goods totals
-  // are preserved rather than silently rewritten on the next save.
+  //
+  // An order that carries a stored goods total keeps it — read straight off the
+  // record, never round-tripped through form state, because no control on this
+  // page can change it and a piece of state nothing writes only invites the
+  // reader to look for the writer. It is a negotiated lot price on the orders
+  // that predate this screen, so it is preserved rather than silently rewritten
+  // on the next save; where it parts company with the line sum, the tape and
+  // the footer both say so rather than leaving the arithmetic looking wrong.
+  const storedGoods = order.totalCost ?? null;
+  const goodsOverridden =
+    storedGoods != null && Math.abs(storedGoods - totals.cost) > GOODS_EPSILON;
 
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
@@ -410,7 +410,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // land on top of it, so they reduce profit and therefore commission.
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
-    totalCostOverride: totalCostOverride ? parsedTotalCost : null,
+    totalCostOverride: storedGoods,
     otherFees: parsedOtherFees,
   });
   const effectiveTotalCost = cost.total;
@@ -421,7 +421,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
 
   const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty
+    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
     || commissionDirty || otherFeesDirty || otherFeesNoteDirty;
 
   const lineReady = (l: EditLine) => {
@@ -485,7 +485,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
-        totalCost:     totalCostDirty ? parsedTotalCost        : undefined,
         otherFees:     otherFeesDirty ? parsedOtherFees        : undefined,
         otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         lines: lines
@@ -693,7 +692,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </tr>
             </thead>
             <tbody>
-              {displayRows.map(({ line: l, index: i, head }) => {
+              {rows.map(({ line: l, index: i, head, hidden }) => {
                 const qty = Number(l.qty) || 0;
                 const lCost = Number(l.unitCost) || 0;
                 const sp = l.sellPrice == null || l.sellPrice === '' ? 0 : Number(l.sellPrice);
@@ -704,14 +703,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 // A folded group still emits its header row, just none of its
                 // lines — otherwise the group would vanish along with them.
                 // Every member drops out, not only the one carrying the head.
-                if (folded.has(l.category)) {
-                  return head ? <Fragment key={'g-' + l.category}>{head}</Fragment> : null;
+                if (hidden) {
+                  return head ? <Fragment key={'g-' + head}>{groupHead(head)}</Fragment> : null;
                 }
                 // Rows open the drawer at every stage — a locked order gets a
                 // read-only drawer, not an unreachable one.
                 return (
                   <Fragment key={l._id ?? l._cid}>
-                  {head}
+                  {head && groupHead(head)}
                   <tr
                     className="row-hover"
                     style={{
@@ -816,6 +815,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             pricedCount={totals.pricedCount}
             coveragePct={totals.cost > 0 ? (totals.pricedCost / totals.cost) * 100 : 100}
             locale={locale}
+            goodsNote={goodsOverridden ? (
+              <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
+            ) : undefined}
             feeField={canEditOrder ? (
               <span style={{ position: 'relative', display: 'inline-block' }}>
                 <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
@@ -1219,7 +1221,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > GOODS_EPSILON && (
+              {t('totalCost')} {goodsOverridden && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>
@@ -1261,6 +1263,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
       {activeIdx !== null && lines[activeIdx] && (
         <LineDrawer
+          // See DesktopSubmit: the drawer's per-line state (notably the
+          // category-switch undo, which snapshots the whole line) must not
+          // survive a move to another row.
+          key={lines[activeIdx]._id ?? lines[activeIdx]._cid}
           line={lines[activeIdx]}
           idx={activeIdx}
           editing

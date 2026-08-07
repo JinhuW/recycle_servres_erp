@@ -1,4 +1,5 @@
-import { CATEGORY_ORDER } from './lookups';
+import { isPricedSellPrice } from '@recycle-erp/shared';
+import { CATEGORY_ORDER, categoryTone } from './lookups';
 
 // Grouping the lines of a mixed purchase order by category.
 //
@@ -30,8 +31,7 @@ export type LineGroup<T> = {
 };
 
 const num = (v: unknown): number => Number(v) || 0;
-const isPriced = (l: GroupableLine): boolean =>
-  l.sellPrice != null && l.sellPrice !== '' && num(l.sellPrice) > 0;
+const isPriced = (l: GroupableLine): boolean => isPricedSellPrice(l.sellPrice);
 
 /** True when the lines span more than one category. */
 export function shouldGroup(lines: readonly GroupableLine[]): boolean {
@@ -72,24 +72,44 @@ export function groupLines<T extends GroupableLine>(lines: readonly T[]): LineGr
     });
 }
 
-// CSS custom properties carrying the group's category colour, so the header
-// row, its chip and its left rule all tint from one place rather than each
-// re-deriving a tone map. Matches OrderCategoryChips.
-const TONE: Record<string, string> = {
-  RAM: 'var(--info)',
-  SSD: 'var(--pos)',
-  HDD: 'var(--cool, oklch(0.58 0.13 305))',
-  Other: 'var(--warn)',
-};
-const TONE_SOFT: Record<string, string> = {
-  RAM: 'var(--info-soft)',
-  SSD: 'var(--pos-soft)',
-  HDD: 'var(--cool-soft, oklch(0.95 0.032 305))',
-  Other: 'var(--warn-soft)',
+export type DisplayRow<T> = {
+  line: T;
+  index: number;
+  /** Category whose header this row must be preceded by, or null for none. */
+  head: string | null;
+  /** Folded away: the table renders `head` if present and skips the row. */
+  hidden: boolean;
 };
 
-export const catTone = (category: string): React.CSSProperties =>
-  ({
-    '--cat': TONE[category] ?? 'var(--fg-subtle)',
-    '--cat-soft': TONE_SOFT[category] ?? 'var(--bg-soft)',
-  } as React.CSSProperties);
+/**
+ * The order the items table walks, so grouped rows come out contiguous
+ * (position order interleaves categories) while every row keeps the index its
+ * handlers were written against.
+ *
+ * `hidden` is gated on `grouped`, not on `folded` alone. Fold state outlives
+ * the headers that toggle it: fold RAM on a RAM+SSD PO, then delete the SSD
+ * line, and the order is no longer mixed — no header is emitted for anything,
+ * so a row hidden on fold state alone would sit behind a toggle that is not on
+ * the screen any more, with no way back short of a reload.
+ */
+export function displayRows<T extends GroupableLine>(
+  lines: readonly T[],
+  groups: readonly LineGroup<T>[],
+  grouped: boolean,
+  folded: ReadonlySet<string>,
+): DisplayRow<T>[] {
+  if (!grouped) return lines.map((line, index) => ({ line, index, head: null, hidden: false }));
+  return groups.flatMap(g => g.lines.map(({ line, index }, k) => ({
+    line,
+    index,
+    head: k === 0 ? g.category : null,
+    hidden: folded.has(g.category),
+  })));
+}
+
+// CSS custom properties carrying the group's category colour, so the header
+// row, its chip and its left rule all tint from one place.
+export const catTone = (category: string): React.CSSProperties => {
+  const { tone, soft } = categoryTone(category);
+  return { '--cat': tone, '--cat-soft': soft } as React.CSSProperties;
+};

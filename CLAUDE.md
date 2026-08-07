@@ -126,6 +126,14 @@ switches the branch out from under the first.
 - **Order ID counters** are per-type sequences in `id_counters` (see
   `migrations/0029`).  Use `lib/id-seq.ts`; never compute an ID by counting
   rows.
+- **`orders.category` and `orders.total_cost` are derived from the lines**, by
+  `services/orderCategory.ts` and `services/orderGoodsTotal.ts`, at the end of
+  every transaction that writes lines.  **Clients must not send `totalCost`** —
+  the API still accepts it, but a value there is read as a *negotiated lot
+  price* and pins the column against the lines from then on.  The mirror /
+  negotiated verdict has to be read *before* the line writes
+  (`goodsTotalIsMirror`); afterwards a stale mirror and a real override are
+  indistinguishable.
 - **Upload validation** — `routes/attachments.ts` enforces both
   `maxBytes` and `allowedMime` from `lib/settings.ts → getUploadLimits()`.
   The allowed set is intersected with `SAFE_UPLOAD_MIME` so a misconfigured

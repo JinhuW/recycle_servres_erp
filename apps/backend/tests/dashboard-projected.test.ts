@@ -6,10 +6,10 @@ import { loginAs, MARCUS, PRIYA, ALEX } from './helpers/auth';
 // Projected financials are the PURCHASER lens: GET /api/dashboard's
 // revenue/profit/commission/count (and the weekly chart + byCat) come from the
 // purchaser's OWN purchase orders, but only once the PO's lifecycle = 'done'.
-// Profit is the margin "set" on each line — (sell_price - unit_cost) * qty,
-// sell_price NULL falling back to unit_cost — the same projection the orders
-// list shows. Window keys off the PO's created_at. The manager (realized) lens
-// is covered in dashboard-realized.test.ts.
+// Profit is the margin "set" on each line — (sell_price - unit_cost) * qty —
+// over the PRICED lines only, the same projection the orders list shows. Window
+// keys off the PO's created_at. The manager (realized) lens is covered in
+// dashboard-realized.test.ts.
 
 async function userId(email: string): Promise<string> {
   const db = getTestDb();
@@ -153,6 +153,24 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     const r = await api<{ kpis: { profit: number; revenue: number } }>('GET', '/api/dashboard?range=30d', { token });
     expect(r.body.kpis.profit).toBeCloseTo((80 - 50) * 2, 2);
     expect(r.body.kpis.revenue).toBeCloseTo(80 * 2, 2);
+  });
+
+  // The three figures sit in one KPI row and are read as an arithmetic. Cost
+  // once summed every line while revenue and profit dropped the unpriced ones,
+  // so the tile stated 160 − 200 = 60. Cost is the cost OF the priced lines.
+  it('revenue − cost equals profit when some lines are unpriced', async () => {
+    await clearWindow();
+    await insertDonePO('PO-PROJ-RECON', MARCUS, { rate: 0.2 }, [
+      { unitCost: 50, sellPrice: null, qty: 2 },
+      { unitCost: 50, sellPrice: 80,   qty: 2 },
+    ]);
+
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ kpis: { revenue: number; cost: number; profit: number } }>(
+      'GET', '/api/dashboard?range=30d', { token });
+    const { revenue, cost, profit } = r.body.kpis;
+    expect(cost).toBeCloseTo(50 * 2, 2);
+    expect(revenue - cost).toBeCloseTo(profit, 2);
   });
 
   // Order-level other_fees are a cost, spread across the PO's lines pro-rata by

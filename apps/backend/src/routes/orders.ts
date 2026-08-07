@@ -16,9 +16,10 @@ import {
   type ExportCategory,
 } from '../lib/categoryColumns';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
-  synthesizePartNumber, serialIssue, staleSpecDbCols, type SerialIssue,
+  synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, type SerialIssue,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
@@ -106,6 +107,7 @@ function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | 
 function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
 }
+
 
 type LineInput = {
   category?: LineCategory;
@@ -721,7 +723,7 @@ orders.post('/', async (c) => {
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
           ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
-          ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
+          ${l.unitCost}, ${normSellPrice(l.sellPrice)}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
         )
@@ -748,6 +750,10 @@ orders.post('/', async (c) => {
     // Written before the event so `created` carries the value the order
     // actually ended up with rather than whatever the client proposed.
     derived = await syncOrderCategory(tx, newId);
+    // The goods total follows the lines unless this request stated one of its
+    // own — the create path is the one place a negotiated lot price can still
+    // enter, since no screen offers a field for it any more.
+    await syncOrderGoodsTotal(tx, newId, body.totalCost == null);
 
     // Baseline of the timeline. Without it a freshly-created PO reads as an
     // order with no history at all until someone submits it.
@@ -918,15 +924,21 @@ orders.patch('/:id', async (c) => {
   const patchCatErr = await assertCategoriesEnabled(sql, patchedCats);
   if (patchCatErr) return c.json({ error: patchCatErr }, 400);
 
+  // A new line may inherit the order's category, but orders.category is a
+  // DERIVATION of the lines — it reads 'Mixed' when they disagree, and an empty
+  // draft holds 'Mixed' as a placeholder. Neither is a category a line may
+  // claim, so there is nothing to inherit and the request has to name one.
+  const inheritedCat =
+    existing.category && existing.category !== 'Mixed' ? (existing.category as string) : null;
+  const addCats: string[] = [];
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
-    const issue = serialIssue({
-      ...l,
-      category: l.category ?? (existing.category as string),
-      qty: l.qty ?? 1,
-    });
+    const cat = l.category ?? inheritedCat;
+    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    addCats.push(cat);
+    const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? (existing.category as string), l);
+    const labelErr = itemTypeErr(`line ${i + 1}`, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
 
@@ -1033,6 +1045,15 @@ orders.patch('/:id', async (c) => {
         }
       }
 
+      // Read before anything moves: afterwards a goods total that merely went
+      // stale is indistinguishable from one that was negotiated. Only asked
+      // when this request will actually change the lines, and skipped when it
+      // states a goods total outright — then the client's figure is the answer.
+      const touchesLines = !!(body.lines || body.addLines || body.removeLineIds);
+      const goodsFollowsLines = touchesLines && body.totalCost === undefined
+        ? await goodsTotalIsMirror(tx, id)
+        : false;
+
       // Snapshot the lines we'll edit / remove so we can diff after the writes.
       // NUMERIC columns come back as strings from postgres.js by default; cast
       // to float so the diff compares numbers, not "120.00" string forms.
@@ -1096,10 +1117,14 @@ orders.patch('/:id', async (c) => {
         for (const r of doomed) if (r.scan_image_id) removedScanKeys.push(r.scan_image_id);
         // Read before the DELETE cascades the rows away. Same list as the scan
         // keys, so the existing post-commit sweep covers both.
-        const doomedPhotos = await tx`
+        //
+        // Keyed off `doomed`, NOT the raw removeLineIds: the request's ids are
+        // unverified, and an id belonging to somebody else's PO would delete
+        // that PO's objects out of R2 while its rows survived pointing at them.
+        const doomedPhotos = doomed.length ? await tx`
           SELECT storage_key FROM order_line_photos
-          WHERE order_line_id = ANY(${body.removeLineIds}::uuid[])
-        ` as { storage_key: string }[];
+          WHERE order_line_id = ANY(${doomed.map(r => r.id)}::uuid[])
+        ` as { storage_key: string }[] : [];
         for (const p of doomedPhotos) removedScanKeys.push(p.storage_key);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
       }
@@ -1152,7 +1177,7 @@ orders.patch('/:id', async (c) => {
           await tx`
             UPDATE order_lines SET
               category       = COALESCE(${l.category ?? null}, category),
-              sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${l.sellPrice ?? null} ELSE sell_price END,
+              sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${normSellPrice(l.sellPrice)} ELSE sell_price END,
               qty            = COALESCE(${l.qty ?? null}, qty),
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
               brand          = COALESCE(${l.brand ?? null}, brand),
@@ -1184,7 +1209,9 @@ orders.patch('/:id', async (c) => {
         // current max so they sort to the end.
         const posRow = (await tx`SELECT COALESCE(MAX(position), -1) AS p FROM order_lines WHERE order_id = ${id}`)[0] as { p: number };
         let pos = posRow.p + 1;
-        for (const l of body.addLines) {
+        for (let i = 0; i < body.addLines.length; i++) {
+          const l = body.addLines[i];
+          const cat = addCats[i];
           const inserted = await tx`
             INSERT INTO order_lines (
               order_id, category, brand, capacity, generation, type, classification, rank, speed,
@@ -1192,12 +1219,12 @@ orders.patch('/:id', async (c) => {
               unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
               health, rpm
             ) VALUES (
-              ${id}, ${l.category ?? (existing.category as string)},
+              ${id}, ${cat},
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-              ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
-              ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
+              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${l.unitCost ?? 0}, ${normSellPrice(l.sellPrice)},
               ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
@@ -1207,9 +1234,9 @@ orders.patch('/:id', async (c) => {
           addedRows.push(inserted[0]);
           addedLineIds.push(inserted[0].id);
         }
-        await autoTrackParts(tx, body.addLines.map(l => ({
-          category: l.category ?? (existing.category as string),
-          partNumber: resolvePartNumber(l.category ?? (existing.category as string), l),
+        await autoTrackParts(tx, body.addLines.map((l, i) => ({
+          category: addCats[i],
+          partNumber: resolvePartNumber(addCats[i], l),
           brand: l.brand,
           capacity: l.capacity,
           type: l.type,
@@ -1294,10 +1321,13 @@ orders.patch('/:id', async (c) => {
         });
       }
 
-      // Last write of the transaction: the order's category is a denormalization
-      // of its lines, so it is recomputed after every add, remove and switch.
-      if (body.lines || body.addLines || body.removeLineIds) {
+      // Last writes of the transaction: category and goods total are both
+      // denormalizations of the lines, recomputed after every add, remove and
+      // edit. Without this the tape itemised categories that summed to one
+      // figure under a goods total that still held the pre-edit one.
+      if (touchesLines) {
         await syncOrderCategory(tx, id);
+        await syncOrderGoodsTotal(tx, id, goodsFollowsLines);
       }
     });
   } catch (e) {
@@ -1751,10 +1781,13 @@ orders.post('/:id/lines/:lineId/photos', async (c) => {
       },
     });
   } catch (e) {
+    // The upload precedes the transaction, so ANY rollback — the cap, a
+    // serialization failure, a pool timeout — leaves an object in R2 that no
+    // row owns. Nothing else can find it later: both cleanup paths (order
+    // delete and the removeLineIds sweep) read their keys out of
+    // order_line_photos, and the row is exactly what didn't commit.
+    await deleteAttachment(c.env, uploaded.storageKey).catch(() => { /* best-effort */ });
     if ((e as { message?: string })?.message?.includes('__PHOTO_CAP__')) {
-      // The object is already in R2; drop it rather than leave an orphan the
-      // row would have owned.
-      await deleteAttachment(c.env, uploaded.storageKey).catch(() => { /* best-effort */ });
       return c.json({ error: `at most ${LINE_PHOTO_CAP} photos per line` }, 409);
     }
     throw e;

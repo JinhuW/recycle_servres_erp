@@ -10,7 +10,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, normSellPrice } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -1111,7 +1111,11 @@ inventory.patch('/:id', async (c) => {
     await tx`
       UPDATE order_lines SET
         status      = COALESCE(${body.status ?? null}, status),
-        sell_price  = COALESCE(${body.sellPrice ?? null}, sell_price),
+        -- Sentinel rather than COALESCE: 0 means "unprice this line" (the same
+        -- rule the PO drawer writes by), and a bare COALESCE would read it as
+        -- "no change" and silently keep the old price. See shared/sellPrice.
+        sell_price  = CASE WHEN ${body.sellPrice !== undefined ? 1 : 0}::int = 1
+                           THEN ${normSellPrice(body.sellPrice)} ELSE sell_price END,
         unit_cost   = COALESCE(${body.unitCost ?? null}, unit_cost),
         qty         = COALESCE(${body.qty ?? null}, qty),
         condition   = COALESCE(${body.condition ?? null}, condition),
@@ -1153,10 +1157,13 @@ inventory.patch('/:id', async (c) => {
   // when a sell price puts the line below cost or below the 15% margin floor.
   // Computed against either the newly submitted unitCost or the row-as-loaded
   // value, so a price-only edit still uses the correct cost basis.
+  // Nothing to warn about when the edit CLEARS the price: an unpriced line is
+  // not a line sold below cost.
   const warnings: string[] = [];
-  if (body.sellPrice !== undefined) {
+  const pricedTo = normSellPrice(body.sellPrice);
+  if (pricedTo !== null) {
     const cost = Number(body.unitCost ?? before.unit_cost);
-    const sp = body.sellPrice;
+    const sp = pricedTo;
     if (sp < cost) warnings.push('sub_cost_sell');
     const margin = sp > 0 ? ((sp - cost) / sp) : 0;
     const floor = await getWorkspaceSetting(sql, 'low_margin_floor', 0.15);

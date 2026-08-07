@@ -17,8 +17,10 @@ export type SubmitMeta = {
   warehouseId: string;
   payment: 'company' | 'self';
   notes: string;
-  // The goods cost. Fees are charged on top of it, never folded into it.
-  totalCost: number;
+  // No goods total. It is the sum of the lines, and the backend derives it from
+  // them on every write that moves them (services/orderGoodsTotal) — a figure
+  // sent from here could only ever restate that, and would be taken for a
+  // negotiated lot price and pin the column at a value the lines have left.
   otherFees: number;
   otherFeesNote: string | null;
 };
@@ -84,7 +86,6 @@ export function buildOrderSubmit(
     warehouseId: meta.warehouseId,
     payment: meta.payment,
     notes: meta.notes || null,
-    totalCost: meta.totalCost,
     otherFees: meta.otherFees,
     otherFeesNote: meta.otherFeesNote,
   };

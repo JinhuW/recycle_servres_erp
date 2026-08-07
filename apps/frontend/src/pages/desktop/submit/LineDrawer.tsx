@@ -14,7 +14,7 @@ import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhoto
 import { linePhotos, type LinePhoto } from '../../../lib/linePhotos';
 import { MarketAssist } from '../../../components/MarketAssist';
 import { type MarketValue } from '../../../lib/useMarketLookup';
-import { addableCategories } from '../../../lib/lookups';
+import { addableCategories, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ export function LineDrawer({
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
+                <span className={'chip ' + categoryTone(cat).chip}>{cat}</span>
                 {!readOnly && !catOpen && (
                   <button type="button" className="dw-cat-link" onClick={() => setCatOpen(true)}>
                     {t('changeCategory')}

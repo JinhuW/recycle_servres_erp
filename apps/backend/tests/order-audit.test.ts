@@ -129,12 +129,14 @@ describe('PO audit log — lifecycle events', () => {
   });
 
   // Nothing is filtered out of a draft's timeline — including the running
-  // total_cost the submit form re-sends with every line it appends.
+  // total_cost the submit form re-sends with every line it appends. The create
+  // derives the opening figure from its own lines (4×80 + 2×50 = 420), so each
+  // append below states the total that append actually produces.
   it('logs every total_cost move on a draft, one event per append', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createDraftWithLines(token);
 
-    for (const [i, total] of [420, 500, 580].entries()) {
+    for (const [i, total] of [500, 580, 660].entries()) {
       const r = await api('PATCH', `/api/orders/${id}`, {
         token,
         body: {
@@ -149,7 +151,7 @@ describe('PO audit log — lifecycle events', () => {
     expect(events.filter(e => e.kind === 'line_added')).toHaveLength(3);
     const meta = events.filter(e => e.kind === 'meta_changed');
     expect(meta).toHaveLength(3);
-    expect(meta.map(e => (e.detail.changes as { to: unknown }[])[0].to)).toEqual([420, 500, 580]);
+    expect(meta.map(e => (e.detail.changes as { to: unknown }[])[0].to)).toEqual([500, 580, 660]);
   });
 
   it('logs an other_fees change as meta_changed, with numeric from/to', async () => {

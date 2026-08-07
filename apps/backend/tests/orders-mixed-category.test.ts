@@ -244,6 +244,57 @@ describe('per-line category validation', () => {
     expect(r.body.error).toMatch(/CPU/);
   });
 
+  // orders.category is a DERIVATION of the lines, so it is not a value a line
+  // may inherit: 'Mixed' is not a row in the categories table, so a line filed
+  // under it matches no category chip, exports to the wrong sheet, clears no
+  // spec fields on a later switch, and skips the Other item-type rule.
+  it('refuses to inherit the order category when the PO is Mixed', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE, SSD_LINE]);
+    expect((await get(token, id)).category).toBe('Mixed');
+
+    const r = await api<{ error: string }>('PATCH', '/api/orders/' + id, {
+      token, body: { addLines: [{ qty: 1, unitCost: 5, condition: 'New' }] },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/category is required/);
+
+    const after = await get(token, id);
+    expect(after.categories).toEqual(['RAM', 'SSD']);
+    expect(after.lines.map(l => l.category)).not.toContain('Mixed');
+  });
+
+  it('still inherits the order category when the PO holds only one', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE]);
+    const r = await api('PATCH', '/api/orders/' + id, {
+      token, body: { addLines: [{ brand: 'Crucial', qty: 1, unitCost: 5, condition: 'New' }] },
+    });
+    expect(r.status).toBe(200);
+
+    const after = await get(token, id);
+    expect(after.category).toBe('RAM');
+    expect(after.lines.map(l => l.category)).toEqual(['RAM', 'RAM']);
+  });
+
+  // The INSERT writes deriveCategory()'s answer directly; syncOrderCategory
+  // corrects it a few statements later, so a per-line list read as 'Mixed' only
+  // survives in the `created` audit event — and in whatever runs before the
+  // sync next time someone reorders this block.
+  it('files a multi-line single-category PO under that category from the first write', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [
+      RAM_LINE,
+      { ...RAM_LINE, partNumber: 'M393A4K40DB3-CWF' },
+      { ...RAM_LINE, partNumber: 'M393A4K40DB3-CWG' },
+    ]);
+    const [created] = await getTestDb()<{ detail: { category: string } }[]>`
+      SELECT detail FROM order_events WHERE order_id = ${id} AND kind = 'created'
+    `;
+    expect(created.detail.category).toBe('RAM');
+    expect((await get(token, id)).category).toBe('RAM');
+  });
+
   it('does not retro-block an edit to a line whose category is untouched', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await makePo(token, [RAM_LINE]);
