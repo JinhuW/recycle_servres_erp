@@ -9,15 +9,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { parseFeeInput } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
-import { addableCategories } from '../lib/lookups';
-
-// Matches the chip tones used for categories elsewhere in the app.
-const CAT_TINT: Record<string, string> = {
-  RAM: 'var(--info)',
-  SSD: 'var(--pos)',
-  HDD: 'var(--cool, oklch(0.58 0.13 305))',
-  Other: 'var(--warn)',
-};
+import { addableCategories, categoryTone } from '../lib/lookups';
 
 type Props = {
   lines: DraftLine[];
@@ -33,7 +25,7 @@ type Props = {
   onRemoveLine: (idx: number) => void;
   onSubmit: (payload: {
     warehouseId: string; payment: 'company' | 'self'; notes: string;
-    totalCost: number; otherFees: number; otherFeesNote: string | null;
+    otherFees: number; otherFeesNote: string | null;
   }) => Promise<void>;
   onCancel: () => void;
 };
@@ -77,7 +69,7 @@ export function OrderReview({
     setSubmitting(true);
     try {
       await onSubmit({
-        warehouseId, payment, notes, totalCost: computedCost,
+        warehouseId, payment, notes,
         otherFees: feesValue,
         otherFeesNote: fees.note.trim() || null,
       });
@@ -180,8 +172,8 @@ export function OrderReview({
                 aria-label={t('subAddCatLine', { cat })}
                 style={{
                   minHeight: 54, borderRadius: 13,
-                  border: '1.5px dashed ' + (CAT_TINT[cat] ?? 'var(--border-strong)'),
-                  background: 'var(--bg-elev)', color: CAT_TINT[cat] ?? 'var(--fg-muted)',
+                  border: '1.5px dashed ' + categoryTone(cat).tone,
+                  background: 'var(--bg-elev)', color: categoryTone(cat).tone,
                   fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
                   display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
                   padding: '6px 2px', cursor: 'pointer',

@@ -11,8 +11,9 @@
 --
 -- The expression below must stay byte-identical to PART_PREFIX_RE in
 -- src/lib/part-number.ts or the planner silently stops matching and the query
--- quietly degrades to a seq scan. tests/market-canon-index.test.ts asserts
--- that by comparing pg_get_indexdef against the TS constant.
+-- quietly degrades to a seq scan. The 'ref_prices canonical part-number index'
+-- block in tests/market-batch-lookup.test.ts asserts that by comparing
+-- pg_get_indexdef against the TS constant.
 --
 -- upper() is collation-dependent-but-marked-immutable, so a glibc/ICU upgrade
 -- technically invalidates this index: REINDEX after one.

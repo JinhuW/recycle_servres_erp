@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groupLines, shouldGroup } from './lineGroups';
+import { groupLines, shouldGroup, displayRows } from './lineGroups';
 
 // The grouped table and the per-category cost breakdown both read this, so a
 // disagreement here would show as a subtotal that doesn't match its group.
@@ -74,5 +74,35 @@ describe('groupLines', () => {
     const [g] = groupLines([{ category: 'RAM', qty: '4', unitCost: '2.50' }]);
     expect(g.goods).toBeCloseTo(10, 2);
     expect(g.units).toBe(4);
+  });
+});
+
+describe('displayRows', () => {
+  const mixed = [line('RAM', 1, 10), line('SSD', 1, 20), line('RAM', 2, 30)];
+  const rows = (lines: ReturnType<typeof line>[], folded: string[] = []) =>
+    displayRows(lines, groupLines(lines), shouldGroup(lines), new Set(folded));
+
+  it('walks a mixed PO group by group, each group headed once', () => {
+    expect(rows(mixed).map(r => [r.index, r.head])).toEqual([[0, 'RAM'], [2, null], [1, 'SSD']]);
+  });
+
+  it('leaves a single-category PO in position order with no headers', () => {
+    const flat = [line('RAM', 1, 10), line('RAM', 2, 20)];
+    expect(rows(flat).map(r => [r.index, r.head, r.hidden])).toEqual([[0, null, false], [1, null, false]]);
+  });
+
+  it('hides every member of a folded group, not just the one carrying the head', () => {
+    expect(rows(mixed, ['RAM']).filter(r => r.hidden).map(r => r.index)).toEqual([0, 2]);
+    // The head survives, so there is still something to click to unfold.
+    expect(rows(mixed, ['RAM']).find(r => r.index === 0)!.head).toBe('RAM');
+  });
+
+  // Fold state outlives the headers that toggle it. Fold RAM on a RAM+SSD PO,
+  // then delete the SSD line: no header is emitted for anything any more, so a
+  // row hidden on fold state alone would sit behind a toggle that is no longer
+  // on screen — an items table that looks empty, with no way back but a reload.
+  it('stops folding once the PO is no longer mixed, headers or not', () => {
+    const noLongerMixed = [line('RAM', 1, 10), line('RAM', 2, 30)];
+    expect(rows(noLongerMixed, ['RAM']).every(r => !r.hidden)).toBe(true);
   });
 });

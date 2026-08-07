@@ -1,5 +1,5 @@
 import { useT } from '../../../lib/i18n';
-import { addableCategories } from '../../../lib/lookups';
+import { addableCategories, categoryTone } from '../../../lib/lookups';
 import type { Category } from '../../../lib/types';
 
 // Four equal buttons, one per category, always visible.
@@ -8,12 +8,6 @@ import type { Category } from '../../../lib/types';
 // category mode, and a button that names one reads as though it were — which is
 // exactly the confusion the old full-page category gate created. Equal weight
 // keeps every category one click away and leaves the mixing visible at rest.
-const SWATCH: Record<string, string> = {
-  RAM: 'var(--info)',
-  SSD: 'var(--pos)',
-  HDD: 'var(--cool, oklch(0.58 0.13 305))',
-  Other: 'var(--warn)',
-};
 
 export function AddLineMenu({
   onAdd,
@@ -35,7 +29,7 @@ export function AddLineMenu({
           title={t('subAddCatLine', { cat })}
           onClick={() => onAdd(cat as Category)}
         >
-          <span className="add-line-swatch" style={{ background: SWATCH[cat] ?? 'var(--fg-subtle)' }} />
+          <span className="add-line-swatch" style={{ background: categoryTone(cat).tone }} />
           {cat}
         </button>
       ))}

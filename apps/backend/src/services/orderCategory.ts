@@ -22,9 +22,14 @@ export function sortCategories(cats: readonly string[]): string[] {
   return [...cats].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
+/**
+ * Deduplicates first, so callers may pass the per-line list as it stands — a
+ * three-line all-RAM order derives 'RAM', not 'Mixed'.
+ */
 export function deriveCategory(cats: readonly string[]): string | null {
-  if (cats.length === 0) return null;
-  return cats.length === 1 ? cats[0] : 'Mixed';
+  const distinct = new Set(cats);
+  if (distinct.size === 0) return null;
+  return distinct.size === 1 ? [...distinct][0] : 'Mixed';
 }
 
 /**

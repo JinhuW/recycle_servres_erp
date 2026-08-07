@@ -77,6 +77,30 @@ export function addItemType(type: ItemType): void {
 // way. Unknown ids sort after these.
 export const CATEGORY_ORDER: readonly string[] = ['RAM', 'SSD', 'HDD', 'Other'];
 
+// The category → colour map, in one place.
+//
+// Five surfaces tint by category — the order-row chips, the grouped table's
+// headers, the desktop add bar, the mobile add tiles and the drawer's chip —
+// and each carried its own copy of this ladder. Recolouring HDD, or adding a
+// fifth category, then meant finding all five, and missing one showed the same
+// PO in a different colour on the next screen.
+//
+// `chip` is a class from the chip ladder in the stylesheet; `tone` and `soft`
+// are the CSS custom properties everything else paints with.
+const CATEGORY_TONE: Record<string, { chip: string; tone: string; soft: string }> = {
+  RAM:   { chip: 'info', tone: 'var(--info)', soft: 'var(--info-soft)' },
+  SSD:   { chip: 'pos',  tone: 'var(--pos)',  soft: 'var(--pos-soft)' },
+  HDD:   { chip: 'cool', tone: 'var(--cool, oklch(0.58 0.13 305))', soft: 'var(--cool-soft, oklch(0.95 0.032 305))' },
+  Other: { chip: 'warn', tone: 'var(--warn)', soft: 'var(--warn-soft)' },
+};
+
+const UNKNOWN_TONE = { chip: 'warn', tone: 'var(--fg-subtle)', soft: 'var(--bg-soft)' };
+
+/** Tones for a category id; a category the map doesn't know renders neutral. */
+export function categoryTone(category: string): { chip: string; tone: string; soft: string } {
+  return CATEGORY_TONE[category] ?? UNKNOWN_TONE;
+}
+
 /** Filter-chip options: 'all' followed by the enabled category ids in order. */
 export function categoryFilterOptions(): string[] {
   return ['all', ...categories.filter(c => c.enabled).map(c => c.id)];

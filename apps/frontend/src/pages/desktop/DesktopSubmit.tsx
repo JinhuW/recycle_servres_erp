@@ -485,11 +485,15 @@ function OrderForm({
     scanConfidence: l.scanConfidence ?? null,
   });
 
+  // No goods total: the backend derives it from the lines on every write that
+  // moves them. Sending one here was actively wrong on the per-line confirm —
+  // `totals.cost` is the sum of ALL local lines, while the PATCH appends only
+  // the one just confirmed, so confirming line 3 of 5 wrote the full local sum
+  // as a stated goods total the remaining appends could no longer correct.
   type WireMeta = {
     warehouseId?: string;
     payment: 'company' | 'self';
     notes: string | null;
-    totalCost: number;
     otherFees: number;
     otherFeesNote: string | null;
   };
@@ -517,7 +521,6 @@ function OrderForm({
     ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
     payment: meta.payment === 'Company' ? 'company' : 'self',
     notes: meta.notes || null,
-    totalCost: totals.cost,
     otherFees: parseFeeInput(meta.otherFees),
     otherFeesNote: meta.otherFeesNote.trim() || null,
   });
@@ -592,9 +595,10 @@ function OrderForm({
     try {
       await api.patch('/api/orders/' + target.id, {
         addLines: submitLines.map(toWireLine),
-        totalCost: (target.totalCost ?? 0) + totals.cost,
-        // Fees accumulate the same way the goods total does — the target PO
-        // keeps whatever it was already charged, plus what this batch carries.
+        // The goods total is not accumulated by hand any more — the backend
+        // re-derives it from the target's lines once these land. Fees are not
+        // a line and have nothing to derive from, so they still accumulate
+        // here: the target keeps what it was charged, plus what this batch adds.
         otherFees: target.otherFees + parseFeeInput(meta.otherFees),
       });
       const evidenceOk = evidenceFiles.length === 0 || await uploadEvidence(target.id);
@@ -954,6 +958,11 @@ function OrderForm({
 
       {activeIdx !== null && lines[activeIdx] && (
         <LineDrawer
+          // Keyed on the line, not mounted once and re-pointed: the drawer holds
+          // per-line state (the category-switch undo snapshot above all, which
+          // carries a whole Line) and without a remount clicking another row
+          // would let Undo write the previous line's record over this one.
+          key={lines[activeIdx]._cid}
           line={lines[activeIdx]}
           idx={activeIdx}
           onChange={patch => updateLine(activeIdx, patch)}

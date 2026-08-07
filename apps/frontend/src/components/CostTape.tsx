@@ -32,11 +32,15 @@ type Props = {
   /** Share of goods cost that has been priced, 0–100. */
   coveragePct: number;
   locale: string;
-  /** Editable cells (goods override, fee amount, fee note) supplied by the page. */
-  goodsField?: ReactNode;
+  /** Editable cells (fee amount, fee note) supplied by the page. */
   feeField?: ReactNode;
   feeNoteField?: ReactNode;
-  goodsReset?: ReactNode;
+  /**
+   * Marker rendered beside the goods label when `goods` is a stored total
+   * rather than the sum of `groups` — without it the itemised rows above read
+   * as an addition that doesn't come out.
+   */
+  goodsNote?: ReactNode;
 };
 
 function Row({
@@ -59,7 +63,7 @@ function Row({
 export function CostTape({
   groups, grouped, lineCount, units, goods, fees, total,
   revenue, pricedCost, pricedProfit, pricedCount, coveragePct,
-  locale, goodsField, feeField, feeNoteField, goodsReset,
+  locale, feeField, feeNoteField, goodsNote,
 }: Props) {
   const { t } = useT();
   const margin = revenue > 0 ? (pricedProfit / revenue) * 100 : 0;
@@ -75,7 +79,9 @@ export function CostTape({
           </span>
         </div>
 
-        {/* Only worth itemising when there is more than one thing to itemise. */}
+        {/* Only worth itemising when there is more than one thing to itemise —
+            and only honest when the parts add up to the sum below them, which
+            a stored goods total need not. `goodsNote` is what says so. */}
         {grouped && groups.map(g => (
           <Row
             key={g.category}
@@ -85,12 +91,7 @@ export function CostTape({
           />
         ))}
 
-        <Row
-          cls="sum"
-          label={<>{t('goodsTotal')}{goodsReset}</>}
-        >
-          {goodsField ?? <span className="tape-v mono">{fmtUSD(goods, locale)}</span>}
-        </Row>
+        <Row cls="sum" label={<>{t('goodsTotal')}{goodsNote}</>} value={fmtUSD(goods, locale)} />
 
         <Row label={t('otherFees')}>
           <span className="tape-edit">

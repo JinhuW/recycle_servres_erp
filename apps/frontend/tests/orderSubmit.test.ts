@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildOrderSubmit } from '../src/lib/orderSubmit';
 import type { DraftLine } from '../src/lib/types';
 
-const meta = { warehouseId: 'W1', payment: 'company' as const, notes: '', totalCost: 100 };
+const meta = { warehouseId: 'W1', payment: 'company' as const, notes: '', otherFees: 0, otherFeesNote: null };
 const line = (over: Partial<DraftLine> = {}): DraftLine => ({
   category: 'RAM', qty: 1, unitCost: 10, brand: 'Samsung', ...over,
 });
@@ -62,6 +62,20 @@ describe('buildOrderSubmit — editing an existing order', () => {
     expect((r.body.addLines as Array<Record<string, unknown>>)[0]).toMatchObject({ brand: 'Crucial', status: 'In Transit' });
     expect(r.body.removeLineIds).toEqual(['l2']);
   });
+
+  // The review screen states the goods total, it can't take one — so the only
+  // value it could send is the line sum, which the backend already derives from
+  // the lines in this same request. Sending it anyway read as a negotiated lot
+  // price: it overwrote a PO's real one on a save that changed nothing but a
+  // note, and pinned every other PO's column at whatever this screen last held.
+  it('never sends totalCost — the backend derives it from the lines', () => {
+    const r = buildOrderSubmit(
+      { editingId: 'PO-1289', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] },
+      meta,
+    );
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect(r.body).not.toHaveProperty('totalCost');
+  });
 });
 
 describe('buildOrderSubmit — finalizing a new draft', () => {
@@ -73,6 +87,12 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
     if (r.kind !== 'patch') throw new Error('expected patch');
     expect(r.url).toBe('/api/orders/PO-9');
     expect((r.body.addLines as unknown[])).toHaveLength(1);
+  });
+
+  it('does not send totalCost either — the appended lines are what derives it', () => {
+    const r = buildOrderSubmit({ draftId: 'PO-9', lines: [line()] }, meta);
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect(r.body).not.toHaveProperty('totalCost');
   });
 
   // The order row is created by the first line that can be persisted, so a
@@ -93,6 +113,12 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
     const r = buildOrderSubmit({ lines: [line({ _confirmed: true }), line()] }, meta);
     if (r.kind !== 'create') throw new Error('expected create');
     expect((r.body.lines as unknown[])).toHaveLength(2);
+  });
+
+  it('does not send totalCost on a create — POST derives it from the lines', () => {
+    const r = buildOrderSubmit({ lines: [line()] }, meta);
+    if (r.kind !== 'create') throw new Error('expected create');
+    expect(r.body).not.toHaveProperty('totalCost');
   });
 
   it('errors rather than creating an empty order', () => {

@@ -72,7 +72,13 @@ dashboard.get('/', async (c) => {
         : sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
             SELECT
               COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
-              COALESCE(SUM(${eff} * ol.qty), 0)::float                                                 AS cost,
+              -- Filtered to the SAME lines revenue and profit are drawn from.
+              -- An unpriced line's NULL drops out of those two SUMs on its own;
+              -- cost summing every line regardless would leave the KPI row
+              -- stating a revenue and a cost that don't reconcile to its own
+              -- profit. Cost here is the cost OF the priced lines.
+              COALESCE(SUM(${eff} * ol.qty)
+                       FILTER (WHERE ol.sell_price IS NOT NULL), 0)::float                             AS cost,
               COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float       AS profit,
               COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
                            * COALESCE(po.commission_rate, 0)), 0)::float                               AS commission

@@ -1,17 +1,9 @@
+import { categoryTone } from '../lib/lookups';
 import type { Category } from '../lib/types';
 
 // One chip per category an order holds. A PO may mix them, so the row is driven
 // by `order.categories` rather than the derived `order.category` scalar — that
 // scalar reads 'Mixed', which tells you there is more than one but not which.
-//
-// Tone map matches the per-page ladders this replaces (Orders, DesktopOrders,
-// OrderDetail, DesktopEditOrder) so the chips stay recognisable.
-const TONE: Record<string, string> = {
-  RAM: 'info',
-  SSD: 'pos',
-  HDD: 'cool',
-  Other: 'warn',
-};
 
 type Props = {
   categories: readonly Category[];
@@ -34,7 +26,7 @@ export function OrderCategoryChips({ categories, max = 2, emptyLabel = '—', st
       title={categories.join(' · ')}
     >
       {shown.map(c => (
-        <span key={c} className={'chip ' + (TONE[c] ?? 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
+        <span key={c} className={'chip ' + categoryTone(c).chip} style={{ minWidth: 42, justifyContent: 'center' }}>
           {c}
         </span>
       ))}
