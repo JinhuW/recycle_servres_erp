@@ -73,10 +73,9 @@ function Shell() {
   // unmounts on every trip into a line form, and an order opened for edit
   // arrives carrying the fee it was saved with.
   const [orderFees, setOrderFees] = useState({ amount: '', note: '' });
-  // The draft order is created asynchronously when the flow starts, so the form
-  // is shown before its id lands in `capture`. Hold the in-flight creation here
-  // so a fast Save can await the id instead of silently dropping the line to
-  // local-only (it would then only reach the DB on final submit).
+  // The draft order is created on demand by `ensureDraftId`, and its id lands
+  // in `capture` a round trip later. Hold the in-flight POST here so a second
+  // save awaits the same one instead of opening a second order.
   const draftIdPromise = useRef<Promise<string | null> | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [langSheet, setLangSheet] = useState(false);
@@ -192,21 +191,34 @@ function Shell() {
   };
 
   // A new PO opens on its (empty) line list, where the add row asks which kind
-  // of thing is going in. Nothing is written until the first line is saved.
+  // of thing is going in. Nothing is written until there's a line to write.
   const startNewDraft = () => {
     setCapture({ phase: 'review', detected: null, lines: [] });
     setOrderFees({ amount: '', note: '' });
+    draftIdPromise.current = null;
+  };
+
+  // The PO row is created by the first line that needs one, never by opening
+  // the flow — a session backed out of at the line list would otherwise leave
+  // an empty order behind, and those pile up in everyone's draft picker.
+  // Memoised in the ref so two quick saves share one POST; cleared on failure
+  // so the next save retries instead of inheriting the rejection.
+  const ensureDraftId = (): Promise<string | null> => {
     // No category on the draft: it has no lines to derive one from yet, and the
     // first line will carry its own.
-    draftIdPromise.current = createDraftOrder()
+    draftIdPromise.current ??= createDraftOrder()
       .then(r => {
-        setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id });
+        setCapture(c =>
+          c.phase === 'idle' || c.phase === 'draftPicker' ? c : { ...c, draftId: r.id },
+        );
         return r.id;
       })
       .catch(() => {
         showToast('Could not start a draft order — retry.', 'error');
+        draftIdPromise.current = null;
         return null;
       });
+    return draftIdPromise.current;
   };
 
   // Reopen an existing draft on the review screen so the user sees the lines
@@ -249,6 +261,8 @@ function Shell() {
     interface: l.interface ?? null,
     formFactor: l.formFactor ?? null,
     description: l.description ?? null,
+    // Required on an Other line — omitting it 400'd every autosave of one.
+    itemType: l.itemType ?? null,
     partNumber: l.partNumber ?? null,
     serialNumber: l.serialNumber ?? null,
     chipNumber: l.chipNumber ?? null,
@@ -306,7 +320,7 @@ function Shell() {
         showToast(blocked, 'error');
         return;
       }
-      const orderId = editingId ?? draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+      const orderId = editingId ?? draftId ?? await ensureDraftId();
       if (!orderId) {
         showToast(t('syncNoDraft'), 'error');
         return;
@@ -339,7 +353,8 @@ function Shell() {
     // The existing order being edited, or the new draft — whose creation is
     // async, so on a fast Save await the in-flight POST instead of dropping the
     // line to local-only.
-    const targetId = editingId ?? draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+    const mintedHere = !editingId && !draftId;
+    const targetId = editingId ?? draftId ?? await ensureDraftId();
     if (!targetId) {
       showToast(t('syncNoDraft'), 'error');
       return;
@@ -364,6 +379,16 @@ function Shell() {
     } catch {
       // Keep the line locally unconfirmed; it will be sent on final submit.
       showToast(t('syncFailed'), 'error');
+      // The order was minted for this line and the line didn't land, so the
+      // order is empty and nothing points at it — take it back out. Submit
+      // creates it again, atomically, from the whole list.
+      if (mintedHere) {
+        deleteOrder(targetId).catch(() => {/* best-effort */});
+        draftIdPromise.current = null;
+        setCapture(c =>
+          c.phase === 'idle' || c.phase === 'draftPicker' ? c : { ...c, draftId: undefined },
+        );
+      }
     }
   };
 
@@ -429,8 +454,10 @@ function Shell() {
   const submitOrder = async (meta: SubmitMeta) => {
     if (capture.phase !== 'review') return;
 
-    // Editing an existing order PATCHes that order; finalizing a new draft
-    // PATCHes the draft. Submitting from review never creates a new order.
+    // Editing an existing order PATCHes it; a draft that exists is PATCHed;
+    // and a session whose lines never synced (so no order was ever created)
+    // POSTs the whole thing at once — atomic, so an invalid line 400s without
+    // leaving an empty PO behind.
     const req = buildOrderSubmit(
       {
         editingId: capture.editingId,
@@ -445,7 +472,8 @@ function Shell() {
       return;
     }
     try {
-      await api.patch(req.url, req.body);
+      if (req.kind === 'create') await api.post(req.url, req.body);
+      else await api.patch(req.url, req.body);
       const editingId = capture.editingId;
       setCapture({ phase: 'idle' });
       if (editingId) {

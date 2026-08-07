@@ -75,8 +75,28 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
     expect((r.body.addLines as unknown[])).toHaveLength(1);
   });
 
-  it('errors when there is no draft and no order being edited', () => {
-    const r = buildOrderSubmit({ lines: [line()] }, meta);
+  // The order row is created by the first line that can be persisted, so a
+  // session whose lines were all held back arrives here with nothing to PATCH.
+  // One atomic create is also what keeps an invalid line from leaving an empty
+  // PO behind.
+  it('creates the order outright when none exists yet', () => {
+    const r = buildOrderSubmit({ lines: [line(), line({ brand: 'Crucial' })] }, meta);
+    if (r.kind !== 'create') throw new Error('expected create');
+    expect(r.url).toBe('/api/orders');
+    expect((r.body.lines as unknown[])).toHaveLength(2);
+    expect(r.body.warehouseId).toBe(meta.warehouseId);
+  });
+
+  it('sends every line on a create, including ones already autosaved', () => {
+    // _confirmed only means "already in the draft" — with no draft, it means
+    // nothing, and skipping those lines would drop them from the new order.
+    const r = buildOrderSubmit({ lines: [line({ _confirmed: true }), line()] }, meta);
+    if (r.kind !== 'create') throw new Error('expected create');
+    expect((r.body.lines as unknown[])).toHaveLength(2);
+  });
+
+  it('errors rather than creating an empty order', () => {
+    const r = buildOrderSubmit({ lines: [] }, meta);
     expect(r.kind).toBe('error');
   });
 });

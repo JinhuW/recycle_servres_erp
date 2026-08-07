@@ -1,12 +1,16 @@
 // Builds the request for finalizing a purchase order from the review screen.
 //
-// There are two cases, and BOTH are a PATCH — submitting from review must
-// never create a new order:
+// Three cases:
 //   - Editing an existing order (`editingId` set): PATCH that order, updating
 //     lines that still carry their DB id, inserting new ones, and deleting the
 //     originals the user removed.
 //   - Finalizing a new draft (`draftId` set): PATCH the draft, appending the
 //     lines that weren't already autosaved.
+//   - No order yet: POST the whole thing. The draft row is only created by the
+//     first line that can be persisted, so a session whose lines were all
+//     held back (incomplete when saved) reaches submit with nothing to PATCH.
+//     One atomic create is also the only shape that cannot leave an empty PO
+//     behind when the lines turn out to be invalid.
 import type { DraftLine } from './types';
 
 export type SubmitMeta = {
@@ -30,6 +34,7 @@ export type SubmitState = {
 
 export type OrderSubmitRequest =
   | { kind: 'patch'; url: string; body: Record<string, unknown> }
+  | { kind: 'create'; url: string; body: Record<string, unknown> }
   | { kind: 'error'; message: string };
 
 // New rows (and the new-draft path) carry status 'In Transit'.
@@ -102,7 +107,14 @@ export function buildOrderSubmit(
   }
 
   if (!state.draftId) {
-    return { kind: 'error', message: 'No draft order — please cancel and retry.' };
+    if (!state.lines.length) {
+      return { kind: 'error', message: 'Add at least one item before submitting.' };
+    }
+    return {
+      kind: 'create',
+      url: '/api/orders',
+      body: { ...metaBody, lines: state.lines.map(toAddLine) },
+    };
   }
   // Only send lines that weren't already autosaved to the draft (confirmed
   // lines were written when the user saved each one — avoid double-insert).
