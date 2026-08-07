@@ -146,6 +146,27 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
   });
 
+  it('filters from the header row on every category tab, protection allowing it', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token);
+    const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
+    const wb = await loadWorkbook(res);
+    expect(categoryTabs(wb).length).toBeGreaterThan(1);
+    for (const ws of categoryTabs(wb)) {
+      const { row: headerRow, cols } = findHeaderRow(ws);
+      const lastCol = Math.max(...cols.values());
+      // The dropdowns must span the whole header, '#' through 'Note / 备注',
+      // and reach the one product row this order puts on each tab.
+      const first = `${ws.getColumn(1).letter}${headerRow}`;
+      const last = `${ws.getColumn(lastCol).letter}${headerRow + 1}`;
+      expect(ws.autoFilter).toBe(`${first}:${last}`);
+      // exceljs 'allow' semantics: true here is the unlocked autoFilter="0"
+      // attribute. Without it Excel greys the dropdowns out on a locked sheet.
+      expect(ws.sheetProtection?.autoFilter).toBe(true);
+      expect(ws.sheetProtection?.sort).toBeFalsy();
+    }
+  });
+
   it('labels the price columns CNY on a CNY order', async () => {
     // Frankfurter is stubbed so the CNY order's FX snapshot never hits the
     // network (same as sell-order-spreadsheet.test.ts).

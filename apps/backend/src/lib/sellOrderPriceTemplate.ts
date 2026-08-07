@@ -241,6 +241,14 @@ async function renderCategorySheet(
     }
   });
 
+  // Header-row filter dropdowns. The range has to be written before protect()
+  // — Excel only lets a protected sheet use an autofilter that already exists,
+  // it can't create one.
+  ws.autoFilter = {
+    from: { row: HEADER_ROW, column: 1 },
+    to: { row: HEADER_ROW + products.length, column: IDX.note },
+  };
+
   // Guard rail, not security: the manager can lift it in Excel (no password),
   // and the import parser tolerates a vendor who does.
   await ws.protect('', {
@@ -251,8 +259,10 @@ async function renderCategorySheet(
     formatRows: false,
     insertRows: false,
     deleteRows: false,
+    // Filtering only hides rows, so it can't desync a bid from its line; a
+    // sort would reorder locked cells and Excel refuses it anyway.
     sort: false,
-    autoFilter: false,
+    autoFilter: true,
   });
 }
 
