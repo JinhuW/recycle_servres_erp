@@ -24,6 +24,11 @@ type Props = {
   editingId?: string | null;
   /** Called with the kind of line to add — the add row always names one. */
   onAddItem: (cat: Category) => void;
+  // Fees live in the session, not this component: it unmounts every time the
+  // user steps into a line form, and an existing order opens carrying the fee
+  // it was saved with — which a blank field would silently zero on save.
+  fees: { amount: string; note: string };
+  onFeesChange: (fees: { amount: string; note: string }) => void;
   onEditLine: (idx: number) => void;
   onRemoveLine: (idx: number) => void;
   onSubmit: (payload: {
@@ -36,6 +41,7 @@ type Props = {
 export function OrderReview({
   lines, editingId,
   onAddItem, onEditLine, onRemoveLine,
+  fees, onFeesChange,
   onSubmit, onCancel,
 }: Props) {
   const { t, lang } = useT();
@@ -64,9 +70,7 @@ export function OrderReview({
   // hero against what they actually paid, so it states goods + fees.
   const computedCost = lines.reduce((a, l) => a + l.qty * l.unitCost, 0);
   const totalQty = lines.reduce((a, l) => a + l.qty, 0);
-  const [otherFees, setOtherFees] = useState('');
-  const [otherFeesNote, setOtherFeesNote] = useState('');
-  const feesValue = parseFeeInput(otherFees);
+  const feesValue = parseFeeInput(fees.amount);
   const allIn = computedCost + feesValue;
 
   const submit = async () => {
@@ -75,7 +79,7 @@ export function OrderReview({
       await onSubmit({
         warehouseId, payment, notes, totalCost: computedCost,
         otherFees: feesValue,
-        otherFeesNote: otherFeesNote.trim() || null,
+        otherFeesNote: fees.note.trim() || null,
       });
     } finally {
       setSubmitting(false);
@@ -242,78 +246,71 @@ export function OrderReview({
           />
         </div>
 
-        {/* What the purchaser paid, stated rather than typed: goods is the sum
-            of the lines, and the only money that can be entered here is what
-            the supplier charged on top of them. */}
+        {/* The card adds up downward: goods (the line sum), then whatever the
+            supplier charged on top, then the total they make. The only money
+            typed here is the fee — the total is stated, never entered. */}
         <div className="ph-card" style={{ marginTop: 16, background: 'var(--accent-soft)', borderColor: 'color-mix(in oklch, var(--accent) 30%, transparent)', overflow: 'hidden' }}>
           <div style={{ padding: '14px 14px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontSize: 10.5, color: 'var(--accent-strong)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {t('totalCost')}
+                {t('costBreakdown')}
               </div>
               <div style={{ fontSize: 11, color: 'var(--accent-strong)', opacity: 0.75, fontVariantNumeric: 'tabular-nums' }}>
                 {totalQty} {totalQty === 1 ? t('unit') : t('units2')} · {lines.length} {lines.length === 1 ? t('item') : t('items')}
               </div>
             </div>
 
-            <div style={{
-              display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 14,
-              borderBottom: '1.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
-              paddingBottom: 10,
-            }}>
-              <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--accent-strong)', opacity: 0.7 }}>$</span>
-              <span
-                className="mono"
-                style={{
-                  flex: 1, minWidth: 0,
-                  fontSize: 32, fontWeight: 700, color: 'var(--accent-strong)',
-                  letterSpacing: '-0.01em', lineHeight: 1.1,
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {allIn.toFixed(2)}
-              </span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 12.5, color: 'var(--accent-strong)' }}>
+              <span style={{ opacity: 0.75 }}>{t('goodsTotal')}</span>
+              <span className="mono" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(computedCost, locale)}</span>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, fontSize: 11.5, color: 'var(--accent-strong)' }}>
-              <span style={{ opacity: 0.75 }}>{t('goodsTotal')}</span>
-              <span className="mono" style={{ opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(computedCost, locale)}</span>
-            </div>
-            {feesValue > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, fontSize: 11.5, color: 'var(--accent-strong)' }}>
-                <span style={{ opacity: 0.75 }}>{t('otherFees')}</span>
-                <span className="mono" style={{ opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>+{fmtUSD(feesValue, locale)}</span>
+            <div className="ph-field-row" style={{ gridTemplateColumns: '110px 1fr', marginTop: 10 }}>
+              <div className="ph-field" style={{ marginTop: 0 }}>
+                <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFees')}</label>
+                <input
+                  className="input mono"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={fees.amount}
+                  placeholder="0.00"
+                  onChange={e => onFeesChange({ ...fees, amount: e.target.value })}
+                />
               </div>
-            )}
+              <div className="ph-field" style={{ marginTop: 0 }}>
+                <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFeesNote')}</label>
+                <input
+                  className="input"
+                  maxLength={280}
+                  value={fees.note}
+                  placeholder={t('otherFeesPh')}
+                  onChange={e => onFeesChange({ ...fees, note: e.target.value })}
+                />
+              </div>
+            </div>
 
             <div style={{
               marginTop: 12, paddingTop: 12,
-              borderTop: '1px solid color-mix(in oklch, var(--accent) 22%, transparent)',
+              borderTop: '1.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
             }}>
-              <div className="ph-field-row" style={{ gridTemplateColumns: '110px 1fr', marginTop: 0 }}>
-                <div className="ph-field" style={{ marginTop: 0 }}>
-                  <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFees')}</label>
-                  <input
-                    className="input mono"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    inputMode="decimal"
-                    value={otherFees}
-                    placeholder="0.00"
-                    onChange={e => setOtherFees(e.target.value)}
-                  />
-                </div>
-                <div className="ph-field" style={{ marginTop: 0 }}>
-                  <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFeesNote')}</label>
-                  <input
-                    className="input"
-                    maxLength={280}
-                    value={otherFeesNote}
-                    placeholder={t('otherFeesPh')}
-                    onChange={e => setOtherFeesNote(e.target.value)}
-                  />
-                </div>
+              <div style={{ fontSize: 10.5, color: 'var(--accent-strong)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {t('totalCost')}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4 }}>
+                <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--accent-strong)', opacity: 0.7 }}>$</span>
+                <span
+                  className="mono"
+                  style={{
+                    flex: 1, minWidth: 0,
+                    fontSize: 32, fontWeight: 700, color: 'var(--accent-strong)',
+                    letterSpacing: '-0.01em', lineHeight: 1.1,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {allIn.toFixed(2)}
+                </span>
               </div>
             </div>
           </div>
