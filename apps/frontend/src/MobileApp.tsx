@@ -69,6 +69,10 @@ function Shell() {
     return () => { document.body.classList.remove('phone-mode'); };
   }, []);
   const [capture, setCapture] = useState<CaptureState>({ phase: 'idle' });
+  // Order-level fees, held here rather than in OrderReview: that screen
+  // unmounts on every trip into a line form, and an order opened for edit
+  // arrives carrying the fee it was saved with.
+  const [orderFees, setOrderFees] = useState({ amount: '', note: '' });
   // The draft order is created asynchronously when the flow starts, so the form
   // is shown before its id lands in `capture`. Hold the in-flight creation here
   // so a fast Save can await the id instead of silently dropping the line to
@@ -191,6 +195,7 @@ function Shell() {
   // of thing is going in. Nothing is written until the first line is saved.
   const startNewDraft = () => {
     setCapture({ phase: 'review', detected: null, lines: [] });
+    setOrderFees({ amount: '', note: '' });
     // No category on the draft: it has no lines to derive one from yet, and the
     // first line will carry its own.
     draftIdPromise.current = createDraftOrder()
@@ -457,6 +462,10 @@ function Shell() {
   };
 
   const startEdit = (o: Order) => {
+    setOrderFees({
+      amount: o.otherFees ? o.otherFees.toFixed(2) : '',
+      note: o.otherFeesNote ?? '',
+    });
     setCapture({
       phase: 'review',
       detected: null,
@@ -564,6 +573,8 @@ function Shell() {
           lines={capture.lines}
           editingId={capture.editingId}
           onAddItem={addAnotherItem}
+          fees={orderFees}
+          onFeesChange={setOrderFees}
           onEditLine={editLine}
           onRemoveLine={removeLine}
           onSubmit={submitOrder}
