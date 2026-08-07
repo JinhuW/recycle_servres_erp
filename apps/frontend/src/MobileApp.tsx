@@ -50,7 +50,7 @@ type CaptureState =
   // ctx null → a fresh session; non-null → adding another line to one already
   // open, which must be handed back intact if the sheet is cancelled.
   | { phase: 'category'; ctx: LineCtx | null }
-  | { phase: 'draftPicker'; category: Category; drafts: OrderSummary[] }   // category = the first line's, held across resume-or-new
+  | { phase: 'draftPicker'; drafts: OrderSummary[] }
   | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   // Review holds a heterogeneous list, so it has no single category — each
@@ -164,7 +164,23 @@ function Shell() {
   }, []);
 
   // ── Capture flow handlers ────────────────────────────────────────────────
-  const startSubmit = () => setCapture({ phase: 'category', ctx: null });
+  const startSubmit = async () => {
+    // Which PO comes first; the category is a property of a line, and the line
+    // list's add row asks for it at the moment it matters. Probing here also
+    // keeps every session from silently spawning another empty draft.
+    try {
+      const r = await api.get<{ orders: OrderSummary[] }>(
+        '/api/orders?status=Draft&limit=20&mine=true',
+      );
+      if (r.orders.length > 0) {
+        setCapture({ phase: 'draftPicker', drafts: r.orders });
+        return;
+      }
+    } catch {
+      // Better to let them work than to block on a probe failure.
+    }
+    startNewDraft();
+  };
   const cancelCapture = () => {
     // Best-effort delete an abandoned empty draft (nothing confirmed = no real
     // inventory rows were written). Safe: backend 409s if lifecycle != 'draft'.
@@ -184,39 +200,24 @@ function Shell() {
     }
   };
 
-  // Probe for in-progress drafts before silently spawning a fresh one. Without
-  // this gate every scan session piles up another empty draft on the server.
-  // Not category-scoped: a PO may mix categories, so any open draft of the
-  // user's own can take this line.
-  const pickCategory = async (cat: Category) => {
-    // Adding to a session already underway skips the probe entirely — the
-    // draft it belongs to is already open.
-    if (capture.phase === 'category' && capture.ctx) {
-      const ctx = capture.ctx;
-      setCapture({
+  // Only reached from the line list's "add another" header link, which asks
+  // for a category without naming one. The four-button add row calls
+  // addAnotherItem(cat) directly and never lands here.
+  const pickCategory = (cat: Category) => {
+    setCapture(c => {
+      if (c.phase !== 'category' || !c.ctx) return c;
+      return {
         phase: 'form', category: cat, detected: null,
-        lines: ctx.lines, editingId: ctx.editingId, originalLineIds: ctx.originalLineIds,
-        editingLineIdx: null, returnTo: 'review', draftId: ctx.draftId,
-      });
-      return;
-    }
-    try {
-      const r = await api.get<{ orders: OrderSummary[] }>(
-        '/api/orders?status=Draft&limit=20&mine=true',
-      );
-      if (r.orders.length > 0) {
-        setCapture({ phase: 'draftPicker', category: cat, drafts: r.orders });
-        return;
-      }
-    } catch {
-      // Fall through to a new draft — better to let them work than block on a
-      // probe failure.
-    }
-    startNewDraft(cat);
+        lines: c.ctx.lines, editingId: c.ctx.editingId, originalLineIds: c.ctx.originalLineIds,
+        editingLineIdx: null, returnTo: 'review', draftId: c.ctx.draftId,
+      };
+    });
   };
 
-  const startNewDraft = (cat: Category) => {
-    setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
+  // A new PO opens on its (empty) line list, where the add row asks which kind
+  // of thing is going in. Nothing is written until the first line is saved.
+  const startNewDraft = () => {
+    setCapture({ phase: 'review', detected: null, lines: [] });
     // No category on the draft: it has no lines to derive one from yet, and the
     // first line will carry its own.
     draftIdPromise.current = createDraftOrder()
@@ -650,10 +651,9 @@ function Shell() {
 
       {capture.phase === 'draftPicker' && (
         <PhDraftPickerSheet
-          category={capture.category}
           drafts={capture.drafts}
           onResume={resumeDraft}
-          onStartNew={() => startNewDraft(capture.category)}
+          onStartNew={startNewDraft}
           onClose={cancelCapture}
         />
       )}

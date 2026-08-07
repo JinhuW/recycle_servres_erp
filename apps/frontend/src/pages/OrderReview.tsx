@@ -125,6 +125,16 @@ export function OrderReview({
           <span className="more" onClick={() => onAddItem()} style={{ cursor: 'pointer' }}>{t('addAnother')}</span>
         </div>
 
+        {/* A new PO now opens here rather than in a form, so the empty list has
+            to say what to do rather than look broken. */}
+        {lines.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '26px 12px 6px' }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600 }}>{t('reviewEmptyTitle')}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)', marginTop: 4 }}>
+              {t('reviewEmptySub')}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {lines.map((l, i) => (
             <div

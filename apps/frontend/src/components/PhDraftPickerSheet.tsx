@@ -1,21 +1,20 @@
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { fmtUSD0, relTime } from '../lib/format';
-import type { Category, OrderSummary } from '../lib/types';
+import type { OrderSummary } from '../lib/types';
 
 type Props = {
-  category: Category;
   drafts: OrderSummary[];
   onResume: (draft: OrderSummary) => void;
   onStartNew: () => void;
   onClose: () => void;
 };
 
-// Surfaces in-progress draft POs in the picked category so the next scan can
-// merge into one of them instead of silently spawning a fresh draft. The
-// "Start a new order" affordance preserves the old behavior when the user
-// really does want a clean slate.
-export function PhDraftPickerSheet({ category, drafts, onResume, onStartNew, onClose }: Props) {
+// The first question of a capture session: which PO is this going into? A PO
+// holds every category now, so any open draft of the user's own can take the
+// next line — nothing is filtered by kind. "Start a new order" is there for
+// when they really do want a clean slate.
+export function PhDraftPickerSheet({ drafts, onResume, onStartNew, onClose }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
@@ -28,7 +27,7 @@ export function PhDraftPickerSheet({ category, drafts, onResume, onStartNew, onC
           {t('resumeDraftTitle')}
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', padding: '0 4px 12px' }}>
-          {t('resumeDraftSub', { category })}
+          {t('resumeDraftSubAny')}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
