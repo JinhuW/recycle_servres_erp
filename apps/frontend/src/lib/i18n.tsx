@@ -192,18 +192,14 @@ export const I18N: Record<Lang, Record<string, string>> = {
     back: 'Back',
     orderNotes: 'Order notes',
     orderNotesPh: 'Optional — supplier reference, condition notes, special handling…',
-    calculated: 'Calculated',
-    adjustment: 'Adjustment',
-    adjustHint: 'Adjust if the supplier charged a different total — rounding, or a bulk discount.',
-    reset: 'Reset',
     goodsTotal: 'Goods total',
     otherFees: 'Other fees',
     otherFeesNote: 'What for?',
     otherFeesPh: 'PayPal processing fee',
+    feesHint: 'Shipping, tax or handling the supplier charged on top of the goods — the total above includes it.',
     inclFees: 'incl. {fees} fees',
     unit: 'unit',
     units2: 'units',
-    totalCostInvalid: 'Total cost must be a valid number.',
     reviewNoLinesHint: 'Add at least one item before submitting.',
     reviewWarehousesLoadingHint: 'Warehouses are still loading — try again in a moment.',
     reviewPickWarehouseHint: 'Pick a warehouse before submitting.',
@@ -1684,15 +1680,13 @@ export const I18N: Record<Lang, Record<string, string>> = {
     langApplyNote: '立即应用到整个应用', langSystem: '跟随系统', langSystemSub: '使用手机当前语言',
     saved: '语言已更新', back: '返回',
     orderNotes: '订单备注', orderNotesPh: '可选 — 供应商参考、成色备注、特殊处理…',
-    calculated: '小计', adjustment: '调整',
-    adjustHint: '若供应商实际收取的金额不同(整数化、批量折扣),可在此调整。',
-    reset: '重置', unit: '件', units2: '件',
+    unit: '件', units2: '件',
     goodsTotal: '货款合计',
     otherFees: '其他费用',
     otherFeesNote: '费用说明',
     otherFeesPh: 'PayPal 手续费',
+    feesHint: '运费、税费等货款之外由供应商收取的费用——上方总额已包含。',
     inclFees: '含 {fees} 费用',
-    totalCostInvalid: '总成本必须是有效数字。',
     reviewNoLinesHint: '请先添加至少一项再提交。',
     reviewWarehousesLoadingHint: '仓库仍在加载，请稍后再试。',
     reviewPickWarehouseHint: '请先选择仓库再提交。',
@@ -1904,7 +1898,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     previewAs: '预览身份', managerYou: '经理(您)',
     purchaser: '采购员',
     languageLabel: '语言', english: 'English', chinese: '中文',
-
     rescanWithAi: '用 AI 重新扫描',
     notifTitle: '通知',
     notifNUnread: '{n} 条未读',
@@ -2100,13 +2093,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     update: '更新',
     aiScanAlt: 'AI 扫描',
     previewingAsPurchaser: '以采购员身份预览 —— 您看到的是 {name} 的受限视图。',
-
     lifecycleDraft: '草稿',
     lifecycleShipped: '已发货',
     lifecycleAwaiting: '待付款',
     lifecycleDone: '已完成',
     lifecycleClosed: '已关闭',
-
     discardSoTitle: '弃单',
     discardSoSub: '停止此交易并释放所有软占用库存。',
     discardSoStatusClosed: '已关闭',
@@ -2124,11 +2115,9 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reopenSoSubmit: '重新打开订单',
     reopenSoSubmitting: '正在重新打开…',
     reopenSoError: '重新打开失败',
-
     paymentReceiverLabel: '收款人',
     paymentReceiverNone: '未指定',
     fieldPaymentReceiver: '收款人',
-
     statusShippedTitle: '标记为已发货',
     statusShippedSub: '记录运单信息以便通知客户。',
     statusShippedPlaceholder: '运单号、承运商、发货日期、装运人 —— 客户或仓库可能需要的任何信息。',
@@ -2166,7 +2155,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     uploadFailed: '上传失败',
     deleteFailed: '删除失败',
     saveFailed: '保存失败',
-
     historyLoading: '加载中…',
     historyEmpty: '暂无活动。',
     historyCreatedPrefix: '已创建',
@@ -2185,7 +2173,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     historyReopened: '已重新打开',
     historyStatusMetaOn: '于',
     historyByActorLine: '由 {name}',
-
     fieldNotes: '备注',
     fieldCustomer: '客户',
     fieldQty: '数量',
@@ -2200,7 +2187,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     fieldStatusNote: '状态备注',
     fieldAttachmentAdded: '已添加附件',
     fieldAttachmentRemoved: '已移除附件',
-
     vendorLinkUnavailableTitle: '链接不可用',
     vendorLinkUnavailableBody: '此链接无效或已过期。',
     vendorServerErrorBody: '无法连接到服务器。',
@@ -2216,7 +2202,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     vendorTableStatus: '状态',
     vendorUnits: '件',
     vendorClear: '清空',
-
     orderArchivedBadge: '已归档。',
     orderArchivedRestoreHint: '点击下方还原按钮即可恢复。',
     orderRestoredToast: '订单已还原',
@@ -2226,10 +2211,8 @@ export const I18N: Record<Lang, Record<string, string>> = {
     archive: '归档',
     archivePromptTitle: '归档 {id}？',
     archivePromptSub: '从默认列表中隐藏。可随时取消归档。',
-
     includeArchivedHint: '包含已归档订单',
     archivedChip: '已归档',
-
     showArchivedBtn: '显示已归档',
     hideArchivedBtn: '隐藏已归档',
     showArchivedPOs: '显示已归档的采购订单',
@@ -2309,7 +2292,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     settingsNavFx: '汇率',
     settingsNavFxSub: '汇率管理',
     settingsNavConnectorsSub: 'OAuth 与抓取器',
-
     catPanelTitle: '类别与 SKU',
     catPanelSub: '团队提交和销售的物品类别。切换以使其可在提交时选择。',
     catAddBtn: '添加类别',
@@ -2320,7 +2302,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     catRequirePNDesc: '在录入厂商零件号之前阻止提交。',
     catDefaultMargin: '默认毛利目标',
     catDefaultMarginDesc: '此类别的默认目标毛利率。',
-
     whPanelTitle: '仓库',
     whAddBtn: '添加仓库',
     whAddSub: '用于接收库存的新位置',
@@ -2356,7 +2337,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     whMoveInventoryTo: '将库存移至',
     whMoveInventoryClear: '(无 — 从记录中清除仓库)',
     whConfirmDelete: '确认删除',
-
     custPanelTitle: '客户',
     custPanelSub: '{active} 活跃 · 共 {total} · 累计营收 ${ltv}',
     custAddBtn: '添加客户',
@@ -2395,7 +2375,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     custFieldContactPhone: '联系人电话',
     custFieldNotes: '备注',
     custSaveFailed: '保存客户失败',
-
     memPanelTitle: '成员',
     memPanelSub: '{active} 活跃 · {archived} 已归档 · {pending} 待邀请',
     memInviteBtn: '邀请成员',
@@ -2457,7 +2436,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     memLastActivitySub: '该成员最近一次登录记录。',
     memLastSignedInLead: '最近登录',
     memNoSignIn: '尚未记录登录。',
-
     genPanelSub: '工作区标识、本地化与通知默认设置。',
     genWorkspaceName: '工作区名称',
     genEmailDomain: '邮箱域名',
@@ -2481,7 +2459,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     genNotifLowMarginSub: '标记实际毛利低于 15% 的明细。',
     genNotifCapacityTitle: '产能警报',
     genNotifCapacitySub: '当仓库利用率超过 85% 时提醒。',
-
     subDrafting: '草稿中…',
     subOrderContainsMixed: '同一笔订单可以同时包含内存、硬盘和其他物品。',
     subItemsClickRowAny: '点击一行进行编辑。在上方选择类别以追加项目。',
@@ -2555,7 +2532,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     syncNeedCost: '保存到服务器前单位成本须为 0 或以上。已暂存本地 —— 将在提交时发送。',
     syncNoDraft: '无法连接草稿订单 —— 此项未保存。将在提交时发送。',
     syncFailed: '无法将此项保存到服务器。将在提交时发送。',
-
     drawerViewAiPhoto: '查看 AI 照片',
     drawerUntitledItem: '未命名项目',
     drawerCostSummary: '成本 {cost}',
@@ -2586,7 +2562,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     drawerConfirmLine: '确认明细',
     drawerConfirmFailed: '确认明细失败',
     drawerLineSaved: '第 {n} 行已保存',
-
     selectPlaceholder: '请选择…',
     comboUseCustom: '使用“{value}”',
     healthPct: '健康度 (%)',
@@ -2595,7 +2570,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     lfItemTypeHint: '这是哪一类配件。选择一个,或创建列表中还没有的类型。',
     lfItemDescriptionPh: '例如:Xeon Gold 6248',
     lfPartSku: '零件 / SKU',
-
     eoUnarchive: '取消归档',
     eoUnarchiveTooltip: '将此订单恢复到活跃列表',
     eoArchiveTooltip: '从默认列表中隐藏(可撤销)',
@@ -2624,7 +2598,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     eoDeleteSubFull: '此操作会永久删除该草稿及其所有明细。请输入订单号确认。',
     eoArchiveModalTitle: '归档订单 {id}?',
     eoArchiveModalBody: '从默认列表中隐藏。明细、审计记录和佣金均保留,可随时取消归档。',
-
     ieUnsaved: '未保存',
     ieUnsavedChangesPre: '您对',
     ieUnsavedChangesPost: '有未保存的更改。',
@@ -2685,7 +2658,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     ieAllowedFieldsLabel: '允许:{fields}',
     ieResolutionLabel: '解决方案:',
     ieResolutionBody: '将销售订单标记为已完成,或将此明细从销售订单中解除关联,然后再修改数量或状态。',
-
     mktDemandHigh: '需求高',
     mktDemandSteady: '平稳',
     mktDemandSlow: '低迷',
@@ -2737,9 +2709,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     mktConfLow: '低',
     mktConfidenceLabel: '置信度:',
     mktConfBasedOn: '—— 基于 {n} 个数据点,跨 {sources} 个来源。',
-
     generalErrorMsg: '出错了,请稍后再试。',
-
     iptProduct: '产品',
     iptLots: '批次',
     iptWarehouses: '仓库',
@@ -2757,19 +2727,16 @@ export const I18N: Record<Lang, Record<string, string>> = {
     iptSelectLot: '选择批次',
     iptAddToSellOrder: '加入销售订单',
     iptCannotSell: '无法销售 —— 状态为 {status}',
-
     dashRangeAriaLabel: '时间范围',
     dashFilterItemTypeAriaLabel: '按品类筛选',
     dashNoDataYet: '暂无数据。',
     dashNoContributorsAll: '尚无贡献者记录任何销售。',
     dashNoContributorsCat: '尚无贡献者记录任何 {cat} 销售。',
     dashShowAllItemTypes: '显示所有品类',
-
     actInventoryActivityLog: '库存活动日志',
     actImmutable: '不可变',
     actAppendOnlyHint: '对库存的每次变更都仅追加记录,无法编辑或删除。',
     actNoEventsMatch: '没有符合筛选条件的事件。',
-
     sodNewDraftOverline: '新销售订单 · 草稿',
     sodItemsFromInventory: '从库存中选取 {n} 项',
     sodLineItems: '明细项',
@@ -2807,7 +2774,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     sodNewCustomerName: '新客户名称',
     sodAdd: '添加',
     sodAddNewCustomer: '添加新客户',
-
     invAllWarehouses: '所有仓库',
     invReadOnlyAccess: '只读访问。',
     invReadOnlyBody: '采购员仅可查看本人订单。成本、利润和团队数据对经理可见。',
@@ -2824,12 +2790,10 @@ export const I18N: Record<Lang, Record<string, string>> = {
     invSelectAllFilter: '全选（{n}）',
     invUnselectAllFilter: '取消全选',
     invSelectAllFilterTip: '全选符合当前筛选的可售批次',
-
     soColOrder: '订单',
     soColCreated: '创建时间',
     soColUpdated: '更新时间',
     soEditReplacesHint: '编辑将替换该订单的明细集。库存支持的数量受限于实际现货。',
-
     dangerDeleteWsTitle: '删除此工作区?',
     dangerDeleteWsBody: '所有订单、库存、销售订单和审计日志将被永久删除。此操作无法撤销。',
     dangerTransferTitle: '转移工作区所有权?',
