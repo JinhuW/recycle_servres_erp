@@ -6,7 +6,7 @@ import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
-import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../../lib/poTotals';
+import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
@@ -103,7 +103,6 @@ type OrderMeta = {
   warehouseId: string;
   payment: 'Company' | 'Self';
   notes: string;
-  totalCostOverride: string | null;
   // Charged on top of the goods total, so it is its own field rather than
   // something folded into the override.
   otherFees: string;
@@ -192,7 +191,6 @@ function OrderForm({
     warehouseId: '',
     payment: 'Company',
     notes: '',
-    totalCostOverride: null,
     otherFees: '',
     otherFeesNote: '',
   });
@@ -338,28 +336,15 @@ function OrderForm({
   // Goods (line sum, or the negotiated override) plus fees charged on top.
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
-    totalCostOverride: meta.totalCostOverride !== null ? (Number(meta.totalCostOverride) || 0) : null,
+    // Always the line sum now — anything paid beyond the goods is the fee.
+    totalCostOverride: null,
     otherFees: parseFeeInput(meta.otherFees),
   });
 
-  // A purchaser types the one number off the supplier's invoice. Anything above
-  // the line sum is a fee, so on blur it moves there and Goods total returns to
-  // the line sum — the all-in total is untouched, the money is just classified.
-  // On blur rather than on change: the first keystroke of "11610.30" is "1",
-  // which would read as a huge negative gap.
-  const [movedToFees, setMovedToFees] = useState<number | null>(null);
-  const applyGoodsOverflow = () => {
-    if (meta.totalCostOverride === null) return;
-    const typed = Number(meta.totalCostOverride);
-    const { goods, overflow } = splitGoodsOverflow(typed, totals.cost);
-    if (overflow <= 0) return;
-    setMeta(m => ({
-      ...m,
-      totalCostOverride: goods.toFixed(2),
-      otherFees: (parseFeeInput(m.otherFees) + overflow).toFixed(2),
-    }));
-    setMovedToFees(overflow);
-  };
+  // No goods-total override on capture: the goods total is the sum of the
+  // lines, and anything paid on top of the goods is the fee — so line costs
+  // plus fee is what the purchaser actually paid, with no second field to
+  // reconcile against the first.
 
   // One batched lookup for every part number on the form, so the drawer can
   // show what the part is worth while the buy price is still being decided.
@@ -532,7 +517,7 @@ function OrderForm({
     ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
     payment: meta.payment === 'Company' ? 'company' : 'self',
     notes: meta.notes || null,
-    totalCost: meta.totalCostOverride != null ? (Number(meta.totalCostOverride) || 0) : totals.cost,
+    totalCost: totals.cost,
     otherFees: parseFeeInput(meta.otherFees),
     otherFeesNote: meta.otherFeesNote.trim() || null,
   });
@@ -834,7 +819,7 @@ function OrderForm({
                   step="0.01"
                   value={meta.otherFees}
                   placeholder="0.00"
-                  onChange={e => { setMeta(m => ({ ...m, otherFees: e.target.value })); setMovedToFees(null); }}
+                  onChange={e => setMeta(m => ({ ...m, otherFees: e.target.value }))}
                   onFocus={e => e.target.select()}
                   style={{ paddingLeft: 22 }}
                 />
@@ -888,39 +873,6 @@ function OrderForm({
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <span>{t('goodsTotal')}</span>
-                {meta.totalCostOverride !== null && (
-                  <button
-                    onClick={() => setMeta(m => ({ ...m, totalCostOverride: null }))}
-                    style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-strong)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                    title={t('subAutoSumIs', { cost: fmtUSD(totals.cost, locale) })}
-                  >{t('reset')}</button>
-                )}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <span className="mono" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-subtle)', pointerEvents: 'none' }}>$</span>
-                <input
-                  className="input mono"
-                  type="number"
-                  step="0.01"
-                  value={meta.totalCostOverride !== null ? meta.totalCostOverride : totals.cost.toFixed(2)}
-                  onChange={e => { setMeta(m => ({ ...m, totalCostOverride: e.target.value })); setMovedToFees(null); }}
-                  onFocus={e => e.target.select()}
-                  onBlur={applyGoodsOverflow}
-                  onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
-                  style={{ paddingLeft: 24, fontWeight: 500 }}
-                />
-              </div>
-              {/* The field just changed under them, and the ledger that shows
-                  the result is further up the page — so say what happened here. */}
-              {movedToFees != null && (
-                <div className="help" style={{ color: 'var(--accent-strong)' }}>
-                  ↓ {t('movedToFees', { amount: fmtUSD(movedToFees, locale) })}
-                </div>
-              )}
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('orderNotes')}</label>
               <input
                 className="input"
@@ -967,9 +919,6 @@ function OrderForm({
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
               {t('totalCost')}
-              {meta.totalCostOverride !== null && Math.abs((Number(meta.totalCostOverride) || 0) - totals.cost) > GOODS_EPSILON && (
-                <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
-              )}
             </div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
               {fmtUSD(cost.total, locale)}
