@@ -146,7 +146,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
   });
 
-  it('filters from the header row on every category tab, protection allowing it', async () => {
+  it('sorts and filters from the header row on every category tab', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
@@ -163,8 +163,49 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       // exceljs 'allow' semantics: true here is the unlocked autoFilter="0"
       // attribute. Without it Excel greys the dropdowns out on a locked sheet.
       expect(ws.sheetProtection?.autoFilter).toBe(true);
-      expect(ws.sheetProtection?.sort).toBeFalsy();
+      expect(ws.sheetProtection?.sort).toBe(true);
+      // The permission alone is not enough — Excel refuses to sort a range
+      // holding a single locked cell, so every data cell has to be unlocked.
+      const data = ws.getRow(headerRow + 1);
+      for (let c = 1; c <= lastCol; c++) {
+        expect(data.getCell(c).protection?.locked).toBe(false);
+      }
+      // The header itself stays locked: the import parser finds its columns
+      // by reading this text.
+      expect(ws.getRow(headerRow).getCell(1).protection?.locked).not.toBe(false);
     }
+  });
+
+  it('ships rows in the default order — capacity, then rank, speed, brand', async () => {
+    const ram = (label: string, specs: Record<string, string | number>) => ({
+      category: 'RAM', label, partNumber: label, condition: null,
+      qty: 1, imageUrl: null, specs,
+    });
+    // Deliberately scrambled on the way in, including a manual line with no
+    // specs at all.
+    const buf = await buildPriceTemplateWorkbook(
+      { id: 'SL-SORT', customerName: 'Acme', currencyCode: 'USD' },
+      [
+        ram('d', { capacity: '16GB', rank: '2Rx4', speed: '2400', brand: 'Micron' }),
+        ram('manual', {}),
+        ram('f', { capacity: '128GB', rank: '2Rx4', speed: '3200', brand: 'Samsung' }),
+        ram('b', { capacity: '16GB', rank: '1Rx8', speed: '3200', brand: 'Hynix' }),
+        ram('e', { capacity: '8GB', rank: '2Rx4', speed: '3200', brand: 'Samsung' }),
+        ram('c', { capacity: '16GB', rank: '2Rx4', speed: '2400', brand: 'Hynix' }),
+      ],
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const ws = wb.worksheets[0];
+    const { row: headerRow, cols } = findHeaderRow(ws);
+    const labels: string[] = [];
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      labels.push(String(ws.getRow(r).getCell(cols.get('Item')!).value ?? ''));
+    }
+    // 8GB before 16GB before 128GB — numeric, not lexical. Within 16GB:
+    // rank 1Rx8 first, then the 2Rx4 pair split by brand at equal speed.
+    // The spec-less manual line sinks to the bottom.
+    expect(labels).toEqual(['e', 'b', 'c', 'd', 'f', 'manual']);
   });
 
   it('labels the price columns CNY on a CNY order', async () => {

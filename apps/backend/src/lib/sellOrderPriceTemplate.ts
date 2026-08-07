@@ -13,11 +13,15 @@
 // full-size scan. Spec attributes get individual columns (same request as the
 // order spreadsheet — never re-merge them into one composed field).
 //
-// Everything except the Unit Price and Note columns is locked; the import
-// parser still never relies on that structure (it re-locates columns by header
-// text — safe here because no spec header matches its part/price/condition
+// The banner, instructions and header row are locked; the data rows are not,
+// because Excel refuses to sort a range containing a locked cell (user-asked
+// for sortable headers 2026-08-06). Format/insert/delete stay blocked. The
+// import parser never relies on that structure anyway — it re-locates columns
+// by header text and matches rows by part number, so a vendor who reorders or
+// retypes cells still round-trips (see services/sellOrderPriceImport.ts;
+// safe here because no spec header matches its part/price/condition
 // heuristics: "chip#" and "note备注" contain none of partnumber/price/单价/
-// condition/成色 etc., see services/sellOrderPriceImport.ts).
+// condition/成色 etc.).
 //
 // After the category tabs come per-warehouse PACKING-CHECKLIST tabs (one per
 // warehouse on the order, named by its short code): stacked per-category
@@ -91,6 +95,31 @@ const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E
 const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7C2' } } as const;
 
 const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
+
+// Rows ship pre-sorted the way the desk reads a bid sheet (user-decided
+// 2026-08-06): capacity, then rank, speed, brand. Categories without those
+// specs just fall through to the label tie-break.
+const DEFAULT_SORT_KEYS = ['capacity', 'rank', 'speed', 'brand'] as const;
+
+// Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
+// 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
+// sink so manual lines (no specs at all) never head the tab.
+function compareSpec(a: string, b: string): number {
+  if (!a) return b ? 1 : 0;
+  if (!b) return -1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// Label breaks ties so the same order always exports byte-identically.
+function sortForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+  return [...products].sort((x, y) => {
+    for (const key of DEFAULT_SORT_KEYS) {
+      const d = compareSpec(String(x.specs[key] ?? ''), String(y.specs[key] ?? ''));
+      if (d !== 0) return d;
+    }
+    return compareSpec(x.label, y.label);
+  });
+}
 
 // Fold products into CATEGORY_ORDER buckets; unknown categories go to Other
 // so nothing can fall off the workbook.
@@ -203,7 +232,8 @@ async function renderCategorySheet(
     cell.border = { bottom: { style: 'medium' } };
   }
 
-  products.forEach((p, i) => {
+  const sorted = sortForSheet(products);
+  sorted.forEach((p, i) => {
     const r = HEADER_ROW + 1 + i;
     const row = ws.getRow(r);
     row.getCell(IDX.index).value = i + 1;
@@ -217,11 +247,12 @@ async function renderCategorySheet(
     qtyCell.value = p.qty;
     qtyCell.numFmt = '#,##0';
 
-    // Blank bid cell: existing order prices must not leak to the vendor.
+    // Blank bid cell: existing order prices must not leak to the vendor. The
+    // fill is what tells the vendor where to type, now that the lock no
+    // longer does.
     const priceCell = row.getCell(IDX.price);
     priceCell.numFmt = '#,##0.00';
     priceCell.fill = PRICE_FILL;
-    priceCell.protection = { locked: false };
 
     const totalCell = row.getCell(IDX.total);
     const qtyRef = `${ws.getColumn(IDX.qty).letter}${r}`;
@@ -229,15 +260,19 @@ async function renderCategorySheet(
     totalCell.value = { formula: `${qtyRef}*${priceRef}` };
     totalCell.numFmt = '#,##0.00';
 
-    // Free-text remarks the vendor may fill alongside the price — starts
-    // blank on purpose (user-decided: nothing is pre-filled from the DB).
-    row.getCell(IDX.note).protection = { locked: false };
-
     row.alignment = { vertical: 'middle' };
     if (p.imageUrl) {
       const imageCell = row.getCell(IDX.image);
       imageCell.value = { text: p.imageUrl, hyperlink: p.imageUrl };
       imageCell.font = { color: { argb: 'FF2563EB' }, underline: true };
+    }
+
+    // Every data cell unlocks, not just Price and Note (which is free text and
+    // starts blank on purpose): Excel refuses to sort a range holding even one
+    // locked cell, whatever the sheet's sort permission says. The header row
+    // stays locked — the import parser locates its columns by header text.
+    for (let c = 1; c <= IDX.note; c++) {
+      row.getCell(c).protection = { locked: false };
     }
   });
 
@@ -246,11 +281,12 @@ async function renderCategorySheet(
   // it can't create one.
   ws.autoFilter = {
     from: { row: HEADER_ROW, column: 1 },
-    to: { row: HEADER_ROW + products.length, column: IDX.note },
+    to: { row: HEADER_ROW + sorted.length, column: IDX.note },
   };
 
   // Guard rail, not security: the manager can lift it in Excel (no password),
-  // and the import parser tolerates a vendor who does.
+  // and the import parser tolerates a vendor who does. What survives here is
+  // the shape of the sheet — headers, banner, row count — not its contents.
   await ws.protect('', {
     selectLockedCells: true,
     selectUnlockedCells: true,
@@ -259,9 +295,9 @@ async function renderCategorySheet(
     formatRows: false,
     insertRows: false,
     deleteRows: false,
-    // Filtering only hides rows, so it can't desync a bid from its line; a
-    // sort would reorder locked cells and Excel refuses it anyway.
-    sort: false,
+    // Reordering rows can't desync a bid from its line: the import matches on
+    // part number, never on position.
+    sort: true,
     autoFilter: true,
   });
 }
@@ -355,7 +391,9 @@ async function renderWarehouseSheet(
     });
 
     let sectionQty = 0;
-    for (const p of byCategory.get(cat)!) {
+    // Same order as the bid tabs, so a picker walking the shelf and a manager
+    // reading the bid see a product in the same place.
+    for (const p of sortForSheet(byCategory.get(cat)!)) {
       const row = ws.getRow(r++);
       cols.forEach((c, i) => {
         const cell = row.getCell(i + 1);
