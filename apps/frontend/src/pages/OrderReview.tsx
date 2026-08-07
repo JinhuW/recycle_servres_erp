@@ -28,8 +28,8 @@ const parseDecimal = (s: string) => {
 type Props = {
   lines: DraftLine[];
   editingId?: string | null;
-  /** Called with the category to add. Omitted → open the picker sheet. */
-  onAddItem: (cat?: Category) => void;
+  /** Called with the kind of line to add — the add row always names one. */
+  onAddItem: (cat: Category) => void;
   onEditLine: (idx: number) => void;
   onRemoveLine: (idx: number) => void;
   onSubmit: (payload: {
@@ -122,7 +122,6 @@ export function OrderReview({
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
         <div className="ph-section-h" style={{ paddingTop: 10 }}>
           <span>{t('products')}</span>
-          <span className="more" onClick={() => onAddItem()} style={{ cursor: 'pointer' }}>{t('addAnother')}</span>
         </div>
 
         {/* A new PO now opens here rather than in a form, so the empty list has

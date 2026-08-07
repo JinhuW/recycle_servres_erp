@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { PhTabBar, type View } from './components/PhTabBar';
-import { PhCategorySheet } from './components/PhCategorySheet';
 import { PhDraftPickerSheet } from './components/PhDraftPickerSheet';
 import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
@@ -36,20 +35,8 @@ import { findDuplicateLine } from './lib/dupParts';
 
 type ReturnTo = 'idle' | 'review';
 
-// Everything the review screen owns, carried through the category sheet so an
-// "add another" that gets cancelled can put the session back exactly as it was.
-type LineCtx = {
-  lines: DraftLine[];
-  editingId?: string | null;
-  originalLineIds?: string[];
-  draftId?: string;
-};
-
 type CaptureState =
   | { phase: 'idle' }
-  // ctx null → a fresh session; non-null → adding another line to one already
-  // open, which must be handed back intact if the sheet is cancelled.
-  | { phase: 'category'; ctx: LineCtx | null }
   | { phase: 'draftPicker'; drafts: OrderSummary[] }
   | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
@@ -198,20 +185,6 @@ function Shell() {
     if (window.location.hash.startsWith('#/purchase-orders/')) {
       navigate('/purchase-orders');
     }
-  };
-
-  // Only reached from the line list's "add another" header link, which asks
-  // for a category without naming one. The four-button add row calls
-  // addAnotherItem(cat) directly and never lands here.
-  const pickCategory = (cat: Category) => {
-    setCapture(c => {
-      if (c.phase !== 'category' || !c.ctx) return c;
-      return {
-        phase: 'form', category: cat, detected: null,
-        lines: c.ctx.lines, editingId: c.ctx.editingId, originalLineIds: c.ctx.originalLineIds,
-        editingLineIdx: null, returnTo: 'review', draftId: c.ctx.draftId,
-      };
-    });
   };
 
   // A new PO opens on its (empty) line list, where the add row asks which kind
@@ -377,7 +350,7 @@ function Shell() {
       // Match by stable client id, not array index: the user may have added,
       // removed, or navigated past this line before the PATCH resolved.
       setCapture(c => {
-        if (c.phase === 'idle' || c.phase === 'category' || c.phase === 'draftPicker') return c;
+        if (c.phase === 'idle' || c.phase === 'draftPicker') return c;
         const updated = c.lines.map(l =>
           l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id } : l,
         );
@@ -390,15 +363,15 @@ function Shell() {
   };
 
   // `cat` comes from the four-button row on the review screen, so adding a
-  // different kind of item is still one tap. Called without one (the header
-  // link) it opens the picker sheet, carrying the session so cancelling it
-  // returns to the list rather than discarding the draft.
-  const addAnotherItem = (cat?: Category) => {
+  // different kind of item is one tap and the PO is never in a category mode.
+  const addAnotherItem = (cat: Category) => {
     setCapture(c => {
       if (c.phase !== 'review') return c;
-      const ctx = { lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, draftId: c.draftId };
-      if (!cat) return { phase: 'category', ctx };
-      return { phase: 'form', category: cat, detected: null, ...ctx, editingLineIdx: null, returnTo: 'review' };
+      return {
+        phase: 'form', category: cat, detected: null,
+        lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds,
+        draftId: c.draftId, editingLineIdx: null, returnTo: 'review',
+      };
     });
   };
 
@@ -633,19 +606,6 @@ function Shell() {
           onOpenNotifications={() => setNotifSheet(true)}
           onOpenAbout={() => setAboutSheet(true)}
           onOpenSecurity={() => setPwSheet(true)}
-        />
-      )}
-
-      {capture.phase === 'category' && (
-        <PhCategorySheet
-          onPick={pickCategory}
-          onClose={() => {
-            // Adding another item to an open session: cancelling means "never
-            // mind", not "discard the draft". Hand the lines back to review.
-            const ctx = capture.phase === 'category' ? capture.ctx : null;
-            if (ctx) setCapture({ phase: 'review', detected: null, ...ctx });
-            else cancelCapture();
-          }}
         />
       )}
 

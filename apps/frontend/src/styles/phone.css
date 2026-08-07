@@ -252,7 +252,7 @@
   font-weight: 600;
 }
 
-/* Submit category selector */
+/* Row card in a bottom sheet (draft picker) */
 .ph-cat-card {
   display: flex;
   align-items: center;
@@ -277,9 +277,6 @@
   place-items: center;
   flex-shrink: 0;
 }
-.ph-cat-icon.ssd { background: var(--info-soft); color: oklch(0.45 0.13 250); }
-.ph-cat-icon.hdd { background: oklch(0.96 0.04 295); color: oklch(0.45 0.16 295); }
-.ph-cat-icon.other { background: var(--warn-soft); color: oklch(0.45 0.13 75); }
 
 /* Camera full-bleed */
 .ph-cam-screen {
