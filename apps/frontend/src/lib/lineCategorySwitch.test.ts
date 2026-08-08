@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { switchLineCategory, clearedBySwitch } from './lineCategorySwitch';
+import { SPEC_FIELDS_BY_CATEGORY } from '@recycle-erp/shared';
+import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from './lineCategorySwitch';
+import { I18N } from './i18n';
 
 const ramLine = {
   category: 'RAM' as const,
@@ -58,5 +60,28 @@ describe('clearedBySwitch', () => {
 
   it('is empty when nothing would be lost', () => {
     expect(clearedBySwitch({ category: 'RAM', brand: 'Samsung' }, 'SSD')).toEqual([]);
+  });
+});
+
+// The label map is a fourth hand-maintained copy of the shared spec-field list,
+// and the only one the i18n coverage tests can't see: LineDrawer looks its keys
+// up by variable, so a field added to the shared table and forgotten here falls
+// through to t(field) and prints the raw camelCase name in the undo notice, in
+// both languages.
+describe('SPEC_FIELD_LABEL_KEY', () => {
+  const specFields = [...new Set(Object.values(SPEC_FIELDS_BY_CATEGORY).flat())];
+
+  it('labels every spec field the shared table owns', () => {
+    const unlabelled = specFields.filter(f => !(f in SPEC_FIELD_LABEL_KEY));
+    expect(unlabelled, `spec fields with no label key: ${unlabelled.join(', ')}`).toEqual([]);
+  });
+
+  it('points every field at a key the dictionary defines', () => {
+    // en only — zh parity is i18nParity.test.ts's job, and a zh gap falls back
+    // to the English label rather than to the bare field name.
+    const dangling = specFields
+      .map(f => SPEC_FIELD_LABEL_KEY[f])
+      .filter(k => k !== undefined && !(k in I18N.en));
+    expect(dangling, `label keys absent from the dictionary: ${dangling.join(', ')}`).toEqual([]);
   });
 });

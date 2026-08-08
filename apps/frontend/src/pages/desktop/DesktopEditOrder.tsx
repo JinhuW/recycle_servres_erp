@@ -6,7 +6,7 @@ import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError, showErrorToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
-import { poEffectiveCost, parseFeeInput, GOODS_EPSILON } from '../../lib/poTotals';
+import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
@@ -14,7 +14,11 @@ import {
 } from './DesktopSubmit';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
-import { linePhotos, uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
+import {
+  linePhotos, uploadLinePhoto, deleteLinePhoto, limitPhotoPick, LINE_PHOTO_CAP,
+  type LinePhoto,
+} from '../../lib/linePhotos';
+import { type PendingPhoto } from '../../components/LinePhotoStrip';
 import { groupLines, shouldGroup, displayRows, catTone } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
@@ -149,22 +153,66 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
   const [photoBusy, setPhotoBusy] = useState(false);
+  // Files picked for a line that has no DB id to hang them off yet — one added
+  // in this session and not yet confirmed. Keyed by _cid, the only handle such
+  // a line has, and flushed once the id lands. Same deferral the submit screen
+  // uses; without it the picker opened and the files went nowhere.
+  const [pendingPhotos, setPendingPhotos] = useState<Record<string, PendingPhoto[]>>({});
+  // The preview URLs outlive the state that holds them — a flush deletes the
+  // entry while the page lives on — so the revoke list is kept separately.
+  const pendingUrls = useRef<Set<string>>(new Set());
+  useEffect(() => () => {
+    for (const url of pendingUrls.current) URL.revokeObjectURL(url);
+  }, []);
 
-  // Photos upload immediately here: unlike the submit screen, every line on an
-  // existing order already has a DB id to attach them to.
-  const addLinePhotos = async (idx: number, files: FileList | null) => {
-    const l = lines[idx];
-    const picked = Array.from(files ?? []).filter(f => f.type.startsWith('image/'));
-    if (!l?._id || !picked.length) return;
+  const uploadLinePhotos = async (cid: string, lineId: string, files: File[]) => {
     setPhotoBusy(true);
+    const saved: LinePhoto[] = [];
     try {
-      for (const f of picked) {
-        try {
-          const r = await uploadLinePhoto(order.id, l._id, f);
-          setLines(ls => ls.map((x, j) => (j === idx ? { ...x, photos: [...(x.photos ?? []), r.photo] } : x)));
-        } catch { showErrorToast(t('linePhotoUploadFailed')); }
+      for (const f of files) {
+        try { saved.push((await uploadLinePhoto(order.id, lineId, f)).photo); }
+        catch { showErrorToast(t('linePhotoUploadFailed')); }
       }
     } finally { setPhotoBusy(false); }
+    if (saved.length) {
+      setLines(ls => ls.map(l =>
+        (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l)));
+    }
+  };
+
+  // A line that came from the server has somewhere to put a photo right away;
+  // one added in this session doesn't until Confirm line or Save gives it an id.
+  const addLinePhotos = (idx: number, files: FileList | null) => {
+    const l = lines[idx];
+    if (!l) return;
+    const held = (l.photos?.length ?? 0) + (pendingPhotos[l._cid]?.length ?? 0);
+    const { accepted, overCap } = limitPhotoPick(files, held);
+    if (overCap > 0) showErrorToast(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
+    if (!accepted.length) return;
+    if (l._id) { void uploadLinePhotos(l._cid, l._id, accepted); return; }
+    const queued = accepted.map(f => ({ file: f, url: URL.createObjectURL(f) }));
+    for (const p of queued) pendingUrls.current.add(p.url);
+    setPendingPhotos(prev => ({ ...prev, [l._cid]: [...(prev[l._cid] ?? []), ...queued] }));
+  };
+
+  const removePendingPhoto = (cid: string, p: PendingPhoto) => {
+    URL.revokeObjectURL(p.url);
+    pendingUrls.current.delete(p.url);
+    setPendingPhotos(prev => ({ ...prev, [cid]: (prev[cid] ?? []).filter(x => x !== p) }));
+  };
+
+  // Upload what was buffered for a line, now that it has an id. Non-fatal: the
+  // line itself is already saved, so a failed photo is a warning, not a lost
+  // line — uploadLinePhotos says so per file.
+  const flushPendingPhotos = async (cid: string, lineId: string) => {
+    const queued = pendingPhotos[cid];
+    if (!queued?.length) return;
+    await uploadLinePhotos(cid, lineId, queued.map(p => p.file));
+    for (const p of queued) {
+      URL.revokeObjectURL(p.url);
+      pendingUrls.current.delete(p.url);
+    }
+    setPendingPhotos(prev => { const next = { ...prev }; delete next[cid]; return next; });
   };
 
   const removeLinePhoto = async (idx: number, photo: LinePhoto) => {
@@ -368,7 +416,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
   // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
-  // must NOT be treated as a change — mirrors the totalCost field's guard.
+  // must NOT be treated as a change — the same guard the other-fees field uses.
   const parsedCommission =
     commissionPct.trim() === '' ? null : Number(commissionPct);
   const commissionValid =
@@ -389,28 +437,37 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // anything paid on top of the goods is the fee — so line costs + fee is what
   // the purchaser actually paid, with nothing to reconcile between two fields.
   //
-  // An order that carries a stored goods total keeps it — read straight off the
-  // record, never round-tripped through form state, because no control on this
-  // page can change it and a piece of state nothing writes only invites the
-  // reader to look for the writer. It is a negotiated lot price on the orders
-  // that predate this screen, so it is preserved rather than silently rewritten
-  // on the next save; where it parts company with the line sum, the tape and
-  // the footer both say so rather than leaving the arithmetic looking wrong.
-  const storedGoods = order.totalCost ?? null;
-  const goodsOverridden =
-    storedGoods != null && Math.abs(storedGoods - totals.cost) > GOODS_EPSILON;
+  // The stored total is read straight off the record, never round-tripped
+  // through form state, because no control on this page can change it. Whether
+  // it is a negotiated lot price worth preserving or just a mirror of the lines
+  // is settled ONCE, against the subtotal the order arrived with — the same
+  // instant the backend settles it (services/orderGoodsTotal.ts). Judge it
+  // against the live sum instead and every unit-cost edit turns the mirror into
+  // a fake override: the tape, the footer and the commission preview all freeze
+  // on the figure the page opened with, while the save that follows stores the
+  // new one. A real negotiated price does stay pinned, and the tape and footer
+  // say so rather than leaving the arithmetic looking wrong.
+  const loadedLineSubtotal = useMemo(
+    () => order.lines.reduce((sum, l) => sum + l.qty * l.unitCost, 0),
+    [order.lines],
+  );
+  const storedGoods = useMemo(
+    () => readStoredGoodsTotal(order.totalCost, loadedLineSubtotal),
+    [order.totalCost, loadedLineSubtotal],
+  );
+  const goodsOverridden = storedGoods.negotiated;
 
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
   // (effectiveTotalCost) AND earns commission on profit. Company pay → only
-  // the commission on profit. When the manager/purchaser overrides Goods total,
-  // that override is the authoritative goods cost for EVERY part of the formula
+  // the commission on profit. When the order carries a negotiated goods total,
+  // that price is the authoritative goods cost for EVERY part of the formula
   // — including (Revenue − Cost), so the commission preview reconciles cleanly
   // with the Self-pay reimbursement instead of mixing two cost figures. Fees
   // land on top of it, so they reduce profit and therefore commission.
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
-    totalCostOverride: storedGoods,
+    totalCostOverride: storedGoods.override,
     otherFees: parsedOtherFees,
   });
   const effectiveTotalCost = cost.total;
@@ -480,7 +537,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       }
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
-      await api.patch(`/api/orders/${order.id}`, {
+      const addedLines = lines.filter(l => !l._id);
+      const r = await api.patch<{ ok: true; addedLineIds: string[] }>(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
@@ -490,11 +548,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
-        addLines: lines
-          .filter(l => !l._id)
-          .map(l => editLineToInsert(l, status)),
+        addLines: addedLines.map(l => editLineToInsert(l, status)),
         removeLineIds: removeLineIds.length ? removeLineIds : undefined,
       });
+      // addedLineIds comes back aligned 1:1 with the addLines we sent, so a
+      // photo buffered against a line that had no id can finally reach it.
+      // Before onSaved, which navigates away and takes the buffer with it.
+      for (const [i, l] of addedLines.entries()) {
+        const newId = r.addedLineIds[i];
+        if (newId) await flushPendingPhotos(l._cid, newId);
+      }
       // The stepper's stage lives on orders.lifecycle, which PATCH never
       // touches — only /advance moves it (and cascades the line statuses).
       // Without this the save returns 200, the lines flip, but the stage snaps
@@ -555,7 +618,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     );
     const newId = l._id ?? r.addedLineIds[0];
     setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, _dirty: false } : x)));
-    if (!l._id && newId) setPersistedIds(ids => [...ids, newId]);
+    if (!l._id && newId) {
+      setPersistedIds(ids => [...ids, newId]);
+      await flushPendingPhotos(l._cid, newId);
+    }
     setActivityKey(k => k + 1);
     window.__showToast?.(t('drawerLineSaved', { n: i + 1 }), 'success');
   };
@@ -1281,13 +1347,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
             orderId: order.id,
-            // A line added in this session isn't persisted until Save, so it
-            // has no id to hang a photo off yet — the strip goes read-only
-            // rather than silently dropping the file.
+            // A line added in this session isn't persisted until Confirm line
+            // or Save, so it has no id to hang a photo off yet — files picked
+            // for it are buffered as local previews and uploaded when it lands.
             lineId: lines[activeIdx]._id ?? null,
-            pending: [],
-            onAddFiles: files => void addLinePhotos(activeIdx, files),
-            onRemovePending: () => { /* nothing is buffered on this screen */ },
+            pending: pendingPhotos[lines[activeIdx]._cid] ?? [],
+            onAddFiles: files => addLinePhotos(activeIdx, files),
+            onRemovePending: p => removePendingPhoto(lines[activeIdx]._cid, p),
             onRemoveSaved: photo => void removeLinePhoto(activeIdx, photo),
             busy: photoBusy,
           }}

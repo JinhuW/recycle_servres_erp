@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, MARCUS } from './helpers/auth';
+import { loginAs, MARCUS, ALEX } from './helpers/auth';
+import { freeSellableLine } from './helpers/inventory';
 
 // orders.total_cost is the PO's goods total. It is USUALLY a denormalization of
 // the lines — kept as a column so the list's keyset sort, the draft picker and
@@ -111,6 +112,109 @@ describe('a negotiated goods total survives the lines under it', () => {
   it('a total that matched the old line sum tracks the new one', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await makePo(token, { totalCost: 100, lines: [line({ qty: 2, unitCost: 50 })] });
+    await api('PATCH', '/api/orders/' + id, { token, body: { addLines: [line({ qty: 1, unitCost: 30 })] } });
+    expect(await goodsTotal(id)).toBeCloseTo(130, 2);
+  });
+});
+
+// The PO routes are not the only writers of order_lines. Every other route that
+// moves qty or unit_cost has to re-derive the goods total too — not merely so
+// the column is fresh, but because the mirror/negotiated verdict is a
+// comparison against the line sum. Leave the column behind once and the next
+// legitimate PO edit reads the drift as a lot price the business negotiated and
+// pins it there for good, with no field left anywhere to put it back.
+describe('the goods total follows the lines through every writer', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('re-derives when the inventory editor changes a unit cost', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    const [lineId] = await lineIds(token, id);
+
+    // The inventory editor is a manager surface; the purchaser raised the PO.
+    const mgr = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/inventory/' + lineId, { token: mgr.token, body: { unitCost: 80 } });
+    expect(r.status).toBe(200);
+    expect(await goodsTotal(id)).toBeCloseTo(160, 2);
+  });
+
+  it('re-derives when the inventory editor changes a qty', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    const [lineId] = await lineIds(token, id);
+
+    const mgr = await loginAs(ALEX);
+    await api('PATCH', '/api/inventory/' + lineId, { token: mgr.token, body: { qty: 5 } });
+    expect(await goodsTotal(id)).toBeCloseTo(250, 2);
+  });
+
+  it('leaves a negotiated total alone when the inventory editor edits a line', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { totalCost: 90, lines: [line({ qty: 2, unitCost: 50 })] });
+    const [lineId] = await lineIds(token, id);
+
+    const mgr = await loginAs(ALEX);
+    await api('PATCH', '/api/inventory/' + lineId, { token: mgr.token, body: { unitCost: 80 } });
+    expect(await goodsTotal(id)).toBeCloseTo(90, 2);
+  });
+
+  // The drift this leaves behind is what later reads as a negotiated price, so
+  // the assertion that matters is the one AFTER the next ordinary PO edit.
+  it('stays a mirror after an inventory edit, so later PO edits still track', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    const [lineId] = await lineIds(token, id);
+
+    const mgr = await loginAs(ALEX);
+    await api('PATCH', '/api/inventory/' + lineId, { token: mgr.token, body: { unitCost: 80 } });
+    await api('PATCH', '/api/orders/' + id, { token, body: { addLines: [line({ qty: 1, unitCost: 20 })] } });
+    expect(await goodsTotal(id)).toBeCloseTo(180, 2);
+  });
+
+  it('re-derives the source PO when a sell order consumes part of a line', async () => {
+    const { token } = await loginAs(ALEX);
+    const src = await freeSellableLine(token, 2);
+    const inv = await api<{ item: { order_id: string } }>('GET', `/api/inventory/${src.id}`, { token });
+    const orderId = inv.body.item.order_id;
+
+    const before = await goodsTotal(orderId);
+    expect(before).not.toBeNull();
+
+    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
+    const created = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token,
+      body: {
+        customerId: customers.body.items[0].id,
+        lines: [{ inventoryId: src.id, category: 'RAM', label: 'x', partNumber: 'pn',
+                  qty: 1, unitPrice: src.sell_price }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const done = await api('POST', `/api/sell-orders/${created.body.id}/status`, {
+      token, body: { to: 'Done', note: 'paid' },
+    });
+    expect(done.status).toBe(200);
+
+    // One unit left the PO, so its goods total drops by that unit's cost.
+    expect(await goodsTotal(orderId)).toBeCloseTo((before as number) - src.unit_cost, 2);
+  });
+});
+
+describe('a stated goods total of zero is not a negotiated price', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Reading 0 literally pinned the column against real lines, and with no
+  // screen able to send a totalCost any more, nothing could put it back.
+  it('derives from the lines when the create states zero', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { totalCost: 0, lines: [line({ qty: 2, unitCost: 50 })] });
+    expect(await goodsTotal(id)).toBeCloseTo(100, 2);
+  });
+
+  it('keeps tracking the lines after a zero-stated create', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { totalCost: 0, lines: [line({ qty: 2, unitCost: 50 })] });
     await api('PATCH', '/api/orders/' + id, { token, body: { addLines: [line({ qty: 1, unitCost: 30 })] } });
     expect(await goodsTotal(id)).toBeCloseTo(130, 2);
   });

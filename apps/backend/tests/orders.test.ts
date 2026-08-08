@@ -34,45 +34,8 @@ describe('POST /api/orders defaults', () => {
     expect(got.body.order.lines[0].status).toBe('Draft');
   });
 
-  it('accepts mixed-category lines and derives category = Mixed', async () => {
-    const { token } = await loginAs(MARCUS);
-    const r = await api<{ id: string }>('POST', '/api/orders', {
-      token,
-      body: {
-        lines: [
-          { category: 'RAM', qty: 1, unitCost: 10, condition: 'New' },
-          { category: 'SSD', qty: 1, unitCost: 10, condition: 'New' },
-        ],
-      },
-    });
-    expect(r.status).toBe(201);
-
-    const got = await api<{ order: { category: string; categories: string[]; lines: { category: string }[] } }>(
-      'GET', '/api/orders/' + r.body.id, { token },
-    );
-    expect(got.body.order.category).toBe('Mixed');
-    expect(got.body.order.categories).toEqual(['RAM', 'SSD']);
-    expect(got.body.order.lines.map(l => l.category).sort()).toEqual(['RAM', 'SSD']);
-  });
-
-  it('derives the sole category when every line agrees', async () => {
-    const { token } = await loginAs(MARCUS);
-    const r = await api<{ id: string }>('POST', '/api/orders', {
-      token,
-      body: {
-        lines: [
-          { category: 'SSD', qty: 1, unitCost: 10, condition: 'New' },
-          { category: 'SSD', qty: 2, unitCost: 12, condition: 'New' },
-        ],
-      },
-    });
-    expect(r.status).toBe(201);
-    const got = await api<{ order: { category: string; categories: string[] } }>(
-      'GET', '/api/orders/' + r.body.id, { token },
-    );
-    expect(got.body.order.category).toBe('SSD');
-    expect(got.body.order.categories).toEqual(['SSD']);
-  });
+  // Deriving `category` from the lines — sole category, 'Mixed', and the
+  // `categories` array — lives in orders-mixed-category.test.ts.
 
   it('lets lines inherit a body-level category', async () => {
     const { token } = await loginAs(MARCUS);
@@ -494,20 +457,62 @@ describe('other fees on a purchase order', () => {
     expect(detail.body.order.otherFeesNote).toBeNull();
   });
 
-  it('nets the fee out of the list row profit', async () => {
+  // Revenue and margin count PRICED lines only, so the fee has to be split the
+  // same way — charging all of it against part of the goods reported a loss on
+  // a PO that had merely not been priced yet. Cost-weighted, matching the
+  // allocation lib/po-cost.ts applies everywhere else.
+  const listRow = async (token: string, id: string) => {
+    const list = await api<{ orders: { id: string; otherFees: number; profit: number; revenue: number }[] }>(
+      'GET', '/api/orders?limit=100', { token });
+    return list.body.orders.find(o => o.id === id)!;
+  };
+
+  it('reports no loss from the fee while nothing is priced yet', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 20 } });
+
+    const row = await listRow(token, id);
+    expect(row.otherFees).toBe(20);
+    expect(row.revenue).toBeCloseTo(0, 2);
+    // The unpriced line's cost is not counted either, so counting its share of
+    // the fee would be half a subtraction.
+    expect(row.profit).toBeCloseTo(0, 2);
+  });
+
+  it('nets the whole fee once every line is priced', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    const [lineId] = (await api<{ order: { lines: { id: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token })).body.order.lines.map(l => l.id);
     await api('PATCH', `/api/orders/${id}`, {
-      token,
-      body: { otherFees: 20, lines: [] , addLines: [] },
+      token, body: { otherFees: 20, lines: [{ id: lineId, sellPrice: 80 }] },
     });
 
-    const list = await api<{ orders: { id: string; otherFees: number; profit: number }[] }>(
-      'GET', '/api/orders?limit=100', { token });
-    const row = list.body.orders.find(o => o.id === id)!;
-    expect(row.otherFees).toBe(20);
-    // Lines carry no sell_price, so line margin is 0 — profit is the fee alone.
-    expect(row.profit).toBeCloseTo(-20, 2);
+    const row = await listRow(token, id);
+    // 2 × (80 − 50) = 60 of margin, less the full fee: every line is priced, so
+    // every share of it belongs here.
+    expect(row.profit).toBeCloseTo(40, 2);
+  });
+
+  it('nets only the priced lines\' share of the fee', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    // A second line of equal goods value, left unpriced — so the priced half
+    // carries half the fee.
+    await api('PATCH', `/api/orders/${id}`, {
+      token,
+      body: { addLines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New' }] },
+    });
+    const lines = (await api<{ order: { lines: { id: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token })).body.order.lines;
+    await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 20, lines: [{ id: lines[0].id, sellPrice: 80 }] },
+    });
+
+    const row = await listRow(token, id);
+    // 60 of margin on the priced line, less 20 × (100 / 200).
+    expect(row.profit).toBeCloseTo(50, 2);
   });
 });
 

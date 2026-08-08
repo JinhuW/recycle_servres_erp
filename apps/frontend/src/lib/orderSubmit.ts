@@ -119,13 +119,18 @@ export function buildOrderSubmit(
   }
   // Only send lines that weren't already autosaved to the draft (confirmed
   // lines were written when the user saved each one — avoid double-insert).
+  // Lines the user deleted after they autosaved are still in the draft and
+  // have to be named, or they ship as stock nobody bought.
   const unconfirmed = state.lines.filter(l => !l._confirmed);
+  const survivingIds = new Set(state.lines.filter(l => l.id).map(l => l.id));
+  const removed = (state.originalLineIds ?? []).filter(id => !survivingIds.has(id));
   return {
     kind: 'patch',
     url: '/api/orders/' + state.draftId,
     body: {
       ...metaBody,
       ...(unconfirmed.length ? { addLines: unconfirmed.map(toAddLine) } : {}),
+      ...(removed.length ? { removeLineIds: removed } : {}),
     },
   };
 }

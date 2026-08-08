@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOrderSubmit } from '../src/lib/orderSubmit';
+import { buildOrderSubmit, type SubmitState } from '../src/lib/orderSubmit';
 import type { DraftLine } from '../src/lib/types';
 
 const meta = { warehouseId: 'W1', payment: 'company' as const, notes: '', otherFees: 0, otherFeesNote: null };
@@ -62,20 +62,6 @@ describe('buildOrderSubmit — editing an existing order', () => {
     expect((r.body.addLines as Array<Record<string, unknown>>)[0]).toMatchObject({ brand: 'Crucial', status: 'In Transit' });
     expect(r.body.removeLineIds).toEqual(['l2']);
   });
-
-  // The review screen states the goods total, it can't take one — so the only
-  // value it could send is the line sum, which the backend already derives from
-  // the lines in this same request. Sending it anyway read as a negotiated lot
-  // price: it overwrote a PO's real one on a save that changed nothing but a
-  // note, and pinned every other PO's column at whatever this screen last held.
-  it('never sends totalCost — the backend derives it from the lines', () => {
-    const r = buildOrderSubmit(
-      { editingId: 'PO-1289', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] },
-      meta,
-    );
-    if (r.kind !== 'patch') throw new Error('expected patch');
-    expect(r.body).not.toHaveProperty('totalCost');
-  });
 });
 
 describe('buildOrderSubmit — finalizing a new draft', () => {
@@ -87,12 +73,6 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
     if (r.kind !== 'patch') throw new Error('expected patch');
     expect(r.url).toBe('/api/orders/PO-9');
     expect((r.body.addLines as unknown[])).toHaveLength(1);
-  });
-
-  it('does not send totalCost either — the appended lines are what derives it', () => {
-    const r = buildOrderSubmit({ draftId: 'PO-9', lines: [line()] }, meta);
-    if (r.kind !== 'patch') throw new Error('expected patch');
-    expect(r.body).not.toHaveProperty('totalCost');
   });
 
   // The order row is created by the first line that can be persisted, so a
@@ -115,15 +95,32 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
     expect((r.body.lines as unknown[])).toHaveLength(2);
   });
 
-  it('does not send totalCost on a create — POST derives it from the lines', () => {
-    const r = buildOrderSubmit({ lines: [line()] }, meta);
-    if (r.kind !== 'create') throw new Error('expected create');
-    expect(r.body).not.toHaveProperty('totalCost');
-  });
-
   it('errors rather than creating an empty order', () => {
     const r = buildOrderSubmit({ lines: [] }, meta);
     expect(r.kind).toBe('error');
+  });
+});
+
+// The review screen states the goods total, it can't take one — so the only
+// value it could send is the line sum, which the backend already derives from
+// the lines in this same request. Sending it anyway read as a negotiated lot
+// price: it overwrote a PO's real one on a save that changed nothing but a
+// note, and pinned every other PO's column at whatever this screen last held.
+//
+// All three branches spread one `metaBody`, so this is a single line of source
+// — but each branch is asserted, because that shared literal is exactly what a
+// future edit could stop sharing.
+describe('buildOrderSubmit — totalCost is never sent', () => {
+  const branches: [string, SubmitState][] = [
+    ['editing an existing order', { editingId: 'PO-1289', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] }],
+    ['finalizing a draft', { draftId: 'PO-9', lines: [line()] }],
+    ['creating the order outright', { lines: [line()] }],
+  ];
+
+  it.each(branches)('omits it when %s', (_branch, state) => {
+    const r = buildOrderSubmit(state, meta);
+    if (r.kind === 'error') throw new Error('expected a request');
+    expect(r.body).not.toHaveProperty('totalCost');
   });
 });
 
@@ -144,5 +141,39 @@ describe('buildOrderSubmit — line fields are not dropped', () => {
     );
     if (r.kind !== 'patch') throw new Error('expected patch');
     expect((r.body.lines as Array<Record<string, unknown>>)[0]).toMatchObject({ generation: 'DDR5' });
+  });
+});
+
+// The draft path only ever appended. A line the user autosaved and then deleted
+// on the review screen stayed in the draft, so the PO shipped carrying stock
+// nobody bought — and order_lines IS the inventory table, so it counted.
+describe('buildOrderSubmit — finalizing a new draft', () => {
+  const draft = (lines: DraftLine[], originalLineIds?: string[]) =>
+    buildOrderSubmit({ draftId: 'PO-1300', lines, originalLineIds }, meta);
+
+  it('removes a line that was autosaved and then deleted', () => {
+    const r = draft([line({ id: 'kept', _confirmed: true })], ['kept', 'deleted']);
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect(r.body.removeLineIds).toEqual(['deleted']);
+  });
+
+  it('sends no removeLineIds when nothing was deleted', () => {
+    const r = draft([line({ id: 'a', _confirmed: true }), line({ id: 'b', _confirmed: true })], ['a', 'b']);
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect(r.body).not.toHaveProperty('removeLineIds');
+  });
+
+  it('never names an unsaved line as removed — it was never in the draft', () => {
+    const r = draft([line({ _cid: 'c1' })], []);
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect(r.body).not.toHaveProperty('removeLineIds');
+    expect(r.body.addLines).toHaveLength(1);
+  });
+
+  it('appends the unsaved lines and removes the deleted ones in one request', () => {
+    const r = draft([line({ id: 'kept', _confirmed: true }), line({ _cid: 'new' })], ['kept', 'gone']);
+    if (r.kind !== 'patch') throw new Error('expected patch');
+    expect(r.body.removeLineIds).toEqual(['gone']);
+    expect(r.body.addLines).toHaveLength(1);
   });
 });

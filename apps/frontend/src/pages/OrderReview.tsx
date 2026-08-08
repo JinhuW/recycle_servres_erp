@@ -6,7 +6,7 @@ import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
-import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { fmt, fmtUSD, fmtUSD0 } from '../lib/format';
 import { parseFeeInput } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 import { addableCategories, categoryTone } from '../lib/lookups';
@@ -291,6 +291,9 @@ export function OrderReview({
                 {t('totalCost')}
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4 }}>
+                {/* The sigil is its own glyph so it can sit smaller than the
+                    figure; the figure itself formats like every other amount
+                    on the card — grouped, and in the reader's locale. */}
                 <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--accent-strong)', opacity: 0.7 }}>$</span>
                 <span
                   className="mono"
@@ -301,7 +304,7 @@ export function OrderReview({
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
-                  {allIn.toFixed(2)}
+                  {fmt(allIn, locale)}
                 </span>
               </div>
             </div>

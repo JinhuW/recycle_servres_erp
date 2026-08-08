@@ -1,8 +1,8 @@
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { fmtUSD } from '../lib/format';
-import { staleness } from '../pages/desktop/marketStaleness';
-import type { MarketValue } from '../lib/useMarketLookup';
+import { staleness } from '../lib/marketStaleness';
+import type { ResolvedMarketValue } from '../lib/useMarketLookup';
 
 // What the recorded market says about the part being captured, shown while the
 // buy decision can still change.
@@ -15,9 +15,6 @@ import type { MarketValue } from '../lib/useMarketLookup';
 //
 // Renders nothing when the part has no recorded value: an empty panel is worse
 // than silence.
-// Mirrors the workspace default in backend lib/settings.ts. Used only for the
-// internal-sales fallback, where the server has no maxBuy to hand back.
-const TARGET_MARGIN_FALLBACK = 0.30;
 
 export function MarketAssist({
   market,
@@ -27,7 +24,7 @@ export function MarketAssist({
   locale,
   disabled,
 }: {
-  market: MarketValue | null;
+  market: ResolvedMarketValue | null;
   unitCost: number;
   onUseMaxBuy: (v: number) => void;
   onUseSellPrice: (v: number) => void;
@@ -45,9 +42,11 @@ export function MarketAssist({
   const suggestedSell = market.lastPrice ?? market.avgSell ?? internal;
   // Same shape the server derives maxBuy with (basis × (1 − target margin)),
   // applied to the internal basis when there is no recorded one — otherwise a
-  // suggested sell would appear with no ceiling beside it.
+  // suggested sell would appear with no ceiling beside it. The margin comes off
+  // the same lookup response the server priced its own maxBuy with, so the two
+  // ceilings can't disagree on a workspace that isn't on the default.
   const maxBuy = market.maxBuy
-    ?? (internal != null ? +(internal * (1 - TARGET_MARGIN_FALLBACK)).toFixed(2) : null);
+    ?? (internal != null ? +(internal * (1 - market.targetMargin)).toFixed(2) : null);
 
   const { days, isStale } = staleness(market.lastPriceAt);
   const overMaxBuy = maxBuy != null && unitCost > maxBuy;

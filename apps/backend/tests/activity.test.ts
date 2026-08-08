@@ -145,6 +145,24 @@ describe('global activity feed', () => {
     expect(r.body.counts.price).toBe(0);
   });
 
+  it('reaches a line-photo event under an action filter', async () => {
+    const sql = getTestDb();
+    const [order] = await sql<{ id: string }[]>`SELECT id FROM orders LIMIT 1`;
+    const [alex] = await sql<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX}`;
+    for (const kind of ['line_photo_added', 'line_photo_removed']) {
+      await sql`INSERT INTO order_events (order_id, actor_id, kind, detail)
+                VALUES (${order.id}, ${alex.id}, ${kind}, ${sql.json({ filename: 'label.jpg' })})`;
+    }
+    const { token } = await loginAs(ALEX);
+
+    // A kind missing from ACTIVITY_KIND_MAP is reported as `edited` but named by
+    // no action's kind list, so the row falls out of every filter value there is.
+    const added = await get(token, '?action=added&limit=200');
+    expect(added.body.events.find(e => e.kind === 'line_photo_added')?.action).toBe('added');
+    const removed = await get(token, '?action=removed&limit=200');
+    expect(removed.body.events.find(e => e.kind === 'line_photo_removed')?.action).toBe('removed');
+  });
+
   it('rejects an unknown area or action instead of ignoring it', async () => {
     const { token } = await loginAs(ALEX);
     expect((await get(token, '?area=nope')).status).toBe(400);

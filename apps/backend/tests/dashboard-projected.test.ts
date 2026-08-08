@@ -155,6 +155,31 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     expect(r.body.kpis.revenue).toBeCloseTo(80 * 2, 2);
   });
 
+  // kpis and recent are one screen — the strip renders directly under the KPI
+  // tiles. The tiles drop an unpriced line; the strip used to bill it at cost
+  // and render "+$0" in green, so the same PO both did and didn't have a margin
+  // depending on which half of the page you read.
+  it('a recent-activity row for an unpriced line states no profit', async () => {
+    await clearWindow();
+    await insertDonePO('PO-RECENT-NULLP', MARCUS, { rate: 0.2 }, [
+      { unitCost: 50, sellPrice: null, qty: 2 },
+      { unitCost: 50, sellPrice: 80,   qty: 2 },
+    ]);
+
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{
+      kpis: { profit: number };
+      recent: { sell_price: number | null; profit: number | null }[];
+    }>('GET', '/api/dashboard?range=30d', { token });
+
+    expect(r.body.recent).toHaveLength(2);
+    expect(r.body.recent.find(x => x.sell_price == null)!.profit).toBeNull();
+    expect(r.body.recent.find(x => x.sell_price === 80)!.profit).toBeCloseTo((80 - 50) * 2, 2);
+    // Every profit the strip does state is one the KPI counted.
+    const strip = r.body.recent.reduce((s, x) => s + (x.profit ?? 0), 0);
+    expect(strip).toBeCloseTo(r.body.kpis.profit, 2);
+  });
+
   // The three figures sit in one KPI row and are read as an arithmetic. Cost
   // once summed every line while revenue and profit dropped the unpriced ones,
   // so the tile stated 160 − 200 = 60. Cost is the cost OF the priced lines.

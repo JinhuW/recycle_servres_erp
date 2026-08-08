@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { createdEventParts, linePhotoEventDetail } from '../../lib/orderPresentation';
 import { activityRecordHref } from '../../lib/route';
 
 // The global audit register — every change made across all four ledgers, in
@@ -115,22 +116,23 @@ function summarise(e: Event, locale: string, t: T): { diff?: Change; note?: stri
       note: String(d.filename ?? ''),
     };
   }
+  // Same shape as an attachment — a filename with no from/to pair, which the
+  // generic branches below would render as a bare filename either way round.
+  if (e.kind === 'line_photo_added' || e.kind === 'line_photo_removed') {
+    return {
+      plain: t(e.kind === 'line_photo_added' ? 'acPhotoAdded' : 'acPhotoRemoved'),
+      note: linePhotoEventDetail(d) || undefined,
+    };
+  }
   if (d.field !== undefined && (d.from !== undefined || d.to !== undefined)) {
     return { diff: { field: String(d.field), from: d.from, to: d.to } };
   }
   if (d.from !== undefined && d.to !== undefined) {
     return { diff: { field: '', from: d.from, to: d.to } };
   }
-  // Rows synthesised by migration 0076 counted their lines at backfill time,
-  // not at creation, so those numbers contradict the line events beneath them.
-  // Show the category alone, exactly as OrderActivityLog does.
+  // Shared with OrderActivityLog so the same event doesn't read two ways.
   if (e.kind === 'created') {
-    if (d.backfilled) return { plain: String(d.category ?? '') };
-    return { plain: [
-      d.category,
-      t('acNLines', { n: (d.lineCount as number) ?? 0 }),
-      d.qty ? t('acNUnits', { n: d.qty as number }) : null,
-    ].filter(Boolean).join(' · ') };
+    return { plain: createdEventParts(d, t).join(' · ') };
   }
   if (e.kind === 'submitted') {
     return { plain: [

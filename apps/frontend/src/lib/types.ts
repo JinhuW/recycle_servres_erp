@@ -96,9 +96,14 @@ export type OrderSummary = {
   otherFeesNote: string | null;
   warehouse: Warehouse | null;
   qty: number;
+  // Priced lines only — an unpriced line contributes no revenue and no margin,
+  // while `otherFees` is subtracted whole. Profit can therefore be negative on
+  // a PO nobody has priced yet; `unpricedLineCount` is what explains it.
   revenue: number;
   profit: number;
   lineCount: number;
+  // Only the list endpoint reports it; absent on an order read on its own.
+  unpricedLineCount?: number;
   status: string;
 };
 
@@ -112,7 +117,12 @@ export type OrderStatusMeta = Record<string, {
   }[];
 }>;
 
-export type Order = OrderSummary & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
+// The per-order aggregates are computed by the list query's GROUP BY; reading
+// one order on its own returns the lines themselves and none of the rollups,
+// so they are dropped here rather than left declared and absent at runtime.
+export type Order =
+  Omit<OrderSummary, 'lineCount' | 'qty' | 'revenue' | 'profit'>
+  & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
 
 export type OrderEventKind =
   | 'created'
@@ -123,6 +133,8 @@ export type OrderEventKind =
   | 'line_edited'
   | 'meta_changed'
   | 'status_meta_changed'
+  | 'line_photo_added'
+  | 'line_photo_removed'
   | 'archived'
   | 'unarchived';
 
@@ -275,7 +287,10 @@ export type DashboardData = {
     qty: number;
     unit_cost?: number;
     sell_price: number | null;
-    profit: number;
+    // null, not 0, on a line nobody has priced — the KPI tiles above the strip
+    // never counted it, so a row stating $0 margin would answer one question
+    // two ways. Render it as an em-dash.
+    profit: number | null;
     created_at: string;
     user_name: string;
     user_initials: string;

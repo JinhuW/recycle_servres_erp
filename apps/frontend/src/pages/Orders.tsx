@@ -7,6 +7,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
+import { signedUSD0 } from '../lib/orderPresentation';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
@@ -181,6 +182,7 @@ export function Orders({ onEdit, onToast }: Props) {
             : orders;
           return filtered.slice(0, 30).map(o => {
           const isOpen = openId === o.id;
+          const unpriced = o.unpricedLineCount ?? 0;
           return (
             <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }} style={o.archivedAt ? { opacity: 0.6 } : undefined}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
@@ -234,8 +236,21 @@ export function Orders({ onEdit, onToast }: Props) {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(o.profit, locale)}</div>
+                  <div className="mono" style={{
+                    fontSize: 13, fontWeight: 600,
+                    color: o.profit < 0 ? 'var(--neg)' : 'var(--pos)',
+                  }}>{signedUSD0(o.profit, locale)}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{fmtUSD0(o.revenue, locale)}</div>
+                  {/* Revenue counts priced lines only, so a PO nobody has
+                      priced reads $0 against a real cost. Say why. */}
+                  {unpriced > 0 && (
+                    <div
+                      style={{ fontSize: 10, color: 'var(--warn)', marginTop: 1 }}
+                      title={t('unpricedRevenueHint', { n: unpriced, total: o.lineCount })}
+                    >
+                      {t('grpUnpriced', { n: unpriced })}
+                    </div>
+                  )}
                 </div>
                 <Icon name="chevronDown" size={16} style={{ color: 'var(--fg-subtle)', transition: 'transform 0.18s', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
               </div>
@@ -282,8 +297,11 @@ export function Orders({ onEdit, onToast }: Props) {
                           Qty {l.qty} · {fmtUSD(l.unitCost, locale)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice, locale)}</>}
                         </span>
                         {l.sellPrice != null && (
-                          <span className="mono pos" style={{ fontWeight: 600, color: 'var(--pos)' }}>
-                            +{fmtUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
+                          <span className="mono" style={{
+                            fontWeight: 600,
+                            color: (l.sellPrice - l.unitCost) < 0 ? 'var(--neg)' : 'var(--pos)',
+                          }}>
+                            {signedUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
                           </span>
                         )}
                       </div>

@@ -8,7 +8,7 @@ import { fmtUSD, fmtUSD0, relTime } from '../../lib/format';
 import { priceSources, categoryFilterOptions } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
-import { staleness, STALE_DAYS } from './marketStaleness';
+import { staleness, STALE_DAYS } from '../../lib/marketStaleness';
 import { usePreference } from '../../lib/preferences';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────

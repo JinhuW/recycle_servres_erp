@@ -21,13 +21,16 @@ import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../../lib/ramRequired';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { type PendingPhoto } from '../../components/LinePhotoStrip';
-import { uploadLinePhoto, deleteLinePhoto, type LinePhoto } from '../../lib/linePhotos';
+import {
+  uploadLinePhoto, deleteLinePhoto, limitPhotoPick, planPhotoCarry, photoSourceFile,
+  LINE_PHOTO_CAP, type LinePhoto, type LineCarryPlan,
+} from '../../lib/linePhotos';
 
 // ─── Public component ────────────────────────────────────────────────────────
-// Two-step submit flow lifted from design/submit.jsx + design/app.jsx#SubmitView:
-//   1. Category picker (RAM / SSD / Other) — chunky cards, AI-capture tag on RAM
-//   2. OrderForm — line-item table + right-side drawer for editing one line,
-//      plus a sticky bottom card with order meta + totals + submit action.
+// OrderForm — line-item table + right-side drawer for editing one line, plus a
+// sticky bottom card with order meta + totals + submit action. There is no
+// category step ahead of it: a PO may hold several categories, so the choice
+// belongs to each line (AddLineMenu) rather than to the order.
 //
 // RAM lines get an AI label drop zone at the top of the right-side drawer
 // (LineDrawer): drop or click a photo, the scan patches the current line.
@@ -200,21 +203,41 @@ function OrderForm({
   // flushPhotos once the DB id lands. Mirrors the evidenceFiles deferral below.
   const [pendingPhotos, setPendingPhotos] = useState<Record<string, PendingPhoto[]>>({});
   const [photoBusy, setPhotoBusy] = useState(false);
+
+  // The live object URLs, held in a ref rather than read off state at cleanup
+  // time: an unmount effect with an empty dep list closes over the FIRST
+  // render's `pendingPhotos` — `{}` — and revokes nothing at all.
+  const pendingUrlsRef = useRef<Set<string>>(new Set());
+  const revokePending = (url: string) => {
+    URL.revokeObjectURL(url);
+    pendingUrlsRef.current.delete(url);
+  };
   useEffect(() => () => {
-    for (const list of Object.values(pendingPhotos)) for (const p of list) URL.revokeObjectURL(p.url);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    for (const url of pendingUrlsRef.current) URL.revokeObjectURL(url);
+    pendingUrlsRef.current.clear();
   }, []);
 
-  const addPendingPhotos = (cid: string, files: FileList | null) => {
-    const picked = Array.from(files ?? []).filter(f => f.type.startsWith('image/'));
-    if (!picked.length) return;
-    setPendingPhotos(prev => ({
-      ...prev,
-      [cid]: [...(prev[cid] ?? []), ...picked.map(f => ({ file: f, url: URL.createObjectURL(f) }))],
-    }));
+  // The File behind every photo this session uploaded, keyed by photo id. The
+  // merge path deletes the draft those photos hang off, and R2 goes with it —
+  // re-uploading bytes we still hold is what lets them survive the move.
+  const uploadedFilesRef = useRef<Map<string, File>>(new Map());
+
+  const addPendingPhotos = (l: Line, files: FileList | null) => {
+    const held = (l.photos?.length ?? 0) + (pendingPhotos[l._cid]?.length ?? 0);
+    const { accepted, overCap } = limitPhotoPick(files, held);
+    if (overCap > 0) setAiError(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
+    if (!accepted.length) return;
+    // Created out here, not inside the updater: React may run a state updater
+    // twice, and each extra run would mint an object URL nothing revokes.
+    const added = accepted.map(f => {
+      const url = URL.createObjectURL(f);
+      pendingUrlsRef.current.add(url);
+      return { file: f, url };
+    });
+    setPendingPhotos(prev => ({ ...prev, [l._cid]: [...(prev[l._cid] ?? []), ...added] }));
   };
   const removePendingPhoto = (cid: string, p: PendingPhoto) => {
-    URL.revokeObjectURL(p.url);
+    revokePending(p.url);
     setPendingPhotos(prev => ({ ...prev, [cid]: (prev[cid] ?? []).filter(x => x !== p) }));
   };
 
@@ -225,22 +248,38 @@ function OrderForm({
     const queued = pendingPhotos[cid];
     if (!queued?.length) return;
     setPhotoBusy(true);
-    const saved: LinePhoto[] = [];
+    let results: { p: PendingPhoto; photo: LinePhoto | null }[];
     try {
-      for (const p of queued) {
-        try {
-          const r = await uploadLinePhoto(poId, lineId, p.file);
-          saved.push(r.photo);
-          URL.revokeObjectURL(p.url);
-        } catch { setAiError(t('linePhotoUploadFailed')); }
-      }
+      // Concurrent: the server assigns `position` under a FOR UPDATE lock on
+      // the parent line, so racing uploads for one line are already serialised
+      // where it matters.
+      results = await Promise.all(queued.map(async p => {
+        try { return { p, photo: (await uploadLinePhoto(poId, lineId, p.file)).photo }; }
+        catch { return { p, photo: null }; }
+      }));
     } finally {
       setPhotoBusy(false);
     }
-    setPendingPhotos(prev => { const next = { ...prev }; delete next[cid]; return next; });
+
+    const saved: LinePhoto[] = [];
+    const failed: PendingPhoto[] = [];
+    for (const r of results) {
+      if (!r.photo) { failed.push(r.p); continue; }
+      saved.push(r.photo);
+      uploadedFilesRef.current.set(r.photo.id, r.p.file);
+      revokePending(r.p.url);
+    }
+    // A photo whose upload failed stays queued — dropping it here discarded the
+    // only copy that existed, with its preview still on screen and no retry.
+    setPendingPhotos(prev => {
+      const next = { ...prev };
+      if (failed.length) next[cid] = failed; else delete next[cid];
+      return next;
+    });
     if (saved.length) {
       setLines(ls => ls.map(l => (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l)));
     }
+    if (failed.length) setAiError(t('linePhotoUploadFailed'));
   };
 
   // Order-level error banner — populated by submit/confirm failures. AI scan
@@ -573,6 +612,12 @@ function OrderForm({
       // Same deferral as a per-line confirm, for lines submitted without one.
       await Promise.all(unconfirmedLines.map((l, i) =>
         saved.lineIds[i] ? flushPhotos(l._cid, finalId, saved.lineIds[i]) : Promise.resolve()));
+      // An already-confirmed line can still be holding photos — one whose
+      // upload failed, or one picked after the confirm. Submit is the last
+      // moment they can be attached.
+      await Promise.all(submitLines
+        .filter(l => l._dbId && pendingPhotos[l._cid]?.length)
+        .map(l => flushPhotos(l._cid, finalId, l._dbId!)));
       if (evidenceFiles.length > 0) {
         const ok = await uploadEvidence(finalId);
         onDone(ok
@@ -588,27 +633,79 @@ function OrderForm({
     }
   };
 
+  // Puts this session's photos on the merge target, and must finish before the
+  // throwaway draft is deleted — that delete sweeps every R2 object the draft's
+  // rows point at. Returns how many photos could not be carried across.
+  const carryPhotosToTarget = async (
+    targetId: string,
+    plans: LineCarryPlan[],
+    addedLineIds: string[],
+  ): Promise<number> => {
+    let lost = 0;
+    const jobs: Promise<void>[] = [];
+    plans.forEach((plan, i) => {
+      lost += plan.overCap;
+      if (!plan.carry.length) return;
+      // addedLineIds mirrors the addLines ordering; a missing entry means the
+      // target never got that line, so there is nothing to attach to.
+      const lineId = addedLineIds[i];
+      if (!lineId) { lost += plan.carry.length; return; }
+      for (const src of plan.carry) {
+        jobs.push((async () => {
+          const file = await photoSourceFile(src);
+          if (!file) { lost += 1; return; }
+          try { await uploadLinePhoto(targetId, lineId, file); }
+          catch { lost += 1; }
+        })());
+      }
+    });
+    await Promise.all(jobs);
+    return lost;
+  };
+
   // Append all local lines to an existing Draft PO. Target meta (warehouse/
   // payment/notes) is inherited — we send only lines + a refreshed total.
   const doSubmitToExisting = async (target: OrderSummary, submitLines: Line[] = lines) => {
     setSubmitting(true);
     try {
-      await api.patch('/api/orders/' + target.id, {
-        addLines: submitLines.map(toWireLine),
+      // Worked out before anything is written: the throwaway draft is deleted
+      // at the end of this, and that sweep takes its line photos and its label
+      // scans out of R2 with it. So the pictures have to be re-uploaded onto
+      // the target, and a scan key the draft still owns must not be handed over
+      // — the surviving PO would point at an object that no longer exists.
+      const draftWillBeDeleted = orderId != null;
+      const plans = planPhotoCarry(
+        submitLines.map(l => ({
+          cid: l._cid,
+          persisted: !!l._dbId,
+          pending: pendingPhotos[l._cid] ?? [],
+          photos: l.photos,
+          scanImageId: l.scanImageId,
+          scanImageUrl: l.scanImageUrl,
+        })),
+        uploadedFilesRef.current,
+        draftWillBeDeleted,
+      );
+      const res = await api.patch<{ ok: true; addedLineIds?: string[] }>('/api/orders/' + target.id, {
+        addLines: submitLines.map((l, i) => ({ ...toWireLine(l), scanImageId: plans[i].scanImageId })),
         // The goods total is not accumulated by hand any more — the backend
         // re-derives it from the target's lines once these land. Fees are not
         // a line and have nothing to derive from, so they still accumulate
         // here: the target keeps what it was charged, plus what this batch adds.
         otherFees: target.otherFees + parseFeeInput(meta.otherFees),
       });
+      const photosLost = await carryPhotosToTarget(target.id, plans, res.addedLineIds ?? []);
       const evidenceOk = evidenceFiles.length === 0 || await uploadEvidence(target.id);
       // Best-effort cleanup of the throwaway draft IF one was created — lazy
       // creation means there may be none (user merged before confirming a
       // line). The merge already succeeded, so a failure here must not fail it.
       if (orderId) { try { await deleteOrder(orderId); } catch { /* harmless */ } }
-      onDone(evidenceOk
-        ? { msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' }
-        : { msg: t('poSubmitUploadWarning'), kind: 'error' });
+      onDone(
+        photosLost > 0
+          ? { msg: t('subMergePhotosLost', { id: target.id, n: photosLost }), kind: 'error' }
+          : !evidenceOk
+            ? { msg: t('poSubmitUploadWarning'), kind: 'error' }
+            : { msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' });
     } catch (e) {
       setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
     } finally {
@@ -974,13 +1071,14 @@ function OrderForm({
             orderId,
             lineId: lines[activeIdx]._dbId ?? null,
             pending: pendingPhotos[lines[activeIdx]._cid] ?? [],
-            onAddFiles: files => addPendingPhotos(lines[activeIdx]._cid, files),
+            onAddFiles: files => addPendingPhotos(lines[activeIdx], files),
             onRemovePending: p => removePendingPhoto(lines[activeIdx]._cid, p),
             onRemoveSaved: async photo => {
               const l = lines[activeIdx];
               if (!orderId || !l._dbId) return;
               try {
                 await deleteLinePhoto(orderId, l._dbId, photo.id);
+                uploadedFilesRef.current.delete(photo.id);
                 setLines(ls => ls.map(x =>
                   x._cid === l._cid ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x));
               } catch { setAiError(t('linePhotoDeleteFailed')); }

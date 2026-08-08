@@ -202,3 +202,37 @@ describe('line photos and the line lifecycle', () => {
     expect(await db`SELECT 1 FROM order_line_photos WHERE order_id = ${id}`).toHaveLength(0);
   });
 });
+
+// The permission read happens before the image shrink and the R2 round trip —
+// seconds during which a manager can advance the order. The write has to be
+// decided under the same lock every other order-mutating route takes, or a
+// purchaser lands a photo (and an audit event) on a closed-book PO.
+describe('photo writes are decided under the order lock', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('refuses a purchaser upload once the order has reached Done', async () => {
+    const { token } = await loginAs(MARCUS);
+    const { id, lineId } = await makePo(token);
+
+    const mgr = await loginAs(ALEX);
+    const adv = await api('POST', `/api/orders/${id}/advance`, {
+      token: mgr.token, body: { toStage: 'done' },
+    });
+    expect(adv.status).toBe(200);
+    const after = await api<{ order: { lifecycle: string } }>('GET', '/api/orders/' + id, { token });
+    expect(after.body.order.lifecycle).toBe('done');
+
+    const r = await multipart(`/api/orders/${id}/lines/${lineId}/photos`, { file: await png() }, { token });
+    expect(r.status).toBe(403);
+    expect((await lines(token, id))[0].photos.filter(p => p.source === 'upload')).toHaveLength(0);
+  });
+
+  it('404s an upload aimed at an order deleted since the request began', async () => {
+    const { token } = await loginAs(MARCUS);
+    const { id, lineId } = await makePo(token);
+    expect((await api('DELETE', '/api/orders/' + id, { token })).status).toBe(200);
+
+    const r = await multipart(`/api/orders/${id}/lines/${lineId}/photos`, { file: await png() }, { token });
+    expect(r.status).toBe(404);
+  });
+});

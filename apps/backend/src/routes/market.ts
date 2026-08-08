@@ -91,8 +91,9 @@ market.post('/lookup', async (c) => {
     return c.json({ error: `at most ${LOOKUP_MAX} part numbers per lookup` }, 413);
   }
 
-  // Canonicalised here so the caller can key its own map with
-  // canonPartNumberJs and get a hit — the two forms are kept byte-identical.
+  // Canonicalised here so the caller can key its own map and get a hit: the
+  // rule is @recycle-erp/shared's canonicalPartNumber, which is the same
+  // function the frontend canonicalised the request with.
   const canon = [...new Set(
     raw.filter((p): p is string => typeof p === 'string')
       .map(p => canonPartNumberJs(p))

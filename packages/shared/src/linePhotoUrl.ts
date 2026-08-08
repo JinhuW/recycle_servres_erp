@@ -15,3 +15,10 @@ export const isRealPhotoUrl = (u: unknown): u is string =>
   && u.length > 0
   && !u.startsWith('data:image/placeholder')
   && !(u.startsWith('data:') && !u.includes(','));
+
+// How many uploaded photos one order line may hold. The server is the
+// authority (routes/orders.ts rejects the surplus with a 409), but it answers
+// one upload at a time and long after the files were chosen — so the picker
+// needs the same number to stop at the limit and say which limit it stopped at.
+// The label scan is not counted: it lives in label_scans, not the photo table.
+export const LINE_PHOTO_CAP = 6;
