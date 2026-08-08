@@ -1,14 +1,18 @@
 /**
  * Centralized error-surfacing helpers.
  *
- * The shell components (DesktopApp, MobileApp) register `window.__showToast`
- * on mount; any module can call it through these helpers without being
- * directly coupled to a React tree. Falls back to console.error when no
- * shell is mounted (tests, SSR, errors during initial render).
+ * Errors are shown in a blocking dialog, never a corner toast — a validation
+ * message that fades after 2.6s is a message the user has to guess at. The
+ * shell components (DesktopApp, MobileApp) register `window.__showErrorDialog`
+ * (errors) and `window.__showToast` (success) on mount; any module can call
+ * these helpers without being directly coupled to a React tree. Falls back to
+ * console.error when no shell is mounted (tests, SSR, errors during initial
+ * render).
  *
  * Usage:
  *   api.get(...).then(...).catch(handleFetchError)   // fetch failures
- *   showErrorToast('Could not parse total cost')      // validation errors
+ *   showErrorDialog('Could not parse total cost')     // validation errors
+ *   showErrorDialog(msg, ['Line 2: …', 'Line 4: …'])  // with per-item detail
  *
  * The LangProvider (lib/i18n.tsx) sets `__genericErrorMessage` to the
  * translated fallback so non-React modules surface localised text when an
@@ -18,15 +22,16 @@
 declare global {
   interface Window {
     __showToast?: (msg: string, tone?: 'success' | 'error') => void;
+    __showErrorDialog?: (msg: string, details?: string[], title?: string) => void;
     __genericErrorMessage?: string;
   }
 }
 
-export function showErrorToast(msg: string): void {
-  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
-    window.__showToast(msg, 'error');
+export function showErrorDialog(msg: string, details?: string[], title?: string): void {
+  if (typeof window !== 'undefined' && typeof window.__showErrorDialog === 'function') {
+    window.__showErrorDialog(msg, details, title);
   } else {
-    console.error('[toast]', msg);
+    console.error('[error]', msg, details ?? '');
   }
 }
 
@@ -37,7 +42,5 @@ export function handleFetchError(err: unknown): void {
     || 'Something went wrong. Please try again.';
   const msg = err instanceof Error ? err.message : fallback;
 
-  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
-    window.__showToast(msg, 'error');
-  }
+  showErrorDialog(msg);
 }

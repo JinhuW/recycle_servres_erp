@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { fmtMoney } from '../../lib/format';
-import { handleFetchError, showErrorToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { precheckPriceFile } from '../../lib/priceFilePrecheck';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
@@ -95,13 +95,13 @@ export function PriceImportSection({
       const check = await precheckPriceFile(file);
       if (!check.ok) {
         if (check.reason === 'columns-missing') {
-          showErrorToast(
+          showErrorDialog(
             check.missing.length === 1
               ? t(check.missing[0] === 'part' ? 'soPriceImportMissingPart' : 'soPriceImportMissingPrice')
               : t('soPriceImportColumnsNotFound'),
           );
         } else {
-          showErrorToast(t(
+          showErrorDialog(t(
             check.reason === 'too-large' ? 'soPriceImportTooLarge'
               : check.reason === 'no-rows' ? 'soPriceImportNoRows'
                 : 'soPriceImportNotXlsx',
@@ -117,7 +117,7 @@ export function PriceImportSection({
       setPreview(res);
     } catch (e) {
       if (e instanceof Error && /column/i.test(e.message)) {
-        showErrorToast(t('soPriceImportColumnsNotFound'));
+        showErrorDialog(t('soPriceImportColumnsNotFound'));
       } else {
         handleFetchError(e);
       }

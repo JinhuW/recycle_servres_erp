@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api, ApiError } from '../../lib/api';
-import { handleFetchError, showErrorToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
@@ -251,7 +251,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         if (draft.status !== item.status) fields.push('status');
         setBlocked({ orders: openOrders, fields });
       } else {
-        showErrorToast(err instanceof Error ? err.message : 'Save failed');
+        showErrorDialog(err instanceof Error ? err.message : 'Save failed');
       }
     } finally {
       setSaving(false);
@@ -987,7 +987,7 @@ function SummaryColumn({
             <button
               className="btn"
               style={{ color: 'var(--neg)', borderColor: 'color-mix(in oklch, var(--neg) 30%, var(--border))' }}
-              onClick={() => showErrorToast(t('ieArchiveNotImpl'))}
+              onClick={() => showErrorDialog(t('ieArchiveNotImpl'))}
             >
               {t('archive')}
             </button>

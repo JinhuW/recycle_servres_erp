@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
-import { handleFetchError } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtMoney, fmtDate } from '../../lib/format';
 import { fetchRateToUsd, type FxInfo } from '../../lib/fxRate';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -72,7 +72,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
   const [paymentReceivedBy, setPaymentReceivedBy] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // Per-order currency. Line prices are entered in it; the FX snapshot (only
   // needed for non-USD) drives the USD-equivalent preview and profit math.
   const [currency, setCurrency] = useState<Currency>('USD');
@@ -166,19 +165,26 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
     setLines(arr => arr.filter((_, i) => i !== idx));
 
   const rateMissing = currency !== 'USD' && rateToUsd == null;
-  const canSubmit = lines.length > 0 && lines.every(l => l.qty > 0) && !!customerId && !rateMissing;
 
-  const saveDisabledReason: string | null =
-    saving                                ? null
-  : lines.length === 0                    ? 'Add at least one item before saving.'
-  : !customerId                           ? 'Pick a customer before saving.'
-  : lines.some(l => l.qty <= 0)           ? 'Every line needs a quantity greater than zero.'
-  : rateMissing                           ? 'Waiting for the exchange rate…'
-  : null;
+  // What Save is waiting on, listed rather than hinted: the button stays live
+  // and clicking it opens a dialog with everything still missing.
+  const saveBlockers: string[] = saving ? [] : [
+    ...(lines.length === 0 ? [t('sodBlockedNoLines')] : []),
+    ...(!customerId ? [t('sodBlockedNoCustomer')] : []),
+    ...(lines.some(l => l.qty <= 0) ? [t('sodBlockedQty')] : []),
+    ...(rateMissing ? [t('sodBlockedRate')] : []),
+  ];
+
+  const onSaveClick = () => {
+    if (saveBlockers.length) {
+      showErrorDialog(t('errCantSaveMsg'), saveBlockers, t('errCantSaveTitle'));
+      return;
+    }
+    void save();
+  };
 
   const save = async () => {
     setSaving(true);
-    setError(null);
     try {
       const r = await api.post<{ ok: true; id: string }>('/api/sell-orders', {
         customerId,
@@ -199,7 +205,7 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
       });
       onSaved(r.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -385,12 +391,6 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
               />
             </div>
 
-            {error && (
-              <div style={{
-                padding: '10px 12px', background: 'var(--neg-soft)',
-                color: 'var(--neg)', borderRadius: 10, fontSize: 12.5,
-              }}>{error}</div>
-            )}
           </div>
 
           {/* Right column — totals */}
@@ -441,23 +441,16 @@ export function DesktopSellOrderDraft({ items, onClose, onSaved }: Props) {
           <div style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             {t('lifecycleDraft')} · {fmtDate(new Date(), locale)}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onClose}>{t('cancel')}</button>
-              <button
-                className="btn accent"
-                disabled={!canSubmit || saving}
-                title={saveDisabledReason ?? undefined}
-                onClick={save}
-              >
-                <Icon name="check2" size={14} /> {saving ? t('vbSaving') : t('sodSaveDraft')}
-              </button>
-            </div>
-            {saveDisabledReason && (
-              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
-                {saveDisabledReason}
-              </div>
-            )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>{t('cancel')}</button>
+            <button
+              className="btn accent"
+              disabled={saving}
+              title={saveBlockers[0]}
+              onClick={onSaveClick}
+            >
+              <Icon name="check2" size={14} /> {saving ? t('vbSaving') : t('sodSaveDraft')}
+            </button>
           </div>
         </div>
       </div>

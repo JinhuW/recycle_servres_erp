@@ -6,6 +6,7 @@ import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
 import { PhAboutSheet } from './components/PhAboutSheet';
 import { PhPasswordSheet } from './components/PhPasswordSheet';
+import { ErrorDialog, type ErrorDialogContent } from './components/ErrorDialog';
 
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
@@ -24,7 +25,7 @@ import { useAuth } from './lib/auth';
 import { useEffectiveUser } from './lib/tweaks';
 import { useT, I18N } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
-import { handleFetchError, showErrorToast } from './lib/errorToast';
+import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
   navigate, navigateBack, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
@@ -136,6 +137,7 @@ function Shell() {
   // whether the session it belongs to is still the live one.
   const captureGen = useRef(0);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [errorDialog, setErrorDialog] = useState<ErrorDialogContent | null>(null);
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
   const [aboutSheet, setAboutSheet] = useState(false);
@@ -182,7 +184,7 @@ function Shell() {
         // a manager in role-preview mode follows a link to a PO they don't own.
         navigate('/purchase-orders');
         const status = err instanceof ApiError ? err.status : 0;
-        showErrorToast(
+        showErrorDialog(
           status === 403 ? "You don't have access to this purchase order."
           : status === 404 ? 'That purchase order no longer exists.'
           : 'Could not open that purchase order.',
@@ -194,21 +196,26 @@ function Shell() {
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  // Errors never become toasts: they go to the blocking dialog so the user can
+  // read and act on them.
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
+    if (kind === 'error') { setErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
 
-  // Register the global toast hook so `handleFetchError` / `showErrorToast` in
+  // Register the global hooks so `handleFetchError` / `showErrorDialog` in
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
+    window.__showErrorDialog = (msg, details, title) => setErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
-      setToast({ msg, kind: kind === 'error' ? 'error' : 'success' });
+      if (kind === 'error') { setErrorDialog({ msg }); return; }
+      setToast({ msg, kind: 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setToast(null), 2600);
     };
-    return () => { delete window.__showToast; };
+    return () => { delete window.__showToast; delete window.__showErrorDialog; };
   }, []);
 
   // ── Capture flow handlers ────────────────────────────────────────────────
@@ -638,17 +645,25 @@ function Shell() {
 
   // Full-screen camera/form/review intercept the normal tab UI
   // The capture-flow screens (camera/form/review) are early returns, so the
-  // toast block in the main shell below never mounts while they're on screen —
-  // every error raised during scan / line-save / submit was set into state but
-  // rendered nowhere, leaving buttons that look like they did nothing. Render
-  // the toast alongside each of these screens too. Fixed positioning anchors
-  // it to the viewport regardless of which screen's root is mounted.
-  const toastEl = toast && (
-    <div className="ph-toast-wrap" style={{ position: 'fixed', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
-      <div className={'ph-toast ' + (toast.kind || '')}>
-        <Icon name="check2" size={14} /><span>{toast.msg}</span>
-      </div>
-    </div>
+  // toast/dialog block in the main shell below never mounts while they're on
+  // screen — every error raised during scan / line-save / submit was set into
+  // state but rendered nowhere, leaving buttons that look like they did
+  // nothing. Render these alongside each of those screens too. Fixed
+  // positioning anchors them to the viewport regardless of which screen's root
+  // is mounted.
+  const overlayEl = (
+    <>
+      {toast && (
+        <div className="ph-toast-wrap" style={{ position: 'fixed', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
+          <div className={'ph-toast ' + (toast.kind || '')}>
+            <Icon name="check2" size={14} /><span>{toast.msg}</span>
+          </div>
+        </div>
+      )}
+      {errorDialog && (
+        <ErrorDialog content={errorDialog} onClose={() => setErrorDialog(null)} />
+      )}
+    </>
   );
 
   if (capture.phase === 'camera') {
@@ -660,7 +675,7 @@ function Shell() {
           onClose={cancelCapture}
           onBack={goBack}
         />
-        {toastEl}
+        {overlayEl}
       </>
     );
   }
@@ -680,7 +695,7 @@ function Shell() {
           onRescan={rescanRam}
           rescanDraft={capture.rescanDraft ?? null}
         />
-        {toastEl}
+        {overlayEl}
       </>
     );
   }
@@ -698,7 +713,7 @@ function Shell() {
           onSubmit={submitOrder}
           onCancel={cancelCapture}
         />
-        {toastEl}
+        {overlayEl}
       </>
     );
   }
@@ -785,7 +800,7 @@ function Shell() {
         <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={effUser?.role ?? user.role} />
       )}
 
-      {toastEl}
+      {overlayEl}
     </div>
   );
 }

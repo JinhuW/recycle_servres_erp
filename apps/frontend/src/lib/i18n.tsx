@@ -121,6 +121,18 @@ export const I18N: Record<Lang, Record<string, string>> = {
     serialNumbersHint: 'Optional — list one serial per unit, one per line.',
     serialNumbersHintDdr5: 'Required for DDR5 — list one serial per unit, one per line.',
     serialCount: '{n} SN',
+    errDialogTitle: 'Something went wrong',
+    errDialogOk: 'OK',
+    errCantSaveTitle: 'Can’t save yet',
+    errCantSaveMsg: 'Nothing was saved. Fix the following, then Save again.',
+    errCantSubmitTitle: 'Can’t submit yet',
+    errCantSubmitMsg: 'Nothing was submitted. Fix the following, then try again.',
+    saveBlockedLocked: 'This order is Done — it can no longer be edited.',
+    saveBlockedNoChanges: 'No changes to save.',
+    sodBlockedNoLines: 'Add at least one item.',
+    sodBlockedNoCustomer: 'Pick a customer.',
+    sodBlockedQty: 'Every line needs a quantity greater than zero.',
+    sodBlockedRate: 'Waiting for the exchange rate — try again in a moment.',
     serialCheckTitle: 'Serial numbers need attention',
     serialCheckSub: 'Fix these before saving — nothing was saved.',
     serialDdr5Required: 'Line {line} ({label}): DDR5 RAM requires serial numbers.',
@@ -206,6 +218,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reviewPickWarehouseHint: 'Pick a warehouse before submitting.',
     transferPickDestinationHint: 'Pick a destination warehouse before transferring.',
     transferQtyOutOfRangeHint: 'One or more lines has an invalid quantity (must be ≥ 1 and ≤ stock).',
+    transferFailed: 'Transfer failed',
 
     // ── Mobile parity additions (2026-05-12) ──
     rescanWithAi: 'Rescan with AI',
@@ -585,6 +598,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     deleteOrderConfirmCta: 'Delete order',
     deleting: 'Deleting…',
     advancing: 'Advancing…',
+    advanceFailed: 'Could not advance this order.',
     savedShort: 'Saved',
 
     // ── OAuth consent screen ──
@@ -1652,6 +1666,18 @@ export const I18N: Record<Lang, Record<string, string>> = {
     serialNumbersHint: '可选 — 每台设备一个序列号，每行一个。',
     serialNumbersHintDdr5: 'DDR5 必填 — 每台设备一个序列号，每行一个。',
     serialCount: '{n} 个序列号',
+    errDialogTitle: '出错了',
+    errDialogOk: '知道了',
+    errCantSaveTitle: '暂时无法保存',
+    errCantSaveMsg: '尚未保存。请修正以下问题后再次保存。',
+    errCantSubmitTitle: '暂时无法提交',
+    errCantSubmitMsg: '尚未提交。请修正以下问题后重试。',
+    saveBlockedLocked: '此订单已完成 —— 无法再编辑。',
+    saveBlockedNoChanges: '没有需要保存的更改。',
+    sodBlockedNoLines: '请至少添加一项。',
+    sodBlockedNoCustomer: '请选择客户。',
+    sodBlockedQty: '每项数量必须大于零。',
+    sodBlockedRate: '正在获取汇率 —— 请稍后重试。',
     serialCheckTitle: '序列号需要修正',
     serialCheckSub: '保存前请先修正，本次未保存任何内容。',
     serialDdr5Required: '第 {line} 行（{label}）：DDR5 内存必须填写序列号。',
@@ -1704,6 +1730,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     reviewPickWarehouseHint: '请先选择仓库再提交。',
     transferPickDestinationHint: '请先选择目标仓库再调拨。',
     transferQtyOutOfRangeHint: '有数量无效（必须 ≥ 1 且 ≤ 库存）。',
+    transferFailed: '调拨失败',
 
     // ── Desktop (zh) ──
     appBrand: '回收服务器', brandSub: '库存与利润',
@@ -2019,6 +2046,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     deleteOrderConfirmCta: '删除订单',
     deleting: '正在删除…',
     advancing: '正在推进…',
+    advanceFailed: '无法推进此订单。',
     savedShort: '已保存',
 
     // ── OAuth consent screen ──

@@ -5,7 +5,7 @@ import { LineSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
-import { handleFetchError } from '../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmt, fmtUSD, fmtUSD0 } from '../lib/format';
 import { parseFeeInput } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
@@ -84,12 +84,23 @@ export function OrderReview({
     }
   };
 
-  const submitDisabledReason: string | null =
-    submitting             ? null
-  : lines.length === 0     ? t('reviewNoLinesHint')
-  : warehouses.length === 0 ? t('reviewWarehousesLoadingHint')
-  : !warehouseId           ? t('reviewPickWarehouseHint')
-  : null;
+  // What Submit is waiting on. The button stays live while these exist:
+  // clicking it opens a dialog with the list, rather than sitting dead behind
+  // a hint the user has to hunt for.
+  const submitBlockers: string[] =
+    submitting              ? []
+  : lines.length === 0      ? [t('reviewNoLinesHint')]
+  : warehouses.length === 0 ? [t('reviewWarehousesLoadingHint')]
+  : !warehouseId            ? [t('reviewPickWarehouseHint')]
+  : [];
+
+  const onSubmitClick = () => {
+    if (submitBlockers.length) {
+      showErrorDialog(t('errCantSubmitMsg'), submitBlockers, t('errCantSubmitTitle'));
+      return;
+    }
+    void submit();
+  };
 
   return (
     <div className="phone-app">
@@ -330,27 +341,13 @@ export function OrderReview({
         </div>
       </div>
 
-      {submitDisabledReason && (
-        <div
-          role="status"
-          style={{
-            position: 'absolute', left: 16, right: 16, bottom: 76,
-            padding: '8px 12px', borderRadius: 10,
-            background: 'var(--bg-elev)', border: '1px solid var(--border)',
-            color: 'var(--fg-subtle)', fontSize: 12, textAlign: 'center',
-            boxShadow: '0 2px 8px rgba(15,23,42,0.06)', zIndex: 5,
-          }}
-        >
-          {submitDisabledReason}
-        </div>
-      )}
       <div className="ph-action-bar">
         <button className="ph-btn ghost" onClick={onCancel}>{t('cancel')}</button>
         <button
           className="ph-btn dark"
-          onClick={submit}
-          disabled={submitting || lines.length === 0 || !warehouseId}
-          title={submitDisabledReason ?? undefined}
+          onClick={onSubmitClick}
+          disabled={submitting}
+          title={submitBlockers[0]}
         >
           <Icon name="check" size={16} /> {submitting ? '…' : t('submitOrder')}
         </button>
