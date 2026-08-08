@@ -53,7 +53,7 @@ type CaptureState =
   // submit can name the ones deleted since.
   | { phase: 'review';  detected: ScanResponse | null; lines: DraftLine[]; originalLineIds?: string[]; draftId?: string };
 
-type Toast = { msg: string; kind: 'success' | 'error' };
+type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
 type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; notes: string };
 
@@ -202,7 +202,7 @@ function Shell() {
     if (kind === 'error') { setErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2600);
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
   };
 
   // Register the global hooks so `handleFetchError` / `showErrorDialog` in
@@ -211,9 +211,9 @@ function Shell() {
     window.__showErrorDialog = (msg, details, title) => setErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
       if (kind === 'error') { setErrorDialog({ msg }); return; }
-      setToast({ msg, kind: 'success' });
+      setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 2600);
+      toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
     };
     return () => { delete window.__showToast; delete window.__showErrorDialog; };
   }, []);

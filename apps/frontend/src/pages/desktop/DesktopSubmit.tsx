@@ -4,7 +4,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder } from '../../lib/api';
-import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -440,7 +440,8 @@ function OrderForm({
       const cur = lines[activeIdx];
       if (cur && !cur._confirmed) {
         if (!lineReady(cur)) {
-          showErrorDialog(t('subFillThisLine'));
+          const fields = missingFieldNames(cur);
+          showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
           return;
         }
         try {
@@ -476,10 +477,24 @@ function OrderForm({
     return qty > 0 && cost >= 0 && hasIdentity && specsComplete;
   };
 
+  // Required fields still blank, in form order — the same set `lineReady`
+  // gates on, so the drawer's prompt can never disagree with what Confirm
+  // does. Unit cost is absent on purpose: a blank one reads as 0.
+  const missingFieldKeys = (l: Line): string[] => {
+    const keys = l.category === 'RAM' ? [...missingRamFields(l)]
+      : l.category === 'Other'
+        ? [
+            ...(!(l.itemType ?? '').trim() ? ['lfItemType'] : []),
+            ...(!l.description ? ['lfItemDescription'] : []),
+          ]
+        : (!l.brand ? ['brand'] : []);
+    if (!(Number(l.qty) > 0)) keys.push('qty');
+    return keys;
+  };
+
   // Localized "Brand, Speed (MHz), …" list for missing-field messages.
   const missingFieldNames = (l: Line): string | null => {
-    if (l.category !== 'RAM') return null;
-    const missing = missingRamFields(l);
+    const missing = missingFieldKeys(l);
     return missing.length ? missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') : null;
   };
 
@@ -923,62 +938,64 @@ function OrderForm({
         </div>
       </div>
 
-      {/* Sticky bottom: meta + totals + submit */}
-      <div className="card" style={{ position: 'sticky', bottom: 16, zIndex: 5, boxShadow: '0 12px 24px rgba(15,23,42,0.06)' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('warehouse')} <span className="req">*</span></label>
-              <select
-                className="select"
-                value={meta.warehouseId}
-                onChange={e => setMeta(m => ({ ...m, warehouseId: e.target.value }))}
-              >
-                {warehouses.length === 0 && <option value="">{t('loadingApp')}</option>}
-                {warehouses.map(w => (
-                  <option key={w.id} value={w.id}>{w.name ?? w.short}</option>
-                ))}
-              </select>
+      {/* Sticky commit bar: destination + payer + note, attachments, then the
+          single figure the submit button commits. */}
+      <div className="card sub-commit">
+        <div className="sub-commit-meta">
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label className="label" htmlFor="sub-warehouse">{t('warehouse')} <span className="req">*</span></label>
+            <select
+              id="sub-warehouse"
+              className="select"
+              value={meta.warehouseId}
+              onChange={e => setMeta(m => ({ ...m, warehouseId: e.target.value }))}
+            >
+              {warehouses.length === 0 && <option value="">{t('loadingApp')}</option>}
+              {warehouses.map(w => (
+                <option key={w.id} value={w.id}>{w.name ?? w.short}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label className="label">{t('payment')} <span className="req">*</span></label>
+            <div className="seg">
+              <button
+                className={meta.payment === 'Company' ? 'active' : ''}
+                style={{ whiteSpace: 'nowrap' }}
+                onClick={() => setMeta(m => ({ ...m, payment: 'Company' }))}
+              >{t('payCompanyShort')}</button>
+              <button
+                className={meta.payment === 'Self' ? 'active' : ''}
+                style={{ whiteSpace: 'nowrap' }}
+                onClick={() => setMeta(m => ({ ...m, payment: 'Self' }))}
+              >{t('paySelfShort')}</button>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('payment')} <span className="req">*</span></label>
-              <div className="seg" style={{ width: '100%' }}>
-                <button
-                  className={meta.payment === 'Company' ? 'active' : ''}
-                  style={{ flex: 1, whiteSpace: 'nowrap' }}
-                  onClick={() => setMeta(m => ({ ...m, payment: 'Company' }))}
-                >{t('payCompanyShort')}</button>
-                <button
-                  className={meta.payment === 'Self' ? 'active' : ''}
-                  style={{ flex: 1, whiteSpace: 'nowrap' }}
-                  onClick={() => setMeta(m => ({ ...m, payment: 'Self' }))}
-                >{t('paySelfShort')}</button>
-              </div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('orderNotes')}</label>
-              <input
-                className="input"
-                value={meta.notes}
-                onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
-                placeholder={t('subOptional')}
-              />
-            </div>
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label className="label" htmlFor="sub-notes">{t('orderNotes')}</label>
+            <input
+              id="sub-notes"
+              className="input"
+              value={meta.notes}
+              onChange={e => setMeta(m => ({ ...m, notes: e.target.value }))}
+              placeholder={t('subOptional')}
+            />
           </div>
         </div>
 
-        <div style={{ padding: '0 16px 16px' }}>
+        <div className="sub-commit-attach">
           {/* Vendors send lot manifests / price lists as spreadsheets, so this
               dropzone takes sheets on top of the usual receipt formats. Other
               attachment surfaces keep the narrower picker. */}
           <AttachmentDropzone
+            compact
             label={t('poSubmitAttachLabel')}
             boxHint={t('uploadHintSheets')}
             accept={SUBMIT_ATTACH_ACCEPT}
             onFiles={addEvidenceFiles}
           />
           {evidencePreviews.length > 0 && (
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="sub-commit-files">
               {evidencePreviews.map(p => (
                 <AttachmentChip
                   key={p.url}
@@ -990,34 +1007,20 @@ function OrderForm({
           )}
         </div>
 
-        <div style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: 18, alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
-            <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('subTotalUnits')}</div>
-            <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{totals.units}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              {t('totalCost')}
-            </div>
-            <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
-              {fmtUSD(cost.total, locale)}
-            </div>
+        <div className="sub-commit-foot">
+          <div className="sub-commit-total">
+            <div className="sub-commit-cap">{t('totalCost')}</div>
+            <div className="sub-commit-amt">{fmtUSD(cost.total, locale)}</div>
             {cost.fees > 0 && (
-              <div style={{ fontSize: 11, color: 'var(--accent-strong)', marginTop: 1 }}>
-                {t('inclFees', { fees: fmtUSD(cost.fees, locale) })}
-              </div>
+              <div className="sub-commit-fees">{t('inclFees', { fees: fmtUSD(cost.fees, locale) })}</div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="sub-commit-actions">
             {/* Leaves the form. Confirmed lines are already persisted to the
                 draft, so nothing entered is lost — this is not a discard. */}
             <button className="btn" onClick={() => onDone()}>{t('cancel')}</button>
             <button
-              className="btn accent"
+              className="btn accent lg"
               disabled={submitting}
               title={submitBlockers[0]}
               onClick={onSubmitClick}
@@ -1041,6 +1044,7 @@ function OrderForm({
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
+          missingFields={missingFieldNames(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
             orderId,

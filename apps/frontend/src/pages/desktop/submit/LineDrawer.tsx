@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { ImageLightbox } from '../../../components/ImageLightbox';
 import { api } from '../../../lib/api';
+import { showWarnToast } from '../../../lib/errorToast';
 import { fmtUSD } from '../../../lib/format';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
 import type { Category, ScanResponse } from '../../../lib/types';
@@ -25,7 +26,7 @@ import { parseSerials } from '../../../components/SerialNumbers';
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
   onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
-  photoCtx, market,
+  photoCtx, market, missingFields,
 }: {
   line: Line;
   idx: number;
@@ -44,6 +45,10 @@ export function LineDrawer({
   // Recorded market value for this line's part number, if the parent looked
   // one up. Optional so surfaces that don't fetch it still render.
   market?: ResolvedMarketValue | null;
+  // Localized "Brand, Capacity, …" list of required fields still blank. Shown
+  // above Confirm while the line is being filled, so the gap is named where
+  // it can be closed rather than on the submit bar three sections away.
+  missingFields?: string | null;
   // Where this line's photos live. `lineId` is null until the line is
   // persisted; while it is, the parent buffers picked files in `pending` and
   // uploads them once the id exists — the same deferral the order-level
@@ -608,6 +613,13 @@ export function LineDrawer({
                     disabled={confirming || line._confirmed}
                     onClick={async () => {
                       if (line._confirmed) { onClose(); return; }
+                      // Name the gaps here rather than letting the round-trip
+                      // fail into a dialog: the fields are on screen and the
+                      // drawer stays open on top of them.
+                      if (missingFields) {
+                        showWarnToast(t('drawerStillNeeded', { fields: missingFields }));
+                        return;
+                      }
                       if (!onConfirmLine) { onClose(); return; }
                       setConfirming(true);
                       try {
