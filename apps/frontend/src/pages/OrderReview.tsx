@@ -11,9 +11,13 @@ import { parseFeeInput } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 import { addableCategories, categoryTone } from '../lib/lookups';
 
+// The last step of capturing a NEW purchase order. An order that already
+// exists is edited on its detail screen — this one asks for a warehouse, a
+// payment type and notes, which is only a fair question before those are set.
 type Props = {
   lines: DraftLine[];
-  editingId?: string | null;
+  /** A resumed draft's saved meta. Null for an order being started here. */
+  initialMeta?: { warehouseId: string; payment: 'company' | 'self'; notes: string } | null;
   /** Called with the kind of line to add — the add row always names one. */
   onAddItem: (cat: Category) => void;
   // Fees live in the session, not this component: it unmounts every time the
@@ -31,7 +35,7 @@ type Props = {
 };
 
 export function OrderReview({
-  lines, editingId,
+  lines, initialMeta,
   onAddItem, onEditLine, onRemoveLine,
   fees, onFeesChange,
   onSubmit, onCancel,
@@ -40,9 +44,9 @@ export function OrderReview({
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [warehouseId, setWarehouseId] = useState('');
-  const [payment, setPayment] = useState<'company' | 'self'>('company');
-  const [notes, setNotes] = useState('');
+  const [warehouseId, setWarehouseId] = useState(initialMeta?.warehouseId ?? '');
+  const [payment, setPayment] = useState<'company' | 'self'>(initialMeta?.payment ?? 'company');
+  const [notes, setNotes] = useState(initialMeta?.notes ?? '');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -51,7 +55,9 @@ export function OrderReview({
       .then(r => {
         if (!alive) return;
         setWarehouses(r.items);
-        if (r.items[0]) setWarehouseId(r.items[0].id);
+        // Only default a draft that has never named one. A resumed draft
+        // arrives with its own, and the first warehouse in the list is not it.
+        setWarehouseId(prev => prev || r.items[0]?.id || '');
       })
       .catch(handleFetchError);
     return () => { alive = false; };
@@ -88,7 +94,7 @@ export function OrderReview({
   return (
     <div className="phone-app">
       <PhHeader
-        title={editingId ? t('editOrderId', { id: editingId }) : t('reviewOrder')}
+        title={t('reviewOrder')}
         sub={t('itemCount', { n: lines.length, label: lines.length === 1 ? t('item') : t('items'), q: totalQty })}
         leading={<button className="ph-icon-btn" onClick={onCancel}><Icon name="chevronLeft" size={16} /></button>}
       />
@@ -121,7 +127,9 @@ export function OrderReview({
                   <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {l.label || '—'}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>{l.partNumber || '—'}</div>
+                  {l.partNumber && (
+                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'JetBrains Mono, monospace', marginTop: 2 }}>{l.partNumber}</div>
+                  )}
                   <LineSpecChips line={l} />
                   {l.serialNumber && (
                     <div style={{ marginTop: 4 }}>

@@ -7,60 +7,25 @@ const line = (over: Partial<DraftLine> = {}): DraftLine => ({
   category: 'RAM', qty: 1, unitCost: 10, brand: 'Samsung', ...over,
 });
 
-describe('buildOrderSubmit — editing an existing order', () => {
-  it('PATCHes the existing order and never creates a new one', () => {
-    const r = buildOrderSubmit(
-      { editingId: 'PO-1289', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] },
-      meta,
-    );
-    expect(r).toMatchObject({ kind: 'patch', url: '/api/orders/PO-1289' });
+describe('buildOrderSubmit — an order that already exists is not its business', () => {
+  // This module states all five meta fields on every request, which is only
+  // safe when the user has just been asked for them. Routing an existing order
+  // through here re-asked on a blank review screen and wrote the defaults back:
+  // a PO saved as HK2 / self-paid / "supplier ref 4471" returned as
+  // warehouses[0] / company / no notes. Existing orders are edited on their
+  // detail screen now, which sends only the fields the user actually touched.
+  it('has no branch that addresses an order by id', () => {
+    const r = buildOrderSubmit({ lines: [line({ id: 'l1' })] }, meta);
+    expect(r).toMatchObject({ kind: 'create', url: '/api/orders' });
   });
 
-  it('updates lines that still carry their DB id (no status, so it is preserved)', () => {
-    const r = buildOrderSubmit(
-      { editingId: 'PO-1', lines: [line({ id: 'l1', qty: 5 })], originalLineIds: ['l1'] },
-      meta,
-    );
-    if (r.kind !== 'patch') throw new Error('expected patch');
-    const lines = r.body.lines as Array<Record<string, unknown>>;
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatchObject({ id: 'l1', qty: 5 });
-    expect(lines[0]).not.toHaveProperty('status');
-    expect(r.body).not.toHaveProperty('addLines');
-  });
-
-  it('a line added then autosaved (has an id, absent from originals) updates in place — never re-inserts', () => {
-    // Mobile "Add item" autosaves the new line and adopts its DB id. On final
-    // submit it must go to `lines` (update), not `addLines` (insert), or the
-    // line would be duplicated. It is not in originalLineIds, so it must also
-    // not be treated as removed.
-    const r = buildOrderSubmit(
-      {
-        editingId: 'PO-1290',
-        lines: [line({ id: 'orig1' }), line({ id: 'added-autosaved', brand: 'Crucial' })],
-        originalLineIds: ['orig1'],
-      },
-      meta,
-    );
-    if (r.kind !== 'patch') throw new Error('expected patch');
-    expect((r.body.lines as Array<Record<string, unknown>>).map(l => l.id)).toEqual(['orig1', 'added-autosaved']);
-    expect(r.body).not.toHaveProperty('addLines');
+  it('carries a line that already has a DB id into the create as a plain line', () => {
+    // A `create` only happens when no order exists, so an id here is vestigial
+    // — the line still has to reach the new order.
+    const r = buildOrderSubmit({ lines: [line({ id: 'l1', qty: 5 })] }, meta);
+    if (r.kind !== 'create') throw new Error('expected create');
+    expect((r.body.lines as Array<Record<string, unknown>>)[0]).toMatchObject({ qty: 5 });
     expect(r.body).not.toHaveProperty('removeLineIds');
-  });
-
-  it('adds lines with no id and removes originals the user deleted', () => {
-    const r = buildOrderSubmit(
-      {
-        editingId: 'PO-1',
-        lines: [line({ id: 'l1' }), line({ brand: 'Crucial' })],
-        originalLineIds: ['l1', 'l2'],
-      },
-      meta,
-    );
-    if (r.kind !== 'patch') throw new Error('expected patch');
-    expect((r.body.lines as unknown[])).toHaveLength(1);
-    expect((r.body.addLines as Array<Record<string, unknown>>)[0]).toMatchObject({ brand: 'Crucial', status: 'In Transit' });
-    expect(r.body.removeLineIds).toEqual(['l2']);
   });
 });
 
@@ -107,12 +72,11 @@ describe('buildOrderSubmit — finalizing a new draft', () => {
 // price: it overwrote a PO's real one on a save that changed nothing but a
 // note, and pinned every other PO's column at whatever this screen last held.
 //
-// All three branches spread one `metaBody`, so this is a single line of source
+// Both branches spread one `metaBody`, so this is a single line of source
 // — but each branch is asserted, because that shared literal is exactly what a
 // future edit could stop sharing.
 describe('buildOrderSubmit — totalCost is never sent', () => {
   const branches: [string, SubmitState][] = [
-    ['editing an existing order', { editingId: 'PO-1289', lines: [line({ id: 'l1' })], originalLineIds: ['l1'] }],
     ['finalizing a draft', { draftId: 'PO-9', lines: [line()] }],
     ['creating the order outright', { lines: [line()] }],
   ];
@@ -134,12 +98,9 @@ describe('buildOrderSubmit — line fields are not dropped', () => {
     expect((r.body.addLines as Array<Record<string, unknown>>)[0]).toMatchObject({ generation: 'DDR4' });
   });
 
-  it('carries RAM generation on updated lines', () => {
-    const r = buildOrderSubmit(
-      { editingId: 'PO-1', lines: [line({ id: 'l1', generation: 'DDR5' })], originalLineIds: ['l1'] },
-      meta,
-    );
-    if (r.kind !== 'patch') throw new Error('expected patch');
+  it('carries RAM generation on created lines', () => {
+    const r = buildOrderSubmit({ lines: [line({ generation: 'DDR5' })] }, meta);
+    if (r.kind !== 'create') throw new Error('expected create');
     expect((r.body.lines as Array<Record<string, unknown>>)[0]).toMatchObject({ generation: 'DDR5' });
   });
 });

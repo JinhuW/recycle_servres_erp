@@ -13,6 +13,9 @@ type Props = {
   orderId: string;
   // Bump this to force a refresh after a save commits new events.
   refreshKey?: number;
+  // The phone opens it closed: it is the longest block on a screen that is
+  // already tall, and the header carries the event count either way.
+  defaultOpen?: boolean;
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
@@ -191,12 +194,12 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
+export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<OrderEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
     let alive = true;
