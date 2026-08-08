@@ -457,17 +457,17 @@ describe('other fees on a purchase order', () => {
     expect(detail.body.order.otherFeesNote).toBeNull();
   });
 
-  // Revenue and margin count PRICED lines only, so the fee has to be split the
-  // same way — charging all of it against part of the goods reported a loss on
-  // a PO that had merely not been priced yet. Cost-weighted, matching the
-  // allocation lib/po-cost.ts applies everywhere else.
+  // The whole fee nets against the margin whatever share of the lines is
+  // priced. That makes the list read as a loss on a PO nobody has priced yet,
+  // which is deliberate — the fee is money already spent — and deliberately
+  // more conservative than the edit screen's tape, which leaves fees out.
   const listRow = async (token: string, id: string) => {
     const list = await api<{ orders: { id: string; otherFees: number; profit: number; revenue: number }[] }>(
       'GET', '/api/orders?limit=100', { token });
     return list.body.orders.find(o => o.id === id)!;
   };
 
-  it('reports no loss from the fee while nothing is priced yet', async () => {
+  it('charges the whole fee while nothing is priced yet', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await draftPO(token);
     await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 20 } });
@@ -475,12 +475,11 @@ describe('other fees on a purchase order', () => {
     const row = await listRow(token, id);
     expect(row.otherFees).toBe(20);
     expect(row.revenue).toBeCloseTo(0, 2);
-    // The unpriced line's cost is not counted either, so counting its share of
-    // the fee would be half a subtraction.
-    expect(row.profit).toBeCloseTo(0, 2);
+    // No margin to offset it yet, so the row stands at the fee, negative.
+    expect(row.profit).toBeCloseTo(-20, 2);
   });
 
-  it('nets the whole fee once every line is priced', async () => {
+  it('nets the fee against the margin once every line is priced', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await draftPO(token);
     const [lineId] = (await api<{ order: { lines: { id: string }[] } }>(
@@ -490,16 +489,15 @@ describe('other fees on a purchase order', () => {
     });
 
     const row = await listRow(token, id);
-    // 2 × (80 − 50) = 60 of margin, less the full fee: every line is priced, so
-    // every share of it belongs here.
+    // 2 × (80 − 50) = 60 of margin, less the full fee.
     expect(row.profit).toBeCloseTo(40, 2);
   });
 
-  it('nets only the priced lines\' share of the fee', async () => {
+  it('charges the whole fee even when only some lines are priced', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await draftPO(token);
-    // A second line of equal goods value, left unpriced — so the priced half
-    // carries half the fee.
+    // A second line of equal goods value, left unpriced: it contributes no
+    // margin and buys no discount on the fee.
     await api('PATCH', `/api/orders/${id}`, {
       token,
       body: { addLines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New' }] },
@@ -511,8 +509,8 @@ describe('other fees on a purchase order', () => {
     });
 
     const row = await listRow(token, id);
-    // 60 of margin on the priced line, less 20 × (100 / 200).
-    expect(row.profit).toBeCloseTo(50, 2);
+    // 60 of margin on the priced line, less the whole 20 — not half of it.
+    expect(row.profit).toBeCloseTo(40, 2);
   });
 });
 
