@@ -219,3 +219,59 @@ describe('a stated goods total of zero is not a negotiated price', () => {
     expect(await goodsTotal(id)).toBeCloseTo(130, 2);
   });
 });
+
+// 0086 made "unpriced" mean NULL rather than 0, and every revenue query and UI
+// predicate now splits on that. 0087 makes the database hold the line, so a
+// writer that skips normSellPrice cannot silently reopen the divergence.
+describe('the schema refuses a zero sell price', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('rejects a direct write of 0', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 1, unitCost: 40 })] });
+    const [lineId] = await lineIds(token, id);
+
+    await expect(
+      getTestDb()`UPDATE order_lines SET sell_price = 0 WHERE id = ${lineId}::uuid`,
+    ).rejects.toThrow(/order_lines_sell_price_positive/);
+  });
+
+  it('rejects a negative sell price', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 1, unitCost: 40 })] });
+    const [lineId] = await lineIds(token, id);
+
+    await expect(
+      getTestDb()`UPDATE order_lines SET sell_price = -5 WHERE id = ${lineId}::uuid`,
+    ).rejects.toThrow(/order_lines_sell_price_positive/);
+  });
+
+  it('still accepts NULL, which is what unpriced means', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 1, unitCost: 40 })] });
+    const [lineId] = await lineIds(token, id);
+
+    await getTestDb()`UPDATE order_lines SET sell_price = NULL WHERE id = ${lineId}::uuid`;
+    const [row] = await getTestDb()<{ sell_price: number | null }[]>`
+      SELECT sell_price FROM order_lines WHERE id = ${lineId}::uuid
+    `;
+    expect(row.sell_price).toBeNull();
+  });
+
+  // The API path collapses 0 to NULL rather than 400ing, so the constraint is a
+  // backstop for other writers, not a new rejection surface for clients.
+  it('lets the API keep collapsing a 0 to NULL', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 1, unitCost: 40 })] });
+    const [lineId] = await lineIds(token, id);
+
+    const r = await api('PATCH', '/api/orders/' + id, {
+      token, body: { lines: [{ id: lineId, sellPrice: 0 }] },
+    });
+    expect(r.status).toBe(200);
+    const [row] = await getTestDb()<{ sell_price: number | null }[]>`
+      SELECT sell_price FROM order_lines WHERE id = ${lineId}::uuid
+    `;
+    expect(row.sell_price).toBeNull();
+  });
+});

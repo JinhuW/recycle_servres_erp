@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
-import { uploadAttachment, deleteAttachment } from '../r2';
+import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
 import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
@@ -600,8 +600,10 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   // Derived from the LINES, so a legacy PO whose header disagrees with its sole
   // line still renders that line's columns.
-  const lineCats = [...new Set(lines.map(l => exportCategory(l.category)))]
-    .sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b));
+  // Through sortCategories, not a bare indexOf: an unknown category scores -1
+  // there and would sort ahead of RAM, so the workbook's tabs and the chips on
+  // screen would disagree about the same order.
+  const lineCats = sortCategories([...new Set(lines.map(l => exportCategory(l.category)))]);
 
   const goodsCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
   const totalCost = +(goodsCost + otherFees).toFixed(2);
@@ -1289,6 +1291,18 @@ orders.patch('/:id', async (c) => {
         })));
       }
 
+      // A PO that HAD lines may not be left with none. Both clients block it,
+      // but the API did not, and an emptied order keeps the NOT NULL category
+      // its last line derived — a chip with nothing behind it — while its goods
+      // total resets to 0. An always-empty draft is untouched: it has nothing
+      // to remove, so this can only fire on a request that removed something.
+      if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
+        const [{ n }] = await tx<{ n: number }[]>`
+          SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id = ${id}
+        `;
+        if (n === 0) throw new Error('__ORDER_WOULD_BE_EMPTY__');
+      }
+
       // Category and goods total are both denormalizations of the lines,
       // recomputed after every add, remove and edit. Without this the tape
       // itemised categories that summed to one figure under a goods total that
@@ -1380,6 +1394,9 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__DONE_LOCKED__')) {
       return c.json({ error: 'Order is Done and cannot be modified. Use the advance-back flow if needed.' }, 409);
     }
+    if (msg.includes('__ORDER_WOULD_BE_EMPTY__')) {
+      return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
+    }
     if (/foreign key|violates|referenced/i.test(msg)) {
       return c.json({ error: 'A line you tried to remove is referenced by a sell-order and cannot be deleted' }, 409);
     }
@@ -1387,10 +1404,10 @@ orders.patch('/:id', async (c) => {
   }
 
   // Best-effort R2 cleanup after a successful commit (stub/CF-era keys are
-  // no-ops in deleteAttachment; a missing object delete is idempotent).
-  for (const key of removedScanKeys) {
-    await deleteAttachment(c.env, key).catch(e => console.error('r2 delete (line removed)', e));
-  }
+  // no-ops; a missing object delete is idempotent). Batched: this runs with the
+  // response still open, and a wide removal used to mean one round trip per key.
+  const unswept = await deleteAttachments(c.env, removedScanKeys);
+  if (unswept.length) console.error('r2 delete (line removed)', unswept);
 
   return c.json({ ok: true, addedLineIds });
 });
@@ -1491,10 +1508,11 @@ orders.delete('/:id', async (c) => {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
   }
 
-  // Best-effort: drop the images from R2 too (after the commit).
-  for (const r of outcome.scanned) {
-    await deleteAttachment(c.env, r.k).catch(e => console.error('r2 delete (order deleted)', e));
-  }
+  // Best-effort: drop the images from R2 too (after the commit). One PO can
+  // carry a scan plus six photos per line, so this is batched rather than a
+  // round trip each.
+  const orphaned = await deleteAttachments(c.env, outcome.scanned.map(r => r.k));
+  if (orphaned.length) console.error('r2 delete (order deleted)', orphaned);
 
   return c.json({ ok: true });
 });

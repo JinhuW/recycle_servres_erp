@@ -19,6 +19,12 @@ vi.mock('../src/r2', async (importOriginal) => {
   return {
     ...actual,
     deleteAttachment: async (_env: unknown, key: string) => { swept.push(key); },
+    // The rollback path uses the single-key form, but the batch one is watched
+    // too so a future move to it cannot make these assertions vacuous.
+    deleteAttachments: async (_env: unknown, keys: readonly string[]) => {
+      swept.push(...keys);
+      return [];
+    },
   };
 });
 
