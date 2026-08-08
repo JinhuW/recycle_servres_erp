@@ -389,3 +389,35 @@ describe('PO audit log — access control', () => {
     await expect(db`UPDATE order_events SET kind = 'tampered' WHERE order_id = ${id}`).rejects.toThrow();
   });
 });
+
+// total_cost is a META_FIELD, but it is now DERIVED from the lines at the end
+// of the transaction. Diffing the order before that ran left every goods-total
+// move off the timeline — which is every move there is, since no client sends
+// the figure any more.
+describe('a derived goods-total move reaches the timeline', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('logs the move when a line is appended', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { lines: [{ category: 'RAM', brand: 'Samsung', partNumber: 'AUD-1',
+                        condition: 'Pulled — Tested', qty: 1, unitCost: 100 }] },
+    });
+    expect(r.status).toBe(201);
+
+    await api('PATCH', '/api/orders/' + r.body.id, {
+      token,
+      body: { addLines: [{ category: 'RAM', brand: 'Crucial', partNumber: 'AUD-2',
+                           condition: 'Pulled — Tested', qty: 2, unitCost: 50 }] },
+    });
+
+    const ev = (await getEvents(r.body.id, token)).body.events;
+    const meta = ev.filter(e => e.kind === 'meta_changed');
+    const move = meta.flatMap(e => (e.detail as { changes?: { field: string; from: unknown; to: unknown }[] }).changes ?? [])
+      .find(ch => ch.field === 'total_cost');
+    expect(move, 'a goods-total move must be audited').toBeDefined();
+    expect(Number(move!.from)).toBeCloseTo(100, 2);
+    expect(Number(move!.to)).toBeCloseTo(200, 2);
+  });
+});

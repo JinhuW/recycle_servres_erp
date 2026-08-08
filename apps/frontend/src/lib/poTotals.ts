@@ -6,6 +6,8 @@
 // The backend keeps the same split: orders.total_cost is the goods override and
 // orders.other_fees is charged on top of it, never folded into it.
 
+import { goodsTotalIsMirror } from '@recycle-erp/shared';
+
 export type PoCostInput = {
   /** Sum of qty * unitCost across the PO's lines. */
   lineSubtotal: number;
@@ -34,8 +36,36 @@ export function parseFeeInput(raw: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** A cent. Below this, a stored goods total IS the line sum. */
-export const GOODS_EPSILON = 0.01;
+export type StoredGoodsTotal = {
+  /**
+   * What to hand `poEffectiveCost` as `totalCostOverride`. Null when the stored
+   * figure is a mirror, so the live line sum wins.
+   */
+  override: number | null;
+  /** Whether the stored figure stands apart from the lines it was loaded with. */
+  negotiated: boolean;
+};
+
+/**
+ * How a screen that edits lines should read `orders.total_cost`.
+ *
+ * `loadedLineSubtotal` is the sum as the order ARRIVED, not as the form now
+ * stands — the mirror-vs-negotiated verdict is only readable before the lines
+ * move, which is the same instant the backend takes it at (see `goodsTotal.ts`
+ * in @recycle-erp/shared and `services/orderGoodsTotal.ts`). Take it against
+ * the live sum instead and every ordinary edit reads as a negotiated price:
+ * the money block freezes on the figure the page opened with, while the save
+ * that follows derives and stores the new one.
+ */
+export function readStoredGoodsTotal(
+  storedGoods: number | null | undefined,
+  loadedLineSubtotal: number,
+): StoredGoodsTotal {
+  if (storedGoods == null || goodsTotalIsMirror(storedGoods, loadedLineSubtotal)) {
+    return { override: null, negotiated: false };
+  }
+  return { override: storedGoods, negotiated: true };
+}
 
 function num(v: number | null | undefined): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;

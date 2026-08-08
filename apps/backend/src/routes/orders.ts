@@ -19,7 +19,8 @@ import { syncOrderCategory, deriveCategory, sortCategories } from '../services/o
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
-  synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, type SerialIssue,
+  synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, LINE_PHOTO_CAP,
+  type SerialIssue,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
@@ -234,9 +235,11 @@ orders.get('/', async (c) => {
       -- projected revenue. The spreadsheet and the edit screen never did that;
       -- this is the list catching up to them.
       COALESCE(SUM(l.sell_price * l.qty), 0)::float                                 AS revenue,
-      -- Fees are a cost, so the row's profit nets them. No per-line
-      -- amortisation needed here (unlike lib/po-cost.ts): the group holds every
-      -- line of the PO, so the shares would sum to o.other_fees anyway.
+      -- The whole fee nets against the margin, so a PO whose lines aren't
+      -- priced yet reads as a loss the size of its fees. That is intended: the
+      -- fee is money already spent. It does mean this figure is deliberately
+      -- more conservative than the edit screen's tape, which reports margin on
+      -- priced lines alone and says outright that fees are not allocated there.
       (COALESCE(SUM((l.sell_price - l.unit_cost) * l.qty), 0)
          - o.other_fees)::float                                                     AS profit,
       COUNT(l.id)::int                                                              AS line_count,
@@ -752,8 +755,10 @@ orders.post('/', async (c) => {
     derived = await syncOrderCategory(tx, newId);
     // The goods total follows the lines unless this request stated one of its
     // own — the create path is the one place a negotiated lot price can still
-    // enter, since no screen offers a field for it any more.
-    await syncOrderGoodsTotal(tx, newId, body.totalCost == null);
+    // enter, since no screen offers a field for it any more. Zero is not one
+    // of those: taking it literally pinned the column at $0 against real lines
+    // with nothing left anywhere able to correct it.
+    await syncOrderGoodsTotal(tx, newId, !(Number(body.totalCost) > 0));
 
     // Baseline of the timeline. Without it a freshly-created PO reads as an
     // order with no history at all until someone submits it.
@@ -915,14 +920,6 @@ orders.patch('/:id', async (c) => {
   // actually CHANGES serial/qty/generation. The edit forms echo every field
   // back on save, so a mere "touched" test would retro-block price/status
   // edits on legacy serial-less lines.
-  // Only the categories this request actually names. An untouched legacy line
-  // whose category was disabled since must not block a price edit elsewhere.
-  const patchedCats = [
-    ...(body.addLines ?? []).map(l => l.category).filter(Boolean),
-    ...(body.lines ?? []).map(l => l.category).filter(Boolean),
-  ] as string[];
-  const patchCatErr = await assertCategoriesEnabled(sql, patchedCats);
-  if (patchCatErr) return c.json({ error: patchCatErr }, 400);
 
   // A new line may inherit the order's category, but orders.category is a
   // DERIVATION of the lines — it reads 'Mixed' when they disagree, and an empty
@@ -958,10 +955,20 @@ orders.patch('/:id', async (c) => {
     for (const r of rows) storedById.set(r.id, r);
   }
 
+  // Categories this request actually PUTS a line into: every new line's
+  // resolved category (a new line inheriting the order's must be checked too —
+  // reading the raw field would let it be filed under a disabled one), and only
+  // those existing lines whose category really moves. The edit forms echo
+  // `category` back on every line, so testing the raw field instead would
+  // retro-block a price edit on any PO holding a legacy line of a category
+  // that has since been turned off.
+  const touchedCats = [...addCats];
+
   for (const l of body.lines ?? []) {
     const row = storedById.get(l.id);
     if (!row) continue; // unknown ids no-op in the UPDATE below too
     const mergedCat = l.category ?? row.category ?? undefined;
+    if (l.category !== undefined && l.category !== row.category) touchedCats.push(l.category);
 
     // Checked when the patch carries the item type, and when it moves the line
     // between categories — switching INTO Other without naming a type in the
@@ -993,6 +1000,9 @@ orders.patch('/:id', async (c) => {
     const issue = serialIssue({ category: mergedCat ?? null, ...merged });
     if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
   }
+
+  const patchCatErr = await assertCategoriesEnabled(sql, touchedCats);
+  if (patchCatErr) return c.json({ error: patchCatErr }, 400);
 
   // R2 keys of label scans whose lines get removed — deleted after the tx
   // commits (R2 isn't transactional; never delete on a rolled-back change).
@@ -1114,7 +1124,6 @@ orders.patch('/:id', async (c) => {
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
         ` as { id: string; category: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
         removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
-        for (const r of doomed) if (r.scan_image_id) removedScanKeys.push(r.scan_image_id);
         // Read before the DELETE cascades the rows away. Same list as the scan
         // keys, so the existing post-commit sweep covers both.
         //
@@ -1127,10 +1136,39 @@ orders.patch('/:id', async (c) => {
         ` as { storage_key: string }[] : [];
         for (const p of doomedPhotos) removedScanKeys.push(p.storage_key);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
+
+        // A scan key is NOT owned by the line that carries it: a partial
+        // transfer clones scan_image_id onto a second line in the same order,
+        // so deleting one of the pair would take the survivor's picture with
+        // it. Photo storage_keys need no such test — each upload mints its own
+        // key and the clone doesn't copy the rows.
+        const doomedScans = doomed.map(r => r.scan_image_id).filter(Boolean) as string[];
+        if (doomedScans.length) {
+          const stillUsed = new Set((await tx`
+            SELECT DISTINCT scan_image_id FROM order_lines
+            WHERE scan_image_id = ANY(${doomedScans})
+          ` as { scan_image_id: string }[]).map(r => r.scan_image_id));
+          for (const k of doomedScans) if (!stillUsed.has(k)) removedScanKeys.push(k);
+        }
       }
       if (Array.isArray(body.lines)) {
+        // Re-read under the order lock. `storedById` was read on the pool
+        // before the transaction and is right for the 400-level validation,
+        // but it decides the spec-column clear below — and a concurrent patch
+        // that committed a category switch in between leaves it claiming the
+        // OLD category, so the clear is skipped and the row keeps columns the
+        // category it now holds does not own.
+        const lockedById = new Map<string, StoredLine>();
+        const lockedRows = await tx`
+          SELECT id, category, generation, qty, serial_number, item_type, part_number,
+                 brand, capacity, interface, form_factor, speed, rpm
+          FROM order_lines
+          WHERE order_id = ${id} AND id = ANY(${body.lines.map(l => l.id)}::uuid[])
+        ` as StoredLine[];
+        for (const r of lockedRows) lockedById.set(r.id, r);
+
         for (let l of body.lines) {
-          const stored = storedById.get(l.id);
+          const stored = lockedById.get(l.id);
           // Clear-then-apply. A line moving to a new category first has the old
           // category's spec columns NULLed (the COALESCE update below can only
           // write values, never clear them), then the normal update re-applies
@@ -1251,9 +1289,24 @@ orders.patch('/:id', async (c) => {
         })));
       }
 
+      // Category and goods total are both denormalizations of the lines,
+      // recomputed after every add, remove and edit. Without this the tape
+      // itemised categories that summed to one figure under a goods total that
+      // still held the pre-edit one. Ahead of the audit block, not after it:
+      // total_cost is one of META_FIELDS, so diffing before the derivation ran
+      // left every goods-total move off the timeline.
+      if (touchesLines) {
+        await syncOrderCategory(tx, id);
+        await syncOrderGoodsTotal(tx, id, goodsFollowsLines);
+      }
+
       // ── Audit. Each kind is written as its own event row so the timeline
       // reads in the order it happened.
-      if (touchesOrder) {
+      //
+      // Also entered on a lines-only patch: total_cost is a META_FIELD that the
+      // derivation above may have just moved, and `diff` reports nothing when
+      // it hasn't, so the extra read costs a query and never a false event.
+      if (touchesOrder || touchesLines) {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
@@ -1321,14 +1374,6 @@ orders.patch('/:id', async (c) => {
         });
       }
 
-      // Last writes of the transaction: category and goods total are both
-      // denormalizations of the lines, recomputed after every add, remove and
-      // edit. Without this the tape itemised categories that summed to one
-      // figure under a goods total that still held the pre-edit one.
-      if (touchesLines) {
-        await syncOrderCategory(tx, id);
-        await syncOrderGoodsTotal(tx, id, goodsFollowsLines);
-      }
     });
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
@@ -1381,7 +1426,10 @@ orders.post('/draft', async (c) => {
       )
     `;
     await writeOrderEvent(tx, newId, u.id, 'created', {
-      category: body?.category ?? null,
+      // Omitted rather than null when the draft has no category yet: the
+      // timeline interpolates whatever is here, and a null rendered as the
+      // literal text "null" as the first line of every phone-started PO.
+      ...(body?.category ? { category: body.category } : {}),
       categories: [],
       lineCount: 0,
       qty: 0,
@@ -1682,8 +1730,8 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
 // A picture of the actual goods, attached to one line. Distinct from the
 // order-level Submission evidence above (that is the receipt for the whole
 // PO) and from the AI label scan (that is a by-product of OCR, and only RAM
-// lines ever get one). Any line may carry photos.
-const LINE_PHOTO_CAP = 6;
+// lines ever get one). Any line may carry photos. The cap is shared so the
+// picker stops at the same number this route enforces.
 
 // order_lines.id is uuid-typed, so a mangled id would make Postgres throw and
 // 500 the route rather than 404 cleanly.
@@ -1749,6 +1797,20 @@ orders.post('/:id/lines/:lineId/photos', async (c) => {
 
   try {
     const row = await sql.begin(async (tx) => {
+      // Lock the ORDER first, then the line — the same order PATCH /:id and
+      // /advance take. Locking the line first deadlocks against them: the
+      // INSERT below needs FOR KEY SHARE on the orders row for its FK, which
+      // conflicts with the FOR UPDATE they are already holding while they wait
+      // on this line. Postgres kills one with 40P01 and nothing here retries.
+      const live = (await tx`
+        SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+      `)[0] as { user_id: string; lifecycle: string } | undefined;
+      // Re-checked under the lock: the permission read happened before the
+      // image shrink and the R2 round trip, seconds a manager can spend
+      // advancing the order to Done out from under it.
+      if (!live) throw new Error('__ORDER_GONE__');
+      if (!canWritePhotos(u, live)) throw new Error('__FORBIDDEN__');
+
       // Serialise concurrent uploads on the parent line — two racing requests
       // would otherwise both see room under the cap and both insert. The lock
       // goes on order_lines because FOR UPDATE can't be combined with the
@@ -1787,9 +1849,12 @@ orders.post('/:id/lines/:lineId/photos', async (c) => {
     // delete and the removeLineIds sweep) read their keys out of
     // order_line_photos, and the row is exactly what didn't commit.
     await deleteAttachment(c.env, uploaded.storageKey).catch(() => { /* best-effort */ });
-    if ((e as { message?: string })?.message?.includes('__PHOTO_CAP__')) {
+    const msg = (e as { message?: string })?.message ?? '';
+    if (msg.includes('__PHOTO_CAP__')) {
       return c.json({ error: `at most ${LINE_PHOTO_CAP} photos per line` }, 409);
     }
+    if (msg.includes('__ORDER_GONE__')) return c.json({ error: 'Not found' }, 404);
+    if (msg.includes('__FORBIDDEN__')) return c.json({ error: 'Forbidden' }, 403);
     throw e;
   }
 });
@@ -1810,6 +1875,10 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   if (!canWritePhotos(u, order)) return c.json({ error: 'Forbidden' }, 403);
 
   const removed = await sql.begin(async (tx) => {
+    // Orders row first, as everywhere else that writes under this order — the
+    // photo delete touches a table whose FK makes Postgres take KEY SHARE on
+    // it anyway, so taking it in the other order deadlocks against PATCH.
+    await tx`SELECT 1 FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`;
     const row = (await tx`
       SELECT storage_key, filename FROM order_line_photos
       WHERE id = ${photoId}::uuid AND order_line_id = ${lineId}::uuid AND order_id = ${id}

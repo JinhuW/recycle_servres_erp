@@ -20,6 +20,7 @@ import {
   buildPriceTemplateWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { searchSellableInventory } from '../services/sellableInventory';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
@@ -1259,6 +1260,22 @@ sellOrders.post('/:id/status', async (c) => {
       // regardless of its retained qty. Partially-sold lines lose qty and
       // stay sellable. Aggregated by inventory_id so multiple lines hitting
       // the same source net out.
+      //
+      // Consuming stock moves qty, which is an input to each source PO's
+      // derived goods total. The mirror verdict has to be taken before the
+      // decrement — afterwards a stale mirror reads as a negotiated lot price
+      // and that PO's total_cost pins itself against its lines for good.
+      const sourceOrders = await tx<{ order_id: string }[]>`
+        SELECT DISTINCT l.order_id
+        FROM sell_order_lines sol
+        JOIN order_lines l ON l.id = sol.inventory_id
+        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL
+      `;
+      const goodsFollowsLines = new Map<string, boolean>();
+      for (const o of sourceOrders) {
+        goodsFollowsLines.set(o.order_id, await goodsTotalIsMirror(tx, o.order_id));
+      }
+
       const sold = await tx<{ line_id: string; remaining: number; sold: number }[]>`
         UPDATE order_lines ol
            SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
@@ -1280,6 +1297,9 @@ sellOrders.post('/:id/status', async (c) => {
           VALUES (${r.line_id}, ${u.id}, 'sold',
                   ${tx.json({ soldQty: r.sold, remainingQty: r.remaining, sellOrder: id })})
         `;
+      }
+      for (const [orderId, isMirror] of goodsFollowsLines) {
+        await syncOrderGoodsTotal(tx, orderId, isMirror);
       }
       const submitters = await tx<{ user_id: string }[]>`
         SELECT DISTINCT o.user_id

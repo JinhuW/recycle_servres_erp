@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ImageLightbox } from './ImageLightbox';
 import { useT } from '../lib/i18n';
-import { type LinePhoto } from '../lib/linePhotos';
+import { LINE_PHOTO_CAP, type LinePhoto } from '../lib/linePhotos';
 
 // Photos of the actual goods on one line. Any line may carry them — the AI
 // label scan appears here too, as a read-only first entry, so the user sees one
@@ -20,6 +20,7 @@ export function LinePhotoStrip({
   onRemovePending,
   readOnly = false,
   busy = false,
+  max = LINE_PHOTO_CAP,
 }: {
   photos: LinePhoto[];
   pending?: PendingPhoto[];
@@ -28,11 +29,15 @@ export function LinePhotoStrip({
   onRemovePending?: (p: PendingPhoto) => void;
   readOnly?: boolean;
   busy?: boolean;
+  max?: number;
 }) {
   const { t } = useT();
   const [lightbox, setLightbox] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const total = photos.length + pending.length;
+  // Only uploads count against the server's cap — the scan entry belongs to
+  // label_scans, not the per-line photo table the limit is enforced on.
+  const full = photos.filter(p => p.source === 'upload').length + pending.length >= max;
 
   const tile = (url: string, key: string, alt: string, onDrop?: () => void, isScan = false) => (
     <div key={key} className="lp-tile">
@@ -59,6 +64,9 @@ export function LinePhotoStrip({
           <span className="muted" style={{ fontWeight: 400 }}> · {t('optional')}</span>
         </span>
         {total > 0 && <span className="lp-count">{total}</span>}
+        {full && !readOnly && (
+          <span className="muted" style={{ fontSize: 11 }}>{t('linePhotoCapFull', { max })}</span>
+        )}
       </div>
       <div className="lp-strip">
         {photos.map(p =>
@@ -69,7 +77,10 @@ export function LinePhotoStrip({
         {pending.map(p =>
           tile(p.url, p.url, p.file.name, onRemovePending ? () => onRemovePending(p) : undefined),
         )}
-        {!readOnly && onAdd && (
+        {/* At the cap the picker is withdrawn rather than left to fail: the
+            surplus is refused per-file by the server, after the previews are
+            already on screen. */}
+        {!readOnly && onAdd && !full && (
           <>
             <button
               type="button"

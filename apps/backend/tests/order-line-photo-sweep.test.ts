@@ -83,3 +83,60 @@ describe('PATCH removeLineIds — the post-commit R2 sweep', () => {
     expect(left).toHaveLength(1);
   });
 });
+
+// scan_image_id is not owned by the line that carries it: a partial transfer
+// clones the key onto a second line in the same order. The sweep read it
+// straight off the doomed rows, so removing one of the pair deleted the object
+// the survivor still renders — a 404 thumbnail with nothing left to restore.
+describe('PATCH removeLineIds — a scan image shared with a transfer clone', () => {
+  beforeEach(async () => { await resetDb(); swept.length = 0; });
+
+  const withSharedScan = async (token: string, tag: string) => {
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        lines: [
+          { category: 'RAM', brand: 'Samsung', capacity: '32GB', partNumber: tag + '-A', condition: 'New', qty: 2, unitCost: 50 },
+          { category: 'RAM', brand: 'Samsung', capacity: '16GB', partNumber: tag + '-B', condition: 'New', qty: 1, unitCost: 25 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    const db = getTestDb();
+    const rows = await db<{ id: string }[]>`
+      SELECT id FROM order_lines WHERE order_id = ${id} ORDER BY position
+    `;
+    const key = `scans/${tag}-shared.png`;
+    // What a partial transfer leaves behind: two lines, one key.
+    await db`UPDATE order_lines SET scan_image_id = ${key} WHERE id = ${rows[0].id}::uuid`;
+    const [clone] = await db<{ id: string }[]>`
+      INSERT INTO order_lines (order_id, category, brand, capacity, part_number, condition,
+                               qty, unit_cost, status, scan_image_id, position)
+      VALUES (${id}, 'RAM', 'Samsung', '32GB', ${tag + '-A'}, 'New',
+              1, 50, 'In Transit', ${key}, 9)
+      RETURNING id
+    `;
+    return { id, sourceId: rows[0].id, cloneId: clone.id, key };
+  };
+
+  it('keeps the object while the clone still points at it', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, sourceId, key } = await withSharedScan(token, 'SWEEP-CLONE');
+
+    const r = await api('PATCH', '/api/orders/' + id, { token, body: { removeLineIds: [sourceId] } });
+    expect(r.status).toBe(200);
+    expect(swept).not.toContain(key);
+  });
+
+  it('deletes it once the last line carrying it is gone', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, sourceId, cloneId, key } = await withSharedScan(token, 'SWEEP-LAST');
+
+    const r = await api('PATCH', '/api/orders/' + id, {
+      token, body: { removeLineIds: [sourceId, cloneId] },
+    });
+    expect(r.status).toBe(200);
+    expect(swept).toContain(key);
+  });
+});

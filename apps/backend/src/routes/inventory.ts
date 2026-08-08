@@ -11,6 +11,7 @@ import {
   type ExportCategory,
 } from '../lib/categoryColumns';
 import { UNTYPED_ITEM, normSellPrice } from '@recycle-erp/shared';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -1108,6 +1109,14 @@ inventory.patch('/:id', async (c) => {
       if (open.n > 0) return { kind: 'committed' };
     }
 
+    // qty and unit_cost are inputs to the parent PO's derived goods total, so
+    // the mirror verdict has to be taken before they move — afterwards a stale
+    // mirror and a real negotiated price are indistinguishable and the column
+    // pins itself against the lines forever.
+    const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
+    const orderId = before.order_id as string;
+    const goodsFollowsLines = touchesGoods ? await goodsTotalIsMirror(tx, orderId) : false;
+
     await tx`
       UPDATE order_lines SET
         status      = COALESCE(${body.status ?? null}, status),
@@ -1144,6 +1153,7 @@ inventory.patch('/:id', async (c) => {
         VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
       `;
     }
+    if (touchesGoods) await syncOrderGoodsTotal(tx, orderId, goodsFollowsLines);
     return { kind: 'ok', before };
   });
 
@@ -1599,6 +1609,18 @@ inventory.delete('/transfer-orders/:id', async (c) => {
         `)[0] as { id: string } | undefined;
         if (peer) {
           await tx`UPDATE order_lines SET qty = qty + ${l.qty} WHERE id = ${peer.id}`;
+          // Hand the clone's photos to the line absorbing it. The FK cascades
+          // on the DELETE below, and once the rows are gone nothing in the
+          // database can name their R2 objects — they would be unreclaimable.
+          // Positions continue after the peer's so the merged strip keeps a
+          // stable order.
+          await tx`
+            UPDATE order_line_photos p
+               SET order_line_id = ${peer.id},
+                   position = p.position + 1 + COALESCE(
+                     (SELECT MAX(position) FROM order_line_photos WHERE order_line_id = ${peer.id}), -1)
+             WHERE p.order_line_id = ${l.id}
+          `;
           await tx`
             INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
             VALUES (${peer.id}, ${u.id}, 'transfer_discarded',

@@ -27,8 +27,6 @@ export const SPEC_DB_COLS_BY_CATEGORY = {
   Other: ['description', 'item_type'],
 } as const satisfies Record<string, readonly string[]>;
 
-export type SpecCategory = keyof typeof SPEC_FIELDS_BY_CATEGORY;
-
 const camel = (snake: string) => snake.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 
 /** camelCase → snake_case, for the handful of spec fields that differ. */
@@ -37,9 +35,9 @@ export const SPEC_FIELD_TO_DB_COL: Readonly<Record<string, string>> = Object.fro
 );
 
 /** Every spec field any category owns, in either spelling. */
-export const ALL_SPEC_FIELDS: readonly string[] =
+const ALL_SPEC_FIELDS: readonly string[] =
   [...new Set(Object.values(SPEC_FIELDS_BY_CATEGORY).flat())];
-export const ALL_SPEC_DB_COLS: readonly string[] =
+const ALL_SPEC_DB_COLS: readonly string[] =
   [...new Set(Object.values(SPEC_DB_COLS_BY_CATEGORY).flat())];
 
 const owned = <T extends readonly string[]>(

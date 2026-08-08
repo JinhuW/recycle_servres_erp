@@ -26,7 +26,7 @@ import { useT, I18N } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorToast } from './lib/errorToast';
 import {
-  navigate, useRoute, match,
+  navigate, navigateBack, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderSummary, ScanResponse } from './lib/types';
@@ -77,6 +77,10 @@ function Shell() {
   // in `capture` a round trip later. Hold the in-flight POST here so a second
   // save awaits the same one instead of opening a second order.
   const draftIdPromise = useRef<Promise<string | null> | null>(null);
+  // Bumped whenever a capture session ends. An autosave that is mid-flight
+  // across the draft-creation round trip reads this after the await to tell
+  // whether the session it belongs to is still the live one.
+  const captureGen = useRef(0);
   const [toast, setToast] = useState<Toast | null>(null);
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
@@ -180,14 +184,26 @@ function Shell() {
       capture.phase === 'review'
     ) {
       const { draftId, lines } = capture;
-      if (draftId && !lines.some(l => l._confirmed)) {
-        deleteOrder(draftId).catch(() => {/* best-effort */});
+      if (!lines.some(l => l._confirmed)) {
+        // The id may not have landed in state yet — a draft POST fired by a
+        // save that is still in flight publishes it asynchronously. Resolve the
+        // in-flight promise rather than reading state, or cancelling during
+        // that window leaves the order (and the line the save is about to
+        // append to it) behind as a ghost PO in everyone's draft picker.
+        const pending = draftIdPromise.current;
+        if (draftId) deleteOrder(draftId).catch(() => {/* best-effort */});
+        else if (pending) {
+          pending.then(id => { if (id) return deleteOrder(id); }).catch(() => {/* best-effort */});
+        }
       }
     }
+    captureGen.current++;
+    draftIdPromise.current = null;
     setCapture({ phase: 'idle' });
-    if (window.location.hash.startsWith('#/purchase-orders/')) {
-      navigate('/purchase-orders');
-    }
+    // The URL is left alone: a capture opened from an order's detail screen
+    // (its "Edit items") runs on top of `/purchase-orders/:id`, so dropping the
+    // session there uncovers the order the user was editing. Clearing the id
+    // dumped them on the full list instead.
   };
 
   // A new PO opens on its (empty) line list, where the add row asks which kind
@@ -195,6 +211,7 @@ function Shell() {
   const startNewDraft = () => {
     setCapture({ phase: 'review', detected: null, lines: [] });
     setOrderFees({ amount: '', note: '' });
+    captureGen.current++;
     draftIdPromise.current = null;
   };
 
@@ -294,6 +311,7 @@ function Shell() {
     // the new lines array before the async PATCH.
     if (capture.phase !== 'form') return;
     const { draftId, editingLineIdx, category, editingId, originalLineIds } = capture;
+    const gen = captureGen.current;
 
     // Build the updated lines array.
     const newLines = (editingLineIdx != null)
@@ -325,6 +343,10 @@ function Shell() {
         showToast(t('syncNoDraft'), 'error');
         return;
       }
+      // Cancelled while the draft POST was in flight — cancelCapture is already
+      // deleting that order, so writing to it now would resurrect a PO the user
+      // discarded.
+      if (gen !== captureGen.current) return;
       try {
         // Omit status: the backend COALESCEs it, so leaving it out preserves
         // the line's lifecycle (Done, etc.) instead of forcing In Transit.
@@ -359,6 +381,7 @@ function Shell() {
       showToast(t('syncNoDraft'), 'error');
       return;
     }
+    if (gen !== captureGen.current) return;
 
     try {
       // Capture the inserted row's id so a later re-edit UPDATEs it in place
@@ -374,7 +397,12 @@ function Shell() {
         const updated = c.lines.map(l =>
           l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id } : l,
         );
-        return { ...c, lines: updated };
+        // Track what the draft holds server-side, not just what the screen
+        // shows: a line autosaved and then deleted here has to be named in
+        // removeLineIds at submit or it ships as stock nobody bought.
+        const known = c.originalLineIds ?? [];
+        const originalLineIds = newId && !known.includes(newId) ? [...known, newId] : known;
+        return { ...c, lines: updated, originalLineIds };
       });
     } catch {
       // Keep the line locally unconfirmed; it will be sent on final submit.
@@ -512,6 +540,9 @@ function Shell() {
         interface: l.interface,
         formFactor: l.formFactor,
         description: l.description,
+        // Required on an Other line: the save echoes every line back, and the
+        // per-line guard reads a missing one as an explicit null.
+        itemType: l.itemType,
         partNumber: l.partNumber,
         serialNumber: l.serialNumber,
         chipNumber: l.chipNumber,
@@ -628,7 +659,7 @@ function Shell() {
       {view === 'history' && orderDetailMatch && detailOrder && (
         <OrderDetail
           order={detailOrder}
-          onCancel={() => navigate('/purchase-orders')}
+          onCancel={() => navigateBack('/purchase-orders')}
           onSaved={(msg) => showToast(msg)}
           onDeleted={() => navigate('/purchase-orders')}
           onEditItems={(o) => startEdit(o)}

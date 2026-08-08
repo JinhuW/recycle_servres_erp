@@ -1,23 +1,13 @@
-// orders.total_cost is the PO's goods total — what the lines cost, before the
-// order-level fees that are charged on top of it.
+// Keeping orders.total_cost in step with the lines it usually mirrors. What
+// that column means, and how a mirror is told apart from a negotiated lot
+// price, is `goodsTotal.ts` in @recycle-erp/shared — the editors apply the same
+// rule client-side, so it can only live in one place.
 //
-// It is USUALLY a denormalization of the lines, kept as a column so the list's
-// keyset sort, the draft picker and the spreadsheet can read one number instead
-// of aggregating. But it is not only that: it can also be a negotiated lot
-// price, a figure the purchaser actually paid that no line arithmetic produces.
-// No screen can enter one any more, so every value written from now on is a
-// mirror — but orders taken before that can hold a real one, and recomputing
-// those would quietly rewrite what the business paid.
-//
-// The two are told apart by whether the stored value still equals the line sum
-// BEFORE the change: a mirror does, a negotiated price doesn't. Which is why
-// `goodsTotalIsMirror` has to be read at the top of the transaction — once the
-// lines have moved, a stale mirror and an override look exactly alike.
+// The verdict has to be read at the top of the transaction: once the lines have
+// moved, a stale mirror and a real override look exactly alike.
 
+import { goodsTotalIsMirror as storedTotalIsMirror } from '@recycle-erp/shared';
 import type { SqlLike } from './orderAudit';
-
-/** A cent. Below this, a stored goods total IS the line sum. */
-const GOODS_EPSILON = 0.01;
 
 async function lineSum(tx: SqlLike, orderId: string): Promise<number> {
   const [row] = await tx<{ sum: number }[]>`
@@ -39,8 +29,10 @@ export async function goodsTotalIsMirror(tx: SqlLike, orderId: string): Promise<
   const [row] = await tx<{ total_cost: number | null }[]>`
     SELECT total_cost::float AS total_cost FROM orders WHERE id = ${orderId} LIMIT 1
   `;
+  // Short-circuited so the sum is only paid for when there is a figure to
+  // compare it against.
   if (!row || row.total_cost == null) return true;
-  return Math.abs(Number(row.total_cost) - await lineSum(tx, orderId)) < GOODS_EPSILON;
+  return storedTotalIsMirror(Number(row.total_cost), await lineSum(tx, orderId));
 }
 
 /**

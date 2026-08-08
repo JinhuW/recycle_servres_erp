@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, MARCUS } from './helpers/auth';
+import { loginAs, MARCUS, ALEX } from './helpers/auth';
 
 // A PO may hold lines of several categories. `orders.category` is a
 // denormalization of the lines — the sole category when they agree, 'Mixed'
@@ -292,7 +292,9 @@ describe('per-line category validation', () => {
       SELECT detail FROM order_events WHERE order_id = ${id} AND kind = 'created'
     `;
     expect(created.detail.category).toBe('RAM');
-    expect((await get(token, id)).category).toBe('RAM');
+    const after = await get(token, id);
+    expect(after.category).toBe('RAM');
+    expect(after.categories).toEqual(['RAM']);
   });
 
   it('does not retro-block an edit to a line whose category is untouched', async () => {
@@ -353,5 +355,101 @@ describe('GET /api/orders?category= matches the lines', () => {
       );
       expect(r.body.orders.map(o => o.id)).not.toContain(draft.body.id);
     }
+  });
+});
+
+// The enabled-category gate has to read the category a line ENDS UP in, not the
+// one the request happens to spell. Both edit forms echo `category` back on
+// every line they send, so gating on the raw field turns "stop filing new stock
+// under this category" into "freeze every PO that ever held one".
+describe('the enabled-category gate follows what the request actually files', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const disable = async (token: string, cat: string) => {
+    const r = await api('PATCH', '/api/categories/' + cat, { token, body: { enabled: false } });
+    expect(r.status).toBe(200);
+  };
+
+  it('still lets an untouched line of a since-disabled category be priced', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE, SSD_LINE]);
+    const before = await get(token, id);
+    const ssd = before.lines.find(l => l.category === 'SSD')!;
+
+    const mgr = await loginAs(ALEX);
+    await disable(mgr.token, 'SSD');
+
+    // What the drawer sends: every line, each echoing the category it is
+    // already in, with one price changed.
+    const r = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: { lines: before.lines.map(l => ({ id: l.id, category: l.category, sellPrice: 200 })) },
+    });
+    expect(r.status).toBe(200);
+    expect((await get(token, id)).lines.find(l => l.id === ssd.id)!.category).toBe('SSD');
+  });
+
+  it('still lets the status of an order holding one advance', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [SSD_LINE]);
+    const before = await get(token, id);
+
+    const mgr = await loginAs(ALEX);
+    await disable(mgr.token, 'SSD');
+
+    const r = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: { notes: 'still editable', lines: before.lines.map(l => ({ id: l.id, category: l.category })) },
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('refuses to move a line INTO a disabled category', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE]);
+    const [ram] = (await get(token, id)).lines;
+
+    const mgr = await loginAs(ALEX);
+    await disable(mgr.token, 'SSD');
+
+    const r = await api<{ error: string }>('PATCH', '/api/orders/' + id, {
+      token,
+      body: { lines: [{ id: ram.id, category: 'SSD', interface: 'SATA', formFactor: '2.5"' }] },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/SSD is disabled/);
+  });
+
+  it('refuses an added line that names a disabled category', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE]);
+
+    const mgr = await loginAs(ALEX);
+    await disable(mgr.token, 'SSD');
+
+    const r = await api<{ error: string }>('PATCH', '/api/orders/' + id, {
+      token, body: { addLines: [SSD_LINE] },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/SSD is disabled/);
+  });
+
+  // The hole the raw-field read left: omit `category` and the new line inherits
+  // the order's, landing under a category the create path would have rejected.
+  it('refuses an added line that INHERITS a disabled category', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE]);
+
+    const mgr = await loginAs(ALEX);
+    await disable(mgr.token, 'RAM');
+
+    const { category, ...noCategory } = RAM_LINE;
+    void category;
+    const r = await api<{ error: string }>('PATCH', '/api/orders/' + id, {
+      token, body: { addLines: [noCategory] },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/RAM is disabled/);
+    expect((await get(token, id)).lines).toHaveLength(1);
   });
 });

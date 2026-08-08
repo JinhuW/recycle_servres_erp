@@ -4,6 +4,7 @@ import { usePhScrolled } from '../lib/usePhScrolled';
 import { PhSparkline } from '../components/PhSparkline';
 import { useT } from '../lib/i18n';
 import { useEffectiveUser } from '../lib/tweaks';
+import { isPricedSellPrice } from '@recycle-erp/shared';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
@@ -200,7 +201,10 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                       : r.category === 'SSD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? 'Item');
-          const profit = r.profit ?? 0;
+          // An unpriced line has no projected margin — the profit tile above
+          // doesn't count it, so this row can't state one. Em-dash, the same as
+          // the orders list's line rows.
+          const priced = isPricedSellPrice(r.sell_price);
           return (
             <div key={r.id} className="ph-row">
               <div className="ph-mini-avatar">{r.user_initials}</div>
@@ -210,7 +214,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{r.user_name.split(' ')[0]} · {relTime(r.created_at, locale)} · {t('qtyShort', { n: r.qty })}</div>
               </div>
-              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(profit, locale)}</div>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: priced ? 'var(--pos)' : 'var(--fg-subtle)' }}>
+                {priced ? '+' + fmtUSD0(r.profit ?? 0, locale) : '—'}
+              </div>
             </div>
           );
         })}

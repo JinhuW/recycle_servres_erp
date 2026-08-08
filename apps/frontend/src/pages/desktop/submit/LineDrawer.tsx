@@ -13,7 +13,7 @@ import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../..
 import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhotoStrip';
 import { linePhotos, type LinePhoto } from '../../../lib/linePhotos';
 import { MarketAssist } from '../../../components/MarketAssist';
-import { type MarketValue } from '../../../lib/useMarketLookup';
+import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
 import { addableCategories, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
@@ -41,12 +41,13 @@ export function LineDrawer({
   // Locked order (Done, or a purchaser past their stage): the drawer still
   // opens so the line's full spec stays lookup-able, but nothing can change.
   readOnly?: boolean;
-  // Where this line's photos live. `lineId` is null until the line is
-  // persisted, in which case files are buffered by the parent and uploaded
-  // once the id exists — the same deferral the order-level evidence uses.
   // Recorded market value for this line's part number, if the parent looked
   // one up. Optional so surfaces that don't fetch it still render.
-  market?: MarketValue | null;
+  market?: ResolvedMarketValue | null;
+  // Where this line's photos live. `lineId` is null until the line is
+  // persisted; while it is, the parent buffers picked files in `pending` and
+  // uploads them once the id exists — the same deferral the order-level
+  // evidence uses. Both callers do that, so the "+" never eats a file.
   photoCtx?: {
     orderId: string | null;
     lineId: string | null;

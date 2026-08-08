@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poEffectiveCost, parseFeeInput } from './poTotals';
+import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from './poTotals';
 
 describe('poEffectiveCost', () => {
   it('uses the line subtotal when there is no override', () => {
@@ -31,6 +31,51 @@ describe('poEffectiveCost', () => {
   it('survives a NaN subtotal rather than propagating it into the total', () => {
     expect(poEffectiveCost({ lineSubtotal: Number.NaN, otherFees: 10 }))
       .toEqual({ goods: 0, fees: 10, total: 10 });
+  });
+});
+
+describe('readStoredGoodsTotal', () => {
+  it('reads a total that matched the lines it loaded with as a mirror', () => {
+    expect(readStoredGoodsTotal(1000, 1000)).toEqual({ override: null, negotiated: false });
+  });
+
+  it('reads a total that never matched the lines as a negotiated price', () => {
+    expect(readStoredGoodsTotal(900, 1000)).toEqual({ override: 900, negotiated: true });
+  });
+
+  it('reads an order with no stored total as a mirror', () => {
+    expect(readStoredGoodsTotal(null, 1000)).toEqual({ override: null, negotiated: false });
+    expect(readStoredGoodsTotal(undefined, 0)).toEqual({ override: null, negotiated: false });
+  });
+
+  // Sub-cent drift is float noise from summing qty * unitCost, not a price
+  // somebody negotiated.
+  it('reads a sub-cent difference as a mirror', () => {
+    expect(readStoredGoodsTotal(1000.009, 1000).negotiated).toBe(false);
+    expect(readStoredGoodsTotal(1000.02, 1000).negotiated).toBe(true);
+  });
+
+  // A free lot is a real price. It must not read as "no override" just because
+  // the figure happens to be zero.
+  it('reads a stored zero against non-zero lines as a negotiated price', () => {
+    expect(readStoredGoodsTotal(0, 1000)).toEqual({ override: 0, negotiated: true });
+    expect(readStoredGoodsTotal(0, 0)).toEqual({ override: null, negotiated: false });
+  });
+
+  // The bug this pair exists for: the backend re-derives total_cost from the
+  // lines on every write, so a mirror is stored on effectively every order.
+  // Pinning the money block to it froze the screen on the figure the page
+  // opened with — the user approved 1,000 and the save stored 1,100.
+  it('lets a mirror follow lines the user has since edited', () => {
+    const stored = readStoredGoodsTotal(1000, 1000);
+    expect(poEffectiveCost({ lineSubtotal: 1100, totalCostOverride: stored.override, otherFees: 50 }))
+      .toEqual({ goods: 1100, fees: 50, total: 1150 });
+  });
+
+  it('pins a negotiated price while the lines under it move', () => {
+    const stored = readStoredGoodsTotal(900, 1000);
+    expect(poEffectiveCost({ lineSubtotal: 1100, totalCostOverride: stored.override, otherFees: 50 }))
+      .toEqual({ goods: 900, fees: 50, total: 950 });
   });
 });
 
