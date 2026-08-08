@@ -21,7 +21,7 @@
 
 declare global {
   interface Window {
-    __showToast?: (msg: string, tone?: 'success' | 'error') => void;
+    __showToast?: (msg: string, tone?: 'success' | 'error' | 'warn') => void;
     __showErrorDialog?: (msg: string, details?: string[], title?: string) => void;
     __genericErrorMessage?: string;
   }
@@ -32,6 +32,16 @@ export function showErrorDialog(msg: string, details?: string[], title?: string)
     window.__showErrorDialog(msg, details, title);
   } else {
     console.error('[error]', msg, details ?? '');
+  }
+}
+
+// A nudge, not a failure: nothing was attempted and nothing was lost, so it
+// clears itself instead of taking a click. Errors still go to the dialog.
+export function showWarnToast(msg: string): void {
+  if (typeof window !== 'undefined' && typeof window.__showToast === 'function') {
+    window.__showToast(msg, 'warn');
+  } else {
+    console.warn('[warn]', msg);
   }
 }
 

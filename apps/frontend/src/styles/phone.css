@@ -744,6 +744,12 @@
   animation: toast-pop 0.2s ease-out;
 }
 .ph-toast.success { background: var(--accent); }
+/* A nudge, not a confirmation — amber and legible on the light card ground. */
+.ph-toast.warn {
+  background: var(--warn-soft);
+  color: oklch(0.40 0.12 75);
+  border: 1px solid color-mix(in oklch, var(--warn) 55%, transparent);
+}
 @keyframes toast-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── Real-device adjustments (lifting the prototype out of the iOS frame) ── */

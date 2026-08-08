@@ -14,6 +14,7 @@ export function AttachmentDropzone({
   accept = '.pdf,.png,.jpg,.jpeg,image/*,application/pdf',
   multiple = true,
   capture,
+  compact = false,
 }: {
   onFiles: (files: FileList | null) => void;
   uploading?: boolean;
@@ -26,6 +27,9 @@ export function AttachmentDropzone({
   // 'environment' asks a phone to open the rear camera rather than the photo
   // library. A hint, not a guarantee — desktop browsers ignore it.
   capture?: 'environment' | 'user';
+  // Same box, half the height. For surfaces where the full-size zone costs more
+  // room than the attachments are worth — a sticky footer above all.
+  compact?: boolean;
 }) {
   const { t } = useT();
   const [dragOver, setDragOver] = useState(false);
@@ -47,14 +51,14 @@ export function AttachmentDropzone({
         style={{
           border: '1.5px dashed ' + (dragOver ? 'var(--accent)' : 'var(--border-strong)'),
           background: dragOver ? 'var(--accent-soft)' : 'var(--bg-soft)',
-          borderRadius: 10, padding: '20px 16px', textAlign: 'center',
+          borderRadius: 10, padding: compact ? '11px 16px' : '20px 16px', textAlign: 'center',
           cursor: uploading ? 'wait' : 'pointer',
           transition: 'border-color 120ms, background 120ms',
           opacity: uploading ? 0.6 : 1,
         }}
       >
-        <Icon name="upload" size={20} style={{ color: 'var(--fg-subtle)' }} />
-        <div style={{ marginTop: 6, fontSize: 13, color: 'var(--fg)' }}>
+        <Icon name="upload" size={compact ? 16 : 20} style={{ color: 'var(--fg-subtle)' }} />
+        <div style={{ marginTop: compact ? 3 : 6, fontSize: 13, color: 'var(--fg)' }}>
           <strong style={{ color: 'var(--accent-strong)' }}>
             {uploading ? t('uploadingLabel') : t('clickToUpload')}
           </strong> {!uploading && t('orDragDrop')}

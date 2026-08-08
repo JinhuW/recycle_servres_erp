@@ -663,6 +663,14 @@ html.desktop, body.desktop, .desktop #root {
 .toast.info    { background: oklch(0.30 0.012 250); }
 .toast.success { background: var(--accent); }
 .toast.error   { background: var(--neg); }
+/* A nudge for something not yet attempted, so it stays a toast rather than
+   escalating to the blocking dialog every other error takes. */
+.toast.warn {
+  background: oklch(0.95 0.07 85);
+  color: oklch(0.38 0.11 75);
+  border: 1px solid oklch(0.82 0.12 80);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.22);
+}
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ===== Stepper (used in EditOrder lifecycle) ===== */
@@ -2241,6 +2249,7 @@ html.desktop, body.desktop, .desktop #root {
 }
 .dw-cat-link:hover { color: var(--fg); }
 
+
 /* ===== Cost tape =====
    The PO's money laid out as a receipt: one figure per line, dot leaders to a
    right-aligned column, rules where the arithmetic changes gear. Replaces a
@@ -2322,3 +2331,66 @@ html.desktop, body.desktop, .desktop #root {
 .oe-items-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
 /* Same ground for the submit screen's tape. */
 .oe-submit-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
+
+/* ===== PO submit — commit bar =====
+   The stub that hangs under the torn tape: where the order lands, who pays,
+   what is attached, and the button that files it. The tape directly above
+   owns the money breakdown, so this band quotes the total once — as the
+   figure the button is about to commit — instead of restating lines, units
+   and cost as three peer statistics. */
+.sub-commit {
+  position: sticky;
+  bottom: 16px;
+  z-index: 5;
+  /* .page is a column flex box, so a card that would overflow gets shrunk
+     instead — with overflow hidden that silently amputates the submit row and
+     the page never grows tall enough to scroll to it. */
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07);
+}
+.sub-commit > * + * { border-top: 1px solid var(--border); }
+
+.sub-commit-meta {
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) auto minmax(240px, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+.sub-commit-attach { padding: 12px 16px; }
+.sub-commit-files { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+
+.sub-commit-foot {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.sub-commit-total { margin-left: auto; text-align: right; }
+.sub-commit-cap {
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle);
+}
+.sub-commit-amt {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 20px; font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.sub-commit-fees { font-size: 11px; color: var(--accent-strong); margin-top: 1px; }
+/* The rule is the tear line: the figure on one side, the act on the other. */
+.sub-commit-actions {
+  display: flex; align-items: center; gap: 8px;
+  align-self: stretch;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 1000px) {
+  .sub-commit-meta { grid-template-columns: minmax(0, 1fr) auto; }
+  .sub-commit-meta > :nth-child(3) { grid-column: 1 / -1; }
+  .sub-commit-total { margin-left: 0; }
+  .sub-commit-actions { margin-left: auto; }
+}

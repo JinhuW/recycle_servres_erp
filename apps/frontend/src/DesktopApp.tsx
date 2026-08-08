@@ -35,7 +35,7 @@ import { FormSkeleton } from './components/Skeleton';
 
 import type { Order } from './lib/types';
 
-type Toast = { msg: string; kind: 'success' | 'error' };
+type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
 export function DesktopApp() {
   const { loading, user: realUser, pendingRoleChoice } = useAuth();
@@ -101,11 +101,14 @@ export function DesktopApp() {
   // re-run on every toast — and an error toast raised BY that effect then loops.
   // Errors never become toasts: they go to the blocking dialog so the user can
   // read and act on them.
+  // 'warn' is the exception: a nudge for something not yet attempted (a line
+  // still missing fields), so it clears itself and reads longer than a
+  // confirmation does.
   const showToast = useCallback((msg: string, kind: Toast['kind'] = 'success') => {
     if (kind === 'error') { setErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2600);
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
   }, []);
 
   // Register the global hooks so `handleFetchError` / `showErrorDialog` in
@@ -114,9 +117,9 @@ export function DesktopApp() {
     window.__showErrorDialog = (msg, details, title) => setErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
       if (kind === 'error') { setErrorDialog({ msg }); return; }
-      setToast({ msg, kind: 'success' });
+      setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 2600);
+      toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
     };
     return () => { delete window.__showToast; delete window.__showErrorDialog; };
   }, []);
@@ -230,7 +233,7 @@ export function DesktopApp() {
       {toast && (
         <div className="toast-wrap">
           <div className={'toast ' + toast.kind}>
-            <Icon name="check2" size={16} />
+            <Icon name={toast.kind === 'warn' ? 'alert' : 'check2'} size={16} />
             <span>{toast.msg}</span>
           </div>
         </div>
