@@ -744,11 +744,16 @@
   animation: toast-pop 0.2s ease-out;
 }
 .ph-toast.success { background: var(--accent); }
-/* A nudge, not a confirmation — amber and legible on the light card ground. */
+/* A nudge, not a confirmation. Same solid amber the desktop toast uses —
+   loud on purpose: it fires over a full-screen form the user is mid-way
+   through. */
 .ph-toast.warn {
-  background: var(--warn-soft);
-  color: oklch(0.40 0.12 75);
-  border: 1px solid color-mix(in oklch, var(--warn) 55%, transparent);
+  background: oklch(0.63 0.16 58);
+  color: #fff;
+  font-weight: 550;
+  box-shadow:
+    0 0 0 4px oklch(0.63 0.16 58 / 0.22),
+    0 16px 38px oklch(0.45 0.12 58 / 0.42);
 }
 @keyframes toast-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
