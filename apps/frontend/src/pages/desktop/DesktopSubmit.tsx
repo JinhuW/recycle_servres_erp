@@ -4,7 +4,7 @@ import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder } from '../../lib/api';
-import { handleFetchError } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -225,7 +225,7 @@ function OrderForm({
   const addPendingPhotos = (l: Line, files: FileList | null) => {
     const held = (l.photos?.length ?? 0) + (pendingPhotos[l._cid]?.length ?? 0);
     const { accepted, overCap } = limitPhotoPick(files, held);
-    if (overCap > 0) setAiError(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
+    if (overCap > 0) showErrorDialog(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
     if (!accepted.length) return;
     // Created out here, not inside the updater: React may run a state updater
     // twice, and each extra run would mint an object URL nothing revokes.
@@ -279,13 +279,12 @@ function OrderForm({
     if (saved.length) {
       setLines(ls => ls.map(l => (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l)));
     }
-    if (failed.length) setAiError(t('linePhotoUploadFailed'));
+    if (failed.length) showErrorDialog(t('linePhotoUploadFailed'));
   };
 
   // Order-level error banner — populated by submit/confirm failures. AI scan
   // failures live inside the LineDrawer, alongside the dropzone that produces
   // them.
-  const [aiError, setAiError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Submission evidence is buffered locally, not uploaded live: the merge path
@@ -309,7 +308,7 @@ function OrderForm({
   const addEvidenceFiles = (fl: FileList | null) => {
     const picked = Array.from(fl || []).filter(f => {
       // 50 MiB server hard cap; oversized images are shrunk server-side.
-      if (f.size > 50 * 1024 * 1024) { setAiError(t('fileTooLarge', { name: f.name })); return false; }
+      if (f.size > 50 * 1024 * 1024) { showErrorDialog(t('fileTooLarge', { name: f.name })); return false; }
       return true;
     });
     if (picked.length) setEvidenceFiles(prev => [...prev, ...picked]);
@@ -441,13 +440,13 @@ function OrderForm({
       const cur = lines[activeIdx];
       if (cur && !cur._confirmed) {
         if (!lineReady(cur)) {
-          setAiError(t('subFillThisLine'));
+          showErrorDialog(t('subFillThisLine'));
           return;
         }
         try {
           await handleConfirmLine(activeIdx);
         } catch (e) {
-          setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
+          showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
           return;
         }
       }
@@ -483,8 +482,6 @@ function OrderForm({
     const missing = missingRamFields(l);
     return missing.length ? missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') : null;
   };
-
-  const canSubmit = lines.every(lineReady);
 
   const lineLabel = (l: Line): string => l.partNumber || l.brand || l.description || '';
 
@@ -574,7 +571,7 @@ function OrderForm({
     if (l._confirmed) return;
     if (!lineReady(l)) {
       const fields = missingFieldNames(l);
-      setAiError(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
+      showErrorDialog(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
       return;
     }
     const issue = serialIssue(l);
@@ -590,9 +587,6 @@ function OrderForm({
     // The line only just acquired an id, so this is the first moment its
     // buffered photos can be attached to anything.
     if (dbId) void flushPhotos(l._cid, saved.orderId, dbId);
-    // A successful confirm supersedes any banner left by an earlier failed
-    // attempt on this line (e.g. the serial-check throw above).
-    setAiError(null);
   };
 
   // Escape closes the drawer.
@@ -627,7 +621,7 @@ function OrderForm({
       }
       onDone({ msg: t('orderSubmitted'), kind: 'success' });
     } catch (e) {
-      setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
+      showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -707,7 +701,7 @@ function OrderForm({
             ? { msg: t('poSubmitUploadWarning'), kind: 'error' }
             : { msg: t('subLinesAddedToPo', { id: target.id }), kind: 'success' });
     } catch (e) {
-      setAiError(e instanceof Error ? e.message : t('subSubmitFailed'));
+      showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -734,7 +728,7 @@ function OrderForm({
       .map((l, idx) => ({ idx, l, gen: (l.partNumber ?? '').trim() ? null : synthesizePartNumber(l.category, l) }))
       .filter(x => !(x.l.partNumber ?? '').trim());
     const blocking = blanks.find(x => !x.gen);
-    if (blocking) { setAiError(t('pnRequiredLine', { n: blocking.idx + 1 })); return; }
+    if (blocking) { showErrorDialog(t('pnRequiredLine', { n: blocking.idx + 1 })); return; }
     if (blanks.length > 0) {
       setPnConfirm(blanks.map(x => ({ idx: x.idx, value: x.gen! })));
       return;
@@ -742,27 +736,32 @@ function OrderForm({
     proceedSubmit();
   };
 
-  // Reason the Submit button is disabled, surfaced inline so the user isn't
-  // staring at a dead button wondering what's wrong. Checked in priority
-  // order: still submitting → warehouse load → warehouse pick → per-line completeness.
-  const submitDisabledReason: string | null =
-    submitting              ? null
-  : warehouses.length === 0 ? t('subWarehousesNotLoaded')
-  : !meta.warehouseId       ? t('reviewPickWarehouseHint')
-  : !canSubmit              ? (() => {
-      const bad = lines.findIndex(l => !lineReady(l));
-      if (bad < 0) return null;
-      const fields = missingFieldNames(lines[bad]);
+  // What Submit is still waiting on, one entry per problem. The button stays
+  // live while these exist: clicking it opens a dialog with the whole list,
+  // which beats a dead button and a hint that's easy to miss. Priority order:
+  // warehouse load → warehouse pick → per-line completeness.
+  const submitBlockers: string[] =
+    submitting              ? []
+  : warehouses.length === 0 ? [t('subWarehousesNotLoaded')]
+  : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
+  : lines.flatMap((l, i) => {
+      if (lineReady(l)) return [];
+      const fields = missingFieldNames(l);
       if (fields) {
-        return lines.length === 1
+        return [lines.length === 1
           ? t('subMissingFieldsThis', { fields })
-          : t('subMissingFieldsLine', { n: bad + 1, fields });
+          : t('subMissingFieldsLine', { n: i + 1, fields })];
       }
-      return lines.length === 1
-        ? t('subFillThisLine')
-        : t('subFillLineN', { n: bad + 1 });
-    })()
-  : null;
+      return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
+    });
+
+  const onSubmitClick = () => {
+    if (submitBlockers.length) {
+      showErrorDialog(t('errCantSubmitMsg'), submitBlockers, t('errCantSubmitTitle'));
+      return;
+    }
+    attemptSubmit();
+  };
 
   return (
     <>
@@ -796,23 +795,6 @@ function OrderForm({
             <AddLineMenu onAdd={addLine} />
           </div>
         </div>
-        {aiError && (
-          <div style={{
-            margin: '12px 18px 12px', padding: '10px 12px',
-            background: 'rgba(220,40,40,0.08)', border: '1px solid rgba(220,40,40,0.25)',
-            borderRadius: 8, fontSize: 12, color: 'var(--neg, #b22)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          }}>
-            <span>{aiError}</span>
-            <button
-              className="btn icon sm"
-              onClick={() => setAiError(null)}
-              title={t('dismiss')}
-            >
-              <Icon name="x" size={12} />
-            </button>
-          </div>
-        )}
 
         <table className="table">
           <thead>
@@ -1030,25 +1012,18 @@ function OrderForm({
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {/* Leaves the form. Confirmed lines are already persisted to the
-                  draft, so nothing entered is lost — this is not a discard. */}
-              <button className="btn" onClick={() => onDone()}>{t('cancel')}</button>
-              <button
-                className="btn accent"
-                disabled={!canSubmit || !meta.warehouseId || submitting}
-                title={submitDisabledReason ?? undefined}
-                onClick={attemptSubmit}
-              >
-                {t('submitOrder')} <Icon name="check" size={14} />
-              </button>
-            </div>
-            {submitDisabledReason && (
-              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
-                {submitDisabledReason}
-              </div>
-            )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {/* Leaves the form. Confirmed lines are already persisted to the
+                draft, so nothing entered is lost — this is not a discard. */}
+            <button className="btn" onClick={() => onDone()}>{t('cancel')}</button>
+            <button
+              className="btn accent"
+              disabled={submitting}
+              title={submitBlockers[0]}
+              onClick={onSubmitClick}
+            >
+              {t('submitOrder')} <Icon name="check" size={14} />
+            </button>
           </div>
         </div>
       </div>
@@ -1081,12 +1056,12 @@ function OrderForm({
                 uploadedFilesRef.current.delete(photo.id);
                 setLines(ls => ls.map(x =>
                   x._cid === l._cid ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x));
-              } catch { setAiError(t('linePhotoDeleteFailed')); }
+              } catch { showErrorDialog(t('linePhotoDeleteFailed')); }
             },
             busy: photoBusy,
           }}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
-          onConfirmError={setAiError}
+          onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)}
         />
       )}

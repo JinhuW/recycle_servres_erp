@@ -12,7 +12,7 @@ import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { primaryPhoto } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
-import { handleFetchError, showErrorToast } from '../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { poEffectiveCost } from '../lib/poTotals';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
@@ -76,9 +76,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [removingLineId, setRemovingLineId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
-  const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
@@ -160,7 +158,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const save = async () => {
     if (!canAnnotate) return;
     setSaving(true);
-    setSaveError(null);
     try {
       // Only what changed. Sending a field the user didn't touch is how the
       // old review screen wrote its blank defaults over a saved order; past
@@ -178,7 +175,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
       setActivityRefreshKey(k => k + 1);
       onSaved(t('savedShort'));
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -210,13 +207,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
 
   const doAdvance = async () => {
     setAdvancing(true);
-    setAdvanceError(null);
     try {
       await api.post(`/api/orders/${order.id}/advance`, {});
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
     } catch (e) {
-      setAdvanceError(e instanceof Error ? e.message : 'Advance failed');
+      showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
     } finally {
       setAdvancing(false);
     }
@@ -238,7 +234,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
       for (const f of files) {
         // 50 MiB server hard cap; oversized images are shrunk server-side.
         if (f.size > 50 * 1024 * 1024) {
-          showErrorToast(t('fileTooLarge', { name: f.name }));
+          showErrorDialog(t('fileTooLarge', { name: f.name }));
           continue;
         }
         const form = new FormData();
@@ -383,11 +379,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                     ? t('lifecycleMarkDone')
                     : t('lifecycleAdvance', { status: nextStatus }))}
             </button>
-          )}
-          {advanceError && (
-            <div role="alert" style={{ marginTop: 8, fontSize: 12, color: 'var(--neg)' }}>
-              {advanceError}
-            </div>
           )}
           {!nextStatus && orderLocked && (
             <div style={{
@@ -728,11 +719,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} defaultOpen={false} />
         </div>
 
-        {saveError && (
-          <div role="alert" style={{ marginTop: 12, fontSize: 12, color: 'var(--neg)' }}>
-            {saveError}
-          </div>
-        )}
       </div>
 
       <div className="ph-action-bar">

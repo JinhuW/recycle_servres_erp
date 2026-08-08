@@ -10,7 +10,7 @@ import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { parseSerials } from '../components/SerialNumbers';
-import { showErrorToast } from '../lib/errorToast';
+import { showErrorDialog } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../lib/ramRequired';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
@@ -205,14 +205,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       const missing = missingRamFields(line);
       if (missing.length) {
         const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
-        showErrorToast(t('fillRequiredFields', { fields }));
+        showErrorDialog(t('fillRequiredFields', { fields }));
         return;
       }
     }
     // Qty can now be left blank, so say so rather than letting the wire's
     // fallback quietly book one unit.
     if (!(Number(line.qty) > 0)) {
-      showErrorToast(t('fillRequiredFields', { fields: t('quantity') }));
+      showErrorDialog(t('fillRequiredFields', { fields: t('quantity') }));
       return;
     }
     const issue = serialIssue(line);
@@ -228,7 +228,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     if (typed) { persist(typed); return; }
     const gen = synthesizePartNumber(line.category, line);
     if (gen) { setPnGen(gen); return; }
-    showErrorToast(t('pnRequiredThis'));
+    showErrorDialog(t('pnRequiredThis'));
   };
 
   // Header text:

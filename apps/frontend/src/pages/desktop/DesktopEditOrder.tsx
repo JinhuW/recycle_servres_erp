@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
-import { handleFetchError, showErrorToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../../lib/poTotals';
@@ -113,7 +113,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       for (const f of files) {
         // 50 MiB server hard cap; oversized images are shrunk server-side.
         if (f.size > 50 * 1024 * 1024) {
-          showErrorToast(t('fileTooLarge', { name: f.name }));
+          showErrorDialog(t('fileTooLarge', { name: f.name }));
           continue;
         }
         const form = new FormData();
@@ -171,7 +171,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     try {
       for (const f of files) {
         try { saved.push((await uploadLinePhoto(order.id, lineId, f)).photo); }
-        catch { showErrorToast(t('linePhotoUploadFailed')); }
+        catch { showErrorDialog(t('linePhotoUploadFailed')); }
       }
     } finally { setPhotoBusy(false); }
     if (saved.length) {
@@ -187,7 +187,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     if (!l) return;
     const held = (l.photos?.length ?? 0) + (pendingPhotos[l._cid]?.length ?? 0);
     const { accepted, overCap } = limitPhotoPick(files, held);
-    if (overCap > 0) showErrorToast(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
+    if (overCap > 0) showErrorDialog(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
     if (!accepted.length) return;
     if (l._id) { void uploadLinePhotos(l._cid, l._id, accepted); return; }
     const queued = accepted.map(f => ({ file: f, url: URL.createObjectURL(f) }));
@@ -222,7 +222,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       await deleteLinePhoto(order.id, l._id, photo.id);
       setLines(ls => ls.map((x, j) =>
         (j === idx ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x)));
-    } catch { showErrorToast(t('linePhotoDeleteFailed')); }
+    } catch { showErrorDialog(t('linePhotoDeleteFailed')); }
   };
   // Line ids that exist in the DB. Seeded from the server's set and grown by
   // the drawer's Confirm-line write-through — `order.lines` is a snapshot from
@@ -249,7 +249,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -494,6 +493,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const canSave =
     dirty && !saving && !orderLocked && (!canEditOrder || lines.every(lineReady));
 
+  // Localized "Brand, Quantity" list of what a line is still waiting on. Mirrors
+  // lineReady — unit cost isn't listed because a blank one reads as 0, which
+  // passes.
+  const missingFieldNames = (l: EditLine): string | null => {
+    const missing: string[] = [];
+    if (l.category === 'Other') {
+      if (!l.description) missing.push('description');
+      if (!(l.itemType ?? '').trim()) missing.push('lfItemType');
+    } else if (!l.brand) {
+      missing.push('brand');
+    }
+    if (!(Number(l.qty) || 0)) missing.push('quantity');
+    return missing.length ? missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') : null;
+  };
+
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.
   // Untouched legacy serial-less lines stay saveable for price/status.
@@ -511,22 +525,34 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const serialIssueFor = (l: EditLine) => (changesSerialFields(l) ? serialIssue(l) : null);
 
-  // Inline hint near the Save button — explains why it's disabled instead of
-  // leaving the user clicking a dead button. Order matches the canSave gates.
-  const saveDisabledReason: string | null =
-    saving || canSave  ? null
-  : orderLocked        ? 'This order is Done — it can no longer be edited.'
-  : !dirty             ? 'No changes to save.'
-  : (() => {
-      const bad = lines.findIndex(l => !lineReady(l));
-      if (bad < 0) return null;
-      const which = lines.length === 1 ? 'this line' : `line ${bad + 1}`;
-      return `Fill in brand/description, quantity and unit cost on ${which} before saving.`;
-    })();
+  // Everything standing between the user and a save, one entry per problem.
+  // Save stays clickable while these exist: clicking opens a dialog listing
+  // them, which beats a dead button next to a hint that's easy to miss.
+  const saveBlockers: string[] =
+    saving || canSave  ? []
+  : orderLocked        ? [t('saveBlockedLocked')]
+  : !dirty             ? [t('saveBlockedNoChanges')]
+  : lines.flatMap((l, i) => {
+      if (lineReady(l)) return [];
+      const fields = missingFieldNames(l);
+      if (fields) {
+        return [lines.length === 1
+          ? t('subMissingFieldsThis', { fields })
+          : t('subMissingFieldsLine', { n: i + 1, fields })];
+      }
+      return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
+    });
+
+  const attemptSave = () => {
+    if (saveBlockers.length) {
+      showErrorDialog(t('errCantSaveMsg'), saveBlockers, t('errCantSaveTitle'));
+      return;
+    }
+    void save();
+  };
 
   const doSave = async () => {
     setSaving(true);
-    setSaveError(null);
     try {
       // Past the purchaser's edit window only the note is theirs to change;
       // sending the line/pricing keys too would trip the backend's 403.
@@ -572,7 +598,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     } catch (e) {
       // Keep the editor open and the user's edits intact on failure — calling
       // onSaved here would navigate away and discard unsaved work.
-      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -1300,28 +1326,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
           </div>
-          {saveError && (
-            <div className="form-error" role="alert" style={{ marginRight: 'auto', alignSelf: 'center', color: 'var(--neg, #c0392b)', fontSize: 13 }}>
-              {saveError}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-              <button
-                className="btn primary"
-                disabled={!canSave}
-                title={saveDisabledReason ?? undefined}
-                onClick={save}
-              >
-                <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
-              </button>
-            </div>
-            {saveDisabledReason && (
-              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
-                {saveDisabledReason}
-              </div>
-            )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+            <button
+              className="btn primary"
+              disabled={saving}
+              title={saveBlockers[0]}
+              onClick={attemptSave}
+            >
+              <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
+            </button>
           </div>
         </div>
       </div>
@@ -1341,7 +1355,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
           onConfirmLine={() => confirmLine(activeIdx)}
-          onConfirmError={showErrorToast}
+          onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)}
           readOnly={!canEditOrder}
           market={marketFor(lines[activeIdx].partNumber)}
