@@ -14,6 +14,12 @@ vi.mock('../src/r2', async (importOriginal) => {
   return {
     ...actual,
     deleteAttachment: async (_env: unknown, key: string) => { swept.push(key); },
+    // The post-commit sweeps batch, so watching only the single-key form would
+    // record nothing and every assertion here would pass vacuously.
+    deleteAttachments: async (_env: unknown, keys: readonly string[]) => {
+      swept.push(...keys);
+      return [];
+    },
   };
 });
 

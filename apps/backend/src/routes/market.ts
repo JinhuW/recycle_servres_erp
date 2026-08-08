@@ -106,6 +106,7 @@ market.post('/lookup', async (c) => {
     sql,
     sql`${canonPartCol(sql, sql`rp.part_number`)} = ANY(${canon})`,
     sql``,
+    sql`${canonPartCol(sql, sql`l.part_number`)} = ANY(${canon})`,
   );
 
   // Two ref_prices rows can canonicalise to the same key (the column has no

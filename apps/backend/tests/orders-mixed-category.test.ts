@@ -453,3 +453,49 @@ describe('the enabled-category gate follows what the request actually files', ()
     expect((await get(token, id)).lines).toHaveLength(1);
   });
 });
+
+// order_lines IS the inventory table and orders.category is NOT NULL, so an
+// emptied PO is a row claiming a category with no line behind it and a goods
+// total of 0. Both clients already refuse it; the API did not.
+describe('a purchase order cannot be emptied of its last line', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('refuses to remove every line', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE, SSD_LINE]);
+    const ids = (await get(token, id)).lines.map(l => l.id);
+
+    const r = await api<{ error: string }>('PATCH', '/api/orders/' + id, {
+      token, body: { removeLineIds: ids },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/at least one line/i);
+    expect((await get(token, id)).lines).toHaveLength(2);
+  });
+
+  it('still allows removing all but one', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE, SSD_LINE]);
+    const ids = (await get(token, id)).lines.map(l => l.id);
+
+    const r = await api('PATCH', '/api/orders/' + id, { token, body: { removeLineIds: [ids[0]] } });
+    expect(r.status).toBe(200);
+    expect((await get(token, id)).lines).toHaveLength(1);
+  });
+
+  // Swapping every line out in one request is a legitimate edit — the order is
+  // never actually left empty.
+  it('allows replacing every line in one request', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, [RAM_LINE]);
+    const ids = (await get(token, id)).lines.map(l => l.id);
+
+    const r = await api('PATCH', '/api/orders/' + id, {
+      token, body: { removeLineIds: ids, addLines: [SSD_LINE] },
+    });
+    expect(r.status).toBe(200);
+    const after = await get(token, id);
+    expect(after.lines).toHaveLength(1);
+    expect(after.category).toBe('SSD');
+  });
+});

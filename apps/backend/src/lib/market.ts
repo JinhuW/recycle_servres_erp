@@ -138,6 +138,11 @@ export function marketValueSelect(
   sql: SqlLike,
   where: postgres.Fragment,
   tail: postgres.Fragment,
+  // Narrows the last-30d aggregate to the parts the caller will actually read.
+  // Unfiltered it seq-scans order_lines + orders and regexp-canonicalises every
+  // row, which the paged Market page amortises over a screenful but the batch
+  // lookup pays per debounced keystroke, for parts it then discards.
+  salesFilter: postgres.Fragment = sql`TRUE`,
 ) {
   return sql<MarketValueRow[]>`
     WITH internal_sales AS (
@@ -150,6 +155,7 @@ export function marketValueSelect(
         AND l.sell_price IS NOT NULL
         AND l.part_number IS NOT NULL
         AND l.part_number <> ''
+        AND ${salesFilter}
       GROUP BY canon
     )
     SELECT rp.id, rp.category, rp.brand, rp.capacity, rp.type, rp.classification,
