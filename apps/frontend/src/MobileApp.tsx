@@ -656,7 +656,7 @@ function Shell() {
       {toast && (
         <div className="ph-toast-wrap" style={{ position: 'fixed', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
           <div className={'ph-toast ' + (toast.kind || '')}>
-            <Icon name="check2" size={14} /><span>{toast.msg}</span>
+            <Icon name={toast.kind === 'warn' ? 'alert' : 'check2'} size={14} /><span>{toast.msg}</span>
           </div>
         </div>
       )}

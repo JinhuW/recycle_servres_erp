@@ -10,7 +10,7 @@ import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { parseSerials } from '../components/SerialNumbers';
-import { showErrorDialog } from '../lib/errorToast';
+import { showErrorDialog, showWarnToast } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { missingRamFields } from '../lib/ramRequired';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
@@ -201,18 +201,13 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // a hard stop. RAM lines additionally require every spec field — the toast
   // names the blanks (which include Part #, so the synth path never fires).
   const attemptSave = () => {
-    if (line.category === 'RAM') {
-      const missing = missingRamFields(line);
-      if (missing.length) {
-        const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
-        showErrorDialog(t('fillRequiredFields', { fields }));
-        return;
-      }
-    }
-    // Qty can now be left blank, so say so rather than letting the wire's
-    // fallback quietly book one unit.
-    if (!(Number(line.qty) > 0)) {
-      showErrorDialog(t('fillRequiredFields', { fields: t('quantity') }));
+    // Qty can be left blank, so it joins the same list rather than arriving as
+    // a second message once the specs are filled.
+    const missing = line.category === 'RAM' ? [...missingRamFields(line)] : [];
+    if (!(Number(line.qty) > 0)) missing.push('quantity');
+    if (missing.length) {
+      const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
+      showWarnToast(t('drawerStillNeeded', { fields }));
       return;
     }
     const issue = serialIssue(line);
