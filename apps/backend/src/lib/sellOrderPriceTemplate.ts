@@ -1,7 +1,7 @@
 // Vendor bid sheet for one sell order: a styled workbook the manager emails
 // out and the vendor fills in. Built directly with exceljs rather than
 // lib/xlsx.ts — the flat sheet builder there has no notion of merged
-// instruction rows, per-cell protection, or formulas.
+// instruction rows, per-cell styling, or formulas.
 //
 // One worksheet per category present (RAM / SSD / HDD / Other, user-requested
 // 2026-07-22: "the SSD should be in a dedicated sub sheet"), each carrying
@@ -13,11 +13,15 @@
 // full-size scan. Spec attributes get individual columns (same request as the
 // order spreadsheet — never re-merge them into one composed field).
 //
-// Everything except the Unit Price and Note columns is locked; the import
-// parser still never relies on that structure (it re-locates columns by header
-// text — safe here because no spec header matches its part/price/condition
-// heuristics: "chip#" and "note备注" contain none of partnumber/price/单价/
-// condition/成色 etc., see services/sellOrderPriceImport.ts).
+// The workbook ships completely unprotected (user-decided 2026-08-08): a
+// manager reshaping a long bid sheet shouldn't have to lift a lock first, and
+// the protection was never security anyway — it carried no password. Nothing
+// downstream depends on the shape it used to hold: the import parser
+// re-locates columns by header text and matches rows by part number, so a
+// vendor who reorders, retypes or inserts still round-trips (see
+// services/sellOrderPriceImport.ts; safe here because no spec header matches
+// its part/price/condition heuristics: "chip#" and "note备注" contain none of
+// partnumber/price/单价/condition/成色 etc.).
 //
 // After the category tabs come per-warehouse PACKING-CHECKLIST tabs (one per
 // warehouse on the order, named by its short code): stacked per-category
@@ -92,6 +96,31 @@ const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7
 
 const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 
+// Rows ship pre-sorted the way the desk reads a bid sheet (user-decided
+// 2026-08-06): capacity, then rank, speed, brand. Categories without those
+// specs just fall through to the label tie-break.
+const DEFAULT_SORT_KEYS = ['capacity', 'rank', 'speed', 'brand'] as const;
+
+// Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
+// 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
+// sink so manual lines (no specs at all) never head the tab.
+function compareSpec(a: string, b: string): number {
+  if (!a) return b ? 1 : 0;
+  if (!b) return -1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// Label breaks ties so the same order always exports byte-identically.
+function sortForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+  return [...products].sort((x, y) => {
+    for (const key of DEFAULT_SORT_KEYS) {
+      const d = compareSpec(String(x.specs[key] ?? ''), String(y.specs[key] ?? ''));
+      if (d !== 0) return d;
+    }
+    return compareSpec(x.label, y.label);
+  });
+}
+
 // Fold products into CATEGORY_ORDER buckets; unknown categories go to Other
 // so nothing can fall off the workbook.
 function groupByCategory(products: PriceTemplateProduct[]): Map<string, PriceTemplateProduct[]> {
@@ -117,24 +146,24 @@ export async function buildPriceTemplateWorkbook(
   for (const cat of CATEGORY_ORDER) {
     const catProducts = byCategory.get(cat);
     if (!catProducts) continue;
-    await renderCategorySheet(wb, cat, head, catProducts);
+    renderCategorySheet(wb, cat, head, catProducts);
   }
   // A workbook needs at least one sheet to be a valid file.
-  if (byCategory.size === 0) await renderCategorySheet(wb, 'Other', head, []);
+  if (byCategory.size === 0) renderCategorySheet(wb, 'Other', head, []);
 
   for (const wh of warehouses) {
-    await renderWarehouseSheet(wb, head, wh);
+    renderWarehouseSheet(wb, head, wh);
   }
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-async function renderCategorySheet(
+function renderCategorySheet(
   wb: import('exceljs').Workbook,
   category: string,
   head: PriceTemplateHead,
   products: PriceTemplateProduct[],
-): Promise<void> {
+): void {
   const ws = wb.addWorksheet(category, {
     views: [{ state: 'frozen', ySplit: HEADER_ROW }],
   });
@@ -203,7 +232,8 @@ async function renderCategorySheet(
     cell.border = { bottom: { style: 'medium' } };
   }
 
-  products.forEach((p, i) => {
+  const sorted = sortForSheet(products);
+  sorted.forEach((p, i) => {
     const r = HEADER_ROW + 1 + i;
     const row = ws.getRow(r);
     row.getCell(IDX.index).value = i + 1;
@@ -217,21 +247,18 @@ async function renderCategorySheet(
     qtyCell.value = p.qty;
     qtyCell.numFmt = '#,##0';
 
-    // Blank bid cell: existing order prices must not leak to the vendor.
+    // Blank bid cell: existing order prices must not leak to the vendor. The
+    // fill is what tells the vendor where to type — nothing else on the sheet
+    // marks the column out.
     const priceCell = row.getCell(IDX.price);
     priceCell.numFmt = '#,##0.00';
     priceCell.fill = PRICE_FILL;
-    priceCell.protection = { locked: false };
 
     const totalCell = row.getCell(IDX.total);
     const qtyRef = `${ws.getColumn(IDX.qty).letter}${r}`;
     const priceRef = `${ws.getColumn(IDX.price).letter}${r}`;
     totalCell.value = { formula: `${qtyRef}*${priceRef}` };
     totalCell.numFmt = '#,##0.00';
-
-    // Free-text remarks the vendor may fill alongside the price — starts
-    // blank on purpose (user-decided: nothing is pre-filled from the DB).
-    row.getCell(IDX.note).protection = { locked: false };
 
     row.alignment = { vertical: 'middle' };
     if (p.imageUrl) {
@@ -241,19 +268,12 @@ async function renderCategorySheet(
     }
   });
 
-  // Guard rail, not security: the manager can lift it in Excel (no password),
-  // and the import parser tolerates a vendor who does.
-  await ws.protect('', {
-    selectLockedCells: true,
-    selectUnlockedCells: true,
-    formatCells: false,
-    formatColumns: false,
-    formatRows: false,
-    insertRows: false,
-    deleteRows: false,
-    sort: false,
-    autoFilter: false,
-  });
+  // Header-row filter dropdowns, spanning the header down to the last data row
+  // so sorting from a dropdown carries every row with it.
+  ws.autoFilter = {
+    from: { row: HEADER_ROW, column: 1 },
+    to: { row: HEADER_ROW + sorted.length, column: IDX.note },
+  };
 }
 
 // ── Warehouse packing-checklist tabs ─────────────────────────────────────────
@@ -276,11 +296,11 @@ function whSectionCols(category: string): WhCol[] {
   ];
 }
 
-async function renderWarehouseSheet(
+function renderWarehouseSheet(
   wb: import('exceljs').Workbook,
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
-): Promise<void> {
+): void {
   // "Pack - DEN" style: the prefix separates packing tabs from the category
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
   const ws = wb.addWorksheet(`Pack - ${wh.warehouse}`);
@@ -345,16 +365,16 @@ async function renderWarehouseSheet(
     });
 
     let sectionQty = 0;
-    for (const p of byCategory.get(cat)!) {
+    // Same order as the bid tabs, so a picker walking the shelf and a manager
+    // reading the bid see a product in the same place.
+    for (const p of sortForSheet(byCategory.get(cat)!)) {
       const row = ws.getRow(r++);
       cols.forEach((c, i) => {
         const cell = row.getCell(i + 1);
         switch (c.key) {
           case 'packed':
-            // Blank bordered tick box — pen after printing, or type x in
-            // Excel (the only unlocked cells on this tab).
+            // Blank bordered tick box — pen after printing, or type x in Excel.
             cell.border = box;
-            cell.protection = { locked: false };
             break;
           case 'part': cell.value = p.partNumber ?? ''; break;
           case 'item': cell.value = p.label; break;
@@ -390,16 +410,4 @@ async function renderWarehouseSheet(
   total.getCell(2).value = totalQty;
   total.getCell(2).numFmt = '#,##0';
   total.font = { bold: true };
-
-  await ws.protect('', {
-    selectLockedCells: true,
-    selectUnlockedCells: true,
-    formatCells: false,
-    formatColumns: false,
-    formatRows: false,
-    insertRows: false,
-    deleteRows: false,
-    sort: false,
-    autoFilter: false,
-  });
 }
