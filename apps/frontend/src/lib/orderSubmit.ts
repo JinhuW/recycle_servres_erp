@@ -1,11 +1,16 @@
-// Builds the request for finalizing a purchase order from the review screen.
+// Builds the request for finalizing a NEW purchase order from the review
+// screen. An order that already exists is edited on its detail screen, which
+// owns warehouse/payment/notes and sends only what the user actually changed.
 //
-// Three cases:
-//   - Editing an existing order (`editingId` set): PATCH that order, updating
-//     lines that still carry their DB id, inserting new ones, and deleting the
-//     originals the user removed.
+// That split is the point: `metaBody` below states all five meta fields
+// unconditionally, which is only safe when the user has just answered for them.
+// Routing an existing order through here re-asked those questions with blank
+// defaults and then wrote the answers back over the saved ones.
+//
+// Two cases:
 //   - Finalizing a new draft (`draftId` set): PATCH the draft, appending the
-//     lines that weren't already autosaved.
+//     lines that weren't already autosaved and dropping the ones that were
+//     autosaved and then deleted.
 //   - No order yet: POST the whole thing. The draft row is only created by the
 //     first line that can be persisted, so a session whose lines were all
 //     held back (incomplete when saved) reaches submit with nothing to PATCH.
@@ -26,11 +31,12 @@ export type SubmitMeta = {
 };
 
 export type SubmitState = {
-  editingId?: string | null;
   draftId?: string;
   lines: DraftLine[];
-  // DB ids of the lines present when an existing order was opened for edit.
-  // Used to compute which lines the user removed.
+  // DB ids the draft held when this session opened it. What is missing from
+  // `lines` at submit is what the user deleted after it had already autosaved,
+  // and order_lines IS the inventory table — leave it and the PO ships stock
+  // nobody bought.
   originalLineIds?: string[];
 };
 
@@ -69,15 +75,6 @@ const toAddLine = (l: DraftLine) => ({
   scanConfidence: l.scanConfidence ?? null,
 });
 
-// Updates to an existing row deliberately omit `status`: the backend COALESCEs
-// it, so leaving it out preserves whatever lifecycle status the line already
-// has (Done, etc.) instead of forcing it back to 'In Transit'.
-const toUpdateLine = (l: DraftLine) => {
-  const { status, ...rest } = toAddLine(l);
-  void status;
-  return { id: l.id as string, ...rest };
-};
-
 export function buildOrderSubmit(
   state: SubmitState,
   meta: SubmitMeta,
@@ -89,23 +86,6 @@ export function buildOrderSubmit(
     otherFees: meta.otherFees,
     otherFeesNote: meta.otherFeesNote,
   };
-
-  if (state.editingId) {
-    const existing = state.lines.filter(l => l.id);
-    const added = state.lines.filter(l => !l.id);
-    const survivingIds = new Set(existing.map(l => l.id));
-    const removed = (state.originalLineIds ?? []).filter(id => !survivingIds.has(id));
-    return {
-      kind: 'patch',
-      url: '/api/orders/' + state.editingId,
-      body: {
-        ...metaBody,
-        ...(existing.length ? { lines: existing.map(toUpdateLine) } : {}),
-        ...(added.length ? { addLines: added.map(toAddLine) } : {}),
-        ...(removed.length ? { removeLineIds: removed } : {}),
-      },
-    };
-  }
 
   if (!state.draftId) {
     if (!state.lines.length) {
