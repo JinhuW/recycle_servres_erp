@@ -32,6 +32,10 @@ export type PrefMap = {
   'analysis.collapsed': string[];
   'orders.cols': string[];
   'market.showStaleOnly': boolean;
+  // Category the PO submit form pre-selects for its first line. Every category
+  // stays one click away in the add control — this only saves re-picking when
+  // someone works through a pallet of one kind.
+  'submit.lastCategory': string;
 };
 
 export type PrefKey = keyof PrefMap;

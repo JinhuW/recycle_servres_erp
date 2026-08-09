@@ -5,7 +5,7 @@
 // on :8787 (see vite.config.ts); in prod Caddy proxies /api/* to the backend.
 // Either way paths stay relative (same-origin), so cookies ride along.
 
-import type { Category, OrderSummary } from './types';
+import type { OrderSummary } from './types';
 
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
@@ -186,21 +186,26 @@ export async function rawFetch(
   });
 }
 
+// No category: an empty draft has no lines to derive one from, and each line
+// carries its own once they arrive.
 export const createDraftOrder = (
-  category: Category,
   meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
-) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
+) => api.post<{ id: string }>('/api/orders/draft', { ...meta });
 
 // Create a PO already carrying its first line(s). The desktop submit form uses
 // this so a draft is never written empty — the order is born with content.
+//
+// No `category` and no `totalCost`: the backend derives both from the lines on
+// every write that moves them. A total sent from here would be read as a
+// negotiated lot price and pin the column against the lines from then on.
 export const createOrder = (body: {
-  category: Category;
   warehouseId?: string;
   payment?: OrderSummary['payment'];
   notes?: string | null;
-  totalCost?: number;
   lines: unknown[];
-}) => api.post<{ id: string }>('/api/orders', body);
+  // lineIds comes back aligned 1:1 with `lines`, so the caller can attach
+  // per-line photos that were buffered while the lines had no id yet.
+}) => api.post<{ id: string; lineIds: string[] }>('/api/orders', body);
 
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);

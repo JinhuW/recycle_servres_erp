@@ -33,9 +33,20 @@ let api: (...args: any[]) => Promise<any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let loginAs: (...args: any[]) => Promise<any>;
 
-type SentCommand = { __type: 'Put' | 'Delete'; input: { Key: string } };
+type SentCommand =
+  | { __type: 'Put' | 'Delete'; input: { Key: string } }
+  | { __type: 'DeleteMany'; input: { Delete: { Objects: { Key: string }[] } } };
 function sent(): SentCommand[] {
   return send.mock.calls.map((c) => c[0] as SentCommand);
+}
+
+// The post-commit sweeps batch, so a key can arrive as either shape. Tests care
+// which objects were deleted, not how many requests carried them.
+function deletedKeys(): string[] {
+  return sent().flatMap((c) =>
+    c.__type === 'Delete' ? [c.input.Key]
+    : c.__type === 'DeleteMany' ? c.input.Delete.Objects.map((o) => o.Key)
+    : []);
 }
 
 function jpeg(): File {
@@ -68,6 +79,7 @@ beforeEach(async () => {
     S3Client: function () { return { send }; },
     PutObjectCommand: function (input: unknown) { return { __type: 'Put', input }; },
     DeleteObjectCommand: function (input: unknown) { return { __type: 'Delete', input }; },
+    DeleteObjectsCommand: function (input: unknown) { return { __type: 'DeleteMany', input }; },
   }));
 
   // Dynamically import helpers/app and helpers/auth AFTER doMock so they pull
@@ -153,6 +165,11 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
         lines: [{
           category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
           condition: 'Pulled — Tested', qty: 1, unitCost: 50, scanImageId: key,
+        }, {
+          // A spare, so removing the scanned line is a legal edit — an order
+          // may not be emptied of its last line.
+          category: 'RAM', brand: 'Crucial', capacity: '16GB', type: 'DDR4',
+          condition: 'Pulled — Tested', qty: 1, unitCost: 25,
         }],
       },
     });
@@ -171,9 +188,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
       token, env, body: { removeLineIds: [lineId] },
     });
     expect(r.status).toBe(200);
-    const deletes = sent().filter((c) => c.__type === 'Delete');
-    expect(deletes).toHaveLength(1);
-    expect(deletes[0].input.Key).toBe(key);
+    expect(deletedKeys()).toEqual([key]);
   });
 
   it('deleting a draft order deletes its line label images from R2', async () => {
@@ -183,9 +198,7 @@ describe('R2-configured environment: scan image reaches PO lines', () => {
     send.mockClear();
     const r = await api('DELETE', '/api/orders/' + orderId, { token, env });
     expect(r.status).toBe(200);
-    const deletes = sent().filter((c) => c.__type === 'Delete');
-    expect(deletes).toHaveLength(1);
-    expect(deletes[0].input.Key).toBe(key);
+    expect(deletedKeys()).toEqual([key]);
   });
 
   it('stub fallback (no R2) stays a filtered placeholder', async () => {

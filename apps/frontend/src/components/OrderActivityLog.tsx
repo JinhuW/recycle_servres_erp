@@ -4,12 +4,18 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
+import {
+  createdEventParts, linePhotoEventDetail, type Translate,
+} from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 
 type Props = {
   orderId: string;
   // Bump this to force a refresh after a save commits new events.
   refreshKey?: number;
+  // The phone opens it closed: it is the longest block on a screen that is
+  // already tall, and the header carries the event count either way.
+  defaultOpen?: boolean;
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
@@ -21,6 +27,8 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_edited:  'edit',
   meta_changed: 'settings',
   status_meta_changed: 'paperclip',
+  line_photo_added:   'image',
+  line_photo_removed: 'image',
   archived:     'box',
   unarchived:   'rotate',
 };
@@ -35,6 +43,10 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_edited:  'info',
   meta_changed: 'muted',
   status_meta_changed: 'muted',
+  // A photo is evidence hung off a line, so it tones like the attachment
+  // events rather than like the line itself; losing one still warns.
+  line_photo_added:   'muted',
+  line_photo_removed: 'warn',
   archived:     'muted',
   unarchived:   'info',
 };
@@ -107,20 +119,13 @@ function changeLine(c: OrderEventChange, locale: string): string {
   return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
 }
 
-function summary(ev: OrderEvent, locale: string): { title: string; lines: string[] } {
+function summary(ev: OrderEvent, locale: string, t: Translate): { title: string; lines: string[] } {
   const d = ev.detail as Record<string, unknown>;
   switch (ev.kind) {
     case 'created': {
-      // Rows synthesised by migration 0076 counted the lines as they stood at
-      // backfill time, not at creation, so the numbers would contradict the
-      // line_added/line_removed events below them. Show the category only.
-      if (d.backfilled) return { title: 'Order created', lines: [String(d.category)] };
-      const lineCount = (d.lineCount as number) ?? 0;
-      const qty = (d.qty as number) ?? 0;
-      return {
-        title: 'Order created',
-        lines: [`${String(d.category)} · ${lineCount} line${lineCount === 1 ? '' : 's'} · ${qty} units`],
-      };
+      // Shared with DesktopActivity so the same event doesn't read two ways.
+      const parts = createdEventParts(d, t);
+      return { title: 'Order created', lines: parts.length ? [parts.join(' · ')] : [] };
     }
     case 'submitted': {
       const lineCount = (d.lineCount as number) ?? 0;
@@ -166,6 +171,14 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
       const verb = field === 'attachment_removed' ? 'removed' : 'added';
       return { title: `Attachment ${verb} on ${status}`, lines: [String(d.filename ?? '')] };
     }
+    case 'line_photo_added':
+    case 'line_photo_removed': {
+      const detail = linePhotoEventDetail(d);
+      return {
+        title: t(ev.kind === 'line_photo_added' ? 'acPhotoAdded' : 'acPhotoRemoved'),
+        lines: detail ? [detail] : [],
+      };
+    }
     case 'archived': {
       return { title: 'Archived', lines: ['Hidden from the default order list'] };
     }
@@ -181,12 +194,12 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
+export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<OrderEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
     let alive = true;
@@ -252,8 +265,10 @@ export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
           )}
 
           {ordered.map(ev => {
-            const s = summary(ev, locale);
-            const tone = KIND_TONE[ev.kind];
+            const s = summary(ev, locale, t);
+            // Same reason `summary` has a default branch: a kind this build
+            // has never heard of otherwise lands in an untinted, empty bubble.
+            const tone = KIND_TONE[ev.kind] ?? 'muted';
             return (
               <div key={ev.id} style={{
                 display: 'grid', gridTemplateColumns: '24px 1fr auto',
@@ -272,7 +287,7 @@ export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
                     color: TONE_FG[tone],
                   }}
                 >
-                  <Icon name={KIND_ICON[ev.kind]} size={11} />
+                  <Icon name={KIND_ICON[ev.kind] ?? 'file'} size={11} />
                 </span>
                 <div style={{ minWidth: 0, paddingTop: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.35 }}>

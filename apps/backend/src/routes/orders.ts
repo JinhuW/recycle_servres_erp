@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
-import { uploadAttachment, deleteAttachment } from '../r2';
+import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
 import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
@@ -12,9 +12,16 @@ import { effectiveRole } from '../lib/role';
 import { getUploadLimits } from '../lib/settings';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import {
-  SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, type ExportCategory,
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
+  type ExportCategory,
 } from '../lib/categoryColumns';
-import { synthesizePartNumber, serialIssue, type SerialIssue } from '@recycle-erp/shared';
+import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
+import { linePhotos, type LinePhoto } from '../lib/linePhotos';
+import {
+  synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, LINE_PHOTO_CAP,
+  type SerialIssue,
+} from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
@@ -45,10 +52,36 @@ function serialErr(label: string, issue: SerialIssue): string {
     : `${label}: serial number count (${issue.count}) must equal qty (${issue.qty})`;
 }
 
+// Every category a write touches must exist and be enabled. Checked per line
+// rather than once per order — a PO may span categories — and only over the
+// categories the request actually names, so a category disabled after the fact
+// can't retro-block an unrelated edit to a legacy line.
+async function assertCategoriesEnabled(
+  sql: ReturnType<typeof getDb>,
+  cats: readonly string[],
+): Promise<string | null> {
+  const wanted = [...new Set(cats.filter(Boolean))];
+  if (wanted.length === 0) return null;
+  const rows = await sql<{ id: string; enabled: boolean }[]>`
+    SELECT id, enabled FROM categories WHERE id = ANY(${wanted})
+  `;
+  const known = new Map(rows.map(r => [r.id, r.enabled]));
+  for (const cat of wanted) {
+    if (!known.has(cat)) return `unknown category: ${cat}`;
+    if (!known.get(cat)) return `category ${cat} is disabled`;
+  }
+  return null;
+}
+
 // An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
 // description, and only for that category — the rest are self-describing.
-function itemTypeErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
+//
+// Brand is deliberately NOT required here even though both editors gate Confirm
+// on it: the API has always accepted a line without one, and the scan and
+// import paths rely on that. The rule that stops an order becoming unsaveable
+// lives in lib/lineRequirements.ts, which both shells share.
+function identityErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
   if (category !== 'Other') return null;
   return (l.itemType ?? '').trim() ? null : `${label}: Other lines require an item type`;
 }
@@ -80,6 +113,7 @@ function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | 
 function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
 }
+
 
 type LineInput = {
   category?: LineCategory;
@@ -138,7 +172,13 @@ orders.get('/', async (c) => {
   const scopeFrag    = isManager && !mineOnly
     ? sql`TRUE`
     : sql`o.user_id = ${u.id}`;
-  const categoryFrag = category ? sql`o.category = ${category}` : sql`TRUE`;
+  // Matched against the LINES, not the order header: a PO may mix categories,
+  // and header-matching would hide every mixed PO from every chip. Served by
+  // order_lines_category_order_idx (migration 0083). A zero-line draft matches
+  // no category, which is correct — it contains nothing.
+  const categoryFrag = category
+    ? sql`EXISTS (SELECT 1 FROM order_lines ocf WHERE ocf.order_id = o.id AND ocf.category = ${category})`
+    : sql`TRUE`;
   // The mobile filter chip sends the order's stage label — map to lifecycle.
   // Filtering on per-line status (an earlier design) silently hid empty drafts
   // and drafts whose lines had already advanced past 'Draft'.
@@ -194,13 +234,27 @@ orders.get('/', async (c) => {
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
-      COALESCE(SUM(COALESCE(l.sell_price, l.unit_cost) * l.qty), 0)::float         AS revenue,
-      -- Fees are a cost, so the row's profit nets them. No per-line
-      -- amortisation needed here (unlike lib/po-cost.ts): the group holds every
-      -- line of the PO, so the shares would sum to o.other_fees anyway.
-      (COALESCE(SUM((COALESCE(l.sell_price, l.unit_cost) - l.unit_cost) * l.qty), 0)
+      -- A line with no sell price contributes nothing: NULL drops out of SUM.
+      -- It used to fall back to unit_cost, which invented revenue equal to the
+      -- cost — so a PO nobody had priced yet reported its full cost as
+      -- projected revenue. The spreadsheet and the edit screen never did that;
+      -- this is the list catching up to them.
+      COALESCE(SUM(l.sell_price * l.qty), 0)::float                                 AS revenue,
+      -- The whole fee nets against the margin, so a PO whose lines aren't
+      -- priced yet reads as a loss the size of its fees. That is intended: the
+      -- fee is money already spent. It does mean this figure is deliberately
+      -- more conservative than the edit screen's tape, which reports margin on
+      -- priced lines alone and says outright that fees are not allocated there.
+      (COALESCE(SUM((l.sell_price - l.unit_cost) * l.qty), 0)
          - o.other_fees)::float                                                     AS profit,
-      COUNT(l.id)::int                                                              AS line_count
+      COUNT(l.id)::int                                                              AS line_count,
+      -- So the UI can explain a revenue figure that looks low rather than
+      -- leaving the reader to wonder.
+      COUNT(l.id) FILTER (WHERE l.sell_price IS NULL)::int                           AS unpriced_line_count,
+      -- The row chip needs every category present, not just the derived header
+      -- value, so a mixed PO can show what it actually holds. Free here: the
+      -- query already groups by o.id over the joined lines.
+      ARRAY_REMOVE(ARRAY_AGG(DISTINCT l.category), NULL)                            AS categories
     FROM orders o
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
@@ -230,6 +284,7 @@ orders.get('/', async (c) => {
       userInitials: r.user_initials,
       commissionRate: r.commission_rate,
       category: r.category,
+      categories: sortCategories((r.categories as string[] | null) ?? []),
       payment: r.payment,
       notes: r.notes,
       lifecycle: r.lifecycle,
@@ -243,6 +298,7 @@ orders.get('/', async (c) => {
       revenue: r.revenue,
       profit: r.profit,
       lineCount: r.line_count,
+      unpricedLineCount: r.unpriced_line_count,
       // PO status is authoritative — derive from o.lifecycle, not from line
       // aggregation. Per-line `Sold` (set when inventory ships out via a sell
       // order) is intentional divergence and must not surface as "Mixed".
@@ -302,6 +358,26 @@ orders.get('/:id', async (c) => {
     SELECT id, status, filename, size_bytes, mime_type, delivery_url, uploaded_at
     FROM order_status_attachments WHERE order_id = ${id} ORDER BY uploaded_at
   `;
+  // One flat select stitched in JS rather than a lateral per line — same shape
+  // as the status-meta rows above.
+  const photoRows = await sql`
+    SELECT id, order_line_id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+    FROM order_line_photos WHERE order_id = ${id}
+    ORDER BY order_line_id, position, uploaded_at
+  `;
+  const photosByLine = new Map<string, LinePhoto[]>();
+  for (const p of photoRows) {
+    const key = p.order_line_id as string;
+    if (!photosByLine.has(key)) photosByLine.set(key, []);
+    photosByLine.get(key)!.push({
+      id: p.id as string,
+      url: p.delivery_url as string,
+      source: 'upload',
+      filename: p.filename as string,
+      mime: p.mime_type as string,
+      uploadedAt: String(p.uploaded_at),
+    });
+  }
   const statusMeta: Record<string, {
     note: string | null; when: string;
     attachments: { id: string; filename: string; size: number; mime: string; url: string; uploadedAt: string }[];
@@ -325,6 +401,7 @@ orders.get('/:id', async (c) => {
       userName: order.user_name,
       userInitials: order.user_initials,
       category: order.category,
+      categories: sortCategories([...new Set(lines.map(l => l.category as string).filter(Boolean))]),
       payment: order.payment,
       notes: order.notes,
       lifecycle: order.lifecycle,
@@ -342,6 +419,7 @@ orders.get('/:id', async (c) => {
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
+        photos: linePhotos(l, photosByLine.get(l.id as string)),
         brand: l.brand,
         capacity: l.capacity,
         generation: l.generation,
@@ -425,12 +503,14 @@ const fmtTs = (v: unknown): string =>
 // A Payment tab with the header/payment fields, and a Line items tab with the
 // costed lines. Reuses the shared exceljs builder.
 //
-// The line columns are the order category's full spec set — the same table the
+// The line columns are a category's full spec set — the same table the
 // inventory export renders — so a RAM PO carries rank/gen/speed/chip # in their
 // own sortable columns. There is deliberately no composed `Item` label column:
 // once every attribute has its own cell it only repeated them, unsorted.
-// An order is single-category (enforced on create), so one column set covers
-// the whole sheet.
+//
+// The sets are disjoint, so a PO spanning categories splits into one sheet per
+// category (categoryTabSheets). A single-category PO keeps its one 'Line items'
+// sheet exactly as before.
 const PO_LINE_TAIL_COLS: XlsxColumn[] = [
   { header: 'Serial #',   key: 'serial',    width: 24 },
   { header: 'Qty',        key: 'qty',       width: 8,  numFmt: '#,##0' },
@@ -505,6 +585,9 @@ orders.get('/:id/spreadsheet', async (c) => {
     const sellPrice = l.sell_price != null ? Number(l.sell_price) : null;
     return {
       ...lineSpecFields(l),
+      // Read by categoryTabSheets to pick the sheet; not a declared column on
+      // any of them, so it never renders.
+      category: l.category,
       serial: String(l.serial_number ?? ''),
       qty,
       unitCost,
@@ -519,6 +602,13 @@ orders.get('/:id/spreadsheet', async (c) => {
       profit: sellPrice != null ? +(qty * (sellPrice - effUnitCost(unitCost))).toFixed(2) : null,
     };
   });
+
+  // Derived from the LINES, so a legacy PO whose header disagrees with its sole
+  // line still renders that line's columns.
+  // Through sortCategories, not a bare indexOf: an unknown category scores -1
+  // there and would sort ahead of RAM, so the workbook's tabs and the chips on
+  // screen would disagree about the same order.
+  const lineCats = sortCategories([...new Set(lines.map(l => exportCategory(l.category)))]);
 
   const goodsCost = order.total_cost != null ? +Number(order.total_cost).toFixed(2) : subtotal;
   const totalCost = +(goodsCost + otherFees).toFixed(2);
@@ -536,7 +626,7 @@ orders.get('/:id/spreadsheet', async (c) => {
     { field: 'Date',                  value: fmtTs(order.created_at).slice(0, 10) },
     { field: 'Status',                value: LIFECYCLE_LABEL[String(order.lifecycle)] ?? String(order.lifecycle) },
     { field: 'Buyer',                 value: String(order.user_name ?? '') },
-    { field: 'Category',              value: String(order.category ?? '') },
+    { field: 'Category',              value: lineCats.length > 1 ? lineCats.join(' · ') : String(order.category ?? '') },
     { field: 'Warehouse',             value: warehouse },
     { field: 'Payment method',        value: order.payment === 'self' ? 'Self pay' : 'Company pay' },
     { field: 'Total quantity',        value: totalQty },
@@ -555,7 +645,10 @@ orders.get('/:id/spreadsheet', async (c) => {
 
   const buf = await buildXlsxWorkbook([
     { name: 'Payment', columns: PO_PAYMENT_COLS, rows: paymentRows },
-    { name: 'Line items', columns: poLineCols(exportCategory(order.category)), rows: lineRows },
+    ...categoryTabSheets(lineRows, poLineCols, {
+      singleSheetName: 'Line items',
+      emptySheetName: 'Line items',
+    }),
   ]);
   return xlsxResponse(buf, `${order.id}.xlsx`);
 });
@@ -566,7 +659,10 @@ orders.post('/', async (c) => {
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
     | {
-        category: LineCategory;
+        // Optional since a PO may mix categories: it is only a fallback for
+        // lines that don't name their own. The stored order category is
+        // derived from the lines (see syncOrderCategory).
+        category?: LineCategory;
         warehouseId?: string;
         payment?: 'company' | 'self';
         notes?: string;
@@ -576,37 +672,40 @@ orders.post('/', async (c) => {
         lines: LineInput[];
       }
     | null;
-  if (!body || !body.category || !Array.isArray(body.lines) || body.lines.length === 0) {
-    return c.json({ error: 'category and at least one line are required' }, 400);
+  if (!body || !Array.isArray(body.lines) || body.lines.length === 0) {
+    return c.json({ error: 'at least one line is required' }, 400);
   }
-  // An order is single-category: every line must match the order category
-  // (a line may omit its category and inherit the order's). Completes the
-  // intent of the lifecycle-default fix (parallel commit 64b885d).
-  if (!body.lines.every(l => !l.category || l.category === body.category)) {
-    return c.json({ error: 'all lines must match the order category' }, 400);
+  const lineCats: string[] = [];
+  for (let i = 0; i < body.lines.length; i++) {
+    const cat = body.lines[i].category ?? body.category;
+    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    lineCats.push(cat);
   }
 
-  // Enforce the category exists and is enabled (prd-gaps categories table).
-  const catRow = (await sql<{ enabled: boolean }[]>`
-    SELECT enabled FROM categories WHERE id = ${body.category} LIMIT 1
-  `)[0];
-  if (!catRow) return c.json({ error: `unknown category: ${body.category}` }, 400);
-  if (!catRow.enabled) return c.json({ error: `category ${body.category} is disabled` }, 400);
+  // Every category a line claims must exist and be enabled — checked per line,
+  // not once on the order, now that one PO can span several.
+  const catErr = await assertCategoriesEnabled(sql, lineCats);
+  if (catErr) return c.json({ error: catErr }, 400);
 
   const feeErr = badFees(body);
   if (feeErr) return c.json({ error: feeErr }, 400);
 
   for (let i = 0; i < body.lines.length; i++) {
     const l = body.lines[i];
-    const issue = serialIssue({ ...l, category: l.category ?? body.category });
+    const issue = serialIssue({ ...l, category: lineCats[i] });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? body.category, l);
+    const labelErr = identityErr(`line ${i + 1}`, lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
 
   // Human-friendly id like PO-1289, allocated atomically (see id-seq.ts).
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
+  // Returned so the client can attach per-line photos, which are buffered
+  // locally until the line it belongs to actually exists. Aligned 1:1 with
+  // the request's `lines` ordering, the same contract PATCH's addedLineIds has.
+  const newLineIds: string[] = [];
+  let derived: { category: string | null; categories: string[] } = { category: null, categories: [] };
   await sql.begin(async (tx) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
@@ -615,7 +714,7 @@ orders.post('/', async (c) => {
         other_fees, other_fees_note, lifecycle
       )
       VALUES (
-        ${newId}, ${u.id}, ${body.category},
+        ${newId}, ${u.id}, ${deriveCategory(lineCats) ?? lineCats[0]},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
@@ -623,26 +722,28 @@ orders.post('/', async (c) => {
     `;
     for (let i = 0; i < body.lines.length; i++) {
       const l = body.lines[i];
-      await tx`
+      const inserted = await tx`
         INSERT INTO order_lines (
           order_id, category, brand, capacity, generation, type, classification, rank, speed,
           interface, form_factor, description, item_type, part_number, serial_number, chip_number, condition, qty,
           unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
           health, rpm
         ) VALUES (
-          ${newId}, ${l.category ?? body.category}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
+          ${newId}, ${lineCats[i]}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-          ${resolvePartNumber(l.category ?? body.category, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
-          ${l.unitCost}, ${l.sellPrice ?? null}, 'Draft',
+          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
+          ${l.unitCost}, ${normSellPrice(l.sellPrice)}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
         )
-      `;
+        RETURNING id
+      ` as { id: string }[];
+      newLineIds.push(inserted[0].id);
     }
-    await autoTrackParts(tx, body.lines.map(l => ({
-      category: l.category ?? body.category,
-      partNumber: resolvePartNumber(l.category ?? body.category, l),
+    await autoTrackParts(tx, body.lines.map((l, i) => ({
+      category: lineCats[i],
+      partNumber: resolvePartNumber(lineCats[i], l),
       brand: l.brand,
       capacity: l.capacity,
       type: l.type,
@@ -656,10 +757,21 @@ orders.post('/', async (c) => {
       rpm: l.rpm,
     })));
 
+    // Written before the event so `created` carries the value the order
+    // actually ended up with rather than whatever the client proposed.
+    derived = await syncOrderCategory(tx, newId);
+    // The goods total follows the lines unless this request stated one of its
+    // own — the create path is the one place a negotiated lot price can still
+    // enter, since no screen offers a field for it any more. Zero is not one
+    // of those: taking it literally pinned the column at $0 against real lines
+    // with nothing left anywhere able to correct it.
+    await syncOrderGoodsTotal(tx, newId, !(Number(body.totalCost) > 0));
+
     // Baseline of the timeline. Without it a freshly-created PO reads as an
     // order with no history at all until someone submits it.
     await writeOrderEvent(tx, newId, u.id, 'created', {
-      category: body.category,
+      category: derived.category,
+      categories: derived.categories,
       lineCount: body.lines.length,
       qty: body.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
       totalCost: body.totalCost ?? null,
@@ -667,7 +779,7 @@ orders.post('/', async (c) => {
     });
   });
 
-  return c.json({ id: newId }, 201);
+  return c.json({ id: newId, lineIds: newLineIds }, 201);
 });
 
 // ── Edit — update order meta + line item details. The order owner
@@ -680,6 +792,10 @@ orders.post('/', async (c) => {
 //   addLines:       new line rows to INSERT (no `id`)
 //   removeLineIds:  ids to DELETE (will 409 if referenced by sell_order_lines)
 type LineFields = {
+  // Editable: a line filed under the wrong category is corrected in place
+  // rather than deleted and retyped. Switching clears the spec fields the old
+  // category owned — see staleSpecDbCols.
+  category?: LineCategory;
   sellPrice?: number | null;
   qty?: number;
   unitCost?: number;
@@ -704,6 +820,25 @@ type LineFields = {
   scanConfidence?: number | null;
 };
 type LinePatch = LineFields & { id: string };
+
+// The stored shape PATCH reads before writing: enough to merge a patch against
+// (category/serial/item-type rules) and to tell a synthetic part number from a
+// typed one when a line changes category.
+type StoredLine = {
+  id: string;
+  category: string | null;
+  generation: string | null;
+  qty: number;
+  serial_number: string | null;
+  item_type: string | null;
+  part_number: string | null;
+  brand: string | null;
+  capacity: string | null;
+  interface: string | null;
+  form_factor: string | null;
+  speed: string | null;
+  rpm: number | null;
+};
 
 orders.patch('/:id', async (c) => {
   const u = c.var.user;
@@ -792,55 +927,89 @@ orders.patch('/:id', async (c) => {
   // actually CHANGES serial/qty/generation. The edit forms echo every field
   // back on save, so a mere "touched" test would retro-block price/status
   // edits on legacy serial-less lines.
+
+  // A new line may inherit the order's category, but orders.category is a
+  // DERIVATION of the lines — it reads 'Mixed' when they disagree, and an empty
+  // draft holds 'Mixed' as a placeholder. Neither is a category a line may
+  // claim, so there is nothing to inherit and the request has to name one.
+  const inheritedCat =
+    existing.category && existing.category !== 'Mixed' ? (existing.category as string) : null;
+  const addCats: string[] = [];
   for (let i = 0; i < (body.addLines ?? []).length; i++) {
     const l = body.addLines![i];
-    const issue = serialIssue({
-      ...l,
-      category: l.category ?? (existing.category as string),
-      qty: l.qty ?? 1,
-    });
+    const cat = l.category ?? inheritedCat;
+    if (!cat) return c.json({ error: `line ${i + 1}: category is required` }, 400);
+    addCats.push(cat);
+    const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemTypeErr(`line ${i + 1}`, l.category ?? (existing.category as string), l);
+    const labelErr = identityErr(`line ${i + 1}`, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
-  // Existing lines are checked only when the patch actually carries the field.
-  // Lines predating item types hold NULL, and a status or price edit must not
-  // retro-block on them — but an edit that submits the field blank is a real
-  // attempt to clear it.
-  if (existing.category === 'Other') {
-    for (const l of body.lines ?? []) {
-      if (l.itemType === undefined) continue;
-      const labelErr = itemTypeErr(`line ${l.id}`, 'Other', l);
+
+  // One pre-read covering both the item-type and the serial rules. Each is
+  // evaluated against the line's OWN category merged with the patch — the
+  // order's category is derived from its lines and says nothing about any
+  // individual one.
+  const patchIds = (body.lines ?? []).map(l => l.id);
+  const storedById = new Map<string, StoredLine>();
+  if (patchIds.length) {
+    const rows = await sql`
+      SELECT id, category, generation, qty, serial_number, item_type, part_number,
+             brand, capacity, interface, form_factor, speed, rpm
+      FROM order_lines
+      WHERE order_id = ${id} AND id = ANY(${patchIds}::uuid[])
+    ` as StoredLine[];
+    for (const r of rows) storedById.set(r.id, r);
+  }
+
+  // Categories this request actually PUTS a line into: every new line's
+  // resolved category (a new line inheriting the order's must be checked too —
+  // reading the raw field would let it be filed under a disabled one), and only
+  // those existing lines whose category really moves. The edit forms echo
+  // `category` back on every line, so testing the raw field instead would
+  // retro-block a price edit on any PO holding a legacy line of a category
+  // that has since been turned off.
+  const touchedCats = [...addCats];
+
+  for (const l of body.lines ?? []) {
+    const row = storedById.get(l.id);
+    if (!row) continue; // unknown ids no-op in the UPDATE below too
+    const mergedCat = l.category ?? row.category ?? undefined;
+    if (l.category !== undefined && l.category !== row.category) touchedCats.push(l.category);
+
+    // Checked when the patch carries the item type, and when it moves the line
+    // between categories — switching INTO Other without naming a type in the
+    // same patch would otherwise land an unidentifiable line. Lines predating
+    // item types hold NULL, so an untouched one is left alone.
+    if (l.itemType !== undefined || l.category !== undefined) {
+      const merged = l.itemType !== undefined ? l : { itemType: row.item_type };
+      const labelErr = identityErr(`line ${l.id}`, mergedCat, merged);
       if (labelErr) return c.json({ error: labelErr }, 400);
     }
+
+    // Generation belongs to RAM alone, so a line leaving RAM has it cleared —
+    // evaluate the post-clear value, or switching a DDR5 line to SSD would
+    // still demand serials for a generation the line no longer has.
+    const clearing = l.category !== undefined && l.category !== row.category
+      ? new Set(staleSpecDbCols(l.category))
+      : new Set<string>();
+    const merged = {
+      generation: clearing.has('generation') ? null : (l.generation ?? row.generation),
+      qty: l.qty ?? row.qty,
+      serialNumber: l.serialNumber ?? row.serial_number,
+    };
+    const changes =
+      l.category !== undefined && l.category !== row.category ||
+      (merged.generation ?? null) !== (row.generation ?? null) ||
+      Number(merged.qty) !== Number(row.qty) ||
+      (merged.serialNumber ?? '') !== (row.serial_number ?? '');
+    if (!changes) continue;
+    const issue = serialIssue({ category: mergedCat ?? null, ...merged });
+    if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
   }
-  const serialTouched = (body.lines ?? []).filter(
-    l => l.serialNumber != null || l.qty != null || l.generation != null,
-  );
-  if (serialTouched.length) {
-    const rows = await sql`
-      SELECT id, category, generation, qty, serial_number
-      FROM order_lines
-      WHERE order_id = ${id} AND id = ANY(${serialTouched.map(l => l.id)}::uuid[])
-    ` as { id: string; category: string | null; generation: string | null; qty: number; serial_number: string | null }[];
-    const byId = new Map(rows.map(r => [r.id, r]));
-    for (const l of serialTouched) {
-      const row = byId.get(l.id);
-      if (!row) continue; // unknown ids no-op in the UPDATE below too
-      const merged = {
-        generation: l.generation ?? row.generation,
-        qty: l.qty ?? row.qty,
-        serialNumber: l.serialNumber ?? row.serial_number,
-      };
-      const changes =
-        (merged.generation ?? null) !== (row.generation ?? null) ||
-        Number(merged.qty) !== Number(row.qty) ||
-        (merged.serialNumber ?? '') !== (row.serial_number ?? '');
-      if (!changes) continue;
-      const issue = serialIssue({ category: row.category, ...merged });
-      if (issue) return c.json({ error: serialErr(`line ${l.id}`, issue) }, 400);
-    }
-  }
+
+  const patchCatErr = await assertCategoriesEnabled(sql, touchedCats);
+  if (patchCatErr) return c.json({ error: patchCatErr }, 400);
 
   // R2 keys of label scans whose lines get removed — deleted after the tx
   // commits (R2 isn't transactional; never delete on a rolled-back change).
@@ -893,13 +1062,28 @@ orders.patch('/:id', async (c) => {
         }
       }
 
+      // Read before anything moves: afterwards a goods total that merely went
+      // stale is indistinguishable from one that was negotiated. Only asked
+      // when this request will actually change the lines, and skipped when it
+      // states a goods total outright — then the client's figure is the answer.
+      const touchesLines = !!(body.lines || body.addLines || body.removeLineIds);
+      // Only a positive figure is a negotiated lot price. POST reads it the
+      // same way, and for the same reason: stored literally, a 0 pins the
+      // column at $0 against real lines, and no screen sends a totalCost any
+      // more to put it back. Anything else non-positive (or unparseable) is
+      // read as "not stated" rather than written through.
+      const statedGoods = Number(body.totalCost) > 0 ? Number(body.totalCost) : undefined;
+      const goodsFollowsLines = (touchesLines || body.totalCost !== undefined) && statedGoods === undefined
+        ? await goodsTotalIsMirror(tx, id)
+        : false;
+
       // Snapshot the lines we'll edit / remove so we can diff after the writes.
       // NUMERIC columns come back as strings from postgres.js by default; cast
       // to float so the diff compares numbers, not "120.00" string forms.
       const editIds = Array.isArray(body.lines) ? body.lines.map(l => l.id) : [];
       const linesBefore = editIds.length
         ? await tx`
-            SELECT id, status, qty, brand, capacity, type, generation, classification,
+            SELECT id, status, qty, category, brand, capacity, type, generation, classification,
                    rank, speed, interface, form_factor, description, item_type, part_number,
                    serial_number, chip_number, condition, rpm,
                    unit_cost::float AS unit_cost,
@@ -910,7 +1094,7 @@ orders.patch('/:id', async (c) => {
       const beforeMap = new Map<string, Record<string, unknown>>(
         linesBefore.map(l => [l.id as string, l as Record<string, unknown>]));
 
-      let removedSnapshots: Array<{ id: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+      let removedSnapshots: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
 
       const touchesOrder =
         body.totalCost !== undefined ||
@@ -925,7 +1109,7 @@ orders.patch('/:id', async (c) => {
         // them by sending `null`; bare COALESCE would treat null as "no
         // change" and silently keep the old value. `payment` is a non-null
         // enum, so COALESCE is correct for it.
-        const setTotalCost = body.totalCost   !== undefined ? 1 : 0;
+        const setTotalCost = statedGoods !== undefined ? 1 : 0;
         const setNotes     = body.notes       !== undefined ? 1 : 0;
         const setWarehouse = body.warehouseId !== undefined ? 1 : 0;
         const setCommission = body.commissionRate !== undefined ? 1 : 0;
@@ -933,7 +1117,7 @@ orders.patch('/:id', async (c) => {
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         await tx`
           UPDATE orders SET
-            total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${body.totalCost ?? null}   ELSE total_cost   END,
+            total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${statedGoods ?? null}      ELSE total_cost   END,
             notes        = CASE WHEN ${setNotes}::int     = 1 THEN ${body.notes ?? null}       ELSE notes        END,
             warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
             commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${clampedRate ?? null} ELSE commission_rate END,
@@ -949,15 +1133,91 @@ orders.patch('/:id', async (c) => {
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`
-          SELECT id, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
+          SELECT id, category, scan_image_id, part_number, qty, unit_cost::float AS unit_cost FROM order_lines
           WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])
-        ` as { id: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
-        removedSnapshots = doomed.map(r => ({ id: r.id, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
-        for (const r of doomed) if (r.scan_image_id) removedScanKeys.push(r.scan_image_id);
+        ` as { id: string; category: string; scan_image_id: string | null; part_number: string | null; qty: number; unit_cost: number }[];
+        removedSnapshots = doomed.map(r => ({ id: r.id, category: r.category, part_number: r.part_number, qty: r.qty, unit_cost: r.unit_cost }));
+        // Read before the DELETE cascades the rows away. Same list as the scan
+        // keys, so the existing post-commit sweep covers both.
+        //
+        // Keyed off `doomed`, NOT the raw removeLineIds: the request's ids are
+        // unverified, and an id belonging to somebody else's PO would delete
+        // that PO's objects out of R2 while its rows survived pointing at them.
+        const doomedPhotos = doomed.length ? await tx`
+          SELECT storage_key FROM order_line_photos
+          WHERE order_line_id = ANY(${doomed.map(r => r.id)}::uuid[])
+        ` as { storage_key: string }[] : [];
+        for (const p of doomedPhotos) removedScanKeys.push(p.storage_key);
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
+
+        // A scan key is NOT owned by the line that carries it: a partial
+        // transfer clones scan_image_id onto a second line in the same order,
+        // so deleting one of the pair would take the survivor's picture with
+        // it. Photo storage_keys need no such test — each upload mints its own
+        // key and the clone doesn't copy the rows.
+        const doomedScans = doomed.map(r => r.scan_image_id).filter(Boolean) as string[];
+        if (doomedScans.length) {
+          const stillUsed = new Set((await tx`
+            SELECT DISTINCT scan_image_id FROM order_lines
+            WHERE scan_image_id = ANY(${doomedScans})
+          ` as { scan_image_id: string }[]).map(r => r.scan_image_id));
+          for (const k of doomedScans) if (!stillUsed.has(k)) removedScanKeys.push(k);
+        }
       }
       if (Array.isArray(body.lines)) {
-        for (const l of body.lines) {
+        // Re-read under the order lock. `storedById` was read on the pool
+        // before the transaction and is right for the 400-level validation,
+        // but it decides the spec-column clear below — and a concurrent patch
+        // that committed a category switch in between leaves it claiming the
+        // OLD category, so the clear is skipped and the row keeps columns the
+        // category it now holds does not own.
+        const lockedById = new Map<string, StoredLine>();
+        const lockedRows = await tx`
+          SELECT id, category, generation, qty, serial_number, item_type, part_number,
+                 brand, capacity, interface, form_factor, speed, rpm
+          FROM order_lines
+          WHERE order_id = ${id} AND id = ANY(${body.lines.map(l => l.id)}::uuid[])
+        ` as StoredLine[];
+        for (const r of lockedRows) lockedById.set(r.id, r);
+
+        for (let l of body.lines) {
+          const stored = lockedById.get(l.id);
+          // Clear-then-apply. A line moving to a new category first has the old
+          // category's spec columns NULLed (the COALESCE update below can only
+          // write values, never clear them), then the normal update re-applies
+          // whatever the patch carries for the new one.
+          if (stored && l.category !== undefined && l.category !== stored.category) {
+            const stale = staleSpecDbCols(l.category);
+            if (stale.length) {
+              await tx`
+                UPDATE order_lines SET ${tx(Object.fromEntries(stale.map(col => [col, null])))}
+                WHERE id = ${l.id} AND order_id = ${id}
+              `;
+            }
+            // A synthetic part number describes the specs of the category it was
+            // built from, so it has to be rebuilt — while a typed/OCR one is the
+            // manufacturer's and stays. Never written back as NULL: inventory
+            // grouping and reference pricing are both keyed on this column.
+            const wasSynthetic = !!stored.part_number
+              && stored.part_number === synthesizePartNumber(stored.category ?? '', {
+                brand: stored.brand, capacity: stored.capacity, interface: stored.interface,
+                formFactor: stored.form_factor, generation: stored.generation,
+                speed: stored.speed, rpm: stored.rpm,
+              });
+            if (wasSynthetic) {
+              const keep = (col: string) => !stale.includes(col);
+              const rebuilt = synthesizePartNumber(l.category, {
+                brand:       l.brand      ?? (keep('brand')       ? stored.brand : null),
+                capacity:    l.capacity   ?? (keep('capacity')    ? stored.capacity : null),
+                interface:   l.interface  ?? (keep('interface')   ? stored.interface : null),
+                formFactor:  l.formFactor ?? (keep('form_factor') ? stored.form_factor : null),
+                generation:  l.generation ?? (keep('generation')  ? stored.generation : null),
+                speed:       l.speed      ?? (keep('speed')       ? stored.speed : null),
+                rpm:         l.rpm        ?? (keep('rpm')         ? stored.rpm : null),
+              });
+              if (rebuilt) l = { ...l, partNumber: rebuilt };
+            }
+          }
           const setSellPrice = l.sellPrice !== undefined ? 1 : 0;
           // `status` is deliberately NOT settable here. Line status is driven
           // by the lifecycle (advance handler) and 'Sold' is a protected
@@ -967,7 +1227,8 @@ orders.patch('/:id', async (c) => {
           // route layer is the gate.
           await tx`
             UPDATE order_lines SET
-              sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${l.sellPrice ?? null} ELSE sell_price END,
+              category       = COALESCE(${l.category ?? null}, category),
+              sell_price     = CASE WHEN ${setSellPrice}::int = 1 THEN ${normSellPrice(l.sellPrice)} ELSE sell_price END,
               qty            = COALESCE(${l.qty ?? null}, qty),
               unit_cost      = COALESCE(${l.unitCost ?? null}, unit_cost),
               brand          = COALESCE(${l.brand ?? null}, brand),
@@ -993,13 +1254,15 @@ orders.patch('/:id', async (c) => {
           `;
         }
       }
-      let addedRows: Array<{ id: string; part_number: string | null; qty: number; unit_cost: number }> = [];
+      let addedRows: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
       if (Array.isArray(body.addLines) && body.addLines.length) {
         // New lines default to the order's category. Position appends after
         // current max so they sort to the end.
         const posRow = (await tx`SELECT COALESCE(MAX(position), -1) AS p FROM order_lines WHERE order_id = ${id}`)[0] as { p: number };
         let pos = posRow.p + 1;
-        for (const l of body.addLines) {
+        for (let i = 0; i < body.addLines.length; i++) {
+          const l = body.addLines[i];
+          const cat = addCats[i];
           const inserted = await tx`
             INSERT INTO order_lines (
               order_id, category, brand, capacity, generation, type, classification, rank, speed,
@@ -1007,24 +1270,24 @@ orders.patch('/:id', async (c) => {
               unit_cost, sell_price, status, scan_image_id, scan_confidence, position,
               health, rpm
             ) VALUES (
-              ${id}, ${l.category ?? (existing.category as string)},
+              ${id}, ${cat},
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-              ${resolvePartNumber(l.category ?? (existing.category as string), l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
-              ${l.unitCost ?? 0}, ${l.sellPrice ?? null},
+              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${l.unitCost ?? 0}, ${normSellPrice(l.sellPrice)},
               ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
             )
-            RETURNING id, part_number, qty, unit_cost::float AS unit_cost
-          ` as { id: string; part_number: string | null; qty: number; unit_cost: number }[];
+            RETURNING id, category, part_number, qty, unit_cost::float AS unit_cost
+          ` as { id: string; category: string; part_number: string | null; qty: number; unit_cost: number }[];
           addedRows.push(inserted[0]);
           addedLineIds.push(inserted[0].id);
         }
-        await autoTrackParts(tx, body.addLines.map(l => ({
-          category: l.category ?? (existing.category as string),
-          partNumber: resolvePartNumber(l.category ?? (existing.category as string), l),
+        await autoTrackParts(tx, body.addLines.map((l, i) => ({
+          category: addCats[i],
+          partNumber: resolvePartNumber(addCats[i], l),
           brand: l.brand,
           capacity: l.capacity,
           type: l.type,
@@ -1039,9 +1302,36 @@ orders.patch('/:id', async (c) => {
         })));
       }
 
+      // A PO that HAD lines may not be left with none. Both clients block it,
+      // but the API did not, and an emptied order keeps the NOT NULL category
+      // its last line derived — a chip with nothing behind it — while its goods
+      // total resets to 0. An always-empty draft is untouched: it has nothing
+      // to remove, so this can only fire on a request that removed something.
+      if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
+        const [{ n }] = await tx<{ n: number }[]>`
+          SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id = ${id}
+        `;
+        if (n === 0) throw new Error('__ORDER_WOULD_BE_EMPTY__');
+      }
+
+      // Category and goods total are both denormalizations of the lines,
+      // recomputed after every add, remove and edit. Without this the tape
+      // itemised categories that summed to one figure under a goods total that
+      // still held the pre-edit one. Ahead of the audit block, not after it:
+      // total_cost is one of META_FIELDS, so diffing before the derivation ran
+      // left every goods-total move off the timeline.
+      if (touchesLines) {
+        await syncOrderCategory(tx, id);
+        await syncOrderGoodsTotal(tx, id, goodsFollowsLines);
+      }
+
       // ── Audit. Each kind is written as its own event row so the timeline
       // reads in the order it happened.
-      if (touchesOrder) {
+      //
+      // Also entered on a lines-only patch: total_cost is a META_FIELD that the
+      // derivation above may have just moved, and `diff` reports nothing when
+      // it hasn't, so the extra read costs a query and never a false event.
+      if (touchesOrder || touchesLines) {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
@@ -1065,7 +1355,7 @@ orders.patch('/:id', async (c) => {
       if (patches.length > 0) {
         const patchIds = patches.map(p => p.id);
         const afters = (await tx`
-          SELECT id, status, qty, brand, capacity, type, generation, classification,
+          SELECT id, status, qty, category, brand, capacity, type, generation, classification,
                  rank, speed, interface, form_factor, description, item_type, part_number,
                  serial_number, chip_number, condition, rpm,
                  unit_cost::float AS unit_cost,
@@ -1093,6 +1383,7 @@ orders.patch('/:id', async (c) => {
       for (const r of addedRows) {
         await writeOrderEvent(tx, id, u.id, 'line_added', {
           lineId: r.id,
+          category: r.category,
           partNumber: r.part_number,
           qty: r.qty,
           unitCost: r.unit_cost,
@@ -1101,16 +1392,21 @@ orders.patch('/:id', async (c) => {
       for (const r of removedSnapshots) {
         await writeOrderEvent(tx, id, u.id, 'line_removed', {
           lineId: r.id,
+          category: r.category,
           partNumber: r.part_number,
           qty: r.qty,
           unitCost: r.unit_cost,
         });
       }
+
     });
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
     if (msg.includes('__DONE_LOCKED__')) {
       return c.json({ error: 'Order is Done and cannot be modified. Use the advance-back flow if needed.' }, 409);
+    }
+    if (msg.includes('__ORDER_WOULD_BE_EMPTY__')) {
+      return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
     }
     if (/foreign key|violates|referenced/i.test(msg)) {
       return c.json({ error: 'A line you tried to remove is referenced by a sell-order and cannot be deleted' }, 409);
@@ -1119,10 +1415,10 @@ orders.patch('/:id', async (c) => {
   }
 
   // Best-effort R2 cleanup after a successful commit (stub/CF-era keys are
-  // no-ops in deleteAttachment; a missing object delete is idempotent).
-  for (const key of removedScanKeys) {
-    await deleteAttachment(c.env, key).catch(e => console.error('r2 delete (line removed)', e));
-  }
+  // no-ops; a missing object delete is idempotent). Batched: this runs with the
+  // response still open, and a wide removal used to mean one round trip per key.
+  const unswept = await deleteAttachments(c.env, removedScanKeys);
+  if (unswept.length) console.error('r2 delete (line removed)', unswept);
 
   return c.json({ ok: true, addedLineIds });
 });
@@ -1133,10 +1429,16 @@ orders.post('/draft', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    | { category: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
+    | { category?: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
     | null;
-  if (!body || !body.category) {
-    return c.json({ error: 'category is required' }, 400);
+
+  // No category required: the draft is empty, and the order's category is
+  // derived from lines that don't exist yet. The column is NOT NULL, so an
+  // uncommitted draft holds 'Mixed' as a placeholder — clients render the chip
+  // from `categories`, which is empty, so the placeholder never surfaces.
+  if (body?.category) {
+    const catErr = await assertCategoriesEnabled(sql, [body.category]);
+    if (catErr) return c.json({ error: catErr }, 400);
   }
 
   // Allocated inside the transaction so a rollback also rolls back the counter.
@@ -1146,13 +1448,17 @@ orders.post('/draft', async (c) => {
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
-        ${newId}, ${u.id}, ${body.category},
-        ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+        ${newId}, ${u.id}, ${body?.category ?? 'Mixed'},
+        ${body?.warehouseId ?? null}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
         ${null}, 'draft'
       )
     `;
     await writeOrderEvent(tx, newId, u.id, 'created', {
-      category: body.category,
+      // Omitted rather than null when the draft has no category yet: the
+      // timeline interpolates whatever is here, and a null rendered as the
+      // literal text "null" as the first line of every phone-started PO.
+      ...(body?.category ? { category: body.category } : {}),
+      categories: [],
       lineCount: 0,
       qty: 0,
       totalCost: null,
@@ -1177,7 +1483,7 @@ orders.delete('/:id', async (c) => {
     | { kind: 'forbidden' }
     | { kind: 'notDraft' }
     | { kind: 'sold' }
-    | { kind: 'ok'; scanned: { scan_image_id: string }[] };
+    | { kind: 'ok'; scanned: { k: string }[] };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const existing = (await tx`
@@ -1194,10 +1500,13 @@ orders.delete('/:id', async (c) => {
     `)[0];
     if (sold) return { kind: 'sold' };
 
+    // Both R2 sources for this order: label scans and explicit line photos.
     const scanned = await tx`
-      SELECT scan_image_id FROM order_lines
+      SELECT scan_image_id AS k FROM order_lines
       WHERE order_id = ${id} AND scan_image_id IS NOT NULL
-    ` as { scan_image_id: string }[];
+      UNION ALL
+      SELECT storage_key AS k FROM order_line_photos WHERE order_id = ${id}
+    ` as { k: string }[];
 
     await tx`DELETE FROM orders WHERE id = ${id}`; // order_lines cascade via FK
     return { kind: 'ok', scanned };
@@ -1210,10 +1519,11 @@ orders.delete('/:id', async (c) => {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
   }
 
-  // Best-effort: drop the label-scan images from R2 too (after the commit).
-  for (const r of outcome.scanned) {
-    await deleteAttachment(c.env, r.scan_image_id).catch(e => console.error('r2 delete (order deleted)', e));
-  }
+  // Best-effort: drop the images from R2 too (after the commit). One PO can
+  // carry a scan plus six photos per line, so this is batched rather than a
+  // round trip each.
+  const orphaned = await deleteAttachments(c.env, outcome.scanned.map(r => r.k));
+  if (orphaned.length) console.error('r2 delete (order deleted)', orphaned);
 
   return c.json({ ok: true });
 });
@@ -1442,6 +1752,177 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   // R2 delete outside the tx — slow side effect, kept out of the lock window.
   // Best-effort.
   await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  return c.json({ ok: true });
+});
+
+// ─── Per-line photos ───────────────────────────────────────────────────────
+// A picture of the actual goods, attached to one line. Distinct from the
+// order-level Submission evidence above (that is the receipt for the whole
+// PO) and from the AI label scan (that is a by-product of OCR, and only RAM
+// lines ever get one). Any line may carry photos. The cap is shared so the
+// picker stops at the same number this route enforces.
+
+// order_lines.id is uuid-typed, so a mangled id would make Postgres throw and
+// 500 the route rather than 404 cleanly.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The purchaser who raised the PO photographs the goods, and pictures keep
+// arriving after it has moved to In Transit — so ownership lasts until Done,
+// mirroring the Submission-evidence rule in canWriteMeta.
+function canWritePhotos(u: User, order: { user_id: string; lifecycle: string }): boolean {
+  if (effectiveRole(u) === 'manager') return true;
+  return order.user_id === u.id && order.lifecycle !== 'done';
+}
+
+// Resolves the order + verifies the line belongs to it. A lineId from another
+// order must 404, not silently attach across POs.
+async function loadPhotoTarget(
+  sql: ReturnType<typeof getDb>,
+  orderId: string,
+  lineId: string,
+): Promise<{ user_id: string; lifecycle: string } | null> {
+  if (!UUID_RE.test(lineId)) return null;
+  const order = (await sql`SELECT user_id, lifecycle FROM orders WHERE id = ${orderId} LIMIT 1`)[0] as
+    | { user_id: string; lifecycle: string } | undefined;
+  if (!order) return null;
+  const line = (await sql`
+    SELECT 1 FROM order_lines WHERE id = ${lineId}::uuid AND order_id = ${orderId} LIMIT 1
+  `)[0];
+  return line ? order : null;
+}
+
+orders.post('/:id/lines/:lineId/photos', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const lineId = c.req.param('lineId');
+  const sql = getDb(c.env);
+
+  const order = await loadPhotoTarget(sql, id, lineId);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (!canWritePhotos(u, order)) return c.json({ error: 'Forbidden' }, 403);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+
+  // Images only. The workspace allow-list also permits PDF/XLSX for receipts,
+  // but a spreadsheet is not a photo of a DIMM — narrowing here keeps the
+  // thumbnail grid renderable, the same way routes/scan.ts does.
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  if (!file.type || !file.type.startsWith('image/') || !allowedMime.has(file.type)) {
+    return c.json({ error: `unsupported file type: ${file.type || 'unknown'}` }, 415);
+  }
+  const fitted = await shrinkImageToFit(file, maxBytes);
+  if (fitted.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
+  }
+
+  // No maybeRenameReceipt — that AI rename reads payment receipts, and these
+  // are pictures of hardware.
+  const uploaded = await uploadAttachment(c.env, fitted, `orders/${id}/lines/${lineId}`)
+    .catch(e => { console.error('line photo upload', e); return null; });
+  if (!uploaded) return c.json({ error: 'upload failed' }, 502);
+
+  try {
+    const row = await sql.begin(async (tx) => {
+      // Lock the ORDER first, then the line — the same order PATCH /:id and
+      // /advance take. Locking the line first deadlocks against them: the
+      // INSERT below needs FOR KEY SHARE on the orders row for its FK, which
+      // conflicts with the FOR UPDATE they are already holding while they wait
+      // on this line. Postgres kills one with 40P01 and nothing here retries.
+      const live = (await tx`
+        SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
+      `)[0] as { user_id: string; lifecycle: string } | undefined;
+      // Re-checked under the lock: the permission read happened before the
+      // image shrink and the R2 round trip, seconds a manager can spend
+      // advancing the order to Done out from under it.
+      if (!live) throw new Error('__ORDER_GONE__');
+      if (!canWritePhotos(u, live)) throw new Error('__FORBIDDEN__');
+
+      // Serialise concurrent uploads on the parent line — two racing requests
+      // would otherwise both see room under the cap and both insert. The lock
+      // goes on order_lines because FOR UPDATE can't be combined with the
+      // aggregate below.
+      await tx`SELECT 1 FROM order_lines WHERE id = ${lineId}::uuid FOR UPDATE`;
+      const existing = (await tx`
+        SELECT COALESCE(MAX(position), -1) AS max_pos, COUNT(*)::int AS n
+        FROM order_line_photos WHERE order_line_id = ${lineId}::uuid
+      `)[0] as { max_pos: number; n: number };
+      if (existing.n >= LINE_PHOTO_CAP) throw new Error('__PHOTO_CAP__');
+      const r = (await tx`
+        INSERT INTO order_line_photos
+          (order_line_id, order_id, filename, size_bytes, mime_type, storage_key, delivery_url, position, uploaded_by)
+        VALUES
+          (${lineId}::uuid, ${id}, ${fitted.name}, ${fitted.size},
+           ${fitted.type || 'image/jpeg'},
+           ${uploaded.storageKey}, ${uploaded.deliveryUrl}, ${existing.max_pos + 1}, ${u.id})
+        RETURNING id, filename, size_bytes, mime_type, delivery_url, uploaded_at
+      `)[0];
+      await writeOrderEvent(tx, id, u.id, 'line_photo_added', {
+        lineId, photoId: r.id, filename: r.filename, size: r.size_bytes, mime: r.mime_type,
+      });
+      return r;
+    });
+    return c.json({
+      photo: {
+        id: row.id, url: row.delivery_url, source: 'upload',
+        filename: row.filename, size: row.size_bytes, mime: row.mime_type,
+        uploadedAt: row.uploaded_at,
+      },
+    });
+  } catch (e) {
+    // The upload precedes the transaction, so ANY rollback — the cap, a
+    // serialization failure, a pool timeout — leaves an object in R2 that no
+    // row owns. Nothing else can find it later: both cleanup paths (order
+    // delete and the removeLineIds sweep) read their keys out of
+    // order_line_photos, and the row is exactly what didn't commit.
+    await deleteAttachment(c.env, uploaded.storageKey).catch(() => { /* best-effort */ });
+    const msg = (e as { message?: string })?.message ?? '';
+    if (msg.includes('__PHOTO_CAP__')) {
+      return c.json({ error: `at most ${LINE_PHOTO_CAP} photos per line` }, 409);
+    }
+    if (msg.includes('__ORDER_GONE__')) return c.json({ error: 'Not found' }, 404);
+    if (msg.includes('__FORBIDDEN__')) return c.json({ error: 'Forbidden' }, 403);
+    throw e;
+  }
+});
+
+orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const lineId = c.req.param('lineId');
+  const photoId = c.req.param('photoId');
+  const sql = getDb(c.env);
+
+  // A scan-sourced photo is addressed as `scan:<key>`, which is not a UUID —
+  // it belongs to label_scans and is removed by re-scanning, not from here.
+  if (!UUID_RE.test(photoId)) return c.json({ error: 'Not found' }, 404);
+
+  const order = await loadPhotoTarget(sql, id, lineId);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (!canWritePhotos(u, order)) return c.json({ error: 'Forbidden' }, 403);
+
+  const removed = await sql.begin(async (tx) => {
+    // Orders row first, as everywhere else that writes under this order — the
+    // photo delete touches a table whose FK makes Postgres take KEY SHARE on
+    // it anyway, so taking it in the other order deadlocks against PATCH.
+    await tx`SELECT 1 FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`;
+    const row = (await tx`
+      SELECT storage_key, filename FROM order_line_photos
+      WHERE id = ${photoId}::uuid AND order_line_id = ${lineId}::uuid AND order_id = ${id}
+      LIMIT 1
+    `)[0] as { storage_key: string; filename: string } | undefined;
+    if (!row) return null;
+    await tx`DELETE FROM order_line_photos WHERE id = ${photoId}::uuid`;
+    await writeOrderEvent(tx, id, u.id, 'line_photo_removed', {
+      lineId, photoId, filename: row.filename,
+    });
+    return row;
+  });
+
+  if (!removed) return c.json({ error: 'Not found' }, 404);
+  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete (line photo)', e));
   return c.json({ ok: true });
 });
 

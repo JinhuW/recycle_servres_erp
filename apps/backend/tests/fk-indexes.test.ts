@@ -19,6 +19,10 @@ describe('FK / join column indexes', () => {
       'transfer_orders_created_by_idx',
       'transfer_orders_received_by_idx',
       'order_lines_scan_image_idx',
+      'order_lines_category_order_idx',
+      'order_line_photos_line_idx',
+      'order_line_photos_order_idx',
+      'order_line_photos_uploaded_by_idx',
     ]) {
       expect(have.has(idx), `missing index ${idx}`).toBe(true);
     }

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { PhTabBar, type View } from './components/PhTabBar';
-import { PhCategorySheet } from './components/PhCategorySheet';
 import { PhDraftPickerSheet } from './components/PhDraftPickerSheet';
 import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
 import { PhAboutSheet } from './components/PhAboutSheet';
 import { PhPasswordSheet } from './components/PhPasswordSheet';
+import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
@@ -15,36 +15,93 @@ import { Camera } from './pages/Camera';
 import { SubmitForm } from './pages/SubmitForm';
 import { OrderReview } from './pages/OrderReview';
 import { Orders } from './pages/Orders';
-import { OrderDetail } from './pages/OrderDetail';
+import { OrderDetail, type OrderMetaDraft } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
 import { ShareTarget } from './pages/ShareTarget';
 
+import {
+  linePhotos, deleteLinePhoto, uploadedPhotoCount, useLinePhotoBuffer,
+  type LinePhoto, type PendingPhoto,
+} from './lib/linePhotos';
+import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
+
 import { useAuth } from './lib/auth';
 import { useEffectiveUser } from './lib/tweaks';
 import { useT, I18N } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
-import { handleFetchError, showErrorToast } from './lib/errorToast';
+import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
-  navigate, useRoute, match,
+  navigate, navigateBack, useRoute, match,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
-import type { Category, DraftLine, Notification, Order, OrderSummary, ScanResponse } from './lib/types';
+import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
 import { buildOrderSubmit, type SubmitMeta } from './lib/orderSubmit';
 import { findDuplicateLine } from './lib/dupParts';
 
-type ReturnTo = 'idle' | 'review';
+// Where a line form goes when it closes. 'detail' is an existing order: the
+// form was opened from its detail screen, which owns the order, so the trip
+// ends back there rather than on a review screen that would re-ask for the
+// order's warehouse/payment/notes.
+type ReturnTo = 'idle' | 'review' | 'detail';
 
 type CaptureState =
   | { phase: 'idle' }
-  | { phase: 'category' }
-  | { phase: 'draftPicker'; category: Category; drafts: OrderSummary[] }
+  | { phase: 'draftPicker'; drafts: OrderSummary[] }
   | { phase: 'camera';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
   | { phase: 'form';    category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; editingLineIdx?: number | null; returnTo: ReturnTo; draftId?: string; rescanDraft?: DraftLine | null }
-  | { phase: 'review';  category: Category;  detected: ScanResponse | null; lines: DraftLine[]; editingId?: string | null; originalLineIds?: string[]; draftId?: string };
+  // Review holds a heterogeneous list, so it has no single category — each
+  // line carries its own. `camera` and `form` keep theirs: they edit ONE line,
+  // and both the scan endpoint and the field groups need to know which kind.
+  // It only ever holds a NEW order; an existing one never enters this phase.
+  // `originalLineIds` is what a RESUMED draft already had on the server, so
+  // submit can name the ones deleted since.
+  | { phase: 'review';  detected: ScanResponse | null; lines: DraftLine[]; originalLineIds?: string[]; draftId?: string };
 
-type Toast = { msg: string; kind: 'success' | 'error' };
+type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
+
+type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; notes: string };
+
+// An order's line as the capture form wants it. Shared by the draft-resume
+// path and the detail screen's line edits so the two can't drift.
+const toDraftLine = (l: OrderLine): DraftLine => ({
+  id: l.id,
+  // It came out of the DB, so it is already there. Without this a resumed
+  // draft's lines look brand new to buildOrderSubmit and it appends a second
+  // copy of every one of them on submit.
+  _confirmed: true,
+  category: l.category,
+  brand: l.brand,
+  capacity: l.capacity,
+  type: l.type,
+  generation: l.generation,
+  classification: l.classification,
+  rank: l.rank,
+  speed: l.speed,
+  interface: l.interface,
+  formFactor: l.formFactor,
+  description: l.description,
+  // Required on an Other line: the save echoes every line back, and the
+  // per-line guard reads a missing one as an explicit null.
+  itemType: l.itemType,
+  partNumber: l.partNumber,
+  serialNumber: l.serialNumber,
+  chipNumber: l.chipNumber,
+  condition: l.condition,
+  qty: l.qty,
+  unitCost: l.unitCost,
+  sellPrice: l.sellPrice ?? null,
+  scanImageId: l.scanImageId,
+  scanConfidence: l.scanConfidence,
+  scanImageUrl: l.scanImageUrl,
+  health: l.health,
+  rpm: l.rpm,
+  label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
+       : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
+       : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
+       : (l.description ?? 'Item'),
+});
 
 function Shell() {
   const { user, loading, logout, pendingRoleChoice } = useAuth();
@@ -52,7 +109,7 @@ function Shell() {
   // Purchaser" sees the purchaser tabs (Market, not Inventory), matching the
   // desktop sidebar and the purchaser-scoped data.
   const effUser = useEffectiveUser();
-  const { t } = useT();
+  const { t, lang } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
   // The 'submit' tab triggers the capture flow (onCenterPress) and has no
@@ -68,18 +125,49 @@ function Shell() {
     return () => { document.body.classList.remove('phone-mode'); };
   }, []);
   const [capture, setCapture] = useState<CaptureState>({ phase: 'idle' });
-  // The draft order is created asynchronously when the flow starts, so the form
-  // is shown before its id lands in `capture`. Hold the in-flight creation here
-  // so a fast Save can await the id instead of silently dropping the line to
-  // local-only (it would then only reach the DB on final submit).
+  // Order-level fees, held here rather than in OrderReview: that screen
+  // unmounts on every trip into a line form, and an order opened for edit
+  // arrives carrying the fee it was saved with.
+  const [orderFees, setOrderFees] = useState({ amount: '', note: '' });
+  // Same reason as the fees above: a resumed draft was saved with a warehouse,
+  // a payment type and notes, and the review screen unmounts on every trip
+  // into a line form. Left to its own defaults it would offer `warehouses[0]`
+  // and blank notes, then write those back over what the draft already had.
+  const [reviewMeta, setReviewMeta] = useState<ReviewMeta | null>(null);
+  // The draft order is created on demand by `ensureDraftId`, and its id lands
+  // in `capture` a round trip later. Hold the in-flight POST here so a second
+  // save awaits the same one instead of opening a second order.
   const draftIdPromise = useRef<Promise<string | null> | null>(null);
+  // Bumped whenever a capture session ends. An autosave that is mid-flight
+  // across the draft-creation round trip reads this after the await to tell
+  // whether the session it belongs to is still the live one.
+  const captureGen = useRef(0);
+  // ── Line photos ──────────────────────────────────────────────────────────
+  // Held here rather than in SubmitForm: that screen unmounts the moment a line
+  // is saved, and a picked file has to outlive it — a line has nowhere to put a
+  // photo until the save gives it an id. Keyed by the line's client id, or its
+  // server id for a line that arrived already persisted.
+  const [savedPhotos, setSavedPhotos] = useState<Record<string, LinePhoto[]>>({});
+  const photoBuffer = useLinePhotoBuffer((key, saved) =>
+    setSavedPhotos(prev => ({ ...prev, [key]: [...(prev[key] ?? []), ...saved] })));
+
   const [toast, setToast] = useState<Toast | null>(null);
+  // Errors queue rather than overwrite: a line save and its photo upload can
+  // fail in the same tap, and the second problem used to replace the first
+  // before it had been read. Shared with the desktop shell.
+  const {
+    current: errorDialog, push: pushErrorDialog, dismiss: dismissErrorDialog,
+  } = useErrorDialogQueue();
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
   const [aboutSheet, setAboutSheet] = useState(false);
   const [pwSheet, setPwSheet] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
+  // The detail screen's unsaved fees / notes / warehouse / payment. Held here
+  // because opening a line form unmounts that screen — typing a fee and then
+  // adding the line it is for used to blank the fee.
+  const [detailMeta, setDetailMeta] = useState<OrderMetaDraft | null>(null);
   const orderDetailMatch = match('/purchase-orders/:id', path);
 
   // Load notifications when the user is signed in.
@@ -120,10 +208,10 @@ function Shell() {
         // a manager in role-preview mode follows a link to a PO they don't own.
         navigate('/purchase-orders');
         const status = err instanceof ApiError ? err.status : 0;
-        showErrorToast(
-          status === 403 ? "You don't have access to this purchase order."
-          : status === 404 ? 'That purchase order no longer exists.'
-          : 'Could not open that purchase order.',
+        showErrorDialog(
+          status === 403 ? t('poNoAccess')
+          : status === 404 ? t('poNotFound')
+          : t('poOpenFailed'),
         );
       });
     return () => { alive = false; };
@@ -132,25 +220,92 @@ function Shell() {
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  // Errors never become toasts: they go to the blocking dialog so the user can
+  // read and act on them.
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
+    if (kind === 'error') { pushErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2600);
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
   };
 
-  // Register the global toast hook so `handleFetchError` / `showErrorToast` in
+  // Register the global hooks so `handleFetchError` / `showErrorDialog` in
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
+    window.__showErrorDialog = (msg, details, title) => pushErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
-      setToast({ msg, kind: kind === 'error' ? 'error' : 'success' });
+      if (kind === 'error') { pushErrorDialog({ msg }); return; }
+      setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 2600);
+      toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
     };
-    return () => { delete window.__showToast; };
-  }, []);
+    return () => { delete window.__showToast; delete window.__showErrorDialog; };
+  }, [pushErrorDialog]);
+
+  // ── Line photo handlers ──────────────────────────────────────────────────
+  const photoKey = (l: DraftLine) => l._cid ?? l.id ?? '';
+  const photosFor = (l: DraftLine): LinePhoto[] => savedPhotos[photoKey(l)] ?? linePhotos(l);
+  const pendingFor = (l: DraftLine): PendingPhoto[] => photoBuffer.queuedFor(photoKey(l));
+  // The order the line form is writing into. A session that has not needed a
+  // draft row yet has none, and neither does a line still being captured.
+  const formOrderId = capture.phase === 'form'
+    ? (capture.editingId ?? capture.draftId ?? null)
+    : null;
+
+  const seedPhotos = (order: Order) => setSavedPhotos(prev => {
+    const next = { ...prev };
+    for (const l of order.lines) next[l.id] = linePhotos(l);
+    return next;
+  });
+
+  const addLinePhotos = (l: DraftLine, files: FileList | null) => {
+    photoBuffer.add(photoKey(l), uploadedPhotoCount(photosFor(l)), files);
+  };
+
+  const removePendingPhoto = (l: DraftLine, p: PendingPhoto) =>
+    photoBuffer.remove(photoKey(l), p);
+
+  const removeSavedPhoto = async (l: DraftLine, photo: LinePhoto) => {
+    const lineId = l.id;
+    if (!lineId || !formOrderId) return;
+    const key = photoKey(l);
+    const base = photosFor(l);
+    try {
+      await deleteLinePhoto(formOrderId, lineId, photo.id);
+      setSavedPhotos(prev => ({
+        ...prev, [key]: (prev[key] ?? base).filter(p => p.id !== photo.id),
+      }));
+    } catch {
+      showErrorDialog(t('linePhotoDeleteFailed'));
+    }
+  };
+
+  // Sends what was buffered for a line, now that it has an id. Non-fatal: the
+  // line itself is already saved, so a photo that fails is a warning — and the
+  // buffer keeps it, bytes and preview intact, for the next save to retry.
+  const flushLinePhotos = async (l: DraftLine, orderId: string, lineId: string) => {
+    const { failed } = await photoBuffer.flush(photoKey(l), orderId, lineId);
+    if (failed.length) showErrorDialog(t('linePhotoUploadFailed'));
+  };
 
   // ── Capture flow handlers ────────────────────────────────────────────────
-  const startSubmit = () => setCapture({ phase: 'category' });
+  const startSubmit = async () => {
+    // Which PO comes first; the category is a property of a line, and the line
+    // list's add row asks for it at the moment it matters. Probing here also
+    // keeps every session from silently spawning another empty draft.
+    try {
+      const r = await api.get<{ orders: OrderSummary[] }>(
+        '/api/orders?status=Draft&limit=20&mine=true',
+      );
+      if (r.orders.length > 0) {
+        setCapture({ phase: 'draftPicker', drafts: r.orders });
+        return;
+      }
+    } catch {
+      // Better to let them work than to block on a probe failure.
+    }
+    startNewDraft();
+  };
   const cancelCapture = () => {
     // Best-effort delete an abandoned empty draft (nothing confirmed = no real
     // inventory rows were written). Safe: backend 409s if lifecycle != 'draft'.
@@ -160,46 +315,59 @@ function Shell() {
       capture.phase === 'review'
     ) {
       const { draftId, lines } = capture;
-      if (draftId && !lines.some(l => l._confirmed)) {
-        deleteOrder(draftId).catch(() => {/* best-effort */});
+      if (!lines.some(l => l._confirmed)) {
+        // The id may not have landed in state yet — a draft POST fired by a
+        // save that is still in flight publishes it asynchronously. Resolve the
+        // in-flight promise rather than reading state, or cancelling during
+        // that window leaves the order (and the line the save is about to
+        // append to it) behind as a ghost PO in everyone's draft picker.
+        const pending = draftIdPromise.current;
+        if (draftId) deleteOrder(draftId).catch(() => {/* best-effort */});
+        else if (pending) {
+          pending.then(id => { if (id) return deleteOrder(id); }).catch(() => {/* best-effort */});
+        }
       }
     }
+    captureGen.current++;
+    draftIdPromise.current = null;
     setCapture({ phase: 'idle' });
-    if (window.location.hash.startsWith('#/purchase-orders/')) {
-      navigate('/purchase-orders');
-    }
+    // The URL is left alone: a capture opened from an order's detail screen
+    // (its "Edit items") runs on top of `/purchase-orders/:id`, so dropping the
+    // session there uncovers the order the user was editing. Clearing the id
+    // dumped them on the full list instead.
   };
 
-  // Probe for in-progress drafts in this category before silently spawning a
-  // fresh one. Without this gate every scan session piles up another empty
-  // draft on the server.
-  const pickCategory = async (cat: Category) => {
-    try {
-      const r = await api.get<{ orders: OrderSummary[] }>(
-        `/api/orders?category=${encodeURIComponent(cat)}&status=Draft&limit=20`,
-      );
-      if (r.orders.length > 0) {
-        setCapture({ phase: 'draftPicker', category: cat, drafts: r.orders });
-        return;
-      }
-    } catch {
-      // Fall through to a new draft — better to let them work than block on a
-      // probe failure.
-    }
-    startNewDraft(cat);
+  // A new PO opens on its (empty) line list, where the add row asks which kind
+  // of thing is going in. Nothing is written until there's a line to write.
+  const startNewDraft = () => {
+    setCapture({ phase: 'review', detected: null, lines: [] });
+    setOrderFees({ amount: '', note: '' });
+    captureGen.current++;
+    setReviewMeta(null);
+    draftIdPromise.current = null;
   };
 
-  const startNewDraft = (cat: Category) => {
-    setCapture({ phase: 'form', category: cat, detected: null, lines: [], editingLineIdx: null, returnTo: 'idle' });
-    draftIdPromise.current = createDraftOrder(cat)
+  // The PO row is created by the first line that needs one, never by opening
+  // the flow — a session backed out of at the line list would otherwise leave
+  // an empty order behind, and those pile up in everyone's draft picker.
+  // Memoised in the ref so two quick saves share one POST; cleared on failure
+  // so the next save retries instead of inheriting the rejection.
+  const ensureDraftId = (): Promise<string | null> => {
+    // No category on the draft: it has no lines to derive one from yet, and the
+    // first line will carry its own.
+    draftIdPromise.current ??= createDraftOrder()
       .then(r => {
-        setCapture(c => c.phase === 'idle' ? c : { ...c, draftId: r.id });
+        setCapture(c =>
+          c.phase === 'idle' || c.phase === 'draftPicker' ? c : { ...c, draftId: r.id },
+        );
         return r.id;
       })
       .catch(() => {
-        showToast('Could not start a draft order — retry.', 'error');
+        showToast(t('draftStartFailed'), 'error');
+        draftIdPromise.current = null;
         return null;
       });
+    return draftIdPromise.current;
   };
 
   // Reopen an existing draft on the review screen so the user sees the lines
@@ -208,10 +376,26 @@ function Shell() {
   // into the same PO instead of a fresh one.
   const resumeDraft = async (summary: OrderSummary) => {
     try {
-      const r = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
-      startEdit(r.order);
+      const { order } = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
+      seedPhotos(order);
+      setOrderFees({
+        amount: order.otherFees ? order.otherFees.toFixed(2) : '',
+        note: order.otherFeesNote ?? '',
+      });
+      setReviewMeta({
+        warehouseId: order.warehouse?.id ?? '',
+        payment: order.payment,
+        notes: order.notes ?? '',
+      });
+      setCapture({
+        phase: 'review',
+        detected: null,
+        draftId: order.id,
+        originalLineIds: order.lines.map(l => l.id),
+        lines: order.lines.map(toDraftLine),
+      });
     } catch {
-      showToast('Could not open draft — retry.', 'error');
+      showToast(t('draftOpenFailed'), 'error');
     }
   };
 
@@ -231,6 +415,7 @@ function Shell() {
   // Maps a DraftLine to the wire shape for PATCH /api/orders/:id addLines.
   const toWireLine = (l: DraftLine) => ({
     category: l.category,
+    sellPrice: l.sellPrice == null ? null : Number(l.sellPrice),
     brand: l.brand ?? null,
     capacity: l.capacity ?? null,
     type: l.type ?? null,
@@ -241,6 +426,8 @@ function Shell() {
     interface: l.interface ?? null,
     formFactor: l.formFactor ?? null,
     description: l.description ?? null,
+    // Required on an Other line — omitting it 400'd every autosave of one.
+    itemType: l.itemType ?? null,
     partNumber: l.partNumber ?? null,
     serialNumber: l.serialNumber ?? null,
     chipNumber: l.chipNumber ?? null,
@@ -258,11 +445,13 @@ function Shell() {
   // when it's ready (identity — brand, or description for Other — a positive
   // qty, and a non-negative unit cost). Surfaced to the user so a line never
   // fails to sync silently.
+  // The backstop before a line is written to the server. The form gates on the
+  // same shared rule first, so reaching this with something missing means the
+  // line arrived from somewhere else — a resumed draft, or a category switch
+  // that emptied the fields the new category needs.
   const lineSyncBlock = (l: DraftLine): string | null => {
-    const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
-    if (!hasIdentity) return l.category === 'Other' ? t('syncNeedDescription') : t('syncNeedBrand');
-    if (l.category === 'Other' && !(l.itemType ?? '').trim()) return t('syncNeedItemType');
-    if (!((Number(l.qty) || 0) > 0)) return t('syncNeedQty');
+    const fields = missingFieldNames(lineRequirements(l).missingKeys, t, lang);
+    if (fields) return t('drawerStillNeeded', { fields });
     if (!(Number(l.unitCost) >= 0)) return t('syncNeedCost');
     return null;
   };
@@ -271,23 +460,29 @@ function Shell() {
     // Capture current state synchronously so we can read draftId and compute
     // the new lines array before the async PATCH.
     if (capture.phase !== 'form') return;
-    const { draftId, editingLineIdx, category, editingId, originalLineIds } = capture;
+    const { draftId, editingLineIdx, category, editingId, returnTo, originalLineIds } = capture;
+    const gen = captureGen.current;
 
     // Build the updated lines array.
     const newLines = (editingLineIdx != null)
       ? capture.lines.map((l, i) => i === editingLineIdx ? line : l)
       : [...capture.lines, line];
 
-    // Move to review immediately (optimistic UI).
-    setCapture({
-      phase: 'review',
-      category,
-      detected: null,
-      lines: newLines,
-      editingId,
-      originalLineIds,
-      draftId,
-    });
+    // An existing order has no review step and no Submit — the PATCH below is
+    // the whole save. Hold the form until it lands so the detail screen can't
+    // refetch ahead of the write, and so a failure leaves the user somewhere
+    // they can retry from rather than back on a screen with no save button.
+    const backToDetail = returnTo === 'detail' && !!editingId;
+    const doneToDetail = () => {
+      setCapture({ phase: 'idle' });
+      navigate('/purchase-orders/' + editingId);
+      showToast(t('savedShort'));
+    };
+
+    if (!backToDetail) {
+      // Move to review immediately (optimistic UI).
+      setCapture({ phase: 'review', detected: null, lines: newLines, draftId, originalLineIds });
+    }
 
     // A line that already exists in the DB carries an id — an existing-order
     // line opened for edit, or a draft line we autosaved earlier. Re-saving it
@@ -299,19 +494,27 @@ function Shell() {
         showToast(blocked, 'error');
         return;
       }
-      const orderId = editingId ?? draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+      const orderId = editingId ?? draftId ?? await ensureDraftId();
       if (!orderId) {
         showToast(t('syncNoDraft'), 'error');
         return;
       }
+      // Cancelled while the draft POST was in flight — cancelCapture is already
+      // deleting that order, so writing to it now would resurrect a PO the user
+      // discarded.
+      if (gen !== captureGen.current) return;
       try {
         // Omit status: the backend COALESCEs it, so leaving it out preserves
         // the line's lifecycle (Done, etc.) instead of forcing In Transit.
         const { status, ...fields } = toWireLine(line);
         void status;
         await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields }] });
-      } catch {
-        showToast(t('syncFailed'), 'error');
+        await flushLinePhotos(line, orderId, line.id);
+        if (backToDetail) doneToDetail();
+      } catch (e) {
+        // The backend refuses line edits from a purchaser past Draft. The
+        // detail screen hides the affordance, but say why if one gets through.
+        handleFetchError(e);
       }
       return;
     }
@@ -332,11 +535,13 @@ function Shell() {
     // The existing order being edited, or the new draft — whose creation is
     // async, so on a fast Save await the in-flight POST instead of dropping the
     // line to local-only.
-    const targetId = editingId ?? draftId ?? (draftIdPromise.current ? await draftIdPromise.current : null);
+    const mintedHere = !editingId && !draftId;
+    const targetId = editingId ?? draftId ?? await ensureDraftId();
     if (!targetId) {
       showToast(t('syncNoDraft'), 'error');
       return;
     }
+    if (gen !== captureGen.current) return;
 
     try {
       // Capture the inserted row's id so a later re-edit UPDATEs it in place
@@ -345,25 +550,50 @@ function Shell() {
         '/api/orders/' + targetId, { addLines: [toWireLine(line)] },
       );
       const newId = res.addedLineIds?.[0];
+      if (newId) await flushLinePhotos(line, targetId, newId);
+      if (backToDetail) { doneToDetail(); return; }
       // Match by stable client id, not array index: the user may have added,
       // removed, or navigated past this line before the PATCH resolved.
       setCapture(c => {
-        if (c.phase === 'idle' || c.phase === 'category' || c.phase === 'draftPicker') return c;
+        if (c.phase === 'idle' || c.phase === 'draftPicker') return c;
         const updated = c.lines.map(l =>
           l._cid === line._cid ? { ...l, _confirmed: true, id: newId ?? l.id } : l,
         );
-        return { ...c, lines: updated };
+        // Track what the draft holds server-side, not just what the screen
+        // shows: a line autosaved and then deleted here has to be named in
+        // removeLineIds at submit or it ships as stock nobody bought.
+        const known = c.originalLineIds ?? [];
+        const originalLineIds = newId && !known.includes(newId) ? [...known, newId] : known;
+        return { ...c, lines: updated, originalLineIds };
       });
-    } catch {
+    } catch (e) {
       // Keep the line locally unconfirmed; it will be sent on final submit.
+      // On the detail path there is no final submit, so the reason matters.
+      if (backToDetail) { handleFetchError(e); return; }
       showToast(t('syncFailed'), 'error');
+      // The order was minted for this line and the line didn't land, so the
+      // order is empty and nothing points at it — take it back out. Submit
+      // creates it again, atomically, from the whole list.
+      if (mintedHere) {
+        deleteOrder(targetId).catch(() => {/* best-effort */});
+        draftIdPromise.current = null;
+        setCapture(c =>
+          c.phase === 'idle' || c.phase === 'draftPicker' ? c : { ...c, draftId: undefined },
+        );
+      }
     }
   };
 
-  const addAnotherItem = () => {
+  // `cat` comes from the four-button row on the review screen, so adding a
+  // different kind of item is one tap and the PO is never in a category mode.
+  const addAnotherItem = (cat: Category) => {
     setCapture(c => {
       if (c.phase !== 'review') return c;
-      return { phase: 'form', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, editingLineIdx: null, returnTo: 'review', draftId: c.draftId };
+      return {
+        phase: 'form', category: cat, detected: null,
+        lines: c.lines, draftId: c.draftId, originalLineIds: c.originalLineIds,
+        editingLineIdx: null, returnTo: 'review',
+      };
     });
   };
 
@@ -372,23 +602,62 @@ function Shell() {
       if (c.phase !== 'review') return c;
       return {
         phase: 'form',
-        category: c.category,
+        // From the LINE, not the session — the list is mixed.
+        category: c.lines[idx]?.category ?? 'RAM',
         detected: null,
         lines: c.lines,
-        editingId: c.editingId,
-        originalLineIds: c.originalLineIds,
         editingLineIdx: idx,
         returnTo: 'review',
         draftId: c.draftId,
+        originalLineIds: c.originalLineIds,
       };
     });
   };
 
+  // ── Line edits on an order that already exists ───────────────────────────
+  // Both open the line form directly. There is no review step: the order has
+  // already answered for its warehouse, payment and notes, and its detail
+  // screen is what owns them.
+  const startEditLine = (order: Order, idx: number) => {
+    seedPhotos(order);
+    setCapture({
+      phase: 'form',
+      category: (order.lines[idx]?.category as Category) ?? 'RAM',
+      detected: null,
+      lines: order.lines.map(toDraftLine),
+      editingId: order.id,
+      editingLineIdx: idx,
+      returnTo: 'detail',
+    });
+  };
+
+  const startAddLine = (order: Order, cat: Category) => {
+    seedPhotos(order);
+    setCapture({
+      phase: 'form',
+      category: cat,
+      detected: null,
+      lines: order.lines.map(toDraftLine),
+      editingId: order.id,
+      editingLineIdx: null,
+      returnTo: 'detail',
+    });
+  };
+
   const goBack = () => {
+    if (
+      (capture.phase === 'camera' || capture.phase === 'form') &&
+      capture.returnTo === 'detail' && capture.editingId
+    ) {
+      const id = capture.editingId;
+      setCapture({ phase: 'idle' });
+      navigate('/purchase-orders/' + id);
+      return;
+    }
     setCapture(c => {
       if (c.phase !== 'camera' && c.phase !== 'form') return c;
       if (c.returnTo === 'review') {
-        return { phase: 'review', category: c.category, detected: null, lines: c.lines, editingId: c.editingId, originalLineIds: c.originalLineIds, draftId: c.draftId };
+        return { phase: 'review', detected: null, lines: c.lines, draftId: c.draftId, originalLineIds: c.originalLineIds };
       }
       return { phase: 'idle' };
     });
@@ -415,16 +684,11 @@ function Shell() {
   const submitOrder = async (meta: SubmitMeta) => {
     if (capture.phase !== 'review') return;
 
-    // Editing an existing order PATCHes that order; finalizing a new draft
-    // PATCHes the draft. Submitting from review never creates a new order.
+    // A draft that exists is PATCHed; a session whose lines never synced (so
+    // no order was ever created) POSTs the whole thing at once — atomic, so an
+    // invalid line 400s without leaving an empty PO behind.
     const req = buildOrderSubmit(
-      {
-        editingId: capture.editingId,
-        draftId: capture.draftId,
-        category: capture.category,
-        lines: capture.lines,
-        originalLineIds: capture.originalLineIds,
-      },
+      { draftId: capture.draftId, lines: capture.lines, originalLineIds: capture.originalLineIds },
       meta,
     );
     if (req.kind === 'error') {
@@ -432,60 +696,14 @@ function Shell() {
       return;
     }
     try {
-      await api.patch(req.url, req.body);
-      const editingId = capture.editingId;
+      if (req.kind === 'create') await api.post(req.url, req.body);
+      else await api.patch(req.url, req.body);
       setCapture({ phase: 'idle' });
-      if (editingId) {
-        // Editing an existing order — return to its detail screen so the user
-        // sees their updated line items in context with the lifecycle/log.
-        navigate('/purchase-orders/' + editingId);
-      } else {
-        setView('history');
-      }
+      setView('history');
       showToast(t('orderSubmitted'));
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
+      showToast(e instanceof Error ? e.message : t('subSubmitFailed'), 'error');
     }
-  };
-
-  const startEdit = (o: Order) => {
-    setCapture({
-      phase: 'review',
-      category: o.category,
-      detected: null,
-      editingId: o.id,
-      originalLineIds: o.lines.map(l => l.id),
-      lines: o.lines.map(l => ({
-        id: l.id,
-        category: l.category,
-        brand: l.brand,
-        capacity: l.capacity,
-        type: l.type,
-        generation: l.generation,
-        classification: l.classification,
-        rank: l.rank,
-        speed: l.speed,
-        interface: l.interface,
-        formFactor: l.formFactor,
-        description: l.description,
-        partNumber: l.partNumber,
-        serialNumber: l.serialNumber,
-        chipNumber: l.chipNumber,
-        condition: l.condition,
-        qty: l.qty,
-        unitCost: l.unitCost,
-        sellPrice: l.sellPrice ?? null,
-        scanImageId: l.scanImageId,
-        scanConfidence: l.scanConfidence,
-        scanImageUrl: l.scanImageUrl,
-        health: l.health,
-        rpm: l.rpm,
-        label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
-              : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
-              : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-              : (l.description ?? 'Item'),
-      })),
-    });
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -504,17 +722,31 @@ function Shell() {
 
   // Full-screen camera/form/review intercept the normal tab UI
   // The capture-flow screens (camera/form/review) are early returns, so the
-  // toast block in the main shell below never mounts while they're on screen —
-  // every error raised during scan / line-save / submit was set into state but
-  // rendered nowhere, leaving buttons that look like they did nothing. Render
-  // the toast alongside each of these screens too. Fixed positioning anchors
-  // it to the viewport regardless of which screen's root is mounted.
-  const toastEl = toast && (
-    <div className="ph-toast-wrap" style={{ position: 'fixed', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
-      <div className={'ph-toast ' + (toast.kind || '')}>
-        <Icon name="check2" size={14} /><span>{toast.msg}</span>
-      </div>
-    </div>
+  // toast/dialog block in the main shell below never mounts while they're on
+  // screen — every error raised during scan / line-save / submit was set into
+  // state but rendered nowhere, leaving buttons that look like they did
+  // nothing. Render these alongside each of those screens too. Fixed
+  // positioning anchors them to the viewport regardless of which screen's root
+  // is mounted.
+  const overlayEl = (
+    <>
+      {toast && (
+        <div className="ph-toast-wrap" style={{ position: 'fixed', left: 16, right: 16, bottom: 96, display: 'flex', justifyContent: 'center', zIndex: 50 }}>
+          <div className={'ph-toast ' + (toast.kind || '')}>
+            <Icon name={toast.kind === 'warn' ? 'alert' : 'check2'} size={14} /><span>{toast.msg}</span>
+          </div>
+        </div>
+      )}
+      {/* Keyed on the entry so the next problem in the queue mounts its own
+          dialog — focus and the OK button belong to one message at a time. */}
+      {errorDialog && (
+        <ErrorDialog
+          key={errorDialog.seq}
+          content={errorDialog}
+          onClose={dismissErrorDialog}
+        />
+      )}
+    </>
   );
 
   if (capture.phase === 'camera') {
@@ -526,7 +758,7 @@ function Shell() {
           onClose={cancelCapture}
           onBack={goBack}
         />
-        {toastEl}
+        {overlayEl}
       </>
     );
   }
@@ -545,8 +777,16 @@ function Shell() {
           onBack={goBack}
           onRescan={rescanRam}
           rescanDraft={capture.rescanDraft ?? null}
+          photoCtx={{
+            photosFor,
+            pendingFor,
+            busy: photoBuffer.busy,
+            onAddFiles: addLinePhotos,
+            onRemovePending: removePendingPhoto,
+            onRemoveSaved: removeSavedPhoto,
+          }}
         />
-        {toastEl}
+        {overlayEl}
       </>
     );
   }
@@ -554,21 +794,23 @@ function Shell() {
     return (
       <>
         <OrderReview
-          category={capture.category}
           lines={capture.lines}
-          editingId={capture.editingId}
+          initialMeta={reviewMeta}
           onAddItem={addAnotherItem}
+          fees={orderFees}
+          onFeesChange={setOrderFees}
           onEditLine={editLine}
           onRemoveLine={removeLine}
           onSubmit={submitOrder}
           onCancel={cancelCapture}
         />
-        {toastEl}
+        {overlayEl}
       </>
     );
   }
 
   const unreadCount = notifs.filter(n => n.unread).length;
+  const orderDetailOpen = view === 'history' && !!orderDetailMatch && !!detailOrder;
 
   return (
     <div className="phone-app">
@@ -580,13 +822,16 @@ function Shell() {
           unreadCount={unreadCount}
         />
       )}
-      {view === 'history' && orderDetailMatch && detailOrder && (
+      {orderDetailOpen && (
         <OrderDetail
           order={detailOrder}
-          onCancel={() => navigate('/purchase-orders')}
+          meta={detailMeta}
+          onMetaChange={setDetailMeta}
+          onCancel={() => navigateBack('/purchase-orders')}
           onSaved={(msg) => showToast(msg)}
           onDeleted={() => navigate('/purchase-orders')}
-          onEditItems={(o) => startEdit(o)}
+          onEditLine={startEditLine}
+          onAddLine={startAddLine}
         />
       )}
       {view === 'history' && (!orderDetailMatch || !detailOrder) && (
@@ -603,16 +848,11 @@ function Shell() {
         />
       )}
 
-      {capture.phase === 'category' && (
-        <PhCategorySheet onPick={pickCategory} onClose={cancelCapture} />
-      )}
-
       {capture.phase === 'draftPicker' && (
         <PhDraftPickerSheet
-          category={capture.category}
           drafts={capture.drafts}
           onResume={resumeDraft}
-          onStartNew={() => startNewDraft(capture.category)}
+          onStartNew={startNewDraft}
           onClose={cancelCapture}
         />
       )}
@@ -644,9 +884,16 @@ function Shell() {
         }} />
       )}
 
-      <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={effUser?.role ?? user.role} />
+      {/* The order screen owns the bottom of the phone: its action bar sits at
+          z-index 25 and the tab bar at 30, so every control down there — save,
+          download, archive, delete — was covered by the nav and untappable.
+          It is a focused task screen like the capture flow, and the header's
+          back button is the way out of it. */}
+      {!orderDetailOpen && (
+        <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={effUser?.role ?? user.role} />
+      )}
 
-      {toastEl}
+      {overlayEl}
     </div>
   );
 }

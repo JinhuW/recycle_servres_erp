@@ -11,13 +11,15 @@ import { useT } from '../lib/i18n';
  * nothing is validated against the option list.
  */
 export function Combobox({
-  value, options, onChange, placeholder, className = 'input',
+  value, options, onChange, placeholder, className = 'input', invalid = false,
 }: {
   value: string | null | undefined;
   options: readonly string[];
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
+  /** Announced on the inner input: the field is one a save is waiting on. */
+  invalid?: boolean;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
@@ -81,6 +83,7 @@ export function Combobox({
         onKeyDown={onKeyDown}
         role="combobox"
         aria-expanded={open}
+        aria-invalid={invalid || undefined}
         autoComplete="off"
         style={{ paddingRight: 30 }}
       />

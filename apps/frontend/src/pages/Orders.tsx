@@ -7,6 +7,8 @@ import { handleFetchError } from '../lib/errorToast';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
+import { profitTone, signedUSD0 } from '../lib/orderPresentation';
+import { isRealPhotoUrl } from '../lib/linePhotos';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
@@ -14,9 +16,8 @@ import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
 import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { OrderCategoryChips } from '../components/OrderCategoryChips';
 
-const realScan = (u?: string | null): u is string =>
-  !!u && !u.startsWith('data:image/placeholder');
 
 // Stable hue (0–359) from an id, so a given warehouse/owner always paints the
 // same colour across the list. Feeds the `--h` custom prop on the meta tags.
@@ -180,12 +181,11 @@ export function Orders({ onEdit, onToast }: Props) {
             : orders;
           return filtered.slice(0, 30).map(o => {
           const isOpen = openId === o.id;
+          const unpriced = o.unpricedLineCount ?? 0;
           return (
             <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }} style={o.archivedAt ? { opacity: 0.6 } : undefined}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
-                <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
-                  {o.category}
-                </span>
+                <OrderCategoryChips categories={o.categories} max={1} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{o.id}</span>
@@ -235,8 +235,24 @@ export function Orders({ onEdit, onToast }: Props) {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(o.profit, locale)}</div>
+                  <div className="mono" style={{
+                    fontSize: 13, fontWeight: 600,
+                    // Through the shared rule, not a second `< 0`: the desktop
+                    // table reads it as a class, the phone as a variable, and
+                    // what counts as a loss has to be decided in one place.
+                    color: `var(--${profitTone(o.profit)})`,
+                  }}>{signedUSD0(o.profit, locale)}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{fmtUSD0(o.revenue, locale)}</div>
+                  {/* Revenue counts priced lines only, so a PO nobody has
+                      priced reads $0 against a real cost. Say why. */}
+                  {unpriced > 0 && (
+                    <div
+                      style={{ fontSize: 10, color: 'var(--warn)', marginTop: 1 }}
+                      title={t('unpricedRevenueHint', { n: unpriced, total: o.lineCount })}
+                    >
+                      {t('grpUnpriced', { n: unpriced })}
+                    </div>
+                  )}
                 </div>
                 <Icon name="chevronDown" size={16} style={{ color: 'var(--fg-subtle)', transition: 'transform 0.18s', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
               </div>
@@ -244,7 +260,7 @@ export function Orders({ onEdit, onToast }: Props) {
                 <div className="ph-order-body">
                   {openLines.lines.map(l => (
                     <div key={l.id} className="ph-line" style={{ display: 'flex', gap: 10 }}>
-                      {realScan(l.scanImageUrl) && (
+                      {isRealPhotoUrl(l.scanImageUrl) && (
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
@@ -283,8 +299,11 @@ export function Orders({ onEdit, onToast }: Props) {
                           Qty {l.qty} · {fmtUSD(l.unitCost, locale)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice, locale)}</>}
                         </span>
                         {l.sellPrice != null && (
-                          <span className="mono pos" style={{ fontWeight: 600, color: 'var(--pos)' }}>
-                            +{fmtUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
+                          <span className="mono" style={{
+                            fontWeight: 600,
+                            color: `var(--${profitTone(l.sellPrice - l.unitCost)})`,
+                          }}>
+                            {signedUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
                           </span>
                         )}
                       </div>

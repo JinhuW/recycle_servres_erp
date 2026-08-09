@@ -38,16 +38,10 @@ export const fmtDateShort = (d: Date | string, locale = 'en-US') =>
   new Date(d).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 
 // Canonical part number for *grouping* — the key that decides whether two PO
-// lines are the same product. Mirrors the scan-time canonicaliser in
-// backend/src/ai/normalize.ts#stripPartPrefix, then strips all whitespace and
-// upper-cases so "ABC-123", " abc-123 " and "PN: ABC-123" collapse to one key.
-// Keep this in lockstep with the SQL canonicaliser in
-// backend/src/routes/inventory.ts (GET /events/by-part).
-export const canonicalPartNumber = (pn: string | null | undefined): string =>
-  !pn ? '' : pn
-    .replace(/^\s*(?:P\s*\/?\s*N|S\s*\/?\s*N|PART\s*(?:NO|NUMBER)?)\s*[:#]?\s*/i, '')
-    .replace(/\s+/g, '')
-    .toUpperCase();
+// lines are the same product. Re-exported here because this is where the rest
+// of the app reaches for formatting helpers; the rule itself is shared with the
+// backend, which keys its market-lookup answers with it and mirrors it in SQL.
+export { canonicalPartNumber } from '@recycle-erp/shared';
 
 // Built-in Intl.RelativeTimeFormat localises "just now / 5m ago / 2d ago" into
 // every browser locale we care about, so we don't need to ship dictionary

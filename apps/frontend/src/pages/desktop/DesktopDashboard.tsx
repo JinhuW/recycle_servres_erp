@@ -4,6 +4,7 @@ import { useT } from '../../lib/i18n';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
+import { isPricedSellPrice } from '@recycle-erp/shared';
 import { fmtUSD0, relTime } from '../../lib/format';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { Category, DashboardData } from '../../lib/types';
@@ -242,7 +243,10 @@ export function DesktopDashboard() {
                       : r.category === 'HDD'
                         ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                         : (r.description ?? 'Item');
-                  const profit = r.profit ?? 0;
+                  // An unpriced line has no projected margin — the KPI tiles
+                  // above don't count it, so this row can't state one. Em-dash,
+                  // the same as the orders list's line rows.
+                  const priced = isPricedSellPrice(r.sell_price);
                   return (
                     <tr key={r.id} className="row-hover">
                       <td>{label}</td>
@@ -254,7 +258,9 @@ export function DesktopDashboard() {
                       </td>
                       <td className="num">{r.qty}</td>
                       <td className="muted">{relTime(r.created_at, locale)}</td>
-                      <td className="num pos mono">+{fmtUSD0(profit, locale)}</td>
+                      <td className={'num mono' + (priced ? ' pos' : ' muted')}>
+                        {priced ? '+' + fmtUSD0(r.profit ?? 0, locale) : '—'}
+                      </td>
                     </tr>
                   );
                 })}

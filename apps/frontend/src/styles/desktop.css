@@ -649,6 +649,15 @@ html.desktop, body.desktop, .desktop #root {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   z-index: 100; display: flex; flex-direction: column; gap: 8px;
 }
+/* The line drawer is anchored right at 620px and the toast floats above it. A
+   centred toast clears the drawer only above 1520px (620 drawer + 280 toast +
+   620 of centring); narrower than that it lands on the drawer's cost fields and
+   Confirm button — the ones it is usually complaining about — so it moves to
+   the corner the drawer never reaches. Only while a drawer is actually open:
+   otherwise every toast in the app sits off-centre for the same reason. */
+@media (max-width: 1519px) {
+  body.has-drawer .toast-wrap { left: 20px; transform: none; }
+}
 .toast {
   background: var(--fg);
   color: white;
@@ -663,6 +672,24 @@ html.desktop, body.desktop, .desktop #root {
 .toast.info    { background: oklch(0.30 0.012 250); }
 .toast.success { background: var(--accent); }
 .toast.error   { background: var(--neg); }
+/* A nudge for something not yet attempted, so it stays a toast rather than
+   escalating to the blocking dialog every other error takes — but solid and
+   the loudest of the three, because it lands over a dimmed drawer where a
+   tinted panel washes out. */
+.toast.warn {
+  background: var(--warn-loud);
+  color: var(--warn-loud-fg);
+  padding: 14px 18px;
+  font-size: 13.5px;
+  font-weight: 550;
+  box-shadow:
+    0 0 0 4px var(--warn-loud-halo),
+    0 16px 38px var(--warn-loud-shadow);
+  animation: toast-in 0.22s ease-out, toast-warn-pop 0.34s ease-out 0.22s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast.warn { animation: none; }
+}
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ===== Stepper (used in EditOrder lifecycle) ===== */
@@ -1467,84 +1494,9 @@ html.desktop, body.desktop, .desktop #root {
 .order-readonly .field .select,
 .order-readonly .field .textarea { user-select: none; }
 
-/* ── PO cost ledger — the footer of the line-items table.
-   Reads as the arithmetic it describes: goods + fees = cost, then revenue and
-   profit as the separate outcome lens. The `+` and `=` are content, not
-   ornament, so they sit on the value baseline rather than centred on the cell.
-   The fee is the only editable cell in the chain. */
-.oe-ledger {
-  padding: 9px 18px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px 28px;
-  flex-wrap: wrap;
-}
-.oe-ledger-eq,
-.oe-ledger-out {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-}
-/* Revenue and profit are a different lens, not another term in the sum. The
-   space-between void already says so louder than a rule could, so there is
-   no divider here. */
-.oe-ledger-out { gap: 28px; }
-/* Figures never shrink below their own width — otherwise the fee cell's
-   flex-grow squeezes them and the operators collide with the numbers. */
-.oe-ledger-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  flex: 0 0 auto;
-  min-width: 0;
-}
-.oe-ledger-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
-  white-space: nowrap;
-}
-/* Every value cell is as tall as the fee input, so the eyebrows land on one
-   line and the figures share a centre — the rail reads as a row, not as cells
-   of differing height stacked next to each other. */
-.oe-ledger-value {
-  display: flex;
-  align-items: center;
-  min-height: 28px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.oe-ledger-total { font-size: 15px; }
-.oe-ledger-op {
-  display: flex;
-  align-items: center;
-  /* Skip the eyebrow row so the operator sits on the figures it joins. */
-  margin-top: 16px;
-  min-height: 28px;
-  font-size: 13px;
-  color: var(--fg-subtle);
-  flex-shrink: 0;
-}
-/* Only the editable fee cell claims slack — a locked one is just a figure. */
-.oe-ledger-fee-edit { flex: 1 1 260px; }
-.oe-ledger-fee-inputs { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* Denser than a standard .input — this is a table footer, not a form. */
-.oe-ledger-input {
-  padding: 4px 9px;
-  font-size: 12.5px;
-  border-radius: var(--radius-sm);
-}
-.oe-ledger-input.mono { font-size: 12.5px; }
-.oe-ledger-note { flex: 1; min-width: 96px; max-width: 240px; }
+/* The `$` sitting inside the fee input on the cost tape. Absolute against the
+   inline wrapper the page puts around the input, so the caret starts clear of
+   it. */
 .oe-ledger-currency {
   position: absolute;
   left: 9px;
@@ -1553,12 +1505,6 @@ html.desktop, body.desktop, .desktop #root {
   color: var(--fg-subtle);
   pointer-events: none;
   font-size: 12px;
-}
-.oe-ledger-fee-note {
-  margin-left: 7px;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--fg-subtle);
 }
 
 @media (max-width: 600px) {
@@ -2253,4 +2199,244 @@ html.desktop, body.desktop, .desktop #root {
 
 @media (prefers-reduced-motion: reduce) {
   .ac-area, .ac-row { transition: none; }
+}
+
+/* ===== Add-line control (PO submit + edit) =====
+   Four equal category buttons rather than one primary that names a category —
+   a PO is not in a category mode, and a button labelled "Add RAM" reads as
+   though it were. */
+.add-line-bar {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 3px 3px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.add-line-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-right: 2px;
+}
+.add-line-cat { gap: 6px; font-weight: 600; }
+.add-line-cat:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+.add-line-swatch { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+
+/* Category selector at the top of the line drawer. */
+.dw-cat-switch { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.dw-cat-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; font-size: 11.5px;
+  background: var(--warn-soft); color: var(--warn-strong);
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, transparent);
+}
+.dw-cat-note button {
+  margin-left: auto; flex-shrink: 0; background: none; border: none; padding: 0;
+  color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer;
+}
+
+/* ===== Category group headers (mixed purchase orders) =====
+   A PO spanning categories groups its lines, each group folding away with its
+   own subtotal. Rendered as a full-width row inside the existing table rather
+   than a nested list, so the money columns stay aligned across every group. */
+.grp-row > td { padding: 0 !important; background: var(--bg-soft); }
+.grp-hd {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 12px;
+  border: none; border-left: 3px solid var(--cat);
+  background: transparent; color: var(--fg);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.grp-hd:hover { background: var(--cat-soft); }
+.grp-tw { display: inline-flex; color: var(--fg-subtle); transition: transform 0.15s; }
+.grp-tw.closed { transform: rotate(-90deg); }
+.grp-chip {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--cat-strong); background: var(--cat-soft);
+  padding: 2px 8px; border-radius: 999px;
+}
+.grp-meta { font-size: 11.5px; color: var(--fg-subtle); }
+.grp-unpriced { color: var(--warn-strong); }
+
+/* Sits directly above Confirm, so the gap and the button that is refusing to
+   fire are read together. */
+.dw-still-needed {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 18px; font-size: 12px; line-height: 1.4;
+  color: var(--warn-strong); background: var(--warn-soft);
+  border-top: 1px solid var(--border);
+}
+.dw-still-needed svg { flex-shrink: 0; }
+.grp-amt { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.grp-pl { width: 104px; text-align: right; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* "Change category" — a quiet link beside the chip that already states the
+   category. The four ADD buttons decide it at creation, so the switch exists
+   only to correct a mis-filed line and shouldn't occupy a form row. */
+.dw-cat-link {
+  background: none; border: none; padding: 0;
+  color: var(--accent-strong); font: inherit; font-size: 11.5px;
+  text-decoration: underline; cursor: pointer;
+}
+.dw-cat-link:hover { color: var(--fg); }
+
+
+/* ===== Cost tape =====
+   The PO's money laid out as a receipt: one figure per line, dot leaders to a
+   right-aligned column, rules where the arithmetic changes gear. Replaces a
+   horizontal strip that stood goods, fees and cost beside each other as peers
+   — they aren't; the first two add up to the third. */
+.tape-wrap {
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.06)) drop-shadow(0 4px 12px rgba(15, 23, 42, 0.05));
+}
+.tape {
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  padding: 16px 20px 26px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  /* Torn bottom edge — this is a receipt you check against a supplier's
+     invoice, not a summary panel. Two mask layers that union: the body, plus a
+     row of half-discs hanging off the bottom. */
+  --tooth: 8px;
+  /* The editable fee is an input, and its digits sit inside its own border and
+     padding. Every other figure carries the same inset so the money column is
+     where the digits end, not where each box happens to end. */
+  --fig-inset: 10px;
+  -webkit-mask:
+    radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
+    linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
+  mask:
+    radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
+    linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
+}
+.tape-cap {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 12px;
+}
+.tape-cap-r { text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
+
+.tape-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+.tape-k { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-muted); white-space: nowrap; }
+.tape-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--cat); }
+.tape-lead { flex: 1; border-bottom: 1px dotted var(--border-strong); transform: translateY(-4px); min-width: 12px; }
+.tape-v { font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--fig-inset); }
+
+.tape-row.sum { border-top: 1px solid var(--border); margin-top: 9px; padding-top: 10px; font-weight: 600; }
+.tape-row.sum .tape-k { color: var(--fg); }
+.tape-row.total {
+  border-top: 2px solid var(--fg); margin-top: 10px; padding-top: 12px;
+  font-weight: 700;
+}
+.tape-row.total .tape-k {
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg);
+}
+.tape-row.total .tape-v { font-size: 21px; letter-spacing: -0.02em; }
+
+.tape-edit { display: inline-flex; align-items: center; gap: 8px; }
+/* 1px of the inset is the input's own border. */
+.tape-edit .input { font-size: 12.5px; padding: 5px calc(var(--fig-inset) - 1px); }
+.tape-edit .tape-money { width: 110px; text-align: right; font-variant-numeric: tabular-nums; }
+.tape-edit .tape-note { width: 190px; }
+.tape-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
+.tape-block-cap {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 10px;
+}
+.tape-row.profit {
+  border-top: 1px solid var(--border); margin-top: 9px; padding-top: 11px;
+  font-weight: 700; font-size: 13px;
+}
+.tape-row.profit .tape-k {
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg);
+}
+.tape-row.profit .tape-v { font-size: 18px; letter-spacing: -0.02em; }
+.tape-foot {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11.5px; color: var(--fg-subtle); margin-top: 10px; line-height: 1.5;
+}
+
+/* The tape's torn edge only reads if there is something behind it to reveal.
+   Inside the items card it was cutting white out of white, so the strip below
+   the teeth carries the page ground — the receipt then looks like it is lying
+   on the card rather than being part of it. */
+.oe-items-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
+/* Same ground for the submit screen's tape. */
+.oe-submit-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
+
+/* ===== PO submit — commit bar =====
+   The stub that hangs under the torn tape: where the order lands, who pays,
+   what is attached, and the button that files it. The tape directly above
+   owns the money breakdown, so this band quotes the total once — as the
+   figure the button is about to commit — instead of restating lines, units
+   and cost as three peer statistics. */
+.sub-commit {
+  position: sticky;
+  bottom: 16px;
+  z-index: 5;
+  /* .page is a column flex box, so a card that would overflow gets shrunk
+     instead — with overflow hidden that silently amputates the submit row and
+     the page never grows tall enough to scroll to it. */
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07);
+  /* Sticky, so whatever it takes it takes from the line table for the whole
+     session. Attachments are the part that grows without limit, so the bar is
+     bounded and the attachment list is what gives way — the total and the
+     Submit button below it stay on screen. */
+  display: flex;
+  flex-direction: column;
+  max-height: min(42vh, 400px);
+}
+.sub-commit > * + * { border-top: 1px solid var(--border); }
+
+.sub-commit-meta {
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) auto minmax(240px, 1fr);
+  gap: 14px;
+  align-items: end;
+  flex-shrink: 0;
+}
+.sub-commit-attach { padding: 12px 16px; min-height: 0; overflow-y: auto; }
+.sub-commit-files {
+  margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 124px; overflow-y: auto;
+}
+
+.sub-commit-foot {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.sub-commit-total { margin-left: auto; text-align: right; }
+.sub-commit-cap {
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle);
+}
+.sub-commit-amt {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 20px; font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.sub-commit-fees { font-size: 11px; color: var(--accent-strong); margin-top: 1px; }
+/* The rule is the tear line: the figure on one side, the act on the other. */
+.sub-commit-actions {
+  display: flex; align-items: center; gap: 8px;
+  align-self: stretch;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 1000px) {
+  .sub-commit-meta { grid-template-columns: minmax(0, 1fr) auto; }
+  .sub-commit-meta > :nth-child(3) { grid-column: 1 / -1; }
+  .sub-commit-total { margin-left: 0; }
+  .sub-commit-actions { margin-left: auto; }
 }

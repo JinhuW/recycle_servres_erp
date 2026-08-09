@@ -1,7 +1,7 @@
 // Vendor bid sheet for one sell order: a styled workbook the manager emails
 // out and the vendor fills in. Built directly with exceljs rather than
 // lib/xlsx.ts — the flat sheet builder there has no notion of merged
-// instruction rows, per-cell protection, or formulas.
+// instruction rows, per-cell styling, or formulas.
 //
 // One worksheet per category present (RAM / SSD / HDD / Other, user-requested
 // 2026-07-22: "the SSD should be in a dedicated sub sheet"), each carrying
@@ -13,15 +13,15 @@
 // full-size scan. Spec attributes get individual columns (same request as the
 // order spreadsheet — never re-merge them into one composed field).
 //
-// The banner, instructions and header row are locked; the data rows are not,
-// because Excel refuses to sort a range containing a locked cell (user-asked
-// for sortable headers 2026-08-06). Format/insert/delete stay blocked. The
-// import parser never relies on that structure anyway — it re-locates columns
-// by header text and matches rows by part number, so a vendor who reorders or
-// retypes cells still round-trips (see services/sellOrderPriceImport.ts;
-// safe here because no spec header matches its part/price/condition
-// heuristics: "chip#" and "note备注" contain none of partnumber/price/单价/
-// condition/成色 etc.).
+// The workbook ships completely unprotected (user-decided 2026-08-08): a
+// manager reshaping a long bid sheet shouldn't have to lift a lock first, and
+// the protection was never security anyway — it carried no password. Nothing
+// downstream depends on the shape it used to hold: the import parser
+// re-locates columns by header text and matches rows by part number, so a
+// vendor who reorders, retypes or inserts still round-trips (see
+// services/sellOrderPriceImport.ts; safe here because no spec header matches
+// its part/price/condition heuristics: "chip#" and "note备注" contain none of
+// partnumber/price/单价/condition/成色 etc.).
 //
 // After the category tabs come per-warehouse PACKING-CHECKLIST tabs (one per
 // warehouse on the order, named by its short code): stacked per-category
@@ -146,24 +146,24 @@ export async function buildPriceTemplateWorkbook(
   for (const cat of CATEGORY_ORDER) {
     const catProducts = byCategory.get(cat);
     if (!catProducts) continue;
-    await renderCategorySheet(wb, cat, head, catProducts);
+    renderCategorySheet(wb, cat, head, catProducts);
   }
   // A workbook needs at least one sheet to be a valid file.
-  if (byCategory.size === 0) await renderCategorySheet(wb, 'Other', head, []);
+  if (byCategory.size === 0) renderCategorySheet(wb, 'Other', head, []);
 
   for (const wh of warehouses) {
-    await renderWarehouseSheet(wb, head, wh);
+    renderWarehouseSheet(wb, head, wh);
   }
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-async function renderCategorySheet(
+function renderCategorySheet(
   wb: import('exceljs').Workbook,
   category: string,
   head: PriceTemplateHead,
   products: PriceTemplateProduct[],
-): Promise<void> {
+): void {
   const ws = wb.addWorksheet(category, {
     views: [{ state: 'frozen', ySplit: HEADER_ROW }],
   });
@@ -248,8 +248,8 @@ async function renderCategorySheet(
     qtyCell.numFmt = '#,##0';
 
     // Blank bid cell: existing order prices must not leak to the vendor. The
-    // fill is what tells the vendor where to type, now that the lock no
-    // longer does.
+    // fill is what tells the vendor where to type — nothing else on the sheet
+    // marks the column out.
     const priceCell = row.getCell(IDX.price);
     priceCell.numFmt = '#,##0.00';
     priceCell.fill = PRICE_FILL;
@@ -266,40 +266,14 @@ async function renderCategorySheet(
       imageCell.value = { text: p.imageUrl, hyperlink: p.imageUrl };
       imageCell.font = { color: { argb: 'FF2563EB' }, underline: true };
     }
-
-    // Every data cell unlocks, not just Price and Note (which is free text and
-    // starts blank on purpose): Excel refuses to sort a range holding even one
-    // locked cell, whatever the sheet's sort permission says. The header row
-    // stays locked — the import parser locates its columns by header text.
-    for (let c = 1; c <= IDX.note; c++) {
-      row.getCell(c).protection = { locked: false };
-    }
   });
 
-  // Header-row filter dropdowns. The range has to be written before protect()
-  // — Excel only lets a protected sheet use an autofilter that already exists,
-  // it can't create one.
+  // Header-row filter dropdowns, spanning the header down to the last data row
+  // so sorting from a dropdown carries every row with it.
   ws.autoFilter = {
     from: { row: HEADER_ROW, column: 1 },
     to: { row: HEADER_ROW + sorted.length, column: IDX.note },
   };
-
-  // Guard rail, not security: the manager can lift it in Excel (no password),
-  // and the import parser tolerates a vendor who does. What survives here is
-  // the shape of the sheet — headers, banner, row count — not its contents.
-  await ws.protect('', {
-    selectLockedCells: true,
-    selectUnlockedCells: true,
-    formatCells: false,
-    formatColumns: false,
-    formatRows: false,
-    insertRows: false,
-    deleteRows: false,
-    // Reordering rows can't desync a bid from its line: the import matches on
-    // part number, never on position.
-    sort: true,
-    autoFilter: true,
-  });
 }
 
 // ── Warehouse packing-checklist tabs ─────────────────────────────────────────
@@ -322,11 +296,11 @@ function whSectionCols(category: string): WhCol[] {
   ];
 }
 
-async function renderWarehouseSheet(
+function renderWarehouseSheet(
   wb: import('exceljs').Workbook,
   head: PriceTemplateHead,
   wh: PriceTemplateWarehouse,
-): Promise<void> {
+): void {
   // "Pack - DEN" style: the prefix separates packing tabs from the category
   // bid tabs at a glance and can never collide with RAM/SSD/HDD/Other.
   const ws = wb.addWorksheet(`Pack - ${wh.warehouse}`);
@@ -399,10 +373,8 @@ async function renderWarehouseSheet(
         const cell = row.getCell(i + 1);
         switch (c.key) {
           case 'packed':
-            // Blank bordered tick box — pen after printing, or type x in
-            // Excel (the only unlocked cells on this tab).
+            // Blank bordered tick box — pen after printing, or type x in Excel.
             cell.border = box;
-            cell.protection = { locked: false };
             break;
           case 'part': cell.value = p.partNumber ?? ''; break;
           case 'item': cell.value = p.label; break;
@@ -438,16 +410,4 @@ async function renderWarehouseSheet(
   total.getCell(2).value = totalQty;
   total.getCell(2).numFmt = '#,##0';
   total.font = { bold: true };
-
-  await ws.protect('', {
-    selectLockedCells: true,
-    selectUnlockedCells: true,
-    formatCells: false,
-    formatColumns: false,
-    formatRows: false,
-    insertRows: false,
-    deleteRows: false,
-    sort: false,
-    autoFilter: false,
-  });
 }

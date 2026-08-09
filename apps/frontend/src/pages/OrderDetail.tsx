@@ -10,12 +10,14 @@ import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
+import { linePhotos } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
-import { handleFetchError, showErrorToast } from '../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
-import { poEffectiveCost } from '../lib/poTotals';
+import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
-import type { Order, OrderLine, Warehouse } from '../lib/types';
+import { addableCategories, categoryTone } from '../lib/lookups';
+import type { Category, Order, OrderLine, Warehouse } from '../lib/types';
 
 // `order.status` can collapse to 'Mixed' when an order's lines disagree, which
 // would falsely lock the owner out. `lifecycle` is authoritative, so we map it
@@ -27,18 +29,41 @@ const LIFECYCLE_STATUS: Record<string, string> = {
   done: 'Done',
 };
 
-const realScan = (u?: string | null): u is string =>
-  !!u && !u.startsWith('data:image/placeholder');
+// How many of a line's photos the row shows before it offers the rest. Four
+// 44px tiles is what fits next to the line's controls on a small phone.
+const PHOTOS_COLLAPSED = 4;
+
+/**
+ * The order-level edits in flight on this screen. They live in the shell, not
+ * here: opening a line form unmounts this component, and a fee typed for the
+ * very line being added must not go with it. `version` is the server state
+ * they were made against — edits are dropped once the server moves on.
+ */
+export type OrderMetaDraft = {
+  version: string;
+  warehouseId: string;
+  payment: 'company' | 'self';
+  notes: string;
+  fees: { amount: string; note: string };
+};
 
 type Props = {
   order: Order;
+  /** Unsaved order-level edits carried across trips into the line form. */
+  meta: OrderMetaDraft | null;
+  onMetaChange: (meta: OrderMetaDraft) => void;
   onCancel: () => void;
   onSaved: (msg: string) => void;
   onDeleted: () => void;
-  onEditItems: (order: Order) => void;
+  /** Opens the line form on an existing line. Returns here when it closes. */
+  onEditLine: (order: Order, idx: number) => void;
+  onAddLine: (order: Order, cat: Category) => void;
 };
 
-export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted, onEditItems }: Props) {
+export function OrderDetail({
+  order: initialOrder, meta: metaDraft, onMetaChange,
+  onCancel, onSaved, onDeleted, onEditLine, onAddLine,
+}: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
@@ -48,9 +73,10 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const isPurchaser = user?.role !== 'manager';
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
   const orderLocked = isCompleted(effectiveStatus);
-  const purchaserCanEdit =
-    !isPurchaser || effectiveStatus === 'Draft' || effectiveStatus === 'In Transit';
-  const canEditOrder = purchaserCanEdit && !orderLocked;
+  // Past Draft, a purchaser owns only the notes: the backend rejects a PATCH
+  // from them carrying lines, fees, warehouse or payment (routes/orders.ts).
+  // This used to allow In Transit, which offered an edit that always 403'd.
+  const canEditOrder = !orderLocked && (!isPurchaser || effectiveStatus === 'Draft');
   const canDelete = canEditOrder && effectiveStatus === 'Draft';
   // The note outlives the purchaser's edit window — the manager owns pricing
   // from Reviewing on, but whoever raised the PO keeps documenting it until
@@ -59,14 +85,40 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const canAnnotate = !orderLocked && isOwnerOrManager;
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
-  const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
-  const [notes, setNotes] = useState<string>(order.notes ?? '');
+  // What the server says the order's meta is, as one comparable string. The
+  // backend rebuilds `statusMeta` as a fresh object on every response, so its
+  // identity changes when nothing did — keying anything on it wiped the fields
+  // the user was typing into on every refetch.
+  const serverVersion = JSON.stringify([
+    order.id,
+    order.warehouse?.id ?? '',
+    order.payment,
+    order.notes ?? '',
+    order.otherFees,
+    order.otherFeesNote ?? '',
+    ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
+  ]);
+  // Edits made against an older server state are stale: the order moved on, so
+  // the fields show what it now holds.
+  const meta: OrderMetaDraft = metaDraft?.version === serverVersion ? metaDraft : {
+    version: serverVersion,
+    warehouseId: order.warehouse?.id ?? '',
+    payment: order.payment,
+    notes: order.notes ?? '',
+    fees: {
+      amount: order.otherFees ? order.otherFees.toFixed(2) : '',
+      note: order.otherFeesNote ?? '',
+    },
+  };
+  const { warehouseId, payment, notes, fees } = meta;
+  const setMeta = (patch: Partial<OrderMetaDraft>) => onMetaChange({ ...meta, ...patch });
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Which lines have their whole photo row open. Collapsed, a line shows the
+  // first few and says how many more there are.
+  const [expandedPhotos, setExpandedPhotos] = useState<ReadonlySet<string>>(() => new Set());
+  const [removingLineId, setRemovingLineId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
-  const [advanceError, setAdvanceError] = useState<string | null>(null);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
@@ -85,13 +137,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
-  // Reset meta inputs when the order itself changes (e.g. refetch after save).
+  // Re-read the evidence list when the server's own version of it moves —
+  // never on a mere refetch that returned the same thing.
   useEffect(() => {
-    setWarehouseId(order.warehouse?.id ?? '');
-    setPayment(order.payment);
-    setNotes(order.notes ?? '');
     setSubmissionAtts(order.statusMeta?.['Submission']?.attachments ?? []);
-  }, [order.id, order.warehouse?.id, order.payment, order.notes, order.statusMeta]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverVersion]);
 
   useEffect(() => {
     let alive = true;
@@ -110,16 +161,21 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
     return { qty, cost };
   }, [order.lines]);
 
+  // Reads the fee being typed, not the saved one, so the total tracks the box.
+  const feesValue = parseFeeInput(fees.amount);
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
     totalCostOverride: order.totalCost,
-    otherFees: order.otherFees,
+    otherFees: feesValue,
   });
 
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
-  const dirty = notesDirty || warehouseDirty || paymentDirty;
+  const feesDirty =
+    feesValue !== (order.otherFees ?? 0) ||
+    (fees.note.trim() || null) !== (order.otherFeesNote || null);
+  const dirty = notesDirty || warehouseDirty || paymentDirty || feesDirty;
 
   const refetchOrder = async () => {
     try {
@@ -136,22 +192,41 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const save = async () => {
     if (!canAnnotate) return;
     setSaving(true);
-    setSaveError(null);
     try {
-      // Past the purchaser's edit window only the note is theirs to change;
-      // warehouse/payment would trip the backend's 403.
+      // Only what changed. Sending a field the user didn't touch is how the
+      // old review screen wrote its blank defaults over a saved order; past
+      // the purchaser's edit window it would also trip the backend's 403,
+      // since only the note stays theirs to change.
+      // No totalCost: the goods figure is derived from the lines.
       await api.patch(`/api/orders/${order.id}`, canEditOrder ? {
-        notes:       notesDirty     ? notes                 : undefined,
-        warehouseId: warehouseDirty ? (warehouseId || null) : undefined,
-        payment:     paymentDirty   ? payment               : undefined,
+        notes:         notesDirty     ? notes                       : undefined,
+        warehouseId:   warehouseDirty ? (warehouseId || null)       : undefined,
+        payment:       paymentDirty   ? payment                     : undefined,
+        otherFees:     feesDirty      ? feesValue                   : undefined,
+        otherFeesNote: feesDirty      ? (fees.note.trim() || null)  : undefined,
       } : { notes });
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
       onSaved(t('savedShort'));
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Line removal commits immediately — there is no Submit step on an order
+  // that already exists. The backend 409s when a sell order has claimed the
+  // line, which is the one case the user needs told about.
+  const removeLine = async (lineId: string) => {
+    setRemovingLineId(null);
+    try {
+      await api.patch(`/api/orders/${order.id}`, { removeLineIds: [lineId] });
+      await refetchOrder();
+      setActivityRefreshKey(k => k + 1);
+      onSaved(t('lineRemoved'));
+    } catch (e) {
+      handleFetchError(e);
     }
   };
 
@@ -166,13 +241,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
 
   const doAdvance = async () => {
     setAdvancing(true);
-    setAdvanceError(null);
     try {
       await api.post(`/api/orders/${order.id}/advance`, {});
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
     } catch (e) {
-      setAdvanceError(e instanceof Error ? e.message : 'Advance failed');
+      showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
     } finally {
       setAdvancing(false);
     }
@@ -194,7 +268,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
       for (const f of files) {
         // 50 MiB server hard cap; oversized images are shrunk server-side.
         if (f.size > 50 * 1024 * 1024) {
-          showErrorToast(t('fileTooLarge', { name: f.name }));
+          showErrorDialog(t('fileTooLarge', { name: f.name }));
           continue;
         }
         const form = new FormData();
@@ -340,11 +414,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                     : t('lifecycleAdvance', { status: nextStatus }))}
             </button>
           )}
-          {advanceError && (
-            <div role="alert" style={{ marginTop: 8, fontSize: 12, color: 'var(--neg)' }}>
-              {advanceError}
-            </div>
-          )}
           {!nextStatus && orderLocked && (
             <div style={{
               marginTop: 12, padding: '8px 12px', borderRadius: 10,
@@ -398,32 +467,23 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
         </div>
 
         <div className="ph-section-h">
-          <span>{t('lineItems', { cat: order.category })} · {order.lines.length}</span>
+          <span>{t('products')} · {order.lines.length}</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {order.lines.map((l, i) => (
-            <div key={l.id} className="ph-line">
+          {order.lines.map((l, i) => {
+            const shots = linePhotos(l);
+            const shown = expandedPhotos.has(l.id) ? shots : shots.slice(0, PHOTOS_COLLAPSED);
+            const hidden = shots.length - shown.length;
+            return (
+            <div
+              key={l.id}
+              className="ph-line"
+              onClick={canEditOrder ? () => onEditLine(order, i) : undefined}
+              style={canEditOrder ? { cursor: 'pointer' } : undefined}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
-                {realScan(l.scanImageUrl) && (
-                  <button
-                    type="button"
-                    onClick={() => setLightboxUrl(l.scanImageUrl!)}
-                    title={t('aiPhotoLabel')}
-                    style={{
-                      width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-                      border: '1px solid var(--border)', overflow: 'hidden',
-                      padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                    }}
-                  >
-                    <img
-                      src={l.scanImageUrl}
-                      alt={t('aiPhotoLabel')}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                    />
-                  </button>
-                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                     {l.category === 'Other' && !!(l.itemType ?? '').trim() && (
@@ -433,9 +493,9 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   </div>
                   {lineHasSpecChips(l)
                     ? <LineSpecChips line={l} />
-                    : (
+                    : l.partNumber && (
                       <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {l.partNumber ?? '—'}
+                        {l.partNumber}
                       </div>
                     )}
                   {l.serialNumber && (
@@ -444,27 +504,186 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                     </div>
                   )}
                 </div>
+                {canEditOrder && (
+                  <>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onEditLine(order, i); }}
+                      className="ph-icon-btn"
+                      style={{ width: 28, height: 28, color: 'var(--fg-subtle)' }}
+                      aria-label={t('edit')}
+                    >
+                      <Icon name="edit" size={13} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setRemovingLineId(l.id); }}
+                      className="ph-icon-btn"
+                      style={{ width: 28, height: 28, color: 'var(--fg-subtle)' }}
+                      aria-label={t('delete')}
+                    >
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </>
+                )}
               </div>
+              {/* Every picture the line carries, not just the first — the
+                  phone is where they are taken, so it is where they are
+                  checked. Taps stop here: the card itself opens the editor. */}
+              {shots.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  {shown.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={e => { e.stopPropagation(); setLightboxUrl(p.url); }}
+                      title={p.filename ?? t('linePhotos')}
+                      style={{
+                        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+                        border: '1px solid var(--border)', overflow: 'hidden',
+                        padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                      }}
+                    >
+                      <img
+                        src={p.url}
+                        alt={t('linePhotos')}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    </button>
+                  ))}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setExpandedPhotos(prev => new Set(prev).add(l.id));
+                      }}
+                      aria-label={t('linePhotosShowAll', { n: hidden })}
+                      style={{
+                        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+                        border: '1px dashed var(--border-strong)', background: 'var(--bg-soft)',
+                        color: 'var(--fg-muted)', fontFamily: 'inherit',
+                        fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0,
+                      }}
+                    >
+                      +{hidden}
+                    </button>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>Qty <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
+                <span>{t('qty')} <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.qty * l.unitCost, locale)}</span>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
-        {!orderLocked && (
-          <button
-            className="ph-btn ghost"
-            style={{
-              width: '100%', marginTop: 10, height: 44,
-              border: '1.5px dashed var(--border-strong)', borderRadius: 12,
-            }}
-            onClick={() => onEditItems(order)}
-          >
-            <Icon name="edit" size={14} /> {t('editItems')}
-          </button>
+        {/* One target per category, matching the capture screen. A single
+            "Add another" button would put the old category lock back in the
+            user's head — the PO is not in a mode. */}
+        {canEditOrder && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.09em',
+              textTransform: 'uppercase', color: 'var(--fg-subtle)', marginBottom: 8,
+            }}>
+              {t('addToThisOrder')}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
+              {addableCategories().map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => onAddLine(order, cat as Category)}
+                  aria-label={t('subAddCatLine', { cat })}
+                  style={{
+                    minHeight: 54, borderRadius: 13,
+                    border: '1.5px dashed ' + categoryTone(cat).tone,
+                    background: 'var(--bg-elev)', color: categoryTone(cat).strong,
+                    fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
+                    display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
+                    padding: '6px 2px', cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontSize: 15, lineHeight: 1, opacity: 0.75 }}>+</span>
+                  <span>{cat}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
+
+        {/* The money sits directly under the lines it comes from: on a phone
+            this is what the screen is for, and the order's warehouse and
+            payment type were answered once and are rarely revisited. */}
+        <div className="ph-card" style={{ marginTop: 16, padding: '12px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              {t('costBreakdown')}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontVariantNumeric: 'tabular-nums' }}>
+              {totals.qty} {totals.qty === 1 ? t('unit') : t('units2')} · {order.lines.length} {order.lines.length === 1 ? t('item') : t('items')}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 10 }}>
+            <span style={{ color: 'var(--fg-subtle)' }}>{t('commissionRate')}</span>
+            <span className="mono" style={{ fontWeight: 600 }}>
+              {order.commissionRate != null ? (order.commissionRate * 100).toFixed(2) + '%' : '—'}
+            </span>
+          </div>
+
+          {/* Goods, then fees, then the total they add up to — the same stack
+              the desktop edit page shows, so the number is never a surprise. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+            <span style={{ color: 'var(--fg-subtle)' }}>{t('goodsTotal')}</span>
+            <span className="mono">{fmtUSD(cost.goods, locale)}</span>
+          </div>
+
+          {canEditOrder ? (
+            <div className="ph-field-row" style={{ gridTemplateColumns: '110px 1fr', marginTop: 8 }}>
+              <div className="ph-field" style={{ marginTop: 0 }}>
+                <label>{t('otherFees')}</label>
+                <input
+                  className="input mono"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={fees.amount}
+                  placeholder="0.00"
+                  onChange={e => setMeta({ fees: { ...fees, amount: e.target.value } })}
+                />
+              </div>
+              <div className="ph-field" style={{ marginTop: 0 }}>
+                <label>{t('otherFeesNote')}</label>
+                <input
+                  className="input"
+                  maxLength={280}
+                  value={fees.note}
+                  placeholder={t('otherFeesPh')}
+                  onChange={e => setMeta({ fees: { ...fees, note: e.target.value } })}
+                />
+              </div>
+            </div>
+          ) : cost.fees > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: 12, marginTop: 6 }}>
+              <span style={{ color: 'var(--fg-subtle)', minWidth: 0, paddingRight: 10 }}>
+                {t('otherFees')}
+                {order.otherFeesNote && (
+                  <span style={{ display: 'block', fontSize: 11, opacity: 0.8 }}>{order.otherFeesNote}</span>
+                )}
+              </span>
+              <span className="mono">{fmtUSD(cost.fees, locale)}</span>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+            <span>{t('totalCost')}</span>
+            <span className="mono" style={{ fontWeight: 600 }}>
+              {fmtUSD(cost.total, locale)}
+            </span>
+          </div>
+        </div>
 
         <div className="ph-section-h"><span>{t('orderDetails')}</span></div>
 
@@ -473,7 +692,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <div style={{ position: 'relative' }}>
             <select
               value={warehouseId}
-              onChange={e => setWarehouseId(e.target.value)}
+              onChange={e => setMeta({ warehouseId: e.target.value })}
               disabled={!canEditOrder}
               style={{
                 width: '100%',
@@ -511,12 +730,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <div className="seg" style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
             <button
               className={payment === 'company' ? 'active' : ''}
-              onClick={() => canEditOrder && setPayment('company')}
+              onClick={() => canEditOrder && setMeta({ payment: 'company' })}
               disabled={!canEditOrder}
             >{t('payCompany')}</button>
             <button
               className={payment === 'self' ? 'active' : ''}
-              onClick={() => canEditOrder && setPayment('self')}
+              onClick={() => canEditOrder && setMeta({ payment: 'self' })}
               disabled={!canEditOrder}
             >{t('paySelf')}</button>
           </div>
@@ -527,7 +746,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <textarea
             className="input"
             value={notes}
-            onChange={e => setNotes(e.target.value)}
+            onChange={e => setMeta({ notes: e.target.value })}
             placeholder={t('orderNotesPh')}
             rows={3}
             disabled={!canAnnotate}
@@ -559,51 +778,25 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           </div>
         )}
 
-        <div className="ph-card" style={{ marginTop: 14, padding: '12px 14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: 'var(--fg-subtle)' }}>{t('commissionRate')}</span>
-            <span className="mono" style={{ fontWeight: 600 }}>
-              {order.commissionRate != null ? (order.commissionRate * 100).toFixed(2) + '%' : '—'}
-            </span>
-          </div>
-          {/* Goods, then fees, then the total they add up to — the same stack
-              the desktop edit page shows, so the number is never a surprise. */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
-            <span style={{ color: 'var(--fg-subtle)' }}>{t('goodsTotal')}</span>
-            <span className="mono">{fmtUSD(cost.goods, locale)}</span>
-          </div>
-          {cost.fees > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: 12, marginTop: 6 }}>
-              <span style={{ color: 'var(--fg-subtle)', minWidth: 0, paddingRight: 10 }}>
-                {t('otherFees')}
-                {order.otherFeesNote && (
-                  <span style={{ display: 'block', fontSize: 11, opacity: 0.8 }}>{order.otherFeesNote}</span>
-                )}
-              </span>
-              <span className="mono">{fmtUSD(cost.fees, locale)}</span>
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-            <span>{t('totalCost')}</span>
-            <span className="mono" style={{ fontWeight: 600 }}>
-              {fmtUSD(cost.total, locale)}
-            </span>
-          </div>
-        </div>
-
+        {/* Collapsed: it is the longest block on the page and the least often
+            read. The header still states the count, so it costs one tap. */}
         <div style={{ marginTop: 14 }}>
-          <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} />
+          <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} defaultOpen={false} />
         </div>
 
-        {saveError && (
-          <div role="alert" style={{ marginTop: 12, fontSize: 12, color: 'var(--neg)' }}>
-            {saveError}
-          </div>
-        )}
       </div>
 
       <div className="ph-action-bar">
-        <button className="ph-btn ghost" onClick={onCancel}>{t('cancel')}</button>
+        {/* The total belongs where the decision is made, not 2,000px up the
+            scroll. It states the figure; it is never typed. */}
+        <div style={{ flex: '0 0 auto', paddingRight: 4, minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--fg-subtle)' }}>
+            {t('totalCost')}
+          </div>
+          <div className="mono" style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+            {fmtUSD(cost.total, locale)}
+          </div>
+        </div>
         <button
           className="ph-icon-btn"
           onClick={() => api.download(`/api/orders/${order.id}/spreadsheet`, `${order.id}.xlsx`).catch(handleFetchError)}
@@ -673,6 +866,42 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           </button>
         )}
       </div>
+
+      {removingLineId && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setRemovingLineId(null); }}>
+          <div className="modal-shell" style={{ maxWidth: 380, width: '92vw' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--neg-soft)', color: 'var(--neg)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="trash" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">
+                    {t('removeLineTitle', {
+                      name: itemLabel(order.lines.find(l => l.id === removingLineId)!) || '—',
+                    })}
+                  </div>
+                  <div className="modal-sub">{t('removeLineSub')}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setRemovingLineId(null)}>{t('cancel')}</button>
+              <button
+                className="btn"
+                style={{ background: 'var(--neg)', color: 'white', borderColor: 'var(--neg)' }}
+                onClick={() => removeLine(removingLineId)}
+              >
+                {t('delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDelete && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !deleting) setShowDelete(false); }}>

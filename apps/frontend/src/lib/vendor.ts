@@ -1,3 +1,5 @@
+import { isRealPhotoUrl } from '@recycle-erp/shared';
+
 export type CatalogItem = {
   id: string; category: string; brand?: string | null; capacity?: string | null;
   generation?: string | null; type?: string | null; classification?: string | null;
@@ -7,10 +9,12 @@ export type CatalogItem = {
   scan_image_url?: string | null;
 };
 
-// Stub scans emit `data:image/placeholder…` URLs; treat those as "no preview".
+// Credential-less scan and upload paths both emit a data: URL that renders as a
+// broken <img>; `isRealPhotoUrl` knows both shapes. Imported from the shared
+// package rather than lib/linePhotos so the vendor bundle keeps no React
+// dependency for a two-line predicate.
 export function previewUrl(it: CatalogItem): string | null {
-  const u = it.scan_image_url;
-  return u && !u.startsWith('data:image/placeholder') ? u : null;
+  return isRealPhotoUrl(it.scan_image_url) ? it.scan_image_url : null;
 }
 
 export type BasketLine = {

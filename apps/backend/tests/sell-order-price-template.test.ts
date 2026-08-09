@@ -119,7 +119,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(Number(ws.getRow(dataRows[0]).getCell(qtyCol).value)).toBe(5);
   });
 
-  it('leaves Unit Price blank and unlocked, locks every sheet, formulas Line Total', async () => {
+  it('leaves Unit Price blank on an unprotected sheet, formulas Line Total', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
@@ -131,7 +131,9 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       const totalCol = cols.get('Line Total (USD)')!;
       expect(priceCol).toBeGreaterThan(0);
       expect(totalCol).toBeGreaterThan(0);
-      expect(ws.sheetProtection).toBeTruthy();
+      // The workbook ships with no sheet protection at all — a manager can
+      // reshape a bid tab without lifting a lock first.
+      expect(ws.sheetProtection).toBeFalsy();
 
       for (let r = headerRow + 1; r <= ws.rowCount; r++) {
         const row = ws.getRow(r);
@@ -139,7 +141,6 @@ describe('GET /api/sell-orders/:id/price-template', () => {
         const priceCell = row.getCell(priceCol);
         // Blank bid sheet: existing order prices must not leak to the vendor.
         expect(priceCell.value).toBeNull();
-        expect(priceCell.protection?.locked).toBe(false);
         const totalCell = row.getCell(totalCol);
         expect(totalCell.formula).toBeTruthy();
       }
@@ -160,19 +161,9 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       const first = `${ws.getColumn(1).letter}${headerRow}`;
       const last = `${ws.getColumn(lastCol).letter}${headerRow + 1}`;
       expect(ws.autoFilter).toBe(`${first}:${last}`);
-      // exceljs 'allow' semantics: true here is the unlocked autoFilter="0"
-      // attribute. Without it Excel greys the dropdowns out on a locked sheet.
-      expect(ws.sheetProtection?.autoFilter).toBe(true);
-      expect(ws.sheetProtection?.sort).toBe(true);
-      // The permission alone is not enough — Excel refuses to sort a range
-      // holding a single locked cell, so every data cell has to be unlocked.
-      const data = ws.getRow(headerRow + 1);
-      for (let c = 1; c <= lastCol; c++) {
-        expect(data.getCell(c).protection?.locked).toBe(false);
-      }
-      // The header itself stays locked: the import parser finds its columns
-      // by reading this text.
-      expect(ws.getRow(headerRow).getCell(1).protection?.locked).not.toBe(false);
+      // No protection to grey the dropdowns out or to refuse a sort — that is
+      // what makes the filter usable without a trip through Review > Unprotect.
+      expect(ws.sheetProtection).toBeFalsy();
     }
   });
 
@@ -274,7 +265,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
   });
 
-  it('every tab carries a blank, unlocked Note column for vendor remarks', async () => {
+  it('every tab carries a blank Note column for vendor remarks', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const wb = await loadWorkbook(
@@ -296,7 +287,6 @@ describe('GET /api/sell-orders/:id/price-template', () => {
         const noteCell = row.getCell(noteCol);
         // Nothing pre-filled from the DB — the vendor/manager types remarks.
         expect(noteCell.value).toBeNull();
-        expect(noteCell.protection?.locked).toBe(false);
       }
     }
   });
@@ -370,7 +360,8 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     // Price-free by design: nothing on a packing tab may look like a price —
     // that's also what keeps the import parser away from these tabs.
     expect(la1Cells.some(v => /price|单价|价格/i.test(v))).toBe(false);
-    expect(la1.sheetProtection).toBeTruthy();
+    // Packing tabs ship unprotected too — a picker types into the tick boxes.
+    expect(la1.sheetProtection).toBeFalsy();
 
     const rowQty = (ws: ExcelJS.Worksheet, firstCell: string): number[] => {
       const out: number[] = [];

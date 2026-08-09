@@ -6,10 +6,10 @@ import { loginAs, MARCUS, PRIYA, ALEX } from './helpers/auth';
 // Projected financials are the PURCHASER lens: GET /api/dashboard's
 // revenue/profit/commission/count (and the weekly chart + byCat) come from the
 // purchaser's OWN purchase orders, but only once the PO's lifecycle = 'done'.
-// Profit is the margin "set" on each line — (sell_price - unit_cost) * qty,
-// sell_price NULL falling back to unit_cost — the same projection the orders
-// list shows. Window keys off the PO's created_at. The manager (realized) lens
-// is covered in dashboard-realized.test.ts.
+// Profit is the margin "set" on each line — (sell_price - unit_cost) * qty —
+// over the PRICED lines only, the same projection the orders list shows. Window
+// keys off the PO's created_at. The manager (realized) lens is covered in
+// dashboard-realized.test.ts.
 
 async function userId(email: string): Promise<string> {
   const db = getTestDb();
@@ -137,17 +137,65 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     expect(after.body.kpis.count).toBe(1);
   });
 
-  it('a line with no sell_price contributes zero margin (falls back to unit_cost)', async () => {
+  // An unpriced line is not a sale at cost — it is a line nobody has priced.
+  // Counting its cost as revenue inflated the KPI by the entire cost of every
+  // unpriced line, which on a fresh PO is all of it. The spreadsheet
+  // (routes/orders.ts) and the edit screen always excluded them; this is the
+  // dashboard agreeing with them.
+  it('a line with no sell_price contributes neither revenue nor profit', async () => {
     await clearWindow();
     await insertDonePO('PO-PROJ-NULLP', MARCUS, { rate: 0.2 }, [
-      { unitCost: 50, sellPrice: null, qty: 2 }, // no margin set
+      { unitCost: 50, sellPrice: null, qty: 2 }, // never priced
       { unitCost: 50, sellPrice: 80,   qty: 2 }, // +60 margin
     ]);
 
     const { token } = await loginAs(MARCUS);
     const r = await api<{ kpis: { profit: number; revenue: number } }>('GET', '/api/dashboard?range=30d', { token });
-    expect(r.body.kpis.profit).toBeCloseTo((80 - 50) * 2, 2);          // only the priced line
-    expect(r.body.kpis.revenue).toBeCloseTo(50 * 2 + 80 * 2, 2);       // null line bills at cost
+    expect(r.body.kpis.profit).toBeCloseTo((80 - 50) * 2, 2);
+    expect(r.body.kpis.revenue).toBeCloseTo(80 * 2, 2);
+  });
+
+  // kpis and recent are one screen — the strip renders directly under the KPI
+  // tiles. The tiles drop an unpriced line; the strip used to bill it at cost
+  // and render "+$0" in green, so the same PO both did and didn't have a margin
+  // depending on which half of the page you read.
+  it('a recent-activity row for an unpriced line states no profit', async () => {
+    await clearWindow();
+    await insertDonePO('PO-RECENT-NULLP', MARCUS, { rate: 0.2 }, [
+      { unitCost: 50, sellPrice: null, qty: 2 },
+      { unitCost: 50, sellPrice: 80,   qty: 2 },
+    ]);
+
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{
+      kpis: { profit: number };
+      recent: { sell_price: number | null; profit: number | null }[];
+    }>('GET', '/api/dashboard?range=30d', { token });
+
+    expect(r.body.recent).toHaveLength(2);
+    expect(r.body.recent.find(x => x.sell_price == null)!.profit).toBeNull();
+    expect(r.body.recent.find(x => x.sell_price === 80)!.profit).toBeCloseTo((80 - 50) * 2, 2);
+    // Every profit the strip does state is one the KPI counted.
+    const strip = r.body.recent.reduce((s, x) => s + (x.profit ?? 0), 0);
+    expect(strip).toBeCloseTo(r.body.kpis.profit, 2);
+  });
+
+  // The three figures sit in one KPI row and are read as an arithmetic. Cost
+  // once summed every line while revenue and profit dropped the unpriced ones,
+  // so the tile stated 160 − 200 = 60. Cost is the cost OF the priced lines.
+  it('revenue − cost equals profit when some lines are unpriced', async () => {
+    await clearWindow();
+    await insertDonePO('PO-PROJ-RECON', MARCUS, { rate: 0.2 }, [
+      { unitCost: 50, sellPrice: null, qty: 2 },
+      { unitCost: 50, sellPrice: 80,   qty: 2 },
+    ]);
+
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ kpis: { revenue: number; cost: number; profit: number } }>(
+      'GET', '/api/dashboard?range=30d', { token });
+    const { revenue, cost, profit } = r.body.kpis;
+    expect(cost).toBeCloseTo(50 * 2, 2);
+    expect(revenue - cost).toBeCloseTo(profit, 2);
   });
 
   // Order-level other_fees are a cost, spread across the PO's lines pro-rata by

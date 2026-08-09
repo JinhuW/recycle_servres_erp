@@ -4,6 +4,7 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, marketValueSelect } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
 import { appendPriceEvent } from '../lib/refPriceEvents';
+import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
 
@@ -65,6 +66,63 @@ market.get('/', async (c) => {
     total,
     items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
   });
+});
+
+// Recorded value for a known set of part numbers, in one round trip.
+//
+// The PO screens need this: a purchaser typing a part number at intake wants to
+// see what it sells for and what the recorded max buy is BEFORE committing to
+// the cost. Doing that through GET / would mean one substring search per line
+// and a client-side exact match (which is what DesktopInventoryEdit does today,
+// and which returns the wrong row whenever the PN is a prefix of another).
+//
+// POST, not GET: a 50-line PO's part numbers overflow a sane query string, and
+// they would land in every access log along the way.
+const LOOKUP_MAX = 100;
+
+market.post('/lookup', async (c) => {
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as
+    | { partNumbers?: unknown }
+    | null;
+  const raw = Array.isArray(body?.partNumbers) ? body!.partNumbers : null;
+  if (!raw) return c.json({ error: 'partNumbers must be an array' }, 400);
+  if (raw.length > LOOKUP_MAX) {
+    return c.json({ error: `at most ${LOOKUP_MAX} part numbers per lookup` }, 413);
+  }
+
+  // Canonicalised here so the caller can key its own map and get a hit: the
+  // rule is @recycle-erp/shared's canonicalPartNumber, which is the same
+  // function the frontend canonicalised the request with.
+  const canon = [...new Set(
+    raw.filter((p): p is string => typeof p === 'string')
+      .map(p => canonPartNumberJs(p))
+      .filter(Boolean),
+  )];
+  const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
+  if (canon.length === 0) return c.json({ targetMargin: TARGET_MARGIN, items: {} });
+
+  const rows = await marketValueSelect(
+    sql,
+    sql`${canonPartCol(sql, sql`rp.part_number`)} = ANY(${canon})`,
+    sql``,
+    sql`${canonPartCol(sql, sql`l.part_number`)} = ANY(${canon})`,
+  );
+
+  // Two ref_prices rows can canonicalise to the same key (the column has no
+  // unique constraint). Keep the freshest reading rather than an arbitrary one.
+  const items: Record<string, ReturnType<typeof formatRefPrice>> = {};
+  const freshness = new Map<string, number>();
+  for (const r of rows) {
+    const key = canonPartNumberJs(r.part_number ?? '');
+    if (!key) continue;
+    const at = r.last_price_at ? new Date(r.last_price_at).getTime() : 0;
+    if (!(key in items) || at > (freshness.get(key) ?? -1)) {
+      items[key] = formatRefPrice(r, TARGET_MARGIN);
+      freshness.set(key, at);
+    }
+  }
+  return c.json({ targetMargin: TARGET_MARGIN, items });
 });
 
 // Manual price entry from the Market page. Manager-only; auth + CSRF are

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api, ApiError } from '../../lib/api';
-import { handleFetchError, showErrorToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
+import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { CONDITIONS } from '../../lib/catalog';
 import { FormSkeleton } from '../../components/Skeleton';
 
@@ -93,19 +94,7 @@ type LinkedSellOrder = {
 
 // Subset of the /api/market row (RefPrice). Just what we render in the
 // Market reference card.
-type RefMatch = {
-  partNumber: string | null;
-  label: string;
-  sub: string | null;
-  source: string | null;
-  target: number | null;
-  low: number | null;
-  high: number | null;
-  avgSell: number | null;
-  samples: number;
-  demand: 'high' | 'medium' | 'low';
-  updatedAt: string;
-};
+type RefMatch = ResolvedMarketValue;
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const { t, lang } = useT();
@@ -118,7 +107,6 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
 
   const [peers, setPeers] = useState<PeerRow[]>([]);
-  const [refMatch, setRefMatch] = useState<RefMatch | null>(null);
   const [linkedSellOrders, setLinkedSellOrders] = useState<LinkedSellOrder[]>([]);
   const [internalNotes, setInternalNotes] = useState('');
   // When the backend rejects a qty/status change because the line is committed
@@ -166,23 +154,12 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     return () => { alive = false; };
   }, [item?.part_number]);
 
-  // Market reference match: same part number wins; fall back to first row.
-  useEffect(() => {
-    const pn = item?.part_number;
-    if (!pn) { setRefMatch(null); return; }
-    let alive = true;
-    api.get<{ items: RefMatch[] }>(`/api/market?q=${encodeURIComponent(pn)}`)
-      .then(r => {
-        if (!alive) return;
-        const match = r.items.find(x => x.partNumber === pn) ?? r.items[0] ?? null;
-        setRefMatch(match);
-      })
-      .catch(err => {
-        if (alive) setRefMatch(null);
-        handleFetchError(err);
-      });
-    return () => { alive = false; };
-  }, [item?.part_number]);
+  // Market reference for this part, through the shared lookup. The old `?q=`
+  // call was a SUBSTRING search narrowed client-side, and its `?? items[0]`
+  // fallback rendered a DIFFERENT part's prices whenever the exact match was
+  // not on the page — editing `720-CT` quietly showed `M720-CTX`.
+  const resolveMarketValue = useMarketLookup([item?.part_number]);
+  const refMatch = resolveMarketValue(item?.part_number);
 
   // Sell orders that drew from this inventory line.
   useEffect(() => {
@@ -274,7 +251,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         if (draft.status !== item.status) fields.push('status');
         setBlocked({ orders: openOrders, fields });
       } else {
-        showErrorToast(err instanceof Error ? err.message : 'Save failed');
+        showErrorDialog(err instanceof Error ? err.message : 'Save failed');
       }
     } finally {
       setSaving(false);
@@ -1010,7 +987,7 @@ function SummaryColumn({
             <button
               className="btn"
               style={{ color: 'var(--neg)', borderColor: 'color-mix(in oklch, var(--neg) 30%, var(--border))' }}
-              onClick={() => showErrorToast(t('ieArchiveNotImpl'))}
+              onClick={() => showErrorDialog(t('ieArchiveNotImpl'))}
             >
               {t('archive')}
             </button>

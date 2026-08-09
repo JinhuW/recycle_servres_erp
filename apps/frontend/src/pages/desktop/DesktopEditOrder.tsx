@@ -3,25 +3,34 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
-import { handleFetchError, showErrorToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
-import { poEffectiveCost, parseFeeInput, splitGoodsOverflow, GOODS_EPSILON } from '../../lib/poTotals';
-import type { Order, OrderLine, Warehouse } from '../../lib/types';
+import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../../lib/poTotals';
+import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
   type Line, type DuplicatePartGroup,
 } from './DesktopSubmit';
+import { AddLineMenu } from './submit/AddLineMenu';
+import { OrderCategoryChips } from '../../components/OrderCategoryChips';
+import {
+  linePhotos, deleteLinePhoto, uploadedPhotoCount, useLinePhotoBuffer,
+  type LinePhoto, type PendingPhoto,
+} from '../../lib/linePhotos';
+import { groupLines, shouldGroup, displayRows, catTone, pricedTotals } from '../../lib/lineGroups';
+import { CostTape } from '../../components/CostTape';
+import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
-import { serialIssue } from '@recycle-erp/shared';
+import { serialIssue, isPricedSellPrice } from '@recycle-erp/shared';
+import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 
-const realScan = (u?: string | null): u is string =>
-  !!u && !u.startsWith('data:image/placeholder');
+
 
 // `order.status` is derived from the SET of line statuses and collapses to
 // 'Mixed' when a (still-open) order's lines disagree — e.g. a draft whose
@@ -81,6 +90,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     : ORDER_STATUSES.slice();
 
   const [status, setStatus] = useState(effectiveStatus);
+  // The stage as last written. Normally the one the page opened with, but a
+  // save that has to keep the user here (a photo upload that failed) has
+  // already advanced the order — re-sending it would step it on again.
+  const [savedStatus, setSavedStatus] = useState(effectiveStatus);
   // Optional Done evidence (note + attachments). The dialog live-saves to the
   // backend; these mirror its latest confirmed state for the read-only block.
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -104,7 +117,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       for (const f of files) {
         // 50 MiB server hard cap; oversized images are shrunk server-side.
         if (f.size > 50 * 1024 * 1024) {
-          showErrorToast(t('fileTooLarge', { name: f.name }));
+          showErrorDialog(t('fileTooLarge', { name: f.name }));
           continue;
         }
         const form = new FormData();
@@ -143,6 +156,60 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
+  // Files picked for a line that has no DB id to hang them off yet — one added
+  // in this session and not yet confirmed. Keyed by _cid, the only handle such
+  // a line has, and flushed once the id lands.
+  const photos = useLinePhotoBuffer((cid, saved) =>
+    setLines(ls => ls.map(l =>
+      (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l))));
+
+  // Upload what was buffered for a line, now that it has an id. Returns how
+  // many are still queued because their upload failed: those keep their File
+  // and their preview, since it is the only copy of that picture there is.
+  const flushPendingPhotos = async (
+    cid: string, lineId: string, items?: PendingPhoto[],
+  ): Promise<number> => (await photos.flush(cid, order.id, lineId, items)).failed.length;
+
+  // A line that came from the server has somewhere to put a photo right away;
+  // one added in this session doesn't until Confirm line or Save gives it an id.
+  const addLinePhotos = (idx: number, files: FileList | null) => {
+    const l = lines[idx];
+    if (!l) return;
+    const added = photos.add(l._cid, uploadedPhotoCount(l.photos), files);
+    if (!added.length || !l._id) return;
+    void flushPendingPhotos(l._cid, l._id, added)
+      .then(failed => { if (failed) showErrorDialog(t('linePhotoUploadFailed')); });
+  };
+
+  // Photos held against a line that already has somewhere to put them: an
+  // upload that failed, nothing else. What the Retry action offers.
+  const retryablePhotos = lines.reduce(
+    (n, l) => n + (l._id ? photos.queuedFor(l._cid).length : 0), 0);
+
+  // Set when a save wrote the order but left photos behind: the page has to
+  // stay put, so it also owes the user the exit once they are uploaded.
+  const [heldAfterSave, setHeldAfterSave] = useState(false);
+
+  const retryQueuedPhotos = async () => {
+    const flushed = await Promise.all(lines
+      .filter(l => l._id && photos.queuedFor(l._cid).length)
+      .map(l => flushPendingPhotos(l._cid, l._id!)));
+    if (flushed.reduce((a, b) => a + b, 0) > 0) {
+      showErrorDialog(t('linePhotoUploadFailed'));
+      return;
+    }
+    if (heldAfterSave) onSaved('Saved ' + order.id);
+  };
+
+  const removeLinePhoto = async (idx: number, photo: LinePhoto) => {
+    const l = lines[idx];
+    if (!l?._id) return;
+    try {
+      await deleteLinePhoto(order.id, l._id, photo.id);
+      setLines(ls => ls.map((x, j) =>
+        (j === idx ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x)));
+    } catch { showErrorDialog(t('linePhotoDeleteFailed')); }
+  };
   // Line ids that exist in the DB. Seeded from the server's set and grown by
   // the drawer's Confirm-line write-through — `order.lines` is a snapshot from
   // page load and never learns about those, so a line added+confirmed and then
@@ -157,10 +224,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // suppressed below by treating null and 0 as equivalent.
   const [commissionPct, setCommissionPct] = useState<string>(
     order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '0');
-  const [totalCostInput, setTotalCostInput] = useState<string>(
-    order.totalCost != null ? order.totalCost.toFixed(2) : '',
-  );
-  const [totalCostOverride, setTotalCostOverride] = useState(order.totalCost != null);
   // Fees are charged on top of the goods total, so they get their own input
   // rather than being folded into the override. '' renders as no fee.
   const [otherFeesInput, setOtherFeesInput] = useState<string>(
@@ -172,7 +235,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -223,8 +285,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const updateLine = (i: number, patch: Partial<EditLine>) =>
     setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch, _dirty: true } : l)));
 
-  const addLine = () => {
-    setLines(ls => [...ls, { ...blankLine(order.category), _dirty: true }]);
+  const addLine = (cat: Category) => {
+    setLines(ls => [...ls, { ...blankLine(cat), _dirty: true }]);
     setActiveIdx(lines.length);
   };
 
@@ -236,6 +298,64 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       if (idx != null && i < idx) return idx - 1;
       return idx;
     });
+  };
+
+  const marketFor = useMarketLookup(lines.map(l => l.partNumber));
+
+  // ── Category grouping ──────────────────────────────────────────────────
+  // Only when the PO actually spans categories: a single-category order gets
+  // one header restating a total the ledger already shows, which is noise.
+  const groups = useMemo(() => groupLines(lines), [lines]);
+  const grouped = useMemo(() => shouldGroup(lines), [lines]);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleFold = (cat: string) => setFolded(prev => {
+    const next = new Set(prev);
+    if (next.has(cat)) next.delete(cat); else next.add(cat);
+    return next;
+  });
+
+  // Which rows the table walks, and which the fold hides — see lib/lineGroups.
+  // Kept out of the render so it can be tested without one.
+  const rows = useMemo(
+    () => displayRows(lines, groups, grouped, folded),
+    [lines, groups, grouped, folded],
+  );
+  const groupByCat = useMemo(
+    () => new Map(groups.map(g => [g.category, g])),
+    [groups],
+  );
+
+  const groupHead = (category: string) => {
+    const g = groupByCat.get(category);
+    if (!g) return null;
+    return (
+      <tr className="grp-row" style={catTone(category)}>
+        <td colSpan={canEditOrder ? 9 : 8}>
+          <button
+            type="button"
+            className="grp-hd"
+            aria-expanded={!folded.has(category)}
+            onClick={e => { e.stopPropagation(); toggleFold(category); }}
+          >
+            <span className={'grp-tw' + (folded.has(category) ? ' closed' : '')}>
+              <Icon name="chevronDown" size={13} />
+            </span>
+            <span className="grp-chip">{category}</span>
+            <span className="grp-meta">
+              {g.lines.length === 1
+                ? t('historyLineCountOne', { n: g.lines.length })
+                : t('historyLineCountMany', { n: g.lines.length })}
+              {' · '}{t('grpUnits', { n: g.units.toLocaleString(locale) })}
+              {g.unpriced > 0 && <span className="grp-unpriced"> · {t('grpUnpriced', { n: g.unpriced })}</span>}
+            </span>
+            <span className="grp-amt mono">{fmtUSD(g.goods, locale)}</span>
+            <span className={'grp-pl mono ' + (g.profit > 0 ? 'pos' : g.profit < 0 ? 'neg' : 'muted')}>
+              {g.profit ? (g.profit > 0 ? '+' : '−') + fmtUSD(Math.abs(g.profit), locale) : '—'}
+            </span>
+          </button>
+        </td>
+      </tr>
+    );
   };
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
@@ -253,34 +373,32 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   const totals = useMemo(() => {
     let qty = 0, cost = 0, revenue = 0, profit = 0;
-    // "Priced" = lines that have a sell price set, which is the subset that
-    // can actually contribute to a realised commission.
-    let pricedCount = 0, pricedProfit = 0;
     for (const l of lines) {
       const q = Number(l.qty) || 0;
       const c = Number(l.unitCost) || 0;
-      const spRaw = l.sellPrice;
-      const hasPrice = spRaw != null && spRaw !== '' && Number(spRaw) > 0;
-      const sp = hasPrice ? Number(spRaw) : 0;
+      // An unpriced line still costs what it cost; it just earns nothing yet.
+      const sp = isPricedSellPrice(l.sellPrice) ? Number(l.sellPrice) : 0;
       qty += q;
       cost += q * c;
       revenue += q * sp;
       profit += q * (sp - c);
-      if (hasPrice) {
-        pricedCount += 1;
-        pricedProfit += q * (sp - c);
-      }
     }
-    return { qty, cost, revenue, profit, pricedCount, pricedProfit };
+    // The priced subset — what can actually contribute to a realised
+    // commission — through the rule the capture screen and the cost tape use.
+    const priced = pricedTotals(lines);
+    return {
+      qty, cost, revenue, profit,
+      pricedCount: priced.count, pricedProfit: priced.profit, pricedCost: priced.cost,
+    };
   }, [lines]);
 
-  const statusDirty = status !== effectiveStatus;
+  const statusDirty = status !== savedStatus;
   const linesDirty = lines.some(l => l._dirty) || lines.length !== persistedIds.length;
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
   // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
-  // must NOT be treated as a change — mirrors the totalCost field's guard.
+  // must NOT be treated as a change — the same guard the other-fees field uses.
   const parsedCommission =
     commissionPct.trim() === '' ? null : Number(commissionPct);
   const commissionValid =
@@ -292,44 +410,46 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // flagged as a pending change.
   const commissionDirty =
     commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
-  const parsedTotalCost = totalCostInput.trim() === '' ? null : Number(totalCostInput);
-  const totalCostDirty =
-    totalCostOverride &&
-    !Number.isNaN(parsedTotalCost as number) &&
-    (parsedTotalCost ?? null) !== (order.totalCost ?? null);
-
-  // Non-numeric intermediate input ("5e") must not read as a change — same
-  // guard as totalCostDirty above.
+  // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
   const otherFeesDirty = parsedOtherFees !== order.otherFees;
   const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
 
-  // A purchaser types the one number off the supplier's invoice. Anything above
-  // the line sum is a fee, so on blur it moves there and Goods total returns to
-  // the line sum — the all-in total is untouched, the money is just classified.
-  // On blur rather than on change: the first keystroke of "11610.30" is "1",
-  // which would read as a huge negative gap.
-  const [movedToFees, setMovedToFees] = useState<number | null>(null);
-  const applyGoodsOverflow = () => {
-    if (!canEditOrder || !totalCostOverride || parsedTotalCost == null) return;
-    const { goods, overflow } = splitGoodsOverflow(parsedTotalCost, totals.cost);
-    if (overflow <= 0) return;
-    setTotalCostInput(goods.toFixed(2));
-    setOtherFeesInput((parsedOtherFees + overflow).toFixed(2));
-    setMovedToFees(overflow);
-  };
+  // The goods total is no longer editable here: it is the sum of the lines, and
+  // anything paid on top of the goods is the fee — so line costs + fee is what
+  // the purchaser actually paid, with nothing to reconcile between two fields.
+  //
+  // The stored total is read straight off the record, never round-tripped
+  // through form state, because no control on this page can change it. Whether
+  // it is a negotiated lot price worth preserving or just a mirror of the lines
+  // is settled ONCE, against the subtotal the order arrived with — the same
+  // instant the backend settles it (services/orderGoodsTotal.ts). Judge it
+  // against the live sum instead and every unit-cost edit turns the mirror into
+  // a fake override: the tape, the footer and the commission preview all freeze
+  // on the figure the page opened with, while the save that follows stores the
+  // new one. A real negotiated price does stay pinned, and the tape and footer
+  // say so rather than leaving the arithmetic looking wrong.
+  const loadedLineSubtotal = useMemo(
+    () => order.lines.reduce((sum, l) => sum + l.qty * l.unitCost, 0),
+    [order.lines],
+  );
+  const storedGoods = useMemo(
+    () => readStoredGoodsTotal(order.totalCost, loadedLineSubtotal),
+    [order.totalCost, loadedLineSubtotal],
+  );
+  const goodsOverridden = storedGoods.negotiated;
 
   // Derived values for the side Payment-detail panel.
   // Self pay → the purchaser is reimbursed for what they paid out of pocket
   // (effectiveTotalCost) AND earns commission on profit. Company pay → only
-  // the commission on profit. When the manager/purchaser overrides Goods total,
-  // that override is the authoritative goods cost for EVERY part of the formula
+  // the commission on profit. When the order carries a negotiated goods total,
+  // that price is the authoritative goods cost for EVERY part of the formula
   // — including (Revenue − Cost), so the commission preview reconciles cleanly
   // with the Self-pay reimbursement instead of mixing two cost figures. Fees
   // land on top of it, so they reduce profit and therefore commission.
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
-    totalCostOverride: totalCostOverride ? parsedTotalCost : null,
+    totalCostOverride: storedGoods.override,
     otherFees: parsedOtherFees,
   });
   const effectiveTotalCost = cost.total;
@@ -340,21 +460,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
 
   const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || totalCostDirty
+    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
     || commissionDirty || otherFeesDirty || otherFeesNoteDirty;
 
-  const lineReady = (l: EditLine) => {
-    const qty = Number(l.qty) || 0;
-    const cost = Number(l.unitCost) || 0;
-    const hasIdentity = l.category === 'Other'
-      ? !!l.description && !!(l.itemType ?? '').trim()
-      : !!l.brand;
-    return qty > 0 && cost >= 0 && hasIdentity;
-  };
+  const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
   const canSave =
     dirty && !saving && !orderLocked && (!canEditOrder || lines.every(lineReady));
+
+  // Localized "Brand, Quantity" list of what a line is still waiting on. The
+  // capture screen asks the same question, and used to name the same blank
+  // field by a different word.
+  const missingNamesFor = (l: EditLine): string | null =>
+    missingFieldNames(lineRequirements(l).missingKeys, t, lang);
 
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.
@@ -373,22 +492,34 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const serialIssueFor = (l: EditLine) => (changesSerialFields(l) ? serialIssue(l) : null);
 
-  // Inline hint near the Save button — explains why it's disabled instead of
-  // leaving the user clicking a dead button. Order matches the canSave gates.
-  const saveDisabledReason: string | null =
-    saving || canSave  ? null
-  : orderLocked        ? 'This order is Done — it can no longer be edited.'
-  : !dirty             ? 'No changes to save.'
-  : (() => {
-      const bad = lines.findIndex(l => !lineReady(l));
-      if (bad < 0) return null;
-      const which = lines.length === 1 ? 'this line' : `line ${bad + 1}`;
-      return `Fill in brand/description, quantity and unit cost on ${which} before saving.`;
-    })();
+  // Everything standing between the user and a save, one entry per problem.
+  // Save stays clickable while these exist: clicking opens a dialog listing
+  // them, which beats a dead button next to a hint that's easy to miss.
+  const saveBlockers: string[] =
+    saving || canSave  ? []
+  : orderLocked        ? [t('saveBlockedLocked')]
+  : !dirty             ? [t('saveBlockedNoChanges')]
+  : lines.flatMap((l, i) => {
+      if (lineReady(l)) return [];
+      const fields = missingNamesFor(l);
+      if (fields) {
+        return [lines.length === 1
+          ? t('subMissingFieldsThis', { fields })
+          : t('subMissingFieldsLine', { n: i + 1, fields })];
+      }
+      return [lines.length === 1 ? t('subFillThisLine') : t('subFillLineN', { n: i + 1 })];
+    });
+
+  const attemptSave = () => {
+    if (saveBlockers.length) {
+      showErrorDialog(t('errCantSaveMsg'), saveBlockers, t('errCantSaveTitle'));
+      return;
+    }
+    void save();
+  };
 
   const doSave = async () => {
     setSaving(true);
-    setSaveError(null);
     try {
       // Past the purchaser's edit window only the note is theirs to change;
       // sending the line/pricing keys too would trip the backend's 403.
@@ -399,22 +530,41 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       }
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
-      await api.patch(`/api/orders/${order.id}`, {
+      const addedLines = lines.filter(l => !l._id);
+      const r = await api.patch<{ ok: true; addedLineIds: string[] }>(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
-        totalCost:     totalCostDirty ? parsedTotalCost        : undefined,
         otherFees:     otherFeesDirty ? parsedOtherFees        : undefined,
         otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
-        addLines: lines
-          .filter(l => !l._id)
-          .map(l => editLineToInsert(l, status)),
+        addLines: addedLines.map(l => editLineToInsert(l, status)),
         removeLineIds: removeLineIds.length ? removeLineIds : undefined,
       });
+      // addedLineIds comes back aligned 1:1 with the addLines we sent, so a
+      // photo buffered against a line that had no id can finally reach it.
+      // Before onSaved, which navigates away and takes the buffer with it.
+      const idByCid = new Map<string, string>();
+      addedLines.forEach((l, i) => { if (r.addedLineIds[i]) idByCid.set(l._cid, r.addedLineIds[i]); });
+      // Written back before anything can keep the user on this page: a second
+      // save must patch these lines, not append them a second time.
+      setLines(ls => ls.map(l => {
+        const id = idByCid.get(l._cid);
+        return id ? { ...l, _id: id, _dirty: false } : (l._dirty ? { ...l, _dirty: false } : l);
+      }));
+      setPersistedIds([...persistedIds.filter(id => presentIds.has(id)), ...idByCid.values()]);
+      let stillQueued = 0;
+      for (const [cid, newId] of idByCid) stillQueued += await flushPendingPhotos(cid, newId);
+      // A photo picked for an existing line whose upload failed is queued too,
+      // and this is its last chance before the page goes away.
+      for (const l of lines) {
+        if (l._id && photos.queuedFor(l._cid).length) {
+          stillQueued += await flushPendingPhotos(l._cid, l._id);
+        }
+      }
       // The stepper's stage lives on orders.lifecycle, which PATCH never
       // touches — only /advance moves it (and cascades the line statuses).
       // Without this the save returns 200, the lines flip, but the stage snaps
@@ -424,12 +574,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       if (statusDirty) {
         const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
         await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
+        setSavedStatus(status);
+      }
+      // The order is saved either way, but those Files exist nowhere else and
+      // this page is the only thing holding them — leaving now would discard
+      // them. Retry is in the footer.
+      if (stillQueued > 0) {
+        setHeldAfterSave(true);
+        showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
+        return;
       }
       onSaved('Saved ' + order.id);
     } catch (e) {
       // Keep the editor open and the user's edits intact on failure — calling
       // onSaved here would navigate away and discard unsaved work.
-      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -475,7 +634,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     );
     const newId = l._id ?? r.addedLineIds[0];
     setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, _dirty: false } : x)));
-    if (!l._id && newId) setPersistedIds(ids => [...ids, newId]);
+    if (!l._id && newId) {
+      setPersistedIds(ids => [...ids, newId]);
+      if (await flushPendingPhotos(l._cid, newId)) showErrorDialog(t('linePhotoUploadFailed'));
+    }
     setActivityKey(k => k + 1);
     window.__showToast?.(t('drawerLineSaved', { n: i + 1 }), 'success');
   };
@@ -513,9 +675,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               borderRadius: 5, background: 'var(--bg-soft)',
               border: '1px solid var(--border)', whiteSpace: 'nowrap',
             }}>{order.id}</span>
-            <span className={'chip ' + (order.category === 'RAM' ? 'info' : order.category === 'SSD' ? 'pos' : order.category === 'HDD' ? 'cool' : 'warn')}>
-              {order.category}
-            </span>
+            <OrderCategoryChips categories={order.categories} max={3} />
           </div>
           <div className="page-sub" style={{ marginTop: 6 }}>
             {fmtDateShort(order.createdAt, locale)} · {t('submittedBy')} {order.userName.split(' ')[0]} · {lines.length === 1 ? t('historyLineCountOne', { n: lines.length }) : t('historyLineCountMany', { n: lines.length })} · {t('editOrderSub')}
@@ -588,15 +748,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         <div className="card-head">
           <div>
             <div className="card-title">{t('orderDetails')}</div>
-            <div className="card-sub">{t('orderContainsMultiple', { cat: order.category })}</div>
+            <div className="card-sub">{t('subOrderContainsMixed')}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span className="chip mono">{t('subUnitsCost', { n: totals.qty, cost: fmtUSD(totals.cost, locale) })}</span>
             <span className="chip mono">{order.id} · {t('subStatusEditing')}</span>
             {canEditOrder && (
-              <button className="btn accent" style={{ marginLeft: 'auto' }} onClick={addLine}>
-                <Icon name="plus" size={13} /> {t('subAddLine', { cat: order.category })}
-              </button>
+              <span style={{ marginLeft: 'auto' }}><AddLineMenu onAdd={addLine} /></span>
             )}
           </div>
         </div>
@@ -616,7 +774,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </tr>
             </thead>
             <tbody>
-              {lines.map((l, i) => {
+              {rows.map(({ line: l, index: i, head, hidden }) => {
                 const qty = Number(l.qty) || 0;
                 const lCost = Number(l.unitCost) || 0;
                 const sp = l.sellPrice == null || l.sellPrice === '' ? 0 : Number(l.sellPrice);
@@ -624,11 +782,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 const lossy = sp > 0 && sp < lCost;
                 const filled = !!l.brand || !!l.description;
                 const isActive = i === activeIdx;
+                // A folded group still emits its header row, just none of its
+                // lines — otherwise the group would vanish along with them.
+                // Every member drops out, not only the one carrying the head.
+                if (hidden) {
+                  return head ? <Fragment key={'g-' + head}>{groupHead(head)}</Fragment> : null;
+                }
                 // Rows open the drawer at every stage — a locked order gets a
                 // read-only drawer, not an unreachable one.
                 return (
+                  <Fragment key={l._id ?? l._cid}>
+                  {head && groupHead(head)}
                   <tr
-                    key={l._id ?? l._cid}
                     className="row-hover"
                     style={{
                       cursor: 'pointer',
@@ -639,24 +804,39 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     <td className="mono" style={{ color: isActive ? 'var(--accent-strong)' : 'var(--fg-subtle)', fontWeight: isActive ? 600 : 400 }}>{i + 1}</td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {realScan(l.scanImageUrl) && (
-                          <button
-                            type="button"
-                            onClick={e => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
-                            title={t('aiPhotoLabel')}
-                            style={{
-                              width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-                              border: '1px solid var(--border)', overflow: 'hidden',
-                              padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                            }}
-                          >
-                            <img
-                              src={l.scanImageUrl}
-                              alt={t('aiPhotoLabel')}
-                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                            />
-                          </button>
-                        )}
+                        {(() => {
+                          // Any line may carry photos now, not just the RAM
+                          // ones an AI scan happened to produce. Shows the
+                          // first with a +N when there are more.
+                          const shots = linePhotos(l);
+                          if (!shots.length) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); setLightboxUrl(shots[0].url); }}
+                              title={t('linePhotos')}
+                              style={{
+                                width: 40, height: 40, borderRadius: 8, flexShrink: 0, position: 'relative',
+                                border: '1px solid var(--border)', overflow: 'hidden',
+                                padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                              }}
+                            >
+                              <img
+                                src={shots[0].url}
+                                alt={t('linePhotos')}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                              />
+                              {shots.length > 1 && (
+                                <span style={{
+                                  position: 'absolute', right: 0, bottom: 0,
+                                  background: 'rgba(15,23,42,0.72)', color: 'white',
+                                  fontSize: 9, fontWeight: 700, padding: '1px 4px',
+                                  borderTopLeftRadius: 5,
+                                }}>+{shots.length - 1}</span>
+                              )}
+                            </button>
+                          );
+                        })()}
                         <div style={{ minWidth: 0 }}>
                           {filled ? (
                             <>
@@ -694,89 +874,63 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       </td>
                     )}
                   </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
-        {/* Cost ledger. The three figures used to sit here as equal peers,
-            which misstates the content: goods and fees ADD UP to cost, and
-            revenue is a separate lens. So the rail spells the arithmetic —
-            the operators carry meaning, they aren't decoration — and the fee,
-            a cost that never was a line, is the one editable cell in it. */}
-        <div className="oe-items-foot oe-ledger">
-          <div className="oe-ledger-eq">
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('goodsTotal')}</div>
-              <div className="oe-ledger-value mono">{fmtUSD(cost.goods, locale)}</div>
-            </div>
-
-            <div className="oe-ledger-op mono" aria-hidden="true">+</div>
-
-            <div className={'oe-ledger-cell oe-ledger-fee' + (canEditOrder ? ' oe-ledger-fee-edit' : '')}>
-              <label className="oe-ledger-label" htmlFor="oe-other-fees">{t('otherFees')}</label>
-              {canEditOrder ? (
-                <div className="oe-ledger-fee-inputs">
-                  <div style={{ position: 'relative', width: 104, flexShrink: 0 }}>
-                    <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
-                    <input
-                      id="oe-other-fees"
-                      className="input mono oe-ledger-input"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={otherFeesInput}
-                      placeholder="0.00"
-                      onChange={e => { setOtherFeesInput(e.target.value); setMovedToFees(null); }}
-                      onFocus={e => e.target.select()}
-                      style={{ paddingLeft: 22 }}
-                    />
-                  </div>
-                  <input
-                    className="input oe-ledger-input oe-ledger-note"
-                    type="text"
-                    maxLength={280}
-                    value={otherFeesNote}
-                    placeholder={t('otherFeesPh')}
-                    onChange={e => setOtherFeesNote(e.target.value)}
-                    aria-label={t('otherFeesNote')}
-                  />
-                </div>
-              ) : (
-                // Locked: the equation still reads, it just isn't editable.
-                <div className="oe-ledger-value mono">
-                  {fmtUSD(cost.fees, locale)}
-                  {otherFeesNote.trim() && (
-                    <span className="oe-ledger-fee-note">{otherFeesNote.trim()}</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="oe-ledger-op mono" aria-hidden="true">=</div>
-
-            <div className="oe-ledger-cell">
-              {/* All-in, so every "Cost" on this page means the same thing. */}
-              <div className="oe-ledger-label">{t('eoCost')}</div>
-              <div className="oe-ledger-value mono oe-ledger-total">{fmtUSD(effectiveTotalCost, locale)}</div>
-            </div>
-          </div>
-
-          <div className="oe-ledger-out">
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('revenue')}</div>
-              <div className="oe-ledger-value mono">{fmtUSD(totals.revenue, locale)}</div>
-            </div>
-            <div className="oe-ledger-cell">
-              <div className="oe-ledger-label">{t('profit')}</div>
-              <div
-                className="oe-ledger-value mono"
-                style={{ color: effectiveProfit >= 0 ? 'var(--pos)' : 'var(--neg)' }}
-              >
-                {fmtUSD(effectiveProfit, locale)}
-              </div>
-            </div>
-          </div>
+        {/* The PO's money as a receipt — see components/CostTape. The fee is
+            the one editable cell in it: a cost that never was a line. */}
+        <div className="oe-items-foot">
+          <CostTape
+            groups={groups}
+            grouped={grouped}
+            lineCount={lines.length}
+            units={totals.qty}
+            goods={cost.goods}
+            fees={cost.fees}
+            total={effectiveTotalCost}
+            revenue={totals.revenue}
+            pricedCost={totals.pricedCost}
+            pricedProfit={totals.pricedProfit}
+            pricedCount={totals.pricedCount}
+            locale={locale}
+            goodsNote={goodsOverridden ? (
+              <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
+            ) : undefined}
+            feeField={canEditOrder ? (
+              <span style={{ position: 'relative', display: 'inline-block' }}>
+                <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
+                <input
+                  id="oe-other-fees"
+                  // Its visible label is a receipt row inside CostTape, not a
+                  // <label>, so the field is unnamed without this.
+                  aria-label={t('otherFees')}
+                  className="input mono tape-money"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={otherFeesInput}
+                  placeholder="0.00"
+                  onChange={e => setOtherFeesInput(e.target.value)}
+                  onFocus={e => e.target.select()}
+                  style={{ paddingLeft: 22 }}
+                />
+              </span>
+            ) : undefined}
+            feeNoteField={canEditOrder ? (
+              <input
+                className="input tape-note"
+                type="text"
+                maxLength={280}
+                value={otherFeesNote}
+                placeholder={t('otherFeesPh')}
+                onChange={e => setOtherFeesNote(e.target.value)}
+                aria-label={t('otherFeesNote')}
+              />
+            ) : (otherFeesNote.trim() ? <span className="muted" style={{ fontSize: 11.5 }}>{otherFeesNote.trim()}</span> : undefined)}
+          />
         </div>
       </div>
 
@@ -866,7 +1020,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('profit')}</span>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoProfitAllLines', { n: lines.length })}</span>
               <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1096,51 +1250,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 onChange={e => setCommissionPct(e.target.value)}
               />
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                <span>{t('goodsTotal')}</span>
-                {totalCostOverride && canEditOrder && (
-                  <button
-                    onClick={() => {
-                      setTotalCostOverride(false);
-                      setTotalCostInput(totals.cost.toFixed(2));
-                    }}
-                    style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-strong)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                    title={t('subAutoSumIs', { cost: fmtUSD(totals.cost, locale) })}
-                  >{t('reset')}</button>
-                )}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <span className="mono" style={{
-                  position: 'absolute', left: 12, top: '50%',
-                  transform: 'translateY(-50%)', color: 'var(--fg-subtle)',
-                  pointerEvents: 'none',
-                }}>$</span>
-                <input
-                  className="input mono"
-                  type="number"
-                  step="0.01"
-                  value={totalCostOverride ? totalCostInput : totals.cost.toFixed(2)}
-                  onChange={e => {
-                    setTotalCostOverride(true);
-                    setTotalCostInput(e.target.value);
-                    setMovedToFees(null);
-                  }}
-                  onFocus={e => e.target.select()}
-                  onBlur={applyGoodsOverflow}
-                  onKeyDown={e => { if (e.key === 'Enter') applyGoodsOverflow(); }}
-                  disabled={!canEditOrder}
-                  style={{ paddingLeft: 24, fontWeight: 500 }}
-                />
-              </div>
-              {/* The field just changed under them, and the ledger that shows
-                  the result is in another card — so say what happened here. */}
-              {movedToFees != null && (
-                <div className="help" style={{ color: 'var(--accent-strong)' }}>
-                  ↓ {t('movedToFees', { amount: fmtUSD(movedToFees, locale) })}
-                </div>
-              )}
-            </div>
             {/* Notes gets its own row and spans the full grid so there's
                 room to write more than a single short phrase. */}
             <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
@@ -1196,7 +1305,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              {t('totalCost')} {totalCostOverride && Math.abs((parsedTotalCost ?? 0) - totals.cost) > GOODS_EPSILON && (
+              {t('totalCost')} {goodsOverridden && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
               )}
             </div>
@@ -1209,28 +1318,27 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
           </div>
-          {saveError && (
-            <div className="form-error" role="alert" style={{ marginRight: 'auto', alignSelf: 'center', color: 'var(--neg, #c0392b)', fontSize: 13 }}>
-              {saveError}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+            {/* Only ever shown for photos whose upload failed: a queued photo
+                on a line that has no id yet is waiting for Save, not for this. */}
+            {retryablePhotos > 0 && (
               <button
-                className="btn primary"
-                disabled={!canSave}
-                title={saveDisabledReason ?? undefined}
-                onClick={save}
+                className="btn"
+                disabled={saving || photos.busy}
+                onClick={() => void retryQueuedPhotos()}
               >
-                <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
+                <Icon name="refresh" size={14} /> {t('linePhotoRetryAction', { n: retryablePhotos })}
               </button>
-            </div>
-            {saveDisabledReason && (
-              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', maxWidth: 320, textAlign: 'right' }}>
-                {saveDisabledReason}
-              </div>
             )}
+            <button
+              className="btn primary"
+              disabled={saving}
+              title={saveBlockers[0]}
+              onClick={attemptSave}
+            >
+              <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
+            </button>
           </div>
         </div>
       </div>
@@ -1238,6 +1346,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
       {activeIdx !== null && lines[activeIdx] && (
         <LineDrawer
+          // See DesktopSubmit: the drawer's per-line state (notably the
+          // category-switch undo, which snapshots the whole line) must not
+          // survive a move to another row.
+          key={lines[activeIdx]._id ?? lines[activeIdx]._cid}
           line={lines[activeIdx]}
           idx={activeIdx}
           editing
@@ -1246,9 +1358,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
           onConfirmLine={() => confirmLine(activeIdx)}
-          onConfirmError={showErrorToast}
+          onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)}
           readOnly={!canEditOrder}
+          missingFields={missingNamesFor(lines[activeIdx])}
+          market={marketFor(lines[activeIdx].partNumber)}
+          photoCtx={{
+            orderId: order.id,
+            // A line added in this session isn't persisted until Confirm line
+            // or Save, so it has no id to hang a photo off yet — files picked
+            // for it are buffered as local previews and uploaded when it lands.
+            lineId: lines[activeIdx]._id ?? null,
+            pending: photos.queuedFor(lines[activeIdx]._cid),
+            onAddFiles: files => addLinePhotos(activeIdx, files),
+            onRemovePending: p => photos.remove(lines[activeIdx]._cid, p),
+            onRemoveSaved: photo => void removeLinePhoto(activeIdx, photo),
+            busy: photos.busy,
+          }}
         />
       )}
 
@@ -1452,6 +1578,7 @@ function orderLineToEditLine(l: OrderLine): EditLine {
     _id:            l.id,
     _status:        l.status,
     category:       l.category,
+    photos:         l.photos ?? [],
     brand:          l.brand ?? undefined,
     capacity:       l.capacity ?? undefined,
     type:           l.type ?? undefined,
@@ -1468,7 +1595,9 @@ function orderLineToEditLine(l: OrderLine): EditLine {
     chipNumber:     l.chipNumber ?? undefined,
     condition:      l.condition,
     qty:            l.qty,
-    unitCost:       l.unitCost,
+    // An unpriced line (purchaser raised it, manager prices it at Reviewing)
+    // opens the drawer blank rather than with a 0 to clear first.
+    unitCost:       l.unitCost || '',
     sellPrice:      l.sellPrice ?? undefined,
     scanImageId:    l.scanImageId ?? undefined,
     scanImageUrl:   l.scanImageUrl ?? undefined,
@@ -1482,6 +1611,9 @@ function editLineToPatch(l: EditLine, status?: string) {
   return {
     id:             l._id!,
     status,
+    // Sent so a recategorisation made in the drawer survives Save. Without it
+    // the backend keeps the stored category and silently drops the change.
+    category:       l.category,
     sellPrice:      sp == null || sp === '' ? null : Number(sp),
     qty:            Number(l.qty) || 0,
     unitCost:       Number(l.unitCost) || 0,

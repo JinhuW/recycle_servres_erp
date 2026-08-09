@@ -252,7 +252,7 @@
   font-weight: 600;
 }
 
-/* Submit category selector */
+/* Row card in a bottom sheet (draft picker) */
 .ph-cat-card {
   display: flex;
   align-items: center;
@@ -277,9 +277,6 @@
   place-items: center;
   flex-shrink: 0;
 }
-.ph-cat-icon.ssd { background: var(--info-soft); color: oklch(0.45 0.13 250); }
-.ph-cat-icon.hdd { background: oklch(0.96 0.04 295); color: oklch(0.45 0.16 295); }
-.ph-cat-icon.other { background: var(--warn-soft); color: oklch(0.45 0.13 75); }
 
 /* Camera full-bleed */
 .ph-cam-screen {
@@ -747,6 +744,21 @@
   animation: toast-pop 0.2s ease-out;
 }
 .ph-toast.success { background: var(--accent); }
+/* A nudge, not a confirmation. Same solid amber the desktop toast uses —
+   loud on purpose: it fires over a full-screen form the user is mid-way
+   through. */
+.ph-toast.warn {
+  background: var(--warn-loud);
+  color: var(--warn-loud-fg);
+  font-weight: 550;
+  box-shadow:
+    0 0 0 4px var(--warn-loud-halo),
+    0 16px 38px var(--warn-loud-shadow);
+  animation: toast-pop 0.2s ease-out, toast-warn-pop 0.34s ease-out 0.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ph-toast.warn { animation: none; }
+}
 @keyframes toast-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── Real-device adjustments (lifting the prototype out of the iOS frame) ── */

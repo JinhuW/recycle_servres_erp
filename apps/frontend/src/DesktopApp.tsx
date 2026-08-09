@@ -12,7 +12,8 @@ import {
   DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath, readSafeNext,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
-import { showErrorToast } from './lib/errorToast';
+import { showErrorDialog } from './lib/errorToast';
+import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 
 import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
 import { DesktopOrders } from './pages/desktop/DesktopOrders';
@@ -34,13 +35,14 @@ import { FormSkeleton } from './components/Skeleton';
 
 import type { Order } from './lib/types';
 
-type Toast = { msg: string; kind: 'success' | 'error' };
+type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
 export function DesktopApp() {
   const { loading, user: realUser, pendingRoleChoice } = useAuth();
   const user = useEffectiveUser();
   const { t } = useT();
   const [toast, setToast] = useState<Toast | null>(null);
+  const { current: errorDialog, push: pushErrorDialog, dismiss: dismissErrorDialog } = useErrorDialogQueue();
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
 
@@ -73,7 +75,7 @@ export function DesktopApp() {
         // a manager in role-preview mode follows a link to a PO they don't own.
         navigate('/purchase-orders');
         const status = err instanceof ApiError ? err.status : 0;
-        showErrorToast(
+        showErrorDialog(
           status === 403 ? "You don't have access to this purchase order."
           : status === 404 ? 'That purchase order no longer exists.'
           : 'Could not open that purchase order.',
@@ -97,22 +99,30 @@ export function DesktopApp() {
   // Stable identity: children put this in effect dep arrays (DesktopTransfers
   // keys its reload on it). A fresh function each render makes any such effect
   // re-run on every toast — and an error toast raised BY that effect then loops.
+  // Errors never become toasts: they go to the blocking dialog so the user can
+  // read and act on them.
+  // 'warn' is the exception: a nudge for something not yet attempted (a line
+  // still missing fields), so it clears itself and reads longer than a
+  // confirmation does.
   const showToast = useCallback((msg: string, kind: Toast['kind'] = 'success') => {
+    if (kind === 'error') { pushErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2600);
-  }, []);
+    toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
+  }, [pushErrorDialog]);
 
-  // Register the global toast hook so `handleFetchError` / `showErrorToast` in
+  // Register the global hooks so `handleFetchError` / `showErrorDialog` in
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
+    window.__showErrorDialog = (msg, details, title) => pushErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
-      setToast({ msg, kind: kind === 'error' ? 'error' : 'success' });
+      if (kind === 'error') { pushErrorDialog({ msg }); return; }
+      setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 2600);
+      toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
     };
-    return () => { delete window.__showToast; };
-  }, []);
+    return () => { delete window.__showToast; delete window.__showErrorDialog; };
+  }, [pushErrorDialog]);
 
   // Resume an OAuth authorize that bounced through the login screen. Must be a
   // real navigation, not navigate(), because the target is a backend route.
@@ -223,10 +233,16 @@ export function DesktopApp() {
       {toast && (
         <div className="toast-wrap">
           <div className={'toast ' + toast.kind}>
-            <Icon name="check2" size={16} />
+            <Icon name={toast.kind === 'warn' ? 'alert' : 'check2'} size={16} />
             <span>{toast.msg}</span>
           </div>
         </div>
+      )}
+
+      {/* Keyed on the entry so the next problem in the queue mounts its own
+          dialog — focus and the OK button belong to one message at a time. */}
+      {errorDialog && (
+        <ErrorDialog key={errorDialog.seq} content={errorDialog} onClose={dismissErrorDialog} />
       )}
 
       <TweaksPanel />

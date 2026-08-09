@@ -9,11 +9,15 @@ import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { LinePhotoStrip, type PendingPhoto } from '../components/LinePhotoStrip';
+import type { LinePhoto } from '../lib/linePhotos';
 import { parseSerials } from '../components/SerialNumbers';
-import { showErrorToast } from '../lib/errorToast';
+import { showErrorDialog, showWarnToast } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
-import { missingRamFields } from '../lib/ramRequired';
+import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { MarketAssist } from '../components/MarketAssist';
+import { useMarketLookup } from '../lib/useMarketLookup';
 
 type Props = {
   category: Category;
@@ -29,6 +33,18 @@ type Props = {
   onRescan: (draft: DraftLine) => void;
   // In-progress draft carried across a rescan trip through the Camera page.
   rescanDraft?: DraftLine | null;
+  // Where this line's photos live. A line that has no server id yet has nowhere
+  // to put a picture, so the shell buffers the picks and uploads them once the
+  // save returns an id; they show here as local previews meanwhile. The shell
+  // owns the state because this screen unmounts the moment the line is saved.
+  photoCtx: {
+    photosFor: (line: DraftLine) => LinePhoto[];
+    pendingFor: (line: DraftLine) => PendingPhoto[];
+    busy: boolean;
+    onAddFiles: (line: DraftLine, files: FileList | null) => void;
+    onRemovePending: (line: DraftLine, p: PendingPhoto) => void;
+    onRemoveSaved: (line: DraftLine, p: LinePhoto) => void;
+  };
 };
 
 const blankDefaults = (category: Category): DraftLine => ({
@@ -97,7 +113,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const isEditing = editingLineIdx != null;
@@ -129,6 +145,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
+  // Qty and unit cost are typed as raw text so a new line starts blank instead
+  // of a literal 0 the user has to select and delete before typing. The number
+  // the form works with is parsed off these, so a half-typed value never
+  // rewrites what's on screen.
+  const [qtyRaw, setQtyRaw] = useState(() => (initial.qty ? String(initial.qty) : ''));
+  const [costRaw, setCostRaw] = useState(() => (initial.unitCost ? String(initial.unitCost) : ''));
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   // Tracks which fields the user has touched since the AI populated them.
@@ -153,6 +175,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !thumbBroken;
 
   const snCount = parseSerials(line.serialNumber).length;
+  const marketFor = useMarketLookup([line.partNumber]);
 
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
     setLine(prev => ({ ...prev, [k]: v }));
@@ -192,13 +215,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // a hard stop. RAM lines additionally require every spec field — the toast
   // names the blanks (which include Part #, so the synth path never fires).
   const attemptSave = () => {
-    if (line.category === 'RAM') {
-      const missing = missingRamFields(line);
-      if (missing.length) {
-        const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
-        showErrorToast(t('fillRequiredFields', { fields }));
-        return;
-      }
+    // The same rule the desktop screens ask, so a line this form accepts is
+    // never one the editor then refuses to save — which used to lock the whole
+    // order until someone reopened that line and filled in a brand.
+    const { missingKeys } = lineRequirements(line);
+    const fields = missingFieldNames(missingKeys, t, lang);
+    if (fields) {
+      showWarnToast(t('drawerStillNeeded', { fields }));
+      return;
     }
     const issue = serialIssue(line);
     if (issue) {
@@ -213,18 +237,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     if (typed) { persist(typed); return; }
     const gen = synthesizePartNumber(line.category, line);
     if (gen) { setPnGen(gen); return; }
-    showErrorToast(t('pnRequiredThis'));
+    showErrorDialog(t('pnRequiredThis'));
   };
 
   // Header text:
   //   - Edit mode:  "Edit RAM item" / sub = existing label
   //   - First-item new order: "New RAM order" / sub = AI-review or fill-in
   //   - Nth-item new order:  "Add RAM item" / sub = "Item N · adding..."
+  // The first line no longer names the order — a PO holds whatever kinds the
+  // purchaser adds — so it is titled like every other line.
   const title = isEditing
     ? (category === 'RAM' ? t('editRamItem') : category === 'SSD' ? t('editSsdItem') : category === 'HDD' ? t('editHddItem') : t('editOtherItem'))
-    : isFirst
-      ? (category === 'RAM' ? t('newRamOrder') : category === 'SSD' ? t('newSsdOrder') : category === 'HDD' ? t('newHddOrder') : t('newOtherOrder'))
-      : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
+    : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
 
   const sub = isEditing
     ? buildLabel()
@@ -410,12 +434,35 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </div>
         )}
 
+        {/* The capture above is the AI's reading of a label; these are pictures
+            of the goods themselves. The scan keeps its own thumbnail, so only
+            uploads are listed here and no image appears twice. */}
+        <LinePhotoStrip
+          photos={photoCtx.photosFor(line).filter(p => p.source === 'upload')}
+          pending={photoCtx.pendingFor(line)}
+          busy={photoCtx.busy}
+          onAdd={files => photoCtx.onAddFiles(line, files)}
+          onRemove={p => photoCtx.onRemoveSaved(line, p)}
+          onRemovePending={p => photoCtx.onRemovePending(line, p)}
+        />
+
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('quantity')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input className="input" type="number" min={1} value={line.qty} onChange={e => set('qty', parseInt(e.target.value, 10) || 0)} />
+            <input
+              className="input"
+              type="number"
+              min={1}
+              inputMode="numeric"
+              placeholder="1"
+              value={qtyRaw}
+              onChange={e => {
+                setQtyRaw(e.target.value);
+                set('qty', parseInt(e.target.value, 10) || 0);
+              }}
+            />
           </div>
           <div className="ph-field">
             <label>{t('condition')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
@@ -463,10 +510,22 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             (always shown so a purchaser can enter the negotiated bulk total
             instead of computing per-unit). Sell price only appears in edit
             mode, matching the desktop drawer. */}
-        <div className="ph-field-row" style={{ gridTemplateColumns: isEditing ? '1fr 1fr 1fr' : '1fr 1fr' }}>
+        <div className="ph-field-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
           <div className="ph-field">
             <label>{t('unitCost')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input className="input mono" type="number" step="0.01" min={0} value={line.unitCost} onChange={e => set('unitCost', parseFloat(e.target.value) || 0)} />
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              placeholder="0.00"
+              value={costRaw}
+              onChange={e => {
+                setCostRaw(e.target.value);
+                set('unitCost', parseFloat(e.target.value) || 0);
+              }}
+            />
           </div>
           <div className="ph-field">
             <label>{t('totalCost')}</label>
@@ -476,31 +535,46 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               step="0.01"
               min={0}
               inputMode="decimal"
-              value={(line.qty * line.unitCost).toFixed(2)}
+              placeholder="0.00"
+              value={line.qty * line.unitCost ? (line.qty * line.unitCost).toFixed(2) : ''}
               onChange={e => {
                 const newTotal = parseFloat(e.target.value);
                 if (!Number.isFinite(newTotal) || line.qty <= 0) return;
-                set('unitCost', +(newTotal / line.qty).toFixed(2));
+                const unit = +(newTotal / line.qty).toFixed(2);
+                set('unitCost', unit);
+                setCostRaw(String(unit));
               }}
             />
           </div>
-          {isEditing && (
-            <div className="ph-field">
-              <label>{t('sellPrice')}</label>
-              <input
-                className="input mono"
-                type="number"
-                step="0.01"
-                min={0}
-                value={line.sellPrice ?? ''}
-                placeholder="—"
-                onChange={e => set('sellPrice', e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
-              />
-            </div>
-          )}
+          <div className="ph-field">
+            <label>{t('sellPrice')}</label>
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              value={line.sellPrice ?? ''}
+              placeholder="—"
+              onChange={e => set('sellPrice', e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+            />
+          </div>
         </div>
 
-        {isEditing && (() => {
+        {/* Same recorded-market panel the desktop drawer shows — the phone is
+            where most capture actually happens, so it needs the buy guidance
+            more, not less. */}
+        <MarketAssist
+          market={marketFor(line.partNumber)}
+          unitCost={line.unitCost || 0}
+          locale={locale}
+          // costRaw is what the input actually renders, so applying a price has
+          // to move both — same pairing the total-cost field does above.
+          onUseMaxBuy={v => { set('unitCost', v); setCostRaw(String(v)); }}
+          onUseSellPrice={v => set('sellPrice', v)}
+        />
+
+        {(isEditing || line.sellPrice != null) && (() => {
           const qty = line.qty || 0;
           const cost = line.unitCost || 0;
           const sell = line.sellPrice ?? 0;

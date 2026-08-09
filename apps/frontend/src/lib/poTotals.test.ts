@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poEffectiveCost, parseFeeInput, splitGoodsOverflow } from './poTotals';
+import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from './poTotals';
 
 describe('poEffectiveCost', () => {
   it('uses the line subtotal when there is no override', () => {
@@ -34,6 +34,51 @@ describe('poEffectiveCost', () => {
   });
 });
 
+describe('readStoredGoodsTotal', () => {
+  it('reads a total that matched the lines it loaded with as a mirror', () => {
+    expect(readStoredGoodsTotal(1000, 1000)).toEqual({ override: null, negotiated: false });
+  });
+
+  it('reads a total that never matched the lines as a negotiated price', () => {
+    expect(readStoredGoodsTotal(900, 1000)).toEqual({ override: 900, negotiated: true });
+  });
+
+  it('reads an order with no stored total as a mirror', () => {
+    expect(readStoredGoodsTotal(null, 1000)).toEqual({ override: null, negotiated: false });
+    expect(readStoredGoodsTotal(undefined, 0)).toEqual({ override: null, negotiated: false });
+  });
+
+  // Sub-cent drift is float noise from summing qty * unitCost, not a price
+  // somebody negotiated.
+  it('reads a sub-cent difference as a mirror', () => {
+    expect(readStoredGoodsTotal(1000.009, 1000).negotiated).toBe(false);
+    expect(readStoredGoodsTotal(1000.02, 1000).negotiated).toBe(true);
+  });
+
+  // A free lot is a real price. It must not read as "no override" just because
+  // the figure happens to be zero.
+  it('reads a stored zero against non-zero lines as a negotiated price', () => {
+    expect(readStoredGoodsTotal(0, 1000)).toEqual({ override: 0, negotiated: true });
+    expect(readStoredGoodsTotal(0, 0)).toEqual({ override: null, negotiated: false });
+  });
+
+  // The bug this pair exists for: the backend re-derives total_cost from the
+  // lines on every write, so a mirror is stored on effectively every order.
+  // Pinning the money block to it froze the screen on the figure the page
+  // opened with — the user approved 1,000 and the save stored 1,100.
+  it('lets a mirror follow lines the user has since edited', () => {
+    const stored = readStoredGoodsTotal(1000, 1000);
+    expect(poEffectiveCost({ lineSubtotal: 1100, totalCostOverride: stored.override, otherFees: 50 }))
+      .toEqual({ goods: 1100, fees: 50, total: 1150 });
+  });
+
+  it('pins a negotiated price while the lines under it move', () => {
+    const stored = readStoredGoodsTotal(900, 1000);
+    expect(poEffectiveCost({ lineSubtotal: 1100, totalCostOverride: stored.override, otherFees: 50 }))
+      .toEqual({ goods: 900, fees: 50, total: 950 });
+  });
+});
+
 describe('parseFeeInput', () => {
   it('reads a plain amount', () => {
     expect(parseFeeInput('79.80')).toBe(79.8);
@@ -51,59 +96,5 @@ describe('parseFeeInput', () => {
   it('reads a negative or zero amount as no fee', () => {
     expect(parseFeeInput('-20')).toBe(0);
     expect(parseFeeInput('0')).toBe(0);
-  });
-});
-
-describe('splitGoodsOverflow', () => {
-  const LINES = 11530.50;
-
-  it('moves the excess over the line sum out of goods', () => {
-    expect(splitGoodsOverflow(11610.30, LINES)).toEqual({ goods: LINES, overflow: 79.80 });
-  });
-
-  // 11610.30 - 11530.50 is 79.80000000000018 unrounded, which would read as
-  // dust in the input and travel to a NUMERIC(12,2) column.
-  it('rounds the overflow to cents rather than leaking float dust', () => {
-    const { overflow } = splitGoodsOverflow(11610.30, LINES);
-    expect(overflow).toBe(79.80);
-    expect(String(overflow)).toBe('79.8');
-  });
-
-  // A total below the line sum is a negotiated lot discount. It has to stay in
-  // goods — the DB rejects a negative fee.
-  it('leaves a total below the line sum alone', () => {
-    expect(splitGoodsOverflow(11000, LINES)).toEqual({ goods: 11000, overflow: 0 });
-  });
-
-  it('does not move an equal total, or one within a cent', () => {
-    expect(splitGoodsOverflow(LINES, LINES).overflow).toBe(0);
-    expect(splitGoodsOverflow(LINES + 0.009, LINES).overflow).toBe(0);
-    // Just past the epsilon it does move.
-    expect(splitGoodsOverflow(LINES + 0.02, LINES).overflow).toBe(0.02);
-  });
-
-  it('leaves non-finite input alone', () => {
-    for (const v of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
-      expect(splitGoodsOverflow(v, LINES).overflow, `typed ${v}`).toBe(0);
-    }
-    expect(splitGoodsOverflow(500, Number.NaN).overflow).toBe(0);
-  });
-
-  it('treats a zero or blank-parsed total as no move', () => {
-    expect(splitGoodsOverflow(0, LINES)).toEqual({ goods: 0, overflow: 0 });
-  });
-
-  // The invariant that makes the move safe: the caller ADDS the overflow to any
-  // existing fee, so the all-in total is identical before and after.
-  it('keeps the all-in total unchanged when applied on top of an existing fee', () => {
-    const feesBefore = 20;
-    const typed = 11610.30;
-    const totalBefore = typed + feesBefore;
-
-    const { goods, overflow } = splitGoodsOverflow(typed, LINES);
-    const feesAfter = feesBefore + overflow;
-
-    expect(feesAfter).toBe(99.80);
-    expect(goods + feesAfter).toBeCloseTo(totalBefore, 2);
   });
 });

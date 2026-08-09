@@ -7,10 +7,11 @@ import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { committedSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
-  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields,
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, normSellPrice } from '@recycle-erp/shared';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -221,25 +222,14 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
 ];
 
 // One plain worksheet per category present, fixed order, unknown categories
-// folded into Other (same recipe as the sell-order download). An empty result
-// still needs a valid file — fall back to a single header-only sheet.
+// folded into Other (same recipe as the sell-order download). The split itself
+// lives in lib/categoryColumns so the PO workbook — which now also spans
+// categories — uses the same one.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
   colsFor: (cat: ExportCategory) => XlsxColumn[],
 ): Promise<Buffer> {
-  const byCategory = new Map<string, Record<string, unknown>[]>();
-  for (const r of rows) {
-    const cat = exportCategory(r.category);
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat)!.push(r);
-  }
-  const sheets = CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
-    name: cat as string,
-    columns: colsFor(cat),
-    rows: byCategory.get(cat)!,
-  }));
-  if (sheets.length === 0) sheets.push({ name: 'Inventory', columns: colsFor('Other'), rows: [] });
-  return buildXlsxWorkbook(sheets);
+  return buildXlsxWorkbook(categoryTabSheets(rows, colsFor, { emptySheetName: 'Inventory' }));
 }
 
 inventory.get('/export', async (c) => {
@@ -1095,6 +1085,7 @@ inventory.patch('/:id', async (c) => {
   type Outcome =
     | { kind: 'notFound' }
     | { kind: 'committed' }
+    | { kind: 'doneLocked' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const before = (await tx<Record<string, unknown>[]>`
@@ -1119,10 +1110,34 @@ inventory.patch('/:id', async (c) => {
       if (open.n > 0) return { kind: 'committed' };
     }
 
+    const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
+    const orderId = before.order_id as string;
+
+    // A Done PO's costs are closed-book, and PATCH /api/orders refuses exactly
+    // this edit with 409 — reaching the same line through the inventory editor
+    // rewrote the header total anyway. Status, sell price and the spec fields
+    // stay editable: that is the ordinary post-Done inventory workflow, and
+    // none of them feed the goods total.
+    if (touchesGoods) {
+      const [parent] = await tx<{ lifecycle: string }[]>`
+        SELECT lifecycle FROM orders WHERE id = ${orderId} LIMIT 1
+      `;
+      if (parent?.lifecycle === 'done') return { kind: 'doneLocked' };
+    }
+
+    // The mirror verdict has to be taken before qty/unit_cost move — afterwards
+    // a stale mirror and a real negotiated price are indistinguishable and the
+    // column pins itself against the lines forever.
+    const goodsFollowsLines = touchesGoods ? await goodsTotalIsMirror(tx, orderId) : false;
+
     await tx`
       UPDATE order_lines SET
         status      = COALESCE(${body.status ?? null}, status),
-        sell_price  = COALESCE(${body.sellPrice ?? null}, sell_price),
+        -- Sentinel rather than COALESCE: 0 means "unprice this line" (the same
+        -- rule the PO drawer writes by), and a bare COALESCE would read it as
+        -- "no change" and silently keep the old price. See shared/sellPrice.
+        sell_price  = CASE WHEN ${body.sellPrice !== undefined ? 1 : 0}::int = 1
+                           THEN ${normSellPrice(body.sellPrice)} ELSE sell_price END,
         unit_cost   = COALESCE(${body.unitCost ?? null}, unit_cost),
         qty         = COALESCE(${body.qty ?? null}, qty),
         condition   = COALESCE(${body.condition ?? null}, condition),
@@ -1151,6 +1166,7 @@ inventory.patch('/:id', async (c) => {
         VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
       `;
     }
+    if (touchesGoods) await syncOrderGoodsTotal(tx, orderId, goodsFollowsLines);
     return { kind: 'ok', before };
   });
 
@@ -1158,16 +1174,22 @@ inventory.patch('/:id', async (c) => {
   if (outcome.kind === 'committed') {
     return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
   }
+  if (outcome.kind === 'doneLocked') {
+    return c.json({ error: 'the purchase order is Done; reopen it before changing qty or unit cost' }, 409);
+  }
   const before = outcome.before;
 
   // Margin guard rails (PRD §10): warn the manager — and drop a notification —
   // when a sell price puts the line below cost or below the 15% margin floor.
   // Computed against either the newly submitted unitCost or the row-as-loaded
   // value, so a price-only edit still uses the correct cost basis.
+  // Nothing to warn about when the edit CLEARS the price: an unpriced line is
+  // not a line sold below cost.
   const warnings: string[] = [];
-  if (body.sellPrice !== undefined) {
+  const pricedTo = normSellPrice(body.sellPrice);
+  if (pricedTo !== null) {
     const cost = Number(body.unitCost ?? before.unit_cost);
-    const sp = body.sellPrice;
+    const sp = pricedTo;
     if (sp < cost) warnings.push('sub_cost_sell');
     const margin = sp > 0 ? ((sp - cost) / sp) : 0;
     const floor = await getWorkspaceSetting(sql, 'low_margin_floor', 0.15);
@@ -1350,8 +1372,16 @@ inventory.post('/transfer', async (c) => {
         // Partial — decrement source, clone the rest at destination.
         // Source line stays put (not moved) — intentionally NOT stamped with
         // transfer_order_id; only the moved clone belongs to this order.
+        // The clone carries away units nothing has sold, so its own qty speaks
+        // for what it cost and it needs no qty_purchased of its own — but the
+        // source must hand over that share, or the two halves together would
+        // claim more than the order ever bought.
         await tx`
-          UPDATE order_lines SET qty = qty - ${r.qty} WHERE id = ${r.id}
+          UPDATE order_lines
+             SET qty = qty - ${r.qty},
+                 qty_purchased = CASE WHEN qty_purchased IS NULL THEN NULL
+                                      ELSE qty_purchased - ${r.qty} END
+           WHERE id = ${r.id}
         `;
         const inserted = (await tx`
           INSERT INTO order_lines (
@@ -1602,7 +1632,27 @@ inventory.delete('/transfer-orders/:id', async (c) => {
           FOR UPDATE
         `)[0] as { id: string } | undefined;
         if (peer) {
-          await tx`UPDATE order_lines SET qty = qty + ${l.qty} WHERE id = ${peer.id}`;
+          // Give back the share the split handed over. A clone can't have been
+          // sold from (discard refuses one that has), so its qty is all it cost.
+          await tx`
+            UPDATE order_lines
+               SET qty = qty + ${l.qty},
+                   qty_purchased = CASE WHEN qty_purchased IS NULL THEN NULL
+                                        ELSE qty_purchased + ${l.qty} END
+             WHERE id = ${peer.id}
+          `;
+          // Hand the clone's photos to the line absorbing it. The FK cascades
+          // on the DELETE below, and once the rows are gone nothing in the
+          // database can name their R2 objects — they would be unreclaimable.
+          // Positions continue after the peer's so the merged strip keeps a
+          // stable order.
+          await tx`
+            UPDATE order_line_photos p
+               SET order_line_id = ${peer.id},
+                   position = p.position + 1 + COALESCE(
+                     (SELECT MAX(position) FROM order_line_photos WHERE order_line_id = ${peer.id}), -1)
+             WHERE p.order_line_id = ${l.id}
+          `;
           await tx`
             INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
             VALUES (${peer.id}, ${u.id}, 'transfer_discarded',

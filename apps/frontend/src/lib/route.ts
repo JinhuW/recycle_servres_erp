@@ -19,12 +19,35 @@ function readPath(): string {
   return '/';
 }
 
+// How many entries this app has pushed, stamped onto each one. A back button
+// can then step through the real browser history (which restores the previous
+// screen's scroll position) when there is an entry of ours behind it, and fall
+// back to a path when there isn't — an order opened from a shared link or a
+// cold load has nothing behind it but the site the user came from.
+function historyDepth(): number {
+  const s = window.history.state as { erpDepth?: number } | null;
+  return typeof s?.erpDepth === 'number' ? s.erpDepth : 0;
+}
+
 export function navigate(path: string): void {
   const target = path.startsWith('/') ? path : '/' + path;
   // Avoid setting the same hash twice — that would emit a redundant
   // hashchange event and cause downstream effects to fire pointlessly.
   if (window.location.hash === '#' + target) return;
+  const depth = historyDepth() + 1;
   window.location.hash = target;
+  // The hash assignment has already pushed the entry, so this stamps the one
+  // we just landed on, not the one we left.
+  window.history.replaceState({ ...(window.history.state ?? {}), erpDepth: depth }, '');
+}
+
+/** Back to wherever the user came from, or `fallback` when that's off-site. */
+export function navigateBack(fallback: string): void {
+  if (historyDepth() > 0) {
+    window.history.back();
+    return;
+  }
+  navigate(fallback);
 }
 
 export function useRoute(): { path: string } {

@@ -1,0 +1,58 @@
+// Presentation rules that more than one purchase-order surface has to agree
+// on. The phone list and the desktop table render the same row, and the order
+// timeline and the global register render the same event — when the rule lives
+// inside one of them the other drifts and the same PO reads two ways.
+
+import { fmtUSD0 } from './format';
+
+/** `t` from useT(), passed down so these stay pure functions. */
+export type Translate = (key: string, vars?: Record<string, string | number>) => string;
+
+/**
+ * Tone for a figure that can land on either side of zero. An order's profit
+ * counts priced lines only while its fees are subtracted whole, so a PO whose
+ * lines nobody has priced yet is a genuine loss and must not read green.
+ */
+export const profitTone = (n: number): 'pos' | 'neg' => (n < 0 ? 'neg' : 'pos');
+
+/** Signed money, in the ±$x form the per-category subtotals already use. */
+export const signedUSD0 = (n: number, locale = 'en-US'): string =>
+  (n > 0 ? '+' : n < 0 ? '−' : '') + fmtUSD0(Math.abs(n), locale);
+
+/**
+ * The `created` event's detail line.
+ *
+ * Every part of it is optional: a draft started on the phone names no category
+ * and holds no lines, and printing those absences gave "null · 0 lines · 0
+ * units". Whatever the event doesn't know is left out.
+ */
+export function createdEventParts(detail: Record<string, unknown>, t: Translate): string[] {
+  const category = typeof detail.category === 'string' ? detail.category : null;
+  // Rows synthesised by migration 0076 counted their lines at backfill time
+  // rather than at creation, so those numbers contradict the line events
+  // beneath them. Category alone.
+  if (detail.backfilled) return category ? [category] : [];
+  const lineCount = Number(detail.lineCount ?? 0);
+  const qty = Number(detail.qty ?? 0);
+  return [
+    category,
+    lineCount > 0 ? t(lineCount === 1 ? 'acNLine' : 'acNLines', { n: lineCount }) : null,
+    qty > 0 ? t(qty === 1 ? 'acNUnit' : 'acNUnits', { n: qty }) : null,
+  ].filter((p): p is string => !!p);
+}
+
+const fmtBytes = (n: number): string =>
+  n < 1024 ? `${n} B`
+  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
+  : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+/**
+ * The detail line behind a line-photo event: what was attached, how big, and
+ * of what type. A removal records only the filename.
+ */
+export function linePhotoEventDetail(detail: Record<string, unknown>): string {
+  const filename = typeof detail.filename === 'string' ? detail.filename : null;
+  const size = typeof detail.size === 'number' ? fmtBytes(detail.size) : null;
+  const mime = typeof detail.mime === 'string' ? detail.mime : null;
+  return [filename, size, mime].filter((p): p is string => !!p).join(' · ');
+}

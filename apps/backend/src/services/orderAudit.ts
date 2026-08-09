@@ -22,6 +22,8 @@ export type EventKind =
   | 'line_edited'
   | 'meta_changed'
   | 'status_meta_changed'
+  | 'line_photo_added'
+  | 'line_photo_removed'
   | 'archived'
   | 'unarchived';
 
@@ -40,7 +42,13 @@ export const META_FIELDS = [
 // Line-level fields PATCH may update. Excludes ids/positions/scan refs and the
 // status column (which is driven by advance events, not free edits) — every
 // other column PATCH can write is listed here, so no edit goes unrecorded.
+//
+// `category` is deliberately here and deliberately absent from META_FIELDS: a
+// line moving between categories is a real edit worth recording, while the
+// order's own category is derived from its lines and would otherwise emit a
+// meta_changed on every add and remove.
 export const LINE_FIELDS = [
+  'category',
   'sell_price',
   'qty',
   'unit_cost',
