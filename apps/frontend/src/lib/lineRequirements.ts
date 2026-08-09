@@ -18,10 +18,15 @@ export type RequirementLine = RamRequiredLine & {
 /** Label keys of the identity fields a non-RAM category insists on. */
 function missingIdentityFields(line: RequirementLine): string[] {
   if (line.category === 'RAM') return missingRamFields(line);
+  // An `Other` line is identified by its type and its part number. The
+  // description is prose — helpful, but two people write it two ways, so it
+  // can't be what the line is looked up by. Both shells already refuse to
+  // submit a part-number-less line; asking here names it while the line is
+  // still open instead of at submit.
   if (line.category === 'Other') {
     return [
       ...(!(line.itemType ?? '').trim() ? ['lfItemType'] : []),
-      ...(!(line.description ?? '').trim() ? ['lfItemDescription'] : []),
+      ...(!(line.partNumber ?? '').trim() ? ['lfPartSku'] : []),
     ];
   }
   return (line.brand ?? '').trim() ? [] : ['brand'];

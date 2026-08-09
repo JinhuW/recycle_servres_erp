@@ -100,7 +100,7 @@ const toDraftLine = (l: OrderLine): DraftLine => ({
   label: l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
        : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
        : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-       : (l.description ?? 'Item'),
+       : ((l.description ?? '').trim() || (l.partNumber ?? '').trim() || 'Item'),
 });
 
 function Shell() {

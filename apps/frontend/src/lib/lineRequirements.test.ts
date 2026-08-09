@@ -36,11 +36,17 @@ describe('lineRequirements', () => {
     expect(lineRequirements({ category: 'HDD', brand: 'Seagate', qty: 4 }).ready).toBe(true);
   });
 
-  it('wants a type and a description from an Other line', () => {
+  it('wants a type and a part number from an Other line', () => {
     expect(lineRequirements({ category: 'Other', qty: 1 }).missingKeys)
-      .toEqual(['lfItemType', 'lfItemDescription']);
-    expect(lineRequirements({ category: 'Other', itemType: 'Cable', description: 'SFF-8087', qty: 1 }).ready)
+      .toEqual(['lfItemType', 'lfPartSku']);
+    expect(lineRequirements({ category: 'Other', itemType: 'Cable', partNumber: 'SFF-8087', qty: 1 }).ready)
       .toBe(true);
+  });
+
+  it('lets an Other line through without a description', () => {
+    const line: RequirementLine = { category: 'Other', itemType: 'CPU', partNumber: 'i5-7500', qty: 21 };
+    expect(lineRequirements({ ...line, description: '' }).ready).toBe(true);
+    expect(lineRequirements({ ...line, description: null }).ready).toBe(true);
   });
 
   // Blanks arrive as '' from the desktop form and null from the API, and a
@@ -48,8 +54,8 @@ describe('lineRequirements', () => {
   it('treats whitespace, null and undefined alike', () => {
     expect(lineRequirements({ category: 'SSD', brand: '   ', qty: 1 }).missingKeys).toEqual(['brand']);
     expect(lineRequirements({ category: 'SSD', brand: null, qty: 1 }).missingKeys).toEqual(['brand']);
-    expect(lineRequirements({ category: 'Other', itemType: ' ', description: ' ', qty: 1 }).missingKeys)
-      .toEqual(['lfItemType', 'lfItemDescription']);
+    expect(lineRequirements({ category: 'Other', itemType: ' ', partNumber: ' ', qty: 1 }).missingKeys)
+      .toEqual(['lfItemType', 'lfPartSku']);
   });
 
   // The forms hold qty as a string while it is being typed, and an emptied
