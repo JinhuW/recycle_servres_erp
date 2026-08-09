@@ -230,7 +230,7 @@ export function OtherFields({ line, set }: FieldsProps) {
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t('lfItemTypeHint')}</div>
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
-        <label className="label">{t('lfItemDescription')} <span className="req">*</span></label>
+        <label className="label">{t('lfItemDescription')}</label>
         <input
           className="input"
           value={line.description ?? ''}
@@ -239,7 +239,7 @@ export function OtherFields({ line, set }: FieldsProps) {
         />
       </div>
       <div className="field">
-        <label className="label">{t('lfPartSku')}</label>
+        <label className="label">{t('lfPartSku')} <span className="req">*</span></label>
         <input
           className="input mono"
           value={line.partNumber ?? ''}
