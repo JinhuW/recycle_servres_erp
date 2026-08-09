@@ -3,6 +3,7 @@ import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
+import { ConfirmDialog } from './settings/dialogs';
 
 // ─── Connectors ────────────────────────────────────────────────────────────────
 // Manager-only OAuth client admin: lists registered clients (DCR-registered
@@ -78,6 +79,9 @@ export function DesktopSettingsConnectors() {
   const [connName, setConnName] = useState('');
   const [connScopes, setConnScopes] = useState<string[]>(['market:read', 'sellorder:read']);
   const [redirectUris, setRedirectUris] = useState('');
+  // Revoking is irreversible, so it asks first — in the app's own dialog, not
+  // the browser's, which the shell can't style or translate.
+  const [pending, setPending] = useState<{ kind: 'cleanup' } | { kind: 'revoke'; id: string } | null>(null);
 
   // Same-origin: the backend mounts the MCP endpoint at /api/mcp behind the
   // same host that serves this app, so the URL an MCP client needs is derivable
@@ -185,7 +189,7 @@ export function DesktopSettingsConnectors() {
   ).length;
 
   async function cleanUpUnused() {
-    if (!confirm(t('connectorsCleanupConfirm', { n: unusedCount }))) return;
+    setPending(null);
     try {
       await api.delete<{ revoked: number }>('/api/oauth/clients/unused');
       await load();
@@ -195,7 +199,7 @@ export function DesktopSettingsConnectors() {
   }
 
   async function revoke(id: string) {
-    if (!confirm(t('connectorsRevokeConfirm'))) return;
+    setPending(null);
     try {
       await api.delete(`/api/oauth/clients/${id}`);
       await load();
@@ -487,7 +491,7 @@ export function DesktopSettingsConnectors() {
             <div className="card-title">{t('connectorsListTitle')}</div>
           </div>
           {unusedCount > 0 && (
-            <button type="button" className="btn sm" onClick={cleanUpUnused} style={{ whiteSpace: 'nowrap' }}>
+            <button type="button" className="btn sm" onClick={() => setPending({ kind: 'cleanup' })} style={{ whiteSpace: 'nowrap' }}>
               {t('connectorsCleanupBtn', { n: unusedCount })}
             </button>
           )}
@@ -524,7 +528,7 @@ export function DesktopSettingsConnectors() {
                       type="button"
                       className="btn sm ghost"
                       style={{ color: 'var(--neg)' }}
-                      onClick={() => revoke(c.id)}
+                      onClick={() => setPending({ kind: 'revoke', id: c.id })}
                     >
                       {t('connectorsRevoke')}
                     </button>
@@ -540,6 +544,21 @@ export function DesktopSettingsConnectors() {
           )}
         </div>
       </div>
+
+      {pending && (
+        <ConfirmDialog
+          title={pending.kind === 'cleanup'
+            ? t('connectorsCleanupTitle', { n: unusedCount })
+            : t('connectorsRevokeTitle')}
+          message={pending.kind === 'cleanup'
+            ? t('connectorsCleanupConfirm')
+            : t('connectorsRevokeConfirm')}
+          confirmLabel={t('connectorsRevoke')}
+          danger
+          onCancel={() => setPending(null)}
+          onConfirm={() => (pending.kind === 'cleanup' ? cleanUpUnused() : revoke(pending.id))}
+        />
+      )}
     </>
   );
 }
