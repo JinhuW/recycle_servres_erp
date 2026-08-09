@@ -1133,6 +1133,53 @@ describe('/api/oauth/clients (admin)', () => {
     expect(row.revoked_at).toBeNull();
   });
 
+  it('DELETE /unused revokes a client whose refresh tokens have all been revoked', async () => {
+    // The grant is dead — the family was killed by reuse detection or an
+    // offboarding — so the client can never refresh again and is reclaimable.
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const { issueRefreshToken, revokeRefreshFamily } = await import('../src/oauth/tokens');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const dead = await createOAuthClient(sql, {
+      name: 'dead-grant', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    await sql`UPDATE oauth_clients SET created_at = NOW() - INTERVAL '2 hours' WHERE id = ${dead.clientId}`;
+    const { familyId } = await issueRefreshToken(sql, { OAUTH_REFRESH_TOKEN_TTL_SEC: '2592000' } as any, {
+      clientId: dead.clientId, userId: u, scopes: ['market:read'],
+    });
+    await revokeRefreshFamily(sql, familyId, 'reuse');
+
+    const r = await api('DELETE', '/api/oauth/clients/unused', { token });
+    expect(r.status).toBe(200);
+    const row = (await sql<{ revoked_at: Date | null }[]>`
+      SELECT revoked_at FROM oauth_clients WHERE id = ${dead.clientId}
+    `)[0];
+    expect(row.revoked_at).not.toBeNull();
+  });
+
+  it('DELETE /unused spares a client_credentials service client', async () => {
+    // client_credentials mints access tokens only, so a perfectly healthy
+    // scraper client never has a refresh token to prove it with.
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const scraper = await createOAuthClient(sql, {
+      name: 'scraper', redirectUris: [], grantTypes: ['client_credentials'],
+      scopes: ['market:read'], createdBy: u, public: false,
+    });
+    await sql`UPDATE oauth_clients SET created_at = NOW() - INTERVAL '2 hours' WHERE id = ${scraper.clientId}`;
+
+    await api('DELETE', '/api/oauth/clients/unused', { token });
+    const row = (await sql<{ revoked_at: Date | null }[]>`
+      SELECT revoked_at FROM oauth_clients WHERE id = ${scraper.clientId}
+    `)[0];
+    expect(row.revoked_at).toBeNull();
+  });
+
   it('list response includes lastUsedAt (null when no live refresh tokens)', async () => {
     const { token } = await loginAs(ALEX);
     const list = await api('GET', '/api/oauth/clients', { token });
@@ -1141,6 +1188,50 @@ describe('/api/oauth/clients (admin)', () => {
     expect(clients.length).toBeGreaterThan(0);
     // Newly-created clients with no refresh tokens have lastUsedAt = null.
     expect(clients.every(c => 'lastUsedAt' in c)).toBe(true);
+  });
+
+  it('list reports lastUsedAt from revoked tokens and flags the grant as dead', async () => {
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const { issueRefreshToken, revokeRefreshFamily } = await import('../src/oauth/tokens');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const c = await createOAuthClient(sql, {
+      name: 'used-then-revoked', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    const { familyId } = await issueRefreshToken(sql, { OAUTH_REFRESH_TOKEN_TTL_SEC: '2592000' } as any, {
+      clientId: c.clientId, userId: u, scopes: ['market:read'],
+    });
+    await revokeRefreshFamily(sql, familyId, 'reuse');
+
+    const list = await api('GET', '/api/oauth/clients', { token });
+    const row = ((list.body as any).clients as any[]).find(x => x.id === c.clientId);
+    // It signed in once — reporting "Never" here is what made the cleanup
+    // button count connectors it then refused to remove.
+    expect(row.lastUsedAt).not.toBeNull();
+    expect(row.hasLiveGrant).toBe(false);
+  });
+
+  it('list flags a client with a live refresh token as having a grant', async () => {
+    const sql = getTestDb();
+    const { token } = await loginAs(ALEX);
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const { issueRefreshToken } = await import('../src/oauth/tokens');
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const c = await createOAuthClient(sql, {
+      name: 'live-grant', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'], scopes: ['market:read'],
+      createdBy: u, public: false,
+    });
+    await issueRefreshToken(sql, { OAUTH_REFRESH_TOKEN_TTL_SEC: '2592000' } as any, {
+      clientId: c.clientId, userId: u, scopes: ['market:read'],
+    });
+
+    const list = await api('GET', '/api/oauth/clients', { token });
+    const row = ((list.body as any).clients as any[]).find(x => x.id === c.clientId);
+    expect(row.hasLiveGrant).toBe(true);
   });
 });
 

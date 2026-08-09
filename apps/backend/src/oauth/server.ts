@@ -632,13 +632,17 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
     const rows = await listOAuthClients(sql);
     // Separate aggregate keeps listOAuthClients pure — admin UI is the only
     // surface that wants last_used_at, so the join doesn't belong in the helper.
-    const lastUsed = await sql<{ client_id: string; last_used_at: Date }[]>`
-      SELECT client_id, MAX(created_at) AS last_used_at
+    // last_used_at counts revoked tokens too: rotation revokes the token it
+    // replaces, so filtering them out reports a connector whose family was
+    // later killed as having never signed in at all.
+    const activity = await sql<{ client_id: string; last_used_at: Date; live: number }[]>`
+      SELECT client_id,
+             MAX(created_at) AS last_used_at,
+             COUNT(*) FILTER (WHERE revoked_at IS NULL)::int AS live
       FROM oauth_refresh_tokens
-      WHERE revoked_at IS NULL
       GROUP BY client_id
     `;
-    const lastUsedByClient = new Map(lastUsed.map(r => [r.client_id, r.last_used_at]));
+    const activityByClient = new Map(activity.map(r => [r.client_id, r]));
     return c.json({
       // With DCR on, connectors mint their own client and the Settings form for
       // doing it by hand is dead UI — so the page hides it unless it's needed.
@@ -649,7 +653,10 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
         scopes: r.scopes,
         grantTypes: r.grant_types,
         createdAt: r.created_at,
-        lastUsedAt: lastUsedByClient.get(r.id) ?? null,
+        lastUsedAt: activityByClient.get(r.id)?.last_used_at ?? null,
+        // What the cleanup sweep goes by: a connector with no live refresh
+        // token can't reach anything again without a fresh authorization.
+        hasLiveGrant: (activityByClient.get(r.id)?.live ?? 0) > 0,
       })),
     });
   })
@@ -699,15 +706,23 @@ export const oauthAdmin = new Hono<{ Bindings: Env; Variables: { user: User } }>
   // otherwise swallow this and try to revoke a client literally named "unused".
   .delete('/unused', async (c) => {
     const sql = getDb(c.env);
-    // "Never used" = never minted a refresh token. The hour of grace protects a
-    // connector that has registered but not finished its consent yet; without
-    // it, cleaning up mid-setup silently breaks the flow the user is in.
+    // Dead = no live refresh token: either the connector never finished a
+    // sign-in, or the family it got has since been revoked, which it cannot
+    // undo without registering again. Matching on "never had one at all" left
+    // the second kind listed forever while the button still counted it.
+    // client_credentials clients are exempt — that grant mints access tokens
+    // only, so a healthy scraper has no refresh token to show for itself.
+    // The hour of grace protects a connector that has registered but not
+    // finished its consent yet; without it, cleaning up mid-setup silently
+    // breaks the flow the user is in.
     const stale = await sql<{ id: string }[]>`
       SELECT id FROM oauth_clients c
       WHERE c.revoked_at IS NULL
         AND c.created_at < NOW() - INTERVAL '1 hour'
+        AND NOT ('client_credentials' = ANY(c.grant_types))
         AND NOT EXISTS (
-          SELECT 1 FROM oauth_refresh_tokens rt WHERE rt.client_id = c.id
+          SELECT 1 FROM oauth_refresh_tokens rt
+          WHERE rt.client_id = c.id AND rt.revoked_at IS NULL
         )
     `;
     for (const { id } of stale) await revokeOAuthClient(sql, id);

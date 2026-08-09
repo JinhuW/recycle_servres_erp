@@ -17,6 +17,7 @@ type Client = {
   grantTypes: string[];
   createdAt: string;
   lastUsedAt: string | null;
+  hasLiveGrant: boolean;
 };
 
 // The four scopes the backend grants (oauth/server.ts VALID_SCOPES). Order is
@@ -181,12 +182,15 @@ export function DesktopSettingsConnectors() {
     );
   }
 
-  // Same rule the backend sweep uses (never minted a refresh token, and older
-  // than the grace window), so the count on the button matches what it removes.
+  // Same rule the backend sweep uses (no live refresh token, not a
+  // client_credentials client, older than the grace window), so the count on
+  // the button matches what it removes.
   const UNUSED_GRACE_MS = 60 * 60 * 1000;
-  const unusedCount = (clients ?? []).filter(
-    (c) => c.lastUsedAt === null && Date.now() - new Date(c.createdAt).getTime() > UNUSED_GRACE_MS,
-  ).length;
+  const isDead = (c: Client) =>
+    !c.hasLiveGrant
+    && !c.grantTypes.includes('client_credentials')
+    && Date.now() - new Date(c.createdAt).getTime() > UNUSED_GRACE_MS;
+  const unusedCount = (clients ?? []).filter(isDead).length;
 
   async function cleanUpUnused() {
     setPending(null);
@@ -522,6 +526,12 @@ export function DesktopSettingsConnectors() {
                   </td>
                   <td style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
                     {c.lastUsedAt ? new Date(c.lastUsedAt).toLocaleString(locale) : t('connectorsNever')}
+                    {/* Why the cleanup button counts a row that has a date on it. */}
+                    {c.lastUsedAt && isDead(c) && (
+                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
+                        {t('connectorsNoLiveGrant')}
+                      </div>
+                    )}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <button
