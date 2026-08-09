@@ -167,7 +167,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
   });
 
-  it('ships rows in the default order — capacity, then rank, speed, brand', async () => {
+  it('ships rows in the default order — brand, then capacity, speed', async () => {
     const ram = (label: string, specs: Record<string, string | number>) => ({
       category: 'RAM', label, partNumber: label, condition: null,
       qty: 1, imageUrl: null, specs,
@@ -193,10 +193,10 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     for (let r = headerRow + 1; r <= ws.rowCount; r++) {
       labels.push(String(ws.getRow(r).getCell(cols.get('Item')!).value ?? ''));
     }
-    // 8GB before 16GB before 128GB — numeric, not lexical. Within 16GB:
-    // rank 1Rx8 first, then the 2Rx4 pair split by brand at equal speed.
-    // The spec-less manual line sinks to the bottom.
-    expect(labels).toEqual(['e', 'b', 'c', 'd', 'f', 'manual']);
+    // Hynix, Micron, Samsung — then within a brand, capacity numerically
+    // (8GB before 128GB, not lexically) and speed last. Rank does not sort:
+    // the Hynix pair splits on speed alone. The spec-less manual line sinks.
+    expect(labels).toEqual(['c', 'b', 'd', 'e', 'f', 'manual']);
   });
 
   it('labels the price columns CNY on a CNY order', async () => {
