@@ -97,9 +97,12 @@ const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7
 const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 
 // Rows ship pre-sorted the way the desk reads a bid sheet (user-decided
-// 2026-08-06): capacity, then rank, speed, brand. Categories without those
-// specs just fall through to the label tie-break.
-const DEFAULT_SORT_KEYS = ['capacity', 'rank', 'speed', 'brand'] as const;
+// 2026-08-09, superseding the 2026-08-06 capacity-first order): brand, then
+// capacity, speed — one brand's parts stay together on the page. Rank is
+// deliberately not a key. Categories without those specs just fall through to
+// the label tie-break. Every sheet in the workbook uses this, bid tabs and
+// packing tabs alike, so a picker and a bidder read the same sequence.
+const DEFAULT_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
 
 // Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
 // 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
