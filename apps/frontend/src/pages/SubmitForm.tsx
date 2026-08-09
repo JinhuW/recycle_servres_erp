@@ -9,10 +9,12 @@ import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { LinePhotoStrip, type PendingPhoto } from '../components/LinePhotoStrip';
+import type { LinePhoto } from '../lib/linePhotos';
 import { parseSerials } from '../components/SerialNumbers';
 import { showErrorDialog, showWarnToast } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
-import { missingRamFields } from '../lib/ramRequired';
+import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
@@ -31,6 +33,18 @@ type Props = {
   onRescan: (draft: DraftLine) => void;
   // In-progress draft carried across a rescan trip through the Camera page.
   rescanDraft?: DraftLine | null;
+  // Where this line's photos live. A line that has no server id yet has nowhere
+  // to put a picture, so the shell buffers the picks and uploads them once the
+  // save returns an id; they show here as local previews meanwhile. The shell
+  // owns the state because this screen unmounts the moment the line is saved.
+  photoCtx: {
+    photosFor: (line: DraftLine) => LinePhoto[];
+    pendingFor: (line: DraftLine) => PendingPhoto[];
+    busy: boolean;
+    onAddFiles: (line: DraftLine, files: FileList | null) => void;
+    onRemovePending: (line: DraftLine, p: PendingPhoto) => void;
+    onRemoveSaved: (line: DraftLine, p: LinePhoto) => void;
+  };
 };
 
 const blankDefaults = (category: Category): DraftLine => ({
@@ -99,7 +113,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const isEditing = editingLineIdx != null;
@@ -201,12 +215,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // a hard stop. RAM lines additionally require every spec field — the toast
   // names the blanks (which include Part #, so the synth path never fires).
   const attemptSave = () => {
-    // Qty can be left blank, so it joins the same list rather than arriving as
-    // a second message once the specs are filled.
-    const missing = line.category === 'RAM' ? [...missingRamFields(line)] : [];
-    if (!(Number(line.qty) > 0)) missing.push('quantity');
-    if (missing.length) {
-      const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
+    // The same rule the desktop screens ask, so a line this form accepts is
+    // never one the editor then refuses to save — which used to lock the whole
+    // order until someone reopened that line and filled in a brand.
+    const { missingKeys } = lineRequirements(line);
+    const fields = missingFieldNames(missingKeys, t, lang);
+    if (fields) {
       showWarnToast(t('drawerStillNeeded', { fields }));
       return;
     }
@@ -419,6 +433,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             <span style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>{t('aiPhotoLabel')}</span>
           </div>
         )}
+
+        {/* The capture above is the AI's reading of a label; these are pictures
+            of the goods themselves. The scan keeps its own thumbnail, so only
+            uploads are listed here and no image appears twice. */}
+        <LinePhotoStrip
+          photos={photoCtx.photosFor(line).filter(p => p.source === 'upload')}
+          pending={photoCtx.pendingFor(line)}
+          busy={photoCtx.busy}
+          onAdd={files => photoCtx.onAddFiles(line, files)}
+          onRemove={p => photoCtx.onRemoveSaved(line, p)}
+          onRemovePending={p => photoCtx.onRemovePending(line, p)}
+        />
 
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 

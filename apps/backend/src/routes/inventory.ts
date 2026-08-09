@@ -1085,6 +1085,7 @@ inventory.patch('/:id', async (c) => {
   type Outcome =
     | { kind: 'notFound' }
     | { kind: 'committed' }
+    | { kind: 'doneLocked' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const before = (await tx<Record<string, unknown>[]>`
@@ -1109,12 +1110,24 @@ inventory.patch('/:id', async (c) => {
       if (open.n > 0) return { kind: 'committed' };
     }
 
-    // qty and unit_cost are inputs to the parent PO's derived goods total, so
-    // the mirror verdict has to be taken before they move — afterwards a stale
-    // mirror and a real negotiated price are indistinguishable and the column
-    // pins itself against the lines forever.
     const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
     const orderId = before.order_id as string;
+
+    // A Done PO's costs are closed-book, and PATCH /api/orders refuses exactly
+    // this edit with 409 — reaching the same line through the inventory editor
+    // rewrote the header total anyway. Status, sell price and the spec fields
+    // stay editable: that is the ordinary post-Done inventory workflow, and
+    // none of them feed the goods total.
+    if (touchesGoods) {
+      const [parent] = await tx<{ lifecycle: string }[]>`
+        SELECT lifecycle FROM orders WHERE id = ${orderId} LIMIT 1
+      `;
+      if (parent?.lifecycle === 'done') return { kind: 'doneLocked' };
+    }
+
+    // The mirror verdict has to be taken before qty/unit_cost move — afterwards
+    // a stale mirror and a real negotiated price are indistinguishable and the
+    // column pins itself against the lines forever.
     const goodsFollowsLines = touchesGoods ? await goodsTotalIsMirror(tx, orderId) : false;
 
     await tx`
@@ -1160,6 +1173,9 @@ inventory.patch('/:id', async (c) => {
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'committed') {
     return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
+  }
+  if (outcome.kind === 'doneLocked') {
+    return c.json({ error: 'the purchase order is Done; reopen it before changing qty or unit cost' }, 409);
   }
   const before = outcome.before;
 
@@ -1356,8 +1372,16 @@ inventory.post('/transfer', async (c) => {
         // Partial — decrement source, clone the rest at destination.
         // Source line stays put (not moved) — intentionally NOT stamped with
         // transfer_order_id; only the moved clone belongs to this order.
+        // The clone carries away units nothing has sold, so its own qty speaks
+        // for what it cost and it needs no qty_purchased of its own — but the
+        // source must hand over that share, or the two halves together would
+        // claim more than the order ever bought.
         await tx`
-          UPDATE order_lines SET qty = qty - ${r.qty} WHERE id = ${r.id}
+          UPDATE order_lines
+             SET qty = qty - ${r.qty},
+                 qty_purchased = CASE WHEN qty_purchased IS NULL THEN NULL
+                                      ELSE qty_purchased - ${r.qty} END
+           WHERE id = ${r.id}
         `;
         const inserted = (await tx`
           INSERT INTO order_lines (
@@ -1608,7 +1632,15 @@ inventory.delete('/transfer-orders/:id', async (c) => {
           FOR UPDATE
         `)[0] as { id: string } | undefined;
         if (peer) {
-          await tx`UPDATE order_lines SET qty = qty + ${l.qty} WHERE id = ${peer.id}`;
+          // Give back the share the split handed over. A clone can't have been
+          // sold from (discard refuses one that has), so its qty is all it cost.
+          await tx`
+            UPDATE order_lines
+               SET qty = qty + ${l.qty},
+                   qty_purchased = CASE WHEN qty_purchased IS NULL THEN NULL
+                                        ELSE qty_purchased + ${l.qty} END
+             WHERE id = ${peer.id}
+          `;
           // Hand the clone's photos to the line absorbing it. The FK cascades
           // on the DELETE below, and once the rows are gone nothing in the
           // database can name their R2 objects — they would be unreclaimable.

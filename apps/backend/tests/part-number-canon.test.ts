@@ -68,6 +68,19 @@ describe('canonPartNumberJs', () => {
     expect(canonPartNumberJs('720-ct')).toBe('720-CT');
   });
 
+  // The label needs its separator. Without one it also ate the opening letters
+  // of part numbers that simply start that way — and this trade stocks them.
+  it('keeps a part number that merely begins with a label', () => {
+    expect(canonPartNumberJs('SNK-P0048AP4')).toBe('SNK-P0048AP4');   // Supermicro heatsink
+    expect(canonPartNumberJs('SNP112P/8G')).toBe('SNP112P/8G');       // Dell memory
+    expect(canonPartNumberJs('PARTS-100')).toBe('PARTS-100');
+  });
+
+  it('keeps two such part numbers apart', () => {
+    expect(canonPartNumberJs('SNK-P0048AP4')).not.toBe(canonPartNumberJs('PNK-P0048AP4'));
+    expect(canonPartNumberJs('PARTS-100')).not.toBe(canonPartNumberJs('S-100'));
+  });
+
   // Whether SQL agrees on these is not asserted: Postgres' [[:space:]] follows
   // the database's ctype, which counts the U+2000 block as space under a UTF-8
   // locale and not under C. What has to hold either way is that the key this

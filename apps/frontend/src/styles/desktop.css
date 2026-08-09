@@ -649,6 +649,15 @@ html.desktop, body.desktop, .desktop #root {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   z-index: 100; display: flex; flex-direction: column; gap: 8px;
 }
+/* The line drawer is anchored right at 620px and the toast floats above it. A
+   centred toast clears the drawer only above 1520px (620 drawer + 280 toast +
+   620 of centring); narrower than that it lands on the drawer's cost fields and
+   Confirm button — the ones it is usually complaining about — so it moves to
+   the corner the drawer never reaches. Only while a drawer is actually open:
+   otherwise every toast in the app sits off-centre for the same reason. */
+@media (max-width: 1519px) {
+  body.has-drawer .toast-wrap { left: 20px; transform: none; }
+}
 .toast {
   background: var(--fg);
   color: white;
@@ -668,20 +677,15 @@ html.desktop, body.desktop, .desktop #root {
    the loudest of the three, because it lands over a dimmed drawer where a
    tinted panel washes out. */
 .toast.warn {
-  background: oklch(0.63 0.16 58);
-  color: #fff;
+  background: var(--warn-loud);
+  color: var(--warn-loud-fg);
   padding: 14px 18px;
   font-size: 13.5px;
   font-weight: 550;
   box-shadow:
-    0 0 0 4px oklch(0.63 0.16 58 / 0.22),
-    0 16px 38px oklch(0.45 0.12 58 / 0.42);
+    0 0 0 4px var(--warn-loud-halo),
+    0 16px 38px var(--warn-loud-shadow);
   animation: toast-in 0.22s ease-out, toast-warn-pop 0.34s ease-out 0.22s;
-}
-@keyframes toast-warn-pop {
-  0%   { transform: scale(1); }
-  40%  { transform: scale(1.035); }
-  100% { transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
   .toast.warn { animation: none; }
@@ -2221,7 +2225,7 @@ html.desktop, body.desktop, .desktop #root {
 .dw-cat-note {
   display: flex; align-items: flex-start; gap: 8px;
   padding: 8px 10px; border-radius: 8px; font-size: 11.5px;
-  background: var(--warn-soft); color: var(--warn-strong, #92400e);
+  background: var(--warn-soft); color: var(--warn-strong);
   border: 1px solid color-mix(in oklch, var(--warn) 40%, transparent);
 }
 .dw-cat-note button {
@@ -2246,11 +2250,21 @@ html.desktop, body.desktop, .desktop #root {
 .grp-tw.closed { transform: rotate(-90deg); }
 .grp-chip {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--cat); background: var(--cat-soft);
+  color: var(--cat-strong); background: var(--cat-soft);
   padding: 2px 8px; border-radius: 999px;
 }
 .grp-meta { font-size: 11.5px; color: var(--fg-subtle); }
-.grp-unpriced { color: var(--warn); }
+.grp-unpriced { color: var(--warn-strong); }
+
+/* Sits directly above Confirm, so the gap and the button that is refusing to
+   fire are read together. */
+.dw-still-needed {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 18px; font-size: 12px; line-height: 1.4;
+  color: var(--warn-strong); background: var(--warn-soft);
+  border-top: 1px solid var(--border);
+}
+.dw-still-needed svg { flex-shrink: 0; }
 .grp-amt { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .grp-pl { width: 104px; text-align: right; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
@@ -2282,6 +2296,10 @@ html.desktop, body.desktop, .desktop #root {
      invoice, not a summary panel. Two mask layers that union: the body, plus a
      row of half-discs hanging off the bottom. */
   --tooth: 8px;
+  /* The editable fee is an input, and its digits sit inside its own border and
+     padding. Every other figure carries the same inset so the money column is
+     where the digits end, not where each box happens to end. */
+  --fig-inset: 10px;
   -webkit-mask:
     radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
     linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
@@ -2301,7 +2319,7 @@ html.desktop, body.desktop, .desktop #root {
 .tape-k { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-muted); white-space: nowrap; }
 .tape-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--cat); }
 .tape-lead { flex: 1; border-bottom: 1px dotted var(--border-strong); transform: translateY(-4px); min-width: 12px; }
-.tape-v { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tape-v { font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--fig-inset); }
 
 .tape-row.sum { border-top: 1px solid var(--border); margin-top: 9px; padding-top: 10px; font-weight: 600; }
 .tape-row.sum .tape-k { color: var(--fg); }
@@ -2316,8 +2334,9 @@ html.desktop, body.desktop, .desktop #root {
 .tape-row.total .tape-v { font-size: 21px; letter-spacing: -0.02em; }
 
 .tape-edit { display: inline-flex; align-items: center; gap: 8px; }
-.tape-edit .input { font-size: 12.5px; padding: 5px 9px; }
-.tape-edit .tape-money { width: 110px; text-align: right; }
+/* 1px of the inset is the input's own border. */
+.tape-edit .input { font-size: 12.5px; padding: 5px calc(var(--fig-inset) - 1px); }
+.tape-edit .tape-money { width: 110px; text-align: right; font-variant-numeric: tabular-nums; }
 .tape-edit .tape-note { width: 190px; }
 .tape-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
 .tape-block-cap {
@@ -2363,6 +2382,13 @@ html.desktop, body.desktop, .desktop #root {
   flex-shrink: 0;
   overflow: hidden;
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07);
+  /* Sticky, so whatever it takes it takes from the line table for the whole
+     session. Attachments are the part that grows without limit, so the bar is
+     bounded and the attachment list is what gives way — the total and the
+     Submit button below it stay on screen. */
+  display: flex;
+  flex-direction: column;
+  max-height: min(42vh, 400px);
 }
 .sub-commit > * + * { border-top: 1px solid var(--border); }
 
@@ -2372,9 +2398,13 @@ html.desktop, body.desktop, .desktop #root {
   grid-template-columns: minmax(200px, 280px) auto minmax(240px, 1fr);
   gap: 14px;
   align-items: end;
+  flex-shrink: 0;
 }
-.sub-commit-attach { padding: 12px 16px; }
-.sub-commit-files { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.sub-commit-attach { padding: 12px 16px; min-height: 0; overflow-y: auto; }
+.sub-commit-files {
+  margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 124px; overflow-y: auto;
+}
 
 .sub-commit-foot {
   padding: 12px 16px;
@@ -2382,6 +2412,7 @@ html.desktop, body.desktop, .desktop #root {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .sub-commit-total { margin-left: auto; text-align: right; }
 .sub-commit-cap {

@@ -6,7 +6,7 @@ import { PhLanguageSheet } from './components/PhLanguageSheet';
 import { PhNotificationsSheet } from './components/PhNotificationsSheet';
 import { PhAboutSheet } from './components/PhAboutSheet';
 import { PhPasswordSheet } from './components/PhPasswordSheet';
-import { ErrorDialog, type ErrorDialogContent } from './components/ErrorDialog';
+import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
@@ -15,11 +15,17 @@ import { Camera } from './pages/Camera';
 import { SubmitForm } from './pages/SubmitForm';
 import { OrderReview } from './pages/OrderReview';
 import { Orders } from './pages/Orders';
-import { OrderDetail } from './pages/OrderDetail';
+import { OrderDetail, type OrderMetaDraft } from './pages/OrderDetail';
 import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
 import { ShareTarget } from './pages/ShareTarget';
+
+import {
+  linePhotos, deleteLinePhoto, uploadedPhotoCount, useLinePhotoBuffer,
+  type LinePhoto, type PendingPhoto,
+} from './lib/linePhotos';
+import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 
 import { useAuth } from './lib/auth';
 import { useEffectiveUser } from './lib/tweaks';
@@ -103,7 +109,7 @@ function Shell() {
   // Purchaser" sees the purchaser tabs (Market, not Inventory), matching the
   // desktop sidebar and the purchaser-scoped data.
   const effUser = useEffectiveUser();
-  const { t } = useT();
+  const { t, lang } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
   // The 'submit' tab triggers the capture flow (onCenterPress) and has no
@@ -136,14 +142,32 @@ function Shell() {
   // across the draft-creation round trip reads this after the await to tell
   // whether the session it belongs to is still the live one.
   const captureGen = useRef(0);
+  // ── Line photos ──────────────────────────────────────────────────────────
+  // Held here rather than in SubmitForm: that screen unmounts the moment a line
+  // is saved, and a picked file has to outlive it — a line has nowhere to put a
+  // photo until the save gives it an id. Keyed by the line's client id, or its
+  // server id for a line that arrived already persisted.
+  const [savedPhotos, setSavedPhotos] = useState<Record<string, LinePhoto[]>>({});
+  const photoBuffer = useLinePhotoBuffer((key, saved) =>
+    setSavedPhotos(prev => ({ ...prev, [key]: [...(prev[key] ?? []), ...saved] })));
+
   const [toast, setToast] = useState<Toast | null>(null);
-  const [errorDialog, setErrorDialog] = useState<ErrorDialogContent | null>(null);
+  // Errors queue rather than overwrite: a line save and its photo upload can
+  // fail in the same tap, and the second problem used to replace the first
+  // before it had been read. Shared with the desktop shell.
+  const {
+    current: errorDialog, push: pushErrorDialog, dismiss: dismissErrorDialog,
+  } = useErrorDialogQueue();
   const [langSheet, setLangSheet] = useState(false);
   const [notifSheet, setNotifSheet] = useState(false);
   const [aboutSheet, setAboutSheet] = useState(false);
   const [pwSheet, setPwSheet] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
+  // The detail screen's unsaved fees / notes / warehouse / payment. Held here
+  // because opening a line form unmounts that screen — typing a fee and then
+  // adding the line it is for used to blank the fee.
+  const [detailMeta, setDetailMeta] = useState<OrderMetaDraft | null>(null);
   const orderDetailMatch = match('/purchase-orders/:id', path);
 
   // Load notifications when the user is signed in.
@@ -185,9 +209,9 @@ function Shell() {
         navigate('/purchase-orders');
         const status = err instanceof ApiError ? err.status : 0;
         showErrorDialog(
-          status === 403 ? "You don't have access to this purchase order."
-          : status === 404 ? 'That purchase order no longer exists.'
-          : 'Could not open that purchase order.',
+          status === 403 ? t('poNoAccess')
+          : status === 404 ? t('poNotFound')
+          : t('poOpenFailed'),
         );
       });
     return () => { alive = false; };
@@ -199,7 +223,7 @@ function Shell() {
   // Errors never become toasts: they go to the blocking dialog so the user can
   // read and act on them.
   const showToast = (msg: string, kind: Toast['kind'] = 'success') => {
-    if (kind === 'error') { setErrorDialog({ msg }); return; }
+    if (kind === 'error') { pushErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
@@ -208,15 +232,61 @@ function Shell() {
   // Register the global hooks so `handleFetchError` / `showErrorDialog` in
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
-    window.__showErrorDialog = (msg, details, title) => setErrorDialog({ msg, details, title });
+    window.__showErrorDialog = (msg, details, title) => pushErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
-      if (kind === 'error') { setErrorDialog({ msg }); return; }
+      if (kind === 'error') { pushErrorDialog({ msg }); return; }
       setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
     };
     return () => { delete window.__showToast; delete window.__showErrorDialog; };
-  }, []);
+  }, [pushErrorDialog]);
+
+  // ── Line photo handlers ──────────────────────────────────────────────────
+  const photoKey = (l: DraftLine) => l._cid ?? l.id ?? '';
+  const photosFor = (l: DraftLine): LinePhoto[] => savedPhotos[photoKey(l)] ?? linePhotos(l);
+  const pendingFor = (l: DraftLine): PendingPhoto[] => photoBuffer.queuedFor(photoKey(l));
+  // The order the line form is writing into. A session that has not needed a
+  // draft row yet has none, and neither does a line still being captured.
+  const formOrderId = capture.phase === 'form'
+    ? (capture.editingId ?? capture.draftId ?? null)
+    : null;
+
+  const seedPhotos = (order: Order) => setSavedPhotos(prev => {
+    const next = { ...prev };
+    for (const l of order.lines) next[l.id] = linePhotos(l);
+    return next;
+  });
+
+  const addLinePhotos = (l: DraftLine, files: FileList | null) => {
+    photoBuffer.add(photoKey(l), uploadedPhotoCount(photosFor(l)), files);
+  };
+
+  const removePendingPhoto = (l: DraftLine, p: PendingPhoto) =>
+    photoBuffer.remove(photoKey(l), p);
+
+  const removeSavedPhoto = async (l: DraftLine, photo: LinePhoto) => {
+    const lineId = l.id;
+    if (!lineId || !formOrderId) return;
+    const key = photoKey(l);
+    const base = photosFor(l);
+    try {
+      await deleteLinePhoto(formOrderId, lineId, photo.id);
+      setSavedPhotos(prev => ({
+        ...prev, [key]: (prev[key] ?? base).filter(p => p.id !== photo.id),
+      }));
+    } catch {
+      showErrorDialog(t('linePhotoDeleteFailed'));
+    }
+  };
+
+  // Sends what was buffered for a line, now that it has an id. Non-fatal: the
+  // line itself is already saved, so a photo that fails is a warning — and the
+  // buffer keeps it, bytes and preview intact, for the next save to retry.
+  const flushLinePhotos = async (l: DraftLine, orderId: string, lineId: string) => {
+    const { failed } = await photoBuffer.flush(photoKey(l), orderId, lineId);
+    if (failed.length) showErrorDialog(t('linePhotoUploadFailed'));
+  };
 
   // ── Capture flow handlers ────────────────────────────────────────────────
   const startSubmit = async () => {
@@ -293,7 +363,7 @@ function Shell() {
         return r.id;
       })
       .catch(() => {
-        showToast('Could not start a draft order — retry.', 'error');
+        showToast(t('draftStartFailed'), 'error');
         draftIdPromise.current = null;
         return null;
       });
@@ -307,6 +377,7 @@ function Shell() {
   const resumeDraft = async (summary: OrderSummary) => {
     try {
       const { order } = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
+      seedPhotos(order);
       setOrderFees({
         amount: order.otherFees ? order.otherFees.toFixed(2) : '',
         note: order.otherFeesNote ?? '',
@@ -324,7 +395,7 @@ function Shell() {
         lines: order.lines.map(toDraftLine),
       });
     } catch {
-      showToast('Could not open draft — retry.', 'error');
+      showToast(t('draftOpenFailed'), 'error');
     }
   };
 
@@ -374,11 +445,13 @@ function Shell() {
   // when it's ready (identity — brand, or description for Other — a positive
   // qty, and a non-negative unit cost). Surfaced to the user so a line never
   // fails to sync silently.
+  // The backstop before a line is written to the server. The form gates on the
+  // same shared rule first, so reaching this with something missing means the
+  // line arrived from somewhere else — a resumed draft, or a category switch
+  // that emptied the fields the new category needs.
   const lineSyncBlock = (l: DraftLine): string | null => {
-    const hasIdentity = l.category === 'Other' ? !!l.description : !!l.brand;
-    if (!hasIdentity) return l.category === 'Other' ? t('syncNeedDescription') : t('syncNeedBrand');
-    if (l.category === 'Other' && !(l.itemType ?? '').trim()) return t('syncNeedItemType');
-    if (!((Number(l.qty) || 0) > 0)) return t('syncNeedQty');
+    const fields = missingFieldNames(lineRequirements(l).missingKeys, t, lang);
+    if (fields) return t('drawerStillNeeded', { fields });
     if (!(Number(l.unitCost) >= 0)) return t('syncNeedCost');
     return null;
   };
@@ -436,6 +509,7 @@ function Shell() {
         const { status, ...fields } = toWireLine(line);
         void status;
         await api.patch('/api/orders/' + orderId, { lines: [{ id: line.id, ...fields }] });
+        await flushLinePhotos(line, orderId, line.id);
         if (backToDetail) doneToDetail();
       } catch (e) {
         // The backend refuses line edits from a purchaser past Draft. The
@@ -476,6 +550,7 @@ function Shell() {
         '/api/orders/' + targetId, { addLines: [toWireLine(line)] },
       );
       const newId = res.addedLineIds?.[0];
+      if (newId) await flushLinePhotos(line, targetId, newId);
       if (backToDetail) { doneToDetail(); return; }
       // Match by stable client id, not array index: the user may have added,
       // removed, or navigated past this line before the PATCH resolved.
@@ -544,6 +619,7 @@ function Shell() {
   // already answered for its warehouse, payment and notes, and its detail
   // screen is what owns them.
   const startEditLine = (order: Order, idx: number) => {
+    seedPhotos(order);
     setCapture({
       phase: 'form',
       category: (order.lines[idx]?.category as Category) ?? 'RAM',
@@ -556,6 +632,7 @@ function Shell() {
   };
 
   const startAddLine = (order: Order, cat: Category) => {
+    seedPhotos(order);
     setCapture({
       phase: 'form',
       category: cat,
@@ -625,7 +702,7 @@ function Shell() {
       setView('history');
       showToast(t('orderSubmitted'));
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Submit failed', 'error');
+      showToast(e instanceof Error ? e.message : t('subSubmitFailed'), 'error');
     }
   };
 
@@ -660,8 +737,14 @@ function Shell() {
           </div>
         </div>
       )}
+      {/* Keyed on the entry so the next problem in the queue mounts its own
+          dialog — focus and the OK button belong to one message at a time. */}
       {errorDialog && (
-        <ErrorDialog content={errorDialog} onClose={() => setErrorDialog(null)} />
+        <ErrorDialog
+          key={errorDialog.seq}
+          content={errorDialog}
+          onClose={dismissErrorDialog}
+        />
       )}
     </>
   );
@@ -694,6 +777,14 @@ function Shell() {
           onBack={goBack}
           onRescan={rescanRam}
           rescanDraft={capture.rescanDraft ?? null}
+          photoCtx={{
+            photosFor,
+            pendingFor,
+            busy: photoBuffer.busy,
+            onAddFiles: addLinePhotos,
+            onRemovePending: removePendingPhoto,
+            onRemoveSaved: removeSavedPhoto,
+          }}
         />
         {overlayEl}
       </>
@@ -734,6 +825,8 @@ function Shell() {
       {orderDetailOpen && (
         <OrderDetail
           order={detailOrder}
+          meta={detailMeta}
+          onMetaChange={setDetailMeta}
           onCancel={() => navigateBack('/purchase-orders')}
           onSaved={(msg) => showToast(msg)}
           onDeleted={() => navigate('/purchase-orders')}

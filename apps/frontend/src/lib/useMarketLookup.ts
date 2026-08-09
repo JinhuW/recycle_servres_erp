@@ -72,39 +72,91 @@ export function resolveMarket(
   return value ? { ...value, targetMargin } : null;
 }
 
-export function useMarketLookup(partNumbers: readonly (string | null | undefined)[]) {
+/**
+ * Everything the screen can be in the middle of, kept apart. A blank panel used
+ * to mean "still loading", "never priced" and "the request failed" all at once,
+ * and the first and last tell a purchaser standing at a pallet opposite things.
+ * `skipped` is a part number past the per-request cap — asked about, never
+ * requested.
+ */
+export type MarketState =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'skipped' }
+  | { status: 'none' }
+  | { status: 'ok'; value: ResolvedMarketValue };
+
+/**
+ * Resolving a part number is the call signature — the shape every consumer
+ * already uses. The request-level extras hang off it so adding them didn't
+ * force four call sites to destructure.
+ */
+export type MarketLookup = {
+  (partNumber: string | null | undefined): ResolvedMarketValue | null;
+  /** Loading / failed / over the cap / never priced / priced, for one part. */
+  state(partNumber: string | null | undefined): MarketState;
+  /** Re-runs the last request. Only a failed one has anything to re-run. */
+  retry(): void;
+};
+
+export function useMarketLookup(partNumbers: readonly (string | null | undefined)[]): MarketLookup {
   const [values, setValues] = useState<Map<string, MarketValue>>(new Map());
   const [targetMargin, setTargetMargin] = useState(TARGET_MARGIN_FALLBACK);
+  // Which key set `values` answers for, so a part number typed after the last
+  // response reads as loading rather than as never-priced.
+  const [loaded, setLoaded] = useState<{ key: string; ok: boolean } | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const seqRef = useRef(0);
 
   // A stable string over the key set, so re-renders that don't change which
   // parts are on screen don't refetch.
   const wanted = lookupKeys(partNumbers);
   const key = wanted.join(' ');
+  const asked = wanted.slice(0, MAX_PER_LOOKUP);
+  const askedSet = new Set(asked);
 
   useEffect(() => {
     // Clearing the field supersedes any request already in the air, so it takes
     // a sequence number too — otherwise the guard below still accepts it and
     // the values it was cleared of come back.
-    if (!wanted.length) { seqRef.current++; setValues(new Map()); return; }
+    if (!wanted.length) { seqRef.current++; setValues(new Map()); setLoaded(null); return; }
     const timer = setTimeout(() => {
       const seq = ++seqRef.current;
       api.post<{ targetMargin?: number; items: Record<string, MarketValue> }>(
         '/api/market/lookup',
-        { partNumbers: wanted.slice(0, MAX_PER_LOOKUP) },
+        { partNumbers: asked },
       )
         .then(r => {
           if (seq !== seqRef.current) return;
           setValues(new Map(Object.entries(r.items)));
           if (typeof r.targetMargin === 'number') setTargetMargin(r.targetMargin);
+          setLoaded({ key, ok: true });
         })
-        .catch(() => { /* a missing assist is not worth an error banner */ });
+        .catch(() => {
+          if (seq !== seqRef.current) return;
+          setLoaded({ key, ok: false });
+        });
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  // `key` is the real dependency; `wanted` is derived from it.
+  // `key` is the real dependency; `wanted` and `asked` are derived from it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, attempt]);
 
-  return (partNumber: string | null | undefined): ResolvedMarketValue | null =>
-    resolveMarket(values, partNumber, targetMargin);
+  const lookup = ((partNumber: string | null | undefined) =>
+    resolveMarket(values, partNumber, targetMargin)) as MarketLookup;
+
+  lookup.state = (partNumber) => {
+    const canon = canonicalPartNumber(partNumber ?? '');
+    if (!canon) return { status: 'none' };
+    if (!askedSet.has(canon)) return { status: 'skipped' };
+    if (loaded?.key !== key) return { status: 'loading' };
+    if (!loaded.ok) return { status: 'error' };
+    const value = resolveMarket(values, canon, targetMargin);
+    return value ? { status: 'ok', value } : { status: 'none' };
+  };
+  // Dropping what failed first, so the panel shows the retry running instead of
+  // sitting on the error until the next response lands.
+  lookup.retry = () => { setLoaded(null); setAttempt(n => n + 1); };
+
+  return lookup;
 }

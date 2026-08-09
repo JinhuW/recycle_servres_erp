@@ -10,14 +10,13 @@ import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
-import { primaryPhoto } from '../lib/linePhotos';
+import { linePhotos } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
-import { poEffectiveCost } from '../lib/poTotals';
+import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
-import { parseFeeInput } from '../lib/poTotals';
 import type { Category, Order, OrderLine, Warehouse } from '../lib/types';
 
 // `order.status` can collapse to 'Mixed' when an order's lines disagree, which
@@ -30,12 +29,29 @@ const LIFECYCLE_STATUS: Record<string, string> = {
   done: 'Done',
 };
 
-// Shared with the desktop shell so the two can't disagree on what counts as
-// a real photo — the stub R2 fallback emits a data: URL that renders broken.
-const firstPhoto = (l: Parameters<typeof primaryPhoto>[0]) => primaryPhoto(l);
+// How many of a line's photos the row shows before it offers the rest. Four
+// 44px tiles is what fits next to the line's controls on a small phone.
+const PHOTOS_COLLAPSED = 4;
+
+/**
+ * The order-level edits in flight on this screen. They live in the shell, not
+ * here: opening a line form unmounts this component, and a fee typed for the
+ * very line being added must not go with it. `version` is the server state
+ * they were made against — edits are dropped once the server moves on.
+ */
+export type OrderMetaDraft = {
+  version: string;
+  warehouseId: string;
+  payment: 'company' | 'self';
+  notes: string;
+  fees: { amount: string; note: string };
+};
 
 type Props = {
   order: Order;
+  /** Unsaved order-level edits carried across trips into the line form. */
+  meta: OrderMetaDraft | null;
+  onMetaChange: (meta: OrderMetaDraft) => void;
   onCancel: () => void;
   onSaved: (msg: string) => void;
   onDeleted: () => void;
@@ -44,7 +60,10 @@ type Props = {
   onAddLine: (order: Order, cat: Category) => void;
 };
 
-export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted, onEditLine, onAddLine }: Props) {
+export function OrderDetail({
+  order: initialOrder, meta: metaDraft, onMetaChange,
+  onCancel, onSaved, onDeleted, onEditLine, onAddLine,
+}: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
@@ -66,14 +85,37 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const canAnnotate = !orderLocked && isOwnerOrManager;
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
-  const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
-  const [notes, setNotes] = useState<string>(order.notes ?? '');
-  const [fees, setFees] = useState({
-    amount: order.otherFees ? order.otherFees.toFixed(2) : '',
-    note: order.otherFeesNote ?? '',
-  });
+  // What the server says the order's meta is, as one comparable string. The
+  // backend rebuilds `statusMeta` as a fresh object on every response, so its
+  // identity changes when nothing did — keying anything on it wiped the fields
+  // the user was typing into on every refetch.
+  const serverVersion = JSON.stringify([
+    order.id,
+    order.warehouse?.id ?? '',
+    order.payment,
+    order.notes ?? '',
+    order.otherFees,
+    order.otherFeesNote ?? '',
+    ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
+  ]);
+  // Edits made against an older server state are stale: the order moved on, so
+  // the fields show what it now holds.
+  const meta: OrderMetaDraft = metaDraft?.version === serverVersion ? metaDraft : {
+    version: serverVersion,
+    warehouseId: order.warehouse?.id ?? '',
+    payment: order.payment,
+    notes: order.notes ?? '',
+    fees: {
+      amount: order.otherFees ? order.otherFees.toFixed(2) : '',
+      note: order.otherFeesNote ?? '',
+    },
+  };
+  const { warehouseId, payment, notes, fees } = meta;
+  const setMeta = (patch: Partial<OrderMetaDraft>) => onMetaChange({ ...meta, ...patch });
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Which lines have their whole photo row open. Collapsed, a line shows the
+  // first few and says how many more there are.
+  const [expandedPhotos, setExpandedPhotos] = useState<ReadonlySet<string>>(() => new Set());
   const [removingLineId, setRemovingLineId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -95,20 +137,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
-  // Reset meta inputs when the order itself changes (e.g. refetch after save).
+  // Re-read the evidence list when the server's own version of it moves —
+  // never on a mere refetch that returned the same thing.
   useEffect(() => {
-    setWarehouseId(order.warehouse?.id ?? '');
-    setPayment(order.payment);
-    setNotes(order.notes ?? '');
-    setFees({
-      amount: order.otherFees ? order.otherFees.toFixed(2) : '',
-      note: order.otherFeesNote ?? '',
-    });
     setSubmissionAtts(order.statusMeta?.['Submission']?.attachments ?? []);
-  }, [
-    order.id, order.warehouse?.id, order.payment, order.notes,
-    order.otherFees, order.otherFeesNote, order.statusMeta,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverVersion]);
 
   useEffect(() => {
     let alive = true;
@@ -437,7 +471,11 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {order.lines.map((l, i) => (
+          {order.lines.map((l, i) => {
+            const shots = linePhotos(l);
+            const shown = expandedPhotos.has(l.id) ? shots : shots.slice(0, PHOTOS_COLLAPSED);
+            const hidden = shots.length - shown.length;
+            return (
             <div
               key={l.id}
               className="ph-line"
@@ -446,24 +484,6 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
-                {firstPhoto(l) && (
-                  <button
-                    type="button"
-                    onClick={() => setLightboxUrl(firstPhoto(l)!.url)}
-                    title={t('linePhotos')}
-                    style={{
-                      width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-                      border: '1px solid var(--border)', overflow: 'hidden',
-                      padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                    }}
-                  >
-                    <img
-                      src={firstPhoto(l)!.url}
-                      alt={t('linePhotos')}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                    />
-                  </button>
-                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                     {l.category === 'Other' && !!(l.itemType ?? '').trim() && (
@@ -505,12 +525,57 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   </>
                 )}
               </div>
+              {/* Every picture the line carries, not just the first — the
+                  phone is where they are taken, so it is where they are
+                  checked. Taps stop here: the card itself opens the editor. */}
+              {shots.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  {shown.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={e => { e.stopPropagation(); setLightboxUrl(p.url); }}
+                      title={p.filename ?? t('linePhotos')}
+                      style={{
+                        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+                        border: '1px solid var(--border)', overflow: 'hidden',
+                        padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
+                      }}
+                    >
+                      <img
+                        src={p.url}
+                        alt={t('linePhotos')}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    </button>
+                  ))}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setExpandedPhotos(prev => new Set(prev).add(l.id));
+                      }}
+                      aria-label={t('linePhotosShowAll', { n: hidden })}
+                      style={{
+                        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
+                        border: '1px dashed var(--border-strong)', background: 'var(--bg-soft)',
+                        color: 'var(--fg-muted)', fontFamily: 'inherit',
+                        fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0,
+                      }}
+                    >
+                      +{hidden}
+                    </button>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>Qty <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
+                <span>{t('qty')} <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.qty * l.unitCost, locale)}</span>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* One target per category, matching the capture screen. A single
@@ -533,7 +598,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   style={{
                     minHeight: 54, borderRadius: 13,
                     border: '1.5px dashed ' + categoryTone(cat).tone,
-                    background: 'var(--bg-elev)', color: categoryTone(cat).tone,
+                    background: 'var(--bg-elev)', color: categoryTone(cat).strong,
                     fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
                     display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
                     padding: '6px 2px', cursor: 'pointer',
@@ -586,7 +651,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   inputMode="decimal"
                   value={fees.amount}
                   placeholder="0.00"
-                  onChange={e => setFees(f => ({ ...f, amount: e.target.value }))}
+                  onChange={e => setMeta({ fees: { ...fees, amount: e.target.value } })}
                 />
               </div>
               <div className="ph-field" style={{ marginTop: 0 }}>
@@ -596,7 +661,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
                   maxLength={280}
                   value={fees.note}
                   placeholder={t('otherFeesPh')}
-                  onChange={e => setFees(f => ({ ...f, note: e.target.value }))}
+                  onChange={e => setMeta({ fees: { ...fees, note: e.target.value } })}
                 />
               </div>
             </div>
@@ -627,7 +692,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <div style={{ position: 'relative' }}>
             <select
               value={warehouseId}
-              onChange={e => setWarehouseId(e.target.value)}
+              onChange={e => setMeta({ warehouseId: e.target.value })}
               disabled={!canEditOrder}
               style={{
                 width: '100%',
@@ -665,12 +730,12 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <div className="seg" style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
             <button
               className={payment === 'company' ? 'active' : ''}
-              onClick={() => canEditOrder && setPayment('company')}
+              onClick={() => canEditOrder && setMeta({ payment: 'company' })}
               disabled={!canEditOrder}
             >{t('payCompany')}</button>
             <button
               className={payment === 'self' ? 'active' : ''}
-              onClick={() => canEditOrder && setPayment('self')}
+              onClick={() => canEditOrder && setMeta({ payment: 'self' })}
               disabled={!canEditOrder}
             >{t('paySelf')}</button>
           </div>
@@ -681,7 +746,7 @@ export function OrderDetail({ order: initialOrder, onCancel, onSaved, onDeleted,
           <textarea
             className="input"
             value={notes}
-            onChange={e => setNotes(e.target.value)}
+            onChange={e => setMeta({ notes: e.target.value })}
             placeholder={t('orderNotesPh')}
             rows={3}
             disabled={!canAnnotate}

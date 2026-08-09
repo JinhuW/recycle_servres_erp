@@ -28,8 +28,20 @@
   --neg-soft: oklch(0.96 0.04 22);
   --warn: oklch(0.78 0.13 75);
   --warn-soft: oklch(0.97 0.05 85);
+  /* --warn is a fill; text set in it lands around 2:1 on our surfaces. Anything
+     amber that has to be *read* takes --warn-strong instead. */
+  --warn-strong: oklch(0.45 0.13 75);
+  /* The one amber loud enough to carry white text (4.6:1), for the nudge toast
+     that fires over a dimmed drawer or a half-filled form. */
+  --warn-loud: oklch(0.57 0.15 70);
+  --warn-loud-fg: white;
+  --warn-loud-halo: oklch(0.57 0.15 70 / 0.22);
+  --warn-loud-shadow: oklch(0.42 0.11 70 / 0.42);
   --info: oklch(0.62 0.13 250);
   --info-soft: oklch(0.96 0.035 250);
+  /* Fourth category tone (HDD). The other three ride on info / pos / warn. */
+  --cool: oklch(0.62 0.13 295);
+  --cool-soft: oklch(0.96 0.04 295);
 
   /* Sizing */
   --radius: 10px;
@@ -160,11 +172,11 @@ button { font-family: inherit; cursor: pointer; }
 }
 .chip.pos    { background: var(--pos-soft);    color: var(--accent-strong);     border-color: transparent; }
 .chip.neg    { background: var(--neg-soft);    color: var(--neg);               border-color: transparent; }
-.chip.warn   { background: var(--warn-soft);   color: oklch(0.45 0.13 75);      border-color: transparent; }
+.chip.warn   { background: var(--warn-soft);   color: var(--warn-strong);       border-color: transparent; }
 .chip.info   { background: var(--info-soft);   color: oklch(0.45 0.13 250);     border-color: transparent; }
 .chip.muted  { background: var(--bg-soft);     color: var(--fg-muted);          border-color: var(--border); }
 .chip.accent { background: var(--accent-soft); color: var(--accent-strong);     border-color: transparent; }
-.chip.cool   { background: oklch(0.96 0.04 295); color: oklch(0.45 0.16 295);     border-color: transparent; }
+.chip.cool   { background: var(--cool-soft);   color: oklch(0.45 0.16 295);     border-color: transparent; }
 .chip.dot::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: currentColor; display: inline-block;
@@ -614,6 +626,15 @@ button { font-family: inherit; cursor: pointer; }
   to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* ===== Warning-toast pulse =====
+   Shared so the same nudge pulses on both shells; each chains it after its own
+   entrance animation. */
+@keyframes toast-warn-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.035); }
+  100% { transform: scale(1); }
+}
+
 /* ===== Loading skeleton (shared base) =====
    The shimmer sweeps a light highlight across a muted base. A wide
    background-size lets the highlight travel across blocks of any width. */
@@ -660,14 +681,30 @@ button { font-family: inherit; cursor: pointer; }
   padding: 1px 4px; border-radius: 4px;
   background: var(--accent); color: white;
 }
+/* Sized for a thumb on a warehouse floor. The disc sits inside its own tile
+   rather than hanging off the corner, where it used to reach across the gap
+   towards the tile beside it; the scrim keeps it readable over any photo. */
 .lp-x {
-  position: absolute; top: -5px; right: -5px;
-  width: 18px; height: 18px; border-radius: 50%;
-  border: 1px solid var(--border); background: var(--bg-elev);
-  color: var(--fg-muted); display: grid; place-items: center;
+  position: absolute; top: 2px; right: 2px;
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid oklch(1 0 0 / 0.35);
+  background: oklch(0.25 0.01 250 / 0.55);
+  backdrop-filter: blur(3px);
+  color: white; display: grid; place-items: center;
   cursor: pointer; padding: 0; line-height: 1;
+  transition: background 0.12s, border-color 0.12s;
 }
-.lp-x:hover { color: var(--neg); border-color: var(--neg); }
+.lp-x svg { width: 14px; height: 14px; }
+/* The finger needs 44px, the eye doesn't: the target grows past the disc into
+   the 8px gutter, which is still 4px short of the next tile. */
+.lp-x::after {
+  content: '';
+  position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px;
+  transform: translate(-50%, -50%);
+}
+.lp-x:hover { background: var(--neg); border-color: var(--neg); }
+.lp-x:focus-visible { outline: 2px solid var(--neg); outline-offset: 2px; }
 .lp-add {
   width: 62px; height: 62px; border-radius: 9px;
   border: 1.5px dashed var(--border-strong); background: transparent;
@@ -690,7 +727,7 @@ button { font-family: inherit; cursor: pointer; }
   text-transform: uppercase; color: var(--fg-subtle);
 }
 .mkt-age { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
-.mkt-age.stale { color: var(--warn); }
+.mkt-age.stale { color: var(--warn-strong); }
 .mkt-figs { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 9px; }
 .mkt-fig { display: flex; align-items: baseline; gap: 8px; }
 .mkt-k { font-size: 11.5px; color: var(--fg-muted); }
@@ -699,6 +736,45 @@ button { font-family: inherit; cursor: pointer; }
 .mkt-warn {
   display: flex; align-items: center; gap: 6px;
   margin-top: 9px; padding: 7px 9px; border-radius: 8px;
-  background: var(--warn-soft); color: var(--warn-strong, #92400e);
+  background: var(--warn-soft); color: var(--warn-strong);
   font-size: 11.5px; font-weight: 550;
 }
+/* Loading, failed and over-the-cap all render one line at the height the full
+   panel's head + figures occupy, so the cost fields underneath never move as
+   the answer arrives. */
+.mkt-assist.mkt-thin {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 74px;
+  font-size: 11.5px; color: var(--fg-muted);
+}
+.mkt-skeleton {
+  display: block; width: 60%; height: 12px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-elev), var(--border), var(--bg-elev));
+  background-size: 200% 100%;
+  animation: mkt-shimmer 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mkt-skeleton { animation: none; }
+}
+@keyframes mkt-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+/* ===== Required field still blank ===== */
+/* Named in the drawer's "still needed" list and marked on the control itself,
+   so the list is a map to the fields rather than a second thing to read. */
+.field.is-missing > .label { color: var(--warn-strong); }
+.field.is-missing .input,
+.field.is-missing .select {
+  border-color: var(--warn-strong);
+}
+.dw-missing {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 9px 12px; border-radius: 8px;
+  background: var(--warn-soft); color: var(--warn-strong);
+  border: 1px solid var(--warn);
+  font-size: 12.5px; line-height: 1.45;
+}
+.dw-missing:focus-visible { outline: 2px solid var(--warn-strong); outline-offset: 2px; }
+.dw-missing .dw-missing-k { font-weight: 650; }

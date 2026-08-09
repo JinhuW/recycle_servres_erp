@@ -748,12 +748,16 @@
    loud on purpose: it fires over a full-screen form the user is mid-way
    through. */
 .ph-toast.warn {
-  background: oklch(0.63 0.16 58);
-  color: #fff;
+  background: var(--warn-loud);
+  color: var(--warn-loud-fg);
   font-weight: 550;
   box-shadow:
-    0 0 0 4px oklch(0.63 0.16 58 / 0.22),
-    0 16px 38px oklch(0.45 0.12 58 / 0.42);
+    0 0 0 4px var(--warn-loud-halo),
+    0 16px 38px var(--warn-loud-shadow);
+  animation: toast-pop 0.2s ease-out, toast-warn-pop 0.34s ease-out 0.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ph-toast.warn { animation: none; }
 }
 @keyframes toast-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 

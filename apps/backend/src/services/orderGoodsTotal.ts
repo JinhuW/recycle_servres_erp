@@ -9,9 +9,14 @@
 import { goodsTotalIsMirror as storedTotalIsMirror } from '@recycle-erp/shared';
 import type { SqlLike } from './orderAudit';
 
+// qty_purchased over qty: a sale takes units off the shelf, and what the PO
+// paid for them does not change when it does. Reading qty here made the goods
+// total fall on every partial sale, so one PO recorded two different costs
+// depending on whether its stock left in one sell order or several. NULL means
+// nothing has parted the two.
 async function lineSum(tx: SqlLike, orderId: string): Promise<number> {
   const [row] = await tx<{ sum: number }[]>`
-    SELECT COALESCE(SUM(qty * unit_cost), 0)::float AS sum
+    SELECT COALESCE(SUM(COALESCE(qty_purchased, qty) * unit_cost), 0)::float AS sum
     FROM order_lines WHERE order_id = ${orderId}
   `;
   return Number(row.sum);

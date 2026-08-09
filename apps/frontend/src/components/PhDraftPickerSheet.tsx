@@ -1,6 +1,7 @@
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { fmtUSD0, relTime } from '../lib/format';
+import { poEffectiveCost } from '../lib/poTotals';
 import type { OrderSummary } from '../lib/types';
 
 type Props = {
@@ -33,8 +34,11 @@ export function PhDraftPickerSheet({ drafts, onResume, onStartNew, onClose }: Pr
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {drafts.map(d => {
             const itemsLabel = `${d.lineCount} ${d.lineCount === 1 ? t('item') : t('items')}`;
-            // All-in, matching the total the draft's own review screen shows.
-            const draftTotal = (d.totalCost ?? 0) + d.otherFees;
+            // All-in, matching the total the draft's own review screen shows —
+            // through the shared stack, so it cannot drift from that screen.
+            const draftTotal = poEffectiveCost({
+              lineSubtotal: d.totalCost ?? 0, otherFees: d.otherFees,
+            }).total;
             const totalLabel = draftTotal > 0 ? fmtUSD0(draftTotal, locale) : null;
             return (
               <button

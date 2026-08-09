@@ -7,7 +7,7 @@ import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmt, fmtUSD, fmtUSD0 } from '../lib/format';
-import { parseFeeInput } from '../lib/poTotals';
+import { parseFeeInput, poEffectiveCost } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 import { addableCategories, categoryTone } from '../lib/lookups';
 
@@ -69,7 +69,7 @@ export function OrderReview({
   const computedCost = lines.reduce((a, l) => a + l.qty * l.unitCost, 0);
   const totalQty = lines.reduce((a, l) => a + l.qty, 0);
   const feesValue = parseFeeInput(fees.amount);
-  const allIn = computedCost + feesValue;
+  const allIn = poEffectiveCost({ lineSubtotal: computedCost, otherFees: feesValue }).total;
 
   const submit = async () => {
     setSubmitting(true);
@@ -166,7 +166,7 @@ export function OrderReview({
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>Qty <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · unit {fmtUSD(l.unitCost, locale)}</span>
+                <span>{t('qty')} <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {t('perUnit')} {fmtUSD(l.unitCost, locale)}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.unitCost * l.qty, locale)}</span>
               </div>
             </div>
@@ -191,8 +191,10 @@ export function OrderReview({
                 aria-label={t('subAddCatLine', { cat })}
                 style={{
                   minHeight: 54, borderRadius: 13,
+                  // The dash is a fill and may stay `tone`; the label is read,
+                  // so it takes the tone that clears contrast against the card.
                   border: '1.5px dashed ' + categoryTone(cat).tone,
-                  background: 'var(--bg-elev)', color: categoryTone(cat).tone,
+                  background: 'var(--bg-elev)', color: categoryTone(cat).strong,
                   fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
                   display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
                   padding: '6px 2px', cursor: 'pointer',

@@ -26,7 +26,7 @@ export function SerialCheckDialog({ issues, onClose }: {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{
               width: 36, height: 36, borderRadius: 8,
-              background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
+              background: 'var(--warn-soft)', color: 'var(--warn-strong)',
               display: 'grid', placeItems: 'center', flexShrink: 0,
             }}>
               <Icon name="alert" size={18} />

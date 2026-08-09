@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ImageLightbox } from './ImageLightbox';
 import { useT } from '../lib/i18n';
-import { LINE_PHOTO_CAP, type LinePhoto } from '../lib/linePhotos';
+import {
+  LINE_PHOTO_CAP, uploadedPhotoCount, type LinePhoto, type PendingPhoto,
+} from '../lib/linePhotos';
 
 // Photos of the actual goods on one line. Any line may carry them — the AI
 // label scan appears here too, as a read-only first entry, so the user sees one
@@ -10,7 +12,7 @@ import { LINE_PHOTO_CAP, type LinePhoto } from '../lib/linePhotos';
 //
 // A new line has no DB id yet (it isn't persisted until confirm), so pending
 // files are held by the parent and shown here as local previews.
-export type PendingPhoto = { file: File; url: string };
+export type { PendingPhoto };
 
 export function LinePhotoStrip({
   photos,
@@ -37,7 +39,7 @@ export function LinePhotoStrip({
   const total = photos.length + pending.length;
   // Only uploads count against the server's cap — the scan entry belongs to
   // label_scans, not the per-line photo table the limit is enforced on.
-  const full = photos.filter(p => p.source === 'upload').length + pending.length >= max;
+  const full = uploadedPhotoCount(photos) + pending.length >= max;
 
   const tile = (url: string, key: string, alt: string, onDrop?: () => void, isScan = false) => (
     <div key={key} className="lp-tile">
@@ -47,7 +49,7 @@ export function LinePhotoStrip({
       {isScan && <span className="lp-badge">{t('aiShort')}</span>}
       {!readOnly && onDrop && (
         <button type="button" className="lp-x" onClick={onDrop} aria-label={t('delete')}>
-          <Icon name="x" size={10} />
+          <Icon name="x" size={14} />
         </button>
       )}
     </div>

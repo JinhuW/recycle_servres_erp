@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS order_line_photos (
   filename      TEXT NOT NULL,
   size_bytes    INTEGER NOT NULL,
   mime_type     TEXT NOT NULL,
-  storage_key   TEXT NOT NULL,         -- R2 object key, or 'stub:<uuid>' in dev
+  storage_key   TEXT NOT NULL,         -- R2 object key, or 'stub-<uuid>' in dev
+                                       -- (the prefix r2.ts's sweep filters on)
   delivery_url  TEXT NOT NULL,         -- public URL the frontend renders
   position      INTEGER NOT NULL DEFAULT 0,
   uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
