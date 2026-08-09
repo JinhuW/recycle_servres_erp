@@ -1,4 +1,8 @@
+import { CATEGORY_ORDER, type ExportCategory } from '@recycle-erp/shared';
 import type { XlsxColumn } from './xlsx';
+
+export { CATEGORY_ORDER };
+export type { ExportCategory };
 
 // The category → granular spec column table, shared by every workbook that
 // itemizes stock (the inventory export and the PO spreadsheet). One column per
@@ -8,8 +12,6 @@ import type { XlsxColumn } from './xlsx';
 // This table is the one source of truth for those column sets. The vendor bid
 // sheet keeps its own copy on purpose — its header text is load-bearing for the
 // round-trip price import parser, so it must not move when this one does.
-export const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
-export type ExportCategory = (typeof CATEGORY_ORDER)[number];
 
 export const SPEC_COLS_BY_CATEGORY: Record<ExportCategory, XlsxColumn[]> = {
   RAM: [

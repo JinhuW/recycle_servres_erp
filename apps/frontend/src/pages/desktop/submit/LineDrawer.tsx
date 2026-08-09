@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { ImageLightbox } from '../../../components/ImageLightbox';
 import { api } from '../../../lib/api';
@@ -66,6 +66,13 @@ export function LineDrawer({
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [confirming, setConfirming] = useState(false);
+  // The toast is centred and this panel is anchored right, so below ~1520px
+  // they overlap. Marking the document lets the stylesheet move the toast only
+  // while there is something for it to land on.
+  useEffect(() => {
+    document.body.classList.add('has-drawer');
+    return () => document.body.classList.remove('has-drawer');
+  }, []);
   const cat = line.category;
   // Pre-switch snapshot for the undo, held only until the next switch or save.
   const [undo, setUndo] = useState<{ line: Line; cleared: string[] } | null>(null);
@@ -581,6 +588,16 @@ export function LineDrawer({
               </div>
             )}
           </fieldset>
+
+          {/* Named where it can be closed, and for as long as it is true: a
+              toast that names eight fields and then clears itself leaves the
+              user hunting for them up the form. */}
+          {!readOnly && !line._confirmed && missingFields && (
+            <div className="dw-still-needed" role="status">
+              <Icon name="alert" size={12} />
+              <span>{t('drawerStillNeeded', { fields: missingFields })}</span>
+            </div>
+          )}
 
           {/* Outside the fieldset — Close must stay live while the form is
               disabled. */}

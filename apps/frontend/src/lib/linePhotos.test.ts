@@ -2,8 +2,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   LINE_PHOTO_CAP,
   limitPhotoPick,
+  linePhotos,
   planPhotoCarry,
   photoSourceFile,
+  uploadedPhotoCount,
   type CarryLine,
   type LinePhoto,
 } from './linePhotos';
@@ -14,6 +16,43 @@ const photo = (over: Partial<LinePhoto> = {}): LinePhoto => ({
 });
 const line = (over: Partial<CarryLine> = {}): CarryLine => ({
   cid: 'c1', persisted: false, pending: [], ...over,
+});
+
+describe('linePhotos', () => {
+  const scan = { scanImageId: 'k', scanImageUrl: 'https://static.example/s.jpg' };
+
+  it('synthesizes the scan entry when the payload has no photos', () => {
+    expect(linePhotos(scan)).toEqual([
+      { id: 'scan:k', url: 'https://static.example/s.jpg', source: 'scan' },
+    ]);
+  });
+
+  it('keeps the scan tile once an upload joins a client-built photo list', () => {
+    const shots = linePhotos({ ...scan, photos: [photo({ id: 'ph-1' })] });
+    expect(shots.map(p => p.source)).toEqual(['scan', 'upload']);
+  });
+
+  it('does not double up a scan the API already merged in', () => {
+    const merged = [photo({ id: 'scan:k', source: 'scan' }), photo({ id: 'ph-1' })];
+    expect(linePhotos({ ...scan, photos: merged })).toEqual(merged);
+  });
+
+  it('drops placeholder URLs from both sources', () => {
+    expect(linePhotos({ scanImageUrl: 'data:image/placeholder' })).toEqual([]);
+    expect(linePhotos({ photos: [photo({ url: 'data:image/placeholder' })] })).toEqual([]);
+  });
+
+  it('is empty for a line with nothing to show', () => {
+    expect(linePhotos(null)).toEqual([]);
+    expect(linePhotos({})).toEqual([]);
+  });
+});
+
+describe('uploadedPhotoCount', () => {
+  it('counts uploads only — the scan is not in the table the cap is enforced on', () => {
+    expect(uploadedPhotoCount([photo({ id: 's', source: 'scan' }), photo({ id: 'a' })])).toBe(1);
+    expect(uploadedPhotoCount(null)).toBe(0);
+  });
 });
 
 describe('limitPhotoPick', () => {

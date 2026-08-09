@@ -9,6 +9,7 @@ import { priceSources, categoryFilterOptions } from '../../lib/lookups';
 import type { RefPrice } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
 import { staleness, STALE_DAYS } from '../../lib/marketStaleness';
+import { TARGET_MARGIN_FALLBACK } from '../../lib/useMarketLookup';
 import { usePreference } from '../../lib/preferences';
 
 // ─── Sparkline ───────────────────────────────────────────────────────────────
@@ -65,8 +66,6 @@ function DemandPill({ level }: { level: 'high' | 'medium' | 'low' }) {
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
-// Fallback only — the live value comes from /api/market (workspace_settings).
-const TARGET_MARGIN_FALLBACK = 0.30;
 
 type Sort = 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples';
 

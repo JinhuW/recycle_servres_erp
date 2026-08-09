@@ -1,5 +1,5 @@
-import { isPricedSellPrice } from '@recycle-erp/shared';
-import { CATEGORY_ORDER, categoryTone } from './lookups';
+import { categoryRank, isPricedSellPrice } from '@recycle-erp/shared';
+import { categoryTone } from './lookups';
 
 // Grouping the lines of a mixed purchase order by category.
 //
@@ -51,13 +51,8 @@ export function groupLines<T extends GroupableLine>(lines: readonly T[]): LineGr
     buckets.get(key)!.push({ line, index });
   });
 
-  const rank = (c: string) => {
-    const i = CATEGORY_ORDER.indexOf(c);
-    return i === -1 ? CATEGORY_ORDER.length : i;
-  };
-
   return [...buckets.entries()]
-    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    .sort(([a], [b]) => categoryRank(a) - categoryRank(b) || a.localeCompare(b))
     .map(([category, members]) => {
       let units = 0, goods = 0, profit = 0, unpriced = 0;
       for (const { line } of members) {
@@ -70,6 +65,35 @@ export function groupLines<T extends GroupableLine>(lines: readonly T[]): LineGr
       }
       return { category, lines: members, units, goods, profit, unpriced };
     });
+}
+
+export type PricedTotals = {
+  /** Σ qty × sellPrice over the priced lines. */
+  revenue: number;
+  /** Σ qty × unitCost over the priced lines only — NOT the PO's goods total. */
+  cost: number;
+  profit: number;
+  count: number;
+};
+
+/**
+ * The projected return, over the lines that carry a sell price.
+ *
+ * The same rule as a group's `profit`, rolled up across every category: an
+ * unpriced line contributes nothing rather than being scored as a total loss.
+ * Both desktop PO screens feed the cost tape from this, so "3 of 5 priced"
+ * can't mean one thing on capture and another on edit.
+ */
+export function pricedTotals(lines: readonly GroupableLine[]): PricedTotals {
+  let revenue = 0, cost = 0, count = 0;
+  for (const line of lines) {
+    if (!isPriced(line)) continue;
+    const q = num(line.qty);
+    revenue += q * num(line.sellPrice);
+    cost += q * num(line.unitCost);
+    count += 1;
+  }
+  return { revenue, cost, profit: revenue - cost, count };
 }
 
 export type DisplayRow<T> = {
@@ -108,8 +132,10 @@ export function displayRows<T extends GroupableLine>(
 }
 
 // CSS custom properties carrying the group's category colour, so the header
-// row, its chip and its left rule all tint from one place.
+// row, its chip and its left rule all tint from one place. `--cat-strong` is
+// the variant anything that sets TEXT in the category colour must use — `--cat`
+// is a fill and does not carry a readable label on `--cat-soft`.
 export const catTone = (category: string): React.CSSProperties => {
-  const { tone, soft } = categoryTone(category);
-  return { '--cat': tone, '--cat-soft': soft } as React.CSSProperties;
+  const { tone, soft, strong } = categoryTone(category);
+  return { '--cat': tone, '--cat-soft': soft, '--cat-strong': strong } as React.CSSProperties;
 };

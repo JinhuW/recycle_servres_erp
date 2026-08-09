@@ -2,7 +2,7 @@ import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
 import { fmtUSD } from '../lib/format';
 import { staleness } from '../lib/marketStaleness';
-import type { ResolvedMarketValue } from '../lib/useMarketLookup';
+import type { MarketState, ResolvedMarketValue } from '../lib/useMarketLookup';
 
 // What the recorded market says about the part being captured, shown while the
 // buy decision can still change.
@@ -13,18 +13,30 @@ import type { ResolvedMarketValue } from '../lib/useMarketLookup';
 // exists — lib/market.ts derives it as basis × (1 − target margin) — it just
 // never reached this screen.
 //
-// Renders nothing when the part has no recorded value: an empty panel is worse
-// than silence.
+// A part with no recorded value renders nothing: an empty panel is worse than
+// silence. Being in flight or having failed is NOT that, and each says its own
+// line — a purchaser who reads "no price on record" off a request that never
+// arrived pays whatever they were going to pay anyway.
 
 export function MarketAssist({
   market,
+  state,
+  onRetry,
   unitCost,
   onUseMaxBuy,
   onUseSellPrice,
   locale,
   disabled,
 }: {
+  /** The recorded value, or null when the part has none. */
   market: ResolvedMarketValue | null;
+  /**
+   * The request behind that value. Without it the panel can only tell priced
+   * from unpriced, which is what made a failed lookup look like a part nobody
+   * has ever sold.
+   */
+  state?: MarketState;
+  onRetry?: () => void;
   unitCost: number;
   onUseMaxBuy: (v: number) => void;
   onUseSellPrice: (v: number) => void;
@@ -32,6 +44,39 @@ export function MarketAssist({
   disabled?: boolean;
 }) {
   const { t } = useT();
+
+  // The skeleton holds the panel's height from the first keystroke, so the
+  // cost fields the user's hand is on don't jump when the answer lands ~300ms
+  // after they stop typing.
+  if (state?.status === 'loading') {
+    return (
+      <div className="mkt-assist mkt-thin" aria-busy="true">
+        <span className="mkt-skeleton" />
+      </div>
+    );
+  }
+  if (state?.status === 'error') {
+    return (
+      <div className="mkt-assist mkt-thin" role="status">
+        <Icon name="alert" size={12} />
+        <span>{t('mktUnreachable')}</span>
+        {onRetry && (
+          <button type="button" className="btn sm" onClick={onRetry}>{t('mktRetry')}</button>
+        )}
+      </div>
+    );
+  }
+  // Over the per-request cap: this part was never asked about, which is not the
+  // same as having no price.
+  if (state?.status === 'skipped') {
+    return (
+      <div className="mkt-assist mkt-thin" role="status">
+        <Icon name="alert" size={12} />
+        <span>{t('mktTooManyParts')}</span>
+      </div>
+    );
+  }
+
   if (!market) return null;
 
   // A row can exist with no recorded price at all — the part has been seen but

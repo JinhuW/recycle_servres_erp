@@ -56,8 +56,10 @@ describe('sell order Done → market data point', () => {
 
   it('rolls up same-PN lines into one qty-weighted data point', async () => {
     const { token } = await loginAs(ALEX);
-    const a = await freeSellableLine(token, 1);
-    const b = await freeSellableLine(token, 1, new Set([a.id]));
+    // Ask for lines big enough for the quantities sold below — a line with the
+    // seed's minimum qty makes the sell order 400 and the failure looks flaky.
+    const a = await freeSellableLine(token, 2);
+    const b = await freeSellableLine(token, 3, new Set([a.id]));
     const customerId = await firstCustomerId(token);
     const pn = 'SALE-DP-ROLLUP-001';
 

@@ -532,7 +532,7 @@ function VendorBidDetail({
                         </td>
                         <td
                           className="num mono"
-                          style={over ? { color: 'var(--warn-strong, var(--danger))', fontWeight: 600 } : undefined}
+                          style={over ? { color: 'var(--warn-strong)', fontWeight: 600 } : undefined}
                           title={over ? t('vbOverAvailable', { n: l.available }) : undefined}
                         >
                           {l.available}{over ? ' ⚠' : ''}

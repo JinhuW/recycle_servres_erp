@@ -160,6 +160,10 @@ const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
   path === '/api/attachments' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
+  // A line photo comes straight off a phone camera at several MB, uncompressed.
+  // Left under the JSON cap it 413s before the handler that would have checked
+  // it against the upload limits ever runs.
+  /^\/api\/orders\/[^/]+\/lines\/[^/]+\/photos$/.test(path) ||
   // Vendor bid sheets round-trip our own template, which embeds item photos —
   // they routinely exceed the JSON cap. The route enforces its own 8 MB limit.
   /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path);

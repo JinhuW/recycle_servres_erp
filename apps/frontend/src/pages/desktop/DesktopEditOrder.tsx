@@ -15,15 +15,15 @@ import {
 import { AddLineMenu } from './submit/AddLineMenu';
 import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import {
-  linePhotos, uploadLinePhoto, deleteLinePhoto, limitPhotoPick, LINE_PHOTO_CAP,
-  type LinePhoto,
+  linePhotos, deleteLinePhoto, uploadedPhotoCount, useLinePhotoBuffer,
+  type LinePhoto, type PendingPhoto,
 } from '../../lib/linePhotos';
-import { type PendingPhoto } from '../../components/LinePhotoStrip';
-import { groupLines, shouldGroup, displayRows, catTone } from '../../lib/lineGroups';
+import { groupLines, shouldGroup, displayRows, catTone, pricedTotals } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useMarketLookup } from '../../lib/useMarketLookup';
 import { ImageLightbox } from '../../components/ImageLightbox';
-import { serialIssue } from '@recycle-erp/shared';
+import { serialIssue, isPricedSellPrice } from '@recycle-erp/shared';
+import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
@@ -90,6 +90,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     : ORDER_STATUSES.slice();
 
   const [status, setStatus] = useState(effectiveStatus);
+  // The stage as last written. Normally the one the page opened with, but a
+  // save that has to keep the user here (a photo upload that failed) has
+  // already advanced the order — re-sending it would step it on again.
+  const [savedStatus, setSavedStatus] = useState(effectiveStatus);
   // Optional Done evidence (note + attachments). The dialog live-saves to the
   // backend; these mirror its latest confirmed state for the read-only block.
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -152,67 +156,49 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   };
   const [activityKey, setActivityKey] = useState(0);
   const [lines, setLines] = useState<EditLine[]>(() => order.lines.map(orderLineToEditLine));
-  const [photoBusy, setPhotoBusy] = useState(false);
   // Files picked for a line that has no DB id to hang them off yet — one added
   // in this session and not yet confirmed. Keyed by _cid, the only handle such
-  // a line has, and flushed once the id lands. Same deferral the submit screen
-  // uses; without it the picker opened and the files went nowhere.
-  const [pendingPhotos, setPendingPhotos] = useState<Record<string, PendingPhoto[]>>({});
-  // The preview URLs outlive the state that holds them — a flush deletes the
-  // entry while the page lives on — so the revoke list is kept separately.
-  const pendingUrls = useRef<Set<string>>(new Set());
-  useEffect(() => () => {
-    for (const url of pendingUrls.current) URL.revokeObjectURL(url);
-  }, []);
+  // a line has, and flushed once the id lands.
+  const photos = useLinePhotoBuffer((cid, saved) =>
+    setLines(ls => ls.map(l =>
+      (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l))));
 
-  const uploadLinePhotos = async (cid: string, lineId: string, files: File[]) => {
-    setPhotoBusy(true);
-    const saved: LinePhoto[] = [];
-    try {
-      for (const f of files) {
-        try { saved.push((await uploadLinePhoto(order.id, lineId, f)).photo); }
-        catch { showErrorDialog(t('linePhotoUploadFailed')); }
-      }
-    } finally { setPhotoBusy(false); }
-    if (saved.length) {
-      setLines(ls => ls.map(l =>
-        (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l)));
-    }
-  };
+  // Upload what was buffered for a line, now that it has an id. Returns how
+  // many are still queued because their upload failed: those keep their File
+  // and their preview, since it is the only copy of that picture there is.
+  const flushPendingPhotos = async (
+    cid: string, lineId: string, items?: PendingPhoto[],
+  ): Promise<number> => (await photos.flush(cid, order.id, lineId, items)).failed.length;
 
   // A line that came from the server has somewhere to put a photo right away;
   // one added in this session doesn't until Confirm line or Save gives it an id.
   const addLinePhotos = (idx: number, files: FileList | null) => {
     const l = lines[idx];
     if (!l) return;
-    const held = (l.photos?.length ?? 0) + (pendingPhotos[l._cid]?.length ?? 0);
-    const { accepted, overCap } = limitPhotoPick(files, held);
-    if (overCap > 0) showErrorDialog(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
-    if (!accepted.length) return;
-    if (l._id) { void uploadLinePhotos(l._cid, l._id, accepted); return; }
-    const queued = accepted.map(f => ({ file: f, url: URL.createObjectURL(f) }));
-    for (const p of queued) pendingUrls.current.add(p.url);
-    setPendingPhotos(prev => ({ ...prev, [l._cid]: [...(prev[l._cid] ?? []), ...queued] }));
+    const added = photos.add(l._cid, uploadedPhotoCount(l.photos), files);
+    if (!added.length || !l._id) return;
+    void flushPendingPhotos(l._cid, l._id, added)
+      .then(failed => { if (failed) showErrorDialog(t('linePhotoUploadFailed')); });
   };
 
-  const removePendingPhoto = (cid: string, p: PendingPhoto) => {
-    URL.revokeObjectURL(p.url);
-    pendingUrls.current.delete(p.url);
-    setPendingPhotos(prev => ({ ...prev, [cid]: (prev[cid] ?? []).filter(x => x !== p) }));
-  };
+  // Photos held against a line that already has somewhere to put them: an
+  // upload that failed, nothing else. What the Retry action offers.
+  const retryablePhotos = lines.reduce(
+    (n, l) => n + (l._id ? photos.queuedFor(l._cid).length : 0), 0);
 
-  // Upload what was buffered for a line, now that it has an id. Non-fatal: the
-  // line itself is already saved, so a failed photo is a warning, not a lost
-  // line — uploadLinePhotos says so per file.
-  const flushPendingPhotos = async (cid: string, lineId: string) => {
-    const queued = pendingPhotos[cid];
-    if (!queued?.length) return;
-    await uploadLinePhotos(cid, lineId, queued.map(p => p.file));
-    for (const p of queued) {
-      URL.revokeObjectURL(p.url);
-      pendingUrls.current.delete(p.url);
+  // Set when a save wrote the order but left photos behind: the page has to
+  // stay put, so it also owes the user the exit once they are uploaded.
+  const [heldAfterSave, setHeldAfterSave] = useState(false);
+
+  const retryQueuedPhotos = async () => {
+    const flushed = await Promise.all(lines
+      .filter(l => l._id && photos.queuedFor(l._cid).length)
+      .map(l => flushPendingPhotos(l._cid, l._id!)));
+    if (flushed.reduce((a, b) => a + b, 0) > 0) {
+      showErrorDialog(t('linePhotoUploadFailed'));
+      return;
     }
-    setPendingPhotos(prev => { const next = { ...prev }; delete next[cid]; return next; });
+    if (heldAfterSave) onSaved('Saved ' + order.id);
   };
 
   const removeLinePhoto = async (idx: number, photo: LinePhoto) => {
@@ -387,29 +373,26 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   const totals = useMemo(() => {
     let qty = 0, cost = 0, revenue = 0, profit = 0;
-    // "Priced" = lines that have a sell price set, which is the subset that
-    // can actually contribute to a realised commission.
-    let pricedCount = 0, pricedProfit = 0, pricedCost = 0;
     for (const l of lines) {
       const q = Number(l.qty) || 0;
       const c = Number(l.unitCost) || 0;
-      const spRaw = l.sellPrice;
-      const hasPrice = spRaw != null && spRaw !== '' && Number(spRaw) > 0;
-      const sp = hasPrice ? Number(spRaw) : 0;
+      // An unpriced line still costs what it cost; it just earns nothing yet.
+      const sp = isPricedSellPrice(l.sellPrice) ? Number(l.sellPrice) : 0;
       qty += q;
       cost += q * c;
       revenue += q * sp;
       profit += q * (sp - c);
-      if (hasPrice) {
-        pricedCount += 1;
-        pricedProfit += q * (sp - c);
-        pricedCost += q * c;
-      }
     }
-    return { qty, cost, revenue, profit, pricedCount, pricedProfit, pricedCost };
+    // The priced subset — what can actually contribute to a realised
+    // commission — through the rule the capture screen and the cost tape use.
+    const priced = pricedTotals(lines);
+    return {
+      qty, cost, revenue, profit,
+      pricedCount: priced.count, pricedProfit: priced.profit, pricedCost: priced.cost,
+    };
   }, [lines]);
 
-  const statusDirty = status !== effectiveStatus;
+  const statusDirty = status !== savedStatus;
   const linesDirty = lines.some(l => l._dirty) || lines.length !== persistedIds.length;
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
@@ -480,33 +463,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
     || commissionDirty || otherFeesDirty || otherFeesNoteDirty;
 
-  const lineReady = (l: EditLine) => {
-    const qty = Number(l.qty) || 0;
-    const cost = Number(l.unitCost) || 0;
-    const hasIdentity = l.category === 'Other'
-      ? !!l.description && !!(l.itemType ?? '').trim()
-      : !!l.brand;
-    return qty > 0 && cost >= 0 && hasIdentity;
-  };
+  const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
   const canSave =
     dirty && !saving && !orderLocked && (!canEditOrder || lines.every(lineReady));
 
-  // Localized "Brand, Quantity" list of what a line is still waiting on. Mirrors
-  // lineReady — unit cost isn't listed because a blank one reads as 0, which
-  // passes.
-  const missingFieldNames = (l: EditLine): string | null => {
-    const missing: string[] = [];
-    if (l.category === 'Other') {
-      if (!l.description) missing.push('description');
-      if (!(l.itemType ?? '').trim()) missing.push('lfItemType');
-    } else if (!l.brand) {
-      missing.push('brand');
-    }
-    if (!(Number(l.qty) || 0)) missing.push('quantity');
-    return missing.length ? missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') : null;
-  };
+  // Localized "Brand, Quantity" list of what a line is still waiting on. The
+  // capture screen asks the same question, and used to name the same blank
+  // field by a different word.
+  const missingNamesFor = (l: EditLine): string | null =>
+    missingFieldNames(lineRequirements(l).missingKeys, t, lang);
 
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.
@@ -534,7 +501,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   : !dirty             ? [t('saveBlockedNoChanges')]
   : lines.flatMap((l, i) => {
       if (lineReady(l)) return [];
-      const fields = missingFieldNames(l);
+      const fields = missingNamesFor(l);
       if (fields) {
         return [lines.length === 1
           ? t('subMissingFieldsThis', { fields })
@@ -580,9 +547,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       // addedLineIds comes back aligned 1:1 with the addLines we sent, so a
       // photo buffered against a line that had no id can finally reach it.
       // Before onSaved, which navigates away and takes the buffer with it.
-      for (const [i, l] of addedLines.entries()) {
-        const newId = r.addedLineIds[i];
-        if (newId) await flushPendingPhotos(l._cid, newId);
+      const idByCid = new Map<string, string>();
+      addedLines.forEach((l, i) => { if (r.addedLineIds[i]) idByCid.set(l._cid, r.addedLineIds[i]); });
+      // Written back before anything can keep the user on this page: a second
+      // save must patch these lines, not append them a second time.
+      setLines(ls => ls.map(l => {
+        const id = idByCid.get(l._cid);
+        return id ? { ...l, _id: id, _dirty: false } : (l._dirty ? { ...l, _dirty: false } : l);
+      }));
+      setPersistedIds([...persistedIds.filter(id => presentIds.has(id)), ...idByCid.values()]);
+      let stillQueued = 0;
+      for (const [cid, newId] of idByCid) stillQueued += await flushPendingPhotos(cid, newId);
+      // A photo picked for an existing line whose upload failed is queued too,
+      // and this is its last chance before the page goes away.
+      for (const l of lines) {
+        if (l._id && photos.queuedFor(l._cid).length) {
+          stillQueued += await flushPendingPhotos(l._cid, l._id);
+        }
       }
       // The stepper's stage lives on orders.lifecycle, which PATCH never
       // touches — only /advance moves it (and cascades the line statuses).
@@ -593,6 +574,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       if (statusDirty) {
         const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
         await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
+        setSavedStatus(status);
+      }
+      // The order is saved either way, but those Files exist nowhere else and
+      // this page is the only thing holding them — leaving now would discard
+      // them. Retry is in the footer.
+      if (stillQueued > 0) {
+        setHeldAfterSave(true);
+        showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
+        return;
       }
       onSaved('Saved ' + order.id);
     } catch (e) {
@@ -646,7 +636,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, _dirty: false } : x)));
     if (!l._id && newId) {
       setPersistedIds(ids => [...ids, newId]);
-      await flushPendingPhotos(l._cid, newId);
+      if (await flushPendingPhotos(l._cid, newId)) showErrorDialog(t('linePhotoUploadFailed'));
     }
     setActivityKey(k => k + 1);
     window.__showToast?.(t('drawerLineSaved', { n: i + 1 }), 'success');
@@ -905,7 +895,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             pricedCost={totals.pricedCost}
             pricedProfit={totals.pricedProfit}
             pricedCount={totals.pricedCount}
-            coveragePct={totals.cost > 0 ? (totals.pricedCost / totals.cost) * 100 : 100}
             locale={locale}
             goodsNote={goodsOverridden ? (
               <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
@@ -915,6 +904,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
                 <input
                   id="oe-other-fees"
+                  // Its visible label is a receipt row inside CostTape, not a
+                  // <label>, so the field is unnamed without this.
+                  aria-label={t('otherFees')}
                   className="input mono tape-money"
                   type="number"
                   min={0}
@@ -1328,6 +1320,17 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn" onClick={onCancel}>{t('cancel')}</button>
+            {/* Only ever shown for photos whose upload failed: a queued photo
+                on a line that has no id yet is waiting for Save, not for this. */}
+            {retryablePhotos > 0 && (
+              <button
+                className="btn"
+                disabled={saving || photos.busy}
+                onClick={() => void retryQueuedPhotos()}
+              >
+                <Icon name="refresh" size={14} /> {t('linePhotoRetryAction', { n: retryablePhotos })}
+              </button>
+            )}
             <button
               className="btn primary"
               disabled={saving}
@@ -1358,6 +1361,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           onConfirmError={showErrorDialog}
           duplicateOnLines={dupByIdx.get(activeIdx)}
           readOnly={!canEditOrder}
+          missingFields={missingNamesFor(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
             orderId: order.id,
@@ -1365,11 +1369,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             // or Save, so it has no id to hang a photo off yet — files picked
             // for it are buffered as local previews and uploaded when it lands.
             lineId: lines[activeIdx]._id ?? null,
-            pending: pendingPhotos[lines[activeIdx]._cid] ?? [],
+            pending: photos.queuedFor(lines[activeIdx]._cid),
             onAddFiles: files => addLinePhotos(activeIdx, files),
-            onRemovePending: p => removePendingPhoto(lines[activeIdx]._cid, p),
+            onRemovePending: p => photos.remove(lines[activeIdx]._cid, p),
             onRemoveSaved: photo => void removeLinePhoto(activeIdx, photo),
-            busy: photoBusy,
+            busy: photos.busy,
           }}
         />
       )}

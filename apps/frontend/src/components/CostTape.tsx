@@ -29,8 +29,6 @@ type Props = {
   pricedCost: number;
   pricedProfit: number;
   pricedCount: number;
-  /** Share of goods cost that has been priced, 0–100. */
-  coveragePct: number;
   locale: string;
   /** Editable cells (fee amount, fee note) supplied by the page. */
   feeField?: ReactNode;
@@ -62,11 +60,16 @@ function Row({
 
 export function CostTape({
   groups, grouped, lineCount, units, goods, fees, total,
-  revenue, pricedCost, pricedProfit, pricedCount, coveragePct,
+  revenue, pricedCost, pricedProfit, pricedCount,
   locale, feeField, feeNoteField, goodsNote,
 }: Props) {
   const { t } = useT();
   const margin = revenue > 0 ? (pricedProfit / revenue) * 100 : 0;
+  // How much of the goods spend has a price against it. Derived here rather
+  // than passed in: it is `pricedCost` over the very figure printed two rows
+  // above, so a caller computing its own denominator can state a coverage the
+  // receipt it sits on contradicts. Nothing bought means nothing left to price.
+  const coveragePct = goods > 0 ? (pricedCost / goods) * 100 : 100;
 
   return (
     <div className="tape-wrap">

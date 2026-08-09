@@ -1,5 +1,8 @@
+import { useEffect, useRef, useState } from 'react';
 import { isRealPhotoUrl, LINE_PHOTO_CAP } from '@recycle-erp/shared';
 import { api } from './api';
+import { showErrorDialog } from './errorToast';
+import { useT } from './i18n';
 
 export { isRealPhotoUrl, LINE_PHOTO_CAP };
 
@@ -30,13 +33,25 @@ type PhotoBearingLine = {
 
 export function linePhotos(line: PhotoBearingLine | null | undefined): LinePhoto[] {
   if (!line) return [];
-  if (line.photos && line.photos.length) return line.photos.filter(p => isRealPhotoUrl(p.url));
-  // No `photos` on this payload — synthesize from the scan so callers get the
-  // same shape everywhere.
-  return isRealPhotoUrl(line.scanImageUrl)
-    ? [{ id: 'scan:' + (line.scanImageId ?? ''), url: line.scanImageUrl, source: 'scan' }]
-    : [];
+  const photos = (line.photos ?? []).filter(p => isRealPhotoUrl(p.url));
+  // The scan is synthesized whenever `photos` doesn't already carry it, not
+  // only when `photos` is empty: on the submit screen that array is built
+  // client-side from uploads alone, so keying off emptiness made the scan tile
+  // vanish the moment a photo was added to a line that had one.
+  if (photos.some(p => p.source === 'scan') || !isRealPhotoUrl(line.scanImageUrl)) return photos;
+  return [
+    { id: 'scan:' + (line.scanImageId ?? ''), url: line.scanImageUrl, source: 'scan' },
+    ...photos,
+  ];
 }
+
+/**
+ * What counts against the server's per-line cap. The scan lives in
+ * `label_scans`, not the photo table the 409 is raised from, so counting it
+ * capped every scanned RAM line one photo short of what the server allows.
+ */
+export const uploadedPhotoCount = (photos: readonly LinePhoto[] | null | undefined): number =>
+  (photos ?? []).filter(p => p.source === 'upload').length;
 
 /** The thumbnail to show when there's room for exactly one. */
 export const primaryPhoto = (line: PhotoBearingLine | null | undefined): LinePhoto | null =>
@@ -71,6 +86,121 @@ export function limitPhotoPick(
   const images = [...(files ?? [])].filter(f => f.type.startsWith('image/'));
   const room = Math.max(0, cap - currentCount);
   return { accepted: images.slice(0, room), overCap: Math.max(0, images.length - room) };
+}
+
+// ─── The pending-photo buffer ────────────────────────────────────────────────
+//
+// A line has nowhere to put a photo until it is persisted, so picked files are
+// held here and uploaded once the id lands. Both desktop order screens used to
+// carry their own copy of this, and the copies had drifted: one of them revoked
+// the preview and dropped the queue whatever the upload did, which threw away
+// the only copy of a photo whose upload had just failed.
+
+export type PendingPhoto = { file: File; url: string };
+
+export type PhotoFlush = { saved: LinePhoto[]; failed: PendingPhoto[] };
+
+export type LinePhotoBuffer = {
+  busy: boolean;
+  queuedFor: (cid: string) => PendingPhoto[];
+  /** Photo id → the File it was uploaded from, for the merge path. */
+  uploadedFiles: Map<string, File>;
+  /** Queues a picker selection; returns what it took. */
+  add: (cid: string, held: number, files: FileList | null) => PendingPhoto[];
+  remove: (cid: string, p: PendingPhoto) => void;
+  /**
+   * Uploads what is queued for a line — or just `items`, which is how a caller
+   * flushes a selection it has only this moment handed to `add`: the queue is
+   * React state and does not carry it until the next render.
+   */
+  flush: (cid: string, orderId: string, lineId: string, items?: PendingPhoto[]) => Promise<PhotoFlush>;
+};
+
+export function useLinePhotoBuffer(
+  onSaved: (cid: string, saved: LinePhoto[]) => void,
+): LinePhotoBuffer {
+  const { t } = useT();
+  const [pending, setPending] = useState<Record<string, PendingPhoto[]>>({});
+  const [busy, setBusy] = useState(false);
+
+  // The live object URLs, held in a ref rather than read off state at cleanup
+  // time: an unmount effect with an empty dep list closes over the FIRST
+  // render's `pending` — `{}` — and revokes nothing at all.
+  const urls = useRef<Set<string>>(new Set());
+  const revoke = (url: string) => { URL.revokeObjectURL(url); urls.current.delete(url); };
+  useEffect(() => () => {
+    for (const url of urls.current) URL.revokeObjectURL(url);
+    urls.current.clear();
+  }, []);
+
+  // The File behind every photo this session uploaded. The merge path deletes
+  // the draft those photos hang off, and R2 goes with it — re-uploading bytes
+  // we still hold is what lets them survive the move.
+  const uploadedFiles = useRef<Map<string, File>>(new Map());
+
+  const queuedFor = (cid: string) => pending[cid] ?? [];
+
+  const add = (cid: string, held: number, files: FileList | null): PendingPhoto[] => {
+    const { accepted, overCap } = limitPhotoPick(files, held + queuedFor(cid).length);
+    if (overCap > 0) showErrorDialog(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
+    if (!accepted.length) return [];
+    // Created out here, not inside the updater: React may run a state updater
+    // twice, and each extra run would mint an object URL nothing revokes.
+    const added = accepted.map(f => {
+      const url = URL.createObjectURL(f);
+      urls.current.add(url);
+      return { file: f, url };
+    });
+    setPending(prev => ({ ...prev, [cid]: [...(prev[cid] ?? []), ...added] }));
+    return added;
+  };
+
+  const remove = (cid: string, p: PendingPhoto) => {
+    revoke(p.url);
+    setPending(prev => ({ ...prev, [cid]: (prev[cid] ?? []).filter(x => x !== p) }));
+  };
+
+  const flush = async (
+    cid: string, orderId: string, lineId: string, items?: PendingPhoto[],
+  ): Promise<PhotoFlush> => {
+    const queued = items ?? pending[cid];
+    if (!queued?.length) return { saved: [], failed: [] };
+    setBusy(true);
+    let results: { p: PendingPhoto; photo: LinePhoto | null }[];
+    try {
+      // Concurrent: the server assigns `position` under a FOR UPDATE lock on
+      // the parent line, so racing uploads for one line are already serialised
+      // where it matters.
+      results = await Promise.all(queued.map(async p => {
+        try { return { p, photo: (await uploadLinePhoto(orderId, lineId, p.file)).photo }; }
+        catch { return { p, photo: null }; }
+      }));
+    } finally {
+      setBusy(false);
+    }
+
+    const saved: LinePhoto[] = [];
+    const failed: PendingPhoto[] = [];
+    for (const r of results) {
+      if (!r.photo) { failed.push(r.p); continue; }
+      saved.push(r.photo);
+      uploadedFiles.current.set(r.photo.id, r.p.file);
+      revoke(r.p.url);
+    }
+    // A photo whose upload failed stays queued, preview and all — dropping it
+    // here discarded the only copy that existed. Anything not in this batch
+    // stays put.
+    setPending(prev => {
+      const keep = [...(prev[cid] ?? []).filter(p => !queued.includes(p)), ...failed];
+      const next = { ...prev };
+      if (keep.length) next[cid] = keep; else delete next[cid];
+      return next;
+    });
+    if (saved.length) onSaved(cid, saved);
+    return { saved, failed };
+  };
+
+  return { busy, queuedFor, uploadedFiles: uploadedFiles.current, add, remove, flush };
 }
 
 // ─── Carrying photos onto a merge target ─────────────────────────────────────

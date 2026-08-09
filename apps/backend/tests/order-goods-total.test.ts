@@ -36,6 +36,45 @@ const lineIds = async (token: string, id: string) =>
   (await api<{ order: { lines: { id: string }[] } }>('GET', '/api/orders/' + id, { token }))
     .body.order.lines.map(l => l.id);
 
+const orderIdOf = async (token: string, lineId: string) =>
+  (await api<{ item: { order_id: string } }>('GET', `/api/inventory/${lineId}`, { token }))
+    .body.item.order_id;
+
+/**
+ * A PO of one line, its line made sellable. Built rather than taken from the
+ * seed so two of them are genuinely comparable — `freeSellableLine` hands back
+ * whichever seeded line happens to be free, which is a different PO each time.
+ */
+const sellablePo = async (token: string, qty: number, unitCost: number) => {
+  const orderId = await makePo(token, { lines: [line({ qty, unitCost })] });
+  const [lineId] = await lineIds(token, orderId);
+  const db = getTestDb();
+  await db`UPDATE orders SET lifecycle = 'done' WHERE id = ${orderId}`;
+  await db`
+    UPDATE order_lines SET status = 'Reviewing', sell_price = ${unitCost * 2}
+     WHERE id = ${lineId}::uuid
+  `;
+  return { orderId, id: lineId, sell_price: unitCost * 2 };
+};
+
+/** Sell `qty` units of an inventory line through to Done. */
+const sell = async (token: string, src: { id: string; sell_price: number }, qty: number) => {
+  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
+  const created = await api<{ id: string }>('POST', '/api/sell-orders', {
+    token,
+    body: {
+      customerId: customers.body.items[0].id,
+      lines: [{ inventoryId: src.id, category: 'RAM', label: 'x', partNumber: 'pn',
+                qty, unitPrice: src.sell_price }],
+    },
+  });
+  expect(created.status).toBe(201);
+  const done = await api('POST', `/api/sell-orders/${created.body.id}/status`, {
+    token, body: { to: 'Done', note: 'paid' },
+  });
+  expect(done.status).toBe(200);
+};
+
 describe('orders.total_cost follows the lines', () => {
   beforeEach(async () => { await resetDb(); });
 
@@ -148,6 +187,34 @@ describe('the goods total follows the lines through every writer', () => {
     expect(await goodsTotal(id)).toBeCloseTo(250, 2);
   });
 
+  // PATCH /api/orders refuses this edit on a Done PO; reaching the same line
+  // through the inventory editor rewrote the closed-book header total anyway.
+  it('refuses a unit-cost edit through the inventory editor on a Done PO', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    const [lineId] = await lineIds(token, id);
+    await getTestDb()`UPDATE orders SET lifecycle = 'done' WHERE id = ${id}`;
+
+    const mgr = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/inventory/' + lineId, { token: mgr.token, body: { unitCost: 80 } });
+    expect(r.status).toBe(409);
+    expect(await goodsTotal(id)).toBeCloseTo(100, 2);
+  });
+
+  // Status and sell price are the ordinary post-Done inventory workflow and
+  // feed no total, so the guard above must not reach them.
+  it('still allows a sell-price edit on a Done PO', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    const [lineId] = await lineIds(token, id);
+    await getTestDb()`UPDATE orders SET lifecycle = 'done' WHERE id = ${id}`;
+
+    const mgr = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/inventory/' + lineId, { token: mgr.token, body: { sellPrice: 140 } });
+    expect(r.status).toBe(200);
+    expect(await goodsTotal(id)).toBeCloseTo(100, 2);
+  });
+
   it('leaves a negotiated total alone when the inventory editor edits a line', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await makePo(token, { totalCost: 90, lines: [line({ qty: 2, unitCost: 50 })] });
@@ -171,33 +238,52 @@ describe('the goods total follows the lines through every writer', () => {
     expect(await goodsTotal(id)).toBeCloseTo(180, 2);
   });
 
-  it('re-derives the source PO when a sell order consumes part of a line', async () => {
+  // Selling stock is not a purchase, so it cannot change what the purchase
+  // cost. This used to read the goods total off qty, which a partial sale
+  // decrements — so the PO's recorded cost fell every time something shipped.
+  it('leaves the source PO alone when a sell order consumes part of a line', async () => {
     const { token } = await loginAs(ALEX);
     const src = await freeSellableLine(token, 2);
-    const inv = await api<{ item: { order_id: string } }>('GET', `/api/inventory/${src.id}`, { token });
-    const orderId = inv.body.item.order_id;
+    const orderId = await orderIdOf(token, src.id);
 
     const before = await goodsTotal(orderId);
     expect(before).not.toBeNull();
 
-    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
-    const created = await api<{ id: string }>('POST', '/api/sell-orders', {
-      token,
-      body: {
-        customerId: customers.body.items[0].id,
-        lines: [{ inventoryId: src.id, category: 'RAM', label: 'x', partNumber: 'pn',
-                  qty: 1, unitPrice: src.sell_price }],
-      },
-    });
-    expect(created.status).toBe(201);
+    await sell(token, src, 1);
 
-    const done = await api('POST', `/api/sell-orders/${created.body.id}/status`, {
-      token, body: { to: 'Done', note: 'paid' },
-    });
-    expect(done.status).toBe(200);
+    expect(await goodsTotal(orderId)).toBeCloseTo(before as number, 2);
+  });
 
-    // One unit left the PO, so its goods total drops by that unit's cost.
-    expect(await goodsTotal(orderId)).toBeCloseTo((before as number) - src.unit_cost, 2);
+  // The same goods for the same money must not record two different costs
+  // depending on how many sell orders they happened to leave in.
+  it('records the same cost whether a line sells at once or in pieces', async () => {
+    const { token } = await loginAs(ALEX);
+
+    const whole = await sellablePo(token, 4, 50);
+    await sell(token, whole, 4);
+
+    const split = await sellablePo(token, 4, 50);
+    await sell(token, split, 1);
+    await sell(token, split, 3);
+
+    expect(await goodsTotal(whole.orderId)).toBeCloseTo(200, 2);
+    expect(await goodsTotal(split.orderId)).toBeCloseTo(200, 2);
+  });
+
+  // A later edit has to keep tracking: if the sale left the stored total looking
+  // unlike the lines, it would read as a negotiated price and pin for good.
+  it('still tracks the lines after a partial sale', async () => {
+    const { token } = await loginAs(ALEX);
+    const src = await freeSellableLine(token, 2);
+    const orderId = await orderIdOf(token, src.id);
+    const before = await goodsTotal(orderId) as number;
+
+    await sell(token, src, 1);
+    await api('PATCH', '/api/orders/' + orderId, {
+      token, body: { addLines: [line({ qty: 1, unitCost: 20 })] },
+    });
+
+    expect(await goodsTotal(orderId)).toBeCloseTo(before + 20, 2);
   });
 });
 
@@ -217,6 +303,34 @@ describe('a stated goods total of zero is not a negotiated price', () => {
     const id = await makePo(token, { totalCost: 0, lines: [line({ qty: 2, unitCost: 50 })] });
     await api('PATCH', '/api/orders/' + id, { token, body: { addLines: [line({ qty: 1, unitCost: 30 })] } });
     expect(await goodsTotal(id)).toBeCloseTo(130, 2);
+  });
+
+  // The create path guarded this; the edit path wrote 0 straight through, and
+  // from then on the column read as a negotiated price no screen could reset.
+  it('derives from the lines when an edit states zero', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    await api('PATCH', '/api/orders/' + id, {
+      token, body: { totalCost: 0, addLines: [line({ qty: 1, unitCost: 30 })] },
+    });
+    expect(await goodsTotal(id)).toBeCloseTo(130, 2);
+  });
+
+  it('keeps tracking the lines after a zero-stated edit', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { lines: [line({ qty: 2, unitCost: 50 })] });
+    await api('PATCH', '/api/orders/' + id, { token, body: { totalCost: 0 } });
+    await api('PATCH', '/api/orders/' + id, { token, body: { addLines: [line({ qty: 1, unitCost: 30 })] } });
+    expect(await goodsTotal(id)).toBeCloseTo(130, 2);
+  });
+
+  // A stored negotiated price is still protected: it is not the line sum, so
+  // the mirror verdict says so and the derivation leaves it alone.
+  it('does not let a zero-stated edit overwrite a negotiated total', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await makePo(token, { totalCost: 90, lines: [line({ qty: 2, unitCost: 50 })] });
+    await api('PATCH', '/api/orders/' + id, { token, body: { totalCost: 0 } });
+    expect(await goodsTotal(id)).toBeCloseTo(90, 2);
   });
 });
 

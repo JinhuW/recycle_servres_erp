@@ -76,7 +76,12 @@ async function assertCategoriesEnabled(
 // An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
 // description, and only for that category — the rest are self-describing.
-function itemTypeErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
+//
+// Brand is deliberately NOT required here even though both editors gate Confirm
+// on it: the API has always accepted a line without one, and the scan and
+// import paths rely on that. The rule that stops an order becoming unsaveable
+// lives in lib/lineRequirements.ts, which both shells share.
+function identityErr(label: string, category: string | undefined, l: { itemType?: string | null }): string | null {
   if (category !== 'Other') return null;
   return (l.itemType ?? '').trim() ? null : `${label}: Other lines require an item type`;
 }
@@ -689,7 +694,7 @@ orders.post('/', async (c) => {
     const l = body.lines[i];
     const issue = serialIssue({ ...l, category: lineCats[i] });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemTypeErr(`line ${i + 1}`, lineCats[i], l);
+    const labelErr = identityErr(`line ${i + 1}`, lineCats[i], l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
 
@@ -937,7 +942,7 @@ orders.patch('/:id', async (c) => {
     addCats.push(cat);
     const issue = serialIssue({ ...l, category: cat, qty: l.qty ?? 1 });
     if (issue) return c.json({ error: serialErr(`line ${i + 1}`, issue) }, 400);
-    const labelErr = itemTypeErr(`line ${i + 1}`, cat, l);
+    const labelErr = identityErr(`line ${i + 1}`, cat, l);
     if (labelErr) return c.json({ error: labelErr }, 400);
   }
 
@@ -978,7 +983,7 @@ orders.patch('/:id', async (c) => {
     // item types hold NULL, so an untouched one is left alone.
     if (l.itemType !== undefined || l.category !== undefined) {
       const merged = l.itemType !== undefined ? l : { itemType: row.item_type };
-      const labelErr = itemTypeErr(`line ${l.id}`, mergedCat, merged);
+      const labelErr = identityErr(`line ${l.id}`, mergedCat, merged);
       if (labelErr) return c.json({ error: labelErr }, 400);
     }
 
@@ -1062,7 +1067,13 @@ orders.patch('/:id', async (c) => {
       // when this request will actually change the lines, and skipped when it
       // states a goods total outright — then the client's figure is the answer.
       const touchesLines = !!(body.lines || body.addLines || body.removeLineIds);
-      const goodsFollowsLines = touchesLines && body.totalCost === undefined
+      // Only a positive figure is a negotiated lot price. POST reads it the
+      // same way, and for the same reason: stored literally, a 0 pins the
+      // column at $0 against real lines, and no screen sends a totalCost any
+      // more to put it back. Anything else non-positive (or unparseable) is
+      // read as "not stated" rather than written through.
+      const statedGoods = Number(body.totalCost) > 0 ? Number(body.totalCost) : undefined;
+      const goodsFollowsLines = (touchesLines || body.totalCost !== undefined) && statedGoods === undefined
         ? await goodsTotalIsMirror(tx, id)
         : false;
 
@@ -1098,7 +1109,7 @@ orders.patch('/:id', async (c) => {
         // them by sending `null`; bare COALESCE would treat null as "no
         // change" and silently keep the old value. `payment` is a non-null
         // enum, so COALESCE is correct for it.
-        const setTotalCost = body.totalCost   !== undefined ? 1 : 0;
+        const setTotalCost = statedGoods !== undefined ? 1 : 0;
         const setNotes     = body.notes       !== undefined ? 1 : 0;
         const setWarehouse = body.warehouseId !== undefined ? 1 : 0;
         const setCommission = body.commissionRate !== undefined ? 1 : 0;
@@ -1106,7 +1117,7 @@ orders.patch('/:id', async (c) => {
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         await tx`
           UPDATE orders SET
-            total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${body.totalCost ?? null}   ELSE total_cost   END,
+            total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${statedGoods ?? null}      ELSE total_cost   END,
             notes        = CASE WHEN ${setNotes}::int     = 1 THEN ${body.notes ?? null}       ELSE notes        END,
             warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
             commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${clampedRate ?? null} ELSE commission_rate END,

@@ -9,3 +9,5 @@ export * from "./lineSpecFields.js";
 export * from "./linePhotoUrl.js";
 export * from "./sellPrice.js";
 export * from "./goodsTotal.js";
+export * from "./categoryOrder.js";
+export * from "./marketStaleness.js";

@@ -14,16 +14,16 @@ import { AddLineMenu } from './submit/AddLineMenu';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { usePreference } from '../../lib/preferences';
 import { useMarketLookup } from '../../lib/useMarketLookup';
-import { groupLines, shouldGroup } from '../../lib/lineGroups';
+import { groupLines, shouldGroup, pricedTotals } from '../../lib/lineGroups';
 import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
-import { missingRamFields } from '../../lib/ramRequired';
+import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
-import { type PendingPhoto } from '../../components/LinePhotoStrip';
 import {
-  uploadLinePhoto, deleteLinePhoto, limitPhotoPick, planPhotoCarry, photoSourceFile,
-  LINE_PHOTO_CAP, type LinePhoto, type LineCarryPlan,
+  deleteLinePhoto, planPhotoCarry, photoSourceFile, uploadLinePhoto,
+  uploadedPhotoCount, useLinePhotoBuffer,
+  type LinePhoto, type LineCarryPlan, type PendingPhoto,
 } from '../../lib/linePhotos';
 
 // ─── Public component ────────────────────────────────────────────────────────
@@ -198,94 +198,42 @@ function OrderForm({
     otherFeesNote: '',
   });
 
-  // Photos picked before their line exists. Keyed by _cid because that is the
-  // only stable handle a line has before it is persisted; flushed by
-  // flushPhotos once the DB id lands. Mirrors the evidenceFiles deferral below.
-  const [pendingPhotos, setPendingPhotos] = useState<Record<string, PendingPhoto[]>>({});
-  const [photoBusy, setPhotoBusy] = useState(false);
+  // Photos picked before their line exists, keyed by _cid — the only stable
+  // handle a line has before it is persisted. Uploaded by `flushPhotos` once
+  // the DB id lands. Mirrors the evidenceFiles deferral below.
+  const photos = useLinePhotoBuffer((cid, saved) =>
+    setLines(ls => ls.map(l => (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l))));
 
-  // The live object URLs, held in a ref rather than read off state at cleanup
-  // time: an unmount effect with an empty dep list closes over the FIRST
-  // render's `pendingPhotos` — `{}` — and revokes nothing at all.
-  const pendingUrlsRef = useRef<Set<string>>(new Set());
-  const revokePending = (url: string) => {
-    URL.revokeObjectURL(url);
-    pendingUrlsRef.current.delete(url);
-  };
-  useEffect(() => () => {
-    for (const url of pendingUrlsRef.current) URL.revokeObjectURL(url);
-    pendingUrlsRef.current.clear();
-  }, []);
+  // Upload whatever was buffered for this line, now that it has an id. Returns
+  // how many are still queued because their upload failed — those keep their
+  // File and their preview, so the retry the user is promised is a real one.
+  const flushPhotos = async (
+    cid: string, poId: string, lineId: string, items?: PendingPhoto[],
+  ): Promise<number> => (await photos.flush(cid, poId, lineId, items)).failed.length;
 
-  // The File behind every photo this session uploaded, keyed by photo id. The
-  // merge path deletes the draft those photos hang off, and R2 goes with it —
-  // re-uploading bytes we still hold is what lets them survive the move.
-  const uploadedFilesRef = useRef<Map<string, File>>(new Map());
-
-  const addPendingPhotos = (l: Line, files: FileList | null) => {
-    const held = (l.photos?.length ?? 0) + (pendingPhotos[l._cid]?.length ?? 0);
-    const { accepted, overCap } = limitPhotoPick(files, held);
-    if (overCap > 0) showErrorDialog(t('linePhotoCapReached', { max: LINE_PHOTO_CAP }));
-    if (!accepted.length) return;
-    // Created out here, not inside the updater: React may run a state updater
-    // twice, and each extra run would mint an object URL nothing revokes.
-    const added = accepted.map(f => {
-      const url = URL.createObjectURL(f);
-      pendingUrlsRef.current.add(url);
-      return { file: f, url };
-    });
-    setPendingPhotos(prev => ({ ...prev, [l._cid]: [...(prev[l._cid] ?? []), ...added] }));
-  };
-  const removePendingPhoto = (cid: string, p: PendingPhoto) => {
-    revokePending(p.url);
-    setPendingPhotos(prev => ({ ...prev, [cid]: (prev[cid] ?? []).filter(x => x !== p) }));
+  // A line that has already been confirmed has somewhere to put a photo right
+  // away; one that hasn't waits for the submit that gives it an id.
+  const addLinePhotos = (l: Line, files: FileList | null) => {
+    const added = photos.add(l._cid, uploadedPhotoCount(l.photos), files);
+    if (!added.length || !orderId || !l._dbId) return;
+    void flushPhotos(l._cid, orderId, l._dbId, added)
+      .then(failed => { if (failed) showErrorDialog(t('linePhotoUploadFailed')); });
   };
 
-  // Upload whatever was buffered for this line, now that it has an id.
-  // Non-fatal: the line itself is already saved, so a failed photo is a
-  // warning, not a lost line.
-  const flushPhotos = async (cid: string, poId: string, lineId: string): Promise<void> => {
-    const queued = pendingPhotos[cid];
-    if (!queued?.length) return;
-    setPhotoBusy(true);
-    let results: { p: PendingPhoto; photo: LinePhoto | null }[];
-    try {
-      // Concurrent: the server assigns `position` under a FOR UPDATE lock on
-      // the parent line, so racing uploads for one line are already serialised
-      // where it matters.
-      results = await Promise.all(queued.map(async p => {
-        try { return { p, photo: (await uploadLinePhoto(poId, lineId, p.file)).photo }; }
-        catch { return { p, photo: null }; }
-      }));
-    } finally {
-      setPhotoBusy(false);
-    }
-
-    const saved: LinePhoto[] = [];
-    const failed: PendingPhoto[] = [];
-    for (const r of results) {
-      if (!r.photo) { failed.push(r.p); continue; }
-      saved.push(r.photo);
-      uploadedFilesRef.current.set(r.photo.id, r.p.file);
-      revokePending(r.p.url);
-    }
-    // A photo whose upload failed stays queued — dropping it here discarded the
-    // only copy that existed, with its preview still on screen and no retry.
-    setPendingPhotos(prev => {
-      const next = { ...prev };
-      if (failed.length) next[cid] = failed; else delete next[cid];
-      return next;
-    });
-    if (saved.length) {
-      setLines(ls => ls.map(l => (l._cid === cid ? { ...l, photos: [...(l.photos ?? []), ...saved] } : l)));
-    }
-    if (failed.length) showErrorDialog(t('linePhotoUploadFailed'));
-  };
+  // Photos sitting on a line that already has somewhere to put them: an upload
+  // that failed, nothing else. What the Retry action in the commit bar offers.
+  const retryablePhotos = lines.reduce(
+    (n, l) => n + (l._dbId ? photos.queuedFor(l._cid).length : 0), 0);
 
   // Order-level error banner — populated by submit/confirm failures. AI scan
   // failures live inside the LineDrawer, alongside the dropzone that produces
   // them.
   const [submitting, setSubmitting] = useState(false);
+
+  // Set when a submit wrote the order but could not upload everything the page
+  // was holding. Keeps the user here with a retry rather than navigating away
+  // from bytes that exist nowhere else.
+  const [unfinished, setUnfinished] = useState<{ orderId: string; evidence: boolean } | null>(null);
 
   // Submission evidence is buffered locally, not uploaded live: the merge path
   // deletes the throwaway draft, so the only stable target id is known after
@@ -318,15 +266,18 @@ function OrderForm({
   // target). Returns true if every file uploaded. Non-fatal: a false result
   // surfaces a warning but the order is already submitted.
   const uploadEvidence = async (finalId: string): Promise<boolean> => {
-    let ok = true;
+    const failed: File[] = [];
     for (const f of evidenceFiles) {
       try {
         const form = new FormData();
         form.append('file', f);
         await api.upload(`/api/orders/${finalId}/status-meta/Submission/attachments`, form);
-      } catch { ok = false; }
+      } catch { failed.push(f); }
     }
-    return ok;
+    // Only the failures are kept, so a retry re-sends exactly those instead of
+    // attaching the ones that landed a second time.
+    if (failed.length !== evidenceFiles.length) setEvidenceFiles(failed);
+    return failed.length === 0;
   };
 
   // The PO is created lazily — only when its first line is persisted (see
@@ -391,20 +342,7 @@ function OrderForm({
   const groups = useMemo(() => groupLines(lines), [lines]);
   const grouped = useMemo(() => shouldGroup(lines), [lines]);
 
-  // Revenue and profit over the lines that actually carry a sell price. An
-  // unpriced line contributes nothing rather than being scored as a loss.
-  const priced = useMemo(() => {
-    let revenue = 0, cost = 0, count = 0;
-    for (const l of lines) {
-      const sp = Number(l.sellPrice);
-      if (!(sp > 0)) continue;
-      const q = Number(l.qty) || 0;
-      revenue += q * sp;
-      cost += q * (Number(l.unitCost) || 0);
-      count += 1;
-    }
-    return { revenue, cost, profit: revenue - cost, count };
-  }, [lines]);
+  const priced = useMemo(() => pricedTotals(lines), [lines]);
 
   const dupGroups = useMemo(() => findDuplicatePartNumbers(lines), [lines]);
   const dupByIdx = useMemo(() => {
@@ -440,7 +378,7 @@ function OrderForm({
       const cur = lines[activeIdx];
       if (cur && !cur._confirmed) {
         if (!lineReady(cur)) {
-          const fields = missingFieldNames(cur);
+          const fields = missingNamesFor(cur);
           showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
           return;
         }
@@ -467,36 +405,12 @@ function OrderForm({
     });
   };
 
-  const lineReady = (l: Line) => {
-    const qty = Number(l.qty) || 0;
-    const cost = Number(l.unitCost) || 0;
-    const hasIdentity = l.category === 'Other'
-      ? !!l.description && !!(l.itemType ?? '').trim()
-      : !!l.brand;
-    const specsComplete = l.category !== 'RAM' || missingRamFields(l).length === 0;
-    return qty > 0 && cost >= 0 && hasIdentity && specsComplete;
-  };
-
-  // Required fields still blank, in form order — the same set `lineReady`
-  // gates on, so the drawer's prompt can never disagree with what Confirm
-  // does. Unit cost is absent on purpose: a blank one reads as 0.
-  const missingFieldKeys = (l: Line): string[] => {
-    const keys = l.category === 'RAM' ? [...missingRamFields(l)]
-      : l.category === 'Other'
-        ? [
-            ...(!(l.itemType ?? '').trim() ? ['lfItemType'] : []),
-            ...(!l.description ? ['lfItemDescription'] : []),
-          ]
-        : (!l.brand ? ['brand'] : []);
-    if (!(Number(l.qty) > 0)) keys.push('qty');
-    return keys;
-  };
+  const lineReady = (l: Line) => lineRequirements(l).ready;
+  const missingFieldKeys = (l: Line): string[] => lineRequirements(l).missingKeys;
 
   // Localized "Brand, Speed (MHz), …" list for missing-field messages.
-  const missingFieldNames = (l: Line): string | null => {
-    const missing = missingFieldKeys(l);
-    return missing.length ? missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ') : null;
-  };
+  const missingNamesFor = (l: Line): string | null =>
+    missingFieldNames(missingFieldKeys(l), t, lang);
 
   const lineLabel = (l: Line): string => l.partNumber || l.brand || l.description || '';
 
@@ -585,7 +499,7 @@ function OrderForm({
     const l = lines[idx];
     if (l._confirmed) return;
     if (!lineReady(l)) {
-      const fields = missingFieldNames(l);
+      const fields = missingNamesFor(l);
       showErrorDialog(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
       return;
     }
@@ -601,7 +515,10 @@ function OrderForm({
     updateLine(idx, { _confirmed: true, _dbId: dbId });
     // The line only just acquired an id, so this is the first moment its
     // buffered photos can be attached to anything.
-    if (dbId) void flushPhotos(l._cid, saved.orderId, dbId);
+    if (dbId) {
+      void flushPhotos(l._cid, saved.orderId, dbId)
+        .then(failed => { if (failed) showErrorDialog(t('linePhotoUploadFailed')); });
+    }
   };
 
   // Escape closes the drawer.
@@ -618,25 +535,71 @@ function OrderForm({
       // submit); otherwise appends any still-unconfirmed lines + refreshes meta.
       const saved = await persistLines(unconfirmedLines.map(toWireLine), wireMeta());
       const finalId = saved.orderId;
-      // Same deferral as a per-line confirm, for lines submitted without one.
-      await Promise.all(unconfirmedLines.map((l, i) =>
-        saved.lineIds[i] ? flushPhotos(l._cid, finalId, saved.lineIds[i]) : Promise.resolve()));
-      // An already-confirmed line can still be holding photos — one whose
-      // upload failed, or one picked after the confirm. Submit is the last
-      // moment they can be attached.
-      await Promise.all(submitLines
-        .filter(l => l._dbId && pendingPhotos[l._cid]?.length)
-        .map(l => flushPhotos(l._cid, finalId, l._dbId!)));
-      if (evidenceFiles.length > 0) {
-        const ok = await uploadEvidence(finalId);
-        onDone(ok
-          ? { msg: t('orderSubmitted'), kind: 'success' }
-          : { msg: t('poSubmitUploadWarning'), kind: 'error' });
+      // Recorded before anything can hold the user here: a retry needs a line
+      // to attach the photos to, and a second submit must patch these lines
+      // rather than append them a second time.
+      const idByCid = new Map<string, string>();
+      unconfirmedLines.forEach((l, i) => {
+        if (saved.lineIds[i]) idByCid.set(l._cid, saved.lineIds[i]);
+      });
+      setLines(ls => ls.map(l => (idByCid.has(l._cid)
+        ? { ...l, _confirmed: true, _dbId: idByCid.get(l._cid)! }
+        : l)));
+      // Same deferral as a per-line confirm, for lines submitted without one,
+      // plus any already-confirmed line still holding photos — one whose
+      // upload failed, or one picked after the confirm.
+      const flushed = await Promise.all([
+        ...unconfirmedLines.map(l => {
+          const lineId = idByCid.get(l._cid);
+          return lineId ? flushPhotos(l._cid, finalId, lineId) : Promise.resolve(0);
+        }),
+        ...submitLines
+          .filter(l => l._dbId && photos.queuedFor(l._cid).length)
+          .map(l => flushPhotos(l._cid, finalId, l._dbId!)),
+      ]);
+      const stillQueued = flushed.reduce((a, b) => a + b, 0);
+      const evidenceOk = evidenceFiles.length === 0 || await uploadEvidence(finalId);
+      // Those Files are the only copy of those pictures, and this form is the
+      // only place holding them — navigating away is what made the promised
+      // retry a lie. The order itself is already saved either way.
+      if (stillQueued > 0) {
+        setUnfinished({ orderId: finalId, evidence: !evidenceOk });
+        if (!evidenceOk) showErrorDialog(t('poSubmitUploadWarning'));
+        showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
         return;
       }
-      onDone({ msg: t('orderSubmitted'), kind: 'success' });
+      onDone(evidenceOk
+        ? { msg: t('orderSubmitted'), kind: 'success' }
+        : { msg: t('poSubmitUploadWarning'), kind: 'error' });
     } catch (e) {
       showErrorDialog(e instanceof Error ? e.message : t('subSubmitFailed'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Retries what the submit could not upload, and leaves the page once nothing
+  // is left behind. Only the bytes are re-sent: the order was written already.
+  const retryQueuedPhotos = async () => {
+    const targetId = unfinished?.orderId ?? orderId;
+    if (!targetId) return;
+    setSubmitting(true);
+    try {
+      const flushed = await Promise.all(lines
+        .filter(l => l._dbId && photos.queuedFor(l._cid).length)
+        .map(l => flushPhotos(l._cid, targetId, l._dbId!)));
+      const stillQueued = flushed.reduce((a, b) => a + b, 0);
+      const evidenceOk = !unfinished?.evidence || await uploadEvidence(targetId);
+      if (stillQueued > 0) {
+        setUnfinished({ orderId: targetId, evidence: !evidenceOk });
+        showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
+        return;
+      }
+      if (unfinished) {
+        onDone(evidenceOk
+          ? { msg: t('orderSubmitted'), kind: 'success' }
+          : { msg: t('poSubmitUploadWarning'), kind: 'error' });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -687,12 +650,12 @@ function OrderForm({
         submitLines.map(l => ({
           cid: l._cid,
           persisted: !!l._dbId,
-          pending: pendingPhotos[l._cid] ?? [],
+          pending: photos.queuedFor(l._cid),
           photos: l.photos,
           scanImageId: l.scanImageId,
           scanImageUrl: l.scanImageUrl,
         })),
-        uploadedFilesRef.current,
+        photos.uploadedFiles,
         draftWillBeDeleted,
       );
       const res = await api.patch<{ ok: true; addedLineIds?: string[] }>('/api/orders/' + target.id, {
@@ -761,7 +724,7 @@ function OrderForm({
   : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
   : lines.flatMap((l, i) => {
       if (lineReady(l)) return [];
-      const fields = missingFieldNames(l);
+      const fields = missingNamesFor(l);
       if (fields) {
         return [lines.length === 1
           ? t('subMissingFieldsThis', { fields })
@@ -904,13 +867,15 @@ function OrderForm({
             pricedCost={priced.cost}
             pricedProfit={priced.profit}
             pricedCount={priced.count}
-            coveragePct={totals.cost > 0 ? (priced.cost / totals.cost) * 100 : 100}
             locale={locale}
             feeField={
               <span style={{ position: 'relative', display: 'inline-block' }}>
                 <span className="mono oe-ledger-currency" aria-hidden="true">$</span>
                 <input
                   id="sub-other-fees"
+                  // Its visible label is a receipt row inside CostTape, not a
+                  // <label>, so the field is unnamed without this.
+                  aria-label={t('otherFees')}
                   className="input mono tape-money"
                   type="number"
                   min={0}
@@ -1019,6 +984,18 @@ function OrderForm({
             {/* Leaves the form. Confirmed lines are already persisted to the
                 draft, so nothing entered is lost — this is not a discard. */}
             <button className="btn" onClick={() => onDone()}>{t('cancel')}</button>
+            {/* Only ever shown for photos whose upload failed: a queued photo
+                on a line that has no id yet is waiting for the submit, not for
+                this. */}
+            {retryablePhotos > 0 && (
+              <button
+                className="btn"
+                disabled={submitting || photos.busy}
+                onClick={() => void retryQueuedPhotos()}
+              >
+                <Icon name="refresh" size={14} /> {t('linePhotoRetryAction', { n: retryablePhotos })}
+              </button>
+            )}
             <button
               className="btn accent lg"
               disabled={submitting}
@@ -1044,25 +1021,25 @@ function OrderForm({
           onClose={() => setActiveIdx(null)}
           onRemove={() => removeLine(activeIdx)}
           canRemove={lines.length > 1}
-          missingFields={missingFieldNames(lines[activeIdx])}
+          missingFields={missingNamesFor(lines[activeIdx])}
           market={marketFor(lines[activeIdx].partNumber)}
           photoCtx={{
             orderId,
             lineId: lines[activeIdx]._dbId ?? null,
-            pending: pendingPhotos[lines[activeIdx]._cid] ?? [],
-            onAddFiles: files => addPendingPhotos(lines[activeIdx], files),
-            onRemovePending: p => removePendingPhoto(lines[activeIdx]._cid, p),
+            pending: photos.queuedFor(lines[activeIdx]._cid),
+            onAddFiles: files => addLinePhotos(lines[activeIdx], files),
+            onRemovePending: p => photos.remove(lines[activeIdx]._cid, p),
             onRemoveSaved: async photo => {
               const l = lines[activeIdx];
               if (!orderId || !l._dbId) return;
               try {
                 await deleteLinePhoto(orderId, l._dbId, photo.id);
-                uploadedFilesRef.current.delete(photo.id);
+                photos.uploadedFiles.delete(photo.id);
                 setLines(ls => ls.map(x =>
                   x._cid === l._cid ? { ...x, photos: (x.photos ?? []).filter(p => p.id !== photo.id) } : x));
               } catch { showErrorDialog(t('linePhotoDeleteFailed')); }
             },
-            busy: photoBusy,
+            busy: photos.busy,
           }}
           onConfirmLine={() => handleConfirmLine(activeIdx)}
           onConfirmError={showErrorDialog}

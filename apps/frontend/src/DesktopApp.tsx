@@ -13,7 +13,7 @@ import {
 } from './lib/route';
 import { api, ApiError } from './lib/api';
 import { showErrorDialog } from './lib/errorToast';
-import { ErrorDialog, type ErrorDialogContent } from './components/ErrorDialog';
+import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 
 import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
 import { DesktopOrders } from './pages/desktop/DesktopOrders';
@@ -42,7 +42,7 @@ export function DesktopApp() {
   const user = useEffectiveUser();
   const { t } = useT();
   const [toast, setToast] = useState<Toast | null>(null);
-  const [errorDialog, setErrorDialog] = useState<ErrorDialogContent | null>(null);
+  const { current: errorDialog, push: pushErrorDialog, dismiss: dismissErrorDialog } = useErrorDialogQueue();
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
 
@@ -105,24 +105,24 @@ export function DesktopApp() {
   // still missing fields), so it clears itself and reads longer than a
   // confirmation does.
   const showToast = useCallback((msg: string, kind: Toast['kind'] = 'success') => {
-    if (kind === 'error') { setErrorDialog({ msg }); return; }
+    if (kind === 'error') { pushErrorDialog({ msg }); return; }
     setToast({ msg, kind });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
-  }, []);
+  }, [pushErrorDialog]);
 
   // Register the global hooks so `handleFetchError` / `showErrorDialog` in
   // lib/errorToast.ts can surface errors from anywhere without prop-drilling.
   useEffect(() => {
-    window.__showErrorDialog = (msg, details, title) => setErrorDialog({ msg, details, title });
+    window.__showErrorDialog = (msg, details, title) => pushErrorDialog({ msg, details, title });
     window.__showToast = (msg, kind) => {
-      if (kind === 'error') { setErrorDialog({ msg }); return; }
+      if (kind === 'error') { pushErrorDialog({ msg }); return; }
       setToast({ msg, kind: kind === 'warn' ? 'warn' : 'success' });
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setToast(null), kind === 'warn' ? 4500 : 2600);
     };
     return () => { delete window.__showToast; delete window.__showErrorDialog; };
-  }, []);
+  }, [pushErrorDialog]);
 
   // Resume an OAuth authorize that bounced through the login screen. Must be a
   // real navigation, not navigate(), because the target is a backend route.
@@ -239,8 +239,10 @@ export function DesktopApp() {
         </div>
       )}
 
+      {/* Keyed on the entry so the next problem in the queue mounts its own
+          dialog — focus and the OK button belong to one message at a time. */}
       {errorDialog && (
-        <ErrorDialog content={errorDialog} onClose={() => setErrorDialog(null)} />
+        <ErrorDialog key={errorDialog.seq} content={errorDialog} onClose={dismissErrorDialog} />
       )}
 
       <TweaksPanel />

@@ -18,6 +18,16 @@ async function png(width = 8, height = 8): Promise<File> {
   return new File([new Uint8Array(buf)], 'dimm.png', { type: 'image/png' });
 }
 
+// Noise rather than a flat fill: a solid-colour PNG of any dimension deflates
+// to a few hundred bytes, so only random pixels reach a realistic photo's size.
+async function noisyPng(side = 900): Promise<File> {
+  const raw = Buffer.allocUnsafe(side * side * 3);
+  for (let i = 0; i < raw.length; i++) raw[i] = (i * 2654435761) & 0xff;
+  const buf = await sharp(raw, { raw: { width: side, height: side, channels: 3 } })
+    .png({ compressionLevel: 0 }).toBuffer();
+  return new File([new Uint8Array(buf)], 'shelf.png', { type: 'image/png' });
+}
+
 async function makePo(token: string, category = 'RAM'): Promise<{ id: string; lineId: string }> {
   const r = await api<{ id: string }>('POST', '/api/orders', {
     token,
@@ -100,6 +110,21 @@ describe('POST /api/orders/:id/lines/:lineId/photos', () => {
     }
     const over = await multipart(`/api/orders/${id}/lines/${lineId}/photos`, { file: await png(20) }, { token });
     expect(over.status).toBe(409);
+  });
+
+  it('accepts a photo far larger than the JSON body cap', async () => {
+    const { token } = await loginAs(ALEX);
+    const { id, lineId } = await makePo(token);
+
+    // A phone camera produces several MB. Routes not listed in index.ts's
+    // isUploadPath get a 1 MiB cap that rejects the request before the handler
+    // — and its shrink step — ever runs, so every real photo 413s while an
+    // 8x8 fixture passes.
+    const big = await noisyPng();
+    expect(big.size).toBeGreaterThan(1024 * 1024);
+
+    const r = await multipart(`/api/orders/${id}/lines/${lineId}/photos`, { file: big }, { token });
+    expect(r.status).toBe(200);
   });
 
   it('lets the owning purchaser attach, and refuses a stranger', async () => {

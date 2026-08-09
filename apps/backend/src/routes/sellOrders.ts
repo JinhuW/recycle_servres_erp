@@ -1279,7 +1279,13 @@ sellOrders.post('/:id/status', async (c) => {
       const sold = await tx<{ line_id: string; remaining: number; sold: number }[]>`
         UPDATE order_lines ol
            SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
-               status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END
+               status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END,
+               -- A partial sale is the moment qty stops meaning "how many were
+               -- bought", so the PO's goods total needs that number kept here
+               -- before the decrement below overwrites it. Selling a line out
+               -- leaves qty alone, so it still speaks for both.
+               qty_purchased = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty_purchased
+                                    ELSE COALESCE(ol.qty_purchased, ol.qty) END
           FROM (
             SELECT inventory_id, SUM(qty)::int AS q
             FROM sell_order_lines

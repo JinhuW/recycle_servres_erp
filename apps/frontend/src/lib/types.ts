@@ -1,5 +1,10 @@
 // Types shared across the frontend, mirroring the backend Hono routes.
 
+// LinePhoto is declared next to the accessor that reads it, and re-exported
+// here because OrderLine carries one.
+import type { LinePhoto } from './linePhotos';
+export type { LinePhoto };
+
 export type Role = 'manager' | 'purchaser';
 export type Lang = 'en' | 'zh';
 export type Category = 'RAM' | 'SSD' | 'HDD' | 'Other';
@@ -27,15 +32,6 @@ export type Warehouse = {
   managerEmail?: string | null;   // derived: users.email (read-only)
   timezone?: string | null;
   active?: boolean; // false = archived: hidden from every UI surface (DB row kept)
-};
-
-export type LinePhoto = {
-  id: string;
-  url: string;
-  source: 'scan' | 'upload';
-  filename?: string | null;
-  mime?: string | null;
-  uploadedAt?: string | null;
 };
 
 export type OrderLine = {
