@@ -280,19 +280,21 @@ function renderCategorySheet(
 
 type WhCol = { header: string; key: string; width: number; numFmt?: string };
 
-// Section layout: Packed ✓ | Part # | Item | <category specs> | Condition |
-// Qty | Image URL. No prices by design (user-decided): the file doubles as
-// the vendor bid sheet. "Part #" (not "Part Number") plus the absence of any
-// price header keeps findHeaders() from ever parsing these tabs.
+// Specs a picker doesn't read off a shelf: they identify a part on a bid
+// sheet, not in a box (user-decided 2026-08-09, same pass that dropped Item /
+// Condition / Image URL here). The bid tabs still carry all of them.
+const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
+
+// Section layout: Packed ✓ | Part # | <category specs> | Qty. No prices by
+// design (user-decided): the file doubles as the vendor bid sheet. "Part #"
+// (not "Part Number") plus the absence of any price header keeps
+// findHeaders() from ever parsing these tabs.
 function whSectionCols(category: string): WhCol[] {
   return [
     { header: 'Packed ✓',  key: 'packed',    width: 9 },
     { header: 'Part #',    key: 'part',      width: 24 },
-    { header: 'Item',      key: 'item',      width: 34 },
-    ...(SPEC_COLS_BY_CATEGORY[category] ?? []),
-    { header: 'Condition', key: 'condition', width: 18 },
+    ...(SPEC_COLS_BY_CATEGORY[category] ?? []).filter((c) => !PACK_OMITTED_SPECS.has(c.key)),
     { header: 'Qty',       key: 'qty',       width: 8, numFmt: '#,##0' },
-    { header: 'Image URL', key: 'image',     width: 40 },
   ];
 }
 
@@ -377,17 +379,9 @@ function renderWarehouseSheet(
             cell.border = box;
             break;
           case 'part': cell.value = p.partNumber ?? ''; break;
-          case 'item': cell.value = p.label; break;
-          case 'condition': cell.value = p.condition ?? ''; break;
           case 'qty':
             cell.value = p.qty;
             cell.numFmt = c.numFmt!;
-            break;
-          case 'image':
-            if (p.imageUrl) {
-              cell.value = { text: p.imageUrl, hyperlink: p.imageUrl };
-              cell.font = { color: { argb: 'FF2563EB' }, underline: true };
-            }
             break;
           default: cell.value = p.specs[c.key] ?? '';
         }
