@@ -234,10 +234,10 @@ export function LineDrawer({
                   {cat === 'RAM' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.generation ?? ''}`.trim()}
                   {cat === 'SSD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.interface ?? ''}`.trim()}
                   {cat === 'HDD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.rpm ? line.rpm + 'rpm' : ''}`.trim()}
-                  {cat === 'Other' && (line.description ?? t('drawerUntitledItem'))}
+                  {cat === 'Other' && ((line.description ?? '').trim() || (line.partNumber ?? '').trim() || t('drawerUntitledItem'))}
                 </span>
               </div>
-              {(line.brand || line.description) && (
+              {(line.brand || line.description || line.partNumber) && (
                 <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
                   {line.partNumber || '—'} · {t('qtyShort', { n: line.qty })} · {t('drawerCostSummary', { cost: fmtUSD(qty * cost, locale) })}
                 </div>

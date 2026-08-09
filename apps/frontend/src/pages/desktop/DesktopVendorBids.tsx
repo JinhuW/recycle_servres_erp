@@ -9,6 +9,7 @@ import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, relTime } from '../..
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { TableSkeleton, FormSkeleton } from '../../components/Skeleton';
 import { CustomerPicker, type Customer } from './DesktopSellOrderDraft';
+import { ConfirmDialog } from './settings/dialogs';
 
 // Vendor-bid lifecycle. Mirrors the backend `status` column; drives the
 // filter tiles and the row chip.
@@ -692,13 +693,18 @@ function VendorLinksManager({
   const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
 
   const [general, setGeneral] = useState<GeneralLink | null>(null);
+  // Revoking kills a URL that vendors already hold, so it asks first — in the
+  // app's own dialog, not the browser's, which can't be styled or translated.
+  const [pendingRevoke, setPendingRevoke] = useState<{ kind: 'general' } | { kind: 'link'; row: VendorLinkRow } | null>(null);
   const reload = () => api.get<{ items: VendorLinkRow[]; general: GeneralLink | null }>('/api/customers/vendor-links')
     .then(r => { setRows(r.items); setGeneral(r.general); })
     .catch(e => onToast?.(e instanceof Error ? e.message : 'Failed to load vendor links', 'error'))
     .finally(() => setLoaded(true));
   useEffect(() => { reload(); }, []);
 
-  useEscapeKey(onClose);
+  // While the confirm is up, Escape belongs to it — otherwise one press would
+  // cancel the revoke and close the whole panel behind it.
+  useEscapeKey(onClose, !pendingRevoke);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -745,8 +751,8 @@ function VendorLinksManager({
   };
 
   const revoke = async (row: VendorLinkRow) => {
+    setPendingRevoke(null);
     if (!row.link) return;
-    if (!window.confirm(t('vendorLinkRevokeConfirm', { name: row.customerName }))) return;
     setBusyId(row.customerId);
     try {
       await api.patch(`/api/customers/vendor-link/${row.link.id}`, { active: false });
@@ -784,8 +790,8 @@ function VendorLinksManager({
   };
 
   const revokeGeneral = async () => {
+    setPendingRevoke(null);
     if (!general) return;
-    if (!window.confirm(t('vendorLinksGeneralRevokeConfirm'))) return;
     setBusyId('__general__');
     try {
       await api.patch(`/api/customers/vendor-link/${general.id}`, { active: false });
@@ -810,6 +816,7 @@ function VendorLinksManager({
   };
 
   return (
+    <>
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-shell" style={{ maxWidth: 980, width: 'calc(100vw - 80px)' }}>
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
@@ -874,7 +881,7 @@ function VendorLinksManager({
                   <button className="btn sm" disabled={busyId === '__general__'} onClick={generateGeneral}>
                     {t('vendorLinksGeneralRegenerate')}
                   </button>
-                  <button className="btn sm" disabled={busyId === '__general__'} onClick={revokeGeneral} style={{ color: 'var(--neg)' }}>
+                  <button className="btn sm" disabled={busyId === '__general__'} onClick={() => setPendingRevoke({ kind: 'general' })} style={{ color: 'var(--neg)' }}>
                     {t('vendorLinkRevoke')}
                   </button>
                 </>
@@ -957,7 +964,7 @@ function VendorLinksManager({
                             <button
                               className="btn sm"
                               disabled={isBusy}
-                              onClick={() => revoke(row)}
+                              onClick={() => setPendingRevoke({ kind: 'link', row })}
                               style={{ color: 'var(--neg)' }}
                               title={t('vendorLinkRevoke')}
                             >
@@ -992,6 +999,24 @@ function VendorLinksManager({
         </div>
       </div>
     </div>
+
+    {/* Sibling of the panel, not a child: a nested fixed backdrop is clipped by
+        the shell's `overflow: hidden` while its open animation runs. */}
+    {pendingRevoke && (
+      <ConfirmDialog
+        title={pendingRevoke.kind === 'general'
+          ? t('vendorLinksGeneralRevokeTitle')
+          : t('vendorLinkRevokeTitle', { name: pendingRevoke.row.customerName })}
+        message={pendingRevoke.kind === 'general'
+          ? t('vendorLinksGeneralRevokeConfirm')
+          : t('vendorLinkRevokeConfirm')}
+        confirmLabel={t('vendorLinkRevoke')}
+        danger
+        onCancel={() => setPendingRevoke(null)}
+        onConfirm={() => (pendingRevoke.kind === 'general' ? revokeGeneral() : revoke(pendingRevoke.row))}
+      />
+    )}
+    </>
   );
 }
 

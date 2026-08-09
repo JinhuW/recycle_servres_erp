@@ -240,11 +240,13 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         <ItemTypePicker value={value.itemType} onChange={v => onChange('itemType', v)} />
       </div>
       <div className="ph-field">
-        <label>{t('description')}<Req /></label>
+        <label>{t('description')}</label>
         <input className={inputClsFor('description')} value={value.description ?? ''} onChange={e => onChange('description', e.target.value)} />
       </div>
       <div className="ph-field">
-        <label>{t('partNumber')}</label>
+        {/* Named as the drawer names it, since it's the field the "still
+            needed" toast lists for an Other line. */}
+        <label>{t('lfPartSku')}<Req /></label>
         <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
       </div>
     </>
