@@ -357,6 +357,13 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(la1Cells).toContain('Warehouse total');
     expect(la1Cells).toContain('WH-R1');
     expect(la1Cells).toContain('WH-S1');
+    // A picker packs by part number and spec, so the columns that only help a
+    // bidder are off these tabs — headers and the values under them.
+    for (const dropped of ['Item', 'Class', 'Chip #', 'Condition', 'Image URL']) {
+      expect(la1Cells).not.toContain(dropped);
+    }
+    expect(la1Cells).not.toContain('DIMM A');
+    expect(la1Cells).not.toContain('Drive B');
     // Price-free by design: nothing on a packing tab may look like a price —
     // that's also what keeps the import parser away from these tabs.
     expect(la1Cells.some(v => /price|单价|价格/i.test(v))).toBe(false);
