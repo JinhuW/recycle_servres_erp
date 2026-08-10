@@ -5,8 +5,11 @@
 // decremented and sold-out lines flip to 'Sold'); Closed is absent because it
 // released it.
 //
-// Every "is this line spoken for?" query must use this list — the rule used to
-// be hand-rolled at five call sites and all five had drifted apart.
+// A commitment reserves the QUANTITY its line names, never the whole lot: 20
+// units of a 100-piece line leave 80 sellable to the next order. Every "how
+// much of this line is spoken for?" query must sum sol.qty over this list —
+// the rule used to be hand-rolled at five call sites and all five had drifted
+// apart, and an EXISTS test here silently blocks the untouched remainder.
 export const COMMITTED_SELL_STATUSES = ['Shipped', 'Awaiting payment'] as const;
 
 // postgres.js binds a readonly tuple as a record, not an array — the spread is
