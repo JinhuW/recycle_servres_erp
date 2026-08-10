@@ -22,6 +22,7 @@ import {
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { searchSellableInventory } from '../services/sellableInventory';
+import { committedSellStatuses } from '../lib/sellCommitment';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
@@ -240,10 +241,21 @@ sellOrders.get('/:id', async (c) => {
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id,
            w.short AS warehouse_short,
-           ol.qty AS inventory_qty
+           -- What this order may still grow its line to: the lot less the units
+           -- other committed orders hold. Its own claim is excluded, so editing
+           -- a line down and back up is not blocked by itself.
+           (ol.qty - elsewhere.qty) AS inventory_qty
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(rival.qty), 0)::int AS qty
+        FROM sell_order_lines rival
+        JOIN sell_orders rso ON rso.id = rival.sell_order_id
+       WHERE rival.inventory_id = sol.inventory_id
+         AND rso.id <> ${id}
+         AND rso.status = ANY(${committedSellStatuses()}::text[])
+    ) elsewhere ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;

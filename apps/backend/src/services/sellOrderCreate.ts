@@ -16,11 +16,14 @@ export type SellLine = { inventoryId?: string | null; qty: number };
 // already-committed lines); null for a brand-new order. Returns a human error
 // string, or null when every line is sellable.
 //
-// `checkExistingSellOrders` (default true) also rejects lines already committed
-// to another sell order (COMMITTED_SELL_STATUSES — Draft rivals are allowed,
-// they're only proposals). The vendor-bid promote path passes false: a bid may
-// legitimately reference inventory that is already on a sell order, so it reuses
-// the qty/sellability locking here without the cross-sell-order conflict guard.
+// `checkExistingSellOrders` (default true) also nets out the units other sell
+// orders have already committed (COMMITTED_SELL_STATUSES — Draft rivals are
+// allowed, they're only proposals). A commitment reserves the quantity it named,
+// not the whole lot, so 20 sold out of 100 still leaves 80 for the next order;
+// only demand past the remainder is refused. The vendor-bid promote path passes
+// false: a bid may legitimately reference inventory that is already on a sell
+// order, so it reuses the qty/sellability locking here without the
+// cross-sell-order reservation.
 export async function validateSellLines(
   tx: postgres.TransactionSql,
   lines: SellLine[],
@@ -42,20 +45,28 @@ export async function validateSellLines(
       return `inventory line not sellable (status=${inv.status})`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
     if (!checkConflicts) continue;
-    const conflict = (await tx<{ so_id: string; label: string; part_number: string | null }[]>`
-      SELECT so.id AS so_id, sol.label, sol.part_number
+    // Reserved units, plus one committed order to name in the error — a bare
+    // "not enough left" leaves the manager with nowhere to go looking.
+    const claim = (await tx<{
+      reserved: number; so_id: string | null; label: string | null; part_number: string | null;
+    }[]>`
+      SELECT COALESCE(SUM(sol.qty), 0)::int AS reserved,
+             MIN(so.id) AS so_id,
+             MIN(sol.label) AS label,
+             MIN(sol.part_number) AS part_number
       FROM sell_order_lines sol
       JOIN sell_orders so ON so.id = sol.sell_order_id
       WHERE sol.inventory_id = ${inventoryId}
         AND so.status = ANY(${committedSellStatuses()}::text[])
         AND (${excludeOrderId}::text IS NULL OR so.id <> ${excludeOrderId}::text)
-      LIMIT 1
     `)[0];
-    if (conflict) {
-      const name = conflict.part_number
-        ? `${conflict.label} (${conflict.part_number})`
-        : conflict.label;
-      return `${name} is already on sell order ${conflict.so_id}`;
+    const remaining = inv.qty - claim.reserved;
+    if (qty > remaining) {
+      const name = claim.part_number
+        ? `${claim.label} (${claim.part_number})`
+        : claim.label ?? inventoryId;
+      return `qty ${qty} exceeds the ${remaining} left of ${name}`
+        + ` — ${claim.reserved} already committed to sell order ${claim.so_id}`;
     }
   }
   return null;

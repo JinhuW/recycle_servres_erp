@@ -10,7 +10,12 @@ async function firstCustomerId(token: string): Promise<string> {
   return r.body.items[0].id;
 }
 
-async function createDraftSellOrder(token: string, notes?: string): Promise<{ id: string; lineId: string }> {
+// Takes the whole lot: a commitment reserves only the qty it names, so a
+// partial line would leave stock over and the release test below would prove
+// nothing.
+async function createDraftSellOrder(
+  token: string, notes?: string,
+): Promise<{ id: string; lineId: string; lineQty: number }> {
   const line = await freeSellableLine(token);
   const customerId = await firstCustomerId(token);
   const r = await api<{ id: string }>('POST', '/api/sell-orders', {
@@ -20,13 +25,13 @@ async function createDraftSellOrder(token: string, notes?: string): Promise<{ id
       notes,
       lines: [{
         inventoryId: line.id, category: 'RAM', label: 'Sample',
-        partNumber: 'PN-1', qty: 1, unitPrice: line.sell_price,
+        partNumber: 'PN-1', qty: line.qty, unitPrice: line.sell_price,
         warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
       }],
     },
   });
   expect(r.status).toBe(201);
-  return { id: r.body.id, lineId: line.id };
+  return { id: r.body.id, lineId: line.id, lineQty: line.qty };
 }
 
 async function advanceTo(token: string, soId: string, to: string, note = 'note') {
@@ -71,17 +76,17 @@ describe('POST /api/sell-orders/:id/status — Close', () => {
 
   it('Shipped → Closed releases the soft-committed inventory line', async () => {
     const { token } = await loginAs(ALEX);
-    const { id, lineId } = await createDraftSellOrder(token);
+    const { id, lineId, lineQty } = await createDraftSellOrder(token);
     await advanceTo(token, id, 'Shipped', 'ship');
 
-    // Before close: a second SO referencing the same line should be rejected.
+    // Before close: the whole lot is reserved, so a second SO on it is rejected.
     const customerId = await firstCustomerId(token);
     const blocked = await api('POST', '/api/sell-orders', {
       token,
       body: {
         customerId,
         lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: 'pn',
-          qty: 1, unitPrice: 1 }],
+          qty: lineQty, unitPrice: 1 }],
       },
     });
     expect(blocked.status).toBeGreaterThanOrEqual(400);
@@ -99,7 +104,7 @@ describe('POST /api/sell-orders/:id/status — Close', () => {
       body: {
         customerId,
         lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: 'pn',
-          qty: 1, unitPrice: 1 }],
+          qty: lineQty, unitPrice: 1 }],
       },
     });
     expect(ok.status).toBe(201);

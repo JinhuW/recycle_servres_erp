@@ -67,20 +67,23 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
   `;
 }
 
-// "Hide items already spoken for" — a line is in a pending sell order when some
-// sell_order_line points at it under a non-terminal order (Draft/Shipped/
-// Awaiting payment). Done/Closed are excluded: Done flips the line to 'Sold'
-// (filtered elsewhere) and Closed releases the commitment. Used to keep a new
-// sell order from re-selecting stock another in-flight order already claims.
+// "Hide items already spoken for" — pending sell orders (Draft/Shipped/Awaiting
+// payment) claim the quantity they name, so a line is spoken for only once
+// those claims cover the whole lot. A 100-piece lot with 20 on a pending order
+// still has 80 to offer and stays listed. Done/Closed are excluded: Done flips
+// the line to 'Sold' (filtered elsewhere) and Closed releases the commitment.
+// Used to keep a new sell order from re-picking stock another in-flight order
+// already claims.
 const PENDING_SO_STATUSES = ['Draft', 'Shipped', 'Awaiting payment'];
 function pendingSellOrderFrag(sql: ReturnType<typeof getDb>, hide: boolean) {
   return hide
-    ? sql`NOT EXISTS (
-        SELECT 1 FROM sell_order_lines sol
+    ? sql`l.qty > COALESCE((
+        SELECT SUM(sol.qty)
+        FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
         WHERE sol.inventory_id = l.id
           AND so.status = ANY(${PENDING_SO_STATUSES}::text[])
-      )`
+      ), 0)`
     : sql`TRUE`;
 }
 
