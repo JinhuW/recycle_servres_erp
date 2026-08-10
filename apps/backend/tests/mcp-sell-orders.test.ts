@@ -69,13 +69,15 @@ describe('MCP search_sellable_inventory', () => {
     expect(typeof rows[0].availableQty).toBe('number');
   });
 
-  it('flags lines on a rival draft, excludes them once committed', async () => {
+  it('flags lines on a rival draft, excludes them once fully committed', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
     const customerId = (await api<{ items: { id: string }[] }>('GET', '/api/customers', { token })).body.items[0].id;
+    // The whole lot — a commitment reserves only the qty it names, so a partial
+    // one would leave the line listed with its remainder.
     const created = await api<{ id: string }>('POST', '/api/sell-orders', {
       token,
-      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x', qty: 1, unitPrice: line.sell_price }] },
+      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x', qty: line.qty, unitPrice: line.sell_price }] },
     });
     expect(created.status).toBe(201);
 
