@@ -3,6 +3,8 @@ import { Icon } from './Icon';
 import { applyPwaUpdate } from '../lib/pwa';
 import { useT } from '../lib/i18n';
 
+import '../styles/pwa.css';
+
 export function PwaUpdateToast() {
   const { t } = useT();
   const [open, setOpen] = useState(false);
