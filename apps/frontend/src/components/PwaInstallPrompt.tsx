@@ -3,6 +3,8 @@ import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { useT } from '../lib/i18n';
 
+import '../styles/pwa.css';
+
 // Chrome's BeforeInstallPromptEvent isn't in lib.dom.d.ts.
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;

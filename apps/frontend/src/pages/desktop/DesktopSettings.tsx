@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
@@ -6,14 +6,17 @@ import { useAppVersion } from '../../lib/useAppVersion';
 import { fmtDate } from '../../lib/format';
 // The settings panels + their modals/dialogs/shared primitives were extracted
 // verbatim into ./settings/* — pure code-motion, no logic or JSX changes.
-import { MembersPanel } from './settings/MembersPanel';
-import { WarehousesPanel } from './settings/WarehousesPanel';
-import { CustomersPanel } from './settings/CustomersPanel';
-import { CategoriesPanel } from './settings/CategoriesPanel';
-import { GeneralPanel } from './settings/GeneralPanel';
+// AccountPanel is the section Settings opens on, so it stays in this chunk;
+// the rest load when their tab is picked.
 import { AccountPanel } from './settings/AccountPanel';
-import { FxRatesPanel } from '../../components/FxRatesPanel';
-import { DesktopSettingsConnectors } from './DesktopSettingsConnectors';
+
+const MembersPanel = lazy(() => import('./settings/MembersPanel').then(m => ({ default: m.MembersPanel })));
+const WarehousesPanel = lazy(() => import('./settings/WarehousesPanel').then(m => ({ default: m.WarehousesPanel })));
+const CustomersPanel = lazy(() => import('./settings/CustomersPanel').then(m => ({ default: m.CustomersPanel })));
+const CategoriesPanel = lazy(() => import('./settings/CategoriesPanel').then(m => ({ default: m.CategoriesPanel })));
+const GeneralPanel = lazy(() => import('./settings/GeneralPanel').then(m => ({ default: m.GeneralPanel })));
+const FxRatesPanel = lazy(() => import('../../components/FxRatesPanel').then(m => ({ default: m.FxRatesPanel })));
+const DesktopSettingsConnectors = lazy(() => import('./DesktopSettingsConnectors').then(m => ({ default: m.DesktopSettingsConnectors })));
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'connectors';
@@ -75,14 +78,16 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
         </nav>
 
         <div className="settings-body">
-          {section === 'account'    && <AccountPanel    showToast={showToast} />}
-          {section === 'members'    && <MembersPanel    showToast={showToast} />}
-          {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
-          {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
-          {section === 'categories' && <CategoriesPanel />}
-          {section === 'general'    && <GeneralPanel />}
-          {section === 'fx'         && <FxRatesPanel />}
-          {section === 'connectors' && <DesktopSettingsConnectors />}
+          <Suspense fallback={<div className="settings-panel-loading" />}>
+            {section === 'account'    && <AccountPanel    showToast={showToast} />}
+            {section === 'members'    && <MembersPanel    showToast={showToast} />}
+            {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
+            {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
+            {section === 'categories' && <CategoriesPanel />}
+            {section === 'general'    && <GeneralPanel />}
+            {section === 'fx'         && <FxRatesPanel />}
+            {section === 'connectors' && <DesktopSettingsConnectors />}
+          </Suspense>
         </div>
       </div>
     </>

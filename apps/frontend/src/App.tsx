@@ -1,10 +1,17 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { LangProvider } from './lib/i18n';
 import { vendorTokenFromPath } from './lib/vendor';
-import { PwaInstallPrompt } from './components/PwaInstallPrompt';
-import { PwaUpdateToast } from './components/PwaUpdateToast';
 
+// desktop.css stays here despite the name: it owns the shared modal, card and
+// vendor-portal layer (~100 classes the phone and vendor shells render), so it
+// is the main stylesheet rather than a desktop-only one.
 import './styles/desktop.css';
+
+// Phone-only, and they carry pwa.css with them.
+const PwaInstallPrompt = lazy(() =>
+  import('./components/PwaInstallPrompt').then(m => ({ default: m.PwaInstallPrompt })));
+const PwaUpdateToast = lazy(() =>
+  import('./components/PwaUpdateToast').then(m => ({ default: m.PwaUpdateToast })));
 
 const DesktopApp = lazy(() => import('./DesktopApp').then(m => ({ default: m.DesktopApp })));
 const MobileApp  = lazy(() => import('./MobileApp').then(m => ({ default: m.MobileApp })));
@@ -42,10 +49,10 @@ export default function App() {
         {isPhone ? <MobileApp /> : <DesktopApp />}
       </Suspense>
       {isPhone && (
-        <>
+        <Suspense fallback={null}>
           <PwaInstallPrompt />
           <PwaUpdateToast />
-        </>
+        </Suspense>
       )}
     </LangProvider>
   );
