@@ -4,3 +4,17 @@ node_modules/
 data/
 *.log
 .DS_Store
+
+# secrets kept next to the deploy tooling — never committed
+secrets.env
+.api-token
+
+# terraform
+.terraform/
+*.tfstate*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# per-session git worktrees created by scripts/new-session.sh
+.claude/worktrees/

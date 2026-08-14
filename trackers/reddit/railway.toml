@@ -6,7 +6,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# The api role serves /health; the worker role has no HTTP surface, and Railway
-# only applies the healthcheck to services with a public domain.
-healthcheckPath = "/health"
+# No healthcheckPath here: this file applies to BOTH services, and the worker
+# role has no HTTP surface — a healthcheck would fail its deploys forever.
+# /health still exists on the api service for manual and uptime checks.
 restartPolicyType = "ON_FAILURE"
