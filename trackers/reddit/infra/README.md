@@ -34,6 +34,11 @@ Railway: Postgres ── api (HTTP admin/UI) ── worker (1, Railway's IP rang
 - **Quota math (Singapore is Pay-As-You-Go):** the free allotment is ~3,000
   A1 OCPU-hours + 18,000 GB-hours/month — exactly 4× (1 OCPU / 6 GB) running
   24/7. Do not raise `sg_arm_count` or sizes: a fifth OCPU starts billing.
+- **Block storage is the binding constraint:** every VM's boot volume is 47 GB
+  (Ubuntu's minimum) against a 200 GB free cap per tenancy. Singapore: 4 A1 ×
+  47 = 188 GB — full; that is why `sg_amd_count = 0` (2 micros were destroyed
+  on 2026-08-14 when this was caught). Toronto: 150 (Vaultwarden) + 47 = 197 GB
+  — also effectively full.
 - **Toronto A1 quota is fully used by the Vaultwarden VM**
   (`instance-20220516-2257`) — which this stack must NEVER touch or import.
   `to_arm_count` stays 0 unless the `toronto_arm_availability` output shows

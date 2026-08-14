@@ -36,9 +36,14 @@ variable "sg_arm_count" {
 }
 
 variable "sg_amd_count" {
-  description = "E2.1.Micro workers in Singapore (max 2 per tenancy)."
+  description = <<-EOT
+    E2.1.Micro workers in Singapore. Default 0: boot volumes are 47 GB minimum
+    and the free block-storage cap is 200 GB per tenancy — the 4 A1 workers
+    already use 188 GB, so any micro here pushes past the cap and starts
+    billing (this tenancy is PAYG).
+  EOT
   type        = number
-  default     = 2
+  default     = 0
   validation {
     condition     = var.sg_amd_count >= 0 && var.sg_amd_count <= 2
     error_message = "Always Free allows at most 2 E2.1.Micro instances per tenancy."
