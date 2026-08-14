@@ -4,18 +4,18 @@
 // taken under is what guarantees a single Telegram message per post no matter
 // how many workers are running.
 
+import type {AlertSender} from '../alerts.ts';
 import {claimPosts, markNotified, releasePostFailure} from '../claims.ts';
 import type {Sql} from '../db.ts';
 import type {Logger} from '../logger.ts';
 import type {SettingsStore} from '../settings.ts';
-import {sendAlert} from '../telegram.ts';
 
 export const NOTIFY_BATCH_SIZE = 5;
 
 export interface NotifyDeps {
   sql: Sql;
   workerId: string;
-  botToken: string;
+  alerts: AlertSender;
   settings: SettingsStore;
   logger: Logger;
 }
@@ -24,7 +24,7 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   const {sql, workerId, logger} = deps;
 
   const settings = await deps.settings.get();
-  if (settings.telegramChatIds.length === 0) {
+  if (deps.alerts.requiresRecipients && settings.telegramChatIds.length === 0) {
     // Nothing configured to notify. Leave targets queued rather than marking
     // them notified, so they go out once a chat id is added via the API.
     return false;
@@ -34,7 +34,7 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
   if (posts.length === 0) return false;
 
   for (const post of posts) {
-    const report = await sendAlert(deps.botToken, settings.telegramChatIds, {
+    const report = await deps.alerts.send(settings.telegramChatIds, {
       subreddit: post.subreddit,
       summary: post.llm_summary ?? post.title,
       price: post.llm_price,
@@ -48,6 +48,7 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
       await markNotified(sql, workerId, post.reddit_id);
       logger.info('alert sent', {
         redditId: post.reddit_id,
+        transport: deps.alerts.transport,
         delivered: report.delivered.length,
         failed: report.failed.length,
       });

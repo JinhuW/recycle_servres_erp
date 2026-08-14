@@ -3,6 +3,7 @@
 // target gets exactly one alert, and nothing is lost when a stage fails.
 
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
+import {createConsoleAlertSender, createTelegramAlertSender} from '../src/alerts.ts';
 import type {NewPost} from '../src/claims.ts';
 import {insertNewPosts} from '../src/claims.ts';
 import {createLogger} from '../src/logger.ts';
@@ -45,7 +46,7 @@ function notifyDeps(workerId = 'worker-1'): NotifyDeps {
   return {
     sql: db.sql,
     workerId,
-    botToken: 'bot-token',
+    alerts: createTelegramAlertSender('bot-token'),
     settings: new SettingsStore(db.sql, 0),
     logger: createLogger(workerId, 'error'),
   };
@@ -224,6 +225,26 @@ describe('notifyOnce', () => {
     await db.sql`UPDATE settings SET value = '["chat-1"]'::jsonb
                   WHERE key = 'telegram_chat_ids'`;
     expect(await notifyOnce(notifyDeps())).toBe(true);
+    expect(await statusOf('t3_a')).toBe('notified');
+  });
+
+  it('prints alerts and marks them notified when the transport is the console', async () => {
+    await seedTarget();
+    await db.sql`UPDATE settings SET value = '[]'::jsonb WHERE key = 'telegram_chat_ids'`;
+    const telegram = stubTelegram();
+    const printed: string[] = [];
+
+    expect(await notifyOnce({
+      ...notifyDeps(),
+      alerts: createConsoleAlertSender((text) => printed.push(text)),
+    })).toBe(true);
+
+    // The console transport needs no recipients and must not touch Telegram.
+    expect(telegram).not.toHaveBeenCalled();
+    expect(printed[0]).toContain('Dell R730xd, $650 shipped.');
+    expect(printed[0]).toContain('https://www.reddit.com/r/homelabsales/comments/a/fs/');
+    // Plain text, not the HTML Telegram would receive.
+    expect(printed[0]).not.toContain('<b>');
     expect(await statusOf('t3_a')).toBe('notified');
   });
 

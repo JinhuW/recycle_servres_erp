@@ -1,0 +1,12 @@
+# Railway service config. Pins the Dockerfile builder so Railway does not try
+# to autodetect a Node build (there is no build step — tsx runs the TS source).
+# Used by both the `api` and `worker` services; they differ only in env vars.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# The api role serves /health; the worker role has no HTTP surface, and Railway
+# only applies the healthcheck to services with a public domain.
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"

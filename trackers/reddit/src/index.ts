@@ -3,6 +3,7 @@
 // database).
 
 import {serve} from '@hono/node-server';
+import {createAlertSender} from './alerts.ts';
 import {createApi} from './api.ts';
 import {releaseAllClaims} from './claims.ts';
 import {loadConfig} from './config.ts';
@@ -91,7 +92,7 @@ async function runWorker(): Promise<void> {
       () => notifyOnce({
         sql,
         workerId: config.workerId,
-        botToken: config.telegramBotToken,
+        alerts: createAlertSender(config.alertTransport, config.telegramBotToken),
         settings,
         logger: logger.child('notify'),
       }),
@@ -101,6 +102,7 @@ async function runWorker(): Promise<void> {
   logger.info('worker started', {
     workerId: config.workerId,
     redditMaxRpm: config.redditMaxRpm,
+    alertTransport: config.alertTransport,
   });
 
   await new Promise<void>((resolve) => {

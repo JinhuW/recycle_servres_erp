@@ -4,12 +4,14 @@
 
 import {hostname} from 'node:os';
 import 'dotenv/config';
+import type {AlertTransport} from './alerts.ts';
 
 export type Role = 'worker' | 'api';
 
 export interface Config {
   readonly databaseUrl: string;
   readonly openrouterApiKey: string;
+  readonly alertTransport: AlertTransport;
   readonly telegramBotToken: string;
   readonly role: Role;
   readonly workerId: string;
@@ -55,12 +57,20 @@ export function loadConfig(): Config {
     throw new Error(`REDDIT_MAX_RPM must be a positive number, got "${process.env['REDDIT_MAX_RPM']}"`);
   }
 
+  // `console` prints alerts to stdout instead of messaging anyone — useful
+  // before a bot token exists, and it makes the bot token optional.
+  const alertTransport: AlertTransport =
+    process.env['ALERT_TRANSPORT'] === 'console' ? 'console' : 'telegram';
+
   return {
     databaseUrl: required('DATABASE_URL', role),
+    alertTransport,
     // The API role never calls OpenRouter, but it does expose a Telegram test
     // endpoint, so only the key it cannot use is optional there.
     openrouterApiKey: role === 'worker' ? required('OPENROUTER_API_KEY', role) : (process.env['OPENROUTER_API_KEY'] ?? ''),
-    telegramBotToken: required('TELEGRAM_BOT_TOKEN', role),
+    telegramBotToken: alertTransport === 'telegram'
+      ? required('TELEGRAM_BOT_TOKEN', role)
+      : (process.env['TELEGRAM_BOT_TOKEN'] ?? ''),
     role,
     workerId: process.env['WORKER_ID'] || generateWorkerId(),
     redditUserAgent: process.env['REDDIT_USER_AGENT'] || DEFAULT_USER_AGENT,
