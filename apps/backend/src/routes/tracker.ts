@@ -54,7 +54,12 @@ async function forward(
   return c.json(body, res.status as ContentfulStatusCode);
 }
 
-tracker.get('/workers', (c) => forward(c, 'GET', '/api/workers', false));
+tracker.get('/workers', (c) => {
+  // Pass the filter/pagination params through untouched; the tracker
+  // validates them.
+  const query = new URL(c.req.url).search;
+  return forward(c, 'GET', `/api/workers${query}`, false);
+});
 tracker.delete('/workers/:id', (c) =>
   forward(c, 'DELETE', `/api/workers/${encodeURIComponent(c.req.param('id'))}`, false));
 
