@@ -29,7 +29,7 @@ import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 
 import { useAuth } from './lib/auth';
 import { useEffectiveUser } from './lib/tweaks';
-import { useT, I18N } from './lib/i18n';
+import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
@@ -880,7 +880,9 @@ function Shell() {
       {langSheet && (
         <PhLanguageSheet onClose={(picked) => {
           setLangSheet(false);
-          if (picked) showToast(I18N[picked].saved);
+          // Confirms in the language just picked, whose table may still be
+          // in flight the first time it is chosen.
+          if (picked) void translateIn(picked, 'saved').then((m) => showToast(m));
         }} />
       )}
 

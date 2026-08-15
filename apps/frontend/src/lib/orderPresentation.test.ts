@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { I18N } from './i18n';
+import zh from './i18n.zh';
 import {
   createdEventParts, linePhotoEventDetail, profitTone, signedUSD0,
 } from './orderPresentation';
@@ -64,7 +65,7 @@ describe('the keys the audit rows name', () => {
     const spy = (key: string) => { asked.add(key); return key; };
     createdEventParts({ category: 'RAM', lineCount: 1, qty: 1 }, spy);
     createdEventParts({ category: 'RAM', lineCount: 2, qty: 2 }, spy);
-    const missing = [...asked].filter(k => !(k in I18N.en) || !(k in I18N.zh));
+    const missing = [...asked].filter(k => !(k in I18N.en!) || !(k in zh));
     expect(missing).toEqual([]);
   });
 });

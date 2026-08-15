@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './components/Icon';
 import { Sidebar, type DesktopView } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
@@ -15,23 +15,29 @@ import { api, ApiError } from './lib/api';
 import { showErrorDialog } from './lib/errorToast';
 import { ErrorDialog, useErrorDialogQueue } from './components/ErrorDialog';
 
+// Eager: the landing view, and the two gates a logged-out or freshly-logged-in
+// user hits before anything else. Making these lazy would only buy a spinner.
 import { DesktopDashboard } from './pages/desktop/DesktopDashboard';
-import { DesktopOrders } from './pages/desktop/DesktopOrders';
-import { DesktopEditOrder } from './pages/desktop/DesktopEditOrder';
-import { DesktopInventory } from './pages/desktop/DesktopInventory';
-import { DesktopInventoryEdit } from './pages/desktop/DesktopInventoryEdit';
-import { DesktopAnalysis } from './pages/desktop/DesktopAnalysis';
-import { DesktopMarket } from './pages/desktop/DesktopMarket';
-import { DesktopSellOrders } from './pages/desktop/DesktopSellOrders';
-import { DesktopVendorBids } from './pages/desktop/DesktopVendorBids';
-import { DesktopTransfers } from './pages/desktop/DesktopTransfers';
-import { DesktopActivity } from './pages/desktop/DesktopActivity';
-import { DesktopSettings } from './pages/desktop/DesktopSettings';
-import { DesktopSubmit } from './pages/desktop/DesktopSubmit';
 import { Login } from './pages/Login';
 import { RolePicker } from './pages/RolePicker';
-import { Authorize } from './pages/Authorize';
 import { FormSkeleton } from './components/Skeleton';
+
+// Every other view is its own chunk — they were ~14k lines of eager imports
+// that a user who only opened the dashboard still paid for.
+const DesktopOrders = lazy(() => import('./pages/desktop/DesktopOrders').then(m => ({ default: m.DesktopOrders })));
+const DesktopEditOrder = lazy(() => import('./pages/desktop/DesktopEditOrder').then(m => ({ default: m.DesktopEditOrder })));
+const DesktopInventory = lazy(() => import('./pages/desktop/DesktopInventory').then(m => ({ default: m.DesktopInventory })));
+const DesktopInventoryEdit = lazy(() => import('./pages/desktop/DesktopInventoryEdit').then(m => ({ default: m.DesktopInventoryEdit })));
+const DesktopAnalysis = lazy(() => import('./pages/desktop/DesktopAnalysis').then(m => ({ default: m.DesktopAnalysis })));
+const DesktopMarket = lazy(() => import('./pages/desktop/DesktopMarket').then(m => ({ default: m.DesktopMarket })));
+const DesktopSellOrders = lazy(() => import('./pages/desktop/DesktopSellOrders').then(m => ({ default: m.DesktopSellOrders })));
+const DesktopVendorBids = lazy(() => import('./pages/desktop/DesktopVendorBids').then(m => ({ default: m.DesktopVendorBids })));
+const DesktopTransfers = lazy(() => import('./pages/desktop/DesktopTransfers').then(m => ({ default: m.DesktopTransfers })));
+const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').then(m => ({ default: m.DesktopActivity })));
+const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
+const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
+const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
+const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
 
 import type { Order } from './lib/types';
 
@@ -144,10 +150,12 @@ export function DesktopApp() {
   if (pendingRoleChoice && realUser?.role === 'manager') return <RolePicker variant="desktop" />;
   // OAuth consent screen — render standalone (no sidebar/topbar). Reached via
   // the backend's `/oauth/authorize` 302 to `/authorize?req=…`.
-  if (isAuthorizePath(path)) return <Authorize />;
+  if (isAuthorizePath(path)) {
+    return <Suspense fallback={<FormSkeleton fields={4} />}><Authorize /></Suspense>;
+  }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'settings')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'tracker' || view === 'settings')
     ? 'dashboard'
     : view;
 
@@ -202,31 +210,36 @@ export function DesktopApp() {
               >{t('nav_analysis')}</button>
             </div>
           )}
-          {view2 === 'dashboard'  && <DesktopDashboard />}
-          {view2 === 'submit'     && (
-            <DesktopSubmit
-              onDone={(toast) => {
-                if (toast) showToast(toast.msg, toast.kind ?? 'success');
-                navigate('/purchase-orders');
-              }}
-            />
-          )}
-          {view2 === 'history'    && ordersOrEdit}
-          {view2 === 'market'     && <DesktopMarket />}
-          {view2 === 'inventory'  && inventoryOrEdit}
-          {view2 === 'analysis'   && <DesktopAnalysis />}
-          {view2 === 'sellorders' && (
-            <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
-          )}
-          {view2 === 'vendorbids' && (
-            <DesktopVendorBids
-              onToast={showToast}
-              onOpenSellOrder={(id) => navigate('/sell-orders/' + id + '/edit')}
-            />
-          )}
-          {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
-          {view2 === 'activity'  && <DesktopActivity />}
-          {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
+          {/* One boundary for the whole page area: every view below except the
+              dashboard is a lazy chunk, and they are mutually exclusive. */}
+          <Suspense fallback={<FormSkeleton fields={8} />}>
+            {view2 === 'dashboard'  && <DesktopDashboard />}
+            {view2 === 'submit'     && (
+              <DesktopSubmit
+                onDone={(toast) => {
+                  if (toast) showToast(toast.msg, toast.kind ?? 'success');
+                  navigate('/purchase-orders');
+                }}
+              />
+            )}
+            {view2 === 'history'    && ordersOrEdit}
+            {view2 === 'market'     && <DesktopMarket />}
+            {view2 === 'inventory'  && inventoryOrEdit}
+            {view2 === 'analysis'   && <DesktopAnalysis />}
+            {view2 === 'sellorders' && (
+              <DesktopSellOrders onNewFromInventory={() => navigate('/inventory')} onToast={showToast} />
+            )}
+            {view2 === 'vendorbids' && (
+              <DesktopVendorBids
+                onToast={showToast}
+                onOpenSellOrder={(id) => navigate('/sell-orders/' + id + '/edit')}
+              />
+            )}
+            {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
+            {view2 === 'activity'  && <DesktopActivity />}
+            {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
+            {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
+          </Suspense>
         </div>
       </main>
 

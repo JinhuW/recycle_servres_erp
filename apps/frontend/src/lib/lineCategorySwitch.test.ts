@@ -81,7 +81,7 @@ describe('SPEC_FIELD_LABEL_KEY', () => {
     // to the English label rather than to the bare field name.
     const dangling = specFields
       .map(f => SPEC_FIELD_LABEL_KEY[f])
-      .filter(k => k !== undefined && !(k in I18N.en));
+      .filter(k => k !== undefined && !(k in I18N.en!));
     expect(dangling, `label keys absent from the dictionary: ${dangling.join(', ')}`).toEqual([]);
   });
 });
