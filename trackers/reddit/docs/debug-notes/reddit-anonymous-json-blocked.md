@@ -67,6 +67,36 @@ Consequences baked into the implementation:
   this into one request per subreddit — that is a 4× rate-limit multiplier for
   no benefit.
 
+## How many subreddits fit in one multireddit request
+
+Measured empirically 2026-08-14 against the live Atom feed (each request ≥45 s
+apart, all HTTP 200):
+
+| subs in URL | URL length | result |
+| --- | --- | --- |
+| 10 | 154 | 100 entries, 8 subs represented |
+| 40 | 394 | 100 entries, 14 subs represented |
+| 100 | 917 | 100 entries, 34 subs represented |
+| 120 | 1,120 | 100 entries, 36 subs represented |
+| ~230 (with duplicates) | 2,108 | 100 entries — even past the mythical 2,048-char URL "limit" |
+
+There is **no meaningful cap on the count** for the ad-hoc `r/a+b+c` URL
+syntax (the famous "100 subreddits" limit applies only to *saved* custom
+feeds/multireddits, a different feature). The URL itself works well past 100
+names.
+
+The binding constraint is the **shared 100-post response window**: the feed
+returns the newest 100 posts across ALL listed subreddits merged by time, so
+busy subs crowd quiet ones out (120 subs → only 36 present in one response).
+Batching stays correct only while the combined posting rate of the batch is
+under ~100 posts per poll interval — beyond that, posts in quiet subs can
+scroll out of the window between polls and be missed entirely.
+
+`SUBREDDIT_BATCH_SIZE = 20` in `claims.ts` is the guardrail. Before raising
+it, estimate the batch's combined posts/hour; at 90 s intervals, 100 posts per
+cycle ≈ 4,000 posts/hour of headroom, which a 20-sub hardware-sales batch
+never approaches — but 100+ busy subs would.
+
 ## Do not do these
 
 - Do not switch back to `.json` endpoints without re-probing; if they ever
