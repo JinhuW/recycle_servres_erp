@@ -13,14 +13,3 @@ export function liveness(lastHeartbeatAt: string, now: number = Date.now()): Liv
   return 'live';
 }
 
-const RANK: Record<Liveness, number> = { dead: 0, stale: 1, live: 2 };
-
-/** Problem workers first (dead, stale, live), ties by workerId. Returns a copy. */
-export function sortByLiveness<T extends { workerId: string; lastHeartbeatAt: string }>(
-  workers: readonly T[],
-  now: number = Date.now(),
-): T[] {
-  return [...workers].sort((a, b) =>
-    RANK[liveness(a.lastHeartbeatAt, now)] - RANK[liveness(b.lastHeartbeatAt, now)]
-    || a.workerId.localeCompare(b.workerId));
-}

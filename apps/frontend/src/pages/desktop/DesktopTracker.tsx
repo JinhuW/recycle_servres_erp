@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
 import { ApiError } from '../../lib/api';
@@ -9,12 +9,14 @@ import {
   MIN_POLL_INTERVAL_S,
   normalizeSubredditName,
   trackerApi,
+  WORKERS_PAGE_SIZE,
   type TrackerRule,
   type TrackerSubreddit,
   type TrackerWorker,
   type LoopName,
+  type WorkerStatusFilter,
 } from '../../lib/tracker';
-import { liveness, sortByLiveness, type Liveness } from '../../lib/workerLiveness';
+import { liveness, type Liveness } from '../../lib/workerLiveness';
 import { ConfirmDialog } from './settings/dialogs';
 import { Toggle } from './settings/_shared';
 
@@ -34,10 +36,8 @@ export function DesktopTracker({ showToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
-  const [workers, setWorkers] = useState<TrackerWorker[] | null>(null);
   const [rules, setRules] = useState<TrackerRule[] | null>(null);
   const [subs, setSubs] = useState<TrackerSubreddit[] | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [notConfigured, setNotConfigured] = useState(false);
 
   const [ruleDialog, setRuleDialog] = useState<TrackerRule | 'new' | null>(null);
@@ -54,25 +54,10 @@ export function DesktopTracker({ showToast }: Props) {
 
   useEffect(() => {
     let alive = true;
-    const loadFleet = () =>
-      trackerApi.listWorkers()
-        .then(w => { if (alive) { setWorkers(w); setNow(Date.now()); } })
-        .catch(err => { if (alive) fail(err); });
-
-    loadFleet();
     trackerApi.listRules().then(r => { if (alive) setRules(r); }).catch(err => { if (alive) fail(err); });
     trackerApi.listSubreddits().then(s => { if (alive) setSubs(s); }).catch(err => { if (alive) fail(err); });
-
-    // Only the fleet refetches on a timer: liveness is time-derived, while
-    // rules and subreddits change only through this page.
-    const timer = setInterval(loadFleet, FLEET_REFRESH_MS);
-    return () => { alive = false; clearInterval(timer); };
+    return () => { alive = false; };
   }, [fail]);
-
-  const liveCount = useMemo(
-    () => (workers ?? []).filter(w => liveness(w.lastHeartbeatAt, now) === 'live').length,
-    [workers, now],
-  );
 
   if (notConfigured) {
     return (
@@ -154,47 +139,7 @@ export function DesktopTracker({ showToast }: Props) {
       />
 
       {/* ── Fleet (worker health, intentionally last) ── */}
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <div className="card-title">{t('trkFleetTitle')}</div>
-            <div className="card-sub">
-              {workers ? t('trkFleetSub', { live: String(liveCount), n: String(workers.length) }) : '…'}
-            </div>
-          </div>
-        </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t('trkColStatus')}</th>
-                <th>{t('trkColWorker')}</th>
-                <th>{t('trkColRole')}</th>
-                <th>{t('trkColStarted')}</th>
-                <th>{t('trkColHeartbeat')}</th>
-                <th>{t('trkColPoll')}</th>
-                <th>{t('trkColEvaluate')}</th>
-                <th>{t('trkColNotify')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {sortByLiveness(workers ?? [], now).map(w => (
-                <WorkerRow key={w.workerId} worker={w} now={now} locale={locale}
-                  onRemove={() => {
-                    trackerApi.removeWorker(w.workerId)
-                      .then(() => {
-                        setWorkers(ws => (ws ?? []).filter(x => x.workerId !== w.workerId));
-                        showToast?.(t('trkWorkerRemoved'));
-                      })
-                      .catch(fail);
-                  }}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <FleetCard locale={locale} onError={fail} showToast={showToast} />
 
       {ruleDialog && (
         <RuleModal
@@ -262,6 +207,132 @@ function PageHead({ t }: { t: (k: string, vars?: Record<string, string>) => stri
         <h1 className="page-title">{t('trkTitle')}</h1>
         <div className="page-sub">{t('trkSubtitle')}</div>
       </div>
+    </div>
+  );
+}
+
+const STATUS_FILTERS: readonly WorkerStatusFilter[] = ['live', 'stale', 'dead', 'all'];
+const FILTER_LABEL_KEY: Record<WorkerStatusFilter, string> = {
+  live: 'trkLive', stale: 'trkStale', dead: 'trkDead', all: 'trkFilterAll',
+};
+
+function FleetCard({ locale, onError, showToast }: {
+  locale: string;
+  onError: (err: unknown) => void;
+  showToast?: (msg: string, kind?: 'success' | 'error') => void;
+}) {
+  const { t } = useT();
+  const [filter, setFilter] = useState<WorkerStatusFilter>('live');
+  const [workers, setWorkers] = useState<TrackerWorker[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const loadingRef = useRef(false);
+  const loadedRef = useRef(0);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  loadedRef.current = workers?.length ?? 0;
+
+  const load = useCallback((offset: number, limit: number, append: boolean) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    trackerApi.listWorkers({ status: filter, limit, offset })
+      .then(page => {
+        setTotal(page.total);
+        setNow(Date.now());
+        setWorkers(prev => append ? [...(prev ?? []), ...page.workers] : page.workers);
+      })
+      .catch(onError)
+      .finally(() => { loadingRef.current = false; });
+  }, [filter, onError]);
+
+  // Filter change (and mount): start over from the first page.
+  useEffect(() => {
+    setWorkers(null);
+    setTotal(0);
+    load(0, WORKERS_PAGE_SIZE, false);
+  }, [load]);
+
+  // Liveness is time-derived, so the loaded window refetches on a timer —
+  // as one request covering everything currently on screen, not per page.
+  useEffect(() => {
+    const timer = setInterval(
+      () => load(0, Math.max(loadedRef.current, WORKERS_PAGE_SIZE), false),
+      FLEET_REFRESH_MS,
+    );
+    return () => clearInterval(timer);
+  }, [load]);
+
+  // Infinite scroll: when the sentinel under the table becomes visible and
+  // more rows exist, append the next page.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting) && loadedRef.current < total) {
+        load(loadedRef.current, WORKERS_PAGE_SIZE, true);
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [load, total]);
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div>
+          <div className="card-title">{t('trkFleetTitle')}</div>
+          <div className="card-sub">
+            {workers ? t('trkFleetSub', { shown: String(workers.length), n: String(total) }) : '…'}
+          </div>
+        </div>
+        <div className="seg" role="tablist" aria-label={t('trkFleetTitle')}>
+          {STATUS_FILTERS.map(f => (
+            <button key={f} type="button" role="tab" aria-selected={filter === f}
+              className={filter === f ? 'active' : ''}
+              onClick={() => setFilter(f)}>
+              {t(FILTER_LABEL_KEY[f])}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t('trkColStatus')}</th>
+              <th>{t('trkColWorker')}</th>
+              <th>{t('trkColRole')}</th>
+              <th>{t('trkColStarted')}</th>
+              <th>{t('trkColHeartbeat')}</th>
+              <th>{t('trkColPoll')}</th>
+              <th>{t('trkColEvaluate')}</th>
+              <th>{t('trkColNotify')}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {(workers ?? []).map(w => (
+              <WorkerRow key={w.workerId} worker={w} now={now} locale={locale}
+                onRemove={() => {
+                  trackerApi.removeWorker(w.workerId)
+                    .then(() => {
+                      setWorkers(ws => (ws ?? []).filter(x => x.workerId !== w.workerId));
+                      setTotal(n => Math.max(0, n - 1));
+                      showToast?.(t('trkWorkerRemoved'));
+                    })
+                    .catch(onError);
+                }}
+              />
+            ))}
+          </tbody>
+        </table>
+        {workers?.length === 0 && (
+          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>
+            {t('trkFleetEmpty')}
+          </div>
+        )}
+      </div>
+      <div ref={sentinelRef} style={{ height: 1 }} />
     </div>
   );
 }
