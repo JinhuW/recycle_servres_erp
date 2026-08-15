@@ -7,6 +7,11 @@ import type {Sql} from './db.ts';
 export type WorkerRole = 'worker' | 'api';
 export type LoopName = 'poll' | 'evaluate' | 'notify';
 
+// Liveness thresholds, shared by the API's status filter and any UI: three
+// missed 30s beats reads as stale, ten silent minutes as dead.
+export const STALE_AFTER_S = 90;
+export const DEAD_AFTER_S = 600;
+
 export interface LoopStatus {
   lastSuccessAt: string | null;
   lastWorkAt: string | null;

@@ -419,6 +419,47 @@ describe('workers endpoints', () => {
     expect(live.loops['poll']!.lastSuccessAt).toBe('2026-08-14T12:00:00.000Z');
   });
 
+  it('filters workers by liveness status', async () => {
+    await seedWorker('w-live', 'worker', 5);
+    await seedWorker('w-stale', 'worker', 200);
+    await seedWorker('w-dead', 'worker', 4000);
+
+    const live = await (await request('/api/workers?status=live')).json() as
+      {workers: Array<{workerId: string}>; total: number};
+    const stale = await (await request('/api/workers?status=stale')).json() as
+      {workers: Array<{workerId: string}>; total: number};
+    const dead = await (await request('/api/workers?status=dead')).json() as
+      {workers: Array<{workerId: string}>; total: number};
+    const all = await (await request('/api/workers?status=all')).json() as
+      {workers: Array<{workerId: string}>; total: number};
+
+    expect(live.workers.map((w) => w.workerId)).toEqual(['w-live']);
+    expect(live.total).toBe(1);
+    expect(stale.workers.map((w) => w.workerId)).toEqual(['w-stale']);
+    expect(dead.workers.map((w) => w.workerId)).toEqual(['w-dead']);
+    expect(all.total).toBe(3);
+  });
+
+  it('orders by most recent heartbeat and paginates with limit/offset', async () => {
+    await seedWorker('w-a', 'worker', 30);
+    await seedWorker('w-b', 'worker', 10);
+    await seedWorker('w-c', 'worker', 20);
+
+    const first = await (await request('/api/workers?limit=2&offset=0')).json() as
+      {workers: Array<{workerId: string}>; total: number};
+    const second = await (await request('/api/workers?limit=2&offset=2')).json() as
+      {workers: Array<{workerId: string}>; total: number};
+
+    expect(first.workers.map((w) => w.workerId)).toEqual(['w-b', 'w-c']);
+    expect(first.total).toBe(3);
+    expect(second.workers.map((w) => w.workerId)).toEqual(['w-a']);
+    expect(second.total).toBe(3);
+  });
+
+  it('rejects an unknown status value', async () => {
+    expect((await request('/api/workers?status=zombie')).status).toBe(400);
+  });
+
   it('deletes a decommissioned worker row', async () => {
     await seedWorker('w-old', 'worker', 9999);
 

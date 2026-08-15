@@ -57,6 +57,10 @@ for IP in $IPS; do
     ssh "${SSH_OPTS[@]}" "ubuntu@${IP}" \
       "echo '${GHCR_READ_TOKEN}' | sudo docker login ghcr.io -u '${GHCR_USERNAME}' --password-stdin &&
        sudo docker pull '${IMAGE}' &&
+       # Graceful stop first: SIGTERM reaches node (PID 1), which releases
+       # claims and deletes its fleet row. rm -f alone SIGKILLs and leaves the
+       # old worker lingering as stale/dead in the fleet view.
+       { sudo docker stop -t 35 tracker 2>/dev/null || true; } &&
        sudo docker rm -f tracker 2>/dev/null || true &&
        sudo docker run -d --name tracker --restart unless-stopped \
          --env-file /opt/reddits_tracker/.env '${IMAGE}' &&

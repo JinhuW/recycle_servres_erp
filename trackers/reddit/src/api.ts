@@ -5,7 +5,7 @@
 import {Hono} from 'hono';
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
-import type {LoopName, LoopStatus} from './heartbeat.ts';
+import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
 import {sendMessage} from './telegram.ts';
@@ -175,23 +175,47 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({deleted: rows[0]!['name']});
   });
 
-  // Fleet visibility. Staleness is judged by the caller from
-  // secondsSinceHeartbeat so this endpoint stays a plain read.
+  // Fleet visibility, filterable by liveness and paginated for the UI's
+  // infinite scroll. Most recently heard-from first.
+  const WORKER_STATUSES = ['all', 'live', 'stale', 'dead'] as const;
+
   app.get('/api/workers', async (c) => {
-    const rows = await deps.sql<Array<{
-      worker_id: string;
-      role: string;
-      started_at: Date;
-      last_heartbeat_at: Date;
-      seconds_since_heartbeat: number;
-      loops: Record<LoopName, LoopStatus>;
-    }>>`
-      SELECT worker_id, role, started_at, last_heartbeat_at,
-             EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at))::float8 AS seconds_since_heartbeat,
-             loops
-        FROM workers ORDER BY worker_id`;
+    const status = c.req.query('status') ?? 'all';
+    if (!(WORKER_STATUSES as readonly string[]).includes(status)) {
+      return c.json({error: `status must be one of ${WORKER_STATUSES.join(', ')}`}, 400);
+    }
+    const limit = parseLimit(c.req.query('limit'), 100);
+    const rawOffset = Number(c.req.query('offset') ?? 0);
+    const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+
+    const {sql} = deps;
+    const age = sql`EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at))`;
+    const statusFilter =
+      status === 'live' ? sql`WHERE ${age} < ${STALE_AFTER_S}`
+      : status === 'stale' ? sql`WHERE ${age} >= ${STALE_AFTER_S} AND ${age} < ${DEAD_AFTER_S}`
+      : status === 'dead' ? sql`WHERE ${age} >= ${DEAD_AFTER_S}`
+      : sql``;
+
+    const [countRows, rows] = await Promise.all([
+      sql<Array<{total: string}>>`SELECT COUNT(*)::text AS total FROM workers ${statusFilter}`,
+      sql<Array<{
+        worker_id: string;
+        role: string;
+        started_at: Date;
+        last_heartbeat_at: Date;
+        seconds_since_heartbeat: number;
+        loops: Record<LoopName, LoopStatus>;
+      }>>`
+        SELECT worker_id, role, started_at, last_heartbeat_at,
+               EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at))::float8 AS seconds_since_heartbeat,
+               loops
+          FROM workers ${statusFilter}
+         ORDER BY last_heartbeat_at DESC, worker_id
+         LIMIT ${limit} OFFSET ${offset}`,
+    ]);
 
     return c.json({
+      total: Number(countRows[0]?.total ?? 0),
       workers: rows.map((r) => ({
         workerId: r.worker_id,
         role: r.role,
