@@ -46,8 +46,13 @@ export async function notifyOnce(deps: NotifyDeps): Promise<boolean> {
       // A partial delivery still counts as sent: retrying would spam the chats
       // that already received it, which is worse than one logged miss.
       await markNotified(sql, workerId, post.reddit_id);
-      logger.info('alert sent', {
+      logger.event('alert_sent', {
         redditId: post.reddit_id,
+        subreddit: post.subreddit,
+        title: post.title,
+        url: post.url,
+        summary: post.llm_summary ?? post.title,
+        price: post.llm_price,
         transport: deps.alerts.transport,
         delivered: report.delivered.length,
         failed: report.failed.length,

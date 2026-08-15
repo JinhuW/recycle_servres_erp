@@ -10,6 +10,13 @@ export interface Logger {
   info(message: string, fields?: Record<string, unknown>): void;
   warn(message: string, fields?: Record<string, unknown>): void;
   error(message: string, fields?: Record<string, unknown>): void;
+  /**
+   * Emits a machine-readable event as one pure-JSON line (no text prefix), so
+   * a log shipper can parse it into fields and OpenSearch can filter on them
+   * (`event: post_evaluated AND verdict: target`). Always emitted regardless
+   * of log level: events are data, not diagnostics.
+   */
+  event(name: string, fields: Record<string, unknown>): void;
   child(scope: string): Logger;
 }
 
@@ -36,11 +43,22 @@ export function createLogger(workerId: string, level: string, scope?: string): L
     else console.log(line);
   };
 
+  const emitEvent = (name: string, fields: Record<string, unknown>): void => {
+    // Stable key order: identity first, then the payload. One line, no prefix.
+    console.log(JSON.stringify({
+      time: new Date().toISOString(),
+      worker: workerId,
+      event: name,
+      ...fields,
+    }));
+  };
+
   return {
     debug: (m, f) => emit('debug', m, f),
     info: (m, f) => emit('info', m, f),
     warn: (m, f) => emit('warn', m, f),
     error: (m, f) => emit('error', m, f),
+    event: emitEvent,
     child: (childScope) => createLogger(workerId, level, scope ? `${scope}:${childScope}` : childScope),
   };
 }

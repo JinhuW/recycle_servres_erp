@@ -35,11 +35,26 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
   const systemPrompt = composeEvalPrompt(settings.evalPrompt, enabledRules);
 
   for (const post of posts) {
+    // Every outcome ends in exactly one post_evaluated event carrying the
+    // post itself and the filter's verdict, so the prompt's behaviour can be
+    // audited from OpenSearch alone (event: post_evaluated, verdict: …).
+    const postFields = {
+      redditId: post.reddit_id,
+      subreddit: post.subreddit,
+      title: post.title,
+      // Enough body to judge the verdict without shipping 8k-char posts.
+      selftext: post.selftext.slice(0, 500),
+      author: post.author,
+      url: post.url,
+      postedAt: post.posted_at.toISOString(),
+      model: settings.llmModel,
+    };
+
     // Re-check age here as well as at insert: a post can go stale while it
     // waits behind a backlog, and a stale listing is not worth paying for.
     if (post.posted_at.getTime() < cutoff) {
       await rejectPost(sql, workerId, post.reddit_id, 'too_old');
-      logger.debug('skipped stale post', {redditId: post.reddit_id});
+      logger.event('post_evaluated', {...postFields, verdict: 'rejected', rejectReason: 'too_old'});
       continue;
     }
 
@@ -56,6 +71,12 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
     if (result.kind === 'error') {
       await releasePostFailure(sql, workerId, post.reddit_id);
       logger.warn('evaluation failed', {redditId: post.reddit_id, error: result.message});
+      logger.event('post_evaluated', {
+        ...postFields,
+        verdict: 'error',
+        error: result.message,
+        attempt: post.attempts + 1,
+      });
       continue;
     }
 
@@ -67,10 +88,13 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
       raw: evaluation.raw,
     });
 
-    logger.info(evaluation.isTarget ? 'target found' : 'post rejected', {
-      redditId: post.reddit_id,
-      subreddit: post.subreddit,
-      title: post.title.slice(0, 80),
+    logger.event('post_evaluated', {
+      ...postFields,
+      verdict: evaluation.isTarget ? 'target' : 'rejected',
+      ...(evaluation.isTarget ? {} : {rejectReason: 'not_target'}),
+      summary: evaluation.summary,
+      price: evaluation.price,
+      reasoning: evaluation.reasoning,
     });
   }
 
