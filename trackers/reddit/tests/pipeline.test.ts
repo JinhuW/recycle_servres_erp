@@ -9,6 +9,7 @@ import {insertNewPosts} from '../src/claims.ts';
 import {createLogger} from '../src/logger.ts';
 import {evaluateOnce, type EvaluateDeps} from '../src/loops/evaluate.ts';
 import {notifyOnce, type NotifyDeps} from '../src/loops/notify.ts';
+import {createRule, updateRule} from '../src/rules.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
 
@@ -111,6 +112,24 @@ describe('evaluateOnce', () => {
       llm_summary: 'Dell R730xd, $650 shipped, Colorado.',
       llm_price: '$650 shipped',
     });
+  });
+
+  it('appends enabled rules to the evaluator prompt and leaves disabled ones out', async () => {
+    await db.sql`DELETE FROM rules`;
+    await createRule(db.sql, {name: 'EPYC lots', prompt: 'Alert on bulk EPYC CPU lots.'});
+    const off = await createRule(db.sql, {name: 'Off', prompt: 'Never mention this.'});
+    await updateRule(db.sql, off.id, {enabled: false});
+    await insertNewPosts(db.sql, [post()]);
+    const spy = stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
+
+    await evaluateOnce(evaluateDeps());
+
+    const request = JSON.parse((spy.mock.calls[0]![1] as RequestInit).body as string) as {
+      messages: Array<{role: string; content: string}>;
+    };
+    const systemPrompt = request.messages[0]!.content;
+    expect(systemPrompt).toContain('EPYC lots: Alert on bulk EPYC CPU lots.');
+    expect(systemPrompt).not.toContain('Never mention this.');
   });
 
   it('drops a post the model rejected', async () => {

@@ -31,6 +31,8 @@ afterEach(() => {
 beforeEach(async () => {
   await db.sql`DELETE FROM posts`;
   await db.sql`DELETE FROM subreddits`;
+  await db.sql`DELETE FROM workers`;
+  await db.sql`DELETE FROM rules`;
   await db.sql`UPDATE settings SET value = '[]'::jsonb WHERE key = 'telegram_chat_ids'`;
 });
 
@@ -379,5 +381,138 @@ describe('POST /api/telegram/test', () => {
     const res = await request('/api/telegram/test', {method: 'POST', body: '{}'});
 
     expect(res.status).toBe(502);
+  });
+});
+
+describe('workers endpoints', () => {
+  async function seedWorker(id: string, role: string, heartbeatAgoSeconds: number): Promise<void> {
+    await db.sql`
+      INSERT INTO workers (worker_id, role, started_at, last_heartbeat_at, loops)
+      VALUES (${id}, ${role}, NOW() - INTERVAL '1 day',
+              NOW() - ${heartbeatAgoSeconds} * INTERVAL '1 second',
+              '{"poll": {"lastSuccessAt": "2026-08-14T12:00:00.000Z", "lastWorkAt": null}}'::jsonb)`;
+  }
+
+  it('requires auth', async () => {
+    const res = await app.request('/api/workers');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('lists workers with camelCase fields and seconds since the last heartbeat', async () => {
+    await seedWorker('w-live', 'worker', 5);
+    await seedWorker('w-api', 'api', 120);
+
+    const body = await (await request('/api/workers')).json() as {
+      workers: Array<{
+        workerId: string; role: string; startedAt: string; lastHeartbeatAt: string;
+        secondsSinceHeartbeat: number;
+        loops: Record<string, {lastSuccessAt: string | null; lastWorkAt: string | null}>;
+      }>;
+    };
+
+    expect(body.workers.map((w) => w.workerId).sort()).toEqual(['w-api', 'w-live']);
+    const live = body.workers.find((w) => w.workerId === 'w-live')!;
+    expect(live.role).toBe('worker');
+    expect(live.secondsSinceHeartbeat).toBeGreaterThanOrEqual(4);
+    expect(live.secondsSinceHeartbeat).toBeLessThan(30);
+    expect(live.loops['poll']!.lastSuccessAt).toBe('2026-08-14T12:00:00.000Z');
+  });
+
+  it('deletes a decommissioned worker row', async () => {
+    await seedWorker('w-old', 'worker', 9999);
+
+    const res = await request('/api/workers/w-old', {method: 'DELETE'});
+
+    expect(res.status).toBe(200);
+    expect(await (await request('/api/workers')).json()).toMatchObject({workers: []});
+  });
+
+  it('404s when deleting an unknown worker', async () => {
+    const res = await request('/api/workers/nope', {method: 'DELETE'});
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('rules endpoints', () => {
+  it('requires auth', async () => {
+    const res = await app.request('/api/rules');
+
+    expect(res.status).toBe(401);
+  });
+
+  it('creates a rule and returns it camelCased', async () => {
+    const res = await request('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify({name: 'EPYC lots', prompt: 'Alert on bulk EPYC CPU lots.'}),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json() as {rule: {id: number; name: string; enabled: boolean; createdAt: string}};
+    expect(body.rule).toMatchObject({name: 'EPYC lots', enabled: true});
+    expect(body.rule.id).toBeGreaterThan(0);
+    expect(typeof body.rule.createdAt).toBe('string');
+  });
+
+  it('rejects a rule with a blank name or prompt', async () => {
+    const noName = await request('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify({name: '  ', prompt: 'p'}),
+    });
+    const noPrompt = await request('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify({name: 'n', prompt: ''}),
+    });
+
+    expect(noName.status).toBe(400);
+    expect(noPrompt.status).toBe(400);
+  });
+
+  it('lists rules in creation order', async () => {
+    await request('/api/rules', {method: 'POST', body: JSON.stringify({name: 'A', prompt: 'a'})});
+    await request('/api/rules', {method: 'POST', body: JSON.stringify({name: 'B', prompt: 'b'})});
+
+    const body = await (await request('/api/rules')).json() as {rules: Array<{name: string}>};
+
+    expect(body.rules.map((r) => r.name)).toEqual(['A', 'B']);
+  });
+
+  it('patches enabled and prompt independently', async () => {
+    const created = await (await request('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify({name: 'A', prompt: 'a'}),
+    })).json() as {rule: {id: number}};
+
+    const res = await request(`/api/rules/${created.rule.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({enabled: false}),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({rule: {name: 'A', prompt: 'a', enabled: false}});
+  });
+
+  it('404s when patching or deleting an unknown rule', async () => {
+    const patch = await request('/api/rules/999999', {
+      method: 'PATCH',
+      body: JSON.stringify({enabled: false}),
+    });
+    const del = await request('/api/rules/999999', {method: 'DELETE'});
+
+    expect(patch.status).toBe(404);
+    expect(del.status).toBe(404);
+  });
+
+  it('deletes a rule', async () => {
+    const created = await (await request('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify({name: 'A', prompt: 'a'}),
+    })).json() as {rule: {id: number}};
+
+    const res = await request(`/api/rules/${created.rule.id}`, {method: 'DELETE'});
+
+    expect(res.status).toBe(200);
+    expect(await (await request('/api/rules')).json()).toMatchObject({rules: []});
   });
 });

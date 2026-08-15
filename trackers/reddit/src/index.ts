@@ -8,6 +8,7 @@ import {createApi} from './api.ts';
 import {releaseAllClaims} from './claims.ts';
 import {loadConfig} from './config.ts';
 import {createDb} from './db.ts';
+import {heartbeatOnce, LoopRegistry, removeWorker} from './heartbeat.ts';
 import {createLogger} from './logger.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
 import {notifyOnce} from './loops/notify.ts';
@@ -21,6 +22,33 @@ const logger = createLogger(config.workerId, config.logLevel);
 const sql = createDb(config.databaseUrl);
 const settings = new SettingsStore(sql);
 const startedAt = Date.now();
+const registry = new LoopRegistry();
+
+const HEARTBEAT_IDLE_MS = 30_000;
+
+function startHeartbeat(role: 'worker' | 'api'): LoopHandle {
+  return startLoop(
+    {name: 'heartbeat', logger: logger.child('heartbeat'), idleMs: HEARTBEAT_IDLE_MS},
+    () => heartbeatOnce({
+      sql,
+      workerId: config.workerId,
+      role,
+      startedAt: new Date(startedAt),
+      registry,
+    }),
+  );
+}
+
+/** Clean shutdown deletes our fleet row; a crash leaves it to go stale. */
+async function deregister(): Promise<void> {
+  try {
+    await removeWorker(sql, config.workerId);
+  } catch (e) {
+    logger.warn('could not remove worker row on shutdown', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
 
 let shuttingDown = false;
 
@@ -44,18 +72,22 @@ async function runApi(): Promise<void> {
 
   const server = serve({fetch: app.fetch, port: config.apiPort});
   logger.info('api listening', {port: config.apiPort});
+  const heartbeat = startHeartbeat('api');
 
   await new Promise<void>((resolve) => {
     const shutdown = (signal: string) => {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info('shutting down', {signal});
+      heartbeat.stop();
       server.close(() => resolve());
     };
     process.once('SIGTERM', () => shutdown('SIGTERM'));
     process.once('SIGINT', () => shutdown('SIGINT'));
   });
 
+  await heartbeat.stopped;
+  await deregister();
   await sql.end();
 }
 
@@ -68,35 +100,36 @@ async function runWorker(): Promise<void> {
   const loops: LoopHandle[] = [
     startLoop(
       {name: 'poll', logger: logger.child('poll'), idleMs: 15_000, busyMs: 1_000},
-      () => pollOnce({
+      registry.wrap('poll', () => pollOnce({
         sql,
         workerId: config.workerId,
         userAgent: config.redditUserAgent,
         pacer,
         settings,
         logger: logger.child('poll'),
-      }),
+      })),
     ),
     startLoop(
       {name: 'evaluate', logger: logger.child('evaluate'), idleMs: 10_000, busyMs: 500},
-      () => evaluateOnce({
+      registry.wrap('evaluate', () => evaluateOnce({
         sql,
         workerId: config.workerId,
         apiKey: config.openrouterApiKey,
         settings,
         logger: logger.child('evaluate'),
-      }),
+      })),
     ),
     startLoop(
       {name: 'notify', logger: logger.child('notify'), idleMs: 10_000, busyMs: 500},
-      () => notifyOnce({
+      registry.wrap('notify', () => notifyOnce({
         sql,
         workerId: config.workerId,
         alerts: createAlertSender(config.alertTransport, config.telegramBotToken),
         settings,
         logger: logger.child('notify'),
-      }),
+      })),
     ),
+    startHeartbeat('worker'),
   ];
 
   logger.info('worker started', {
@@ -128,6 +161,7 @@ async function runWorker(): Promise<void> {
       error: e instanceof Error ? e.message : String(e),
     });
   }
+  await deregister();
   await sql.end();
   logger.info('worker stopped');
 }

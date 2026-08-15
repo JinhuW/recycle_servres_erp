@@ -5,6 +5,8 @@
 import {Hono} from 'hono';
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
+import type {LoopName, LoopStatus} from './heartbeat.ts';
+import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
 import {sendMessage} from './telegram.ts';
 
@@ -171,6 +173,86 @@ export function createApi(deps: ApiDeps): Hono {
       RETURNING name`;
     if (rows.length === 0) return c.json({error: 'not found'}, 404);
     return c.json({deleted: rows[0]!['name']});
+  });
+
+  // Fleet visibility. Staleness is judged by the caller from
+  // secondsSinceHeartbeat so this endpoint stays a plain read.
+  app.get('/api/workers', async (c) => {
+    const rows = await deps.sql<Array<{
+      worker_id: string;
+      role: string;
+      started_at: Date;
+      last_heartbeat_at: Date;
+      seconds_since_heartbeat: number;
+      loops: Record<LoopName, LoopStatus>;
+    }>>`
+      SELECT worker_id, role, started_at, last_heartbeat_at,
+             EXTRACT(EPOCH FROM (NOW() - last_heartbeat_at))::float8 AS seconds_since_heartbeat,
+             loops
+        FROM workers ORDER BY worker_id`;
+
+    return c.json({
+      workers: rows.map((r) => ({
+        workerId: r.worker_id,
+        role: r.role,
+        startedAt: r.started_at,
+        lastHeartbeatAt: r.last_heartbeat_at,
+        secondsSinceHeartbeat: r.seconds_since_heartbeat,
+        loops: r.loops,
+      })),
+    });
+  });
+
+  app.delete('/api/workers/:id', async (c) => {
+    const rows = await deps.sql`
+      DELETE FROM workers WHERE worker_id = ${c.req.param('id')} RETURNING worker_id`;
+    if (rows.length === 0) return c.json({error: 'not found'}, 404);
+    return c.json({deleted: c.req.param('id')});
+  });
+
+  const ruleJson = (rule: {
+    id: number; name: string; prompt: string; enabled: boolean; createdAt: Date; updatedAt: Date;
+  }) => ({rule});
+
+  app.get('/api/rules', async (c) => c.json({rules: await listRules(deps.sql)}));
+
+  app.post('/api/rules', async (c) => {
+    const body = await c.req.json().catch(() => null) as
+      {name?: unknown; prompt?: unknown} | null;
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    if (!name || !prompt) {
+      return c.json({error: 'name and prompt must be non-empty strings'}, 400);
+    }
+
+    return c.json(ruleJson(await createRule(deps.sql, {name, prompt})), 201);
+  });
+
+  app.patch('/api/rules/:id', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) return c.json({error: 'not found'}, 404);
+
+    const body = await c.req.json().catch(() => null) as
+      {name?: unknown; prompt?: unknown; enabled?: unknown} | null;
+    if (!body) return c.json({error: 'body must be a JSON object'}, 400);
+
+    const patch: {name?: string; prompt?: string; enabled?: boolean} = {};
+    if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim();
+    if (typeof body.prompt === 'string' && body.prompt.trim()) patch.prompt = body.prompt.trim();
+    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+    if (Object.keys(patch).length === 0) return c.json({error: 'nothing to update'}, 400);
+
+    const rule = await updateRule(deps.sql, id, patch);
+    if (!rule) return c.json({error: 'not found'}, 404);
+    return c.json(ruleJson(rule));
+  });
+
+  app.delete('/api/rules/:id', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id) || !(await deleteRule(deps.sql, id))) {
+      return c.json({error: 'not found'}, 404);
+    }
+    return c.json({deleted: id});
   });
 
   app.get('/api/settings', async (c) => c.json({settings: await deps.settings.all()}));

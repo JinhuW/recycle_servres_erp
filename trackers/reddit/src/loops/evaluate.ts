@@ -7,6 +7,7 @@ import {claimPosts, recordEvaluation, rejectPost, releasePostFailure} from '../c
 import type {Sql} from '../db.ts';
 import {evaluatePost} from '../llm.ts';
 import type {Logger} from '../logger.ts';
+import {composeEvalPrompt, listRules} from '../rules.ts';
 import type {SettingsStore} from '../settings.ts';
 
 /** Small batch: each item is a paid API call, and claims should turn over fast. */
@@ -28,6 +29,10 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
 
   const settings = await deps.settings.get();
   const cutoff = Date.now() - settings.maxPostAgeHours * 3600_000;
+  // One cheap SELECT per batch keeps rule edits reaching the fleet as fast as
+  // a settings change, without another cache to invalidate.
+  const enabledRules = (await listRules(sql)).filter((r) => r.enabled);
+  const systemPrompt = composeEvalPrompt(settings.evalPrompt, enabledRules);
 
   for (const post of posts) {
     // Re-check age here as well as at insert: a post can go stale while it
@@ -45,7 +50,7 @@ export async function evaluateOnce(deps: EvaluateDeps): Promise<boolean> {
         selftext: post.selftext,
         author: post.author,
       },
-      {apiKey: deps.apiKey, model: settings.llmModel, systemPrompt: settings.evalPrompt},
+      {apiKey: deps.apiKey, model: settings.llmModel, systemPrompt},
     );
 
     if (result.kind === 'error') {
