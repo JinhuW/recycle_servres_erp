@@ -51,9 +51,15 @@ export function normalizeSubredditName(input: string): string | null {
   return SUBREDDIT_NAME_RE.test(name) ? name.toLowerCase() : null;
 }
 
+export type WorkerStatusFilter = 'all' | 'live' | 'stale' | 'dead';
+
+export const WORKERS_PAGE_SIZE = 15;
+
 export const trackerApi = {
-  listWorkers: () =>
-    api.get<{ workers: TrackerWorker[] }>('/api/tracker/workers').then(r => r.workers),
+  listWorkers: (params: { status: WorkerStatusFilter; limit: number; offset: number }) =>
+    api.get<{ workers: TrackerWorker[]; total: number }>(
+      `/api/tracker/workers?status=${params.status}&limit=${params.limit}&offset=${params.offset}`,
+    ),
   removeWorker: (workerId: string) =>
     api.delete(`/api/tracker/workers/${encodeURIComponent(workerId)}`),
 

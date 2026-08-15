@@ -58,6 +58,20 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tracker-secret');
   });
 
+  it('forwards the query string on worker listings', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = stubTracker(200, { workers: [], total: 0 });
+
+    const r = await api('GET', '/api/tracker/workers?status=live&limit=15&offset=30', {
+      token,
+      env: TRACKER_ENV,
+    });
+
+    expect(r.status).toBe(200);
+    const [url] = spy.mock.calls[0] as [string];
+    expect(url).toBe('http://tracker.internal:8080/api/workers?status=live&limit=15&offset=30');
+  });
+
   it('forwards a POST body and preserves the upstream status', async () => {
     const { token } = await loginAs(ALEX);
     const spy = stubTracker(201, { rule: { id: 1, name: 'EPYC lots' } });
