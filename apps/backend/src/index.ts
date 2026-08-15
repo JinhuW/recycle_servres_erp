@@ -22,6 +22,7 @@ import ordersRoutes from './routes/orders';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
+import trackerRoutes from './routes/tracker';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
@@ -258,6 +259,8 @@ app.route('/api/activity', activityRoutes);
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
 // list above. csrfGuard still runs from the global stack.
 app.route('/api/oauth/clients', oauthAdmin);
+// Self-applies authMiddleware + manager gate (oauthAdmin pattern).
+app.route('/api/tracker', trackerRoutes);
 
 // Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
 // and are bearer-equivalent secrets — the only gate to a vendor's data. A
