@@ -12,6 +12,10 @@ export type Env = {
   STUB_LOW_CONF?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
+  // Reddit tracker admin proxy (/api/tracker/*). Both unset → proxy answers
+  // 501 so the UI can show a "not configured" state instead of erroring.
+  TRACKER_API_URL?: string;
+  TRACKER_API_TOKEN?: string;
   // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
   // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
   R2_S3_ENDPOINT?: string;

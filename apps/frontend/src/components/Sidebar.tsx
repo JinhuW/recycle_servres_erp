@@ -7,7 +7,7 @@ import type { Role } from '../lib/types';
 export type DesktopView =
   | 'dashboard' | 'submit' | 'history' | 'market'
   | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers'
-  | 'activity' | 'settings';
+  | 'activity' | 'tracker' | 'settings';
 
 type NavItem = { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string };
 
@@ -31,6 +31,7 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
     tKey: 'nav_group_oversight',
     items: [
       { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
+      { id: 'tracker',    tKey: 'nav_tracker',    icon: 'globe',      roles: ['manager'] },
       { id: 'settings',   tKey: 'nav_settings',   icon: 'settings',   roles: ['manager'] },
     ],
   },

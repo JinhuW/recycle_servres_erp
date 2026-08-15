@@ -40,6 +40,15 @@ describe('pathToDesktopView — transfers', () => {
   });
 });
 
+describe('pathToDesktopView — tracker', () => {
+  it('resolves the tracker path', () => {
+    expect(pathToDesktopView('/tracker')).toBe('tracker');
+  });
+  it('does not match tracker sub-paths', () => {
+    expect(pathToDesktopView('/tracker/x')).toBe('dashboard');
+  });
+});
+
 describe('activityRecordHref', () => {
   it('hash-prefixes a purchase-order link', () => {
     expect(activityRecordHref('po', 'PO-1366')).toBe('#/purchase-orders/PO-1366');
