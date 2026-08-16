@@ -704,14 +704,15 @@ describe('/oauth/token', () => {
     });
     expect(r.status).toBe(200);
     const at = (r.body as Record<string, unknown>).access_token as string;
-    expect(((r.body as Record<string, unknown>).scope as string).split(' ').sort())
-      .toEqual(['market:read', 'sellorder:read']);
+    // The role ceiling: everything but market:read is dropped for a purchaser —
+    // sell-order reads included, not just the write scopes.
+    expect((r.body as Record<string, unknown>).scope).toBe('market:read');
     const list = await api('POST', '/api/mcp', {
       headers: { authorization: `Bearer ${at}` },
       body: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
     });
     const names = ((list.body as any).result.tools as { name: string }[]).map((t) => t.name).sort();
-    expect(names).toEqual(['get_market_value', 'list_market_values', 'search_sellable_inventory']);
+    expect(names).toEqual(['get_market_value', 'list_market_values']);
     const pn = (await sql<{ part_number: string }[]>`
       SELECT part_number FROM ref_prices
       WHERE part_number IS NOT NULL AND part_number <> '' LIMIT 1

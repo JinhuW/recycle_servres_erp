@@ -8,16 +8,17 @@ import { getDb } from '../db';
 import { authMiddleware, verifyToken } from '../auth';
 import { createOAuthClient, findOAuthClient, verifyClientSecret, listOAuthClients, revokeOAuthClient } from './clients';
 import { verifyChallenge } from './pkce';
-import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily, dropWriteUnlessManager } from './tokens';
+import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshFamily, restrictScopesToRole } from './tokens';
 import { oauthGrantsTotal } from '../metrics';
 
 const CODE_TTL_SEC = 600;
 const sha256hex = (s: string) => createHash('sha256').update(s).digest('hex');
 
 const KNOWN_SCOPES = new Set<string>(['market:read', 'market:write', 'sellorder:read', 'sellorder:write']);
-// :write scopes through the interactive code flow are reserved for managers; a
-// non-manager's consent yields a read-only grant. Service clients still get
-// write via the admin-minted client_credentials path. The same rule is
+// The interactive code flow is role-ceilinged: a manager's consent can grant
+// any scope; a non-manager's yields market:read only (price lookup — their MCP
+// use case; sell-order data stays manager-only). Service clients still get any
+// scope via the admin-minted client_credentials path. The same rule is
 // re-applied on refresh rotation (see oauth/tokens.ts).
 
 const wellKnown = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -238,10 +239,10 @@ oauth.get('/authorize', async (c) => {
     const next = encodeURIComponent('/oauth/authorize?' + new URLSearchParams(q).toString());
     return c.redirect(`/login?next=${next}`, 302);
   }
-  // Gate market:write on the consenter's role so the consent screen shows the
-  // scope that will actually be granted. The role here comes from the 15-min
-  // `at` JWT; /authorize/consent re-checks it against the live DB record.
-  const granted = dropWriteUnlessManager(requested, payload.role);
+  // Apply the role ceiling here so the consent screen shows only the scopes
+  // that will actually be granted. The role comes from the 15-min `at` JWT;
+  // /authorize/consent re-checks it against the live DB record.
+  const granted = restrictScopesToRole(requested, payload.role);
   if (granted.length === 0) return redirectWithError('invalid_scope');
   // Park the request server-side; hand the SPA an opaque handle so the long
   // PKCE challenge stays out of the URL on the consent screen.
@@ -290,8 +291,8 @@ oauth.post('/authorize/consent', authMiddleware, async (c) => {
     }
     // Authoritative scope gate: the pending row was frozen at /authorize using
     // the JWT's role; re-derive against the live DB role so a demotion (or a
-    // tampered row) can't leak market:write to a non-manager.
-    const allowed = dropWriteUnlessManager(row.scopes, user.role);
+    // tampered row) can't leak above-ceiling scopes to a non-manager.
+    const allowed = restrictScopesToRole(row.scopes, user.role);
     // Intersect, never union: the user can only narrow what /authorize already
     // parked, so a tampered request body can't widen the grant past what the
     // client asked for or past what the role permits.
