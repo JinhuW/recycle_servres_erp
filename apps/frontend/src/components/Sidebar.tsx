@@ -32,7 +32,9 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
     items: [
       { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
       { id: 'tracker',    tKey: 'nav_tracker',    icon: 'globe',      roles: ['manager'] },
-      { id: 'settings',   tKey: 'nav_settings',   icon: 'settings',   roles: ['manager'] },
+      // Purchasers get Settings too (Account + Connectors — the MCP connect
+      // page); the admin sections are filtered inside DesktopSettings.
+      { id: 'settings',   tKey: 'nav_settings',   icon: 'settings',   roles: ['manager', 'purchaser'] },
     ],
   },
 ];
