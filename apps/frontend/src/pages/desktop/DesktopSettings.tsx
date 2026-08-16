@@ -32,7 +32,9 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
   { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box' },
   { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings' },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
-  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip', managerOnly: true },
+  // Connectors is visible to every role: purchasers connect ChatGPT/Claude for
+  // read-only market prices; the client-admin cards inside are manager-only.
+  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
