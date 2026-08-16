@@ -67,7 +67,29 @@ function DemandPill({ level }: { level: 'high' | 'medium' | 'low' }) {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-type Sort = 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples';
+type Sort =
+  | 'recent' | 'sell-high' | 'rising' | 'falling' | 'samples'
+  | 'oldest' | 'label-asc' | 'label-desc' | 'part-asc' | 'part-desc'
+  | 'lastsell-high' | 'lastsell-low' | 'maxbuy-high' | 'maxbuy-low'
+  | 'paid-high' | 'paid-low';
+
+// The curated dropdown options; a header click can set any other Sort, and the
+// select then shows a synthetic "sorted by column" entry instead of going blank.
+const DROPDOWN_SORTS: Sort[] = ['recent', 'sell-high', 'rising', 'falling', 'samples'];
+
+// Clickable column headers → server sort values. `first` is the direction a
+// fresh click starts with: text reads ascending, numbers highest-first,
+// Updated newest-first; clicking again flips it.
+const COL_SORTS = {
+  item:    { asc: 'label-asc',    desc: 'label-desc',    first: 'asc' },
+  part:    { asc: 'part-asc',     desc: 'part-desc',     first: 'asc' },
+  sell:    { asc: 'lastsell-low', desc: 'lastsell-high', first: 'desc' },
+  trend:   { asc: 'falling',      desc: 'rising',        first: 'desc' },
+  maxbuy:  { asc: 'maxbuy-low',   desc: 'maxbuy-high',   first: 'desc' },
+  paid:    { asc: 'paid-low',     desc: 'paid-high',     first: 'desc' },
+  updated: { asc: 'oldest',       desc: 'recent',        first: 'desc' },
+} as const satisfies Record<string, { asc: Sort; desc: Sort; first: 'asc' | 'desc' }>;
+type ColKey = keyof typeof COL_SORTS;
 
 export function DesktopMarket() {
   const { t, lang } = useT();
@@ -90,6 +112,29 @@ export function DesktopMarket() {
   // Bumped on every first-page (re)load; lets an in-flight loadMore drop its
   // result when the query shape changed underneath it.
   const genRef = useRef(0);
+
+  const colDir = (col: ColKey): 'asc' | 'desc' | null =>
+    sort === COL_SORTS[col].asc ? 'asc' : sort === COL_SORTS[col].desc ? 'desc' : null;
+  const clickHeader = (col: ColKey) => {
+    const c = COL_SORTS[col];
+    const dir = colDir(col);
+    setSort(dir === null ? c[c.first] : dir === 'asc' ? c.desc : c.asc);
+  };
+  const sortableTh = (col: ColKey, label: string, className?: string, style?: React.CSSProperties) => {
+    const dir = colDir(col);
+    return (
+      <th
+        className={className}
+        style={{ ...style, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+        aria-sort={dir === null ? undefined : dir === 'asc' ? 'ascending' : 'descending'}
+        title={t('mktSortByColumn')}
+        onClick={() => clickHeader(col)}
+      >
+        {label}
+        {dir && <span aria-hidden style={{ marginLeft: 4, fontSize: 9 }}>{dir === 'asc' ? '▲' : '▼'}</span>}
+      </th>
+    );
+  };
 
   // Category, search, sort and the stale filter are all applied server-side so
   // pagination stays consistent; the desktop list pages 100 rows at a time.
@@ -235,6 +280,11 @@ export function DesktopMarket() {
               <option value="rising">{t('mktSortRising')}</option>
               <option value="falling">{t('mktSortFalling')}</option>
               <option value="samples">{t('mktSortSamples')}</option>
+              {/* A header-click sort isn't one of the curated options; without
+                  this the select would render as empty. */}
+              {!DROPDOWN_SORTS.includes(sort) && (
+                <option value={sort} hidden>{t('mktSortByColumn')}</option>
+              )}
             </select>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-muted)', cursor: 'pointer' }}>
               <input
@@ -277,13 +327,13 @@ export function DesktopMarket() {
             </colgroup>
             <thead>
               <tr>
-                <th>{t('mktColItemSpec')}</th>
-                <th>{t('partNumber')}</th>
-                <th className="num" style={{ color: 'var(--pos)' }}>{t('mktColLastSell')}</th>
-                <th>{t('mktCol12wTrend')}</th>
-                <th className="num" style={{ color: 'var(--accent-strong)' }}>{t('mktColMaxBuy')}</th>
-                <th className="num">{t('lastPaid')}</th>
-                <th>{t('mktColUpdated')}</th>
+                {sortableTh('item', t('mktColItemSpec'))}
+                {sortableTh('part', t('partNumber'))}
+                {sortableTh('sell', t('mktColLastSell'), 'num', { color: 'var(--pos)' })}
+                {sortableTh('trend', t('mktCol12wTrend'))}
+                {sortableTh('maxbuy', t('mktColMaxBuy'), 'num', { color: 'var(--accent-strong)' })}
+                {sortableTh('paid', t('lastPaid'), 'num')}
+                {sortableTh('updated', t('mktColUpdated'))}
                 <th></th>
               </tr>
             </thead>

@@ -73,8 +73,8 @@ export function resolvePublicOrigin(c: OriginCtx): string {
 
 // Open registration is the default: RFC 7591 is how Claude and ChatGPT mint a
 // client for a custom connector, and registering on its own grants nothing —
-// a token still requires an interactive login plus consent, and :write survives
-// only a manager's (see dropWriteUnlessManager). Set OAUTH_DCR_OPEN=false to
+// a token still requires an interactive login plus consent, and anything past
+// market:read survives only a manager's (see restrictScopesToRole). Set OAUTH_DCR_OPEN=false to
 // shut it off; /oauth/register then 403s and the discovery document below stops
 // advertising the endpoint, so clients fall back to a manually-issued client_id
 // instead of failing hard.

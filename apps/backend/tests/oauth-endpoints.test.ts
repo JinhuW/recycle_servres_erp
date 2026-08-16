@@ -672,6 +672,64 @@ describe('/oauth/token', () => {
     expect(scope).toBe('market:read');
   });
 
+  it("a purchaser's token drives the MCP market read tools end to end", async () => {
+    // The purchaser MCP story: connect ChatGPT/Claude, consent narrows to the
+    // read scopes, and the resulting bearer can look up a price by part number.
+    const sql = getTestDb();
+    const u = (await sql<{ id: string }[]>`SELECT id FROM users WHERE active LIMIT 1`)[0].id;
+    const { createOAuthClient } = await import('../src/oauth/clients');
+    const c = await createOAuthClient(sql, {
+      name: 'tk-purchaser-mcp', redirectUris: ['https://example.com/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+      scopes: ['market:read', 'market:write', 'sellorder:read', 'sellorder:write'],
+      createdBy: u, public: false,
+    });
+    const verifier = generateVerifier();
+    const { token } = await loginAs(MARCUS);
+    const start = await api('GET',
+      `/oauth/authorize?response_type=code&client_id=${c.clientId}&redirect_uri=https://example.com/cb`
+      + `&code_challenge=${challengeS256(verifier)}&code_challenge_method=S256`
+      + `&scope=${encodeURIComponent('market:read market:write sellorder:read sellorder:write')}`,
+      { token, redirect: 'manual' },
+    );
+    const req = new URL(start.headers.get('location')!, 'http://localhost').searchParams.get('req')!;
+    const consent = await api('POST', '/oauth/authorize/consent', { body: { req }, token, redirect: 'manual' });
+    const code = new URL(consent.headers.get('location')!).searchParams.get('code')!;
+    const r = await api('POST', '/oauth/token', {
+      form: {
+        grant_type: 'authorization_code', code, code_verifier: verifier,
+        redirect_uri: 'https://example.com/cb',
+        client_id: c.clientId, client_secret: c.clientSecret!, // pragma: allowlist secret
+      },
+    });
+    expect(r.status).toBe(200);
+    const at = (r.body as Record<string, unknown>).access_token as string;
+    // The role ceiling: everything but market:read is dropped for a purchaser —
+    // sell-order reads included, not just the write scopes.
+    expect((r.body as Record<string, unknown>).scope).toBe('market:read');
+    const list = await api('POST', '/api/mcp', {
+      headers: { authorization: `Bearer ${at}` },
+      body: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+    });
+    const names = ((list.body as any).result.tools as { name: string }[]).map((t) => t.name).sort();
+    expect(names).toEqual(['get_market_value', 'list_market_values']);
+    const pn = (await sql<{ part_number: string }[]>`
+      SELECT part_number FROM ref_prices
+      WHERE part_number IS NOT NULL AND part_number <> '' LIMIT 1
+    `)[0].part_number;
+    const got = await api('POST', '/api/mcp', {
+      headers: { authorization: `Bearer ${at}` },
+      body: {
+        jsonrpc: '2.0', id: 2, method: 'tools/call',
+        params: { name: 'get_market_value', arguments: { partNumber: pn } },
+      },
+    });
+    const result = (got.body as any).result;
+    expect(result.isError).toBeFalsy();
+    const payload = JSON.parse(result.content[0].text) as { partNumber: string };
+    expect(payload.partNumber.toLowerCase()).toBe(pn.toLowerCase());
+  });
+
   it('token exchange stays port-exact even for a loopback client', async () => {
     // The authorize-time allowlist ignores loopback ports, but the code records
     // the concrete URI — redeeming it against a different port must fail, or a

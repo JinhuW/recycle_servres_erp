@@ -173,8 +173,10 @@ switches the branch out from under the first.
   and globally.  `registration_endpoint` is advertised only when it's on — an
   endpoint that 403s makes clients fail hard instead of falling back to a
   manual client ID.
-- `:write` scopes survive only a **manager's** consent (`dropWriteUnlessManager`),
-  re-derived on every refresh rotation.
+- Interactive consent is role-ceilinged (`restrictScopesToRole`): a **manager**
+  can grant any scope; every other role keeps only `market:read` — sell-order
+  reads included in the drop, not just `:write`.  Re-derived on every refresh
+  rotation.  Manager-minted service clients are exempt.
 - Loopback redirect URIs match **ignoring the port** (RFC 8252 §7.3) so Claude
   Code's ephemeral port works.  That applies to the `/authorize` allowlist only —
   the token endpoint stays an exact match against the URI recorded on the code.

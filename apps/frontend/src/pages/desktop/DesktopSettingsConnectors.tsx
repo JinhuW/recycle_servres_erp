@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { api } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
 import { useT } from '../../lib/i18n';
 import { ConfirmDialog } from './settings/dialogs';
 
 // ─── Connectors ────────────────────────────────────────────────────────────────
-// Manager-only OAuth client admin: lists registered clients (DCR-registered
-// integrations + manually-minted scraper service clients), lets managers create
-// new client_credentials service clients, and revokes existing ones.
-// Backed by /api/oauth/clients (cookie-authed, manager-only).
+// Every role sees the MCP connect card — a purchaser's OAuth consent yields
+// read-only scopes (the backend drops :write for non-managers), which is all
+// they need to look up market prices from ChatGPT/Claude. The client-admin
+// surfaces below it (client list, connector/service client minting, revoke)
+// stay manager-only, matching /api/oauth/clients (cookie-authed, manager-only).
 type Client = {
   id: string;
   name: string;
@@ -58,6 +60,8 @@ const REDIRECT_PRESETS = [
 export function DesktopSettingsConnectors() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const { user } = useAuth();
+  const isManager = user?.role === 'manager';
   const [clients, setClients] = useState<Client[] | null>(null);
   // Connectors self-register when DCR is on, which makes the manual
   // connector-client form dead UI. Only surface it when it's the only way in.
@@ -113,7 +117,8 @@ export function DesktopSettingsConnectors() {
     api.get<{ clients: Client[]; dcrOpen: boolean }>('/api/oauth/clients')
       .then((r) => { setClients(r.clients); setDcrOpen(r.dcrOpen); })
       .catch(handleFetchError);
-  useEffect(() => { load(); }, []);
+  // /api/oauth/clients 403s for non-managers; they only get the connect card.
+  useEffect(() => { if (isManager) load(); }, [isManager]);
 
   async function createServiceClient() {
     const name = newName.trim();
@@ -269,7 +274,7 @@ export function DesktopSettingsConnectors() {
             {t('connectorsTab')}
           </h2>
           <div style={{ fontSize: 13, color: 'var(--fg-subtle)', marginTop: 3 }}>
-            {t('connectorsSub')}
+            {t(isManager ? 'connectorsSub' : 'connectorsSubReadOnly')}
           </div>
         </div>
       </div>
@@ -310,15 +315,17 @@ export function DesktopSettingsConnectors() {
             <li>{t('connectorsMcpStep1')}</li>
             <li>{t('connectorsMcpStep2')}</li>
             <li>{t('connectorsMcpStep3')}</li>
-            <li>{t('connectorsMcpStep4')}</li>
+            {/* Step 4's manager wording points at the minting forms below,
+                which non-managers don't get. */}
+            <li>{t(isManager ? 'connectorsMcpStep4' : 'connectorsMcpStep4ReadOnly')}</li>
           </ol>
           <div className="so-tip" style={{ marginTop: 14 }}>
-            <span>{t('connectorsMcpNote')}</span>
+            <span>{t(isManager ? 'connectorsMcpNote' : 'connectorsReadOnlyNote')}</span>
           </div>
         </div>
       </div>
 
-      {!dcrOpen && (
+      {isManager && !dcrOpen && (
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
           <div>
@@ -415,6 +422,7 @@ export function DesktopSettingsConnectors() {
       </div>
       )}
 
+      {isManager && (
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
           <div>
@@ -488,7 +496,9 @@ export function DesktopSettingsConnectors() {
         </div>
         )}
       </div>
+      )}
 
+      {isManager && (
       <div className="card" style={{ marginTop: 'var(--gap)' }}>
         <div className="card-head">
           <div>
@@ -554,6 +564,7 @@ export function DesktopSettingsConnectors() {
           )}
         </div>
       </div>
+      )}
 
       {pending && (
         <ConfirmDialog

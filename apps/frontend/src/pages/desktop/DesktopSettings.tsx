@@ -24,15 +24,19 @@ type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categorie
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
 // dictionary.
+// Purchasers reach Settings too (the desktop shell no longer bounces them),
+// but only for the self-service sections: Account and Connectors — the MCP
+// connect page, where their OAuth consent yields read-only market access.
+// Everything else drives manager-only APIs.
 const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconName; managerOnly?: boolean }[] = [
   { id: 'account',    labelKey: 'settingsNavAccount',    subKey: 'settingsNavAccountSub',    icon: 'lock' },
-  { id: 'members',    labelKey: 'settingsNavMembers',    subKey: 'settingsNavMembersSub',    icon: 'user' },
-  { id: 'warehouses', labelKey: 'settingsNavWarehouses', subKey: 'settingsNavWarehousesSub', icon: 'warehouse' },
-  { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield' },
-  { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box' },
-  { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings' },
+  { id: 'members',    labelKey: 'settingsNavMembers',    subKey: 'settingsNavMembersSub',    icon: 'user', managerOnly: true },
+  { id: 'warehouses', labelKey: 'settingsNavWarehouses', subKey: 'settingsNavWarehousesSub', icon: 'warehouse', managerOnly: true },
+  { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield', managerOnly: true },
+  { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box', managerOnly: true },
+  { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings', managerOnly: true },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
-  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip', managerOnly: true },
+  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
