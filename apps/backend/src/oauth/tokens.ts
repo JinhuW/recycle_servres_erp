@@ -92,12 +92,15 @@ export async function verifyAccessToken(env: Env, token: string): Promise<Access
 
 const opaqueToken = () => randomBytes(32).toString('hex');
 
-// :write scopes are reserved for managers. Applied at consent time and
-// re-derived from the live role on every refresh rotation so a demotion
-// takes effect within one access-token lifetime.
-const WRITE_SCOPES = new Set(['market:write', 'sellorder:write']);
-export const dropWriteUnlessManager = (scopes: string[], role: string | undefined): string[] =>
-  role === 'manager' ? scopes : scopes.filter(s => !WRITE_SCOPES.has(s));
+// Interactive grants are role-ceilinged: managers can hold any scope; every
+// other role keeps only read access to market prices (their MCP use case is
+// price lookup — sell-order data stays manager-only, reads included). Applied
+// at consent time and re-derived from the live role on every refresh rotation
+// so a demotion takes effect within one access-token lifetime. Service
+// clients (no user) are untouched — their scopes are minted by a manager.
+const NON_MANAGER_SCOPES = new Set(['market:read']);
+export const restrictScopesToRole = (scopes: string[], role: string | undefined): string[] =>
+  role === 'manager' ? scopes : scopes.filter(s => NON_MANAGER_SCOPES.has(s));
 
 export type IssueRefreshInput = {
   clientId: string;
@@ -164,10 +167,10 @@ export async function rotateRefreshToken(
       await revokeRefreshFamily(tx, row.family_id, 'manual');
       return { ok: false, reason: 'revoked' };
     }
-    // Re-derive write scopes from the live role so a demoted manager's grant
-    // narrows on the next rotation instead of living on as originally consented.
+    // Re-derive the scope ceiling from the live role so a demoted manager's
+    // grant narrows on the next rotation instead of living on as consented.
     const scopes = row.user_id
-      ? (dropWriteUnlessManager(row.scopes, row.user_role ?? undefined) as OAuthScope[])
+      ? (restrictScopesToRole(row.scopes, row.user_role ?? undefined) as OAuthScope[])
       : row.scopes;
     await tx`UPDATE oauth_refresh_tokens SET revoked_at = NOW() WHERE id = ${row.id}`;
     const next = await issueRefreshToken(tx, env, {
