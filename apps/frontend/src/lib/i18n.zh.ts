@@ -465,6 +465,7 @@ const zh: Record<string, string> = {
   // ── Settings > Connectors ──
   connectorsTab: '连接器',
   connectorsSub: 'OAuth 集成与抓取器服务客户端。',
+  connectorsSubReadOnly: '将 ChatGPT 或 Claude 连接到此工作区。',
   connectorsMcpTitle: '连接 MCP 客户端',
   connectorsMcpSub: '将 Claude（或任意 MCP 客户端）指向此工作区 — 无需手动创建凭据。',
   connectorsMcpUrlLabel: 'MCP 服务器地址',
@@ -472,7 +473,9 @@ const zh: Record<string, string> = {
   connectorsMcpStep2: '在提示输入服务器地址时，粘贴上面的 MCP 服务器地址。',
   connectorsMcpStep3: '浏览器窗口将打开 — 使用你的工作区账户登录。',
   connectorsMcpStep4: '批准所请求的访问权限（只读，或读 + 写）。多数客户端会自动完成注册；若你的客户端要求填写 OAuth 客户端 ID，请在下方创建。',
+  connectorsMcpStep4ReadOnly: '批准所请求的访问权限。你的账户将获得市场价格的只读访问权限。',
   connectorsMcpNote: '下方的服务客户端仅用于非交互式集成（例如抓取器），它们使用客户端 ID + 密钥进行认证，而不是登录。',
+  connectorsReadOnlyNote: '连接后，可直接向 AI 助手查询任意零件号的当前市场价。你的访问为只读 — 只能查询价格，不能修改。',
   connectorsAddConnectorTitle: '添加连接器客户端（Claude / ChatGPT）',
   connectorsAddConnectorSub: '仅当客户端要求填写 OAuth 客户端 ID、而非自动注册时才需要。选择对应的平台以填入其回调地址。',
   connectorsRedirectLabel: '回调地址',
