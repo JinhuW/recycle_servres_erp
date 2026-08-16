@@ -1346,6 +1346,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     mktSortRising: 'Sort: sell rising fastest',
     mktSortFalling: 'Sort: sell falling fastest',
     mktSortSamples: 'Sort: most data points',
+    mktSortByColumn: 'Sort: by column (click a header)',
     mktColItemSpec: 'Item / Spec',
     mktColLastSell: 'Last sell price',
     mktCol12wTrend: '12-week sell trend',

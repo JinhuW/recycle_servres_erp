@@ -27,12 +27,27 @@ market.get('/', async (c) => {
 
   // Whitelisted sort → fragment; the default mirrors the old updated_at order.
   // rp.id is appended as a stable tiebreaker so OFFSET paging is deterministic.
+  // The -asc/-desc / -high/-low pairs back the clickable column headers on the
+  // desktop table; the un-suffixed values are the curated dropdown sorts.
   const sortParam = c.req.query('sort');
   const orderBy =
     sortParam === 'sell-high' ? sql`rp.avg_sell DESC NULLS LAST`
     : sortParam === 'rising'  ? sql`rp.trend DESC NULLS LAST`
     : sortParam === 'falling' ? sql`rp.trend ASC NULLS LAST`
     : sortParam === 'samples' ? sql`rp.samples DESC NULLS LAST`
+    : sortParam === 'label-asc'  ? sql`LOWER(rp.label) ASC`
+    : sortParam === 'label-desc' ? sql`LOWER(rp.label) DESC`
+    : sortParam === 'part-asc'  ? sql`LOWER(rp.part_number) ASC NULLS LAST`
+    : sortParam === 'part-desc' ? sql`LOWER(rp.part_number) DESC NULLS LAST`
+    : sortParam === 'lastsell-high' ? sql`rp.last_price DESC NULLS LAST`
+    : sortParam === 'lastsell-low'  ? sql`rp.last_price ASC NULLS LAST`
+    // maxBuy = COALESCE(last_price, avg_sell) × (1 - margin); the constant
+    // factor doesn't change the order, so sort on the basis directly.
+    : sortParam === 'maxbuy-high' ? sql`COALESCE(rp.last_price, rp.avg_sell) DESC NULLS LAST`
+    : sortParam === 'maxbuy-low'  ? sql`COALESCE(rp.last_price, rp.avg_sell) ASC NULLS LAST`
+    : sortParam === 'paid-high' ? sql`rp.target DESC NULLS LAST`
+    : sortParam === 'paid-low'  ? sql`rp.target ASC NULLS LAST`
+    : sortParam === 'oldest' ? sql`rp.updated_at ASC`
     : sql`rp.updated_at DESC`;
 
   // Filters shared by the page query and the count, so `total` always reflects

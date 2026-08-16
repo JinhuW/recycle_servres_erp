@@ -1131,6 +1131,7 @@ const zh: Record<string, string> = {
   mktSortRising: '排序:售价上升最快',
   mktSortFalling: '排序:售价下降最快',
   mktSortSamples: '排序:数据点最多',
+  mktSortByColumn: '排序:按列(点击表头)',
   mktColItemSpec: '项目 / 规格',
   mktColLastSell: '最近售价',
   mktCol12wTrend: '12 周售价趋势',
