@@ -31,6 +31,9 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_photo_removed: 'image',
   archived:     'box',
   unarchived:   'rotate',
+  shipment_created:   'truck',
+  shipment_purchased: 'truck',
+  shipment_voided:    'truck',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -49,6 +52,10 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_photo_removed: 'warn',
   archived:     'muted',
   unarchived:   'info',
+  shipment_created:   'muted',
+  // Money moved: buying tones positive-action, voiding warns.
+  shipment_purchased: 'pos',
+  shipment_voided:    'warn',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -184,6 +191,24 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     }
     case 'unarchived': {
       return { title: 'Unarchived', lines: ['Restored to the active list'] };
+    }
+    case 'shipment_created': {
+      return { title: t('acShipmentCreated'), lines: [] };
+    }
+    case 'shipment_purchased': {
+      const line = [d.carrier, d.service].filter(Boolean).join(' ');
+      const amount = typeof d.amount === 'number' ? fmtUSD(d.amount, locale) : null;
+      return {
+        title: t('acShipmentPurchased'),
+        lines: [[line, amount, d.trackingNumber].filter(Boolean).join(' · ')].filter(Boolean),
+      };
+    }
+    case 'shipment_voided': {
+      const amount = typeof d.amount === 'number' ? fmtUSD(d.amount, locale) : null;
+      return {
+        title: t('acShipmentVoided'),
+        lines: [[d.trackingNumber, amount].filter(Boolean).join(' · ')].filter(Boolean),
+      };
     }
     // The backend and this bundle deploy independently, so a browser holding
     // an older build can be handed a kind it has never heard of. Returning

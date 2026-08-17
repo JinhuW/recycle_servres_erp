@@ -19,6 +19,7 @@ import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
 import ordersRoutes from './routes/orders';
+import shipmentsRoutes from './routes/shipments';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
@@ -239,6 +240,8 @@ app.use('/api/activity/*', authMiddleware);
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/orders', ordersRoutes);
+// Second sub-app on the same prefix: /api/orders/:orderId/shipments/*.
+app.route('/api/orders', shipmentsRoutes);
 app.route('/api/market', marketRoutes);
 app.route('/api/scan', scanRoutes);
 app.route('/api/notifications', notificationsRoutes);

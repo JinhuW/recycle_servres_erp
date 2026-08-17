@@ -16,6 +16,10 @@ export type Env = {
   // 501 so the UI can show a "not configured" state instead of erroring.
   TRACKER_API_URL?: string;
   TRACKER_API_TOKEN?: string;
+  // ShipSaving prepaid-label API. Either unset → deterministic stub provider
+  // (demo rates/labels, no real purchases) and the tracking poll stays off.
+  SHIPSAVING_API_URL?: string;
+  SHIPSAVING_API_TOKEN?: string;
   // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
   // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
   R2_S3_ENDPOINT?: string;

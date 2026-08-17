@@ -32,6 +32,56 @@ export type Warehouse = {
   managerEmail?: string | null;   // derived: users.email (read-only)
   timezone?: string | null;
   active?: boolean; // false = archived: hidden from every UI surface (DB row kept)
+  // Structured ship-to address for prepaid labels. `address` stays the
+  // human-facing display line; carriers read these.
+  shipContactName?: string | null;
+  shipPhone?: string | null;
+  shipStreet1?: string | null;
+  shipStreet2?: string | null;
+  shipCity?: string | null;
+  shipState?: string | null;
+  shipZip?: string | null;
+  shipCountry?: string | null;
+};
+
+export type ShipmentStatus =
+  | 'draft' | 'quoted' | 'purchased' | 'in_transit'
+  | 'delivered' | 'voided' | 'exception';
+
+export type Shipment = {
+  id: string;
+  orderId: string;
+  status: ShipmentStatus;
+  from: {
+    name: string; phone: string | null;
+    street1: string; street2: string | null;
+    city: string; state: string; zip: string; country: string;
+  };
+  package: { weightOz: number; lengthIn: number; widthIn: number; heightIn: number };
+  carrier: string | null;
+  service: string | null;
+  rateAmount: number | null;
+  rateCurrency: string;
+  deliveryDays: number | null;
+  provider: 'shipsaving' | 'stub';
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+  labelCost: number | null;
+  trackingStatus: string | null;
+  trackingEta: string | null;
+  lastTrackedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export type ShipmentRate = {
+  rateId: string;
+  carrier: string;
+  service: string;
+  amount: number;
+  currency: string;
+  deliveryDays: number | null;
 };
 
 export type OrderLine = {
@@ -132,7 +182,10 @@ export type OrderEventKind =
   | 'line_photo_added'
   | 'line_photo_removed'
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'shipment_created'
+  | 'shipment_purchased'
+  | 'shipment_voided';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 

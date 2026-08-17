@@ -28,6 +28,14 @@ type DetailInput = {
   address?: FieldUpdate<string>;
   managerUserId?: FieldUpdate<string>;
   timezone?: FieldUpdate<string>;
+  shipContactName?: FieldUpdate<string>;
+  shipPhone?: FieldUpdate<string>;
+  shipStreet1?: FieldUpdate<string>;
+  shipStreet2?: FieldUpdate<string>;
+  shipCity?: FieldUpdate<string>;
+  shipState?: FieldUpdate<string>;
+  shipZip?: FieldUpdate<string>;
+  shipCountry?: FieldUpdate<string>;
 };
 
 function parseDetails(body: Record<string, unknown>): { input: DetailInput; error: string | null } {
@@ -35,6 +43,14 @@ function parseDetails(body: Record<string, unknown>): { input: DetailInput; erro
     address:       optionalString(body.address),
     managerUserId: optionalString(body.managerUserId),
     timezone:      optionalString(body.timezone),
+    shipContactName: optionalString(body.shipContactName),
+    shipPhone:       optionalString(body.shipPhone),
+    shipStreet1:     optionalString(body.shipStreet1),
+    shipStreet2:     optionalString(body.shipStreet2),
+    shipCity:        optionalString(body.shipCity),
+    shipState:       optionalString(body.shipState),
+    shipZip:         optionalString(body.shipZip),
+    shipCountry:     optionalString(body.shipCountry),
   };
 
   for (const [key, f] of Object.entries(input) as [string, FieldUpdate<unknown>][]) {
@@ -79,6 +95,14 @@ const toApi = (r: WhRow) => ({
   managerEmail:  r.manager_email   ?? null, // users.email (derived)
   timezone:      r.timezone        ?? null,
   active:        (r.active ?? true) as boolean,
+  shipContactName: r.ship_contact_name ?? null,
+  shipPhone:       r.ship_phone        ?? null,
+  shipStreet1:     r.ship_street1      ?? null,
+  shipStreet2:     r.ship_street2      ?? null,
+  shipCity:        r.ship_city         ?? null,
+  shipState:       r.ship_state        ?? null,
+  shipZip:         r.ship_zip          ?? null,
+  shipCountry:     r.ship_country      ?? null,
 });
 
 // Single source for the warehouse projection: manager name/phone/email are
@@ -89,6 +113,8 @@ async function fetchWarehouse(
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
            w.timezone, w.active, w.manager_user_id,
+           w.ship_contact_name, w.ship_phone, w.ship_street1, w.ship_street2,
+           w.ship_city, w.ship_state, w.ship_zip, w.ship_country,
            mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
     FROM warehouses w
     LEFT JOIN users mu ON mu.id = w.manager_user_id
@@ -106,6 +132,8 @@ warehouses.get('/', async (c) => {
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
            w.timezone, w.active, w.manager_user_id,
+           w.ship_contact_name, w.ship_phone, w.ship_street1, w.ship_street2,
+           w.ship_city, w.ship_state, w.ship_zip, w.ship_country,
            mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
     FROM warehouses w
     LEFT JOIN users mu ON mu.id = w.manager_user_id
@@ -149,12 +177,18 @@ warehouses.post('/', async (c) => {
     const ins = await sql`
       INSERT INTO warehouses (
         id, name, short, region,
-        address, manager_user_id, timezone
+        address, manager_user_id, timezone,
+        ship_contact_name, ship_phone, ship_street1, ship_street2,
+        ship_city, ship_state, ship_zip, ship_country
       )
       VALUES (
         ${id}, ${name}, ${short}, ${region},
         ${val(input.address)}, ${val(input.managerUserId)}::uuid,
-        ${val(input.timezone)}
+        ${val(input.timezone)},
+        ${val(input.shipContactName)}, ${val(input.shipPhone)},
+        ${val(input.shipStreet1)}, ${val(input.shipStreet2)},
+        ${val(input.shipCity)}, ${val(input.shipState)},
+        ${val(input.shipZip)}, ${val(input.shipCountry)}
       )
       RETURNING id
     `;
@@ -202,6 +236,14 @@ warehouses.patch('/:id', async (c) => {
       address         = CASE WHEN ${flag(input.address)}::int       = 1 THEN ${val(input.address)}             ELSE address         END,
       manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
       timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
+      ship_contact_name = CASE WHEN ${flag(input.shipContactName)}::int = 1 THEN ${val(input.shipContactName)} ELSE ship_contact_name END,
+      ship_phone      = CASE WHEN ${flag(input.shipPhone)}::int     = 1 THEN ${val(input.shipPhone)}           ELSE ship_phone      END,
+      ship_street1    = CASE WHEN ${flag(input.shipStreet1)}::int   = 1 THEN ${val(input.shipStreet1)}         ELSE ship_street1    END,
+      ship_street2    = CASE WHEN ${flag(input.shipStreet2)}::int   = 1 THEN ${val(input.shipStreet2)}         ELSE ship_street2    END,
+      ship_city       = CASE WHEN ${flag(input.shipCity)}::int      = 1 THEN ${val(input.shipCity)}            ELSE ship_city       END,
+      ship_state      = CASE WHEN ${flag(input.shipState)}::int     = 1 THEN ${val(input.shipState)}           ELSE ship_state      END,
+      ship_zip        = CASE WHEN ${flag(input.shipZip)}::int       = 1 THEN ${val(input.shipZip)}             ELSE ship_zip        END,
+      ship_country    = CASE WHEN ${flag(input.shipCountry)}::int   = 1 THEN ${val(input.shipCountry)}         ELSE ship_country    END,
       active          = COALESCE(${active}, active)
     WHERE id = ${id}
     RETURNING id
