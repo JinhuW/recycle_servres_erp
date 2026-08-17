@@ -52,12 +52,16 @@ export type Shipment = {
   id: string;
   orderId: string;
   status: ShipmentStatus;
+  // Nullable: a seller-fill shell starts empty until the seller submits.
   from: {
-    name: string; phone: string | null;
-    street1: string; street2: string | null;
-    city: string; state: string; zip: string; country: string;
+    name: string | null; phone: string | null;
+    street1: string | null; street2: string | null;
+    city: string | null; state: string | null; zip: string | null; country: string | null;
   };
-  package: { weightOz: number; lengthIn: number; widthIn: number; heightIn: number };
+  package: {
+    weightOz: number | null; lengthIn: number | null;
+    widthIn: number | null; heightIn: number | null;
+  };
   carrier: string | null;
   service: string | null;
   rateAmount: number | null;
@@ -71,6 +75,8 @@ export type Shipment = {
   trackingStatus: string | null;
   trackingEta: string | null;
   lastTrackedAt: string | null;
+  sellerToken: string | null;
+  complete: boolean;
   createdBy: string | null;
   createdAt: string;
 };
@@ -185,7 +191,8 @@ export type OrderEventKind =
   | 'unarchived'
   | 'shipment_created'
   | 'shipment_purchased'
-  | 'shipment_voided';
+  | 'shipment_voided'
+  | 'shipment_seller_filled';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 

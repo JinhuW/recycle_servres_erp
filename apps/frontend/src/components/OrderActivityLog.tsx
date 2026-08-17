@@ -34,6 +34,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   shipment_created:   'truck',
   shipment_purchased: 'truck',
   shipment_voided:    'truck',
+  shipment_seller_filled: 'truck',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -56,6 +57,7 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   // Money moved: buying tones positive-action, voiding warns.
   shipment_purchased: 'pos',
   shipment_voided:    'warn',
+  shipment_seller_filled: 'info',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -208,6 +210,12 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
       return {
         title: t('acShipmentVoided'),
         lines: [[d.trackingNumber, amount].filter(Boolean).join(' · ')].filter(Boolean),
+      };
+    }
+    case 'shipment_seller_filled': {
+      return {
+        title: t('acShipmentSellerFilled'),
+        lines: [[d.sellerName, [d.city, d.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')].filter(Boolean),
       };
     }
     // The backend and this bundle deploy independently, so a browser holding

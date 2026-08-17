@@ -239,8 +239,28 @@ export type ShipmentPackageInput = {
 export const listShipments = (orderId: string) =>
   api.get<{ items: Shipment[] }>(`/api/orders/${orderId}/shipments`);
 
-export const createShipment = (orderId: string, body: { from: ShipmentAddressInput; package: ShipmentPackageInput }) =>
-  api.post<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments`, body);
+export const createShipment = (
+  orderId: string,
+  body: { from: ShipmentAddressInput; package: ShipmentPackageInput } | { sellerFill: true },
+) => api.post<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments`, body);
+
+export const issueSellerLink = (orderId: string, sid: string) =>
+  api.post<{ sellerToken: string }>(`/api/orders/${orderId}/shipments/${sid}/seller-link`, {});
+
+// Public seller-fill endpoints (/s/<token> page). Token in the URL is the
+// credential; CSRF-exempt server-side, the header just rides along.
+export const getSellerFill = (token: string) =>
+  api.get<{
+    destination: string | null;
+    submitted: boolean;
+    from: Partial<ShipmentAddressInput>;
+    package: Partial<Record<keyof ShipmentPackageInput, number | null>>;
+  }>(`/api/public/shipping/${encodeURIComponent(token)}`);
+
+export const postSellerFill = (
+  token: string,
+  body: { from: ShipmentAddressInput; package: ShipmentPackageInput },
+) => api.post<{ ok: true }>(`/api/public/shipping/${encodeURIComponent(token)}`, body);
 
 export const updateShipment = (orderId: string, sid: string, body: { from: ShipmentAddressInput; package: ShipmentPackageInput }) =>
   api.patch<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments/${sid}`, body);

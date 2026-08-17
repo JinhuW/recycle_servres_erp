@@ -16,6 +16,15 @@ const PwaUpdateToast = lazy(() =>
 const DesktopApp = lazy(() => import('./DesktopApp').then(m => ({ default: m.DesktopApp })));
 const MobileApp  = lazy(() => import('./MobileApp').then(m => ({ default: m.MobileApp })));
 const VendorApp  = lazy(() => import('./VendorApp').then(m => ({ default: m.VendorApp })));
+const SellerShippingApp = lazy(() =>
+  import('./SellerShippingApp').then(m => ({ default: m.SellerShippingApp })));
+
+// Seller-fill links (/s/<token>) mirror the vendor portal's URL-token shape.
+const SELLER_PATH = /^\/s\/([^/]+)/;
+function sellerTokenFromPath(pathname: string): string | null {
+  const m = SELLER_PATH.exec(pathname);
+  return m && m[1] ? m[1] : null;
+}
 
 const PHONE_BREAKPOINT = 720;
 
@@ -32,6 +41,17 @@ function useIsPhone() {
 
 export default function App() {
   const isPhone = useIsPhone();
+  const sellerToken = typeof window !== 'undefined'
+    ? sellerTokenFromPath(window.location.pathname) : null;
+  if (sellerToken) {
+    return (
+      <LangProvider>
+        <Suspense fallback={<div className="app-loading" />}>
+          <SellerShippingApp token={sellerToken} />
+        </Suspense>
+      </LangProvider>
+    );
+  }
   const vendorToken = typeof window !== 'undefined'
     ? vendorTokenFromPath(window.location.pathname) : null;
   if (vendorToken) {

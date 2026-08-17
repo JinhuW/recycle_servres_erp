@@ -20,6 +20,7 @@ import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
 import ordersRoutes from './routes/orders';
 import shipmentsRoutes from './routes/shipments';
+import shippingPublicRoutes from './routes/shippingPublic';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
@@ -196,6 +197,7 @@ app.use('*', async (c, next) => {
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
+app.route('/api/public/shipping', shippingPublicRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
 
