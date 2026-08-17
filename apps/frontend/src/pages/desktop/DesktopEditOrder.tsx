@@ -26,6 +26,7 @@ import { serialIssue, isPricedSellPrice } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
+import { ShippingPanel } from './ShippingPanel';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
@@ -230,6 +231,23 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
   );
   const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
+  // Buying/voiding a shipping label moves other_fees server-side while this
+  // page holds a pre-purchase snapshot. The baseline tracks the server value
+  // so the display refreshes and the dirty check doesn't misread the fold as
+  // a user edit.
+  const [feesBaseline, setFeesBaseline] = useState<{ fees: number; note: string | null }>({
+    fees: order.otherFees, note: order.otherFeesNote,
+  });
+  const refreshFeesFromServer = async () => {
+    try {
+      const r = await api.get<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+        `/api/orders/${order.id}`,
+      );
+      setFeesBaseline({ fees: r.order.otherFees, note: r.order.otherFeesNote });
+      setOtherFeesInput(r.order.otherFees > 0 ? r.order.otherFees.toFixed(2) : '');
+      setOtherFeesNote(r.order.otherFeesNote ?? '');
+    } catch { /* display catches up on next open */ }
+  };
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -412,8 +430,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
-  const otherFeesDirty = parsedOtherFees !== order.otherFees;
-  const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+  const otherFeesDirty = parsedOtherFees !== feesBaseline.fees;
+  const otherFeesNoteDirty = otherFeesNote.trim() !== (feesBaseline.note ?? '');
 
   // The goods total is no longer editable here: it is the sum of the lines, and
   // anything paid on top of the goods is the fee — so line costs + fee is what
@@ -932,6 +950,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             ) : (otherFeesNote.trim() ? <span className="muted" style={{ fontSize: 11.5 }}>{otherFeesNote.trim()}</span> : undefined)}
           />
         </div>
+
+        <ShippingPanel
+          orderId={order.id}
+          canEdit={canAnnotate}
+          onMutated={() => { setActivityKey(k => k + 1); void refreshFeesFromServer(); }}
+        />
       </div>
 
       <aside className="oe-side">

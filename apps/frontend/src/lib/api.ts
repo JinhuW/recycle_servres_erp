@@ -5,7 +5,7 @@
 // on :8787 (see vite.config.ts); in prod Caddy proxies /api/* to the backend.
 // Either way paths stay relative (same-origin), so cookies ride along.
 
-import type { OrderSummary } from './types';
+import type { OrderSummary, Shipment, ShipmentRate } from './types';
 
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
@@ -224,3 +224,35 @@ export const archiveSellOrder = (id: string) =>
 
 export const unarchiveSellOrder = (id: string) =>
   api.post<{ ok: true }>(`/api/sell-orders/${id}/unarchive`, {});
+
+// ── Shipments (prepaid labels on a PO) ──────────────────────────────────────
+
+export type ShipmentAddressInput = {
+  name: string; phone?: string | null;
+  street1: string; street2?: string | null;
+  city: string; state: string; zip: string; country?: string | null;
+};
+export type ShipmentPackageInput = {
+  weightOz: number; lengthIn: number; widthIn: number; heightIn: number;
+};
+
+export const listShipments = (orderId: string) =>
+  api.get<{ items: Shipment[] }>(`/api/orders/${orderId}/shipments`);
+
+export const createShipment = (orderId: string, body: { from: ShipmentAddressInput; package: ShipmentPackageInput }) =>
+  api.post<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments`, body);
+
+export const updateShipment = (orderId: string, sid: string, body: { from: ShipmentAddressInput; package: ShipmentPackageInput }) =>
+  api.patch<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments/${sid}`, body);
+
+export const fetchShipmentRates = (orderId: string, sid: string) =>
+  api.post<{ rates: ShipmentRate[] }>(`/api/orders/${orderId}/shipments/${sid}/rates`, {});
+
+export const buyShipmentLabel = (orderId: string, sid: string, body: { rateId: string; expectedAmount?: number }) =>
+  api.post<{ shipment: Shipment; amountChanged: boolean }>(`/api/orders/${orderId}/shipments/${sid}/buy`, body);
+
+export const voidShipment = (orderId: string, sid: string) =>
+  api.post<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments/${sid}/void`, {});
+
+export const deleteShipment = (orderId: string, sid: string) =>
+  api.delete<{ ok: true }>(`/api/orders/${orderId}/shipments/${sid}`);
