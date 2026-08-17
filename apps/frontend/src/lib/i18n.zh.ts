@@ -831,6 +831,8 @@ const zh: Record<string, string> = {
   shipCopySellerLink: '复制卖家链接',
   shipLinkCopied: '链接已复制',
   shipMakeSellerLink: '生成卖家链接',
+  shipLinkCopiedHint: '把链接发给卖家即可 —— 可以关闭此窗口,该包裹会显示"等待卖家填写"。',
+  shipOrManual: '或自己填写',
   sellerFillTitle: '您的预付运单',
   sellerFillIntro: '填写您的地址和要寄的箱子。我们购买运单并把 PDF 发给您 —— 无需付费。',
   sellerFillIntroDest: '填写您的地址和要寄到 {dest} 的箱子。我们购买运单并把 PDF 发给您 —— 无需付费。',

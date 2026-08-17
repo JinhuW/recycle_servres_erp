@@ -91,29 +91,12 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
   };
 
   const sellerUrl = (tok: string) => `${window.location.origin}/s/${tok}`;
-  const [askingSeller, setAskingSeller] = useState(false);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   const copyLink = (tok: string) => {
     navigator.clipboard?.writeText(sellerUrl(tok))
       .then(() => { setCopiedLink(tok); setTimeout(() => setCopiedLink(null), 1800); })
       .catch(() => { /* the link is also shown in the row title attr */ });
-  };
-
-  // One click: create an empty seller-fill shipment and put its public link on
-  // the clipboard, ready to paste into the chat with the seller.
-  const askSeller = async () => {
-    setAskingSeller(true);
-    try {
-      const r = await createShipment(orderId, { sellerFill: true });
-      reload();
-      onMutated();
-      if (r.shipment.sellerToken) copyLink(r.shipment.sellerToken);
-    } catch (e) {
-      handleFetchError(e);
-    } finally {
-      setAskingSeller(false);
-    }
   };
 
   const regenLink = async (sid: string) => {
@@ -145,19 +128,9 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
         )}
         <span style={{ flex: 1 }} />
         {canEdit && (
-          <>
-            <button
-              className="btn sm"
-              title={t('shipAskSellerHint')}
-              disabled={askingSeller}
-              onClick={askSeller}
-            >
-              {askingSeller ? '…' : t('shipAskSeller')}
-            </button>
-            <button className="btn accent sm" onClick={() => setFlowFor('new')}>
-              <Icon name="plus" size={13} /> {t('shipNewLabel')}
-            </button>
-          </>
+          <button className="btn accent sm" onClick={() => setFlowFor('new')}>
+            <Icon name="plus" size={13} /> {t('shipNewLabel')}
+          </button>
         )}
       </div>
 
@@ -358,6 +331,7 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
           existing={flowFor === 'new' ? null : flowFor}
           onClose={() => setFlowFor(null)}
           onDone={() => { setFlowFor(null); reload(); onMutated(); }}
+          onSellerLinked={() => { reload(); onMutated(); }}
         />
       )}
     </div>
@@ -366,11 +340,14 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
 
 // ── Create / continue flow: address+package → rates → confirm ────────────────
 
-function LabelFlowModal({ orderId, existing, onClose, onDone }: {
+function LabelFlowModal({ orderId, existing, onClose, onDone, onSellerLinked }: {
   orderId: string;
   existing: Shipment | null;
   onClose: () => void;
   onDone: () => void;
+  // Fired when a seller link was issued from inside the modal, so the panel
+  // list refreshes behind it without closing the form.
+  onSellerLinked: () => void;
 }) {
   const { t } = useT();
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -379,6 +356,34 @@ function LabelFlowModal({ orderId, existing, onClose, onDone }: {
   const [picked, setPicked] = useState<ShipmentRate | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  // The seller-link path from inside the form: reuse this modal's shipment if
+  // it already exists (issuing/rotating its token), else create the empty
+  // shell. The link lands on the clipboard; the modal stays open so the
+  // purchaser can still switch to filling it in manually.
+  const copySellerLink = async () => {
+    setLinkBusy(true);
+    setError(null);
+    try {
+      let tok: string;
+      if (shipment) {
+        tok = shipment.sellerToken ?? (await issueSellerLink(orderId, shipment.id)).sellerToken;
+      } else {
+        const r = await createShipment(orderId, { sellerFill: true });
+        setShipment(r.shipment);
+        tok = r.shipment.sellerToken!;
+      }
+      await navigator.clipboard?.writeText(`${window.location.origin}/s/${tok}`);
+      setLinkCopied(true);
+      onSellerLinked();
+    } catch (e) {
+      setError((e as { message?: string })?.message ?? t('shipRatesFailed'));
+    } finally {
+      setLinkBusy(false);
+    }
+  };
 
   const [from, setFrom] = useState<ShipmentAddressInput>({
     name: existing?.from.name ?? '',
@@ -455,6 +460,40 @@ function LabelFlowModal({ orderId, existing, onClose, onDone }: {
         <div className="modal-body">
           {step === 1 && (
             <>
+              {/* The no-typing path first: most sellers can fill this in
+                  faster and more accurately than a chat transcription. */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '12px 14px', borderRadius: 10, marginBottom: 4,
+                background: 'var(--accent-soft)',
+                border: '1px dashed color-mix(in oklch, var(--accent) 45%, transparent)',
+              }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--accent-strong)' }}>
+                    {t('shipAskSeller')}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--fg-muted)', marginTop: 1 }}>
+                    {linkCopied ? t('shipLinkCopiedHint') : t('shipAskSellerHint')}
+                  </div>
+                </div>
+                <button
+                  className={'btn sm' + (linkCopied ? '' : ' accent')}
+                  disabled={linkBusy}
+                  onClick={copySellerLink}
+                  style={{ flexShrink: 0 }}
+                >
+                  {linkBusy ? '…' : linkCopied ? t('shipLinkCopied') : t('shipCopySellerLink')}
+                </button>
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0 4px',
+                fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+                textTransform: 'uppercase', color: 'var(--fg-subtle)',
+              }}>
+                <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                {t('shipOrManual')}
+                <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
               <div className="field-row">
                 <div className="field">
                   <label className="label">{t('shipSellerName')} <span className="req">*</span></label>
