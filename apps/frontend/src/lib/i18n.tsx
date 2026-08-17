@@ -1035,6 +1035,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipPickWhHint: 'Where is the seller shipping to? A draft purchase order is created for this label; add its items when the goods arrive.',
     shipPickWhNoAddr: 'This warehouse has no shipping address yet — set it in Settings → Warehouses before rates can be fetched.',
     shipPickWhStart: 'Start label',
+    tapeShipping: 'Shipping labels',
     sellerFillTitle: 'Your prepaid shipping label',
     sellerFillIntro: 'Enter your address and the box you’ll ship. We buy the label and send you the PDF — nothing to pay.',
     sellerFillIntroDest: 'Enter your address and the box you’ll ship to {dest}. We buy the label and send you the PDF — nothing to pay.',
