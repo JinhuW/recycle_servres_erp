@@ -5,7 +5,7 @@ import { useEffectiveUser } from '../lib/tweaks';
 import type { Role } from '../lib/types';
 
 export type DesktopView =
-  | 'dashboard' | 'submit' | 'history' | 'market'
+  | 'dashboard' | 'submit' | 'history' | 'shipping' | 'market'
   | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers'
   | 'activity' | 'tracker' | 'settings';
 
@@ -20,6 +20,7 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
       { id: 'dashboard',  tKey: 'nav_dashboard',  icon: 'dashboard',  roles: ['manager', 'purchaser'] },
       { id: 'submit',     tKey: 'nav_submit',     icon: 'submit',     roles: ['manager', 'purchaser'], badge: '+' },
       { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
+      { id: 'shipping',   tKey: 'nav_shipping',   icon: 'truck',      roles: ['manager', 'purchaser'] },
       { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
       { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
       { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },

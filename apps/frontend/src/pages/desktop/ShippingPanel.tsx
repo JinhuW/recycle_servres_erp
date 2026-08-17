@@ -340,7 +340,7 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
 
 // ── Create / continue flow: address+package → rates → confirm ────────────────
 
-function LabelFlowModal({ orderId, existing, onClose, onDone, onSellerLinked }: {
+export function LabelFlowModal({ orderId, existing, onClose, onDone, onSellerLinked }: {
   orderId: string;
   existing: Shipment | null;
   onClose: () => void;

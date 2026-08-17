@@ -37,6 +37,7 @@ const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').the
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
+const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
 
 import type { Order } from './lib/types';
@@ -58,6 +59,8 @@ export function DesktopApp() {
   // /inventory/:id opens the edit page; otherwise no item is being edited.
   // /inventory/analysis is the Analysis tab, not an item id — exclude it.
   const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
+  // /shipping/:orderId focuses the shipping page on one PO's labels.
+  const shippingOrderId = match('/shipping/:orderId', path)?.orderId ?? null;
 
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
@@ -223,6 +226,7 @@ export function DesktopApp() {
               />
             )}
             {view2 === 'history'    && ordersOrEdit}
+            {view2 === 'shipping'   && <DesktopShipping orderId={shippingOrderId} showToast={showToast} />}
             {view2 === 'market'     && <DesktopMarket />}
             {view2 === 'inventory'  && inventoryOrEdit}
             {view2 === 'analysis'   && <DesktopAnalysis />}
