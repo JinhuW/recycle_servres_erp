@@ -848,6 +848,7 @@ const zh: Record<string, string> = {
   shipPickWhHint: '卖家寄往哪个仓库?会为此运单创建一张草稿采购单,货到后再补充明细。',
   shipPickWhNoAddr: '该仓库尚未设置收货地址 —— 请先在 设置 → 仓库 中填写,才能获取运价。',
   shipPickWhStart: '开始创建',
+  tapeShipping: '运费(运单)',
   sellerFillTitle: '您的预付运单',
   sellerFillIntro: '填写您的地址和要寄的箱子。我们购买运单并把 PDF 发给您 —— 无需付费。',
   sellerFillIntroDest: '填写您的地址和要寄到 {dest} 的箱子。我们购买运单并把 PDF 发给您 —— 无需付费。',
