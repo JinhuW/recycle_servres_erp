@@ -1018,6 +1018,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipCopySellerLink: 'Copy seller link',
     shipLinkCopied: 'Link copied',
     shipMakeSellerLink: 'Make seller link',
+    shipLinkCopiedHint: 'Paste it to the seller — this window can close; the shipment will show "Waiting for seller".',
+    shipOrManual: 'or enter it yourself',
     sellerFillTitle: 'Your prepaid shipping label',
     sellerFillIntro: 'Enter your address and the box you’ll ship. We buy the label and send you the PDF — nothing to pay.',
     sellerFillIntroDest: 'Enter your address and the box you’ll ship to {dest}. We buy the label and send you the PDF — nothing to pay.',
