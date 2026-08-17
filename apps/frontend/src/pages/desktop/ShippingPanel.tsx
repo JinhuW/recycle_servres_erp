@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import {
   buyShipmentLabel, createShipment, deleteShipment, fetchShipmentRates,
-  listShipments, updateShipment, voidShipment,
+  issueSellerLink, listShipments, updateShipment, voidShipment,
   type ShipmentAddressInput, type ShipmentPackageInput,
 } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -90,6 +90,42 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
     }
   };
 
+  const sellerUrl = (tok: string) => `${window.location.origin}/s/${tok}`;
+  const [askingSeller, setAskingSeller] = useState(false);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
+
+  const copyLink = (tok: string) => {
+    navigator.clipboard?.writeText(sellerUrl(tok))
+      .then(() => { setCopiedLink(tok); setTimeout(() => setCopiedLink(null), 1800); })
+      .catch(() => { /* the link is also shown in the row title attr */ });
+  };
+
+  // One click: create an empty seller-fill shipment and put its public link on
+  // the clipboard, ready to paste into the chat with the seller.
+  const askSeller = async () => {
+    setAskingSeller(true);
+    try {
+      const r = await createShipment(orderId, { sellerFill: true });
+      reload();
+      onMutated();
+      if (r.shipment.sellerToken) copyLink(r.shipment.sellerToken);
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setAskingSeller(false);
+    }
+  };
+
+  const regenLink = async (sid: string) => {
+    try {
+      const r = await issueSellerLink(orderId, sid);
+      reload();
+      copyLink(r.sellerToken);
+    } catch (e) {
+      handleFetchError(e);
+    }
+  };
+
   if (loaded && items.length === 0 && !canEdit) return null;
 
   return (
@@ -109,9 +145,19 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
         )}
         <span style={{ flex: 1 }} />
         {canEdit && (
-          <button className="btn accent sm" onClick={() => setFlowFor('new')}>
-            <Icon name="plus" size={13} /> {t('shipNewLabel')}
-          </button>
+          <>
+            <button
+              className="btn sm"
+              title={t('shipAskSellerHint')}
+              disabled={askingSeller}
+              onClick={askSeller}
+            >
+              {askingSeller ? '…' : t('shipAskSeller')}
+            </button>
+            <button className="btn accent sm" onClick={() => setFlowFor('new')}>
+              <Icon name="plus" size={13} /> {t('shipNewLabel')}
+            </button>
+          </>
         )}
       </div>
 
@@ -147,10 +193,16 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
                 </>
               ) : (
                 <span style={{ fontWeight: 600, fontSize: 13.5 }}>
-                  {t('shipBoxFrom', { name: s.from.name })}
+                  {s.from.name
+                    ? t('shipBoxFrom', { name: s.from.name })
+                    : t('shipAwaitingSellerTitle')}
                 </span>
               )}
-              <span className={'chip dot ' + chip.cls} style={{ fontSize: 11 }}>{t(chip.key)}</span>
+              {isPending && !s.complete && s.sellerToken ? (
+                <span className="chip warn dot" style={{ fontSize: 11 }}>{t('shipWaitingSeller')}</span>
+              ) : (
+                <span className={'chip dot ' + chip.cls} style={{ fontSize: 11 }}>{t(chip.key)}</span>
+              )}
               {s.provider === 'stub' && s.status !== 'draft' && s.status !== 'quoted' && (
                 <span className="chip muted" style={{ fontSize: 10.5 }}>{t('shipDemoTag')}</span>
               )}
@@ -250,8 +302,22 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
               {isPending && canEdit && (
                 <>
                   <button className="btn accent sm" onClick={() => setFlowFor(s)}>
-                    {t('shipContinue')}
+                    {s.complete ? t('shipContinue') : t('shipFillManually')}
                   </button>
+                  {s.sellerToken && (
+                    <button
+                      className="btn sm"
+                      title={sellerUrl(s.sellerToken)}
+                      onClick={() => copyLink(s.sellerToken!)}
+                    >
+                      {copiedLink === s.sellerToken ? t('shipLinkCopied') : t('shipCopySellerLink')}
+                    </button>
+                  )}
+                  {!s.sellerToken && (
+                    <button className="btn ghost sm" onClick={() => regenLink(s.id)}>
+                      {t('shipMakeSellerLink')}
+                    </button>
+                  )}
                   <button className="btn ghost sm" style={{ color: 'var(--neg)' }} onClick={() => doDelete(s.id)}>
                     {t('delete')}
                   </button>
@@ -276,9 +342,11 @@ export function ShippingPanel({ orderId, canEdit, onMutated }: Props) {
                   <button className="btn ghost sm" onClick={() => setConfirmVoid(null)}>{t('cancel')}</button>
                 </span>
               )}
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                {t('shipFromTo', { name: s.from.name, city: s.from.city, state: s.from.state })}
-              </span>
+              {s.from.name && s.from.city && (
+                <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                  {t('shipFromTo', { name: s.from.name, city: s.from.city, state: s.from.state ?? '' })}
+                </span>
+              )}
             </div>
           </div>
         );
@@ -323,10 +391,10 @@ function LabelFlowModal({ orderId, existing, onClose, onDone }: {
     country: existing?.from.country ?? 'US',
   });
   const [pkg, setPkg] = useState<{ weightOz: string; lengthIn: string; widthIn: string; heightIn: string }>({
-    weightOz: existing ? String(existing.package.weightOz) : '',
-    lengthIn: existing ? String(existing.package.lengthIn) : '',
-    widthIn: existing ? String(existing.package.widthIn) : '',
-    heightIn: existing ? String(existing.package.heightIn) : '',
+    weightOz: existing?.package.weightOz != null ? String(existing.package.weightOz) : '',
+    lengthIn: existing?.package.lengthIn != null ? String(existing.package.lengthIn) : '',
+    widthIn: existing?.package.widthIn != null ? String(existing.package.widthIn) : '',
+    heightIn: existing?.package.heightIn != null ? String(existing.package.heightIn) : '',
   });
 
   const setF = (k: keyof ShipmentAddressInput, v: string) => setFrom((p) => ({ ...p, [k]: v }));

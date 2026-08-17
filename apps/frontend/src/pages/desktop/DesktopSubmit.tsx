@@ -10,6 +10,7 @@ import { poEffectiveCost, parseFeeInput } from '../../lib/poTotals';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Category, ScanResponse, Warehouse, OrderSummary } from '../../lib/types';
 import { LineDrawer } from './submit/LineDrawer';
+import { ShippingPanel } from './ShippingPanel';
 import { AddLineMenu } from './submit/AddLineMenu';
 import { eligibleDraftTargets } from './submit/eligibleTargets';
 import { usePreference } from '../../lib/preferences';
@@ -902,6 +903,27 @@ function OrderForm({
           />
         </div>
       </div>
+
+      {/* Prepaid labels for the seller. Only once the PO exists (first line
+          confirm creates it) — before that there is nothing to hang a
+          shipment on. Every persist PATCHes otherFees from the form, so a
+          label bought mid-compose must sync the form's fee fields to the
+          server values or the next persist would clobber the fold. */}
+      {orderId && (
+        <ShippingPanel
+          orderId={orderId}
+          canEdit
+          onMutated={() => {
+            void api.get<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+              `/api/orders/${orderId}`,
+            ).then(r => setMeta(m => ({
+              ...m,
+              otherFees: r.order.otherFees > 0 ? r.order.otherFees.toFixed(2) : '',
+              otherFeesNote: r.order.otherFeesNote ?? '',
+            }))).catch(() => { /* next reload catches up */ });
+          }}
+        />
+      )}
 
       {/* Sticky commit bar: destination + payer + note, attachments, then the
           single figure the submit button commits. */}

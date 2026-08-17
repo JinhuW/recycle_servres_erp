@@ -349,6 +349,111 @@ describe('shipments — done lifecycle freeze', () => {
   });
 });
 
+describe('shipments — seller self-service fill', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('sellerFill creates an empty shell with a token; rates refuse until the seller submits', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+
+    const created = await api<{ shipment: Shipment & { sellerToken: string | null; complete: boolean } }>(
+      'POST', `/api/orders/${po}/shipments`, { token, body: { sellerFill: true } },
+    );
+    expect(created.status).toBe(201);
+    const s = created.body.shipment;
+    expect(s.sellerToken).toBeTruthy();
+    expect(s.complete).toBe(false);
+
+    const rates = await api<{ error: string }>('POST', `/api/orders/${po}/shipments/${s.id}/rates`, { token });
+    expect(rates.status).toBe(409);
+    expect(rates.body.error).toMatch(/seller/i);
+  });
+
+  it('public fill: seller GETs, POSTs address+package (no auth), owner is notified, rates unlock', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const created = await api<{ shipment: { id: string; sellerToken: string } }>(
+      'POST', `/api/orders/${po}/shipments`, { token, body: { sellerFill: true } },
+    );
+    const sid = created.body.shipment.id;
+    const st = created.body.shipment.sellerToken;
+
+    // No auth cookie on either public call.
+    const peek = await api<{ submitted: boolean; destination: string | null }>(
+      'GET', `/api/public/shipping/${st}`, {},
+    );
+    expect(peek.status).toBe(200);
+    expect(peek.body.submitted).toBe(false);
+
+    const fill = await api('POST', `/api/public/shipping/${st}`, {
+      body: { from: FROM, package: PKG },
+    });
+    expect(fill.status).toBe(200);
+
+    const list = await api<{ items: Array<{ id: string; complete: boolean }> }>(
+      'GET', `/api/orders/${po}/shipments`, { token },
+    );
+    expect(list.body.items.find((i) => i.id === sid)!.complete).toBe(true);
+
+    const sql = getTestDb();
+    const notes = await sql`
+      SELECT 1 FROM notifications WHERE kind = 'shipment_seller_filled'
+    `;
+    expect(notes.length).toBe(1);
+
+    const ev = await api<{ events: Array<{ kind: string }> }>('GET', `/api/orders/${po}/events`, { token });
+    expect(ev.body.events.map((e) => e.kind)).toContain('shipment_seller_filled');
+
+    const rates = await api<{ rates: Rate[] }>('POST', `/api/orders/${po}/shipments/${sid}/rates`, { token });
+    expect(rates.status).toBe(200);
+    expect(rates.body.rates).toHaveLength(3);
+  });
+
+  it('unknown tokens 404 uniformly, and a bought shipment kills its link', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const created = await api<{ shipment: { id: string; sellerToken: string } }>(
+      'POST', `/api/orders/${po}/shipments`, { token, body: { sellerFill: true } },
+    );
+    const sid = created.body.shipment.id;
+    const st = created.body.shipment.sellerToken;
+
+    const bogus = await api('GET', '/api/public/shipping/not-a-real-token', {});
+    expect(bogus.status).toBe(404);
+
+    await api('POST', `/api/public/shipping/${st}`, { body: { from: FROM, package: PKG } });
+    await quoteAndBuy(token, po, sid);
+
+    const dead = await api('GET', `/api/public/shipping/${st}`, {});
+    expect(dead.status).toBe(404);
+    const deadPost = await api('POST', `/api/public/shipping/${st}`, {
+      body: { from: FROM, package: PKG },
+    });
+    expect(deadPost.status).toBe(404);
+  });
+
+  it('seller-link endpoint re-issues a token for an existing draft', async () => {
+    const { token } = await loginAs(MARCUS);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+
+    const link = await api<{ sellerToken: string }>(
+      'POST', `/api/orders/${po}/shipments/${s.id}/seller-link`, { token },
+    );
+    expect(link.status).toBe(200);
+    expect(link.body.sellerToken).toBeTruthy();
+
+    const peek = await api('GET', `/api/public/shipping/${link.body.sellerToken}`, {});
+    expect(peek.status).toBe(200);
+  });
+});
+
 describe('warehouses — shipping address round-trip', () => {
   beforeEach(async () => { await resetDb(); });
 

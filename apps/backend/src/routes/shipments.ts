@@ -28,18 +28,20 @@ type ShipmentRow = {
   id: string;
   order_id: string;
   status: ShipmentStatus;
-  from_name: string;
+  // Nullable since 0093: a seller-fill shell starts empty. rates/buy enforce
+  // completeness.
+  from_name: string | null;
   from_phone: string | null;
-  from_street1: string;
+  from_street1: string | null;
   from_street2: string | null;
-  from_city: string;
-  from_state: string;
-  from_zip: string;
-  from_country: string;
-  weight_oz: number;
-  length_in: number;
-  width_in: number;
-  height_in: number;
+  from_city: string | null;
+  from_state: string | null;
+  from_zip: string | null;
+  from_country: string | null;
+  weight_oz: number | null;
+  length_in: number | null;
+  width_in: number | null;
+  height_in: number | null;
   carrier: string | null;
   service: string | null;
   rate_amount: number | null;
@@ -54,9 +56,17 @@ type ShipmentRow = {
   tracking_status: string | null;
   tracking_eta: Date | null;
   last_tracked_at: Date | null;
+  seller_token: string | null;
   created_by: string | null;
   created_at: Date;
 };
+
+export function shipmentComplete(r: Pick<ShipmentRow,
+  'from_name' | 'from_street1' | 'from_city' | 'from_state' | 'from_zip'
+  | 'weight_oz' | 'length_in' | 'width_in' | 'height_in'>): boolean {
+  return !!(r.from_name && r.from_street1 && r.from_city && r.from_state && r.from_zip
+    && r.weight_oz && r.length_in && r.width_in && r.height_in);
+}
 
 const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql`
   id, order_id, status,
@@ -66,7 +76,7 @@ const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql`
   carrier, service, rate_amount::float AS rate_amount, rate_currency, delivery_days,
   provider, tracking_number, tracking_url, label_delivery_url,
   label_cost::float AS label_cost, fees_applied,
-  tracking_status, tracking_eta, last_tracked_at, created_by, created_at
+  tracking_status, tracking_eta, last_tracked_at, seller_token, created_by, created_at
 `;
 
 function toApi(r: ShipmentRow) {
@@ -103,6 +113,8 @@ function toApi(r: ShipmentRow) {
     trackingStatus: r.tracking_status,
     trackingEta: r.tracking_eta,
     lastTrackedAt: r.last_tracked_at,
+    sellerToken: r.seller_token,
+    complete: shipmentComplete(r),
     createdBy: r.created_by,
     createdAt: r.created_at,
   };
@@ -122,7 +134,8 @@ function canMutate(u: User, order: OrderRow): boolean {
 type FromInput = Partial<Record<keyof ShipAddress, unknown>>;
 type PkgInput = Partial<Record<keyof ShipPackage, unknown>>;
 
-function parseFrom(raw: unknown): ShipAddress | string {
+// Exported for the public seller-fill route, which accepts the same shapes.
+export function parseFrom(raw: unknown): ShipAddress | string {
   const f = (raw ?? {}) as FromInput;
   const req = (v: unknown, label: string): string | { v: string } => {
     if (typeof v !== 'string' || !v.trim()) return `${label} is required`;
@@ -147,7 +160,7 @@ function parseFrom(raw: unknown): ShipAddress | string {
   };
 }
 
-function parsePackage(raw: unknown): ShipPackage | string {
+export function parsePackage(raw: unknown): ShipPackage | string {
   const p = (raw ?? {}) as PkgInput;
   const dims: [keyof ShipPackage, string][] = [
     ['weightOz', 'weight'],
@@ -208,6 +221,13 @@ async function loadWarehouseShipTo(
   };
 }
 
+// URL-safe unguessable token, same recipe as vendor links (customers.ts).
+function newSellerToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 // ── List ─────────────────────────────────────────────────────────────────────
 shipments.get('/:orderId/shipments', async (c) => {
   const sql = getDb(c.env);
@@ -232,13 +252,26 @@ shipments.post('/:orderId/shipments', async (c) => {
   if (!canMutate(u, order)) return c.json({ error: 'Forbidden' }, 403);
   if (order.lifecycle === 'done') return c.json({ error: 'Order is done — its book is closed' }, 409);
 
-  const body = (await c.req.json().catch(() => null)) as { from?: unknown; package?: unknown } | null;
-  const from = parseFrom(body?.from);
-  if (typeof from === 'string') return c.json({ error: from }, 400);
-  const pkg = parsePackage(body?.package);
-  if (typeof pkg === 'string') return c.json({ error: pkg }, 400);
+  const body = (await c.req.json().catch(() => null)) as
+    | { from?: unknown; package?: unknown; sellerFill?: boolean }
+    | null;
+
+  // sellerFill: create an empty shell whose address/package the seller enters
+  // via the tokenized public link. Otherwise the purchaser supplies both.
+  const sellerFill = body?.sellerFill === true;
+  let from: ShipAddress | null = null;
+  let pkg: ShipPackage | null = null;
+  if (!sellerFill) {
+    const f = parseFrom(body?.from);
+    if (typeof f === 'string') return c.json({ error: f }, 400);
+    const p = parsePackage(body?.package);
+    if (typeof p === 'string') return c.json({ error: p }, 400);
+    from = f;
+    pkg = p;
+  }
 
   const provider = pickShippingClient(c.env).provider;
+  const sellerToken = sellerFill ? newSellerToken() : null;
   const row = await sql.begin(async (tx) => {
     const inserted = await tx<{ id: string }[]>`
       INSERT INTO shipments (
@@ -246,17 +279,20 @@ shipments.post('/:orderId/shipments', async (c) => {
         from_name, from_phone, from_street1, from_street2,
         from_city, from_state, from_zip, from_country,
         weight_oz, length_in, width_in, height_in,
-        provider, created_by
+        provider, seller_token, created_by
       ) VALUES (
         ${orderId}, 'draft',
-        ${from.name}, ${from.phone}, ${from.street1}, ${from.street2},
-        ${from.city}, ${from.state}, ${from.zip}, ${from.country},
-        ${pkg.weightOz}, ${pkg.lengthIn}, ${pkg.widthIn}, ${pkg.heightIn},
-        ${provider}, ${u.id}
+        ${from?.name ?? null}, ${from?.phone ?? null}, ${from?.street1 ?? null}, ${from?.street2 ?? null},
+        ${from?.city ?? null}, ${from?.state ?? null}, ${from?.zip ?? null}, ${from?.country ?? null},
+        ${pkg?.weightOz ?? null}, ${pkg?.lengthIn ?? null}, ${pkg?.widthIn ?? null}, ${pkg?.heightIn ?? null},
+        ${provider}, ${sellerToken}, ${u.id}
       )
       RETURNING id
     `;
-    await writeOrderEvent(tx, orderId, u.id, 'shipment_created', { shipmentId: inserted[0].id });
+    await writeOrderEvent(tx, orderId, u.id, 'shipment_created', {
+      shipmentId: inserted[0].id,
+      ...(sellerFill ? { sellerFill: true } : {}),
+    });
     return inserted[0];
   });
 
@@ -264,6 +300,26 @@ shipments.post('/:orderId/shipments', async (c) => {
     SELECT ${SHIPMENT_COLS(sql)} FROM shipments WHERE id = ${row.id} LIMIT 1
   `) as unknown as ShipmentRow[];
   return c.json({ shipment: toApi(full[0]) }, 201);
+});
+
+// ── Seller link: (re)issue the public fill token ─────────────────────────────
+shipments.post('/:orderId/shipments/:sid/seller-link', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const orderId = c.req.param('orderId');
+  const sid = c.req.param('sid');
+  const order = await loadOrder(sql, orderId);
+  if (!order) return c.json({ error: 'Not found' }, 404);
+  if (!canMutate(u, order)) return c.json({ error: 'Forbidden' }, 403);
+
+  const token = newSellerToken();
+  const updated = await sql<{ id: string }[]>`
+    UPDATE shipments SET seller_token = ${token}
+    WHERE id = ${sid} AND order_id = ${orderId} AND status IN ('draft','quoted')
+    RETURNING id
+  `;
+  if (!updated.length) return c.json({ error: 'Seller links only apply before a label is bought' }, 409);
+  return c.json({ sellerToken: token });
 });
 
 // ── Edit address / package (draft|quoted; editing invalidates quotes) ────────
@@ -319,6 +375,9 @@ shipments.post('/:orderId/shipments/:sid/rates', async (c) => {
   if (!canTransition(shipment.status, 'quoted')) {
     return c.json({ error: 'Rates can only be fetched for a draft shipment' }, 409);
   }
+  if (!shipmentComplete(shipment)) {
+    return c.json({ error: "Waiting for the seller's address and box size — share the seller link or fill them in" }, 409);
+  }
 
   const shipTo = await loadWarehouseShipTo(sql, order.warehouse_id);
   if ('error' in shipTo) return c.json({ error: shipTo.error }, 409);
@@ -328,21 +387,21 @@ shipments.post('/:orderId/shipments/:sid/rates', async (c) => {
   try {
     rates = await client.listRates(
       {
-        name: shipment.from_name,
+        name: shipment.from_name!,
         phone: shipment.from_phone,
-        street1: shipment.from_street1,
+        street1: shipment.from_street1!,
         street2: shipment.from_street2,
-        city: shipment.from_city,
-        state: shipment.from_state,
-        zip: shipment.from_zip,
-        country: shipment.from_country,
+        city: shipment.from_city!,
+        state: shipment.from_state!,
+        zip: shipment.from_zip!,
+        country: shipment.from_country ?? 'US',
       },
       shipTo.addr,
       {
-        weightOz: shipment.weight_oz,
-        lengthIn: shipment.length_in,
-        widthIn: shipment.width_in,
-        heightIn: shipment.height_in,
+        weightOz: shipment.weight_oz!,
+        lengthIn: shipment.length_in!,
+        widthIn: shipment.width_in!,
+        heightIn: shipment.height_in!,
       },
     );
   } catch (err) {
@@ -381,6 +440,9 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   if (!shipment) return c.json({ error: 'Not found' }, 404);
   if (!canTransition(shipment.status, 'purchased')) {
     return c.json({ error: 'Fetch rates before buying a label' }, 409);
+  }
+  if (!shipmentComplete(shipment)) {
+    return c.json({ error: "Waiting for the seller's address and box size — share the seller link or fill them in" }, 409);
   }
 
   const shipTo = await loadWarehouseShipTo(sql, order.warehouse_id);
