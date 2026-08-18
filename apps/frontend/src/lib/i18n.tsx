@@ -1257,6 +1257,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     drawerCatCleared: 'Cleared for the new category: {fields}',
     subItemsInOrder: 'Items in this order',
     subUnitsCost: '{n} units · {cost}',
+    subJumpToBottom: 'Jump to submit',
     dismiss: 'Dismiss',
     subEditingFill: 'Editing — fill in below',
     subNotFilled: 'Not filled in',

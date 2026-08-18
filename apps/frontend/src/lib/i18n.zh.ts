@@ -1062,6 +1062,7 @@ const zh: Record<string, string> = {
   drawerCatCleared: '已为新类别清空:{fields}',
   subItemsInOrder: '本订单明细',
   subUnitsCost: '{n} 件 · {cost}',
+  subJumpToBottom: '跳到提交栏',
   dismiss: '关闭',
   subEditingFill: '编辑中 —— 请在下方填写',
   subNotFilled: '未填写',
