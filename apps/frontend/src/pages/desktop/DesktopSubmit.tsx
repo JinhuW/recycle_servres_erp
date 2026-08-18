@@ -28,7 +28,7 @@ import {
 
 // ─── Public component ────────────────────────────────────────────────────────
 // OrderForm — line-item table + right-side drawer for editing one line, plus a
-// sticky bottom card with order meta + totals + submit action. There is no
+// bottom card with order meta + totals + submit action. There is no
 // category step ahead of it: a PO may hold several categories, so the choice
 // belongs to each line (AddLineMenu) rather than to the order.
 //
@@ -284,6 +284,19 @@ function OrderForm({
   // persistLines) — so abandoning the form never writes an empty draft. Null
   // until then, then holds the real PO id.
   const [orderId, setOrderId] = useState<string | null>(null);
+
+  // The commit bar sits in normal flow (not sticky), so on a long order it
+  // starts off screen. The fab appears exactly while it is — a shortcut to
+  // the Submit button rather than a second copy of it.
+  const commitRef = useRef<HTMLDivElement>(null);
+  const [commitVisible, setCommitVisible] = useState(true);
+  useEffect(() => {
+    const el = commitRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([e]) => setCommitVisible(e.isIntersecting));
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   // Existing same-category Draft POs the user can append to instead of creating
   // a fresh PO. Fetched once on mount, before any order exists; excludeId keeps
@@ -774,6 +787,7 @@ function OrderForm({
           </div>
         </div>
 
+        <div className="sub-lines-scroll">
         <table className="table">
           <thead>
             <tr>
@@ -849,6 +863,7 @@ function OrderForm({
             })}
           </tbody>
         </table>
+        </div>
 
         {/* Same cost ledger as the edit page: goods + fees = cost, with the
             fee — a cost that never was a line — as the one editable cell.
@@ -903,9 +918,9 @@ function OrderForm({
         </div>
       </div>
 
-      {/* Sticky commit bar: destination + payer + note, attachments, then the
+      {/* Commit bar: destination + payer + note, attachments, then the
           single figure the submit button commits. */}
-      <div className="card sub-commit">
+      <div className="card sub-commit" ref={commitRef}>
         <div className="sub-commit-meta">
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label" htmlFor="sub-warehouse">{t('warehouse')} <span className="req">*</span></label>
@@ -1007,6 +1022,17 @@ function OrderForm({
           </div>
         </div>
       </div>
+
+      {!commitVisible && (
+        <button
+          className="jump-bottom-fab"
+          title={t('subJumpToBottom')}
+          aria-label={t('subJumpToBottom')}
+          onClick={() => commitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
+        >
+          <Icon name="chevronDown" size={16} />
+        </button>
+      )}
 
       {activeIdx !== null && lines[activeIdx] && (
         <LineDrawer

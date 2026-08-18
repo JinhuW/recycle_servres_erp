@@ -2371,26 +2371,47 @@ html.desktop, body.desktop, .desktop #root {
    what is attached, and the button that files it. The tape directly above
    owns the money breakdown, so this band quotes the total once — as the
    figure the button is about to commit — instead of restating lines, units
-   and cost as three peer statistics. */
+   and cost as three peer statistics. In normal flow (not sticky) so it can
+   never cover the items card; the jump-to-bottom fab is the shortcut down. */
 .sub-commit {
-  position: sticky;
-  bottom: 16px;
-  z-index: 5;
-  /* .page is a column flex box, so a card that would overflow gets shrunk
-     instead — with overflow hidden that silently amputates the submit row and
-     the page never grows tall enough to scroll to it. */
   flex-shrink: 0;
   overflow: hidden;
-  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07);
-  /* Sticky, so whatever it takes it takes from the line table for the whole
-     session. Attachments are the part that grows without limit, so the bar is
-     bounded and the attachment list is what gives way — the total and the
-     Submit button below it stay on screen. */
   display: flex;
   flex-direction: column;
-  max-height: min(42vh, 400px);
 }
 .sub-commit > * + * { border-top: 1px solid var(--border); }
+
+/* Cap the line table at the pinned header + 10 rows, then scroll — same
+   64px-per-row budget the order-edit page uses (--oe-row-h). */
+.sub-lines-scroll {
+  max-height: calc(40px + 64px * 10);
+  overflow-y: auto;
+}
+.sub-lines-scroll .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Shortcut down to the commit bar once it has scrolled out of view. Sits to
+   the left of the tweaks fab, which owns the corner. */
+.jump-bottom-fab {
+  position: fixed;
+  bottom: 18px;
+  right: 64px;
+  z-index: 90;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+}
+.jump-bottom-fab:hover { color: var(--fg); border-color: var(--fg-muted); }
 
 .sub-commit-meta {
   padding: 14px 16px;
