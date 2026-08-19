@@ -1483,6 +1483,7 @@ orders.delete('/:id', async (c) => {
     | { kind: 'forbidden' }
     | { kind: 'notDraft' }
     | { kind: 'sold' }
+    | { kind: 'hasLabels' }
     | { kind: 'ok'; scanned: { k: string }[] };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -1499,6 +1500,15 @@ orders.delete('/:id', async (c) => {
       WHERE ol.order_id = ${id} LIMIT 1
     `)[0];
     if (sold) return { kind: 'sold' };
+
+    // A bought label is real money on the books; the shipments CASCADE may
+    // only ever sweep draft/quoted/voided rows.
+    const labeled = (await tx`
+      SELECT 1 FROM shipments
+      WHERE order_id = ${id} AND status IN ('purchased','in_transit','delivered')
+      LIMIT 1
+    `)[0];
+    if (labeled) return { kind: 'hasLabels' };
 
     // Both R2 sources for this order: label scans and explicit line photos.
     const scanned = await tx`
@@ -1517,6 +1527,9 @@ orders.delete('/:id', async (c) => {
   if (outcome.kind === 'notDraft') return c.json({ error: 'Only Draft orders can be deleted' }, 403);
   if (outcome.kind === 'sold') {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
+  }
+  if (outcome.kind === 'hasLabels') {
+    return c.json({ error: 'This order has purchased shipping labels — void them first' }, 409);
   }
 
   // Best-effort: drop the images from R2 too (after the commit). One PO can

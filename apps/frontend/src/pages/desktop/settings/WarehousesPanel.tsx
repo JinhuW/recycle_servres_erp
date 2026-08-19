@@ -132,6 +132,18 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
                     <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{w.timezone}</span>
                   </div>
                 )}
+                {w.shipStreet1 ? (
+                  <div className="wh-row">
+                    <span className="wh-row-label">{t('whShipAddrTitle')}</span>
+                    <span className="wh-row-val">{[w.shipCity, w.shipState].filter(Boolean).join(', ')}</span>
+                  </div>
+                ) : (
+                  <div className="wh-row">
+                    <span className="wh-row-val" style={{ color: 'var(--warn-strong)', fontSize: 12 }}>
+                      {t('whShipAddrMissing')}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="wh-card-foot">
@@ -189,6 +201,9 @@ function WarehouseEditModal({
     name: string; short: string; region: string;
     address: string; managerUserId: string;
     timezone: string;
+    shipContactName: string; shipPhone: string;
+    shipStreet1: string; shipStreet2: string;
+    shipCity: string; shipState: string; shipZip: string; shipCountry: string;
   };
   const [draft, setDraft] = useState<Draft>({
     name: warehouse?.name ?? '',
@@ -197,6 +212,14 @@ function WarehouseEditModal({
     address: warehouse?.address ?? '',
     managerUserId: warehouse?.managerUserId ?? '',
     timezone: warehouse?.timezone ?? '',
+    shipContactName: warehouse?.shipContactName ?? '',
+    shipPhone: warehouse?.shipPhone ?? '',
+    shipStreet1: warehouse?.shipStreet1 ?? '',
+    shipStreet2: warehouse?.shipStreet2 ?? '',
+    shipCity: warehouse?.shipCity ?? '',
+    shipState: warehouse?.shipState ?? '',
+    shipZip: warehouse?.shipZip ?? '',
+    shipCountry: warehouse?.shipCountry ?? '',
   });
   // Manager dropdown is sourced from the DB (users with role=manager).
   const [managers, setManagers] = useState<Member[]>([]);
@@ -231,6 +254,14 @@ function WarehouseEditModal({
         address: clean(draft.address),
         managerUserId: draft.managerUserId || null,
         timezone: clean(draft.timezone),
+        shipContactName: clean(draft.shipContactName),
+        shipPhone: clean(draft.shipPhone),
+        shipStreet1: clean(draft.shipStreet1),
+        shipStreet2: clean(draft.shipStreet2),
+        shipCity: clean(draft.shipCity),
+        shipState: clean(draft.shipState),
+        shipZip: clean(draft.shipZip),
+        shipCountry: clean(draft.shipCountry),
       };
       if (isNew) await api.post('/api/warehouses', body);
       else       await api.patch(`/api/warehouses/${warehouse!.id}`, body);
@@ -295,6 +326,54 @@ function WarehouseEditModal({
                 onChange={e => set('address', e.target.value)}
                 placeholder={t('whAddressPh')}
               />
+            </div>
+          </div>
+          {/* Structured ship-to for prepaid labels; the free-text address
+              above stays the display line. */}
+          <div style={{ margin: '14px 0 4px', fontSize: 12, fontWeight: 650, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {t('whShipAddrTitle')}
+          </div>
+          <div className="field-hint" style={{ marginBottom: 8 }}>{t('whShipAddrHint')}</div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">{t('whShipContact')}</label>
+              <input className="input" value={draft.shipContactName} onChange={e => set('shipContactName', e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">{t('whShipPhone')}</label>
+              <input className="input" value={draft.shipPhone} onChange={e => set('shipPhone', e.target.value)} />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">{t('whShipStreet1')}</label>
+              <input className="input" value={draft.shipStreet1} onChange={e => set('shipStreet1', e.target.value)} />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">{t('whShipStreet2')}</label>
+              <input className="input" value={draft.shipStreet2} onChange={e => set('shipStreet2', e.target.value)} />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">{t('whShipCity')}</label>
+              <input className="input" value={draft.shipCity} onChange={e => set('shipCity', e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">{t('whShipState')}</label>
+              <input className="input" value={draft.shipState} onChange={e => set('shipState', e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">{t('whShipZip')}</label>
+              <input className="input" value={draft.shipZip} onChange={e => set('shipZip', e.target.value)} />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="label">{t('whShipCountry')}</label>
+              <input className="input" value={draft.shipCountry} onChange={e => set('shipCountry', e.target.value.toUpperCase())} placeholder="US" />
             </div>
           </div>
           <div className="field-row">

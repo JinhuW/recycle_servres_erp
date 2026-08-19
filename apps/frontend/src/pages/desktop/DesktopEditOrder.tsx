@@ -26,6 +26,25 @@ import { serialIssue, isPricedSellPrice } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
+import { navigate } from '../../lib/route';
+import { listShipments } from '../../lib/api';
+
+// The backend folds prepaid-label costs into orders.other_fees and appends
+// "Shipping label <tracking>" entries to its note (a dedicated column is
+// pending the backend phase). The UI un-folds them: label spend renders as its
+// own read-only Shipping row, the editable Other-fees cell holds only the
+// user's remainder, and saves re-attach the shipping parts so the stored
+// column round-trips unchanged.
+const SHIP_NOTE_RE = /^(Shipping label |Label voided )/;
+function splitFeeNote(note: string | null): { userNote: string; shipNotes: string[] } {
+  const segs = (note ?? '').split(' | ').map(s => s.trim()).filter(Boolean);
+  return {
+    userNote: segs.filter(s => !SHIP_NOTE_RE.test(s)).join(' | '),
+    shipNotes: segs.filter(s => SHIP_NOTE_RE.test(s)),
+  };
+}
+// Voided labels were already subtracted server-side; these still count.
+const LIVE_LABEL_STATUSES = new Set(['purchased', 'in_transit', 'delivered', 'exception']);
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
@@ -230,6 +249,32 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
   );
   const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
+  // null until the PO's shipments load; the fee inputs then re-seed to the
+  // user-only remainder. Clamped to the stored column so the tape's rows
+  // always sum to exactly what the server holds, even after manual fee edits.
+  const [shipSplit, setShipSplit] = useState<{ fees: number; notes: string[] } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    listShipments(order.id)
+      .then(({ items }) => {
+        if (!alive) return;
+        const raw = items
+          .filter(s => LIVE_LABEL_STATUSES.has(s.status) && s.labelCost != null)
+          .reduce((sum, s) => sum + (s.labelCost ?? 0), 0);
+        const fees = Math.min(raw, order.otherFees);
+        const { userNote, shipNotes } = splitFeeNote(order.otherFeesNote);
+        setShipSplit({ fees, notes: shipNotes });
+        if (fees > 0 || shipNotes.length) {
+          const remainder = order.otherFees - fees;
+          setOtherFeesInput(remainder > 0 ? remainder.toFixed(2) : '');
+          setOtherFeesNote(userNote);
+        }
+      })
+      .catch(() => { if (alive) setShipSplit({ fees: 0, notes: [] }); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id]);
+  const shipFees = shipSplit?.fees ?? 0;
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -412,8 +457,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     commissionValid && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
   // Non-numeric intermediate input ("5e") must not read as a change.
   const parsedOtherFees = parseFeeInput(otherFeesInput);
-  const otherFeesDirty = parsedOtherFees !== order.otherFees;
-  const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+  // Compare against the user-only part once the split is known; before that
+  // the inputs still hold the raw column values, so the raw baseline applies.
+  const otherFeesDirty = shipSplit
+    ? parsedOtherFees !== order.otherFees - shipSplit.fees
+    : parsedOtherFees !== order.otherFees;
+  const otherFeesNoteDirty = shipSplit
+    ? otherFeesNote.trim() !== splitFeeNote(order.otherFeesNote).userNote
+    : otherFeesNote.trim() !== (order.otherFeesNote ?? '');
 
   // The goods total is no longer editable here: it is the sum of the lines, and
   // anything paid on top of the goods is the fee — so line costs + fee is what
@@ -450,7 +501,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const cost = poEffectiveCost({
     lineSubtotal: totals.cost,
     totalCostOverride: storedGoods.override,
-    otherFees: parsedOtherFees,
+    otherFees: parsedOtherFees + shipFees,
   });
   const effectiveTotalCost = cost.total;
   const effectiveProfit = totals.revenue - effectiveTotalCost;
@@ -536,8 +587,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
-        otherFees:     otherFeesDirty ? parsedOtherFees        : undefined,
-        otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
+        otherFees:     otherFeesDirty ? parsedOtherFees + shipFees : undefined,
+        otherFeesNote: otherFeesNoteDirty
+          ? ([otherFeesNote.trim(), ...(shipSplit?.notes ?? [])].filter(Boolean).join(' | ') || null)
+          : undefined,
         lines: lines
           .filter(l => l._id && (l._dirty || statusDirty))
           .map(l => editLineToPatch(l, statusDirty ? status : undefined)),
@@ -889,7 +942,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             lineCount={lines.length}
             units={totals.qty}
             goods={cost.goods}
-            fees={cost.fees}
+            fees={parsedOtherFees}
+            shippingFees={shipFees}
             total={effectiveTotalCost}
             revenue={totals.revenue}
             pricedCost={totals.pricedCost}
@@ -1292,9 +1346,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
         <div style={{
           padding: 16, display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr) auto',
+          gridTemplateColumns: 'auto repeat(3, 1fr) auto',
           gap: 18, alignItems: 'center',
         }}>
+          {/* Shipping lives on its own page — this is the way in. */}
+          <button
+            className="btn"
+            onClick={() => navigate(`/shipping/${order.id}`)}
+          >
+            <Icon name="truck" size={14} /> {t('shipLabelsBtn')}
+          </button>
           <div>
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
