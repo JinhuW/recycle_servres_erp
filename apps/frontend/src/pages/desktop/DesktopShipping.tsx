@@ -39,9 +39,18 @@ const STATUS_CHIP: Record<Shipment['status'], { cls: string; key: string }> = {
 };
 
 export function DesktopShipping({ orderId, showToast }: Props) {
-  return orderId
-    ? <FocusedShipping orderId={orderId} />
-    : <GlobalShipping showToast={showToast} />;
+  const { t } = useT();
+  return (
+    <>
+      <div className="ship-wip-banner" role="alert">
+        <Icon name="alert" size={14} />
+        <span>{t('shipNotReadyBanner')}</span>
+      </div>
+      {orderId
+        ? <FocusedShipping orderId={orderId} />
+        : <GlobalShipping showToast={showToast} />}
+    </>
+  );
 }
 
 // ── /shipping/:orderId — one PO's labels, full panel with all actions ────────
