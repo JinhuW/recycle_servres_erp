@@ -1023,6 +1023,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     nav_shipping: 'Shipping',
     shipLabelsBtn: 'Shipping labels',
     shipPageTitle: 'Shipping labels',
+    shipNotReadyBanner: 'The shipping feature is not ready yet — please do not use it.',
     shipPageSub: 'Prepaid labels for sellers — create the label first; the purchase order follows.',
     shipPageOrderMissing: 'This purchase order could not be opened.',
     shipOpenPo: 'Manage labels',

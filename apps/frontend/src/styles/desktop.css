@@ -154,6 +154,23 @@ html.desktop, body.desktop, .desktop #root {
   gap: 8px;
 }
 
+/* Shipping page — feature still in its UI-only phase; warn people off until
+   the backend lands. Same warn treatment as the role-preview banner. */
+.ship-wip-banner {
+  margin: 0 0 14px;
+  padding: 8px 14px;
+  max-width: 860px;
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: oklch(0.42 0.12 75);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ===== Tweaks floating panel ===== */
 .tweaks-fab {
   position: fixed;

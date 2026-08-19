@@ -836,6 +836,7 @@ const zh: Record<string, string> = {
   nav_shipping: '物流',
   shipLabelsBtn: '运单管理',
   shipPageTitle: '预付运单',
+  shipNotReadyBanner: '物流功能尚未就绪，请暂时不要使用。',
   shipPageSub: '为卖家创建预付运单 —— 先建运单,采购单随之自动创建。',
   shipPageOrderMissing: '无法打开该采购单。',
   shipOpenPo: '管理运单',
