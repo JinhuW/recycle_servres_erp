@@ -21,6 +21,8 @@ TypeScript trackers elsewhere in this workspace.
 | `rs_poster/` | Buy-ad poster (Playwright). CLIs: `rs-poster`, and `rs-session` for password-free Facebook sessions. |
 | `configs/` | `master.toml` (what the fleet searches), `fleet.toml` (which VM searches where), generated per-worker shards. |
 | `deploy/` | Docker Compose files and the per-node bringup checklist. |
+| `scripts/` | Deploy, measurement probes, and the release/vendor/secret checks. |
+| `CHANGELOG.md` · `VERSION` · `VENDOR.md` | What changed, which version, and which revision of the vendored projects it expects. |
 
 ## How it fits together
 
@@ -407,16 +409,87 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | A 30-result floor on the scroll loop: below it, insist on more quiet rounds before believing a short result list, since a stalled loader and a finished search look identical | `facebook.py` (`MIN_RESULTS_BEFORE_STOP`, `get_listings`) |
 | `Failed to get search results` fires only on an actually empty result set | `facebook.py` (`search`) |
 
-Before pulling upstream, rebase that branch rather than merging into it.
+Before pulling upstream, rebase that branch rather than merging into it, then
+refresh the pin with `scripts/check-vendor.sh update`.
+
+## Version control
+
+This repository tracks the locally-authored tree. The two vendored projects —
+`ai-marketplace-monitor` and `facebook-marketplace-bot` — have their own git
+repositories and are gitignored here; [VENDOR.md](VENDOR.md) says which commit
+of each a given release expects, and why they are kept separate.
+
+Two guards run on demand and again on every release:
+
+```bash
+scripts/check-vendor.sh           # do the vendored checkouts match VENDOR.md?
+scripts/check-vendor.sh update    # ... they were meant to move; re-pin them
+scripts/check-secrets.sh          # would this commit leak a credential?
+scripts/check-secrets.sh --all    # ... check every tracked file
+```
+
+`check-secrets.sh` scans for credential paths and for credential-shaped content.
+It skips test fixtures deliberately — a suite needs a password-shaped string on
+every other line, and a scanner that cries wolf is one people learn to bypass
+with `--no-verify`. For anything else it is wrong about, append `pragma:
+allowlist secret` to the line. It has a test of its own
+(`scripts/tests/test-check-secrets.sh`) that plants real-shaped secrets and
+demands they be caught, which is how it was found to miss a Playwright
+`storage_state` file entirely.
+
+Neither repository has a remote. Give this one a private remote before treating
+a clone as enough to redeploy from — and note that `recycle-patches` must never
+be pushed to `ai-marketplace-monitor`'s `origin`, which is the upstream author's
+repository.
+
+## Releases
+
+One version covers the whole system: the coordinator, the poster, the configs,
+and the pinned revision of the vendored monitor. They only ever ship together,
+so versioning them apart would just make "what is deployed?" harder to answer.
+[CHANGELOG.md](CHANGELOG.md) is the record; `VERSION` and both `pyproject.toml`
+files are kept in step by the release script, and `rsc --version` reports it
+from the running process rather than from whatever is checked out locally.
+
+```bash
+# Write what changed under [Unreleased] in CHANGELOG.md first, then:
+scripts/release.sh --dry-run minor   # run every check, change nothing
+scripts/release.sh minor             # bump, changelog, commit, tag
+scripts/release.sh 0.4.2             # or an exact version
+```
+
+While the major version is `0`, a **minor** bump carries a breaking change —
+which here almost always means *the fleet will not come up until you do
+something*: a renamed environment variable, configs that must be regenerated, a
+credential no longer accepted. Those go under **Breaking** in the changelog with
+the command to run.
+
+The script refuses to tag when the tree is dirty, when `[Unreleased]` is empty,
+when a vendored checkout has drifted from its pin or has uncommitted work, when
+`configs/generated` is not what `rsc gen-configs` produces, or when any suite
+fails. That list is not defensive padding — a release that quietly ships stale
+shards brings the fleet up healthy and searching the wrong cities, which is the
+most expensive way this project can fail.
 
 ## Tests
 
 ```bash
-pytest rs_coordinator/tests rs_poster/tests
+AIMM_PYTHON=$PWD/.venv-aimm/bin/python \
+    .venv-coordinator/bin/python -m pytest rs_coordinator/tests rs_poster/tests
 
-# Also validate generated configs against the real aimm loader:
-AIMM_PYTHON=$PWD/.venv/bin/python pytest rs_coordinator/tests
+# The vendored monitor has its own venv. test_facebook.py needs
+# pytest-playwright, which the runtime environment does not install.
+.venv-aimm/bin/python -m pytest ai-marketplace-monitor/tests \
+    --ignore=ai-marketplace-monitor/tests/test_facebook.py
 ```
+
+`AIMM_PYTHON` is what lets `rs_coordinator/tests` validate every generated
+worker config against the monitor's real loader, in the monitor's own
+environment. Without it those tests skip, and a config that the fleet cannot
+load passes CI — the generator prints `wrote ...` and exits 0 either way.
+
+`scripts/release.sh` runs all three suites, so the fastest way to check
+everything at once is `scripts/release.sh --dry-run patch`.
 
 ## Constraints worth knowing
 

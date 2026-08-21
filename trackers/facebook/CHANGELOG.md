@@ -18,6 +18,15 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- README sections for version control and releases: what the vendor pin and the
+  credential scanner are for, and what `scripts/release.sh` refuses to tag. The
+  test command now shows `AIMM_PYTHON`, without which the generated worker
+  configs are never validated against the monitor's real loader and a config the
+  fleet cannot load passes anyway.
+
+
 ## [0.2.0] - 2026-08-21
 
 ### Breaking
