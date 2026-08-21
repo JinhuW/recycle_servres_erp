@@ -101,5 +101,5 @@ report "a Facebook session cookie (storage_state form)" \
     '"name"[[:space:]]*:[[:space:]]*"(xs|c_user|datr)"'
 report "a Facebook session cookie" '"(xs|c_user|datr)"[[:space:]]*:[[:space:]]*"[^"]{8,}'
 
-[ "$STATUS" -eq 0 ] && echo "  no credentials in $(printf '%s\n' $FILES | wc -l | tr -d ' ') staged file(s)"
+[ "$STATUS" -eq 0 ] && echo "  no credentials in $(printf '%s\n' $FILES | wc -l | tr -d ' ') file(s)"
 exit $STATUS
