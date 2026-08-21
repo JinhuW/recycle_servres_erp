@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-21
+
 ### Breaking
 
 These three need an action before the fleet comes back up. Each of them
