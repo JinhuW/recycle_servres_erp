@@ -93,6 +93,16 @@ def parse_secret(raw: str, account_id: str) -> TotpConfig:
 
     if not text.lower().startswith("otpauth://"):
         secret = _clean(text)
+        if not secret:
+            # `_clean` strips separators, so a vault entry of "----" or "  -  "
+            # survives the empty check above and comes out as "". base32 decodes
+            # "" happily, and HMAC over an empty key produces a perfectly
+            # plausible six digits — a code that will never work, indistinguishable
+            # from one that should. rs_poster/totp.py has always guarded this.
+            raise CodeUnavailable(
+                f"The TOTP secret stored for account '{account_id}' is only separators, "
+                f"with no base32 characters in it. {_FIX_IT}"
+            )
         _decode(secret, account_id)
         return TotpConfig(secret=secret)
 

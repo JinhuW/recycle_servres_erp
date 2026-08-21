@@ -69,6 +69,9 @@ class ListingsRequest(BaseModel):
 
 
 class CodeRequest(BaseModel):
+    # Both identity fields are advisory only. The bearer token decides which
+    # account a code is minted for; these are kept so older workers still parse,
+    # and are logged-and-ignored when they disagree with the token.
     worker_id: str | None = None
     account_id: str | None = None
     kind: CodeKind = CodeKind.TOTP

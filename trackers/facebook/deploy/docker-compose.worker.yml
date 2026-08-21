@@ -40,8 +40,26 @@ services:
       PROXY_WEST: ${PROXY_WEST:-}
 
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+
+      # Listing alerts. These two feed the notification channel ONLY — they are
+      # not what drives 2FA, escalation or session backup.
       RS_COORDINATOR_URL: ${RS_COORDINATOR_URL:?set RS_COORDINATOR_URL}
       RS_COORDINATOR_TOKEN: ${RS_COORDINATOR_TOKEN:?set RS_COORDINATOR_TOKEN}
+
+      # Control plane. THESE are what the generated config's
+      # [marketplace.facebook] control_plane_url / control_plane_token read, and
+      # leaving them out is silent: the monitor only builds its control-plane
+      # client when both are set, and an unset ${VAR} in the TOML degrades to
+      # None with a Python warning. A worker missing these starts, searches and
+      # looks healthy while having no heartbeat, no automatic 2FA, no captcha
+      # escalation and no session backup — so they are required, not optional.
+      #
+      # Mint this worker's token on the coordinator host:
+      #     rsc mint-token --worker "$WORKER_ID"
+      # It authenticates this worker only; the fleet-wide token above cannot
+      # stand in for it (the control plane refuses it for secret release).
+      RS_CONTROL_PLANE_URL: ${RS_CONTROL_PLANE_URL:?set RS_CONTROL_PLANE_URL}
+      RS_CONTROL_PLANE_TOKEN: ${RS_CONTROL_PLANE_TOKEN:?set RS_CONTROL_PLANE_TOKEN - mint it with rsc mint-token --worker WORKER_ID}
 
       AIMM_ENABLE_VNC: "1"
       AIMM_WEBUI_HOST: 0.0.0.0

@@ -107,7 +107,27 @@ rsync -az --delete --itemize-changes \
 # ---------------------------------------------------------------- build
 if [ "${1:-deploy}" != "sync" ]; then
     step "rebuild $IMAGE"
-    ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build -t $IMAGE ." | tail -5
+    # NOT `docker build ... | tail -5`.
+    #
+    # This is /bin/sh with no pipefail, so a pipeline's exit status is `tail`'s,
+    # and `tail` always succeeds. A failed build therefore exited 0, `set -e`
+    # saw nothing wrong, and the next step --force-recreate'd the live monitor
+    # onto the PREVIOUS image — a deploy that reports success and changes
+    # nothing, which is the exact class of failure `verify` exists to catch.
+    #
+    # The output goes to a file so the tail is still short on success and the
+    # whole thing is there to read on failure.
+    build_log=$(mktemp)
+    if ssh "$VM" "cd $REMOTE/ai-marketplace-monitor && docker build -t $IMAGE ." \
+            > "$build_log" 2>&1; then
+        tail -5 "$build_log"
+        rm -f "$build_log"
+    else
+        echo "  build FAILED — the running container was left untouched." >&2
+        tail -40 "$build_log" >&2
+        rm -f "$build_log"
+        exit 1
+    fi
 fi
 
 # ---------------------------------------------------------------- restart

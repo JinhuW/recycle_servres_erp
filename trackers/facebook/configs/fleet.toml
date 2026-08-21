@@ -4,21 +4,34 @@
 # There is no runtime dispatch and no random city selection — a worker's search
 # scope changes only when this file is edited and `rsc gen-configs` is re-run.
 #
-# The fleet, as assigned:
+# The fleet, as assigned. City counts are deliberately uneven: coverage comes
+# from the number of city centres, not from the radius around them, and the
+# hardware is on the east coast. See the region block in master.toml.
 #
-#   worker     region            cities (500 mi radius each)
-#   ---------  ----------------  ------------------------------------------------
-#   ne-1       rs_northeast      Boston, New York, Philadelphia, Pittsburgh
-#   se-1       rs_southeast      Washington DC, Charlotte, Atlanta, Miami
-#   mw-1       rs_midwest        Detroit, Chicago, Minneapolis, St. Louis
-#   sc-1       rs_south_central  Memphis, Dallas, Houston, New Orleans
-#   denver-1   rs_mountain       Denver, Billings, Salt Lake City, Albuquerque
-#   wc-1       rs_west           Seattle, Portland, Sacramento, Los Angeles, Phoenix
+#   worker     region            n   cities
+#   ---------  ----------------  --  --------------------------------------------
+#   ne-1       rs_northeast      14  Boston, NY, Philadelphia, Pittsburgh,
+#                                    Providence, Buffalo, Rochester, Syracuse,
+#                                    Bangor, Worcester, Springfield, Hartford,
+#                                    New Haven, Manchester
+#   se-1       rs_southeast      11  Washington DC, Baltimore, Richmond,
+#                                    Virginia Beach, Charlotte, Raleigh, Atlanta,
+#                                    Jacksonville, Tampa, Orlando, Miami
+#   mw-1       rs_midwest         7  Columbus, Cleveland, Louisville, Detroit,
+#                                    Chicago, Minneapolis, St. Louis
+#   sc-1       rs_south_central   4  Memphis, Dallas, Houston, New Orleans
+#   denver-1   rs_mountain        4  Denver, Billings, Salt Lake City, Albuquerque
+#   wc-1       rs_west            5  Seattle, Portland, Sacramento, LA, Phoenix
 #
 # Mainland only — Alaska and Hawaii are out of scope, and no region here
 # reaches them.
 #
 # Rules:
+#   - Between them the regions must cover every entry in
+#     [marketplace.facebook].search_city. `rsc gen-configs` refuses to write
+#     configs that do not (pass --allow-gaps for a deliberate phased rollout):
+#     a metro missing from every region is simply never searched, and nothing
+#     downstream reports it.
 #   - Regions must not overlap. The coordinator dedupes anyway (radius overlap
 #     at region borders is expected), but overlap wastes worker time.
 #   - One Facebook account per worker. Never share an account across VMs.
@@ -52,11 +65,20 @@ region = "rs_northeast"
 # Session file for this worker's account, mounted into the container at /data.
 session = "sessions/ne-1.json"
 proxy_env = "PROXY_NORTHEAST"
+# Fourteen cities — by far the heaviest region, so a full cycle takes about
+# three times a four-city worker's. Stretched to keep this account's request
+# rate in line rather than by dropping New England centres, which are the
+# reason the region exists: Boston's circle does not reach them.
+search_interval = "90m"
+max_search_interval = "150m"
 
 [worker.se-1]
 region = "rs_southeast"
 session = "sessions/se-1.json"
 proxy_env = "PROXY_SOUTHEAST"
+# Eleven cities, and dc is the single most valuable centre in the fleet.
+search_interval = "75m"
+max_search_interval = "120m"
 
 [worker.mw-1]
 region = "rs_midwest"

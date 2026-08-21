@@ -5,16 +5,20 @@ import os
 from pathlib import Path
 
 import pytest
+import tomli_w
 import tomllib
 from fastapi.testclient import TestClient
 
 from rs_coordinator.db import Database
 from rs_coordinator.dedupe import Verdict, classify, dedupe_key, parse_price
 from rs_coordinator.sharding import (
+    DEFAULT_CONTROL_PLANE_TOKEN_ENV,
     build_worker_config,
+    check_region_coverage,
     check_region_overlap,
     generate_all,
     load_toml,
+    write_worker_config,
 )
 
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
@@ -348,3 +352,287 @@ def test_overlap_is_reported():
     warnings = check_region_overlap(master, fleet)
     assert len(warnings) == 1
     assert "denver" in warnings[0]
+
+
+# -- the dedupe race -------------------------------------------------------
+
+
+def test_only_one_of_two_racing_claims_wins(tmp_path):
+    """The invariant the alert stream rests on, at the storage layer."""
+    import threading
+
+    db = Database(tmp_path / "race.db")
+    start = threading.Barrier(8)
+    won = []
+
+    def claim():
+        start.wait()
+        if db.claim_listing(
+            {
+                "dedupe_key": "k",
+                "marketplace": "facebook",
+                "listing_id": "1",
+                "first_seen_at": "2026-01-01T00:00:00+00:00",
+                "last_seen_at": "2026-01-01T00:00:00+00:00",
+            }
+        ):
+            won.append(True)
+
+    threads = [threading.Thread(target=claim) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(won) == 1
+
+
+def test_losing_the_race_is_a_duplicate_not_a_second_alert(client, monkeypatch):
+    """A worker that read "absent" and then lost the insert must not alert.
+
+    Both workers read before either writes, so both would classify NEW. Only
+    the winner may alert; the loser has to notice and demote itself, not raise
+    a UNIQUE violation that 500s the rest of its batch.
+    """
+    import rs_coordinator.deps as deps_module
+
+    client.post(
+        "/api/v1/listings",
+        json={"worker_id": "denver-1", "listings": [sample_listing()]},
+        headers=AUTH,
+    )
+    assert len(client.sent) == 1
+
+    # Make the *first* read of this request lie, exactly as a stale read does.
+    real_get_listing = deps_module.db.get_listing
+    calls = []
+
+    def racing_get_listing(key):
+        calls.append(key)
+        return None if len(calls) == 1 else real_get_listing(key)
+
+    monkeypatch.setattr(deps_module.db, "get_listing", racing_get_listing)
+
+    response = client.post(
+        "/api/v1/listings",
+        json={"worker_id": "sw-1", "listings": [sample_listing()]},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert response.json() == {"accepted": 0, "duplicates": 1, "notified": 0}
+    assert len(client.sent) == 1
+
+
+def test_a_failing_listing_does_not_swallow_the_rest_of_the_batch(client, monkeypatch):
+    import rs_coordinator.deps as deps_module
+
+    real_record_sighting = deps_module.db.record_sighting
+
+    def explode_on_the_first(key, worker_id, price, ai_score):
+        if ai_score == 1:
+            raise RuntimeError("simulated storage failure")
+        return real_record_sighting(key, worker_id, price, ai_score)
+
+    monkeypatch.setattr(deps_module.db, "record_sighting", explode_on_the_first)
+
+    response = client.post(
+        "/api/v1/listings",
+        json={
+            "worker_id": "denver-1",
+            "listings": [
+                sample_listing(id="111", ai_score=1),
+                sample_listing(id="222", ai_score=5),
+            ],
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["accepted"], body["failed"]) == (1, 1)
+    # The good listing after the bad one still landed and still alerted.
+    assert client.db.get_listing(dedupe_key("facebook", "222"))
+    assert len(client.sent) == 1
+
+
+def test_a_failed_statement_leaves_the_connection_usable(tmp_path):
+    """No rollback means an open transaction on the one shared connection."""
+    import sqlite3
+
+    db = Database(tmp_path / "rollback.db")
+    row = {
+        "dedupe_key": "k",
+        "marketplace": "facebook",
+        "listing_id": "1",
+        "first_seen_at": "2026-01-01T00:00:00+00:00",
+        "last_seen_at": "2026-01-01T00:00:00+00:00",
+    }
+    db.insert_listing(row)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.insert_listing(row)
+
+    # A second connection must not find the database locked by the aborted write.
+    other = sqlite3.connect(db.path, timeout=1)
+    try:
+        other.execute("INSERT INTO sightings (dedupe_key, worker_id, seen_at) VALUES ('k','w','t')")
+        other.commit()
+    finally:
+        other.close()
+
+
+# -- region coverage -------------------------------------------------------
+
+
+def test_the_shipped_fleet_searches_every_curated_city():
+    """The regions must cover [marketplace.facebook].search_city, all of it.
+
+    That list is the measured one — every slug in it was verified against a
+    live session and several were added because a specific listing was missed
+    without them. A region set that covers less searches less than the
+    single-machine config it replaced, and says nothing about it: a metro with
+    no search_city entry is invisible however wide the radius next door.
+    """
+    master = load_toml(CONFIGS / "master.toml")
+    fleet = load_toml(CONFIGS / "fleet.toml")
+
+    assert check_region_coverage(master, fleet) == []
+
+
+def test_the_louisville_case_is_covered():
+    """The listing that established the rule: item 955960664200505, missed for
+    four days because columbus (189 mi away) returns zero of its results."""
+    master = load_toml(CONFIGS / "master.toml")
+    covered = {
+        city for region in master["region"].values() for city in region["search_city"]
+    }
+    assert {"louisville", "columbus"} <= covered
+
+
+def test_a_gap_is_reported():
+    master = {
+        "marketplace": {"facebook": {"search_city": ["dc", "louisville"]}},
+        "region": {"east": {"search_city": ["dc"]}},
+    }
+    fleet = {"worker": {"ne-1": {"region": "east"}}}
+
+    gaps = check_region_coverage(master, fleet)
+    assert len(gaps) == 1
+    assert "louisville" in gaps[0]
+
+
+def test_every_region_zips_its_city_columns():
+    """search_city, city_name and radius are read positionally; a length
+    mismatch mislabels cities or is rejected outright by aimm."""
+    master = load_toml(CONFIGS / "master.toml")
+    for name, region in master["region"].items():
+        assert len(region["search_city"]) == len(region["city_name"]) == len(region["radius"]), name
+
+
+def test_a_worker_console_url_survives_generation(tmp_path):
+    """fleet.toml's per-worker vnc_url is the operator's way into a stuck
+    browser, and it used to produce a config aimm could not load at all."""
+    master = load_toml(CONFIGS / "master.toml")
+    config = build_worker_config(
+        master,
+        "denver-1",
+        {"region": "rs_mountain", "vnc_url": "https://vnc.example.com/denver-1"},
+    )
+
+    assert config["marketplace"]["facebook"]["vnc_url"] == "https://vnc.example.com/denver-1"
+
+    # aimm lives in its own venv, so the loader is exercised the same way the
+    # validator test does it. The generated table is splatted straight into
+    # FacebookMarketplaceConfig, so an unknown key is a TypeError at worker
+    # start-up, not a warning — `rsc gen-configs` still prints "wrote ..." and
+    # exits 0.
+    import subprocess
+
+    path = tmp_path / "worker-denver-1.toml"
+    write_worker_config(config, path, "denver-1")
+    result = subprocess.run(
+        [
+            os.environ["AIMM_PYTHON"],
+            "-c",
+            "import sys;from pathlib import Path;"
+            "from ai_marketplace_monitor.config import Config;"
+            "c=Config([Path(sys.argv[1])]);"
+            "print(c.marketplace['facebook'].vnc_url)",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "OPENROUTER_API_KEY": "sk-test",
+             "RS_COORDINATOR_URL": "http://127.0.0.1:8599", "RS_COORDINATOR_TOKEN": "tok"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "https://vnc.example.com/denver-1" in result.stdout
+
+
+# -- the worker's control-plane wiring -------------------------------------
+
+
+def test_every_env_var_a_generated_config_reads_is_exported_by_the_compose_file():
+    """A worker missing these starts, searches, and is silently half-dead.
+
+    aimm builds its control-plane client only when the URL, the token and a
+    worker id are all present, and utils.py degrades an unset `${VAR}` in the
+    TOML to None with nothing more than a Python warning. So a variable the
+    generated config names but the compose file never exports costs the fleet
+    its heartbeat, its automatic 2FA, its escalation and its session backups,
+    with every container reporting healthy.
+    """
+    import re
+
+    compose = (Path(__file__).resolve().parents[2] / "deploy/docker-compose.worker.yml").read_text()
+    master = load_toml(CONFIGS / "master.toml")
+    fleet = load_toml(CONFIGS / "fleet.toml")
+
+    # Set by compose itself, or by the operator's shell before `compose up`.
+    provided_elsewhere = {"WORKER_ID"}
+
+    for worker_id, worker in fleet["worker"].items():
+        config = build_worker_config(master, worker_id, worker)
+        referenced = set(re.findall(r"\$\{([A-Z0-9_]+)\}", tomli_w.dumps(config)))
+        for name in sorted(referenced - provided_elsewhere):
+            assert re.search(rf"^\s+{name}:", compose, re.MULTILINE), (
+                f"{worker_id}'s config reads ${{{name}}}, which "
+                "deploy/docker-compose.worker.yml never puts in the container"
+            )
+
+
+def test_the_control_plane_token_variable_is_reachable_from_compose():
+    """Compose cannot build `RS_WORKER_TOKEN_${WORKER_ID}` — it has no string
+    functions — so a name derived from the worker id can never be exported."""
+    master = load_toml(CONFIGS / "master.toml")
+    config = build_worker_config(master, "ne-1", {"region": "rs_northeast"})
+
+    assert (
+        config["marketplace"]["facebook"]["control_plane_token"]
+        == f"${{{DEFAULT_CONTROL_PLANE_TOKEN_ENV}}}"
+    )
+
+
+def test_healthz_fails_when_the_database_is_unreachable(client, monkeypatch):
+    """The Docker healthcheck asks this and nothing else.
+
+    A healthz that never queried reported `ok` with a dead Postgres pool, so a
+    coordinator accepting listings and losing them looked like a healthy
+    container.
+    """
+    import rs_coordinator.deps as deps_module
+
+    def dead_cursor():
+        raise RuntimeError("connection pool exhausted")
+
+    monkeypatch.setattr(deps_module.db, "cursor", dead_cursor)
+
+    response = client.get("/healthz")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert "connection pool exhausted" in body["database"]
+
+
+def test_healthz_reports_the_database_when_it_is_reachable(client):
+    body = client.get("/healthz").json()
+    assert body["status"] == "ok"
+    assert body["database"] == "ok"

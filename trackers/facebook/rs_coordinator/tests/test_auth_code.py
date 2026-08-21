@@ -191,3 +191,73 @@ def test_credentials_are_released_and_audited_when_allowed(client):
 
 def test_credentials_require_a_valid_token(client):
     assert client.post("/v1/auth/credentials", json={}).status_code == 401
+
+
+# -- the legacy fleet-wide token --------------------------------------------
+
+
+@pytest.fixture()
+def legacy_client(tmp_path, monkeypatch):
+    """A control plane that still accepts the shared fleet token."""
+    monkeypatch.setenv("RS_COORDINATOR_DB", str(tmp_path / "legacy.db"))
+    monkeypatch.setenv("RS_VAULT_KEY", generate_key())
+    monkeypatch.setenv("RS_WORKER_TOKEN_SECRET", WORKER_SECRET)
+    monkeypatch.setenv("RS_COORDINATOR_TOKEN", "fleet-wide-token")
+    monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    import rs_coordinator.app as app_module
+    import rs_coordinator.deps as deps_module
+
+    importlib.reload(deps_module)
+    importlib.reload(app_module)
+
+    store = deps_module.get_account_store()
+    store.put_account(
+        "denver",
+        {"password": "hunter2", "totp_secret": TOTP_SECRET},
+        worker_id="denver-1",
+        fb_username="denver@example.com",
+        allow_password_login=True,
+    )
+
+    test_client = TestClient(app_module.app)
+    test_client.db = app_module.db
+    yield test_client
+
+
+LEGACY = {"Authorization": "Bearer fleet-wide-token"}
+
+
+@pytest.mark.parametrize("route", ["/v1/auth/code", "/v1/auth/credentials"])
+def test_the_fleet_token_cannot_name_an_account(legacy_client, route):
+    """The whole point: one compromised VM must not reach another's secrets.
+
+    Every worker container is handed RS_COORDINATOR_TOKEN for the listing
+    channel, so if that token could name an `account_id` it would also be a
+    fleet-wide key to the vault.
+    """
+    response = legacy_client.post(
+        route, json={"worker_id": "anything", "account_id": "denver"}, headers=LEGACY
+    )
+    assert response.status_code == 403
+    assert "per-worker token" in response.json()["detail"]
+    # Nothing leaked, and nothing was minted to leak.
+    assert "hunter2" not in response.text
+    assert legacy_client.db.list_code_audit() == []
+
+
+def test_the_fleet_token_cannot_impersonate_a_worker_either(legacy_client):
+    """Refusing only `account_id` would leave the same hole one hop away."""
+    response = legacy_client.post(
+        "/v1/auth/code", json={"worker_id": "denver-1"}, headers=LEGACY
+    )
+    assert response.status_code == 403
+    assert legacy_client.db.list_code_audit() == []
+
+
+def test_a_per_worker_token_still_works_on_that_deployment(legacy_client):
+    """Refusing the fleet token must not take real workers down with it."""
+    response = legacy_client.post("/v1/auth/code", json={}, headers=auth("denver-1"))
+    assert response.status_code == 200
+    assert response.json()["code"] in reference_codes()

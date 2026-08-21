@@ -17,7 +17,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import __version__
 from .db import open_database
-from .sharding import check_region_overlap, generate_all, load_toml
+from .sharding import (
+    DEFAULT_CONTROL_PLANE_TOKEN_ENV,
+    check_region_coverage,
+    check_region_overlap,
+    generate_all,
+    load_toml,
+)
 from .tokens import TokenError, generate_secret, mint_worker_token
 from .vault import SECRET_FIELDS, AccountStore, Vault, VaultError, generate_key
 
@@ -47,8 +53,28 @@ def cmd_gen_configs(args: argparse.Namespace) -> int:
             print(f"error: {path} not found", file=sys.stderr)
             return 1
 
-    for warning in check_region_overlap(load_toml(master), load_toml(fleet)):
+    master_config = load_toml(master)
+    fleet_config = load_toml(fleet)
+
+    # Overlap only costs worker time — the coordinator dedupes — so it is a
+    # warning.
+    for warning in check_region_overlap(master_config, fleet_config):
         print(f"warning: {warning}", file=sys.stderr)
+
+    # A gap is not: those metros are simply never searched, and nothing
+    # downstream ever says so. Refuse to write configs that quietly cover less
+    # than the single-machine config they replace.
+    gaps = check_region_coverage(master_config, fleet_config)
+    if gaps and not args.allow_gaps:
+        for gap in gaps:
+            print(f"error: {gap}", file=sys.stderr)
+        print(
+            "Pass --allow-gaps to generate anyway (a deliberate phased rollout).",
+            file=sys.stderr,
+        )
+        return 1
+    for gap in gaps:
+        print(f"warning: {gap}", file=sys.stderr)
 
     written = generate_all(master, fleet, output)
     if not written:
@@ -542,9 +568,10 @@ def cmd_mint_token(args: argparse.Namespace) -> int:
     print(mint_worker_token(args.worker))
     # The note goes to stderr so the token itself stays pipeable. The variable
     # name matches the one `rsc gen-configs` writes into the worker's config.
-    env_var = f"RS_WORKER_TOKEN_{re.sub(r'[^A-Za-z0-9]+', '_', args.worker).strip('_').upper()}"
+    env_var = DEFAULT_CONTROL_PLANE_TOKEN_ENV
     print(
-        f"\nPut this in worker '{args.worker}''s environment as {env_var}. It is sent as "
+        f"\nPut this in worker '{args.worker}''s environment as {env_var} (one worker "
+        "per VM, so the name is the same on each). It is sent as "
         "`Authorization: Bearer <token>` and authenticates that worker only, so a "
         "compromised VM reaches nothing but its own account. Rotating "
         "RS_WORKER_TOKEN_SECRET revokes every token at once.",
@@ -565,6 +592,11 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--master", default=str(DEFAULT_CONFIGS / "master.toml"))
     gen.add_argument("--fleet", default=str(DEFAULT_CONFIGS / "fleet.toml"))
     gen.add_argument("--output", default=str(DEFAULT_CONFIGS / "generated"))
+    gen.add_argument(
+        "--allow-gaps",
+        action="store_true",
+        help="Generate even if some search_city entries are in no region",
+    )
     gen.set_defaults(func=cmd_gen_configs)
 
     serve = sub.add_parser("serve", help="Run the coordinator API")

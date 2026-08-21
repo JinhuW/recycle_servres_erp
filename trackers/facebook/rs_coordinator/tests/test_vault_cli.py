@@ -320,8 +320,13 @@ def test_mint_token_round_trips(env, capsys):
     assert verify_worker_token(token) == "denver-1"
     # The token alone goes to stdout so it can be piped; guidance goes to stderr.
     assert "\n" not in token
-    # The note names the env var the generated worker config reads.
-    assert "RS_WORKER_TOKEN_DENVER_1" in captured.err
+    # The note names the env var the generated worker config reads — the same
+    # one docker-compose.worker.yml exports. It is deliberately NOT derived from
+    # the worker id: compose has no string functions, so a derived name could
+    # never be set, and the control plane silently stayed off.
+    from rs_coordinator.sharding import DEFAULT_CONTROL_PLANE_TOKEN_ENV
+
+    assert DEFAULT_CONTROL_PLANE_TOKEN_ENV in captured.err
 
 
 def test_mint_token_rejects_a_bad_worker_id(env, capsys):

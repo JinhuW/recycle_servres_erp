@@ -252,3 +252,38 @@ def test_describe_ignores_session_cookie_expiry():
     assert info.has_required
     assert info.days_remaining is None
     assert not info.expired
+
+
+# -- session cookies survive an import --------------------------------------
+
+
+def test_a_netscape_session_cookie_is_not_stamped_with_the_epoch():
+    """cookies.txt is text, so "no expiry" arrives as the STRING "0".
+
+    Comparing it against the int 0 fell through to float("0") -> 0.0, i.e.
+    expired at the epoch, and Playwright discards those on restore. Facebook
+    rotates precisely the session-scoped cookies, so the import silently lost
+    its live half while `rs-session check` still passed on the persistent ones.
+    """
+    cookies = parse_netscape(
+        ".facebook.com\tTRUE\t/\tTRUE\t0\txs\t42%3Aabcdef%3A%3A2%3A1234567890\n"
+    )
+    assert len(cookies) == 1
+    assert cookies[0]["name"] == "xs"
+    assert cookies[0]["expires"] == -1
+
+
+def test_a_real_expiry_still_comes_through():
+    cookies = parse_netscape(".facebook.com\tTRUE\t/\tTRUE\t1800000000\tdatr\tsomevalue\n")
+    assert cookies[0]["expires"] == 1800000000.0
+
+
+def test_the_http_only_flag_is_carried_not_dropped():
+    """The "#HttpOnly_" prefix is the file format's only record of the flag."""
+    cookies = parse_netscape(
+        "#HttpOnly_.facebook.com\tTRUE\t/\tTRUE\t0\txs\tsecret\n"
+        ".facebook.com\tTRUE\t/\tTRUE\t1800000000\tc_user\t100000\n"
+    )
+    by_name = {cookie["name"]: cookie for cookie in cookies}
+    assert by_name["xs"]["httpOnly"] is True
+    assert by_name["c_user"]["httpOnly"] is False

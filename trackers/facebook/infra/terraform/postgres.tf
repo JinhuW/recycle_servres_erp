@@ -26,6 +26,21 @@ resource "railway_service" "postgres" {
     name       = "pgdata"
     mount_path = var.volume_mount_path
   }
+
+  # This service's volume holds the account vault: every worker's encrypted
+  # Facebook credentials, session snapshots, and the listing history. Replacing
+  # the service destroys the volume with it, and there is no backup here.
+  #
+  # It is guarded because a REPLACE is a live possibility, not a hypothetical:
+  # the provider bug documented in infra/README.md leaves this resource tainted
+  # after a normal apply, and the documented recovery is `terraform untaint` —
+  # a plain `apply` on a tainted resource replaces it instead. prevent_destroy
+  # turns "I did not read the plan closely enough" into a hard error.
+  #
+  # To retire the project deliberately, delete this block first, then apply.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Service variables. The image reads these on first boot to run initdb; after

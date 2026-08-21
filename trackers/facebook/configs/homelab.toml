@@ -311,73 +311,129 @@ where <summary> names the component type, the unit count, and the price (max 25 
 # --------------------------------------------------------------------------
 # Regions — each worker VM is pinned to exactly one of these.
 #
-# Six regions divide the lower 48 between six worker accounts, each city
-# searched at radius=500, which is 311 mi and NOT the maximum — radius=805
-# returns "Within 500 mi" and 1000 is accepted too. Coverage is
-# mainland only: Alaska and Hawaii sit outside every radius here and are not
-# searched.
+# THE CITY LIST IS THE COVERAGE. A metro is invisible until it has its own
+# search_city entry; the radius around a neighbouring centre does not reach it.
+# This is measured, not assumed — see the radius block above, and the Louisville
+# case in the search_city comment: a listing at POSITION 1 from `louisville`
+# returned ZERO from `columbus` (189 mi away) at radius 100, 250 AND 500, with
+# the filters dropped as well. Results are anchored to the city in the URL path.
 #
-# Overlap between neighbouring regions is expected and deliberate: a 311-mile
-# circle is not what Facebook actually returns. Ranking, seller settings, and
-# category placement hide listings that are geographically in range, so two
-# cities seeing the same area is coverage, not waste. The coordinator dedupes
-# by Facebook item id, so an overlap costs worker time, never a second alert.
+# So these lists are the union of every centre worth searching, split across six
+# workers by geography — NOT four-city summaries with wide circles, which is
+# what they used to be. Every slug in [marketplace.facebook].search_city above
+# appears in exactly one region below, and `rsc gen-configs` refuses to write
+# any config if that stops being true (--allow-gaps overrides it for a
+# deliberate phased rollout). It has to be enforced there because the failure is
+# otherwise completely silent: the fleet just never sees those metros.
 #
-# search_city values are Facebook Marketplace location slugs — the segment
-# after /marketplace/ in a search URL. All 25 below were verified against a
-# live session on 2026-08-19. Two are not the obvious spelling:
+# The split is geographic, not balanced, and it has to stay that way: fleet.toml
+# pairs each region with a proxy in that part of the country, because a
+# Marketplace search from a city 2000 miles from the account's IP is exactly the
+# pattern Facebook checkpoints on. The east coast therefore carries far more
+# centres than the mountain west, which is where the decommissioned hardware
+# actually is. Pace the heavy workers with fleet.toml's per-worker
+# search_interval rather than by deleting cities from them.
+#
+# Radius is in KILOMETRES and, as measured, changes nothing (37 mi and 311 mi
+# returned identical results). 100 km matches the phase-1 list above; the New
+# England five get 60 km only because they are packed close enough that wider
+# circles would re-search each other.
+#
+# search_city values are Facebook Marketplace location slugs — the segment after
+# /marketplace/ in a search URL. A wrong slug fails SILENTLY: Facebook falls
+# back to the account's own location and returns plausible results from the
+# wrong part of the country rather than erroring. Re-verify with
+# `python scripts/check-cities.py` after editing this section. Three entries are
+# not the obvious spelling:
 #   - Sacramento is "sac"; "sacramento" is not a location.
-#   - Billings has no slug at all, so its numeric location id is used. Numeric
-#     ids are equally valid wherever a slug is (see upstream config.toml).
-# A wrong slug fails SILENTLY — Facebook falls back to the account's own
-# location and returns plausible results from the wrong part of the country
-# rather than erroring. Re-verify with `python scripts/check-cities.py` after
-# editing this section.
+#   - Billings has no slug at all, so its numeric location id is used.
+#   - The five New England ids are numeric for the same reason — `worcester`,
+#     `hartford`, `newhaven`, `lowell` and `springfield` are all rejected.
+# Numeric ids are equally valid wherever a slug is (see upstream config.toml).
 # --------------------------------------------------------------------------
 [region.rs_northeast]
 full_name = "Northeast"
-search_city = ["boston", "nyc", "philly", "pittsburgh"]
-city_name = ["Boston, MA", "New York, NY", "Philadelphia, PA", "Pittsburgh, PA"]
-radius = [500, 500, 500, 500]
+# The heaviest region by a wide margin, and deliberately so: New England is
+# dense with small centres Boston's circle does not reach, and the corridor from
+# NY to Boston produces more clear-outs than anywhere except DC. ne-1 carries a
+# longer search_interval in fleet.toml to keep its request rate in line.
+search_city = [
+    "boston", "nyc", "philly", "pittsburgh",
+    "providence", "buffalo", "rochester", "syracuse", "bangor",
+    # Numeric ids: Worcester MA, Springfield MA, Hartford CT, New Haven CT,
+    # Manchester NH. Paired with their labels in city_name, in this order.
+    "105596609473837", "112781448736001", "108119482550253",
+    "108541499165950", "107634079257154",
+]
+city_name = [
+    "Boston, MA", "New York, NY", "Philadelphia, PA", "Pittsburgh, PA",
+    "Providence, RI", "Buffalo, NY", "Rochester, NY", "Syracuse, NY", "Bangor, ME",
+    "Worcester, MA", "Springfield, MA", "Hartford, CT",
+    "New Haven, CT", "Manchester, NH",
+]
+radius = [
+    100, 100, 100, 100,
+    100, 100, 100, 100, 100,
+    60, 60, 60, 60, 60,
+]
 currency = "USD"
 
 [region.rs_southeast]
-full_name = "Southeast"
-search_city = ["dc", "charlotte", "atlanta", "miami"]
-city_name = ["Washington, DC", "Charlotte, NC", "Atlanta, GA", "Miami, FL"]
-radius = [500, 500, 500, 500]
+full_name = "Southeast / Mid-Atlantic"
+# dc is the single most valuable centre in the fleet: "Data Center Alley"
+# (Ashburn, Reston, Manassas, Sterling) has no Marketplace slug of its own and
+# all of it sits inside dc's circle.
+search_city = [
+    "dc", "baltimore", "richmond", "virginiabeach",
+    "charlotte", "raleigh", "atlanta",
+    "jacksonville", "tampa", "orlando", "miami",
+]
+city_name = [
+    "Washington, DC", "Baltimore, MD", "Richmond, VA", "Virginia Beach, VA",
+    "Charlotte, NC", "Raleigh, NC", "Atlanta, GA",
+    "Jacksonville, FL", "Tampa, FL", "Orlando, FL", "Miami, FL",
+]
+radius = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100]
 currency = "USD"
 
 [region.rs_midwest]
-full_name = "Midwest"
-search_city = ["detroit", "chicago", "minneapolis", "stlouis"]
-city_name = ["Detroit, MI", "Chicago, IL", "Minneapolis, MN", "St. Louis, MO"]
-radius = [500, 500, 500, 500]
+full_name = "Midwest / Ohio Valley"
+# louisville is here because of item 955960664200505 — a $150 Samsung PM883 +
+# PC4-2666V ECC lot that sat listed for four days and was never seen, because
+# the nearest centre the fleet had was columbus. It is the case that established
+# the rule at the top of this section.
+search_city = [
+    "columbus", "cleveland", "louisville",
+    "detroit", "chicago", "minneapolis", "stlouis",
+]
+city_name = [
+    "Columbus, OH", "Cleveland, OH", "Louisville, KY",
+    "Detroit, MI", "Chicago, IL", "Minneapolis, MN", "St. Louis, MO",
+]
+radius = [100, 100, 100, 100, 100, 100, 100]
 currency = "USD"
 
 [region.rs_south_central]
 full_name = "South Central"
 search_city = ["memphis", "dallas", "houston", "neworleans"]
 city_name = ["Memphis, TN", "Dallas, TX", "Houston, TX", "New Orleans, LA"]
-radius = [500, 500, 500, 500]
+radius = [100, 100, 100, 100]
 currency = "USD"
 
 [region.rs_mountain]
 full_name = "Mountain / Plains"
-# 112454482100538 = Billings, MT. It is the only one of these with no slug;
-# it anchors the northern plains, which nothing else reaches.
+# 112454482100538 = Billings, MT. It is the only one of these with no slug; it
+# anchors the northern plains, which nothing else reaches.
 search_city = ["denver", "112454482100538", "saltlakecity", "albuquerque"]
 city_name = ["Denver, CO", "Billings, MT", "Salt Lake City, UT", "Albuquerque, NM"]
-radius = [500, 500, 500, 500]
+radius = [100, 100, 100, 100]
 currency = "USD"
 
 [region.rs_west]
 full_name = "West Coast"
-# Five cities, not four: the coast is long and Phoenix has no closer centre.
-# This worker does ~25% more searching per cycle than the others.
 search_city = ["seattle", "portland", "sac", "la", "phoenix"]
 city_name = ["Seattle, WA", "Portland, OR", "Sacramento, CA", "Los Angeles, CA", "Phoenix, AZ"]
-radius = [500, 500, 500, 500, 500]
+radius = [100, 100, 100, 100, 100]
 currency = "USD"
 
 # --------------------------------------------------------------------------

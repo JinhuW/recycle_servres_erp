@@ -220,6 +220,18 @@ class PostgresDatabase:
         with self.cursor() as cur:
             cur.execute(f"INSERT INTO listings ({columns}) VALUES ({placeholders})", record)
 
+    def claim_listing(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
+        """See `Database.claim_listing`. True only for the caller that inserted."""
+        columns = ", ".join(record)
+        placeholders = ", ".join(f"%({name})s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO listings ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT (dedupe_key) DO NOTHING",
+                record,
+            )
+            return cur.rowcount > 0
+
     def update_listing(
         self: "PostgresDatabase", dedupe_key: str, fields: Dict[str, Any]
     ) -> None:

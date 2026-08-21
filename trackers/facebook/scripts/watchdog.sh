@@ -10,10 +10,21 @@
 #
 # Progress is measured by the log's mtime: the monitor writes constantly while
 # scanning, and its longest legitimate quiet stretch is one search interval.
+#
+# THIS ONLY RESTARTS A MONITOR THAT IS ALREADY RUNNING HERE. It must never start
+# one. The laptop deployment this was written for has been retired — the live
+# monitor is a container on the homelab VM (deploy/docker-compose.homelab.yml),
+# which shares this machine's NAT IP. Loading the laptop agent would put a
+# SECOND monitor on the same Facebook account from the same public IP, doubling
+# that IP's request rate, which is the single pattern most likely to get the
+# account checkpointed. The staleness trigger below is permanently satisfied on
+# a retired host (the log stopped advancing the day it was retired), so without
+# the guard the very first tick after a reboot does exactly that.
 set -eu
 
 ROOT="/Users/jinhu/Projects/recycle_servers/facebook_tracker"
-AGENT="$HOME/Library/LaunchAgents/com.recycleservers.fbmonitor.plist"
+AGENT_LABEL="com.recycleservers.fbmonitor"
+AGENT="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 LOG="$HOME/.ai-marketplace-monitor/ai-marketplace-monitor.log"
 WATCHLOG="$ROOT/logs/watchdog.log"
 
@@ -25,6 +36,15 @@ STALL_MINUTES=110
 note() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $*" >> "$WATCHLOG"; }
 
 mkdir -p "$ROOT/logs"
+
+# Is this host actually serving the monitor? `launchctl list` prints one line
+# per loaded job; an unloaded agent is absent entirely. Absent means a human
+# unloaded it (or never loaded it), and reloading it here would be this script
+# overruling that decision — see the header. Silent, because this runs every ten
+# minutes and on a retired host it is the normal state, not an incident.
+if ! launchctl list 2>/dev/null | grep -q "[[:space:]]${AGENT_LABEL}\$"; then
+    exit 0
+fi
 
 [ -f "$LOG" ] || { note "no log yet at $LOG; nothing to judge"; exit 0; }
 

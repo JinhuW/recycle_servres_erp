@@ -7,7 +7,7 @@ fleet and owns the single Telegram alert stream.
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from .. import deps
 from ..db import utcnow
@@ -37,17 +37,44 @@ LISTING_COLUMNS = (
 
 
 @router.get("/healthz")
-def healthz() -> Dict[str, Any]:
+def healthz(response: Response) -> Dict[str, Any]:
+    """Is this coordinator able to do its job right now?
+
+    It touches the database, because without that it cannot. Every route that
+    matters here reads or writes, so a coordinator with a dead Postgres pool
+    accepts listings and loses them — and Docker's healthcheck (see
+    deploy/docker-compose.coordinator.yml) only asks this endpoint, so a
+    healthz that never queried reported a healthy container throughout.
+
+    Answers 503 when the database is unreachable, so the healthcheck fails
+    instead of the operator having to notice.
+    """
     # Report the backend actually in use, not the SQLite path constant: during
     # an incident "db: /data/coordinator.db" on a Postgres deployment sends the
     # operator looking for a file that is not the source of truth.
     postgres = type(deps.db).__name__ == "PostgresDatabase"
-    return {
+    body: Dict[str, Any] = {
         "status": "ok",
         "telegram": deps.notifier.enabled,
         "backend": "postgres" if postgres else "sqlite",
         "db": "(remote postgres)" if postgres else deps.DB_PATH,
     }
+
+    try:
+        # The cheapest statement that proves a usable connection: it takes one
+        # from the pool, round-trips it, and returns it.
+        with deps.db.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+    except Exception as e:
+        logger.exception("healthz could not reach the database")
+        response.status_code = 503
+        body["status"] = "degraded"
+        body["database"] = f"unreachable: {type(e).__name__}: {e}"
+        return body
+
+    body["database"] = "ok"
+    return body
 
 
 @router.post("/api/v1/listings")
@@ -61,39 +88,27 @@ def report_listings(
     accepted = 0
     duplicates = 0
     notified = 0
+    failed = 0
 
     for listing in payload.listings:
-        key = dedupe_key(listing.marketplace, listing.id)
-        incoming = listing.model_dump()
-        existing = db.get_listing(key)
-        verdict = classify(incoming, existing)
+        try:
+            verdict = _ingest_one(db, listing, worker_id)
+        except Exception:
+            # One malformed or unlucky listing must not cost the worker the rest
+            # of its batch: everything after it in the loop would go unrecorded
+            # and unalerted, and the worker has no way to tell which.
+            logger.exception("Could not ingest listing %s; skipping it", listing.id)
+            failed += 1
+            continue
 
-        record = {column: incoming.get(column) for column in LISTING_COLUMNS}
-        db.record_sighting(key, worker_id, listing.price, listing.ai_score)
-
-        if verdict is Verdict.NEW:
-            db.insert_listing(
-                {
-                    "dedupe_key": key,
-                    "marketplace": listing.marketplace,
-                    "listing_id": listing.id,
-                    "item_name": listing.name,
-                    "first_seen_at": utcnow(),
-                    "last_seen_at": utcnow(),
-                    "first_worker_id": worker_id,
-                    **record,
-                }
-            )
-            accepted += 1
+        if verdict is Verdict.DUPLICATE:
+            duplicates += 1
         else:
-            db.update_listing(key, {**record, "last_seen_at": utcnow()})
-            if verdict is Verdict.DUPLICATE:
-                duplicates += 1
-            else:
-                accepted += 1
+            accepted += 1
 
         if verdict.should_notify:
-            stored = db.get_listing(key) or record
+            key = dedupe_key(listing.marketplace, listing.id)
+            stored = db.get_listing(key) or listing.model_dump()
             if deps.notifier.send_listing(stored, verdict.value, worker_id):
                 db.update_listing(key, {"notified_at": utcnow()})
                 notified += 1
@@ -101,7 +116,49 @@ def report_listings(
                 logger.warning("Telegram alert failed for listing %s", listing.id)
 
     db.upsert_worker(worker_id, status="ok", heartbeat=True, saw_listing=True)
-    return {"accepted": accepted, "duplicates": duplicates, "notified": notified}
+    result = {"accepted": accepted, "duplicates": duplicates, "notified": notified}
+    if failed:
+        result["failed"] = failed
+    return result
+
+
+def _ingest_one(db: Any, listing: Any, worker_id: str) -> Verdict:
+    """Record one listing and return what it turned out to be.
+
+    The verdict is decided by whether *our* insert won, not by a read that
+    happened earlier: `get_listing` releases the database lock before the insert
+    takes it again, and FastAPI runs these handlers in a threadpool, so two
+    workers reporting the same border listing can both read "absent". Both would
+    then alert, and the loser's plain INSERT would raise a UNIQUE violation.
+    """
+    key = dedupe_key(listing.marketplace, listing.id)
+    incoming = listing.model_dump()
+    record = {column: incoming.get(column) for column in LISTING_COLUMNS}
+    db.record_sighting(key, worker_id, listing.price, listing.ai_score)
+
+    if classify(incoming, db.get_listing(key)) is Verdict.NEW:
+        now = utcnow()
+        won = db.claim_listing(
+            {
+                "dedupe_key": key,
+                "marketplace": listing.marketplace,
+                "listing_id": listing.id,
+                "item_name": listing.name,
+                "first_seen_at": now,
+                "last_seen_at": now,
+                "first_worker_id": worker_id,
+                **record,
+            }
+        )
+        if won:
+            return Verdict.NEW
+        # Someone inserted it between our read and our insert. Re-read and
+        # judge against what they wrote, so the loser reports a duplicate (or a
+        # genuine price drop) instead of a second "new listing" alert.
+
+    verdict = classify(incoming, db.get_listing(key))
+    db.update_listing(key, {**record, "last_seen_at": utcnow()})
+    return verdict
 
 
 @router.get("/api/v1/listings")

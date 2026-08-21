@@ -211,11 +211,22 @@ class Database:
 
     @contextmanager
     def cursor(self: "Database") -> Iterator[sqlite3.Cursor]:
+        """Yield a cursor, then commit — or roll back if the body raised.
+
+        The rollback is not optional bookkeeping. There is one shared
+        connection, so a statement that fails (a UNIQUE violation, say) and is
+        neither committed nor rolled back leaves an open transaction on it, and
+        every later caller — including a `rsc status` on another thread — gets
+        "database is locked" until the process restarts.
+        """
         with self._lock:
             cur = self._conn.cursor()
             try:
                 yield cur
                 self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
             finally:
                 cur.close()
 
@@ -232,10 +243,33 @@ class Database:
         return dict(row) if row else None
 
     def insert_listing(self: "Database", record: Dict[str, Any]) -> None:
+        """Insert a listing, raising if the dedupe key is already taken.
+
+        Callers racing other workers for the same key want `claim_listing`.
+        """
         columns = ", ".join(record)
         placeholders = ", ".join(f":{name}" for name in record)
         with self.cursor() as cur:
             cur.execute(f"INSERT INTO listings ({columns}) VALUES ({placeholders})", record)
+
+    def claim_listing(self: "Database", record: Dict[str, Any]) -> bool:
+        """Insert a listing if nobody has that dedupe key yet; True if we won.
+
+        Two workers whose regions overlap report a border listing at the same
+        moment. Deciding newness by reading first and inserting second lets both
+        of them read "absent" and both alert, and makes the loser's INSERT
+        raise. One atomic statement decides it instead: exactly one caller gets
+        True, which is what "exactly one alert per listing" rests on.
+        """
+        columns = ", ".join(record)
+        placeholders = ", ".join(f":{name}" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO listings ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(dedupe_key) DO NOTHING",
+                record,
+            )
+            return cur.rowcount > 0
 
     def update_listing(self: "Database", dedupe_key: str, fields: Dict[str, Any]) -> None:
         assignments = ", ".join(f"{name} = :{name}" for name in fields)

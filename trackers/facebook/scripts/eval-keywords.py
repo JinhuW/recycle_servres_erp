@@ -105,6 +105,25 @@ def unwrap(path: pathlib.Path):
     return [(t, lv, re.sub(r"\s+", " ", m).strip()) for t, lv, m in records]
 
 
+# "[Search] Searching facebook for server_ram from Denver, CO using server ram
+# memory ddr4 ddr5 ecc with radius=100"
+#
+# Three moving parts this has to survive, all of which it did not:
+#   * the search phrase, inserted between the city and the radius. Without the
+#     ` using ...` group, the city capture swallowed it and every city was
+#     counted once PER PHRASE — the report's "N searches across M cities" header
+#     over-reported coverage by the phrase count.
+#   * "with default radius", which carries no "=" and so matched nothing at
+#     all: those cycles were uncounted, per_cycle got no bucket, and cur_item
+#     stayed stale, mis-attributing every following [Skip] to the previous item.
+#   * city names containing a comma ("Denver, CO").
+SEARCH_START_RE = re.compile(
+    r"\[Search\] Searching \w+ for (\S+) from (.+?)"
+    r"(?: using (.+?))?"
+    r" with (?:radius=\S+|default radius)$"
+)
+
+
 def parse_ts(stamp: str):
     try:
         return dt.datetime.strptime(stamp.strip("[]"), "%m/%d/%y %H:%M:%S")
@@ -144,13 +163,24 @@ def bullets(counter, limit, fmt="{k} — {v}"):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", type=float, default=24.0, help="hours of log to consider")
-    ap.add_argument("--log", default="logs/monitor.out.log")
+    # The live monitor is a container on the homelab VM; scripts/eval-keywords.sh
+    # fetches its `docker logs` to this path before calling us. The retired
+    # laptop agent's logs/monitor.out.log is deliberately NOT the default any
+    # more — it can never advance again, so it produced a fresh-looking report
+    # about a dead window every single day.
+    ap.add_argument("--log", default="logs/monitor-live.log")
     ap.add_argument("--db", default="data/coordinator.db")
     args = ap.parse_args()
 
     log_path = ROOT / args.log
     if not log_path.exists():
-        print(f"# Keyword evidence\n\n**No log at {log_path}.** The monitor has not run.")
+        print(
+            f"# Keyword evidence\n\n**No log at {log_path}.**\n\n"
+            "The live monitor runs in a container on the homelab VM, so this file "
+            "only exists once something has fetched its log. Use "
+            "`scripts/eval-keywords.sh`, which does that, or point `--log` at a "
+            "log you already have."
+        )
         return
 
     records = unwrap(log_path)
@@ -170,6 +200,7 @@ def main():
     yields = collections.Counter()          # item -> new listings
     searches = collections.Counter()        # item -> searches run
     cities = collections.Counter()
+    phrases_run = collections.Counter()     # phrase -> searches actually issued
     gate_drops, anti_drops = [], []
     anti_terms = collections.Counter()
     ai_scores = collections.Counter()
@@ -185,10 +216,12 @@ def main():
             continue
         if msg.startswith("[VERSION]"):
             restarts += 1
-        elif m := re.match(r"\[Search\] Searching \w+ for (\S+) from (.+?) with radius", msg):
+        elif m := SEARCH_START_RE.match(msg):
             cur_item = m.group(1)
             searches[cur_item] += 1
             cities[m.group(2)] += 1
+            if m.group(3):
+                phrases_run[m.group(3)] += 1
             per_cycle.append(0)
         elif m := re.match(r"\[Search\] Failed to get search results for (.+?) from (\S+)$", msg):
             failed[m.group(1)] += 1
@@ -242,10 +275,29 @@ def main():
     w = out.append
     w("# Facebook Marketplace — keyword evidence")
     w("")
+
+    # A log that has stopped advancing produces a perfectly well-formed report
+    # about a window that ended days ago, and nothing in it says so. This job
+    # runs daily, so without the banner it emits the same dead analysis under a
+    # new date every morning. The window itself is still anchored to the newest
+    # record rather than the clock — re-analysing yesterday deliberately is
+    # fine; doing it without noticing is not.
+    stale_hours = (dt.datetime.now() - newest).total_seconds() / 3600
+    if stale_hours > args.since:
+        w(f"> **STALE LOG — the newest record in `{log_path}` is "
+          f"{stale_hours:.1f}h old, past the {args.since:g}h window.** Everything "
+          "below re-analyses a period that has already been reported on. The "
+          "live monitor runs in a container on the homelab VM; this file only "
+          "advances if a monitor is writing to it here. Fetch the real log with "
+          "`scripts/eval-keywords.sh`, which pulls `docker logs` from the VM.")
+        w("")
+
     w(f"- Log window: **{min(stamps):%Y-%m-%d %H:%M} → {newest:%Y-%m-%d %H:%M}** "
       f"(last {args.since:g}h of a file spanning {(newest - min(stamps)).total_seconds()/3600:.1f}h)")
+    w(f"- Source: `{log_path}`" + (f" — **{stale_hours:.1f}h stale**" if stale_hours > args.since else ""))
     w(f"- Monitor starts in window: **{restarts}**")
-    w(f"- Searches run: **{sum(searches.values())}** across **{len(cities)}** cities")
+    w(f"- Searches run: **{sum(searches.values())}** across **{len(cities)}** cities"
+      + (f" and **{len(phrases_run)}** phrases" if phrases_run else ""))
     w(f"- Listings retrieved: **{len(gate_drops) + len(anti_drops) + sum(ai_scores.values())}**"
       f" · alerted: **{len(notified)}**")
     w("")

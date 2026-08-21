@@ -17,6 +17,10 @@ except ModuleNotFoundError:  # Python < 3.11
 
 import tomli_w
 
+# Environment variable each worker reads its own control-plane token from.
+# Fixed rather than derived from the worker id — see build_worker_config.
+DEFAULT_CONTROL_PLANE_TOKEN_ENV = "RS_CONTROL_PLANE_TOKEN"
+
 GENERATED_HEADER = """# GENERATED FILE — DO NOT EDIT.
 # Produced by `rsc gen-configs` from configs/master.toml + configs/fleet.toml.
 # Worker: {worker_id}   Region: {region} ({cities})
@@ -109,7 +113,16 @@ def build_worker_config(
     # Point the worker at the control plane for verification codes, health
     # reporting, and escalation. The token is per-worker (`rsc mint-token
     # --worker <id>`), so a compromised VM reaches only its own account.
-    control_plane_env = worker.get("control_plane_token_env", f"RS_WORKER_TOKEN_{_slug(worker_id)}")
+    #
+    # One worker per VM, so the variable has a FIXED name by default rather than
+    # one derived from the worker id. A derived name is unreachable from
+    # docker-compose.worker.yml — compose cannot build `RS_WORKER_TOKEN_NE_1`
+    # from `${WORKER_ID}` — so it went unset on every worker, and utils.py
+    # degrades an unset `${VAR}` to None with a warning, which means the whole
+    # control plane (2FA, escalation, heartbeat, session backup) was silently
+    # off with the container otherwise healthy. Override per worker with
+    # `control_plane_token_env` when several workers share one env file.
+    control_plane_env = worker.get("control_plane_token_env", DEFAULT_CONTROL_PLANE_TOKEN_ENV)
     facebook["worker_id"] = worker_id
     facebook["control_plane_url"] = f"${{{control_plane_url_env}}}"
     facebook["control_plane_token"] = f"${{{control_plane_env}}}"
@@ -154,6 +167,35 @@ def check_region_overlap(master: Dict[str, Any], fleet: Dict[str, Any]) -> List[
             else:
                 seen[city] = worker_id
     return warnings
+
+
+def check_region_coverage(master: Dict[str, Any], fleet: Dict[str, Any]) -> List[str]:
+    """Report cities the fleet's regions leave out of the phase-1 city list.
+
+    Unlike overlap, this one is not cosmetic. Coverage comes from the city list
+    and nothing else — a metro with no search_city entry of its own is invisible
+    no matter how wide the radius on a neighbouring centre, which is how a
+    Louisville listing at rank 1 went unseen for four days behind a columbus
+    search 189 miles away. `[marketplace.facebook].search_city` is the curated,
+    measured list; a region set that does not cover it silently searches less
+    than the single-machine config it replaced.
+    """
+    phase1 = master.get("marketplace", {}).get("facebook", {}).get("search_city", []) or []
+    regions = master.get("region", {})
+
+    assigned: Dict[str, str] = {}
+    for worker_id, worker in fleet.get("worker", {}).items():
+        for city in regions.get(worker.get("region"), {}).get("search_city", []):
+            assigned.setdefault(city, worker_id)
+
+    missing = [city for city in phase1 if city not in assigned]
+    if not missing:
+        return []
+    return [
+        f"{len(missing)} city/cities in [marketplace.facebook].search_city are not "
+        f"searched by any worker: {', '.join(missing)}. Add each to a [region.*] "
+        "block in master.toml — a metro with no search_city entry is invisible."
+    ]
 
 
 def generate_all(

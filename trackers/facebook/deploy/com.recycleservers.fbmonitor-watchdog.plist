@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!--
+    RETIRED alongside com.recycleservers.fbmonitor — see that file.
+
+    scripts/watchdog.sh now refuses to start a monitor that is not already
+    loaded, so an installed copy of this agent is inert rather than dangerous.
+    Remove it anyway:
+
+        launchctl bootout gui/$UID/com.recycleservers.fbmonitor-watchdog 2>/dev/null
+        launchctl disable gui/$UID/com.recycleservers.fbmonitor-watchdog
+        rm ~/Library/LaunchAgents/com.recycleservers.fbmonitor-watchdog.plist
+
+    The VM's equivalent is `restart: unless-stopped` plus the container
+    healthcheck in deploy/docker-compose.homelab.yml.
+-->
 <dict>
     <key>Label</key>
     <string>com.recycleservers.fbmonitor-watchdog</string>

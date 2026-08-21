@@ -83,12 +83,26 @@ def _normalize_same_site(value: Any) -> str:
 
 
 def _normalize_expiry(value: Any) -> float:
-    """Return a POSIX expiry, using -1 for session cookies (Playwright's rule)."""
-    if value in (None, "", 0):
+    """Return a POSIX expiry, using -1 for session cookies (Playwright's rule).
+
+    The "no expiry" test has to survive a string, because that is what it is
+    always handed: `parse_netscape` splits a text file, so a session cookie
+    arrives as "0", and `"0" != 0`. Falling through then produced expires=0.0 —
+    the epoch, i.e. expired 56 years ago — and Playwright drops those on
+    restore. The cookies Facebook rotates are exactly the session-scoped ones,
+    so an imported cookies.txt lost its live half silently while `rs-session
+    check` still passed on the persistent cookies that remained.
+    """
+    if value is None:
+        return -1
+    text = str(value).strip()
+    if text in ("", "0"):
         return -1
     try:
-        expiry = float(value)
+        expiry = float(text)
     except (TypeError, ValueError):
+        return -1
+    if expiry <= 0:
         return -1
     # Some exports use milliseconds; anything this far out is not seconds.
     if expiry > 1e11:
@@ -101,8 +115,10 @@ def parse_netscape(text: str) -> List[Dict[str, Any]]:
     for raw_line in text.splitlines():
         line = raw_line.strip()
         # "#HttpOnly_" is a real cookie line, not a comment.
+        http_only = False
         if line.startswith("#HttpOnly_"):
             line = line[len("#HttpOnly_") :]
+            http_only = True
         elif not line or line.startswith("#"):
             continue
 
@@ -120,7 +136,12 @@ def parse_netscape(text: str) -> List[Dict[str, Any]]:
                 "domain": domain,
                 "path": path or "/",
                 "expires": _normalize_expiry(expiry),
-                "httpOnly": False,
+                # The "#HttpOnly_" prefix stripped above is the file format's
+                # only record of the flag, so it has to be carried here.
+                # Hardcoding False restored `xs` and `datr` as readable from
+                # document.cookie — a fingerprint difference on the two cookies
+                # that are the bearer credentials for a live account.
+                "httpOnly": http_only,
                 "secure": secure.upper() == "TRUE",
                 "sameSite": "Lax",
             }

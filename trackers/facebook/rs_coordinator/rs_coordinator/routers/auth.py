@@ -7,8 +7,15 @@ off unless an account opts into it.
 
 Every release is written to the code audit log. That log is the only way to
 notice a worker asking for codes it should not need (a compromised VM looks
-exactly like a busy one otherwise), so it is written even when the caller is
-the legacy fleet token and we only half-know who asked.
+exactly like a busy one otherwise), so it is written on every release.
+
+Both routes here require a *per-worker* token. The legacy fleet-wide token is
+refused, for the same reason `session.restore` refuses it: it is shared by every
+container in the fleet, so it proves nothing about who is calling, and anything
+that trusted its `account_id` would let one compromised VM mint second factors
+for every account in the vault. Workers already carry a per-worker token for
+these calls (`ControlPlaneClient`); the fleet token only feeds the listing
+notification channel.
 """
 
 import logging
@@ -35,25 +42,34 @@ router = APIRouter()
 PASSWORD_KIND = "password"
 
 
-def _resolve(
-    worker: Optional[str], claimed_worker: Optional[str], claimed_account: Optional[str] = None
-) -> Tuple[str, str]:
+def _resolve(worker: Optional[str], claimed_worker: Optional[str]) -> Tuple[str, str]:
     """The (worker_id, account_id) this request may speak for.
 
-    A per-worker token is authoritative: it pins the account no matter what the
-    body claims, so a worker can never ask for another account's secrets. Only
-    the legacy fleet-wide token — which identifies nobody — is allowed to name
-    an account, and it is on its way out.
+    The token is the only thing consulted. A per-worker token pins the account
+    no matter what the body claims, so a worker can never ask for another
+    account's secrets, and the fleet-wide token — which identifies nobody — is
+    refused outright rather than being allowed to name a worker or an account.
+
+    A body that names a different worker is logged and then ignored, not
+    refused: the token is already authoritative, and failing the request would
+    turn a stale `worker_id` in a config file into a login that cannot complete
+    its second factor — at the exact moment a human is not watching.
     """
-    worker_id = worker or claimed_worker
-    if not worker_id:
+    if worker is None:
         raise HTTPException(
-            status_code=400,
-            detail="worker_id is required when authenticating with the fleet-wide token.",
+            status_code=403,
+            detail="Releasing codes or credentials requires a per-worker token. The "
+            "fleet-wide token is shared by every worker, so it cannot prove which "
+            "worker is calling. Mint one with `rsc worker token <worker-id>`.",
         )
-    if worker is None and claimed_account:
-        return worker_id, claimed_account
-    return worker_id, deps.resolve_account(worker_id)
+    if claimed_worker and claimed_worker != worker:
+        logger.warning(
+            "Worker %s asked for secrets as %s; serving %s (its token pins it).",
+            worker,
+            claimed_worker,
+            worker,
+        )
+    return worker, deps.resolve_account(worker)
 
 
 @router.post("/api/v1/auth/code", response_model=CodeResponse)
@@ -61,7 +77,7 @@ def _resolve(
 def issue_code(
     payload: CodeRequest, worker: Optional[str] = Depends(require_worker)
 ) -> CodeResponse:
-    worker_id, account_id = _resolve(worker, payload.worker_id, payload.account_id)
+    worker_id, account_id = _resolve(worker, payload.worker_id)
 
     try:
         code, expires_in = code_service.get_code(account_id, payload.kind, payload.since)

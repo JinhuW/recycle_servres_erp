@@ -324,9 +324,18 @@ def looks_like_facebook(msg: Message) -> bool:
 # -- IMAP ------------------------------------------------------------------
 
 
+# Seconds to wait on the mail host. Without a timeout, `IMAP4_SSL` inherits the
+# global default of None and blocks forever on an unreachable or black-holed
+# host — and these calls run in a Starlette threadpool thread, so each one that
+# hangs is a worker permanently removed from the pool until the process is
+# restarted. A worker asking for an email code is mid-login and cannot wait
+# anyway; failing fast lets it escalate.
+IMAP_TIMEOUT_SECONDS = 20
+
+
 def _connect(host: str, port: int, user: str, password: str) -> Any:
     """Open and authenticate an IMAP connection. Monkeypatched in tests."""
-    client = imaplib.IMAP4_SSL(host, port)
+    client = imaplib.IMAP4_SSL(host, port, timeout=IMAP_TIMEOUT_SECONDS)
     client.login(user, password)
     return client
 

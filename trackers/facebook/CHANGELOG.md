@@ -18,6 +18,142 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Breaking
+
+These three need an action before the fleet comes back up. Each of them
+otherwise fails the way this project fails worst — quietly, with every container
+reporting healthy.
+
+- **Workers now read `RS_CONTROL_PLANE_TOKEN`**, not `RS_WORKER_TOKEN_<SLUG>`.
+  The derived name could never be set from `docker-compose.worker.yml` at all,
+  because Compose has no string functions and cannot build
+  `RS_WORKER_TOKEN_NE_1` out of `${WORKER_ID}` — so it was unset on every
+  worker, and an unset `${VAR}` in the TOML degrades to `None` with nothing but
+  a Python warning. The whole control plane was off fleet-wide: no heartbeat, no
+  automatic 2FA, no captcha escalation, no session backup.
+  *Set `RS_CONTROL_PLANE_URL` and `RS_CONTROL_PLANE_TOKEN` on each worker VM
+  (`rsc mint-token --worker <id>`), then `rsc gen-configs`.* The compose file now
+  refuses to start without them.
+
+- **The fleet-wide `RS_COORDINATOR_TOKEN` is no longer accepted on
+  `/v1/auth/code` or `/v1/auth/credentials`.** Use a per-worker token.
+
+- **Every `[region.*]` block changed**, so the generated shards did too.
+  *Run `rsc gen-configs`.* It now refuses to write if any city in
+  `[marketplace.facebook].search_city` is in no region (`--allow-gaps` to
+  override).
+
+### Security
+
+- The fleet-wide token could name any `account_id` and be handed that account's
+  live TOTP code, or its Facebook password wherever `allow_password_login` was
+  set. Every worker container is required to hold that token for the listing
+  channel, so one compromised VM was a key to every account in the vault —
+  despite `rsc mint-token` promising the opposite. Both routes now require a
+  per-worker token, which is what `session.restore` had always required and for
+  the same stated reason.
+- `terraform destroy` can no longer take the account-vault database with it. The
+  provider bug documented in `infra/README.md` leaves that resource tainted after
+  a normal apply, and a plain `apply` on a tainted resource replaces it — so
+  `prevent_destroy` is a live guard, not a hypothetical one.
+- A vault entry of `"----"` minted a plausible six-digit TOTP code instead of an
+  error: the separators were stripped, the empty string base32-decoded happily,
+  and HMAC over an empty key produces six perfectly ordinary digits.
+
+### Fixed
+
+- **The saved Facebook session could be overwritten with a logged-out one.** The
+  per-cycle save added for cookie freshness fires on a timer, not only after a
+  successful login, so the first sweep after Facebook expired a session wrote an
+  empty cookie jar over a file that costs a human login with a 2FA code to
+  recreate. It now refuses to write from a context that is not logged in, and
+  writes via a temp file and rename so an interrupted save cannot truncate it
+  either.
+- **An expired session killed the whole process**, taking the other items, the
+  web UI, the log shipper and the heartbeat with it — and under `restart:
+  unless-stopped` that became a loop opening a fresh browser at Facebook every
+  few seconds, the exact pattern the saved-session design exists to avoid. It is
+  now a typed error the monitor loop catches, and the worker stops retrying a
+  login it already knows will fail until the session file changes.
+- **Two workers reporting the same border listing both alerted**, and the loser's
+  insert raised a UNIQUE violation that 500'd the request — losing every listing
+  after it in that batch, unrecorded and unalerted. Ingestion now decides newness
+  by an atomic insert rather than a read that happened earlier. The aborted write
+  also left an open transaction on the coordinator's single shared connection, so
+  the next reader got "database is locked" until the process restarted.
+- **Twenty of the twenty-eight measured search cities were in no region**,
+  including Louisville and Columbus — the two added specifically because a
+  listing in Louisville was missed for four days. The regions were four-city
+  summaries relying on a wide radius, which was measured to do nothing: results
+  are anchored to the city in the URL path, so 37 miles and 311 miles return
+  identical results. The six regions are now the union of all 45 centres, split
+  geographically so each still matches its proxy.
+- **Generated worker configs predated essentially all of `master.toml`'s
+  tuning** — search phrases the file says in capitals drag a query to zero
+  results, antikeywords it removed for discarding the listings we now want, price
+  bounds it deliberately has nowhere, and no `title_prefilter`, which cost every
+  worker about 205 wasted detail-page fetches per sweep.
+- **`vnc_url` produced a config the monitor could not load.** The generator had
+  always written that key and the dataclass had no field for it, so the first
+  worker to use the documented console URL simply would not start. It now reaches
+  the heartbeat and the escalation, which is what lets an operator actually open
+  a stuck browser.
+- **A seller mentioning eBay had their listing discarded as an advertisement.**
+  Affiliate detection matched Facebook's markers against the whole rendered page,
+  so "cheaper than buy now on eBay" in a description read as Facebook's own buy
+  button. It now matches the page's controls, and the verdict is cached instead
+  of the page being re-fetched on every sweep of every city forever.
+- **Keyword terms that do not start with a letter never matched anything.**
+  `` in front of `+ecc` asks for a word character before the `+`, so
+  `keywords = ["+ecc"]`, `antikeywords = ["$1"]` and `seller_locations =
+  ["(remote)"]` all passed validation and were silently dead.
+- **The scroll loop stopped early and logged it as a complete sweep.** Rounds
+  where results arrived only via the scroll nudge — the common path, since a list
+  already at the bottom fires no scroll event — counted as quiet, so the counter
+  was past its threshold before the first genuinely quiet round arrived.
+- **One unreachable coordinator froze the browser for 6.5 minutes per matched
+  listing** (over two hours for a twenty-match sweep, by which time the search
+  page has aged out), because the alert POST inherited five retries a minute
+  apart. Now ~36 seconds worst case. A 4xx is a refusal, not an outage, so it is
+  no longer retried, and `coordinator_token` is required — the coordinator 401s
+  every request without one, so a typo'd token failed every alert forever behind
+  a single warning.
+- **`rs-session import` stamped every Netscape session cookie with the epoch**,
+  and Playwright discards those on restore. `cookies.txt` is text, so "no expiry"
+  arrives as the string `"0"`, which is not the integer `0`. Facebook rotates
+  precisely the session-scoped cookies, so an import silently lost its live half
+  while `rs-session check` still passed on the persistent ones. `httpOnly` is
+  carried through now too, rather than being hardcoded false on `xs` and `datr`.
+- **The daily keyword report analysed a dead log.** It defaulted to the retired
+  laptop agent's stdout, which is frozen at the migration and excluded from the
+  deploy rsync, and anchored its window to the newest record in the file — so it
+  re-analysed the same 19 hours every morning under a new date. It now fetches
+  the live container log from the VM, and banners a stale one. Its `[Search]`
+  regex had also drifted when the search phrase was added to that log line,
+  over-reporting city coverage by the phrase count and matching the "default
+  radius" form not at all.
+- **The laptop watchdog would have restarted the retired monitor**, putting a
+  second monitor on the same Facebook account behind the same NAT IP as the
+  homelab container. Its staleness trigger has been permanently satisfied since
+  the migration, so the first tick after a reboot would have done it. It now only
+  restarts a monitor that is already running, never starts one.
+- **A failed image build reported success.** `docker build … | tail -5` under
+  `/bin/sh` with no `pipefail` exits with `tail`'s status, so the deploy went on
+  to `--force-recreate` the live monitor onto the previous image.
+- **`/healthz` answered `ok` with a dead database**, which is the only thing the
+  container healthcheck asks. It now touches the database and answers 503 when it
+  cannot.
+- An unreachable mail host wedged a Starlette threadpool thread forever; the IMAP
+  connection has a timeout.
+
+### Added
+
+- `scripts/release.sh` — verify, bump, changelog, commit, tag. It refuses to tag
+  a tree whose generated shards are not what `gen-configs` produces, whose
+  vendored checkout does not match its pin, or whose `[Unreleased]` section is
+  empty.
+
+
 ## [0.1.0] - 2026-08-20
 
 First tagged version: the system as it stood when it went under version
