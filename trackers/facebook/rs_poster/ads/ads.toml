@@ -1,0 +1,81 @@
+# "We buy your hardware" ads.
+#
+# Facebook Marketplace has no want-to-buy listing type, so these are ordinary
+# item listings whose copy makes clear we are buying. Two consequences:
+#
+#   - `price` is what the listing shows. Use a low nominal figure and say in
+#     the description that it is a placeholder; a $0 listing tends to get
+#     filtered, and a high one attracts buyers instead of sellers.
+#   - Facebook may still remove these. Keep the copy plain and honest, avoid
+#     ALL CAPS walls, and never post the same ad to the same city twice in a
+#     day.
+
+[pacing]
+# Hard safety limits, enforced in code. Loosening these raises ban risk.
+min_action_interval_minutes = 20   # between any create/delete on one account
+max_active_ads = 3                 # concurrent live ads per account
+max_group_shares_per_day = 3
+renew_jitter_days = 2              # renew_days is +/- this
+
+[ad.buy_servers]
+title = "We Buy Used Servers - Dell PowerEdge, HPE ProLiant, Supermicro - Cash"
+price = 123
+category = "Electronics"
+condition = "Used - Good"
+photo_set = "servers"
+renew_days = 7
+description = """Recycle Servers LLC (Denver, CO) buys used and decommissioned server
+hardware. The listed price is a placeholder - we are BUYING, not selling.
+
+What we buy:
+- Rack and tower servers: Dell PowerEdge R/T series, HPE ProLiant DL/ML, Supermicro,
+  Lenovo ThinkSystem, Cisco UCS
+- Server RAM: DDR4/DDR5 ECC RDIMM and LRDIMM
+- CPUs: Intel Xeon and AMD EPYC
+- Enterprise drives, RAID/HBA controllers, 10GbE+ NICs, switches, PSUs
+
+We handle single units up to full datacenter and office cleanouts. Same-day cash for
+local pickup, or we cover shipping for larger lots. Licensed business, references
+available, and we can provide data-destruction documentation.
+
+Send a photo and a model number for a quick quote."""
+cities = ["Denver, CO", "Colorado Springs, CO"]
+groups = []
+
+[ad.buy_ram_cpus]
+title = "Buying Server RAM and CPUs - ECC RDIMM, Xeon, EPYC - Bulk Lots Welcome"
+price = 123
+category = "Electronics"
+condition = "Used - Good"
+photo_set = "ram_cpus"
+renew_days = 7
+description = """Recycle Servers LLC (Denver, CO) is BUYING server memory and processors.
+The listed price is a placeholder.
+
+Wanted:
+- DDR4 / DDR5 ECC RDIMM and LRDIMM, any capacity, bulk lots preferred
+- Intel Xeon (E5, Scalable Gold/Platinum) and AMD EPYC processors
+- Matched pairs and full trays
+
+Cash on pickup in the Denver metro, or we pay shipping for lots. Tell us the part
+numbers and quantities and we will quote same day."""
+cities = ["Denver, CO"]
+groups = []
+
+[ad.datacenter_cleanout]
+title = "Datacenter and Office IT Cleanout - We Remove and Pay for Your Old Servers"
+price = 123
+category = "Electronics"
+condition = "Used - Good"
+photo_set = "datacenter_cleanout"
+renew_days = 10
+description = """Decommissioning a server room or closing an office? Recycle Servers LLC
+(Denver, CO) buys the hardware and hauls it out. The listed price is a placeholder.
+
+We handle full-rack decommissions, pallet lots, and mixed IT equipment. We bring the
+truck, pallets, and labor. Data-destruction documentation available on request.
+
+Serving Colorado and the surrounding states for larger lots. Send a photo or an asset
+list for a quote."""
+cities = ["Denver, CO", "Colorado Springs, CO"]
+groups = []

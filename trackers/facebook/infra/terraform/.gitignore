@@ -1,0 +1,15 @@
+# State holds the generated Postgres password — it is a credential, not a record.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+
+.terraform/
+.terraform.lock.hcl
+
+# Plans embed variable values, secrets included.
+*.tfplan
+tf.plan
+
+terraform.tfvars
+*.auto.tfvars

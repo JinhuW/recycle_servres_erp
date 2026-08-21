@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rs-poster"
+version = "0.1.0"
+description = "Posts 'we buy used server hardware' ads to Facebook Marketplace"
+requires-python = ">=3.11"
+dependencies = [
+  # >=1.51 for storage_state(indexed_db=...) — see marketplace.py/session.py
+  "playwright>=1.51.0",
+  "pyotp>=2.9.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+rs-poster = "rs_poster.cli:main"
+rs-session = "rs_poster.session_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rs_poster"]

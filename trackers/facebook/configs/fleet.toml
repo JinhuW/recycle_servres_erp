@@ -1,0 +1,84 @@
+# Worker fleet: which VM searches which region.
+#
+# Each worker is statically pinned to exactly ONE region defined in master.toml.
+# There is no runtime dispatch and no random city selection — a worker's search
+# scope changes only when this file is edited and `rsc gen-configs` is re-run.
+#
+# The fleet, as assigned:
+#
+#   worker     region            cities (500 mi radius each)
+#   ---------  ----------------  ------------------------------------------------
+#   ne-1       rs_northeast      Boston, New York, Philadelphia, Pittsburgh
+#   se-1       rs_southeast      Washington DC, Charlotte, Atlanta, Miami
+#   mw-1       rs_midwest        Detroit, Chicago, Minneapolis, St. Louis
+#   sc-1       rs_south_central  Memphis, Dallas, Houston, New Orleans
+#   denver-1   rs_mountain       Denver, Billings, Salt Lake City, Albuquerque
+#   wc-1       rs_west           Seattle, Portland, Sacramento, Los Angeles, Phoenix
+#
+# Mainland only — Alaska and Hawaii are out of scope, and no region here
+# reaches them.
+#
+# Rules:
+#   - Regions must not overlap. The coordinator dedupes anyway (radius overlap
+#     at region borders is expected), but overlap wastes worker time.
+#   - One Facebook account per worker. Never share an account across VMs.
+#   - Match the proxy's geography to the region so the account's activity stays
+#     geo-consistent. A Marketplace search from a city 2000 miles from the
+#     account's IP is exactly the pattern Facebook checkpoints on.
+#
+# Optional per-worker keys:
+#   search_interval / max_search_interval — override master.toml's pacing for
+#     this worker only. Use it to slow a worker down; do not speed one up past
+#     master's values without a reason.
+#
+# Authentication is session-based — no passwords here or anywhere else. Each
+# worker gets its own session file, created once with:
+#
+#     rs-session capture --proxy <this worker's proxy> \
+#         --storage-state configs/sessions/<worker-id>.json
+#
+# Capture through the worker's own proxy: Facebook binds a session to the IP
+# and browser it was created on, so a session born elsewhere gets challenged.
+#
+# Store each account's 2FA secret once and capture fills the code in itself:
+#
+#     rs-session set-secret --storage-state configs/sessions/<worker-id>.json
+#
+# It lands in that session's .meta.json sidecar and survives re-captures, so a
+# lapsed session is one command to refresh with no code to go look up.
+
+[worker.ne-1]
+region = "rs_northeast"
+# Session file for this worker's account, mounted into the container at /data.
+session = "sessions/ne-1.json"
+proxy_env = "PROXY_NORTHEAST"
+
+[worker.se-1]
+region = "rs_southeast"
+session = "sessions/se-1.json"
+proxy_env = "PROXY_SOUTHEAST"
+
+[worker.mw-1]
+region = "rs_midwest"
+session = "sessions/mw-1.json"
+proxy_env = "PROXY_MIDWEST"
+
+[worker.sc-1]
+region = "rs_south_central"
+session = "sessions/sc-1.json"
+proxy_env = "PROXY_SOUTH_CENTRAL"
+
+[worker.denver-1]
+region = "rs_mountain"
+session = "sessions/denver-1.json"
+# Empty = use the VM's own IP. Denver is home base, so no proxy needed.
+proxy_env = ""
+
+[worker.wc-1]
+region = "rs_west"
+session = "sessions/wc-1.json"
+proxy_env = "PROXY_WEST"
+# Five cities instead of four, so a full cycle takes ~25% longer than the other
+# workers'. Stretched a little to keep this account's request rate in line.
+search_interval = "55m"
+max_search_interval = "90m"

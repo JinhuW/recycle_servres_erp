@@ -1,0 +1,170 @@
+"""Generate per-worker monitor configs from master.toml + fleet.toml.
+
+Each worker VM is pinned to exactly one region. Assignment is static: a
+worker's search scope changes only when fleet.toml is edited and configs are
+regenerated — there is no runtime dispatch and no random city selection.
+"""
+
+import copy
+import re
+from pathlib import Path
+from typing import Any, Dict, List
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore
+
+import tomli_w
+
+GENERATED_HEADER = """# GENERATED FILE — DO NOT EDIT.
+# Produced by `rsc gen-configs` from configs/master.toml + configs/fleet.toml.
+# Worker: {worker_id}   Region: {region} ({cities})
+"""
+
+
+def load_toml(path: Path) -> Dict[str, Any]:
+    with open(path, "rb") as handle:
+        return tomllib.load(handle)
+
+
+def _slug(worker_id: str) -> str:
+    """`denver-1` -> `DENVER_1`, for building a per-worker env var name."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", worker_id).strip("_").upper()
+
+
+def build_worker_config(
+    master: Dict[str, Any],
+    worker_id: str,
+    worker: Dict[str, Any],
+    coordinator_url_env: str = "RS_COORDINATOR_URL",
+    coordinator_token_env: str = "RS_COORDINATOR_TOKEN",
+    control_plane_url_env: str = "RS_CONTROL_PLANE_URL",
+) -> Dict[str, Any]:
+    """Return the config for one worker: master, narrowed to its region."""
+    region = worker.get("region")
+    if not region:
+        raise ValueError(f"Worker {worker_id} has no region assigned.")
+
+    regions = master.get("region", {})
+    if region not in regions:
+        raise ValueError(
+            f"Worker {worker_id} references region '{region}', which is not defined "
+            f"in master.toml. Known regions: {', '.join(sorted(regions)) or 'none'}"
+        )
+
+    config = copy.deepcopy(master)
+
+    # Keep only this worker's region so the file states its scope plainly.
+    config["region"] = {region: regions[region]}
+
+    facebook = config.setdefault("marketplace", {}).setdefault("facebook", {})
+    # search_region expands to the region's city list. Drop the Phase 1
+    # single-city defaults so the two cannot disagree — including currency and
+    # radius, which are zip-aligned with search_city and are rejected outright
+    # when it is absent. The region section supplies all three.
+    for city_bound_key in ("search_city", "radius", "currency", "city_name"):
+        facebook.pop(city_bound_key, None)
+    facebook["search_region"] = region
+
+    # Workers authenticate from a saved session, not credentials. Optional
+    # per-worker password fallback is supported but deliberately not the
+    # default — see configs/fleet.toml.
+    for key, env_key in (
+        ("username", "fb_username_env"),
+        ("password", "fb_password_env"),
+        ("totp_secret", "fb_totp_env"),
+    ):
+        env_var = worker.get(env_key)
+        if env_var:
+            facebook[key] = f"${{{env_var}}}"
+    if not worker.get("fb_username_env"):
+        # Master may carry a Phase 1 credential block; a sharded worker must
+        # not inherit it.
+        for credential_key in ("username", "password", "totp_secret"):
+            facebook.pop(credential_key, None)
+
+    # Optional per-worker pacing. Used to slow a worker down — a region with
+    # more cities than the rest, or one thin enough to check a few times a day
+    # rather than hourly. Absent, master.toml's pacing applies.
+    for pacing_key in ("search_interval", "max_search_interval"):
+        if pacing_key in worker:
+            facebook[pacing_key] = worker[pacing_key]
+
+    monitor = config.setdefault("monitor", {})
+    proxy_env = worker.get("proxy_env")
+    if proxy_env:
+        monitor["proxy_server"] = [f"${{{proxy_env}}}"]
+    # Each worker's session is mounted at this path inside its container.
+    monitor["storage_state_path"] = worker.get("storage_state_path", "/data/fb_state.json")
+
+    # Route alerts through the coordinator so cross-worker duplicates collapse
+    # into one Telegram message.
+    config.setdefault("notification", {})["coordinator"] = {
+        "coordinator_url": f"${{{coordinator_url_env}}}",
+        "coordinator_token": f"${{{coordinator_token_env}}}",
+        "worker_id": worker_id,
+    }
+
+    # Point the worker at the control plane for verification codes, health
+    # reporting, and escalation. The token is per-worker (`rsc mint-token
+    # --worker <id>`), so a compromised VM reaches only its own account.
+    control_plane_env = worker.get("control_plane_token_env", f"RS_WORKER_TOKEN_{_slug(worker_id)}")
+    facebook["worker_id"] = worker_id
+    facebook["control_plane_url"] = f"${{{control_plane_url_env}}}"
+    facebook["control_plane_token"] = f"${{{control_plane_env}}}"
+    if worker.get("vnc_url"):
+        # Surfaced in escalation alerts so an operator lands in this worker's
+        # own browser, on the IP its session belongs to.
+        facebook["vnc_url"] = worker["vnc_url"]
+
+    for user in config.get("user", {}).values():
+        user.pop("telegram_token", None)
+        user.pop("telegram_chat_id", None)
+        user["notify_with"] = ["coordinator"]
+
+    return config
+
+
+def write_worker_config(config: Dict[str, Any], path: Path, worker_id: str) -> None:
+    region = next(iter(config.get("region", {})), "?")
+    cities = ", ".join(config.get("region", {}).get(region, {}).get("search_city", []))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = tomli_w.dumps(config)
+    header = GENERATED_HEADER.format(worker_id=worker_id, region=region, cities=cities)
+    path.write_text(f"{header}\n{body}")
+
+
+def check_region_overlap(master: Dict[str, Any], fleet: Dict[str, Any]) -> List[str]:
+    """Report cities covered by more than one worker.
+
+    Overlap is not fatal — the coordinator dedupes — but it wastes worker time,
+    so it is worth surfacing.
+    """
+    seen: Dict[str, str] = {}
+    warnings: List[str] = []
+    for worker_id, worker in fleet.get("worker", {}).items():
+        region = worker.get("region")
+        cities = master.get("region", {}).get(region, {}).get("search_city", [])
+        for city in cities:
+            if city in seen:
+                warnings.append(
+                    f"City '{city}' is covered by both {seen[city]} and {worker_id}."
+                )
+            else:
+                seen[city] = worker_id
+    return warnings
+
+
+def generate_all(
+    master_path: Path, fleet_path: Path, output_dir: Path
+) -> List[Path]:
+    master = load_toml(master_path)
+    fleet = load_toml(fleet_path)
+    written: List[Path] = []
+    for worker_id, worker in fleet.get("worker", {}).items():
+        config = build_worker_config(master, worker_id, worker)
+        out_path = output_dir / f"worker-{worker_id}.toml"
+        write_worker_config(config, out_path, worker_id)
+        written.append(out_path)
+    return written

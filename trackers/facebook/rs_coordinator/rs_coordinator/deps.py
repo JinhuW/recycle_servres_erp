@@ -1,0 +1,116 @@
+"""Shared FastAPI dependencies and process-wide singletons.
+
+Every router imports its database handle, notifiers, and auth guards from here,
+so there is one place that decides how the control plane is wired.
+"""
+
+import os
+import secrets as pysecrets
+from functools import lru_cache
+from typing import Optional
+
+from fastapi import Header, HTTPException
+
+from .db import AnyDatabase, open_database
+from .telegram_notify import TelegramNotifier
+from .tokens import verify_worker_token
+from .vault import AccountStore, Vault, VaultError
+
+DB_PATH = os.environ.get("RS_COORDINATOR_DB", "data/coordinator.db")
+# Legacy fleet-wide token. Still accepted so workers deployed before per-worker
+# tokens keep reporting while they are migrated.
+LEGACY_TOKEN = os.environ.get("RS_COORDINATOR_TOKEN")
+ADMIN_TOKEN = os.environ.get("RS_ADMIN_TOKEN")
+
+# Postgres when RS_DATABASE_URL / DATABASE_URL is set, SQLite at DB_PATH
+# otherwise. Same methods either way, so nothing downstream changes.
+db: AnyDatabase = open_database(DB_PATH)
+
+notifier = TelegramNotifier(
+    token=os.environ.get("TELEGRAM_TOKEN"),
+    chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
+)
+
+# Operational alerts (worker down, session expiring, challenge raised) go to a
+# separate chat from listing alerts, so ops noise never buries a find. Falls
+# back to the listings chat when no ops chat is configured.
+ops_notifier = TelegramNotifier(
+    token=os.environ.get("TELEGRAM_TOKEN"),
+    chat_id=os.environ.get("TELEGRAM_OPS_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID"),
+)
+
+
+def get_db() -> AnyDatabase:
+    return db
+
+
+def get_notifier() -> TelegramNotifier:
+    return notifier
+
+
+def get_ops_notifier() -> TelegramNotifier:
+    return ops_notifier
+
+
+@lru_cache(maxsize=1)
+def get_vault() -> Vault:
+    """The process vault. Cached because constructing it validates the key."""
+    return Vault()
+
+
+def get_account_store() -> AccountStore:
+    return AccountStore(get_db(), get_vault())
+
+
+def _bearer(authorization: Optional[str]) -> Optional[str]:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    return authorization[len("Bearer ") :].strip()
+
+
+def require_worker(authorization: Optional[str] = Header(default=None)) -> Optional[str]:
+    """Authenticate a worker and return its id.
+
+    Returns None for the legacy fleet-wide token, in which case the caller
+    falls back to the worker_id in the request body. A per-worker token always
+    wins over whatever the body claims.
+    """
+    token = _bearer(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    worker_id = verify_worker_token(token)
+    if worker_id:
+        return worker_id
+
+    if LEGACY_TOKEN and pysecrets.compare_digest(token, LEGACY_TOKEN):
+        return None
+
+    raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+
+def require_admin(authorization: Optional[str] = Header(default=None)) -> None:
+    """Guard the console-facing endpoints."""
+    if not ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="RS_ADMIN_TOKEN is not configured; admin endpoints are disabled.",
+        )
+    token = _bearer(authorization)
+    if not token or not pysecrets.compare_digest(token, ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+
+
+def resolve_account(worker_id: str) -> str:
+    """The account a worker owns, or 404 if the fleet config has no mapping."""
+    try:
+        account_id = get_account_store().account_for_worker(worker_id)
+    except VaultError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    if not account_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No account is registered for worker '{worker_id}'. "
+            "Add one with `rsc vault set-account`.",
+        )
+    return account_id

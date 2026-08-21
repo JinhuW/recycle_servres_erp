@@ -1,0 +1,435 @@
+# facebook_tracker
+
+Facebook Marketplace tooling for Recycle Servers LLC. Two halves:
+
+- **Monitor** — a fleet of worker VMs, each pinned to one region, searching
+  Marketplace for used server hardware, filtering with an LLM, and reporting
+  matches to a central coordinator that dedupes and alerts one Telegram chat.
+- **Poster** — publishes "we buy your used servers" ads with photos, and keeps
+  them near the top of the feed by reposting on a schedule.
+
+Python (the two upstream projects it builds on are Python), unlike the
+TypeScript trackers elsewhere in this workspace.
+
+## Layout
+
+| Path | What it is |
+| --- | --- |
+| `ai-marketplace-monitor/` | Upstream monitor engine (AGPL-3). Our changes live on the `recycle-patches` branch — see below. |
+| `facebook-marketplace-bot/` | Reference only. Stale Selenium; never run it. Its posting flow was reimplemented in `rs_poster`. |
+| `rs_coordinator/` | Coordinator service (FastAPI + SQLite) and the config sharding generator. CLI: `rsc`. |
+| `rs_poster/` | Buy-ad poster (Playwright). CLIs: `rs-poster`, and `rs-session` for password-free Facebook sessions. |
+| `configs/` | `master.toml` (what the fleet searches), `fleet.toml` (which VM searches where), generated per-worker shards. |
+| `deploy/` | Docker Compose files and the per-node bringup checklist. |
+
+## How it fits together
+
+```
+master.toml + fleet.toml  --rsc gen-configs-->  configs/generated/worker-<id>.toml
+                                                          |
+                        worker VM (one region, one FB account, one proxy)
+                                                          |
+                          search -> keyword filter -> OpenRouter rating >= 4
+                                                          |
+                                    POST /api/v1/listings (coordinator channel)
+                                                          |
+                    coordinator: dedupe by Facebook item id -> SQLite -> Telegram
+```
+
+Each worker is **statically pinned to one region**. There is no runtime
+dispatch and no random city selection: a worker's scope changes only when
+`fleet.toml` is edited and configs are regenerated. Workers never message
+Telegram directly, so a listing visible from two adjacent regions still
+produces exactly one alert.
+
+## Fleet coverage
+
+Six workers divide the lower 48, each city searched at `radius=500`. Two
+corrections, both measured 2026-08-20 and both worth knowing before you touch
+that number: **the parameter is in kilometres** (500 reads back as "Within 311
+mi", and 805 is what a real 500 miles looks like), and **changing it makes no
+difference** — the same search at 60, 100, 161 and 500 returned byte-identical
+result sets. Coverage comes from the number of centres, not the radius:
+
+| Worker | Region | Cities |
+| --- | --- | --- |
+| `ne-1` | Northeast | Boston, New York, Philadelphia, Pittsburgh |
+| `se-1` | Southeast | Washington DC, Charlotte, Atlanta, Miami |
+| `mw-1` | Midwest | Detroit, Chicago, Minneapolis, St. Louis |
+| `sc-1` | South Central | Memphis, Dallas, Houston, New Orleans |
+| `denver-1` | Mountain / Plains | Denver, Billings, Salt Lake City, Albuquerque |
+| `wc-1` | West Coast | Seattle, Portland, Sacramento, Los Angeles, Phoenix |
+
+Neighbouring circles overlap on purpose: the radius is not what
+Marketplace actually returns, so extra centres surface listings that ranking or
+category placement would otherwise bury. Coverage is mainland only — Alaska and
+Hawaii are out of scope and no region reaches them.
+
+**Radius is not the coverage knob — the city list is.** Measured 2026-08-20 on
+the RAM phrase, chasing a Louisville lot (item 955960664200505) the fleet never
+captured. Every row below is the monitor's own URL builder and result parser, so
+"absent" means the sweep genuinely could not see it:
+
+| search | results | target | Louisville-area results |
+| --- | ---: | :---: | ---: |
+| `columbus` r=100, 7d, local pickup (what the fleet runs) | 115 | absent | 0 |
+| `columbus` r=250 / r=500, same filters | 115 | absent | 0 |
+| `columbus`, `deliveryMethod` dropped | 978 | absent | 0 |
+| `columbus`, `daysSinceListed` dropped | 310 | absent | 0 |
+| `columbus`, every filter dropped | 978 | absent | 3 |
+| `cincinnati` r=100 (89 mi from the seller) | 115 | absent | 0 |
+| **`louisville` r=100, identical filters** | 115 | **position 1** | **64** |
+
+No filter is responsible — stripping all of them still does not surface it, and
+the *same* filters from Louisville put it first. Neither is radius: 100, 250 and
+500 from Columbus are indistinguishable. Results are anchored to the city in the
+URL path, and Columbus's result set contains essentially no Louisville-area
+inventory at any radius. A metro is covered only when it has its own entry in
+`search_city`.
+
+This is also why a listing can be plainly visible in your own browser and
+invisible to the fleet: your browser searches from whatever location your
+account is set to, the worker searches from the city in `search_city`.
+
+City values are Facebook location slugs, and a wrong one **fails silently** —
+Facebook searches from the account's own city instead of erroring. Verify
+before deploying:
+
+```bash
+python scripts/check-cities.py            # every region in master.toml
+python scripts/check-cities.py rs_west    # or just one
+```
+
+## Authentication: sessions, not passwords
+
+No Facebook password is stored anywhere in this system. Each account is logged
+into once by hand, and the resulting browser session is what the fleet uses.
+
+```bash
+# Log in manually; only the resulting cookies are kept.
+rs-session capture --storage-state configs/sessions/denver-1.json
+
+# Or reuse a browser you are already logged into.
+rs-session import --cookies cookies.txt \
+    --user-agent "<that browser's user agent>" \
+    --storage-state configs/sessions/denver-1.json
+
+rs-session check   # confirm it authenticates, and when it expires
+rs-session info    # same, as JSON, for cron
+```
+
+A session is pinned to the environment it was born in: `rs-session` records the
+user agent and proxy in a `<session>.json.meta.json` sidecar, and both the
+monitor and poster present that same identity. Capture through the worker's own
+proxy (`--proxy`) so the session's IP matches where it will be used — Facebook
+challenges sessions that move.
+
+Sessions last on the order of weeks and are invalidated by a password change,
+"log out of all devices", or a security checkpoint. When one lapses, the worker
+stops with an error naming the exact command to run; it never searches while
+logged out. See [deploy/README.md](deploy/README.md) for the refresh routine.
+
+### Two-factor codes
+
+Every worker account has 2FA on, so every capture needs a six-digit code. Store
+each account's TOTP secret once and `rs-session` produces the code itself —
+there is no reason to fetch it from a web authenticator by hand:
+
+```bash
+# Once per account. Omit --secret to be prompted (keeps it out of shell history).
+rs-session set-secret --storage-state configs/sessions/sc-1.json \
+    --secret "otpauth://totp/..."      # or the bare base32 key
+
+rs-session capture --storage-state configs/sessions/sc-1.json   # fills 2FA in itself
+
+rs-session totp --all --dir configs/sessions   # every account's current code
+rs-session totp --storage-state configs/sessions/sc-1.json --raw | pbcopy
+```
+
+The secret is the base32 key Facebook shows under Settings → Security →
+Two-factor → Authentication app → "Set up another way", or the whole
+`otpauth://` URI from the QR code. Codes are plain RFC 6238, computed locally —
+nothing is sent anywhere.
+
+Secrets live in the same `<session>.json.meta.json` sidecar as the user agent
+and proxy: 0600, gitignored, sitting beside cookies that are an equally live
+credential. Per-account overrides come from `FB_TOTP_SECRET_<WORKER>` (e.g.
+`FB_TOTP_SECRET_SC_1`); a plain `FB_TOTP_SECRET` covers the single-account case
+inside a worker container. `rs-session check` prints whether a secret is stored,
+and `rs-session info` reports `totp_configured` for cron.
+
+A stored secret outlives the cookies next to it — a session expires in weeks, a
+TOTP secret mints codes until the account re-enrolls. Keep them on the operator
+machine, which is where captures happen; workers only need one if you configure
+the password fallback, which is not the intended setup.
+
+**Why not OAuth.** Facebook's OAuth / Graph API cannot do this. There is no
+Graph endpoint that reads or searches Marketplace listings; the only official
+Marketplace APIs are write-only catalog feeds in a closed partner program for
+vehicle, rental, and real-estate dealers, which would not cover server hardware
+and grants no read access regardless. An OAuth access token is also not a web
+session — it cannot authenticate a browser to facebook.com. Session cookies are
+the only mechanism that works.
+
+## Setup
+
+```bash
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -e ./ai-marketplace-monitor -e ./rs_coordinator -e ./rs_poster
+playwright install chromium
+
+cp configs/secrets.env.example configs/secrets.env   # then fill it in
+set -a; source configs/secrets.env; set +a
+```
+
+## Running
+
+Phase 1, a single worker with no coordinator (useful for validating your search
+criteria before building out the fleet):
+
+```bash
+aimm --config configs/master.toml
+```
+
+Full fleet: see [deploy/README.md](deploy/README.md).
+
+### Deploying to the homelab worker
+
+**Always deploy with the script.** It ends by proving the container is running
+this tree, which is the whole point:
+
+```bash
+scripts/deploy.sh          # test, regenerate config, sync, rebuild, restart, verify
+scripts/deploy.sh sync     # config-only change: skip the image rebuild
+scripts/deploy.sh check    # verify only — is the VM running this tree right now?
+```
+
+`check` is the one to reach for whenever you are about to explain live
+behaviour from local source. It md5s every module inside the container against
+this tree, diffs the mounted `config.toml` against `configs/homelab.toml`, and
+greps the boot log for the errors that get buried within seconds:
+
+```
+  code:   MATCH (351ccddb2b7a8fd84842fd0104a638af)
+  config: MATCH
+  uptime: started 2026-08-21T01:17:45Z, restarts 0, running true
+  boot:   clean
+```
+
+This exists because of a real afternoon lost: `aimm-recycle:latest` is not
+rebuilt automatically, so the container ran an image from hours earlier.
+`title_prefilter` and `build_search_url` were in this tree and in the patch
+table below, and absent from the running process — every conclusion drawn from
+reading local source was wrong about the live system, and nothing said so. A
+marker grep only finds the patches someone remembered to list; the checksum
+finds everything.
+
+Two traps the script handles that a manual `up -d` does not:
+
+- **`up -d` will not recreate a container when only the image changed** under a
+  tag it already holds. The script forces `--force-recreate`.
+- **The image bakes in `ENV AIMM_WEBUI_HOST=0.0.0.0`**, so *removing* the
+  variable from compose leaves 0.0.0.0 in force. It has to be overridden, not
+  omitted — and 0.0.0.0 does not expose the web UI, it stops it starting.
+
+`configs/secrets.env` and `configs/sessions/` are never pushed. The VM's copies
+are live credentials — the worker's Facebook cookies and its coordinator token
+— and the laptop's belong to a different account and IP.
+
+### Did it alert, and did the alert arrive?
+
+Every listing that clears the rating threshold logs one verdict line saying
+whether the message actually left the process:
+
+```
+[Alert] SENT     rating 4 >= 4 to recycle | 955960664200505 | 8x 32GB DDR4 ECC RDIMM | https://...
+[Alert] NOT SENT rating 5 >= 4 to recycle | 118820441003377 | Dell R730 memory lot   | https://...
+```
+
+```bash
+scripts/worker-status.sh alerts     # every verdict, oldest first
+```
+
+Those rows and the messages in the Telegram chat should correspond one to one.
+A row with no message, or a message with no row, is a real discrepancy; an
+empty list means nothing scored high enough, which is the common case — over
+one measured 24 h window only 8 of 325 rated listings reached 4.
+
+This exists because the log used to say only "Sent recycle a message", printed
+before the send was checked, and every notification backend returns `False` for
+a refused send rather than raising. So a quiet Telegram chat and a broken
+Telegram chat looked identical in the log. `NOT SENT` now names the failure,
+and the listing stays un-cached so the next sweep retries it.
+
+The same verdict is emitted as a `listing_alert` structured event
+(`delivered`, `score`, `threshold`, `listing_id`, `url`), so it is queryable in
+the OpenSearch dashboards alongside the skip reasons.
+
+### Watching the browser
+
+The homelab monitor drives a real Chromium on a virtual display, and you can
+watch it live — the fastest way to tell a selector break apart from a
+checkpoint, an empty result page, or a session that quietly logged out.
+
+```bash
+scripts/monitor-view.sh          # prints the ssh tunnel command for a viewer
+scripts/monitor-view.sh shot     # saves reports/monitor-screen.png
+```
+
+`shot` needs nothing installed on either machine: `scripts/vnc-screenshot.py`
+speaks RFB and writes the PNG with `zlib` alone, because neither the container
+nor the VM has ImageMagick, vncsnapshot or PIL.
+
+The session is shared, so anything you click goes to the same browser the
+scraper is using. Watch; do not drive, unless you are clearing a checkpoint.
+
+**There is no web UI.** The compose files publish 8467 and set
+`AIMM_WEBUI_HOST=0.0.0.0`, and that combination *prevents* the UI from
+starting — aimm refuses a non-loopback bind without credentials, logging one
+`[WebUI] Failed to start` line at boot while the monitor carries on searching.
+The only credentials it accepts are `FACEBOOK_USERNAME` / `FACEBOOK_PASSWORD`,
+which `facebook.py` also reads as the marketplace login, so turning the UI on
+means putting a real Facebook password on the box and re-arming the password
+fallback this project exists to avoid. VNC is the supported route.
+
+Posting:
+
+```bash
+rs-poster validate                 # checks ads, photos, pacing budget
+rs-poster post --ad buy_servers --city "Denver, CO" --dry-run
+rs-poster post --ad buy_servers --city "Denver, CO"
+rs-poster renew                    # reposts only what is due
+rs-poster status
+```
+
+Coordinator:
+
+```bash
+rsc gen-configs      # regenerate worker shards after editing configs
+rsc serve            # run the API locally
+rsc status           # fleet health + recent finds
+rsc test-telegram
+```
+
+## Tuning what gets found
+
+Everything lives in `configs/master.toml`:
+
+- `[item.*]` — search phrases, keyword/antikeyword filters, price bands. The
+  `extra_prompt` on each item is what teaches the model that we are a
+  commercial buyer, not a consumer; it is the highest-leverage knob for
+  precision.
+- `rating` (default 4) — the AI score needed to alert. Lower it to 3 for a
+  wider net, raise to 5 for only standout deals.
+- `search_interval` / `max_search_interval` — pacing. Do not go below ~30m.
+
+After editing, regenerate worker configs with `rsc gen-configs` and restart the
+workers.
+
+### Daily keyword review
+
+A launchd job reads the last 24h of `logs/monitor.out.log` each morning at 08:00
+and writes `reports/keywords-<date>.md` — a review of which phrases are earning
+their slot, which listings the gates are silently dropping, and where the fleet
+has drifted from `master.toml`. It is **report-only**: it never edits configs,
+never runs `rsc gen-configs`, and never touches a worker.
+
+```bash
+scripts/eval-keywords.sh            # run it now, last 24h
+scripts/eval-keywords.sh 72         # a wider window
+
+cp deploy/com.recycleservers.keyword-eval.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.recycleservers.keyword-eval.plist
+```
+
+Two pieces, so the measuring is separable from the judging:
+
+- `scripts/eval-keywords.py` does the counting — unwraps Rich's line wrapping,
+  attributes skips to items, recomputes which antikeyword actually matched a
+  title (the log prints the whole rule list, not the term that fired), and
+  diffs `master.toml` against `configs/generated/`. Needs 3.11+ for `tomllib`,
+  so it runs under `.venv-aimm/bin/python`.
+- `scripts/eval-keywords.prompt` is the reviewer's brief. It carries the rules
+  this project already paid for — the title-only gate, "lot" pulling in pickup
+  trucks, bare brands being unusable — so the report argues from measurement
+  instead of re-deriving them. Edit this to change what the review looks for.
+
+The raw evidence is kept beside each report as `reports/evidence-<date>.md`, so
+any claim can be traced back. Both are pruned after 60 days.
+
+**The refusal table in older reports ranks nothing.** `Failed to get search
+results` was logged unconditionally after every search — 110 of 110 cycles —
+so it counted how often a phrase was searched, not whether Facebook refused it.
+Fixed on 2026-08-20: the line now fires only when a search really came back
+empty, and carries a `search_empty` event. Reports written before that date
+still show the flat distribution, and a phrase in one of them is dead only once
+a probe confirms it.
+
+### Daily search probe
+
+The keyword review reads the log; this reads Marketplace. A launchd job at 07:45
+opens the fleet's own search URL in a browser — built by the monitor's
+`build_search_url`, parsed by the monitor's result-page parser, filtered by the
+monitor's title gate — and writes `reports/search-probe-<date>.md`: how many
+results came back, how many were rejected without opening a page, and the
+position at which Facebook stopped matching the query. Report-only, like the
+review, and pruned after 60 days.
+
+```bash
+scripts/probe-search-url.sh                                   # one phrase per item
+scripts/probe-search-url.py --item server_ram --city dc \
+    --phrase "samsung micron sk hynix ram"                    # one specific search
+scripts/probe-search-url.py --all-phrases                     # everything, slow
+
+cp deploy/com.recycleservers.search-probe.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.recycleservers.search-probe.plist
+```
+
+It exists because "the URL looks right in my browser" and "the log is full of
+laptops" were both true at once, and only a probe that shares the monitor's own
+code can tell you which half of the pipeline is at fault. Each run costs one
+full result page per phrase in Facebook traffic, so keep the phrase count small.
+
+## Upstream patches
+
+`ai-marketplace-monitor` is a vendored upstream checkout. Our changes are on the
+`recycle-patches` branch, kept deliberately small so upstream merges stay easy:
+
+| Change | Files |
+| --- | --- |
+| Session auth — restore `storage_state`, present the session's pinned user agent, and fail with an actionable error rather than searching logged out | `utils.py` (`MonitorConfig.storage_state_path`), `marketplace.py` (`create_page`, `save_storage_state`, `get_session_user_agent`), `facebook.py` (`login`, `is_logged_in`) |
+| TOTP 2FA auto-fill + "trust this device", for the optional password fallback | `facebook.py` (`handle_two_factor_auth`, `trust_this_device`) |
+| Coordinator notification channel | `coordinator_notify.py` (new), `user.py` (registered on `UserConfig`) |
+| Collect search results while scrolling. Marketplace unmounts cards that scroll out of view, so parsing after the scroll returned the tail of the ranking (ranks 56-115 of 115, none of the top 24) and dropped the best matches | `facebook.py` (`FacebookSearchResultPage._parse_visible_listings`, `get_listings`) |
+| `title_prefilter` — reject a listing on its title before fetching its detail page, exempting titles too terse to judge | `facebook.py` (`FacebookMarketItemCommonConfig.title_prefilter`, `check_listing`) |
+| One search URL builder, so a probe and the monitor cannot drift; per-city options no longer leak into the next city's URL | `facebook.py` (`base_search_options`, `city_search_options`, `build_search_url`) |
+| Per-listing alert verdict, so a Telegram inbox can be reconciled against the scraper. `User.notify` returns whether the send succeeded instead of `None`, and the notify log line reports the outcome rather than announcing success before checking it | `monitor.py` (`[Alert]` line, `listing_alert` event), `user.py` (`notify`), `notification.py` (`_execute_with_retry`) |
+| A 30-result floor on the scroll loop: below it, insist on more quiet rounds before believing a short result list, since a stalled loader and a finished search look identical | `facebook.py` (`MIN_RESULTS_BEFORE_STOP`, `get_listings`) |
+| `Failed to get search results` fires only on an actually empty result set | `facebook.py` (`search`) |
+
+Before pulling upstream, rebase that branch rather than merging into it.
+
+## Tests
+
+```bash
+pytest rs_coordinator/tests rs_poster/tests
+
+# Also validate generated configs against the real aimm loader:
+AIMM_PYTHON=$PWD/.venv/bin/python pytest rs_coordinator/tests
+```
+
+## Constraints worth knowing
+
+- **Facebook has no want-to-buy listing type.** Buy ads are ordinary item
+  listings worded as buy ads (with a placeholder price), optionally shared into
+  local buy/sell groups. Expect occasional removals.
+- **Automating Marketplace violates Facebook's ToS.** Accounts get
+  checkpointed or banned. Use dedicated accounts, one per IP, keep the pacing
+  limits in `ads.toml` and `master.toml` conservative, and treat every worker
+  account as replaceable.
+- **Selectors break.** The poster's are centralized in
+  `rs_poster/rs_poster/selectors.py`; run `rs-poster post --dry-run` after any
+  Facebook UI change. Worker accounts must be set to English (US).
+- **AGPL-3.** Internal use imposes no obligations. `rs_coordinator` and
+  `rs_poster` are separate processes talking over HTTP; keep it that way and do
+  not distribute the patched monitor.

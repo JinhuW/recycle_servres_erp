@@ -1,0 +1,72 @@
+# One worker VM = one Facebook account = one region.
+#
+# Copy this file per node and set WORKER_ID to match a [worker.*] entry in
+# configs/fleet.toml. The generated config for that worker is mounted read-only;
+# regenerate it with `rsc gen-configs` after editing fleet.toml or master.toml.
+#
+# Authentication is session-based — no Facebook password is stored anywhere.
+# Before first start, create this worker's session (ideally through the same
+# proxy the worker uses, since Facebook binds a session to the IP it was born
+# on):
+#
+#   mkdir -p configs/sessions/sc-1
+#   rs-session capture --proxy "$PROXY_SOUTH_CENTRAL" \
+#       --storage-state configs/sessions/sc-1/fb_state.json
+#
+# Each worker gets its own directory under configs/sessions/, mounted read-write
+# at /data, so the worker can persist the cookies Facebook rotates while it
+# browses. Verify at any time with:
+#
+#   rs-session check --storage-state configs/sessions/sc-1/fb_state.json
+
+services:
+  worker:
+    build:
+      context: ../ai-marketplace-monitor
+    image: aimm-recycle:latest
+    container_name: rs-worker-${WORKER_ID:?set WORKER_ID}
+    restart: unless-stopped
+    # Web UI + noVNC. Keep it on the tailnet — it exposes a logged-in browser.
+    ports:
+      - "127.0.0.1:8467:8467"
+    environment:
+      # Per-region proxies referenced by fleet.toml. Only the one this
+      # worker's region names is used; the rest expand to empty. No Facebook
+      # credentials: the session file below is the only Facebook secret.
+      PROXY_NORTHEAST: ${PROXY_NORTHEAST:-}
+      PROXY_SOUTHEAST: ${PROXY_SOUTHEAST:-}
+      PROXY_MIDWEST: ${PROXY_MIDWEST:-}
+      PROXY_SOUTH_CENTRAL: ${PROXY_SOUTH_CENTRAL:-}
+      PROXY_WEST: ${PROXY_WEST:-}
+
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+      RS_COORDINATOR_URL: ${RS_COORDINATOR_URL:?set RS_COORDINATOR_URL}
+      RS_COORDINATOR_TOKEN: ${RS_COORDINATOR_TOKEN:?set RS_COORDINATOR_TOKEN}
+
+      AIMM_ENABLE_VNC: "1"
+      AIMM_WEBUI_HOST: 0.0.0.0
+      AIMM_WEBUI_PORT: "8467"
+    volumes:
+      - ../configs/generated/worker-${WORKER_ID}.toml:/root/.ai-marketplace-monitor/config.toml:ro
+      # diskcache: listing details, AI results, per-worker notification state
+      - aimm-home:/root/.ai-marketplace-monitor
+      # This worker's Facebook session — the DIRECTORY, not the files inside it.
+      #
+      # Bind-mounting the two files individually looks tidier and is a trap: if
+      # a file does not already exist on the host, Docker creates a *directory*
+      # at that path and the container gets IsADirectoryError instead of a
+      # session. On a fresh VM, where no session has been captured yet, that is
+      # the default outcome. A directory mount cannot fail that way.
+      #
+      # Read-write, and that matters twice over: Facebook rotates session
+      # cookies as the worker browses, and the .meta.json sidecar (user agent +
+      # proxy the session was born on) has to be updatable too — mounting it
+      # read-only makes `rs-session` and the poster fail inside the container.
+      #
+      # Per-worker directory, never the whole sessions/ tree: one container must
+      # not be able to read another account's cookies.
+      - ../configs/sessions/${WORKER_ID}:/data
+    shm_size: 1gb
+
+volumes:
+  aimm-home:

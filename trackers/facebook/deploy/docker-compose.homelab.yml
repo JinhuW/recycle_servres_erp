@@ -1,0 +1,129 @@
+# Standalone monitor on the homelab server — the always-on replacement for the
+# laptop's launchd agent.
+#
+# This is the single-account setup (master.toml, alerts straight to Telegram),
+# not a fleet worker: no coordinator, no per-worker token. It exists because a
+# laptop that sleeps breaks browser automation — the Playwright driver's pipe
+# dies and the process hangs rather than exiting, so nothing restarts it. A
+# server that never sleeps removes the failure entirely rather than papering
+# over it with a watchdog.
+#
+# The Facebook session moves here unchanged because the homelab shares the
+# laptop's public IP (same NAT). Facebook binds a session to the IP it was
+# created on, so a box on a different connection would need its own capture.
+#
+# Before first start:
+#   configs/sessions/homelab/fb_state.json            (+ .meta.json sidecar)
+#   configs/homelab.toml                              (master.toml with an
+#                                                      absolute session path)
+#   configs/secrets.env                               (OPENROUTER + TELEGRAM)
+#
+# IMPORTANT: stop the laptop's agent before starting this. Two monitors on one
+# Facebook account double the request rate from a single IP, which is the
+# pattern most likely to get the account checkpointed.
+
+services:
+  monitor:
+    image: aimm-recycle:latest
+    container_name: rs-monitor
+    restart: unless-stopped
+
+    # Raw VNC into the live Chromium, bound to localhost only: this is a
+    # logged-in Facebook browser with no VNC password (x11vnc runs -nopw), so
+    # it must never be reachable from the LAN. Tunnel to it with
+    #   ssh -L 5900:127.0.0.1:5900 jinhu@10.10.10.73
+    # then point a viewer at 127.0.0.1:5900. scripts/monitor-view.sh wraps
+    # both that and a stdlib-only screenshot grab.
+    #
+    # 8467 (the aimm web UI, which embeds noVNC) is NOT published, because
+    # under this deployment it never starts. It refuses to bind a non-loopback
+    # host without credentials, and the only credentials it accepts are
+    # FACEBOOK_USERNAME / FACEBOOK_PASSWORD — which facebook.py ALSO reads as
+    # the marketplace login, so supplying them would put a real Facebook
+    # password on this box and re-arm the password-login fallback that the
+    # session-based setup exists to avoid. Publishing a port to a server that
+    # is not listening just makes the failure look like a network problem.
+    ports:
+      - "127.0.0.1:5900:5900"
+
+    env_file:
+      - ../configs/secrets.env
+
+    environment:
+      AIMM_ENABLE_VNC: "1"
+      # Override, not a default. The Dockerfile bakes AIMM_WEBUI_HOST=0.0.0.0
+      # into the image, so simply omitting it here leaves 0.0.0.0 in force —
+      # and 0.0.0.0 does not expose the web UI, it stops the UI from starting
+      # at all: aimm refuses a non-loopback bind without credentials, logs one
+      # ERROR at boot, and the monitor carries on searching so nobody notices.
+      # The only credentials it accepts are FACEBOOK_USERNAME/PASSWORD, which
+      # facebook.py also reads as the marketplace login, so supplying them
+      # would put a real Facebook password on this box.
+      #
+      # 127.0.0.1 lets the UI start without a password. It is bound inside the
+      # container's own namespace, so it stays unreachable from the LAN and
+      # 8467 is not published; use VNC (scripts/monitor-view.sh) to watch the
+      # browser.
+      AIMM_WEBUI_HOST: 127.0.0.1
+      AIMM_WEBUI_PORT: "8467"
+
+      # Structured events -> OpenSearch, for debugging after the fact: which
+      # listings the AI saw, what it was shown, and how it scored them.
+      #
+      # Reached over the host gateway rather than by joining the OpenSearch
+      # stack's own docker network — this monitor should not break when that
+      # stack is recreated, and 9200 is already published on the host.
+      AIMM_OPENSEARCH_URL: "http://host.docker.internal:9200"
+      AIMM_OPENSEARCH_INDEX: "fb-tracker"
+
+      # Control-plane wiring — RS_CONTROL_PLANE_URL, RS_CONTROL_PLANE_TOKEN and
+      # RS_WORKER_ID — comes from configs/secrets.env via env_file above, not
+      # from `environment:`. Compose interpolates ${...} from the shell and the
+      # .env file only, never from an env_file, so declaring them here would
+      # demand they also be exported in whatever shell runs `docker compose`.
+      #
+      # The monitor reports health to the coordinator and fetches 2FA codes from
+      # its vault rather than holding a secret. Its token is scoped to one
+      # account. Alerts deliberately still go straight to Telegram: routing them
+      # through the coordinator buys cross-worker dedupe, which a single-worker
+      # deployment does not need, and it would put the alert path behind another
+      # service.
+
+    volumes:
+      # Config with an absolute storage_state_path — supervisord's child cwd is
+      # not guaranteed, so a relative path in master.toml would be a coin flip.
+      - ../configs/homelab.toml:/root/.ai-marketplace-monitor/config.toml:ro
+      # diskcache: listing dedupe, AI verdicts, notification state. A named
+      # volume so a container rebuild does not replay every listing as new.
+      - aimm-home:/root/.ai-marketplace-monitor
+      # The session DIRECTORY, read-write. A directory (not the two files) so a
+      # missing file cannot make Docker create a directory in its place, and
+      # read-write because Facebook rotates cookies as the monitor browses.
+      - ../configs/sessions/homelab:/data
+
+    # Chromium needs more than the default 64 MB of /dev/shm or it crashes on
+    # image-heavy Marketplace pages.
+    shm_size: 1gb
+
+    # Resolves host.docker.internal on Linux, where it is not automatic.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - rs-fleet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  aimm-home:
+
+networks:
+  # Created by the coordinator's compose; joined here as an external network so
+  # either service can be restarted independently.
+  rs-fleet:
+    name: rs-fleet
+    external: true

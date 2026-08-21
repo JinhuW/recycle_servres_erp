@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.recycleservers.fbmonitor-watchdog</string>
+
+    <!-- Restarts the monitor when it hangs rather than exits — see
+         scripts/watchdog.sh for why KeepAlive cannot cover that case. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/scripts/watchdog.sh</string>
+    </array>
+
+    <!-- Every 10 minutes. The check is a single stat() when all is well, and
+         RunAtLoad makes a sleeping Mac get checked promptly on wake. -->
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/watchdog.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/watchdog.err.log</string>
+</dict>
+</plist>

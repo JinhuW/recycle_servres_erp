@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.recycleservers.fbmonitor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/scripts/run-monitor.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker</string>
+
+    <!-- Start at login and keep it running; relaunch if it ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Don't hammer-restart on a crash loop. -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/monitor.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jinhu/Projects/recycle_servers/facebook_tracker/logs/monitor.err.log</string>
+</dict>
+</plist>
