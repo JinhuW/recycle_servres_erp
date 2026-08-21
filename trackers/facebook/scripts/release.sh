@@ -97,11 +97,38 @@ fi
 step "tests"
 AIMM_PYTHON="$ROOT/.venv-aimm/bin/python"
 export AIMM_PYTHON
-(cd rs_coordinator && "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider | tail -1)
-(cd rs_poster && "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider | tail -1)
+
+# NOT `pytest ... | tail -1`.
+#
+# /bin/sh has no pipefail, so a pipeline exits with the status of its LAST
+# command — and `tail` always succeeds. Piping pytest into tail therefore hides
+# every failure from `set -e`: the first run of this script sailed past "5
+# failed, 71 passed", bumped the version and wrote a tag. That is the identical
+# bug this release fixes in scripts/deploy.sh, which is a good argument for not
+# writing the pattern anywhere.
+#
+# Output goes to a file, so the summary line is still all you see when it
+# passes and the failures are all there when it does not.
+run_suite() {
+    suite_dir="$1"
+    shift
+    log=$(mktemp)
+    if (cd "$suite_dir" && "$@") > "$log" 2>&1; then
+        tail -1 "$log"
+        rm -f "$log"
+    else
+        echo "  $suite_dir FAILED — not releasing" >&2
+        cat "$log" >&2
+        rm -f "$log"
+        exit 1
+    fi
+}
+
+run_suite rs_coordinator "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
+run_suite rs_poster "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
 # test_facebook.py needs pytest-playwright, which the runtime venv does not have.
-(cd ai-marketplace-monitor && "$AIMM_PYTHON" -m pytest tests/ -q \
-    --ignore=tests/test_facebook.py -p no:cacheprovider | tail -1)
+run_suite ai-marketplace-monitor "$AIMM_PYTHON" -m pytest tests/ -q \
+    --ignore=tests/test_facebook.py -p no:cacheprovider
 
 if [ -n "$DRY" ]; then
     step "dry run — nothing written"
@@ -170,8 +197,8 @@ git commit -q -m "Release v$NEW
 $(awk -v v="$NEW" '
     $0 ~ "^## \\[" v "\\]" {f=1; next}
     /^## \[/ {f=0}
-    f
-' CHANGELOG.md | sed '/^$/{N;/^\n$/D}')
+    f && (NF || prev) {print; prev = NF}
+' CHANGELOG.md)
 
 Vendored monitor pinned at $(git -C ai-marketplace-monitor rev-parse --short HEAD) (see VENDOR.md).
 
