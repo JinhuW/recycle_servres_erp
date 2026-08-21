@@ -145,6 +145,13 @@ reporting healthy.
   cannot.
 - An unreachable mail host wedged a Starlette threadpool thread forever; the IMAP
   connection has a timeout.
+- **Five `rs-session` 2FA tests failed for three seconds out of every thirty.**
+  They read the real clock, and `_autofill_two_factor` deliberately declines a
+  code with three seconds or less left in its window. Because the suite runs in
+  under a tenth of a second, a run landed either wholly inside that dead zone or
+  wholly outside it — so it did not present as flakiness, it presented as a
+  broken suite that was fine again a minute later. The clock is pinned
+  mid-window now; the guard keeps its own dedicated test.
 
 ### Added
 

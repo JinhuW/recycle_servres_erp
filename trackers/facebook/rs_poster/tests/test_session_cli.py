@@ -19,6 +19,42 @@ from rs_poster.cookies import meta_path_for
 DEMO_SECRET = "JBSWY3DPEHPK3PXP"
 CONFIG = totp.TotpConfig(secret=DEMO_SECRET)
 
+# A timestamp 10 seconds into a 30-second TOTP window.
+#
+# Without this the suite reads the real clock, and `_autofill_two_factor`
+# deliberately declines a code with 3 seconds or less left in its window — so
+# for roughly three seconds out of every thirty, five of the tests below failed.
+# Because the whole suite runs in under a tenth of a second, a run lands either
+# wholly inside that dead zone or wholly outside it: it did not look like
+# flakiness, it looked like the suite was broken, and then fine again a moment
+# later. It also removes a narrower race in which the window rolls between the
+# code the helper generates and the one the assertion compares it to.
+#
+# 1_700_000_010 is divisible by 30, so it is the first second of a window and
+# +10 sits comfortably in the middle of one. (1_700_000_000 is NOT divisible by
+# 30 — it is 20 seconds into a window — which is worth stating because getting
+# it wrong gives a constant that still passes and no longer tests what it says.)
+WINDOW_START = 1_700_000_010
+FROZEN_NOW = WINDOW_START + 10
+
+
+class FrozenClock:
+    """Stands in for the `time` module inside rs_poster.totp."""
+
+    @staticmethod
+    def time():
+        return FROZEN_NOW
+
+
+@pytest.fixture(autouse=True)
+def frozen_clock(monkeypatch):
+    """Pin the TOTP clock mid-window for every test in this module.
+
+    The <=3s guard keeps its own coverage: it is exercised deliberately by
+    `test_waits_out_a_code_that_is_about_to_expire`, which overrides this.
+    """
+    monkeypatch.setattr(totp, "time", FrozenClock)
+
 
 class FakeLocator:
     def __init__(self, visible=True, log=None, name="field"):
