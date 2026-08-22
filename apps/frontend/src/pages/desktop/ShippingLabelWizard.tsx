@@ -7,10 +7,10 @@ import {
   type ShipmentAddressInput, type ShipmentPackageInput,
 } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtMoney } from '../../lib/format';
+import { fmtDateShort, fmtMoney } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { navigateBack, navigate } from '../../lib/route';
-import { previousSellers, type PoLabels, type PrevSeller } from '../../lib/shippingList';
+import { matchSellers, previousSellers, type PoLabels, type PrevSeller } from '../../lib/shippingList';
 import type { Order, OrderSummary, Shipment, ShipmentRate, Warehouse } from '../../lib/types';
 
 // Full-page two-step label wizard.
@@ -36,7 +36,8 @@ const EMPTY_FROM: ShipmentAddressInput = {
 type PkgDraft = { weightOz: string; lengthIn: string; widthIn: string; heightIn: string };
 
 export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [step, setStep] = useState<1 | 2>(1);
   const [shipment, setShipment] = useState<Shipment | null>(null);
   const [rates, setRates] = useState<ShipmentRate[]>([]);
@@ -53,10 +54,14 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   const [prevSellers, setPrevSellers] = useState<PrevSeller[]>([]);
   const [prevPick, setPrevPick] = useState<string | null>(null);
   const [contactQ, setContactQ] = useState('');
+  // Seller-name typeahead: opens while the user types, never right after a pick.
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestIdx, setSuggestIdx] = useState(0);
   const setF = (k: keyof ShipmentAddressInput, v: string) => { setPrevPick(null); setFrom((p) => ({ ...p, [k]: v })); };
   const setP = (k: keyof PkgDraft, v: string) => setPkg((p) => ({ ...p, [k]: v }));
 
   const pickSeller = (p: PrevSeller) => {
+    setSuggestOpen(false);
     setPrevPick(p.key);
     setFrom({
       name: p.from.name ?? '', phone: p.from.phone ?? '',
@@ -242,6 +247,7 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   const shownContacts = q
     ? prevSellers.filter(p => (p.label + ' ' + (p.from.street1 ?? '')).toLowerCase().includes(q))
     : prevSellers;
+  const suggestions = matchSellers(prevSellers, from.name);
 
   return (
     <div className="ship-wizard-layout">
@@ -297,9 +303,44 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
             </div>
             <div className="ship-or-divider">{t('shipOrManual')}</div>
             <div className="field-row">
-              <div className="field">
+              <div className="field ship-name-field">
                 <label className="label">{t('shipSellerName')} <span className="req">*</span></label>
-                <input className="input" value={from.name} onChange={(e) => setF('name', e.target.value)} autoComplete="off" />
+                <input
+                  className="input"
+                  value={from.name}
+                  role="combobox"
+                  aria-expanded={suggestOpen && suggestions.length > 0}
+                  autoComplete="off"
+                  onChange={(e) => { setF('name', e.target.value); setSuggestOpen(e.target.value.trim().length > 0); setSuggestIdx(0); }}
+                  onBlur={() => setSuggestOpen(false)}
+                  onKeyDown={(e) => {
+                    if (!suggestOpen || suggestions.length === 0) return;
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setSuggestIdx(i => (i + 1) % suggestions.length); }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setSuggestIdx(i => (i - 1 + suggestions.length) % suggestions.length); }
+                    else if (e.key === 'Enter') { e.preventDefault(); pickSeller(suggestions[suggestIdx]); }
+                    else if (e.key === 'Escape') { setSuggestOpen(false); }
+                  }}
+                />
+                {suggestOpen && suggestions.length > 0 && (
+                  <div className="ship-suggest" role="listbox">
+                    {suggestions.map((p, i) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        role="option"
+                        aria-selected={i === suggestIdx}
+                        className={'ship-suggest-row' + (i === suggestIdx ? ' active' : '')}
+                        onMouseDown={(e) => { e.preventDefault(); pickSeller(p); }}
+                        onMouseEnter={() => setSuggestIdx(i)}
+                      >
+                        <span style={{ fontWeight: 600 }}>{p.from.name}</span>
+                        <span className="ship-suggest-sub">
+                          {[p.from.city, p.from.state].filter(Boolean).join(', ')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="field">
                 <label className="label">{t('shipSellerPhone')}</label>
@@ -459,9 +500,18 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
                   >
                     <Icon name="user" size={14} />
                     <span className="ship-contact-main">
-                      <span className="ship-contact-name">{p.from.name}</span>
+                      <span className="ship-contact-name">
+                        {p.from.name}
+                        {p.count > 1 && <span className="ship-contact-count mono">×{p.count}</span>}
+                      </span>
                       <span className="ship-contact-addr">
-                        {[p.from.street1, p.from.city, p.from.state].filter(Boolean).join(', ')}
+                        {p.from.street1}{p.from.street2 ? `, ${p.from.street2}` : ''}
+                      </span>
+                      <span className="ship-contact-addr">
+                        {[p.from.city, p.from.state].filter(Boolean).join(', ')} {p.from.zip ?? ''}
+                      </span>
+                      <span className="ship-contact-meta">
+                        {[p.from.phone, fmtDateShort(p.lastUsed, locale)].filter(Boolean).join(' · ')}
                       </span>
                     </span>
                   </button>

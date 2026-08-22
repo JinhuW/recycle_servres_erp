@@ -63,27 +63,48 @@ export function statusCounts(rows: ShipRow[]): Record<ShipmentStatus | 'all', nu
   return counts;
 }
 
-export type PrevSeller = { key: string; label: string; from: Shipment['from'] };
+export type PrevSeller = {
+  key: string;
+  label: string;
+  from: Shipment['from'];
+  /** How many labels have shipped from this address. */
+  count: number;
+  /** Newest shipment's createdAt for this address. */
+  lastUsed: string;
+};
 
 /**
  * Address book composed from past shipments: every complete seller address the
- * user can see, deduped (name + street + zip), newest first. Feeds the
- * wizard's "previous sellers" picker until a real address book exists
- * server-side.
+ * user can see, deduped (name + street + zip), newest first, with per-address
+ * label count. Feeds the wizard's contacts rail and the seller-name typeahead
+ * until a real address book exists server-side.
  */
 export function previousSellers(sections: PoLabels[]): PrevSeller[] {
-  const seen = new Set<string>();
-  const out: PrevSeller[] = [];
+  const byKey = new Map<string, PrevSeller>();
   for (const { shipment: s } of flattenRows(sections)) {
     const f = s.from;
     if (!f.name || !f.street1 || !f.city || !f.state || !f.zip) continue;
     const key = [f.name, f.street1, f.zip].join('|').toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ key, label: `${f.name} · ${f.city}, ${f.state}`, from: f });
-    if (out.length >= 50) break;
+    const hit = byKey.get(key);
+    if (hit) { hit.count++; continue; } // rows are newest-first, so the entry already holds the freshest data
+    if (byKey.size >= 50) continue;
+    byKey.set(key, { key, label: `${f.name} · ${f.city}, ${f.state}`, from: f, count: 1, lastUsed: s.createdAt });
   }
-  return out;
+  return [...byKey.values()];
+}
+
+/** Name typeahead: prefix matches rank above substring matches, capped at 6. */
+export function matchSellers(list: PrevSeller[], q: string): PrevSeller[] {
+  const s = q.trim().toLowerCase();
+  if (!s) return [];
+  const pre: PrevSeller[] = [];
+  const sub: PrevSeller[] = [];
+  for (const p of list) {
+    const n = (p.from.name ?? '').toLowerCase();
+    if (n.startsWith(s)) pre.push(p);
+    else if (n.includes(s)) sub.push(p);
+  }
+  return [...pre, ...sub].slice(0, 6);
 }
 
 export function rowsToCsv(rows: ShipRow[]): string {
