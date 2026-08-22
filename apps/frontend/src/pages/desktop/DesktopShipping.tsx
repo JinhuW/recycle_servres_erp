@@ -9,11 +9,16 @@ import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate, type ShippingRoute } from '../../lib/route';
 import {
-  STATUS_CHIP, carriersOf, filterRows, flattenRows, fmtEta, rowsToCsv, statusCounts,
-  type PoLabels, type ShipRow,
+  carrierTrackingUrl, createPoFromPackage, listPackages, removePackage,
+  type TrackedPackage,
+} from '../../lib/packages';
+import {
+  STATUS_CHIP, filterInbound, flattenRows, fmtEta, inboundCarriers, inboundCounts,
+  inboundToCsv, mergeInbound, type InboundRow, type PoLabels, type ShipRow,
 } from '../../lib/shippingList';
 import { useEffectiveUser } from '../../lib/tweaks';
 import type { Order, OrderSummary, ShipmentStatus } from '../../lib/types';
+import { ShippingAddLabel } from './ShippingAddLabel';
 import { ShippingLabelWizard } from './ShippingLabelWizard';
 import { ShippingPanel } from './ShippingPanel';
 
@@ -53,6 +58,7 @@ export function DesktopShipping({ route, showToast }: Props) {
         <span>{t('shipNotReadyBanner')}</span>
       </div>
       {route.kind === 'dashboard' && <GlobalShipping showToast={showToast} />}
+      {route.kind === 'addLabel' && <ShippingAddLabel showToast={showToast} />}
       {(route.kind === 'wizardNew' || route.kind === 'wizardPo') && (
         <ShippingLabelWizard
           key={route.kind === 'wizardPo' ? `${route.orderId}/${route.sid ?? 'new'}` : 'new'}
@@ -115,6 +121,7 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
   const user = useEffectiveUser();
   const isManager = user?.role === 'manager';
   const [sections, setSections] = useState<PoLabels[]>([]);
+  const [pkgs, setPkgs] = useState<TrackedPackage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   // One advance attempt per PO per page-load; a failed attempt (403/409) is
@@ -137,6 +144,7 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
         })),
       );
       setSections(withShipments.filter(s => s.shipments.length > 0));
+      setPkgs((await listPackages()).items);
     } catch (e) {
       handleFetchError(e);
     } finally {
@@ -144,6 +152,13 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
     }
   }, [isManager, scope]);
   useEffect(() => { void reload(); }, [reload]);
+
+  // Standalone packages track server-side; re-read on a slow tick so status
+  // moves show up without a manual refresh.
+  useEffect(() => {
+    const h = setInterval(() => { listPackages().then(r => setPkgs(r.items)).catch(() => {}); }, 30_000);
+    return () => clearInterval(h);
+  }, []);
 
   // The confirmed rule, UI-side for now: carrier movement moves the draft PO
   // to In Transit. Runs after each load against what the page can see.
@@ -162,17 +177,17 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
     }
   }, [sections, reload, showToast, t]);
 
-  const rows = useMemo(() => flattenRows(sections), [sections]);
-  const carriers = useMemo(() => carriersOf(rows), [rows]);
+  const rows = useMemo(() => mergeInbound(flattenRows(sections), pkgs), [sections, pkgs]);
+  const carriers = useMemo(() => inboundCarriers(rows), [rows]);
   // Rail counts reflect the carrier + search narrowing, not the status pick —
   // same layering as the orders page (counts answer "of what I'm looking at").
   const searchScoped = useMemo(
-    () => filterRows(rows, { status: 'all', carrier, search }),
+    () => filterInbound(rows, { status: 'all', carrier, search }),
     [rows, carrier, search],
   );
-  const counts = useMemo(() => statusCounts(searchScoped), [searchScoped]);
+  const counts = useMemo(() => inboundCounts(searchScoped), [searchScoped]);
   const visible = useMemo(
-    () => filterRows(rows, { status, carrier, search }),
+    () => filterInbound(rows, { status, carrier, search }),
     [rows, status, carrier, search],
   );
 
@@ -183,7 +198,7 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
   };
 
   const exportCsv = () => {
-    const blob = new Blob([rowsToCsv(visible)], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([inboundToCsv(visible)], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -202,6 +217,9 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
           <div className="page-sub">{t('shipPageSub')}</div>
         </div>
         <div className="page-actions">
+          <button className="btn" onClick={() => navigate('/shipping/add')}>
+            <Icon name="label" size={14} /> {t('shipAddLabel')}
+          </button>
           <button className="btn accent" onClick={() => navigate('/shipping/new')}>
             <Icon name="plus" size={14} /> {t('shipBuyLabel')}
           </button>
@@ -304,7 +322,17 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
                     {t('shipNoMatch')}
                   </td></tr>
                 )}
-                {visible.map(row => (
+                {visible.map(row => row.kind === 'package' ? (
+                  <PackageTableRow
+                    key={row.pkg.id}
+                    pkg={row.pkg}
+                    locale={locale}
+                    copied={copied}
+                    onCopy={copyTracking}
+                    onMutated={reload}
+                    showToast={showToast}
+                  />
+                ) : (
                   <ShipTableRow
                     key={row.shipment.id}
                     row={row}
@@ -324,6 +352,117 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
         )}
       </div>
     </>
+  );
+}
+
+// A standalone tracked package: an external label with no PO behind it yet.
+// The PO is born when the box arrives — that's the whole point of the row.
+function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: {
+  pkg: TrackedPackage;
+  locale: string;
+  copied: string | null;
+  onCopy: (tn: string) => void;
+  onMutated: () => void;
+  showToast: (msg: string, kind?: ToastKind) => void;
+}) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const chip = STATUS_CHIP[pkg.status];
+  const eta = fmtEta(pkg.trackingEta, locale);
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
+  const createPo = async () => {
+    setBusy(true);
+    try {
+      const { orderId } = await createPoFromPackage(pkg);
+      showToast(t('shipPoCreated', { id: orderId }));
+      navigate(`/purchase-orders/${orderId}`);
+    } catch (e) {
+      handleFetchError(e);
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await removePackage(pkg.id);
+      onMutated();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td>
+        {pkg.orderId ? (
+          <button className="ship-po-pill" onClick={() => navigate(`/purchase-orders/${pkg.orderId}`)}>
+            {pkg.orderId}
+          </button>
+        ) : (
+          <span className="chip muted" style={{ fontSize: 11 }}>{t('shipColNoPo')}</span>
+        )}
+        <div className="ship-cell-sub">{fmtDateShort(pkg.createdAt, locale)}</div>
+      </td>
+      <td>
+        {pkg.sellerName
+          ? <span style={{ fontWeight: 600 }}>{pkg.sellerName}</span>
+          : <span className="muted">—</span>}
+        {pkg.note && <div className="ship-cell-sub">{pkg.note}</div>}
+      </td>
+      <td><span className="muted">—</span></td>
+      <td>
+        <span className="ship-carrier-chip">{pkg.carrier}</span>{' '}
+        <span style={{ fontSize: 12.5 }}>{t('shipAddedLabelTag')}</span>
+        <div className="ship-cell-sub">
+          {eta && pkg.status !== 'delivered' && t('shipEstDelivery', { eta })}
+          {eta && pkg.status !== 'delivered' && ' '}
+          <span className="chip muted" style={{ fontSize: 10 }}>{t('shipDemoTag')}</span>
+        </div>
+      </td>
+      <td className={'ship-track ' + chip.cls}>
+        <span className={'chip dot ' + chip.cls} style={{ fontSize: 11 }}>{t(chip.key)}</span>
+        <div className="ship-cell-sub" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            type="button"
+            className="ship-copy-btn mono"
+            title={t('shipCopyTracking')}
+            onClick={(e) => { stop(e); onCopy(pkg.trackingNumber); }}
+          >
+            {pkg.trackingNumber}
+            <span className={'ship-copy-hint' + (copied === pkg.trackingNumber ? ' done' : '')}>
+              {copied === pkg.trackingNumber ? t('shipCopied') : t('shipCopy')}
+            </span>
+          </button>
+          <a
+            href={carrierTrackingUrl(pkg.carrier, pkg.trackingNumber)}
+            target="_blank"
+            rel="noreferrer"
+            onClick={stop}
+            title={t('shipTrackOnCarrier', { carrier: pkg.carrier })}
+          >
+            ↗
+          </a>
+        </div>
+      </td>
+      <td className="num" style={{ cursor: 'default' }}>
+        <div style={{ display: 'inline-flex', gap: 6 }}>
+          {pkg.status === 'delivered' && !pkg.orderId && (
+            <button className="btn accent sm" disabled={busy} onClick={() => void createPo()}>
+              {t('shipCreatePo')}
+            </button>
+          )}
+          {!pkg.orderId && (
+            <button className="btn ghost sm" disabled={busy} onClick={() => void remove()}>
+              {t('shipPkgRemove')}
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }
 
