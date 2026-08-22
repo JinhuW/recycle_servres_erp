@@ -30,6 +30,16 @@ deployed?" harder to answer.
   job is category, not generation. After pulling this, regenerate configs:
   `sh deploy/make-homelab-config.sh && rsc gen-configs`.
 
+- **A listing the AI is confident is a single unit never alerts.** "Fewer
+  than 3 units" was already a reject rule, but an attractive one-off — a lone
+  128GB module, a 15TB drive priced to move — could still talk its way up the
+  scale on capacity or price and clear the `rating = 4` alert threshold. The
+  prompt now makes the single-unit case outrank everything else about the
+  listing: confident single, rate 1, whatever the capacity, price or
+  condition, and "large"/"high-value" at rating 5 describes the lot rather
+  than the unit. Genuine doubt about the count still goes to the
+  quantity-unclear path (rating 2), which does not alert either.
+
 - **AI evaluation is text-only, deliberately.** Attaching the listing's photos
   to the evaluation was tried and removed before release: multimodal calls cost
   several times a text call on every listing the fleet visits, and the fleet
