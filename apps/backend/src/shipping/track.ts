@@ -1,4 +1,4 @@
-// Best-effort tracking refresh. ShipSaving v1 has no webhook/event feed, so a
+// Best-effort tracking refresh. ShipSaving v2 has no webhook/event feed, so a
 // poll loop (same shape as startFxRefreshLoop) asks the provider about every
 // live purchased shipment and applies status moves through the shared guard
 // table. Stub-provider deployments never tick — canned tracking data would
@@ -18,8 +18,8 @@ export async function refreshShipmentTracking(
   sql: Sql,
   client: ShippingClient,
 ): Promise<{ checked: number; updated: number }> {
-  const rows = await sql<{ id: string; order_id: string; status: ShipmentStatus; tracking_number: string }[]>`
-    SELECT id, order_id, status, tracking_number
+  const rows = await sql<{ id: string; order_id: string; status: ShipmentStatus; tracking_number: string; carrier: string | null }[]>`
+    SELECT id, order_id, status, tracking_number, carrier
     FROM shipments
     WHERE status IN ('purchased','in_transit','exception')
       AND tracking_number IS NOT NULL
@@ -28,7 +28,7 @@ export async function refreshShipmentTracking(
   let updated = 0;
   for (const row of rows) {
     try {
-      const info = await client.getShipment(row.tracking_number);
+      const info = await client.getShipment(row.tracking_number, row.carrier);
       // 'purchased' from the carrier means "no movement yet" — refresh the
       // metadata but never regress the status machine.
       const next: ShipmentStatus | null =
@@ -75,9 +75,13 @@ export async function refreshPackageTracking(
   let updated = 0;
   for (const row of rows) {
     try {
-      const info = await client.getShipment(row.tracking_number);
+      const info = await client.getShipment(row.tracking_number, row.carrier);
+      // Externally-voided doesn't exist for a package row (its CHECK holds the
+      // 4-value tracked vocabulary) — treat it as no movement.
       const next: ShipmentStatus | null =
-        info.normalized !== row.status && canTransition(row.status, info.normalized)
+        info.normalized !== 'voided'
+          && info.normalized !== row.status
+          && canTransition(row.status, info.normalized)
           ? info.normalized
           : null;
       await sql.begin(async (tx) => {

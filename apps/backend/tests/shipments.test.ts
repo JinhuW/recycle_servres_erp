@@ -208,6 +208,27 @@ describe('shipments — buy folds the label cost into the PO', () => {
     expect(notes.length).toBeGreaterThan(0);
   });
 
+  it('stores the quotes and refuses a rateId the shipment was never quoted', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+
+    const rates = await api('POST', `/api/orders/${po}/shipments/${s.id}/rates`, { token });
+    expect(rates.status).toBe(200);
+    const sql = getTestDb();
+    const row = (await sql`SELECT quotes FROM shipments WHERE id = ${s.id}`)[0] as { quotes: unknown[] };
+    expect(Array.isArray(row.quotes)).toBe(true);
+    expect(row.quotes.length).toBeGreaterThan(0);
+
+    // A rate_id minted elsewhere (or expired) must not buy on this shipment.
+    const replay = await api('POST', `/api/orders/${po}/shipments/${s.id}/buy`, {
+      token, body: { rateId: 'some-other-shipments-rate' },
+    });
+    expect(replay.status).toBe(409);
+  });
+
   it('enforces the status guard: no buy on a draft, no double-buy, no void on a draft', async () => {
     const mgr = await loginAs(ALEX);
     const { token } = await loginAs(MARCUS);

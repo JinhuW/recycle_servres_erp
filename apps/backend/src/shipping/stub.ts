@@ -38,7 +38,9 @@ export const stubShippingClient: ShippingClient = {
       service: rate.service,
       amount: rate.amount,
       currency: rate.currency,
-      labelPdf: STUB_PDF.slice(),
+      labelData: STUB_PDF.slice(),
+      labelContentType: 'application/pdf',
+      labelExt: 'pdf',
       trackingUrl: carrierTrackingUrl(rate.carrier, trackingNumber),
     };
   },
