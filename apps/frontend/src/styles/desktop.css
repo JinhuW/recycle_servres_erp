@@ -159,7 +159,6 @@ html.desktop, body.desktop, .desktop #root {
 .ship-wip-banner {
   margin: 0 0 14px;
   padding: 8px 14px;
-  max-width: 860px;
   background: var(--warn-soft);
   border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
   border-radius: 8px;
@@ -2478,3 +2477,442 @@ html.desktop, body.desktop, .desktop #root {
   .sub-commit-total { margin-left: 0; }
   .sub-commit-actions { margin-left: auto; }
 }
+
+/* ===== Shipping =====
+   Dashboard table + full-page label wizard + the per-PO panel. The table
+   borrows the orders-page skeleton; the wizard is a single centered column
+   because it is a form, not a workspace. */
+
+/* Shipments dashboard variant — head, toolbar and status rail stay put; only
+   the table body scrolls (same treatment as .page-history). */
+.page.page-shipping {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-shipping > .ship-wip-banner,
+.page.page-shipping > .page-head { flex-shrink: 0; }
+.page.page-shipping > .ship-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page.page-shipping > .ship-card > .card-head,
+.page.page-shipping > .ship-card > .status-rail,
+.page.page-shipping > .ship-card > .ship-cap-note { flex-shrink: 0; }
+.page.page-shipping > .ship-card > .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page.page-shipping > .ship-card .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Toolbar buttons must not wrap ("Export CSV" is the widest). */
+.ship-card .card-head .btn { white-space: nowrap; }
+
+/* Search input with the icon set inside it — the two-tier toolbar pattern. */
+.toolbar-search { position: relative; }
+.toolbar-search > svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  pointer-events: none;
+}
+.toolbar-search > .input {
+  padding-left: 30px;
+  height: 32px;
+  font-size: 12.5px;
+  width: 220px;
+}
+
+/* No logo assets — the carrier reads as a typed stamp instead. */
+.ship-carrier-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+.ship-cell-sub { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; }
+
+/* Tracking cell — the status owns a coloured edge so a scan down the column
+   reads like the reference's tracking rail. */
+.ship-track {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 11px;
+}
+.ship-track.pos    { border-left-color: var(--pos); }
+.ship-track.info   { border-left-color: var(--info); }
+.ship-track.warn   { border-left-color: var(--warn); }
+.ship-track.neg    { border-left-color: var(--neg); }
+.ship-track.accent { border-left-color: var(--accent); }
+
+/* Click-to-copy tracking number. */
+.ship-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ship-copy-btn .ship-copy-hint { color: var(--fg-subtle); font-size: 11px; }
+.ship-copy-btn .ship-copy-hint.done { color: var(--accent-strong); }
+
+/* PO id as a pressable mono pill (dashboard + panel headers). */
+.ship-po-pill {
+  font: inherit;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 650;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: var(--fg);
+}
+.ship-po-pill:hover { border-color: var(--border-strong); }
+
+.ship-cap-note {
+  padding: 8px 18px;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Label wizard ─────────────────────────────────────────────────────────── */
+.ship-wizard {
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.ship-wizard-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ship-wizard-head .ship-wizard-step {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+.ship-wizard-title {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.ship-wizard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ship-sec-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+/* Selectable warehouse (ship-to) cards. */
+.ship-addr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.ship-addr-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.ship-addr-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ship-addr-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ship-addr-name { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.ship-addr-line { display: block; font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+.ship-addr-warn { display: block; font-size: 12px; color: var(--warn-strong); margin-top: 4px; }
+
+/* Focused per-PO view. */
+.ship-focus { max-width: 760px; }
+.ship-focus-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.ship-focus-title { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.ship-focus-missing { font-size: 13px; color: var(--fg-muted); padding: 16px 0; }
+
+/* The no-typing path: hand the seller a link instead of transcribing chat. */
+.ship-seller-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px dashed color-mix(in oklch, var(--accent) 45%, transparent);
+}
+.ship-seller-card .ship-seller-title { font-size: 13px; font-weight: 650; color: var(--accent-strong); }
+.ship-seller-card .ship-seller-hint { font-size: 12px; color: var(--fg-muted); margin-top: 1px; }
+
+.ship-or-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.ship-or-divider::before,
+.ship-or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* L × W × H + weight with fixed units — the backend model is inches/ounces. */
+.ship-dims-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.ship-unit-suffix {
+  align-self: center;
+  font-size: 12px;
+  color: var(--fg-subtle);
+}
+
+/* Rate cards (step 2). */
+.ship-rate-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 11px 14px;
+  background: var(--bg-elev);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.ship-rate-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ship-rate-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ship-rate-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-strong);
+  display: grid;
+  place-items: center;
+}
+.ship-rate-card.selected .ship-rate-radio { border-color: var(--accent); }
+.ship-rate-radio::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.ship-rate-card.selected .ship-rate-radio::after { background: var(--accent); }
+.ship-rate-days { margin-left: auto; font-size: 12px; color: var(--fg-subtle); }
+.ship-rate-price {
+  font-weight: 600;
+  font-size: 14px;
+  width: 72px;
+  text-align: right;
+}
+.ship-rate-card.selected .ship-rate-price { color: var(--accent-strong); }
+
+/* Money-consequence callout before Buy. */
+.ship-callout-warn {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+  border: 1px solid color-mix(in oklch, var(--warn-strong) 25%, transparent);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ship-confirm-rows { display: flex; flex-direction: column; gap: 10px; }
+.ship-confirm-row { display: flex; justify-content: space-between; font-size: 13px; }
+.ship-confirm-row > :first-child { color: var(--fg-muted); }
+.ship-confirm-row > :last-child { font-weight: 600; }
+.ship-confirm-row.strong { border-top: 1px solid var(--border); padding-top: 10px; }
+
+.ship-wizard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.ship-wizard-foot .ship-foot-right { display: flex; gap: 8px; margin-left: auto; }
+.ship-wizard-err { font-size: 12.5px; color: var(--neg); }
+
+/* ── Per-PO panel ─────────────────────────────────────────────────────────── */
+.ship-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.ship-panel-head.bare { border-bottom: none; }
+.ship-panel-title { font-size: 14px; font-weight: 650; }
+.ship-panel-count {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.ship-block {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ship-block:last-child { border-bottom: none; }
+.ship-block.voided { opacity: 0.72; }
+.ship-block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ship-block-carrier { font-weight: 600; font-size: 13.5px; }
+.ship-block-service { color: var(--fg-muted); font-size: 13px; }
+.ship-block-cost { margin-left: auto; font-weight: 600; font-size: 13px; }
+.ship-block-cost.voided { text-decoration: line-through; color: var(--fg-subtle); }
+
+/* Created → purchased → in transit → delivered. Voided/exception stay badge
+   states — a failure is not a step on the way. */
+.ship-timeline { display: flex; align-items: center; }
+.ship-tl-seg { display: flex; align-items: center; flex: 1; min-width: 0; }
+.ship-tl-seg.last { flex: 0 0 auto; }
+.ship-tl-node {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  border: 2px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg-subtle);
+}
+.ship-tl-node.done {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.ship-tl-node.now {
+  border-color: var(--info);
+  background: var(--info-soft);
+  color: var(--info);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--info) 15%, transparent);
+}
+.ship-tl-bar {
+  flex: 1;
+  height: 2px;
+  margin: 0 6px;
+  min-width: 14px;
+  background: var(--border-strong);
+}
+.ship-tl-bar.done { background: var(--accent); }
+.ship-tl-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  margin-top: 5px;
+}
+.ship-tl-labels .now { color: var(--info); font-weight: 600; }
+.ship-tl-labels .done { color: var(--accent-strong); font-weight: 600; }
+
+.ship-exception-note { font-size: 12.5px; color: var(--warn-strong); }
+
+.ship-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.ship-meta .ship-eta-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  margin-right: 6px;
+}
+.ship-meta .ship-eta-value { font-weight: 600; color: var(--fg); }
+.ship-meta a { color: var(--info); }
+
+.ship-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ship-actions .ship-from-note {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
+/* Delivered → the goods are here; the PO is the next thing to finish. */
+.ship-delivered-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  font-size: 12.5px;
+  color: var(--accent-strong);
+}
+.ship-delivered-cta .btn { margin-left: auto; }
