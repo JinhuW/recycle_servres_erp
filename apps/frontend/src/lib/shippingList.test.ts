@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   carriersOf, filterRows, flattenRows, fmtEta, inboundCarriers, inboundCounts, inboundToCsv,
-  matchSellers, mergeInbound, filterInbound, previousSellers, rowsToCsv, statusCounts,
-  type PoLabels, type ShipRow,
+  matchSellers, mergeInbound, filterInbound, rowsToCsv, statusCounts,
+  type PoLabels, type PrevSeller, type ShipRow,
 } from './shippingList';
 import type { TrackedPackage } from './packages';
 import type { OrderSummary, Shipment } from './types';
@@ -111,66 +111,18 @@ describe('statusCounts', () => {
   });
 });
 
-describe('previousSellers', () => {
-  const addr = (name: string, street1 = '1 Main St', zip = '80202') => ({
-    name, phone: null, street1, street2: null, city: 'Denver', state: 'CO', zip, country: 'US',
-  });
-
-  it('lists complete seller addresses newest first, deduped with counts', () => {
-    const secs: PoLabels[] = [
-      { order: order({ id: 'PO-1' }), shipments: [
-        shipment({ id: 'a', from: addr('Ana'), createdAt: '2026-08-01T00:00:00Z' }),
-        shipment({ id: 'b', from: addr('Bo'), createdAt: '2026-08-03T00:00:00Z' }),
-        shipment({ id: 'c', from: addr('ANA'), createdAt: '2026-08-05T00:00:00Z' }), // dup of a (case-insensitive)
-      ] },
-    ];
-    const out = previousSellers(secs);
-    expect(out.map(p => p.from.name)).toEqual(['ANA', 'Bo']);
-    expect(out[0].label).toBe('ANA · Denver, CO');
-    expect(out[0].count).toBe(2);
-    expect(out[0].lastUsed).toBe('2026-08-05T00:00:00Z');
-    expect(out[1].count).toBe(1);
-  });
-
-  it('skips incomplete addresses (seller-fill shells)', () => {
-    const secs: PoLabels[] = [
-      { order: order({}), shipments: [shipment({ from: { ...shipment({}).from, name: 'NoStreet' } })] },
-    ];
-    expect(previousSellers(secs)).toEqual([]);
-  });
-
-  it('caps the address book at 50 entries, keeping the newest', () => {
-    const secs: PoLabels[] = [{
-      order: order({}),
-      shipments: Array.from({ length: 55 }, (_, i) =>
-        shipment({
-          id: `s${i}`,
-          from: addr(`Seller ${i}`, `${i} Main St`),
-          createdAt: `2026-07-01T00:00:${String(i).padStart(2, '0')}Z`,
-        })),
-    }];
-    const out = previousSellers(secs);
-    expect(out).toHaveLength(50);
-    expect(out[0].from.name).toBe('Seller 54'); // newest first survives the cap
-  });
-
-  it('keeps sellers with the same name at different addresses separate', () => {
-    const secs: PoLabels[] = [
-      { order: order({}), shipments: [
-        shipment({ id: 'a', from: addr('Ana', '1 Main St'), createdAt: '2026-08-02T00:00:00Z' }),
-        shipment({ id: 'b', from: addr('Ana', '9 Elm St'), createdAt: '2026-08-01T00:00:00Z' }),
-      ] },
-    ];
-    expect(previousSellers(secs)).toHaveLength(2);
-  });
-});
-
 describe('matchSellers', () => {
-  const addr2 = (name: string) => ({
-    name, phone: null, street1: '1 Main St', street2: null, city: 'Denver', state: 'CO', zip: '80202', country: 'US',
-  });
-  const mk = (names: string[]): ReturnType<typeof previousSellers> =>
-    previousSellers([{ order: order({}), shipments: names.map((n, i) => shipment({ id: String(i), from: addr2(n) })) }]);
+  const mk = (names: string[]): PrevSeller[] =>
+    names.map((name, i) => ({
+      key: `${name.toLowerCase()}|1 main st|80202`,
+      label: `${name} · Denver, CO`,
+      from: {
+        name, phone: null, street1: '1 Main St', street2: null,
+        city: 'Denver', state: 'CO', zip: '80202', country: 'US',
+      },
+      count: 1,
+      lastUsed: `2026-08-0${(i % 9) + 1}T00:00:00Z`,
+    }));
 
   it('ranks prefix matches above substring matches', () => {
     const list = mk(['Wang Jin', 'Jinhu Wang', 'Bo Li']);

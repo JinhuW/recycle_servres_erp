@@ -1,23 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { progressedStatus } from './packages';
+import { carrierTrackingUrl } from './packages';
+import type { Carrier } from './carrierDetect';
 
-const T0 = Date.parse('2026-08-22T12:00:00Z');
-const min = (n: number) => n * 60_000;
-
-describe('progressedStatus', () => {
-  it('stays purchased right after the label is added', () => {
-    expect(progressedStatus('2026-08-22T12:00:00Z', T0 + 30_000)).toBe('purchased');
+describe('carrierTrackingUrl', () => {
+  it('links each carrier to its public tracking page with the number encoded', () => {
+    expect(carrierTrackingUrl('UPS', '1Z999AA10123456784'))
+      .toBe('https://www.ups.com/track?tracknum=1Z999AA10123456784');
+    expect(carrierTrackingUrl('FedEx', '123456789012'))
+      .toBe('https://www.fedex.com/fedextrack/?trknbr=123456789012');
+    expect(carrierTrackingUrl('USPS', '9400 1118'))
+      .toBe('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400%201118');
   });
 
-  it('moves to in transit after two minutes', () => {
-    expect(progressedStatus('2026-08-22T12:00:00Z', T0 + min(2))).toBe('in_transit');
-  });
-
-  it('is delivered after five minutes', () => {
-    expect(progressedStatus('2026-08-22T12:00:00Z', T0 + min(5))).toBe('delivered');
-  });
-
-  it('stays delivered forever after', () => {
-    expect(progressedStatus('2026-08-22T12:00:00Z', T0 + min(600))).toBe('delivered');
+  it('returns null for a carrier outside the union — no href-less links', () => {
+    expect(carrierTrackingUrl('DHL' as Carrier, 'X')).toBeNull();
   });
 });

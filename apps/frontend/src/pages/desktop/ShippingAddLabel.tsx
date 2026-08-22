@@ -123,9 +123,7 @@ export function ShippingAddLabel({ showToast }: Props) {
       </section>
 
       <div className="ship-wizard-foot">
-        <span className="ship-add-demo-note">
-          <span className="chip muted" style={{ fontSize: 10 }}>{t('shipDemoTag')}</span> {t('shipAddDemoNote')}
-        </span>
+        <span />
         <div className="ship-foot-right">
           <button className="btn accent" disabled={!canSubmit} onClick={() => void submit()}>
             {busy ? '…' : t('shipAddSubmit')}
