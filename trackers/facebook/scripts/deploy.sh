@@ -143,3 +143,27 @@ ssh "$VM" "cd $REMOTE && docker compose -f deploy/docker-compose.homelab.yml up 
 ssh "$VM" "sleep 20"
 
 verify
+
+# ---------------------------------------------------------------- notify
+# Tell the Telegram chat a deploy happened, reusing the coordinator's live
+# credentials on the VM (the laptop deliberately has none). Non-fatal: a
+# missed notification must never mark a verified deploy as failed.
+step "notify telegram"
+DEPLOY_DESC="$(cat "$ROOT/VERSION" 2>/dev/null || echo '?') $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to rs-monitor - verified running this tree.\"" <<'PYEOF'
+import os, sys, urllib.parse, urllib.request
+
+data = urllib.parse.urlencode(
+    {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": sys.argv[1]}
+).encode()
+urllib.request.urlopen(
+    "https://api.telegram.org/bot" + os.environ["TELEGRAM_TOKEN"] + "/sendMessage",
+    data,
+    timeout=10,
+)
+PYEOF
+then
+    echo "  sent"
+else
+    echo "  telegram notification failed (deploy itself is verified)"
+fi

@@ -38,6 +38,18 @@ deployed?" harder to answer.
     fails open and alerts unevaluated listings — now says so at ERROR level.
   After pulling this, regenerate configs (`sh deploy/make-homelab-config.sh`,
   `rsc gen-configs`) and restart the coordinator before the workers.
+- **Telegram listing alerts show the whole AI verdict.** The direct-Telegram
+  alert (the homelab path) now prints price, location, `Count:`, `AI rating:
+  N/5`, and the AI's one-line summary; any piece the AI could not establish
+  just drops its line.
+- **The minimum lot size is now 5 units** (was 3). The prompt rejects lots
+  under 5, and a new `min_unit_count = 5` in `configs/master.toml` enforces it
+  in code: a listing the AI counts at fewer than 5 units never alerts,
+  whatever its score. An uncounted listing is never suppressed on doubt. The
+  vendored default is 2, which preserves the confident-single-unit rule.
+- **Every `scripts/deploy.sh` run ends with a Telegram notification** (sent
+  through the coordinator's live credentials on the VM, non-fatal on failure)
+  saying which version and commit were deployed and verified.
 - **AI completions are capped at `max_tokens = 8192`** (configurable per
   `[ai.*]` agent). OpenRouter prices an uncapped request at the model's full
   65536-token output ceiling and 402s any balance below it — which is how a
