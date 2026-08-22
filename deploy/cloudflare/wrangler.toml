@@ -4,26 +4,24 @@ compatibility_date = "2026-06-18"
 # Lets CI deploy with a scoped CLOUDFLARE_API_TOKEN (no OAuth session).
 account_id = "cf0e09b533b74d32407f6fe1b558165b"
 
-# Static SPA build output. run_worker_first lists exactly the prefixes
-# worker.js reverse-proxies (API_PREFIXES); everything else is served straight
-# from the asset pipeline without paying a Worker invocation to run the same
-# three-prefix check. not_found_handling still serves index.html for
-# client-side routes. Cache headers come from apps/frontend/public/_headers.
-# Inherited by both named environments below.
+# Static SPA build output. The Worker must see every *navigable* request so
+# its http→https redirect runs before anything is served (a document loaded
+# over plain http can never store the backend's Secure auth cookies — see
+# docs/debug-notes/2026-08-22-mobile-login-bounce-http-secure-cookie.md).
+# Only the content-hashed asset directories skip the Worker invocation: they
+# are referenced relatively by an already-https page, so they never carry the
+# scheme bug and stay on the free asset path. not_found_handling still serves
+# index.html for client-side routes. Cache headers come from
+# apps/frontend/public/_headers. Inherited by both named environments below.
 [assets]
 directory = "../../apps/frontend/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-# The bare forms are listed too: worker.js matches `=== p` as well as the
-# subpath, and a bare /api would otherwise fall through to the SPA fallback
-# and answer index.html instead of the backend's 404.
 run_worker_first = [
-  "/api",
-  "/api/*",
-  "/oauth",
-  "/oauth/*",
-  "/.well-known",
-  "/.well-known/*",
+  "/*",
+  "!/assets/*",
+  "!/fonts/*",
+  "!/icons/*",
 ]
 
 # Two deployments — one Worker per Railway backend environment. Deploy with:
