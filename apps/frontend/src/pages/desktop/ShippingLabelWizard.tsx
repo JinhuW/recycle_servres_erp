@@ -317,7 +317,9 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
               </div>
               <button
                 className={'btn sm' + (linkCopied ? '' : ' accent')}
-                disabled={linkBusy}
+                // Label-first: the link's draft PO needs a destination, and the
+                // backend rejects a draft naming no real warehouse.
+                disabled={linkBusy || (orderId == null && !warehouseId)}
                 onClick={copySellerLink}
                 style={{ flexShrink: 0 }}
               >
