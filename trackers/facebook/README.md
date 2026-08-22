@@ -466,7 +466,6 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | Per-listing alert verdict, so a Telegram inbox can be reconciled against the scraper. `User.notify` returns whether the send succeeded instead of `None`, and the notify log line reports the outcome rather than announcing success before checking it | `monitor.py` (`[Alert]` line, `listing_alert` event), `user.py` (`notify`), `notification.py` (`_execute_with_retry`) |
 | A 30-result floor on the scroll loop: below it, insist on more quiet rounds before believing a short result list, since a stalled loader and a finished search look identical | `facebook.py` (`MIN_RESULTS_BEFORE_STOP`, `get_listings`) |
 | `Failed to get search results` fires only on an actually empty result set | `facebook.py` (`search`) |
-| Listing photos attached to the AI evaluation — up to 4 `/t45.` CDN photos are collected per listing, downloaded, and sent to the (multimodal) model as data URIs so it can count units and read module labels the text omits; falls back to text-only after two failed multimodal calls | `listing.py` (`Listing.images`), `facebook.py` (`get_image_urls`), `ai.py` (`fetch_image_data_uris`, `OpenAIBackend.evaluate`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then
 refresh the pin with `scripts/check-vendor.sh update`.

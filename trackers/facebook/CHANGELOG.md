@@ -30,19 +30,16 @@ deployed?" harder to answer.
   job is category, not generation. After pulling this, regenerate configs:
   `sh deploy/make-homelab-config.sh && rsc gen-configs`.
 
-### Added
+- **AI evaluation is text-only, deliberately.** Attaching the listing's photos
+  to the evaluation was tried and removed before release: multimodal calls cost
+  several times a text call on every listing the fleet visits, and the fleet
+  visits a lot of them. The AI still does the reading that matters — the prompt
+  now tells it to work the unit count out of the *description*, where sellers
+  usually bury it ("$8 each, 40 available", "3 trays of 8") instead of putting
+  it in the title. A listing whose text gives nothing to count is rated
+  unlikely, as it was before.
 
-- **Listing photos now reach the AI.** The monitor collects up to 4 of the
-  listing's own photos (the `/t45.` fbcdn assets, avatars and sprites
-  excluded), downloads them, and attaches them to the OpenRouter evaluation as
-  data URIs — Gemini 2.5 Flash is multimodal, and until now it judged
-  image-heavy listings blind. The prompt uses them two ways: counting units
-  when the seller never states a quantity (a photo clearly showing 3+ wanted
-  modules/SSDs now satisfies the bulk minimum and alerts on Telegram instead
-  of being rejected as "quantity unclear"), and reading memory-generation
-  labels. Photo fetch failures skip that photo; two failed multimodal calls
-  fall back to text-only, so a CDN or provider hiccup degrades to the old
-  behaviour rather than losing the evaluation.
+### Added
 
 - **Seller-rating filter.** Listings from sellers Facebook itself rates below
   `min_seller_rating` (set to 4.5 in `master.toml`) are dropped before the AI

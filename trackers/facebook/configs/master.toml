@@ -304,18 +304,19 @@ The listing must include AT LEAST 3 units of that component (3+ DDR4/DDR5 RAM mo
 
 We are NOT buying CPUs at the moment. Reject Xeon and EPYC processors even though they are server parts.
 
-The listing's photos may be attached as images. Use them as evidence:
-- When the text does not state a quantity, COUNT the units visible in the
-  photos. Photos clearly showing 3 or more of a wanted component (a stack,
-  tray, or box of memory modules or SSDs) satisfy the quantity requirement
-  even though the text never gives a number.
-- Read module labels in the photos to pin down the memory generation
-  (DDR4/PC4, DDR5/PC5 vs DDR3/PC3) when the text doesn't say.
+You are judging TEXT ONLY — the title and the description. The photos are not
+attached, so never assume what they show. Read the whole description before
+deciding the quantity: sellers often bury the count in a sentence rather than
+the title ("clearing out a box of 24", "$8 each, 40 available", "12 sticks
+total", "3 trays of 8"). Work the count out from whatever the text gives —
+an explicit number, a per-unit price with an available count, or a lot
+described as N x M — and only treat the quantity as unstated when the text
+really gives nothing to count.
 
 Reject the listing when ANY of these is true:
 - It is not RAM or an SSD as defined above. Reject whole servers, CPUs, motherboards, GPUs, hard disk drives (HDD), networking gear (NICs, switches), and other parts.
 - The memory is DDR3, DDR2 or older ONLY. A mixed-generation lot qualifies on its DDR4/DDR5 modules alone: count only those toward the 3-unit minimum and reject if fewer than 3 remain.
-- It has fewer than 3 units of the component in the text AND the photos do not clearly show 3 or more.
+- It has fewer than 3 units of the component, or the text gives nothing to work a quantity out from.
 - The SSDs are low-capacity consumer drives with no resale value to us. This
   exclusion does NOT apply to RAM: desktop and laptop memory are wanted, so
   never reject a memory lot merely for being non-ECC, SODIMM, or "gaming".
@@ -325,14 +326,14 @@ Reject the listing when ANY of these is true:
   Do NOT reject a genuine local seller merely for mentioning eBay — quoting eBay prices to justify their own ("these go for $1k on eBay") is normal and is not a reason to reject."""
 
 rating_prompt = """Rate this listing from 1 to 5:
-1 - Reject: not RAM/SSD, DDR3-or-older memory only, fewer than 3 units with no photo evidence of more, a consumer SSD, an eBay/marketplace reseller cross-post, or already sold/pending (see the reject rules above).
-2 - Unlikely: probably not a qualifying bulk component lot, or neither the text nor the photos establish the quantity.
-3 - Maybe: a qualifying component type but borderline quantity (around 3), unclear condition, or a memory lot whose generation cannot be determined from the text or the photos.
-4 - Good: a clear bulk lot of 3+ DDR4/DDR5 memory modules (server, desktop or laptop) or 3+ enterprise SSDs — counted from the text OR clearly visible in the photos.
+1 - Reject: not RAM/SSD, DDR3-or-older memory only, fewer than 3 units, a consumer SSD, an eBay/marketplace reseller cross-post, or already sold/pending (see the reject rules above).
+2 - Unlikely: probably not a qualifying bulk component lot, or the text establishes no quantity.
+3 - Maybe: a qualifying component type but borderline quantity (around 3), unclear condition, or a memory lot whose generation cannot be determined from the text.
+4 - Good: a clear bulk lot of 3+ DDR4/DDR5 memory modules (server, desktop or laptop) or 3+ enterprise SSDs, with usable details.
 5 - Strong: a large or high-value bulk lot (many units, high capacity, or priced well below market).
 Conclude with:
 "Rating <1-5>: <summary>"
-where <summary> names the component type, the unit count, and the price (max 25 words). Always state the count explicitly, e.g. "8x 32GB DDR4 ECC RDIMM", and append "(counted from photos)" when the count came from the photos rather than the text."""
+where <summary> names the component type, the unit count, and the price (max 25 words). Always state the count explicitly, e.g. "8x 32GB DDR4 ECC RDIMM"."""
 
 # --------------------------------------------------------------------------
 # Regions — each worker VM is pinned to exactly one of these.
