@@ -182,6 +182,7 @@ export function readSafeNext(search: string): string | null {
 export const MOBILE_VIEW_TO_PATH = {
   dashboard: '/dashboard',
   history:   '/purchase-orders',
+  shipping:  '/shipping',
   market:    '/market',
   inventory: '/inventory',
   me:        '/profile',
@@ -192,6 +193,7 @@ export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
 export function pathToMobileView(path: string): MobileViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
   if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
+  if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   if (path === '/inventory') return 'inventory';
   if (path === '/profile') return 'me';

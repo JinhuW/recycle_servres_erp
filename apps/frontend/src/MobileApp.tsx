@@ -20,6 +20,7 @@ import { Market } from './pages/Market';
 import { Inventory } from './pages/Inventory';
 import { Profile } from './pages/Profile';
 import { ShareTarget } from './pages/ShareTarget';
+import { MobileShipping } from './pages/Shipping';
 
 import {
   linePhotos, deleteLinePhoto, uploadedPhotoCount, useLinePhotoBuffer,
@@ -33,7 +34,7 @@ import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
-  navigate, navigateBack, useRoute, match,
+  navigate, navigateBack, useRoute, match, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
@@ -374,7 +375,9 @@ function Shell() {
   // they've already accumulated; "Add another item" then routes them back into
   // the scan/form path with the draft id carried through, so new lines merge
   // into the same PO instead of a fresh one.
-  const resumeDraft = async (summary: OrderSummary) => {
+  // Accepts anything carrying the order id — the draft picker hands a full
+  // OrderSummary, the shipping screen just the id the create-po call returned.
+  const resumeDraft = async (summary: { id: string }) => {
     try {
       const { order } = await api.get<{ order: Order }>(`/api/orders/${summary.id}`);
       seedPhotos(order);
@@ -811,6 +814,10 @@ function Shell() {
 
   const unreadCount = notifs.filter(n => n.unread).length;
   const orderDetailOpen = view === 'history' && !!orderDetailMatch && !!detailOrder;
+  const shippingRoute = parseShippingRoute(path);
+  // Add / focus / wizard-handoff are focused task screens like the order
+  // detail: the header's back button is the way out, not the tab bar.
+  const shippingTaskOpen = !!shippingRoute && shippingRoute.kind !== 'dashboard';
 
   return (
     <div className="phone-app">
@@ -836,6 +843,13 @@ function Shell() {
       )}
       {view === 'history' && (!orderDetailMatch || !detailOrder) && (
         <Orders onEdit={(o) => navigate('/purchase-orders/' + o.id)} onToast={showToast} />
+      )}
+      {view === 'shipping' && shippingRoute && (
+        <MobileShipping
+          route={shippingRoute}
+          showToast={showToast}
+          onCreatedPo={(id) => void resumeDraft({ id })}
+        />
       )}
       {view === 'market' && <Market />}
       {view === 'inventory' && <Inventory onNewEntry={startSubmit} />}
@@ -891,7 +905,7 @@ function Shell() {
           download, archive, delete — was covered by the nav and untappable.
           It is a focused task screen like the capture flow, and the header's
           back button is the way out of it. */}
-      {!orderDetailOpen && (
+      {!orderDetailOpen && !shippingTaskOpen && (
         <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={effUser?.role ?? user.role} />
       )}
 

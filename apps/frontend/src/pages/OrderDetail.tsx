@@ -11,7 +11,8 @@ import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { linePhotos } from '../lib/linePhotos';
-import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder, listShipments } from '../lib/api';
+import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
@@ -83,6 +84,17 @@ export function OrderDetail({
   // Done. Mirrors the backend's notes-only gate.
   const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canAnnotate = !orderLocked && isOwnerOrManager;
+
+  // Shipping quick link — count only; the labels themselves live on /shipping.
+  // Silent on failure: a nav row that can't count just doesn't show.
+  const [shipmentCount, setShipmentCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    listShipments(order.id)
+      .then(r => { if (alive) setShipmentCount(r.items.length); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [order.id]);
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // What the server says the order's meta is, as one comparable string. The
@@ -465,6 +477,22 @@ export function OrderDetail({
             </div>
           )}
         </div>
+
+        {shipmentCount > 0 && (
+          <button
+            className="ph-row"
+            onClick={() => navigate(`/shipping/${order.id}`)}
+            style={{ width: '100%', marginTop: 12, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-inv-thumb" style={{ width: 34, height: 34 }}>
+              <Icon name="truck" size={15} />
+            </div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>
+              {t('shipPanelTitle')} <span className="mono" style={{ color: 'var(--fg-subtle)' }}>· {shipmentCount}</span>
+            </div>
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
 
         <div className="ph-section-h">
           <span>{t('products')} · {order.lines.length}</span>
