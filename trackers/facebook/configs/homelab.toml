@@ -29,6 +29,10 @@ base_url = "https://openrouter.ai/api/v1"
 api_key = "${OPENROUTER_API_KEY}"
 model = "openai/gpt-5.6-luna"
 timeout = 60
+# Without an explicit cap OpenRouter prices each request at the model's full
+# 65536-token output ceiling and 402s any balance below it. The verdict is a
+# few dozen tokens; 8192 leaves generous room for reasoning tokens.
+max_tokens = 8192
 
 # --------------------------------------------------------------------------
 # Marketplace / account

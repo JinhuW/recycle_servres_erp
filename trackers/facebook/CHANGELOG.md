@@ -38,6 +38,11 @@ deployed?" harder to answer.
     fails open and alerts unevaluated listings — now says so at ERROR level.
   After pulling this, regenerate configs (`sh deploy/make-homelab-config.sh`,
   `rsc gen-configs`) and restart the coordinator before the workers.
+- **AI completions are capped at `max_tokens = 8192`** (configurable per
+  `[ai.*]` agent). OpenRouter prices an uncapped request at the model's full
+  65536-token output ceiling and 402s any balance below it — which is how a
+  nearly-empty credit balance turned into "every evaluation fails" even
+  though each verdict costs a few dozen tokens.
 
 - **Listing alerts show the AI's unit count.** The rating prompt now asks the
   model to state the quantity it worked out on its own `Count:` line, and the
