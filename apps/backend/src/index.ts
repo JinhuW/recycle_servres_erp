@@ -20,6 +20,8 @@ import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
 import ordersRoutes from './routes/orders';
 import shipmentsRoutes from './routes/shipments';
+import { shipmentsList as shipmentsListRoutes, shippingContacts as shippingContactsRoutes } from './routes/shipmentsGlobal';
+import packagesRoutes from './routes/packages';
 import shippingPublicRoutes from './routes/shippingPublic';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
@@ -238,12 +240,23 @@ app.use('/api/vendor-bids/*', authMiddleware);
 // The feed lives at the bare /api/activity, which `/*` alone doesn't cover.
 app.use('/api/activity', authMiddleware);
 app.use('/api/activity/*', authMiddleware);
+// Bare paths matter here too: the shipments list and packages list live at
+// the prefix root. /api/public/shipping stays public — /api/shipping/* does
+// not match it.
+app.use('/api/shipments', authMiddleware);
+app.use('/api/shipments/*', authMiddleware);
+app.use('/api/shipping/*', authMiddleware);
+app.use('/api/packages', authMiddleware);
+app.use('/api/packages/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/orders', ordersRoutes);
 // Second sub-app on the same prefix: /api/orders/:orderId/shipments/*.
 app.route('/api/orders', shipmentsRoutes);
+app.route('/api/shipments', shipmentsListRoutes);
+app.route('/api/shipping', shippingContactsRoutes);
+app.route('/api/packages', packagesRoutes);
 app.route('/api/market', marketRoutes);
 app.route('/api/scan', scanRoutes);
 app.route('/api/notifications', notificationsRoutes);

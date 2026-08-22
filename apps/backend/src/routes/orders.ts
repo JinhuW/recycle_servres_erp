@@ -15,6 +15,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
+import { advanceOrderTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
@@ -1939,145 +1940,19 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   return c.json({ ok: true });
 });
 
-// Canonical lifecycle ordering. The workflow_stages table was removed; this
-// map's key order (draft → in_transit → reviewing → done) is the source of
-// truth, matching the frontend's WORKFLOW_STAGES.
-// Purchasers may only move Draft → In Transit (and not back); that one
-// transition is open to every signed-in user, owner or not.
-const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
-  draft: 'Draft',
-  in_transit: 'In Transit',
-  reviewing: 'Reviewing',
-  done: 'Done',
-};
-
 orders.post('/:id/advance', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
 
-  const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE)
-    .map((id, position) => ({ id, position }));
-
   // The lifecycle read, all stage guards and the writes run inside one tx
-  // with the orders row locked FOR UPDATE. Reading lifecycle outside the tx
+  // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —
+  // shared with the shipping tracking poll). Reading lifecycle outside the tx
   // let a concurrent delete (which also guarded on a stale lifecycle read)
   // delete an order that was being advanced, and vice-versa.
-  type Outcome =
-    | { kind: 'notFound' }
-    | { kind: 'forbidden'; msg: string }
-    | { kind: 'badStage'; msg: string }
-    | { kind: 'finalStage' }
-    | { kind: 'committedLines'; offendingLineIds: string[] }
-    | { kind: 'ok'; nextStageId: string };
-
-  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
-    const cur = (await tx`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
-      | { user_id: string; lifecycle: string } | undefined;
-    if (!cur) return { kind: 'notFound' };
-
-    const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
-    let nextStageId: string;
-    if (body?.toStage) {
-      if (u.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
-      if (!stages.find(s => s.id === body.toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
-      nextStageId = body.toStage;
-    } else {
-      if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
-      nextStageId = stages[curIdx + 1].id;
-    }
-    // Purchaser can only advance Draft → in_transit — but ANY purchaser may,
-    // not just the PO's creator: whoever handles the goods submits the order.
-    // Every other transition stays manager-only.
-    if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
-      return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
-    }
-
-    // Guard: if the transition would move non-Sold lines away from Done status,
-    // check whether any of those lines are committed to an open sell order.
-    // Un-doing a Done line that a sell order depends on leaves it in a status
-    // that validateSellLines rejects, making the sell order unpromotable/broken.
-    const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
-    if (newLineStatus && newLineStatus !== 'Done') {
-      // The transition sets lines to something other than Done — any lines
-      // currently Done that are referenced by open sell orders will break.
-      const committed = await tx<{ id: string }[]>`
-        SELECT DISTINCT ol.id
-        FROM order_lines ol
-        JOIN sell_order_lines sol ON sol.inventory_id = ol.id
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE ol.order_id = ${id}
-          AND ol.status = 'Done'
-          AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
-      `;
-      if (committed.length > 0) {
-        return { kind: 'committedLines', offendingLineIds: committed.map(r => r.id) };
-      }
-    }
-    await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
-
-    // PO-level audit: the Draft → In Transit transition is the "submitted"
-    // baseline (snapshot of lineCount + totalCost); every subsequent advance
-    // is an `advanced` event with from/to.
-    if (cur.lifecycle === 'draft' && nextStageId === 'in_transit') {
-      const snap = (await tx`
-        SELECT COUNT(*)::int AS line_count,
-               COALESCE(SUM(qty), 0)::int AS qty,
-               COALESCE(SUM(qty * unit_cost), 0)::float AS total_cost
-        FROM order_lines WHERE order_id = ${id}
-      `)[0] as { line_count: number; qty: number; total_cost: number };
-      await writeOrderEvent(tx, id, u.id, 'submitted', {
-        lineCount: snap.line_count,
-        qty: snap.qty,
-        totalCost: snap.total_cost,
-      });
-    } else {
-      await writeOrderEvent(tx, id, u.id, 'advanced', {
-        from: cur.lifecycle,
-        to: nextStageId,
-      });
-    }
-    if (newLineStatus) {
-      // 'Sold' is a terminal post-sale state, not a lifecycle stage — a PO
-      // re-advance/stage-jump must never resurrect a sold-out line.
-      // All CTEs see the snapshot from before the statement, so `targets`
-      // captures the pre-update status while `upd` applies the new one.
-      // (A separate post-UPDATE SELECT would always read the already-
-      // updated status, so `status IS DISTINCT FROM $new` would be
-      // universally false and zero audit rows would ever be written.)
-      await tx`
-        WITH targets AS (
-          SELECT id, status AS old_status
-          FROM order_lines
-          WHERE order_id = ${id} AND status <> 'Sold'
-            AND status IS DISTINCT FROM ${newLineStatus}
-          FOR UPDATE
-        ),
-        upd AS (
-          UPDATE order_lines ol SET status = ${newLineStatus}
-          FROM targets t WHERE ol.id = t.id
-        )
-        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        SELECT t.id, ${u.id}::uuid, 'status',
-               jsonb_build_object('field','status','from',t.old_status,'to',${newLineStatus}::text)
-        FROM targets t
-      `;
-    }
-    // PRD §10: managers want to see when a purchaser finalises an order.
-    // We fire this only on the first forward transition (Draft → In Transit)
-    // so they aren't spammed during later manager-driven moves.
-    if (nextStageId === 'in_transit') {
-      await notifyManagers(tx, {
-        kind: 'order_submitted',
-        tone: 'info',
-        icon: 'inventory',
-        title: `Order ${id} submitted`,
-        body: `${u.name} advanced ${id} to In Transit`,
-      });
-    }
-    return { kind: 'ok', nextStageId };
-  });
+  const outcome = await sql.begin(async (tx) =>
+    advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage));
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'forbidden') return c.json({ error: outcome.msg }, 403);
