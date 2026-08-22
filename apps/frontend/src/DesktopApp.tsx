@@ -8,7 +8,7 @@ import { useAuth } from './lib/auth';
 import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
-  useRoute, match, navigate,
+  useRoute, match, navigate, parseShippingRoute,
   DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath, readSafeNext,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
@@ -59,8 +59,8 @@ export function DesktopApp() {
   // /inventory/:id opens the edit page; otherwise no item is being edited.
   // /inventory/analysis is the Analysis tab, not an item id — exclude it.
   const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
-  // /shipping/:orderId focuses the shipping page on one PO's labels.
-  const shippingOrderId = match('/shipping/:orderId', path)?.orderId ?? null;
+  // Dashboard / label wizard / one PO's labels — the parser owns the shapes.
+  const shippingRoute = parseShippingRoute(path);
 
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
@@ -196,6 +196,7 @@ export function DesktopApp() {
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'analysis' ? ' page-analysis' : '')
           + (view2 === 'dashboard' ? ' page-dashboard' : '')
+          + (view2 === 'shipping' && shippingRoute?.kind === 'dashboard' ? ' page-shipping' : '')
           + (view2 === 'activity' ? ' page-activity' : '')}>
           {/* Inventory ▸ Analysis tab strip — shown on the list and the
               analysis tab, but not while editing a single item. */}
@@ -226,7 +227,7 @@ export function DesktopApp() {
               />
             )}
             {view2 === 'history'    && ordersOrEdit}
-            {view2 === 'shipping'   && <DesktopShipping orderId={shippingOrderId} showToast={showToast} />}
+            {view2 === 'shipping'   && shippingRoute && <DesktopShipping route={shippingRoute} showToast={showToast} />}
             {view2 === 'market'     && <DesktopMarket />}
             {view2 === 'inventory'  && inventoryOrEdit}
             {view2 === 'analysis'   && <DesktopAnalysis />}
