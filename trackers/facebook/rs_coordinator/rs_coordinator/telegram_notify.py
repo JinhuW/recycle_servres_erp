@@ -83,11 +83,7 @@ class TelegramNotifier:
 def format_message(
     thread: Dict[str, Any], message: Dict[str, Any], item_count: str | None = None
 ) -> str:
-    """A Messenger message as a Telegram alert, with enough context to answer.
-
-    The thread id is included verbatim so an operator can reply from the
-    console (`rsc msg reply <thread-id> "..."`) without opening Facebook.
-    """
+    """A Messenger message as a Telegram alert, with enough context to answer."""
     counterpart = escape_markdown(str(thread.get("counterpart") or "Unknown"))
     lines = [f"*Messenger — {counterpart}*"]
     listing = thread.get("listing_title")
@@ -95,14 +91,9 @@ def format_message(
         lines.append(f"Re: {escape_markdown(str(listing))}")
     lines.append("")
     lines.append(escape_markdown(str(message.get("text") or "(no text)")))
-    lines.append("")
-    worker = thread.get("worker_id")
-    tail = f"Thread {escape_markdown(str(thread.get('thread_id') or '?'))}"
-    if worker:
-        tail += f" · worker {escape_markdown(str(worker))}"
     if item_count:
-        tail += f" · count: {escape_markdown(item_count)}"
-    lines.append(tail)
+        lines.append("")
+        lines.append(f"count: {escape_markdown(item_count)}")
     return "\n".join(lines)
 
 
