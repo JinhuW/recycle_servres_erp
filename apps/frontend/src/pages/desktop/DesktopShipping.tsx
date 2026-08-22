@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { TableSkeleton } from '../../components/Skeleton';
-import { api, listShipments } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDateShort, fmtMoney } from '../../lib/format';
@@ -13,11 +13,11 @@ import {
   type TrackedPackage,
 } from '../../lib/packages';
 import {
-  STATUS_CHIP, filterInbound, flattenRows, fmtEta, inboundCarriers, inboundCounts,
-  inboundToCsv, mergeInbound, type InboundRow, type PoLabels, type ShipRow,
+  STATUS_CHIP, filterInbound, fmtEta, inboundCarriers, inboundCounts,
+  inboundToCsv, mergeInbound, type ShipOrder, type ShipRow,
 } from '../../lib/shippingList';
 import { useEffectiveUser } from '../../lib/tweaks';
-import type { Order, OrderSummary, ShipmentStatus } from '../../lib/types';
+import type { Order, Shipment, ShipmentStatus } from '../../lib/types';
 import { ShippingAddLabel } from './ShippingAddLabel';
 import { ShippingLabelWizard } from './ShippingLabelWizard';
 import { ShippingPanel } from './ShippingPanel';
@@ -28,18 +28,14 @@ import { ShippingPanel } from './ShippingPanel';
 //   #/shipping/:orderId           — one PO's labels, full panel
 //   #/shipping/:orderId/label(/:sid) — wizard for a new / pending label on a PO
 //
-// UI-only pass: the cross-PO list is composed client-side from the newest
-// orders (no backend list endpoint yet), and the draft → In Transit advance
-// fires opportunistically when this page observes carrier movement. Both get
-// proper backend counterparts in the backend phase.
+// The table reads GET /api/shipments + GET /api/packages; the draft → In
+// Transit advance is the tracking poll's job server-side.
 
 type ToastKind = 'success' | 'error';
 type Props = {
   route: ShippingRoute;
   showToast: (msg: string, kind?: ToastKind) => void;
 };
-
-const ORDERS_SCANNED = 30;
 
 // Status → dot colour for the rail; chip tones stay in STATUS_CHIP.
 const TONE_VAR: Record<string, string> = {
@@ -50,13 +46,8 @@ const TONE_VAR: Record<string, string> = {
 const RAIL_ORDER: ShipmentStatus[] = ['draft', 'quoted', 'purchased', 'in_transit', 'delivered', 'exception', 'voided'];
 
 export function DesktopShipping({ route, showToast }: Props) {
-  const { t } = useT();
   return (
     <>
-      <div className="ship-wip-banner" role="alert">
-        <Icon name="alert" size={14} />
-        <span>{t('shipNotReadyBanner')}</span>
-      </div>
       {route.kind === 'dashboard' && <GlobalShipping showToast={showToast} />}
       {route.kind === 'addLabel' && <ShippingAddLabel showToast={showToast} />}
       {(route.kind === 'wizardNew' || route.kind === 'wizardPo') && (
@@ -121,37 +112,30 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const user = useEffectiveUser();
   const isManager = user?.role === 'manager';
-  const [sections, setSections] = useState<PoLabels[]>([]);
+  const [shipRows, setShipRows] = useState<ShipRow[]>([]);
   const [pkgs, setPkgs] = useState<TrackedPackage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  // One advance attempt per PO per page-load; a failed attempt (403/409) is
-  // not retried — the backend is the authority.
-  const advanceTried = useRef(new Set<string>());
 
   const [scope, setScope] = usePersisted<'all' | 'mine'>('desktop.shipping.scope', 'all');
   const [status, setStatus] = usePersisted<ShipmentStatus | 'all'>('desktop.shipping.status', 'all');
   const [carrier, setCarrier] = usePersisted<string>('desktop.shipping.carrier', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.shipping.search', '');
 
-  // Monotonic load generation: the composition takes many round trips, so a
-  // scope flip mid-flight would otherwise let the older response land last.
+  // Monotonic load generation so a scope flip mid-flight can't let the older
+  // response land last.
   const loadGen = useRef(0);
   const reload = useCallback(async () => {
     const gen = ++loadGen.current;
     try {
       const mine = isManager && scope === 'mine' ? '&mine=true' : '';
-      const { orders } = await api.get<{ orders: OrderSummary[] }>(`/api/orders?limit=${ORDERS_SCANNED}${mine}`);
-      const withShipments = await Promise.all(
-        orders.map(async (order) => ({
-          order,
-          shipments: (await listShipments(order.id).catch(() => ({ items: [] as never[] }))).items,
-        })),
-      );
-      const packages = (await listPackages()).items;
+      const [shipments, packages] = await Promise.all([
+        api.get<{ items: (Shipment & { order: ShipOrder })[] }>(`/api/shipments?limit=200${mine}`),
+        listPackages(),
+      ]);
       if (gen !== loadGen.current) return;
-      setSections(withShipments.filter(s => s.shipments.length > 0));
-      setPkgs(packages);
+      setShipRows(shipments.items.map(({ order, ...shipment }) => ({ order, shipment })));
+      setPkgs(packages.items);
     } catch (e) {
       if (gen === loadGen.current) handleFetchError(e);
     } finally {
@@ -167,24 +151,7 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
     return () => clearInterval(h);
   }, []);
 
-  // The confirmed rule, UI-side for now: carrier movement moves the draft PO
-  // to In Transit. Runs after each load against what the page can see.
-  useEffect(() => {
-    for (const s of sections) {
-      if (s.order.lifecycle !== 'draft') continue;
-      if (!s.shipments.some(sh => sh.status === 'in_transit')) continue;
-      if (advanceTried.current.has(s.order.id)) continue;
-      advanceTried.current.add(s.order.id);
-      api.post(`/api/orders/${s.order.id}/advance`, {})
-        .then(() => {
-          showToast(t('shipAutoAdvanced', { id: s.order.id }));
-          void reload();
-        })
-        .catch(() => { /* lifecycle already moved, or not ours to move */ });
-    }
-  }, [sections, reload, showToast, t]);
-
-  const rows = useMemo(() => mergeInbound(flattenRows(sections), pkgs), [sections, pkgs]);
+  const rows = useMemo(() => mergeInbound(shipRows, pkgs), [shipRows, pkgs]);
   const carriers = useMemo(() => inboundCarriers(rows), [rows]);
   // Rail counts reflect the carrier + search narrowing, not the status pick —
   // same layering as the orders page (counts answer "of what I'm looking at").
@@ -363,9 +330,6 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
           )}
         </div>
 
-        {loaded && rows.length > 0 && (
-          <div className="ship-cap-note">{t('shipCapNote', { n: ORDERS_SCANNED })}</div>
-        )}
       </div>
     </>
   );
@@ -434,11 +398,9 @@ function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: 
       <td>
         <span className="ship-carrier-chip">{pkg.carrier}</span>{' '}
         <span style={{ fontSize: 12.5 }}>{t('shipAddedLabelTag')}</span>
-        <div className="ship-cell-sub">
-          {eta && pkg.status !== 'delivered' && t('shipEstDelivery', { eta })}
-          {eta && pkg.status !== 'delivered' && ' '}
-          <span className="chip muted" style={{ fontSize: 10 }}>{t('shipDemoTag')}</span>
-        </div>
+        {eta && pkg.status !== 'delivered' && (
+          <div className="ship-cell-sub">{t('shipEstDelivery', { eta })}</div>
+        )}
       </td>
       <td className={'ship-track ' + chip.cls}>
         <span className={'chip dot ' + chip.cls} style={{ fontSize: 11 }}>{t(chip.key)}</span>

@@ -1,12 +1,21 @@
 import type { TrackedPackage } from './packages';
-import type { OrderSummary, Shipment, ShipmentStatus } from './types';
+import type { Shipment, ShipmentStatus } from './types';
 
-// Pure helpers behind the shipping dashboard: flattening the client-composed
-// per-PO sections into table rows, filtering them, and exporting CSV. Kept out
-// of the component so the filter/search/export logic is testable.
+// Pure helpers behind the shipping dashboard: filtering the shipment/package
+// rows and exporting CSV. Kept out of the component so the filter/search/
+// export logic is testable.
 
-export type PoLabels = { order: OrderSummary; shipments: Shipment[] };
-export type ShipRow = { order: OrderSummary; shipment: Shipment };
+/** The slice of the order the shipping table renders and searches — what
+ *  GET /api/shipments joins in (a full OrderSummary also satisfies it). */
+export type ShipOrder = {
+  id: string;
+  userName: string;
+  lifecycle: string;
+  warehouse: { id?: string; name?: string | null; short: string; region: string } | null;
+};
+
+export type PoLabels = { order: ShipOrder; shipments: Shipment[] };
+export type ShipRow = { order: ShipOrder; shipment: Shipment };
 
 export type ShipFilter = {
   status: ShipmentStatus | 'all';
@@ -76,7 +85,7 @@ export function statusCounts(rows: ShipRow[]): Record<ShipmentStatus | 'all', nu
 // both row kinds.
 
 export type InboundRow =
-  | { kind: 'shipment'; order: OrderSummary; shipment: Shipment }
+  | { kind: 'shipment'; order: ShipOrder; shipment: Shipment }
   | { kind: 'package'; pkg: TrackedPackage };
 
 function inboundCreatedAt(r: InboundRow): string {
@@ -128,27 +137,8 @@ export type PrevSeller = {
   lastUsed: string;
 };
 
-/**
- * Address book composed from past shipments: every complete seller address the
- * user can see, deduped (name + street + zip), newest first, with per-address
- * label count. Feeds the wizard's contacts rail and the seller-name typeahead
- * until a real address book exists server-side.
- */
-export function previousSellers(sections: PoLabels[]): PrevSeller[] {
-  const byKey = new Map<string, PrevSeller>();
-  for (const { shipment: s } of flattenRows(sections)) {
-    const f = s.from;
-    if (!f.name || !f.street1 || !f.city || !f.state || !f.zip) continue;
-    const key = [f.name, f.street1, f.zip].join('|').toLowerCase();
-    const hit = byKey.get(key);
-    if (hit) { hit.count++; continue; } // rows are newest-first, so the entry already holds the freshest data
-    if (byKey.size >= 50) continue;
-    byKey.set(key, { key, label: `${f.name} · ${f.city}, ${f.state}`, from: f, count: 1, lastUsed: s.createdAt });
-  }
-  return [...byKey.values()];
-}
-
-/** Name typeahead: prefix matches rank above substring matches, capped at 6. */
+/** Name typeahead over GET /api/shipping/contacts entries:
+ *  prefix matches rank above substring matches, capped at 6. */
 export function matchSellers(list: PrevSeller[], q: string): PrevSeller[] {
   const s = q.trim().toLowerCase();
   if (!s) return [];

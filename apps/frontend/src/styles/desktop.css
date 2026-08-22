@@ -154,21 +154,6 @@ html.desktop, body.desktop, .desktop #root {
   gap: 8px;
 }
 
-/* Shipping page — feature still in its UI-only phase; warn people off until
-   the backend lands. Same warn treatment as the role-preview banner. */
-.ship-wip-banner {
-  margin: 0 0 14px;
-  padding: 8px 14px;
-  background: var(--warn-soft);
-  border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
-  border-radius: 8px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: oklch(0.42 0.12 75);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 /* ===== Tweaks floating panel ===== */
 .tweaks-fab {
@@ -2489,7 +2474,6 @@ html.desktop, body.desktop, .desktop #root {
   overflow: hidden;
   padding-bottom: 8px;
 }
-.page.page-shipping > .ship-wip-banner,
 .page.page-shipping > .page-head { flex-shrink: 0; }
 .page.page-shipping > .ship-card {
   flex: 1;
@@ -2498,8 +2482,7 @@ html.desktop, body.desktop, .desktop #root {
   flex-direction: column;
 }
 .page.page-shipping > .ship-card > .card-head,
-.page.page-shipping > .ship-card > .status-rail,
-.page.page-shipping > .ship-card > .ship-cap-note { flex-shrink: 0; }
+.page.page-shipping > .ship-card > .status-rail { flex-shrink: 0; }
 .page.page-shipping > .ship-card > .table-scroll {
   flex: 1;
   min-height: 0;
@@ -2591,12 +2574,6 @@ html.desktop, body.desktop, .desktop #root {
 }
 .ship-po-pill:hover { border-color: var(--border-strong); }
 
-.ship-cap-note {
-  padding: 8px 18px;
-  font-size: 11.5px;
-  color: var(--fg-subtle);
-  border-top: 1px solid var(--border);
-}
 
 /* ── Label wizard ─────────────────────────────────────────────────────────── */
 .ship-wizard {
@@ -2942,7 +2919,6 @@ html.desktop, body.desktop, .desktop #root {
 .ship-carrier-tile .icon { color: var(--tile); flex-shrink: 0; }
 
 .ship-add-hint { min-height: 18px; font-size: 12px; color: var(--fg-muted); }
-.ship-add-demo-note { font-size: 11.5px; color: var(--fg-subtle); }
 
 @media (prefers-reduced-motion: reduce) {
   .ship-carrier-tile { transition: none; }

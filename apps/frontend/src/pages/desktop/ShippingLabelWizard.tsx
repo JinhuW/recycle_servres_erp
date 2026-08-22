@@ -10,8 +10,8 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDateShort, fmtMoney } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { navigateBack, navigate } from '../../lib/route';
-import { matchSellers, previousSellers, type PoLabels, type PrevSeller } from '../../lib/shippingList';
-import type { Order, OrderSummary, Shipment, ShipmentRate, Warehouse } from '../../lib/types';
+import { matchSellers, type PrevSeller } from '../../lib/shippingList';
+import type { Order, Shipment, ShipmentRate, Warehouse } from '../../lib/types';
 
 // Full-page two-step label wizard.
 //   Step 1 — ship-to warehouse, seller address (link or manual), box size.
@@ -126,22 +126,13 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
     return () => { alive = false; };
   }, [orderId, sid]);
 
-  // Address book: the same client-side composition the dashboard uses — the
-  // backend phase replaces both with a real endpoint.
+  // Address book: complete seller addresses from past shipments, deduped
+  // server-side (GET /api/shipping/contacts).
   useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        const { orders } = await api.get<{ orders: OrderSummary[] }>('/api/orders?limit=30');
-        const sections: PoLabels[] = await Promise.all(
-          orders.map(async (order) => ({
-            order,
-            shipments: (await listShipments(order.id).catch(() => ({ items: [] as Shipment[] }))).items,
-          })),
-        );
-        if (alive) setPrevSellers(previousSellers(sections));
-      } catch { /* the picker is a convenience — the blank form still works */ }
-    })();
+    api.get<{ items: PrevSeller[] }>('/api/shipping/contacts')
+      .then(r => { if (alive) setPrevSellers(r.items); })
+      .catch(() => { /* the picker is a convenience — the blank form still works */ });
     return () => { alive = false; };
   }, []);
 
