@@ -13,6 +13,7 @@ import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { writeOrderEvent } from '../services/orderAudit';
 import { notifyManagers } from '../lib/notify';
+import { effectiveRole } from '../lib/role';
 import { pickShippingClient, carrierTrackingUrl } from '../shipping';
 import type { RateQuote, ShipAddress, ShipPackage, ShipmentStatus } from '../shipping';
 import { canTransition } from '../shipping/status';
@@ -24,7 +25,7 @@ const FEE_NOTE_MAX = 280;
 
 type OrderRow = { id: string; user_id: string; lifecycle: string; warehouse_id: string | null };
 
-type ShipmentRow = {
+export type ShipmentRow = {
   id: string;
   order_id: string;
   status: ShipmentStatus;
@@ -79,7 +80,7 @@ const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql`
   tracking_status, tracking_eta, last_tracked_at, seller_token, created_by, created_at
 `;
 
-function toApi(r: ShipmentRow) {
+export function toApi(r: ShipmentRow) {
   return {
     id: r.id,
     orderId: r.order_id,
@@ -230,10 +231,16 @@ function newSellerToken(): string {
 
 // ── List ─────────────────────────────────────────────────────────────────────
 shipments.get('/:orderId/shipments', async (c) => {
+  const u = c.var.user;
   const sql = getDb(c.env);
   const orderId = c.req.param('orderId');
   const order = await loadOrder(sql, orderId);
   if (!order) return c.json({ error: 'Not found' }, 404);
+  // Same scope as GET /api/orders/:id — a shipment row carries the seller's
+  // address and the PO's fee trail, not something every purchaser should read.
+  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
   const rows = (await sql`
     SELECT ${SHIPMENT_COLS(sql)} FROM shipments
     WHERE order_id = ${orderId}

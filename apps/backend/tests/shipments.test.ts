@@ -108,7 +108,12 @@ describe('shipments — CRUD and role guards', () => {
     });
     expect(viaMgr.status).toBe(201);
 
-    const list = await api<{ items: Shipment[] }>('GET', `/api/orders/${po}/shipments`, { token: other.token });
+    // Reads share the order-detail scope: owner or manager only. A shipment
+    // row carries the seller's address and the PO's fee trail.
+    const denied2 = await api('GET', `/api/orders/${po}/shipments`, { token: other.token });
+    expect(denied2.status).toBe(403);
+
+    const list = await api<{ items: Shipment[] }>('GET', `/api/orders/${po}/shipments`, { token: mgr.token });
     expect(list.status).toBe(200);
     expect(list.body.items).toHaveLength(2);
   });
@@ -319,6 +324,47 @@ describe('shipments — tracking refresh', () => {
     await sql`UPDATE shipments SET status = 'delivered' WHERE id = ${s.id}`;
     const res2 = await refreshShipmentTracking(sql, stubShippingClient);
     expect(res2.checked).toBe(0);
+  });
+
+  it('carrier movement advances the draft PO to In Transit server-side, once', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+    await quoteAndBuy(token, po, s.id);
+
+    const sql = getTestDb();
+    await sql`UPDATE shipments SET provider = 'shipsaving' WHERE id = ${s.id}`;
+    await refreshShipmentTracking(sql, stubShippingClient);
+
+    const order = (await sql`SELECT lifecycle FROM orders WHERE id = ${po}`)[0] as { lifecycle: string };
+    expect(order.lifecycle).toBe('in_transit');
+
+    // The advance rides the normal audit path: a system-actor submitted event
+    // with the line snapshot, and lines cascaded to In Transit.
+    const events = await sql<{ kind: string; actor_id: string | null }[]>`
+      SELECT kind, actor_id FROM order_events WHERE order_id = ${po} AND kind = 'submitted'
+    `;
+    expect(events).toHaveLength(1);
+    expect(events[0].actor_id).toBeNull();
+    const lines = await sql<{ status: string }[]>`SELECT status FROM order_lines WHERE order_id = ${po}`;
+    expect(lines.every(l => l.status === 'In Transit')).toBe(true);
+    const notes = await sql<{ body: string }[]>`
+      SELECT body FROM notifications WHERE kind = 'order_submitted' AND title LIKE ${'%' + po + '%'}
+    `;
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes[0].body).toContain('Carrier movement');
+
+    // A later tick on the now-In-Transit PO is a quiet no-op for the order.
+    await sql`UPDATE shipments SET status = 'purchased' WHERE id = ${s.id}`;
+    await refreshShipmentTracking(sql, stubShippingClient);
+    const again = (await sql`SELECT lifecycle FROM orders WHERE id = ${po}`)[0] as { lifecycle: string };
+    expect(again.lifecycle).toBe('in_transit');
+    const events2 = await sql<{ kind: string }[]>`
+      SELECT kind FROM order_events WHERE order_id = ${po} AND kind = 'submitted'
+    `;
+    expect(events2).toHaveLength(1);
   });
 });
 

@@ -9,6 +9,8 @@ import type { Env } from '../types';
 import type { ShipmentStatus, ShippingClient } from './types';
 import { canTransition } from './status';
 import { pickShippingClient } from './index';
+import { advanceOrderTx } from '../services/orderAdvance';
+import { notify } from '../lib/notify';
 
 const REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
@@ -16,8 +18,8 @@ export async function refreshShipmentTracking(
   sql: Sql,
   client: ShippingClient,
 ): Promise<{ checked: number; updated: number }> {
-  const rows = await sql<{ id: string; status: ShipmentStatus; tracking_number: string }[]>`
-    SELECT id, status, tracking_number
+  const rows = await sql<{ id: string; order_id: string; status: ShipmentStatus; tracking_number: string }[]>`
+    SELECT id, order_id, status, tracking_number
     FROM shipments
     WHERE status IN ('purchased','in_transit','exception')
       AND tracking_number IS NOT NULL
@@ -42,8 +44,67 @@ export async function refreshShipmentTracking(
         WHERE id = ${row.id}
       `;
       if (next) updated++;
+      // The confirmed business rule, applied server-side: carrier movement
+      // moves a Draft PO to In Transit. The system actor is held to exactly
+      // that one transition, so a PO in any later stage is a quiet no-op.
+      if (next === 'in_transit' || next === 'delivered') {
+        await sql.begin((tx) => advanceOrderTx(tx, row.order_id, null));
+      }
     } catch (err) {
       console.warn(`[shipping] tracking refresh failed for shipment ${row.id}; keeping previous state`, err);
+    }
+  }
+  return { checked: rows.length, updated };
+}
+
+// Standalone packages carry externally-bought labels, so every active row is
+// polled through whatever client is configured — there is no provider column
+// to filter on. Runs from the same loop; stub deployments never tick.
+export async function refreshPackageTracking(
+  sql: Sql,
+  client: ShippingClient,
+): Promise<{ checked: number; updated: number }> {
+  const rows = await sql<{
+    id: string; status: ShipmentStatus; tracking_number: string;
+    carrier: string; created_by: string | null;
+  }[]>`
+    SELECT id, status, tracking_number, carrier, created_by
+    FROM packages
+    WHERE status IN ('purchased','in_transit','exception')
+  `;
+  let updated = 0;
+  for (const row of rows) {
+    try {
+      const info = await client.getShipment(row.tracking_number);
+      const next: ShipmentStatus | null =
+        info.normalized !== row.status && canTransition(row.status, info.normalized)
+          ? info.normalized
+          : null;
+      await sql.begin(async (tx) => {
+        await tx`
+          UPDATE packages SET
+            status          = ${next ?? row.status},
+            tracking_status = ${info.raw},
+            tracking_eta    = ${info.eta},
+            last_tracked_at = NOW()
+          WHERE id = ${row.id}
+        `;
+        // Delivery is the moment the row wants a human: the PO is created
+        // from the delivered box (create-po), so tell whoever added it.
+        if (next === 'delivered' && row.created_by) {
+          await notify(tx, {
+            userId: row.created_by,
+            kind: 'package_delivered',
+            tone: 'pos',
+            icon: 'package',
+            title: `Package delivered — ${row.carrier} ${row.tracking_number}`,
+            body: 'Create its purchase order from the Shipping page.',
+          });
+        }
+      });
+      if (next) updated++;
+    } catch (err) {
+      console.warn(`[shipping] tracking refresh failed for package ${row.id}; keeping previous state`, err);
     }
   }
   return { checked: rows.length, updated };
@@ -57,6 +118,7 @@ export function startShipmentTrackingLoop(sql: Sql, env: Env): { stop: () => voi
     if (stopped) return;
     try {
       await refreshShipmentTracking(sql, client);
+      await refreshPackageTracking(sql, client);
     } catch (err) {
       console.warn('[shipping] tracking refresh pass failed', err);
     }

@@ -1,0 +1,196 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { resetDb, getTestDb } from './helpers/db';
+import { api } from './helpers/app';
+import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
+import { refreshPackageTracking } from '../src/shipping/track';
+import { stubShippingClient } from '../src/shipping/stub';
+import type { ShippingClient } from '../src/shipping/types';
+
+type Pkg = {
+  id: string;
+  trackingNumber: string;
+  carrier: string;
+  status: string;
+  sellerName: string | null;
+  note: string | null;
+  orderId: string | null;
+};
+
+const TN = '1Z999AA10123456784';
+
+async function addPackage(token: string, over: Record<string, unknown> = {}): Promise<Pkg> {
+  const r = await api<{ package: Pkg }>('POST', '/api/packages', {
+    token,
+    body: { trackingNumber: TN, carrier: 'UPS', sellerName: 'Bo Li', ...over },
+  });
+  expect(r.status).toBe(201);
+  return r.body.package;
+}
+
+describe('packages — add and list', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('adds a package at purchased, trims optional fields to null', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token, { sellerName: '  ', note: ' fragile ' });
+    expect(pkg.status).toBe('purchased');
+    expect(pkg.carrier).toBe('UPS');
+    expect(pkg.sellerName).toBeNull();
+    expect(pkg.note).toBe('fragile');
+    expect(pkg.orderId).toBeNull();
+  });
+
+  it('rejects a duplicate tracking number, a bad carrier, and a short number', async () => {
+    const { token } = await loginAs(MARCUS);
+    await addPackage(token);
+    const dup = await api('POST', '/api/packages', {
+      token, body: { trackingNumber: TN, carrier: 'UPS' },
+    });
+    expect(dup.status).toBe(409);
+    const badCarrier = await api('POST', '/api/packages', {
+      token, body: { trackingNumber: '9400111899223333333333', carrier: 'DHL' },
+    });
+    expect(badCarrier.status).toBe(400);
+    const short = await api('POST', '/api/packages', {
+      token, body: { trackingNumber: '123', carrier: 'UPS' },
+    });
+    expect(short.status).toBe(400);
+  });
+
+  it('scopes the list: purchasers see their own, managers see all', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const mgr = await loginAs(ALEX);
+    await addPackage(marcus.token);
+
+    const own = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: marcus.token });
+    expect(own.body.items).toHaveLength(1);
+    const other = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: priya.token });
+    expect(other.body.items).toHaveLength(0);
+    const all = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: mgr.token });
+    expect(all.body.items).toHaveLength(1);
+  });
+});
+
+describe('packages — delete guards', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('creator deletes an unlinked package; a non-owner purchaser cannot', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const pkg = await addPackage(marcus.token);
+
+    const denied = await api('DELETE', `/api/packages/${pkg.id}`, { token: priya.token });
+    expect(denied.status).toBe(403);
+    const ok = await api('DELETE', `/api/packages/${pkg.id}`, { token: marcus.token });
+    expect(ok.status).toBe(200);
+    const gone = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: marcus.token });
+    expect(gone.body.items).toHaveLength(0);
+  });
+
+  it('refuses to delete a package that already has a PO', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
+    const created = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token, body: {} });
+    expect(created.status).toBe(201);
+
+    const denied = await api('DELETE', `/api/packages/${pkg.id}`, { token });
+    expect(denied.status).toBe(409);
+  });
+});
+
+describe('packages — create-po', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('is refused before delivery, then atomically mints a linked draft PO', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token, { note: 'two servers' });
+
+    const early = await api('POST', `/api/packages/${pkg.id}/create-po`, { token, body: {} });
+    expect(early.status).toBe(409);
+
+    const sql = getTestDb();
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
+    const r = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token, body: {} });
+    expect(r.status).toBe(201);
+    expect(r.body.orderId).toMatch(/^PO-\d+$/);
+
+    const order = (await sql`
+      SELECT user_id, lifecycle, notes FROM orders WHERE id = ${r.body.orderId}
+    `)[0] as { user_id: string; lifecycle: string; notes: string };
+    expect(order.lifecycle).toBe('draft');
+    expect(order.notes).toBe(`Created from delivered package · UPS · ${TN} · Bo Li`);
+
+    const events = await sql<{ kind: string }[]>`
+      SELECT kind FROM order_events WHERE order_id = ${r.body.orderId}
+    `;
+    expect(events.map(e => e.kind)).toContain('created');
+
+    const linked = (await sql`SELECT order_id FROM packages WHERE id = ${pkg.id}`)[0] as { order_id: string };
+    expect(linked.order_id).toBe(r.body.orderId);
+
+    // Idempotence guard: the second click cannot mint a second PO.
+    const again = await api('POST', `/api/packages/${pkg.id}/create-po`, { token, body: {} });
+    expect(again.status).toBe(409);
+  });
+
+  it('only the creator or a manager may create the PO', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const pkg = await addPackage(marcus.token);
+    const sql = getTestDb();
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
+
+    const denied = await api('POST', `/api/packages/${pkg.id}/create-po`, { token: priya.token, body: {} });
+    expect(denied.status).toBe(403);
+  });
+});
+
+describe('packages — tracking refresh', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('moves purchased → in_transit through the status guard (stub client)', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+
+    const res = await refreshPackageTracking(sql, stubShippingClient);
+    expect(res.checked).toBe(1);
+    expect(res.updated).toBe(1);
+    const row = (await sql`
+      SELECT status, tracking_eta, last_tracked_at FROM packages WHERE id = ${pkg.id}
+    `)[0] as { status: string; tracking_eta: Date | null; last_tracked_at: Date | null };
+    expect(row.status).toBe('in_transit');
+    expect(row.tracking_eta).not.toBeNull();
+    expect(row.last_tracked_at).not.toBeNull();
+
+    // Delivered rows leave the poll's working set.
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
+    const res2 = await refreshPackageTracking(sql, stubShippingClient);
+    expect(res2.checked).toBe(0);
+  });
+
+  it('notifies the creator when a package lands delivered', async () => {
+    const { token, user } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+
+    const delivering: ShippingClient = {
+      ...stubShippingClient,
+      getShipment: async () => ({ raw: 'DELIVERED', normalized: 'delivered', eta: null }),
+    };
+    const res = await refreshPackageTracking(sql, delivering);
+    expect(res.updated).toBe(1);
+
+    const row = (await sql`SELECT status FROM packages WHERE id = ${pkg.id}`)[0] as { status: string };
+    expect(row.status).toBe('delivered');
+    const notes = await sql<{ user_id: string; title: string }[]>`
+      SELECT user_id, title FROM notifications WHERE kind = 'package_delivered'
+    `;
+    expect(notes).toHaveLength(1);
+    expect(notes[0].user_id).toBe(user.id);
+    expect(notes[0].title).toContain(TN);
+  });
+});
