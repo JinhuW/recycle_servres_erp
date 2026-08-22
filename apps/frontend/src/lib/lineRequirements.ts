@@ -15,6 +15,24 @@ export type RequirementLine = RamRequiredLine & {
   qty?: number | string | null;
 };
 
+// Small SSDs move as anonymous bulk lots, so brand isn't worth blocking on.
+// Above this size a drive is an enterprise part whose value depends on who
+// made it, so the brand becomes part of the line's identity.
+export const SSD_BRAND_REQUIRED_OVER_GB = 800;
+
+/** Catalog capacity string ("960GB", "1.92TB") as gigabytes, or null. */
+export function capacityGb(capacity?: string | null): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(GB|TB)\s*$/i.exec(capacity ?? '');
+  if (!m) return null;
+  return Number(m[1]) * (m[2].toUpperCase() === 'TB' ? 1000 : 1);
+}
+
+/** Whether an SSD line's capacity puts it over the brand-required threshold. */
+export function ssdBrandRequired(capacity?: string | null): boolean {
+  const gb = capacityGb(capacity);
+  return gb != null && gb > SSD_BRAND_REQUIRED_OVER_GB;
+}
+
 /** Label keys of the identity fields a non-RAM category insists on. */
 function missingIdentityFields(line: RequirementLine): string[] {
   if (line.category === 'RAM') return missingRamFields(line);
@@ -29,6 +47,7 @@ function missingIdentityFields(line: RequirementLine): string[] {
       ...(!(line.partNumber ?? '').trim() ? ['lfPartSku'] : []),
     ];
   }
+  if (line.category === 'SSD' && !ssdBrandRequired(line.capacity)) return [];
   return (line.brand ?? '').trim() ? [] : ['brand'];
 }
 

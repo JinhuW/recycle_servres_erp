@@ -58,6 +58,7 @@ const zh: Record<string, string> = {
   serialNumbers: '序列号',
   serialNumbersPh: '每行一个序列号…',
   serialNumbersHint: '可选 — 每台设备一个序列号，每行一个。',
+  ssdBrandNeededOverGb: '超过 {gb}GB 的固态硬盘必须填写品牌。',
   serialNumbersHintDdr5: 'DDR5 必填 — 每台设备一个序列号，每行一个。',
   serialCount: '{n} 个序列号',
   errDialogTitle: '出错了',

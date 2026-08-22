@@ -480,6 +480,10 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </div>
         </div>
 
+        {/* SSDs are received as anonymous bulk lots — nobody keys in per-drive
+            serials at purchase, so the field only invited count-mismatch
+            errors. */}
+        {line.category !== 'SSD' && (
         <div className="ph-field">
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
@@ -507,6 +511,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               : t('serialNumbersHint')}
           </div>
         </div>
+        )}
 
         {/* Pricing row mirrors desktop LineDrawer: qty → unit → total
             (always shown so a purchaser can enter the negotiated bulk total

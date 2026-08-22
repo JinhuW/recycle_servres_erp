@@ -123,6 +123,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     serialNumbers: 'Serial numbers',
     serialNumbersPh: 'One serial number per line…',
     serialNumbersHint: 'Optional — list one serial per unit, one per line.',
+    ssdBrandNeededOverGb: 'SSDs over {gb}GB must include the brand.',
     serialNumbersHintDdr5: 'Required for DDR5 — list one serial per unit, one per line.',
     serialCount: '{n} SN',
     errDialogTitle: 'Something went wrong',
