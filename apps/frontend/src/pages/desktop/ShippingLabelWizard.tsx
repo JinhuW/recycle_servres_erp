@@ -52,6 +52,7 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   // highlighted card never claims an address the form no longer matches.
   const [prevSellers, setPrevSellers] = useState<PrevSeller[]>([]);
   const [prevPick, setPrevPick] = useState<string | null>(null);
+  const [contactQ, setContactQ] = useState('');
   const setF = (k: keyof ShipmentAddressInput, v: string) => { setPrevPick(null); setFrom((p) => ({ ...p, [k]: v })); };
   const setP = (k: keyof PkgDraft, v: string) => setPkg((p) => ({ ...p, [k]: v }));
 
@@ -237,7 +238,13 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
 
   if (loading) return <FormSkeleton fields={6} />;
 
+  const q = contactQ.trim().toLowerCase();
+  const shownContacts = q
+    ? prevSellers.filter(p => (p.label + ' ' + (p.from.street1 ?? '')).toLowerCase().includes(q))
+    : prevSellers;
+
   return (
+    <div className="ship-wizard-layout">
     <div className="ship-wizard">
       <div className="ship-wizard-head">
         <button className="btn ghost sm" onClick={abandon}>
@@ -288,30 +295,6 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
                 {linkBusy ? '…' : linkCopied ? t('shipLinkCopied') : t('shipCopySellerLink')}
               </button>
             </div>
-            {prevSellers.length > 0 && (
-              <>
-                <div className="ship-prev-label">{t('shipPrevSeller')}</div>
-                <div className="ship-addr-grid">
-                  {prevSellers.slice(0, 6).map(p => (
-                    <button
-                      key={p.key}
-                      type="button"
-                      className={'ship-addr-card' + (prevPick === p.key ? ' selected' : '')}
-                      aria-pressed={prevPick === p.key}
-                      onClick={() => pickSeller(p)}
-                    >
-                      <Icon name="user" size={16} style={{ marginTop: 2, flexShrink: 0 }} />
-                      <span style={{ minWidth: 0 }}>
-                        <span className="ship-addr-name">{p.from.name}</span>
-                        <span className="ship-addr-line">
-                          {[p.from.street1, p.from.city, p.from.state, p.from.zip].filter(Boolean).join(', ')}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
             <div className="ship-or-divider">{t('shipOrManual')}</div>
             <div className="field-row">
               <div className="field">
@@ -443,6 +426,55 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
           )}
         </div>
       </div>
+    </div>
+
+    {step === 1 && (
+      <aside className="card ship-contacts">
+        <div className="card-head">
+          <div className="card-title">{t('shipContactsTitle')}</div>
+          {prevSellers.length > 0 && <span className="ship-panel-count">{prevSellers.length}</span>}
+        </div>
+        <div className="ship-contacts-body">
+          {prevSellers.length === 0 ? (
+            <div className="ship-contacts-empty">{t('shipContactsEmpty')}</div>
+          ) : (
+            <>
+              <div className="toolbar-search ship-contacts-search">
+                <Icon name="search" size={13} />
+                <input
+                  className="input"
+                  placeholder={t('shipContactsSearchPh')}
+                  value={contactQ}
+                  onChange={e => setContactQ(e.target.value)}
+                />
+              </div>
+              <div className="ship-contacts-list">
+                {shownContacts.map(p => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    className={'ship-contact-row' + (prevPick === p.key ? ' selected' : '')}
+                    aria-pressed={prevPick === p.key}
+                    onClick={() => pickSeller(p)}
+                  >
+                    <Icon name="user" size={14} />
+                    <span className="ship-contact-main">
+                      <span className="ship-contact-name">{p.from.name}</span>
+                      <span className="ship-contact-addr">
+                        {[p.from.street1, p.from.city, p.from.state].filter(Boolean).join(', ')}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {shownContacts.length === 0 && (
+                  <div className="ship-contacts-empty">{t('shipNoMatch')}</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </aside>
+    )}
     </div>
   );
 }

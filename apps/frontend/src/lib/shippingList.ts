@@ -81,7 +81,7 @@ export function previousSellers(sections: PoLabels[]): PrevSeller[] {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ key, label: `${f.name} · ${f.city}, ${f.state}`, from: f });
-    if (out.length >= 20) break;
+    if (out.length >= 50) break;
   }
   return out;
 }
