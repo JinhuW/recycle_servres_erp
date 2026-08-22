@@ -18,6 +18,46 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **DDR3 and DDR2 memory are no longer bought.** The AI filter now accepts
+  DDR4/DDR5 lots only (server RDIMM/LRDIMM, desktop DIMMs and laptop SODIMMs
+  all still qualify); DDR3/DDR2-only lots are rejected, and a mixed-generation
+  lot is judged on its DDR4/DDR5 modules alone. The prompt also teaches the
+  model the PC3/PC4/PC5 label prefixes so unlabeled generations can be read
+  off module stickers. The `ddr3` title-gate keyword deliberately stays:
+  removing it would silently drop mixed lots titled "DDR3/4", and the gate's
+  job is category, not generation. After pulling this, regenerate configs:
+  `sh deploy/make-homelab-config.sh && rsc gen-configs`.
+
+### Added
+
+- **Listing photos now reach the AI.** The monitor collects up to 4 of the
+  listing's own photos (the `/t45.` fbcdn assets, avatars and sprites
+  excluded), downloads them, and attaches them to the OpenRouter evaluation as
+  data URIs — Gemini 2.5 Flash is multimodal, and until now it judged
+  image-heavy listings blind. The prompt uses them two ways: counting units
+  when the seller never states a quantity (a photo clearly showing 3+ wanted
+  modules/SSDs now satisfies the bulk minimum and alerts on Telegram instead
+  of being rejected as "quantity unclear"), and reading memory-generation
+  labels. Photo fetch failures skip that photo; two failed multimodal calls
+  fall back to text-only, so a CDN or provider hiccup degrades to the old
+  behaviour rather than losing the evaluation.
+
+- **Seller-rating filter.** Listings from sellers Facebook itself rates below
+  `min_seller_rating` (set to 4.5 in `master.toml`) are dropped before the AI
+  call — a rating under 4.5 is other buyers reporting a problem, and this
+  business drives to a stranger's address with cash. The rating is read from
+  the GraphQL payload already embedded in the listing page, so it costs no
+  extra request; skips are logged with reason `seller_rating`.
+  - Sellers with **no** rating still get through. On Marketplace that is the
+    normal state of a private seller, not a warning, and rejecting them would
+    discard most of what the fleet finds. `exclude_unrated_sellers = true`
+    (per marketplace or per item) requires a rating instead.
+  - The rating is deliberately kept out of `Listing.hash`: it drifts with the
+    seller's other sales, and counting it would re-alert the whole backlog.
+  - After pulling this, regenerate worker configs: `rsc gen-configs`.
+
 ## [0.3.0] - 2026-08-21
 
 ### Added
