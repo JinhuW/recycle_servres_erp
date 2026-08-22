@@ -2,7 +2,7 @@ import { Icon, type IconName } from './Icon';
 import { useT } from '../lib/i18n';
 import type { Role } from '../lib/types';
 
-export type View = 'dashboard' | 'history' | 'submit' | 'market' | 'inventory' | 'me';
+export type View = 'dashboard' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'me';
 
 type Props = {
   view: View;
@@ -13,9 +13,12 @@ type Props = {
 
 export function PhTabBar({ view, setView, onCenterPress, role }: Props) {
   const { t } = useT();
+  // Purchasers get Shipping where Market used to sit — their field work is
+  // inbound boxes, and Market keeps a quick link on Home. Managers keep
+  // Inventory; they reach /shipping through the Home inbound card.
   const fourth = role === 'manager'
     ? { id: 'inventory' as View, label: t('tabInventory'), icon: 'inventory' as IconName }
-    : { id: 'market' as View,    label: t('tabMarket'),    icon: 'tag' as IconName };
+    : { id: 'shipping' as View,  label: t('tabShipping'),  icon: 'truck' as IconName };
 
   const tabs: { id: View; label: string; icon: IconName; center?: boolean }[] = [
     { id: 'dashboard', label: t('tabHome'),    icon: 'dashboard' },

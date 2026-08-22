@@ -9,7 +9,11 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
-import type { DashboardData } from '../lib/types';
+import { navigate } from '../lib/route';
+import type { TrackedPackage } from '../lib/packages';
+import { mergeInbound, type ShipOrder } from '../lib/shippingList';
+import { inboundSummary } from '../lib/shippingInbound';
+import type { DashboardData, Shipment } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
 type Props = {
@@ -32,6 +36,27 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
   useEffect(() => {
     let alive = true;
     api.get<DashboardData>('/api/dashboard').then(r => { if (alive) setData(r); }).catch(handleFetchError);
+    return () => { alive = false; };
+  }, [effRole]);
+
+  // Inbound counts for the shipping card — the card is also the manager's only
+  // tab-bar-free entry to /shipping, so both roles load it. Silent on failure:
+  // a nav card that can't count just doesn't show.
+  const [inbound, setInbound] = useState<{ moving: number; needs: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      api.get<{ items: (Shipment & { order: ShipOrder })[] }>('/api/shipments?limit=200&mine=true'),
+      api.get<{ items: TrackedPackage[] }>('/api/packages'),
+    ])
+      .then(([shipments, packages]) => {
+        if (!alive) return;
+        setInbound(inboundSummary(mergeInbound(
+          shipments.items.map(({ order, ...shipment }) => ({ order, shipment })),
+          packages.items,
+        )));
+      })
+      .catch(() => {});
     return () => { alive = false; };
   }, [effRole]);
 
@@ -150,6 +175,49 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           </div>
           <Icon name="chevronRight" size={16} />
         </button>
+
+        {inbound && inbound.moving + inbound.needs > 0 && (
+          <button
+            className="ph-row"
+            onClick={() => navigate('/shipping')}
+            style={{ width: '100%', marginTop: 10, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-cat-icon" style={{ width: 36, height: 36, borderRadius: 10 }}>
+              <Icon name="truck" size={17} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{t('shipMobInboundTitle')}</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                {[
+                  inbound.moving > 0 ? t('shipMobMovingN', { n: inbound.moving }) : null,
+                  inbound.needs > 0 ? t('shipMobNeedsN', { n: inbound.needs }) : null,
+                ].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            {inbound.needs > 0 && (
+              <span className="mono" style={{
+                minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
+                background: 'var(--warn)', color: 'white', fontSize: 10.5, fontWeight: 700,
+                lineHeight: '18px', textAlign: 'center',
+              }}>{inbound.needs}</span>
+            )}
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
+
+        {!isManager && (
+          <button
+            className="ph-row"
+            onClick={() => navigate('/market')}
+            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
+              <Icon name="tag" size={16} />
+            </div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeMarketLink')}</div>
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
 
         {!isManager && myRank >= 0 && (
           <>
