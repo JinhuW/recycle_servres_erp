@@ -10,7 +10,8 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtMoney } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { navigateBack, navigate } from '../../lib/route';
-import type { Order, Shipment, ShipmentRate, Warehouse } from '../../lib/types';
+import { previousSellers, type PoLabels, type PrevSeller } from '../../lib/shippingList';
+import type { Order, OrderSummary, Shipment, ShipmentRate, Warehouse } from '../../lib/types';
 
 // Full-page two-step label wizard.
 //   Step 1 — ship-to warehouse, seller address (link or manual), box size.
@@ -47,8 +48,22 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
 
   const [from, setFrom] = useState<ShipmentAddressInput>(EMPTY_FROM);
   const [pkg, setPkg] = useState<PkgDraft>({ weightOz: '', lengthIn: '', widthIn: '', heightIn: '' });
-  const setF = (k: keyof ShipmentAddressInput, v: string) => setFrom((p) => ({ ...p, [k]: v }));
+  // Address book from past shipments; a manual edit clears the selection so a
+  // highlighted card never claims an address the form no longer matches.
+  const [prevSellers, setPrevSellers] = useState<PrevSeller[]>([]);
+  const [prevPick, setPrevPick] = useState<string | null>(null);
+  const setF = (k: keyof ShipmentAddressInput, v: string) => { setPrevPick(null); setFrom((p) => ({ ...p, [k]: v })); };
   const setP = (k: keyof PkgDraft, v: string) => setPkg((p) => ({ ...p, [k]: v }));
+
+  const pickSeller = (p: PrevSeller) => {
+    setPrevPick(p.key);
+    setFrom({
+      name: p.from.name ?? '', phone: p.from.phone ?? '',
+      street1: p.from.street1 ?? '', street2: p.from.street2 ?? '',
+      city: p.from.city ?? '', state: p.from.state ?? '',
+      zip: p.from.zip ?? '', country: p.from.country ?? 'US',
+    });
+  };
 
   // Label-first destination pick.
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -100,6 +115,25 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
       })
       .catch(handleFetchError);
   }, [orderId, sid]);
+
+  // Address book: the same client-side composition the dashboard uses — the
+  // backend phase replaces both with a real endpoint.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { orders } = await api.get<{ orders: OrderSummary[] }>('/api/orders?limit=30');
+        const sections: PoLabels[] = await Promise.all(
+          orders.map(async (order) => ({
+            order,
+            shipments: (await listShipments(order.id).catch(() => ({ items: [] as Shipment[] }))).items,
+          })),
+        );
+        if (alive) setPrevSellers(previousSellers(sections));
+      } catch { /* the picker is a convenience — the blank form still works */ }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const chosenWh: Warehouse | null = orderId ? (order?.warehouse ?? null) : (warehouses.find(w => w.id === warehouseId) ?? null);
   const noShipAddr = !!chosenWh && !chosenWh.shipStreet1;
@@ -254,6 +288,30 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
                 {linkBusy ? '…' : linkCopied ? t('shipLinkCopied') : t('shipCopySellerLink')}
               </button>
             </div>
+            {prevSellers.length > 0 && (
+              <>
+                <div className="ship-prev-label">{t('shipPrevSeller')}</div>
+                <div className="ship-addr-grid">
+                  {prevSellers.slice(0, 6).map(p => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      className={'ship-addr-card' + (prevPick === p.key ? ' selected' : '')}
+                      aria-pressed={prevPick === p.key}
+                      onClick={() => pickSeller(p)}
+                    >
+                      <Icon name="user" size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+                      <span style={{ minWidth: 0 }}>
+                        <span className="ship-addr-name">{p.from.name}</span>
+                        <span className="ship-addr-line">
+                          {[p.from.street1, p.from.city, p.from.state, p.from.zip].filter(Boolean).join(', ')}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="ship-or-divider">{t('shipOrManual')}</div>
             <div className="field-row">
               <div className="field">

@@ -2687,6 +2687,13 @@ html.desktop, body.desktop, .desktop #root {
 .ship-seller-card .ship-seller-title { font-size: 13px; font-weight: 650; color: var(--accent-strong); }
 .ship-seller-card .ship-seller-hint { font-size: 12px; color: var(--fg-muted); margin-top: 1px; }
 
+/* Address book pulled from past shipments — one click fills the form. */
+.ship-prev-label {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  margin-top: 2px;
+}
+
 .ship-or-divider {
   display: flex;
   align-items: center;
