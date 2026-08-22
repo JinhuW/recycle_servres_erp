@@ -38,6 +38,23 @@ deployed?" harder to answer.
     fails open and alerts unevaluated listings — now says so at ERROR level.
   After pulling this, regenerate configs (`sh deploy/make-homelab-config.sh`,
   `rsc gen-configs`) and restart the coordinator before the workers.
+- **An AI outage now fails CLOSED, and pages the chat.** Previously a failed
+  evaluation alerted the listing anyway at a fake score 5 ("Not evaluated by
+  AI") — an empty OpenRouter balance flooded Telegram with unevaluated
+  listings. Now every alert must carry a real verdict: unevaluated listings
+  are withheld and re-scanned once the AI recovers, and the outage itself is
+  announced on Telegram once per incident ("AI evaluation DOWN", with the
+  last error and the credits link), with a recovery note when evaluations
+  resume.
+- **Consumer gaming-brand RAM is filtered out** (owner call): Corsair
+  (Vengeance, Dominator), G.Skill (Trident, Ripjaws, Aegis), Kingston Fury /
+  HyperX, TeamGroup T-Force, Crucial Ballistix, ADATA XPG, and RGB kits are
+  rejected — cheaply by antikeywords (before the detail fetch and the AI
+  call) and as a prompt reject rule. Plain/OEM desktop and laptop modules
+  still qualify.
+- **`max_tokens` lowered 8192 → 4096** so evaluations keep fitting a low
+  OpenRouter balance (the drained balance 402'd 8192-token requests on
+  2026-08-22 and took every evaluation down).
 - **Telegram listing alerts show the whole AI verdict.** The direct-Telegram
   alert (the homelab path) now prints price, location, `Count:`, `AI rating:
   N/5`, and the AI's one-line summary; any piece the AI could not establish

@@ -31,8 +31,10 @@ model = "openai/gpt-5.6-luna"
 timeout = 60
 # Without an explicit cap OpenRouter prices each request at the model's full
 # 65536-token output ceiling and 402s any balance below it. The verdict is a
-# few dozen tokens; 8192 leaves generous room for reasoning tokens.
-max_tokens = 8192
+# few dozen tokens; 4096 still leaves room for reasoning tokens while keeping
+# requests affordable on a low balance (a drained balance 402'd 8192-token
+# requests on 2026-08-22 and took every evaluation down with it).
+max_tokens = 4096
 
 # --------------------------------------------------------------------------
 # Marketplace / account
@@ -305,7 +307,8 @@ prompt = """You are a purchasing agent for Recycle Servers LLC, a used-server ha
 Decide whether this Facebook Marketplace listing is a FOR-SALE listing of ONE of the component types we are buying, offered as a BULK LOT:
 
 - RAM: DDR4 or DDR5 memory modules ONLY — server ECC RDIMM/LRDIMM, desktop
-  DIMMs, and laptop SODIMMs are ALL wanted in all three form factors. We do
+  DIMMs, and laptop SODIMMs are ALL wanted in all three form factors, EXCEPT
+  consumer gaming-brand kits (see the reject rules). We do
   NOT buy DDR3, DDR2 or older generations any more. Module label prefixes
   identify the generation when the seller doesn't say: PC4-xxxxx is DDR4,
   PC5-xxxxx is DDR5 (wanted); PC3/PC3L is DDR3 and PC2 is DDR2 (rejected).
@@ -339,9 +342,16 @@ Reject the listing when ANY of these is true:
 - The memory is DDR3, DDR2 or older ONLY. A mixed-generation lot qualifies on its DDR4/DDR5 modules alone: count only those toward the 5-unit minimum and reject if fewer than 5 remain.
 - The seller is clearly offering ONE unit (see the single-unit rule above).
 - It has fewer than 5 units of the component, or the text gives nothing to work a quantity out from.
+- The memory is a consumer gaming-brand kit: Corsair (Vengeance, Dominator),
+  G.Skill (Trident, Ripjaws, Aegis), Kingston Fury / HyperX, TeamGroup
+  T-Force, Crucial Ballistix, ADATA XPG, or any RGB-branded kit. These
+  consumer-facing lines are not bought. Plain/OEM desktop and laptop modules
+  (Samsung, SK Hynix, Micron, plain Crucial or Kingston ValueRAM) still
+  qualify — the brand line, not the form factor, is what rejects.
 - The SSDs are low-capacity consumer drives with no resale value to us. This
-  exclusion does NOT apply to RAM: desktop and laptop memory are wanted, so
-  never reject a memory lot merely for being non-ECC, SODIMM, or "gaming".
+  exclusion does NOT apply to RAM: plain desktop and laptop memory are
+  wanted, so never reject a memory lot merely for being non-ECC or SODIMM —
+  only the gaming-brand kits listed above are rejected.
 - The seller is looking to buy or trade, or it is a discussion rather than a real for-sale listing.
 - The listing is already marked sold or pending.
 - It is an eBay (or other online marketplace) reseller cross-posting their storefront inventory rather than a local seller with the parts in hand. Tell-tales: pointing at their eBay store or feedback score, stock/catalogue photos instead of photos of the actual parts, "brand new sealed" retail stock, shipping-only with no local pickup, or a description written as a retail spec sheet.
@@ -540,12 +550,15 @@ search_phrases = [
 # the measured cost of letting DDR3 titles through to the AI is a handful of
 # cheap evaluations per cycle, not lost alerts.
 keywords = ["ram OR memory OR dimm OR sodimm OR rdimm OR lrdimm OR udimm OR ddr3 OR ddr4 OR ddr5 OR ecc"]
-# "desktop", "sodimm", "laptop", "gaming" and "rgb" were REMOVED: we recycle
-# desktop DIMMs and laptop SODIMMs too, and each of those words was throwing
-# away exactly the listings we now want. What is left excludes non-lots and
-# storefront cross-posts, which is all an antikeyword should be doing — the
-# rest is the AI's call.
-antikeywords = ["single stick", '"ebay store" OR "my ebay" OR "ebay listing" OR "ebay.com" OR "our ebay" OR "ebay feedback"']
+# "desktop", "sodimm" and "laptop" stay out of this list: we recycle plain
+# desktop DIMMs and laptop SODIMMs, and each of those words was throwing away
+# exactly the listings we want. Consumer GAMING-BRAND kits are different —
+# they are not bought (owner call, 2026-08-22), and killing them here saves
+# the detail-page fetch and the AI call that the prompt-level reject would
+# still cost. The brand words below are whole-word matches, so plain Kingston
+# ValueRAM or Crucial server memory is untouched; "fury"/"trident"/"xpg"
+# etc. only ever name the gaming lines.
+antikeywords = ["single stick", '"ebay store" OR "my ebay" OR "ebay listing" OR "ebay.com" OR "our ebay" OR "ebay feedback"', "corsair OR vengeance OR dominator OR g.skill OR gskill OR trident OR ripjaws OR aegis OR t-force OR tforce OR teamgroup OR xpg OR ballistix OR hyperx OR fury OR rgb"]
 # No price bounds: a bulk lot is often listed at a price the seller made up,
 # and a minPrice/maxPrice filter drops those listings before they can be
 # judged. Scoring is the AI's job, so let it see everything.
