@@ -1,3 +1,4 @@
+import type { TrackedPackage } from './packages';
 import type { OrderSummary, Shipment, ShipmentStatus } from './types';
 
 // Pure helpers behind the shipping dashboard: flattening the client-composed
@@ -63,6 +64,52 @@ export function statusCounts(rows: ShipRow[]): Record<ShipmentStatus | 'all', nu
   return counts;
 }
 
+// ── Inbound stream: shipments + standalone tracked packages ──────────────────
+// Package statuses are a subset of ShipmentStatus, so one rail/filter serves
+// both row kinds.
+
+export type InboundRow =
+  | { kind: 'shipment'; order: OrderSummary; shipment: Shipment }
+  | { kind: 'package'; pkg: TrackedPackage };
+
+function inboundCreatedAt(r: InboundRow): string {
+  return r.kind === 'package' ? r.pkg.createdAt : r.shipment.createdAt;
+}
+
+/** Shipment rows and package rows in one stream, newest first. */
+export function mergeInbound(rows: ShipRow[], pkgs: TrackedPackage[]): InboundRow[] {
+  const all: InboundRow[] = [
+    ...rows.map(r => ({ kind: 'shipment' as const, ...r })),
+    ...pkgs.map(pkg => ({ kind: 'package' as const, pkg })),
+  ];
+  return all.sort((a, b) => inboundCreatedAt(b).localeCompare(inboundCreatedAt(a)));
+}
+
+export function filterInbound(rows: InboundRow[], f: ShipFilter): InboundRow[] {
+  const q = f.search.trim().toLowerCase();
+  return rows.filter((r) => {
+    if (r.kind === 'shipment') return filterRows([r], f).length > 0;
+    const p = r.pkg;
+    if (f.status !== 'all' && p.status !== f.status) return false;
+    if (f.carrier !== 'all' && p.carrier !== f.carrier) return false;
+    if (!q) return true;
+    return p.trackingNumber.toLowerCase().includes(q)
+      || (p.sellerName ?? '').toLowerCase().includes(q)
+      || (p.orderId ?? '').toLowerCase().includes(q);
+  });
+}
+
+export function inboundCounts(rows: InboundRow[]): Record<ShipmentStatus | 'all', number> {
+  const counts = { all: rows.length, draft: 0, quoted: 0, purchased: 0, in_transit: 0, delivered: 0, voided: 0, exception: 0 };
+  for (const r of rows) counts[r.kind === 'package' ? r.pkg.status : r.shipment.status]++;
+  return counts;
+}
+
+export function inboundCarriers(rows: InboundRow[]): string[] {
+  const names = rows.map(r => (r.kind === 'package' ? r.pkg.carrier : r.shipment.carrier));
+  return [...new Set(names.filter((c): c is string => !!c))].sort();
+}
+
 export type PrevSeller = {
   key: string;
   label: string;
@@ -107,12 +154,14 @@ export function matchSellers(list: PrevSeller[], q: string): PrevSeller[] {
   return [...pre, ...sub].slice(0, 6);
 }
 
-export function rowsToCsv(rows: ShipRow[]): string {
-  const head = ['Order', 'Created', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #'];
-  // Excel/Sheets execute cells starting with = + - @ as formulas; seller names
-  // and tracking numbers are external text.
-  const esc = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
-  const lines = rows.map(({ order, shipment: s }) => [
+const CSV_HEAD = ['Order', 'Created', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #'];
+
+// Excel/Sheets execute cells starting with = + - @ as formulas; seller names
+// and tracking numbers are external text.
+const csvEsc = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replace(/"/g, '""')}"`;
+
+function shipCsvCells({ order, shipment: s }: ShipRow): string[] {
+  return [
     order.id,
     s.createdAt,
     s.status,
@@ -125,6 +174,23 @@ export function rowsToCsv(rows: ShipRow[]): string {
     s.labelCost != null ? String(s.labelCost) : '',
     s.rateCurrency,
     s.trackingNumber ?? '',
-  ].map(esc).join(','));
-  return [head.map(esc).join(','), ...lines].join('\r\n');
+  ];
+}
+
+function pkgCsvCells(p: TrackedPackage): string[] {
+  return [
+    p.orderId ?? '', p.createdAt, p.status, p.sellerName ?? '', '', '', '',
+    p.carrier, '', '', '', p.trackingNumber,
+  ];
+}
+
+export function rowsToCsv(rows: ShipRow[]): string {
+  const lines = rows.map(r => shipCsvCells(r).map(csvEsc).join(','));
+  return [CSV_HEAD.map(csvEsc).join(','), ...lines].join('\r\n');
+}
+
+export function inboundToCsv(rows: InboundRow[]): string {
+  const lines = rows.map(r =>
+    (r.kind === 'package' ? pkgCsvCells(r.pkg) : shipCsvCells(r)).map(csvEsc).join(','));
+  return [CSV_HEAD.map(csvEsc).join(','), ...lines].join('\r\n');
 }

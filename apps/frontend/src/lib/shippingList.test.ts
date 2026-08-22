@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { carriersOf, filterRows, flattenRows, matchSellers, previousSellers, rowsToCsv, statusCounts, type PoLabels, type ShipRow } from './shippingList';
+import {
+  carriersOf, filterRows, flattenRows, inboundCarriers, inboundCounts, inboundToCsv,
+  matchSellers, mergeInbound, filterInbound, previousSellers, rowsToCsv, statusCounts,
+  type PoLabels, type ShipRow,
+} from './shippingList';
+import type { TrackedPackage } from './packages';
 import type { OrderSummary, Shipment } from './types';
 
 function order(over: Partial<OrderSummary>): OrderSummary {
@@ -141,6 +146,62 @@ describe('matchSellers', () => {
     const list = mk(['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7']);
     expect(matchSellers(list, '')).toEqual([]);
     expect(matchSellers(list, 'a')).toHaveLength(6);
+  });
+});
+
+function pkg(over: Partial<TrackedPackage>): TrackedPackage {
+  return {
+    id: 'p1', trackingNumber: '1Z999AA10123456784', carrier: 'UPS', status: 'in_transit',
+    trackingEta: null, lastTrackedAt: null, sellerName: null, note: null, orderId: null,
+    createdAt: '2026-08-04T00:00:00Z',
+    ...over,
+  };
+}
+
+describe('mergeInbound', () => {
+  it('interleaves shipments and packages newest first', () => {
+    const rows = mergeInbound(flattenRows(sections), [pkg({ id: 'p1', createdAt: '2026-08-04T00:00:00Z' })]);
+    expect(rows.map(r => (r.kind === 'package' ? r.pkg.id : r.shipment.id))).toEqual(['s2', 'p1', 's3', 's1']);
+  });
+});
+
+describe('filterInbound', () => {
+  const all = { status: 'all', carrier: 'all', search: '' } as const;
+  const rows = mergeInbound(flattenRows(sections), [
+    pkg({ id: 'p1', status: 'delivered', carrier: 'FedEx', trackingNumber: '123456789012', sellerName: 'Trench Corp' }),
+  ]);
+
+  it('filters packages by status and carrier alongside shipments', () => {
+    expect(filterInbound(rows, { ...all, status: 'delivered' })).toHaveLength(2);
+    expect(filterInbound(rows, { ...all, carrier: 'FedEx' }).map(r => r.kind)).toEqual(['package']);
+  });
+
+  it('searches package tracking numbers and seller names', () => {
+    expect(filterInbound(rows, { ...all, search: 'trench' })).toHaveLength(1);
+    expect(filterInbound(rows, { ...all, search: '123456789012' })).toHaveLength(1);
+  });
+});
+
+describe('inboundCounts and inboundCarriers', () => {
+  const rows = mergeInbound(flattenRows(sections), [pkg({ status: 'delivered', carrier: 'FedEx' })]);
+
+  it('counts packages into the same status rail', () => {
+    const c = inboundCounts(rows);
+    expect(c.all).toBe(4);
+    expect(c.delivered).toBe(2);
+  });
+
+  it('includes package carriers', () => {
+    expect(inboundCarriers(rows)).toEqual(['FedEx', 'UPS', 'USPS']);
+  });
+});
+
+describe('inboundToCsv', () => {
+  it('exports package rows with empty order columns', () => {
+    const csv = inboundToCsv(mergeInbound(flattenRows(sections), [pkg({ sellerName: 'Trench Corp' })]));
+    expect(csv.split('\r\n')).toHaveLength(5);
+    expect(csv).toContain('"Trench Corp"');
+    expect(csv).toContain('"1Z999AA10123456784"');
   });
 });
 

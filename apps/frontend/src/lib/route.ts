@@ -87,12 +87,14 @@ export function match(template: string, path: string): Record<string, string> | 
 export type ShippingRoute =
   | { kind: 'dashboard' }
   | { kind: 'wizardNew' }
+  | { kind: 'addLabel' }
   | { kind: 'wizardPo'; orderId: string; sid: string | null }
   | { kind: 'focus'; orderId: string };
 
 export function parseShippingRoute(path: string): ShippingRoute | null {
   if (path === '/shipping') return { kind: 'dashboard' };
   if (path === '/shipping/new') return { kind: 'wizardNew' };
+  if (path === '/shipping/add') return { kind: 'addLabel' };
   const cont = match('/shipping/:orderId/label/:sid', path);
   if (cont) return { kind: 'wizardPo', orderId: cont.orderId!, sid: cont.sid! };
   const fresh = match('/shipping/:orderId/label', path);

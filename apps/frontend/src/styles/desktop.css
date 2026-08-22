@@ -2892,6 +2892,62 @@ html.desktop, body.desktop, .desktop #root {
 .ship-wizard-foot .ship-foot-right { display: flex; gap: 8px; margin-left: auto; }
 .ship-wizard-err { font-size: 12.5px; color: var(--neg); }
 
+/* ── Add an existing label ────────────────────────────────────────────────── */
+.ship-add { max-width: 620px; }
+.ship-add-sub { font-size: 13px; color: var(--fg-muted); margin-top: -12px; }
+
+/* The tracking number is the whole point of the page — set it like one. */
+.ship-tn-input {
+  height: 52px;
+  font-size: 19px;
+  letter-spacing: 0.12em;
+  padding: 0 16px;
+}
+.ship-tn-input::placeholder { letter-spacing: 0.12em; color: var(--fg-subtle); opacity: 0.6; }
+
+.ship-carrier-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.ship-carrier-tile {
+  --tile: var(--fg-subtle);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.ship-carrier-tile[data-carrier='UPS'] { --tile: #b8860b; }
+.ship-carrier-tile[data-carrier='FedEx'] { --tile: #7b3fd4; }
+.ship-carrier-tile[data-carrier='USPS'] { --tile: #2f6fb5; }
+.ship-carrier-tile.lit {
+  border-color: color-mix(in srgb, var(--tile) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 14%, transparent);
+}
+.ship-carrier-tile.selected {
+  border-color: var(--tile);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 22%, transparent);
+}
+.ship-carrier-tile.selected .ship-carrier-name { color: var(--tile); }
+.ship-carrier-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ship-carrier-name { font-size: 13.5px; font-weight: 700; letter-spacing: 0.01em; }
+.ship-carrier-fmt { margin-left: auto; font-size: 10.5px; color: var(--fg-subtle); }
+.ship-carrier-tile .icon { color: var(--tile); flex-shrink: 0; }
+
+.ship-add-hint { min-height: 18px; font-size: 12px; color: var(--fg-muted); }
+.ship-add-demo-note { font-size: 11.5px; color: var(--fg-subtle); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ship-carrier-tile { transition: none; }
+}
+
 /* ── Per-PO panel ─────────────────────────────────────────────────────────── */
 .ship-panel-head {
   display: flex;
