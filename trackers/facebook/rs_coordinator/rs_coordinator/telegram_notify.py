@@ -120,6 +120,7 @@ def format_listing(record: Dict[str, Any], verdict: str, worker_id: str) -> str:
     item_name = escape_markdown(str(record.get("item_name") or "?"))
     score = record.get("ai_score")
     comment = escape_markdown(str(record.get("ai_comment") or ""))
+    count = record.get("ai_count")
     url = str(record.get("post_url") or "")
 
     lines = [
@@ -131,6 +132,8 @@ def format_listing(record: Dict[str, Any], verdict: str, worker_id: str) -> str:
         f"Search: {item_name}",
         f"Worker: {escape_markdown(worker_id)}",
     ]
+    if count:
+        lines.append(f"Count: *{escape_markdown(str(count))}*")
     if score is not None:
         lines.append(f"AI rating: *{escape_markdown(str(score))}/5*")
     if comment:

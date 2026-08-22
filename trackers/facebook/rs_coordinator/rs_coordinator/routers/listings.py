@@ -34,6 +34,7 @@ LISTING_COLUMNS = (
     "listing_hash",
     "ai_score",
     "ai_comment",
+    "ai_count",
 )
 
 

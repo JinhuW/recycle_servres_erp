@@ -20,6 +20,25 @@ deployed?" harder to answer.
 
 ### Changed
 
+- **The AI evaluation answers with one JSON object.** The single per-listing
+  call now concludes with `{"rating", "unit_count", "count_phrase", "summary"}`
+  instead of two grep-able text lines, parsed once by a shared tolerant parser
+  (legacy two-line answers still parse). What that buys:
+  - the "confidently one unit → never alert" rule is now enforced in code
+    (`unit_count == 1` suppresses the alert whatever the score), not just by
+    the prompt;
+  - fleet workers forward the count to the coordinator (`ai_count`), so the
+    coordinator's Telegram alerts finally show `Count: 8 sticks` — previously
+    only the homelab's direct-Telegram path printed it. The coordinator adds
+    an `ai_count` column via an automatic additive migration on boot;
+  - the AI response cache key is versioned, so pre-JSON cached verdicts are
+    re-evaluated rather than served stale (a one-time re-evaluation cost);
+  - exhausted AI retries raise a clean error instead of an
+    `UnboundLocalError`, and a total AI outage — which deliberately still
+    fails open and alerts unevaluated listings — now says so at ERROR level.
+  After pulling this, regenerate configs (`sh deploy/make-homelab-config.sh`,
+  `rsc gen-configs`) and restart the coordinator before the workers.
+
 - **Listing alerts show the AI's unit count.** The rating prompt now asks the
   model to state the quantity it worked out on its own `Count:` line, and the
   compact alert prints it between the price and the link (`count: 8 sticks`).

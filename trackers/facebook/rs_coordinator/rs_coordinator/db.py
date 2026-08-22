@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS listings (
     listing_hash    TEXT,
     ai_score        INTEGER,
     ai_comment      TEXT,
+    ai_count        TEXT,
     first_seen_at   TEXT NOT NULL,
     last_seen_at    TEXT NOT NULL,
     first_worker_id TEXT,
@@ -207,6 +208,12 @@ WORKER_HEALTH_COLUMNS = (
     ("alerted_liveness", "TEXT"),
 )
 
+# Columns added to `listings` after the first release, same mechanism.
+LISTING_EXTRA_COLUMNS = (
+    # The AI's unit count as a display phrase ("8 sticks").
+    ("ai_count", "TEXT"),
+)
+
 
 DEFAULT_DB_PATH = "data/coordinator.db"
 
@@ -289,6 +296,7 @@ class Database:
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._migrate_workers()
+            self._migrate_listings()
             self._conn.commit()
 
     def _migrate_workers(self: "Database") -> None:
@@ -301,6 +309,13 @@ class Database:
         for column, decl in WORKER_HEALTH_COLUMNS:
             if column not in existing:
                 self._conn.execute(f"ALTER TABLE workers ADD COLUMN {column} {decl}")
+
+    def _migrate_listings(self: "Database") -> None:
+        """Add later columns to `listings`, same mechanism as `_migrate_workers`."""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(listings)")}
+        for column, decl in LISTING_EXTRA_COLUMNS:
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE listings ADD COLUMN {column} {decl}")
 
     @contextmanager
     def cursor(self: "Database") -> Iterator[sqlite3.Cursor]:

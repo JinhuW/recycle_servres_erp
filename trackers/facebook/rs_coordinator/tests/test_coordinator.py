@@ -222,6 +222,51 @@ def test_unknown_payload_fields_are_ignored(client):
     assert result.status_code == 200
 
 
+def test_the_alert_carries_the_ai_count(client):
+    client.post(
+        "/api/v1/listings",
+        json={"worker_id": "denver-1", "listings": [sample_listing(ai_count="8 sticks")]},
+        headers=AUTH,
+    )
+    client.drain()
+    assert "Count: *8 sticks*" in client.sent[-1]
+
+    stored = client.db.get_listing(dedupe_key("facebook", "123456789"))
+    assert stored["ai_count"] == "8 sticks"
+
+
+def test_the_alert_omits_a_missing_count(client):
+    # Workers that predate the field send no ai_count; the alert must look
+    # exactly as it did before the field existed.
+    client.post(
+        "/api/v1/listings",
+        json={"worker_id": "denver-1", "listings": [sample_listing()]},
+        headers=AUTH,
+    )
+    client.drain()
+    assert "Count:" not in client.sent[-1]
+
+
+def test_migration_adds_ai_count_to_a_preexisting_db(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE listings ("
+        "dedupe_key TEXT PRIMARY KEY, marketplace TEXT NOT NULL, "
+        "listing_id TEXT NOT NULL, ai_score INTEGER, ai_comment TEXT, "
+        "first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    with db.cursor() as cur:
+        columns = {row["name"] for row in cur.execute("PRAGMA table_info(listings)")}
+    assert "ai_count" in columns
+
+
 # -- sharding --------------------------------------------------------------
 
 

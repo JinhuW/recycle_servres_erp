@@ -55,6 +55,9 @@ class ListingPayload(BaseModel):
     listing_hash: str | None = None
     ai_score: int | None = None
     ai_comment: str | None = None
+    # The AI's unit count as a display phrase ("8 sticks"); null from workers
+    # that predate the field.
+    ai_count: str | None = None
     status: str | None = None
 
     model_config = {"extra": "ignore"}

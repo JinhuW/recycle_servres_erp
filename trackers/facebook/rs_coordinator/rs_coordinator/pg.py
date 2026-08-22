@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .db import SCHEMA, WORKER_HEALTH_COLUMNS, utcnow
+from .db import LISTING_EXTRA_COLUMNS, SCHEMA, WORKER_HEALTH_COLUMNS, utcnow
 
 # Guards concurrent schema creation. Deliberately different from the reddit
 # tracker's 778431 so the two projects can never block each other if they ever
@@ -175,6 +175,7 @@ class PostgresDatabase:
             try:
                 conn.execute(postgres_schema())
                 self._migrate_workers(conn)
+                self._migrate_listings(conn)
                 conn.commit()
             finally:
                 conn.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_KEY,))
@@ -191,6 +192,18 @@ class PostgresDatabase:
         for column, decl in WORKER_HEALTH_COLUMNS:
             if column not in existing:
                 conn.execute(f"ALTER TABLE workers ADD COLUMN IF NOT EXISTS {column} {decl}")
+
+    @staticmethod
+    def _migrate_listings(conn: Any) -> None:
+        """Add later columns to a `listings` table created before them."""
+        cur = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'listings'"
+        )
+        existing = {row["column_name"] for row in cur.fetchall()}
+        for column, decl in LISTING_EXTRA_COLUMNS:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column} {decl}")
 
     @contextmanager
     def cursor(self: "PostgresDatabase") -> Iterator[Any]:
