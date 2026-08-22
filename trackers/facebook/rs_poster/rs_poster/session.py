@@ -6,6 +6,7 @@ the two from driving the same account at the same time, which is both a
 detection risk and a source of racey page state.
 """
 
+import json
 import logging
 import os
 import random
@@ -18,13 +19,39 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
 from . import selectors as sel
 from . import totp
-from .cookies import read_session_meta, write_session_meta
+from .cookies import atomic_write_text, read_session_meta, write_session_meta
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on any navigation. Facebook hanging is an error we want reported,
+# not a process that sits on a page forever — the old timeout=0 turned a stuck
+# load into a hung poster that still held the account lock.
+NAV_TIMEOUT_MS = 90_000
 
 
 class SessionLockedError(RuntimeError):
     """Another process holds the account lock."""
+
+
+def _lock_holder_alive(lock_path: Path) -> Optional[int]:
+    """The PID holding the lock if that process still runs, else None.
+
+    A malformed or unreadable lock file counts as stale: whatever wrote it is
+    not following this protocol, and treating it as live would wedge every
+    future run behind a file nothing will ever remove.
+    """
+    try:
+        pid = int(lock_path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        os.kill(pid, 0)  # signal 0: existence probe, delivers nothing
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        # Not ours to signal, but it exists.
+        return pid
+    return pid
 
 
 @contextmanager
@@ -40,9 +67,18 @@ def account_lock(lock_path: str | Path, timeout: int = 0) -> Iterator[None]:
             os.close(fd)
             break
         except FileExistsError:
+            # A hard-killed run leaves its lock behind; probe the recorded PID
+            # so a dead holder does not block posting until someone notices.
+            holder = _lock_holder_alive(lock_path)
+            if holder is None:
+                logger.warning(
+                    "Breaking stale lock %s (holder no longer running).", lock_path
+                )
+                lock_path.unlink(missing_ok=True)
+                continue
             if time.time() >= deadline:
                 raise SessionLockedError(
-                    f"{lock_path} is held by another process. The monitor may be "
+                    f"{lock_path} is held by PID {holder}. The monitor may be "
                     "running; stop it or wait before posting."
                 ) from None
             time.sleep(5)
@@ -59,6 +95,41 @@ def human_pause(low: float = 0.8, high: float = 2.5) -> None:
 
 class SessionExpiredError(RuntimeError):
     """The stored session no longer authenticates and cannot be renewed here."""
+
+
+class AccountRestrictedError(RuntimeError):
+    """Facebook interrupted the account mid-run: a checkpoint, or an
+    "action blocked" style restriction. Nothing automated can clear it —
+    a human has to open the account in a normal browser."""
+
+
+def raise_if_restricted(page: Page, doing: str) -> None:
+    """Fail with a named condition if Facebook has parked the account.
+
+    Called after navigations in the posting/delete/share flows. Without it a
+    mid-run checkpoint surfaces minutes later as an opaque selector timeout on
+    whatever field happened to be waited for next.
+    """
+    url = page.url
+    if any(marker in url for marker in sel.CHECKPOINT_URL_MARKERS):
+        raise AccountRestrictedError(
+            f"Facebook redirected to {url} while {doing}: the session hit a "
+            "checkpoint or was logged out. Clear it in a normal browser, then "
+            "re-run `rs-session capture`."
+        )
+    try:
+        blocked = page.get_by_text(sel.ACTION_BLOCKED_RE).first
+        if blocked.is_visible(timeout=1000):
+            raise AccountRestrictedError(
+                f"Facebook is showing '{blocked.inner_text().strip()[:80]}' while "
+                f"{doing}. The account is rate-limited or restricted; stop "
+                "posting and let it cool down."
+            )
+    except AccountRestrictedError:
+        raise
+    except Exception:
+        # The check is best-effort; an evaluation error must not fail a healthy run.
+        pass
 
 
 class PosterSession:
@@ -123,6 +194,11 @@ class PosterSession:
             viewport={"width": 1440, "height": 900},
         )
         self.page = self._context.new_page()
+        # Accept dialogs rather than Playwright's default dismissal: the one
+        # dialog this flow can raise is beforeunload on an abandoned create
+        # form (a dry run, a failed publish), where "dismiss" means staying on
+        # the page and the next goto times out. See selectors.py.
+        self.page.on("dialog", lambda dialog: dialog.accept())
         self.login()
         return self.page
 
@@ -143,18 +219,28 @@ class PosterSession:
         if self._context is None:
             return
         try:
-            Path(self.storage_state_path).parent.mkdir(parents=True, exist_ok=True)
+            # Never save from a context that is not logged in: the run may
+            # have ended on an expired session or a checkpoint, and writing
+            # that state would replace a file that costs a human login with a
+            # 2FA code to recreate with an empty cookie jar. (The monitor had
+            # exactly this bug; fixed there in 0.2.0.)
+            if self.page is None or not self.is_logged_in():
+                logger.warning(
+                    "Not saving session to %s: the browser is not logged in.",
+                    self.storage_state_path,
+                )
+                return
             # indexed_db=True: Facebook keeps device state in IndexedDB as well
-            # as cookies, and Playwright drops it unless asked.
-            self._context.storage_state(path=self.storage_state_path, indexed_db=True)
+            # as cookies, and Playwright drops it unless asked. Taking the
+            # state as a dict and writing it ourselves keeps the write atomic.
+            state = self._context.storage_state(indexed_db=True)
+            atomic_write_text(self.storage_state_path, json.dumps(state, indent=2))
             # Keep the sidecar in step, so a session created here is reusable
             # under the same identity next time.
-            user_agent = None
-            if self.page is not None:
-                try:
-                    user_agent = self.page.evaluate("() => navigator.userAgent")
-                except Exception:
-                    user_agent = None
+            try:
+                user_agent = self.page.evaluate("() => navigator.userAgent")
+            except Exception:
+                user_agent = None
             write_session_meta(
                 self.storage_state_path, user_agent=user_agent, proxy=self.proxy
             )
@@ -165,13 +251,8 @@ class PosterSession:
     # URL fragments that mean login is unfinished (login form, 2FA, captcha,
     # checkpoint). Several carry no email field, so the form test alone treats
     # them as logged in — live testing hit a captcha wall misread that way.
-    _INTERSTITIAL_URL_MARKERS = (
-        "/login",
-        "/checkpoint",
-        "two_step_verification",
-        "two_factor",
-        "/recover",
-    )
+    # Shared with raise_if_restricted, which applies the same test mid-run.
+    _INTERSTITIAL_URL_MARKERS = sel.CHECKPOINT_URL_MARKERS
 
     def is_logged_in(self: "PosterSession") -> bool:
         assert self.page is not None
@@ -188,7 +269,7 @@ class PosterSession:
         assert self.page is not None
         # Land on Marketplace rather than the login page: with a valid session
         # this never renders a login form at all.
-        self.page.goto(sel.MARKETPLACE_URL, timeout=0)
+        self.page.goto(sel.MARKETPLACE_URL, timeout=NAV_TIMEOUT_MS)
         self.page.wait_for_load_state("domcontentloaded")
         self._accept_cookies()
 
@@ -211,7 +292,7 @@ class PosterSession:
             "Session invalid; falling back to password login. Prefer refreshing the "
             "session with `rs-session` — password logins are what trigger checkpoints."
         )
-        self.page.goto(sel.LOGIN_URL, timeout=0)
+        self.page.goto(sel.LOGIN_URL, timeout=NAV_TIMEOUT_MS)
         self.page.wait_for_load_state("domcontentloaded")
         logger.info("Logging in as %s", self.username)
         self.page.fill(sel.LOGIN_EMAIL_INPUT, "")

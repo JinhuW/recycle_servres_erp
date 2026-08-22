@@ -6,8 +6,9 @@ so there is one place that decides how the control plane is wired.
 
 import os
 import secrets as pysecrets
+import threading
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Header, HTTPException
 
@@ -16,15 +17,40 @@ from .telegram_notify import TelegramNotifier
 from .tokens import verify_worker_token
 from .vault import AccountStore, Vault, VaultError
 
-DB_PATH = os.environ.get("RS_COORDINATOR_DB", "data/coordinator.db")
 # Legacy fleet-wide token. Still accepted so workers deployed before per-worker
 # tokens keep reporting while they are migrated.
 LEGACY_TOKEN = os.environ.get("RS_COORDINATOR_TOKEN")
 ADMIN_TOKEN = os.environ.get("RS_ADMIN_TOKEN")
 
-# Postgres when RS_DATABASE_URL / DATABASE_URL is set, SQLite at DB_PATH
-# otherwise. Same methods either way, so nothing downstream changes.
-db: AnyDatabase = open_database(DB_PATH)
+# The database is opened on first use, not at import. Opening it here meant a
+# Postgres unreachable at boot failed the module import, uvicorn exited, and
+# the container restart-looped with nothing answering /healthz to say why.
+# Lazily, the process comes up, /healthz reports the database unreachable, and
+# the first successful open sticks. Backend choice is unchanged: Postgres when
+# RS_DATABASE_URL / DATABASE_URL is set, SQLite otherwise.
+_db_lock = threading.Lock()
+_db_instance: Optional[AnyDatabase] = None
+
+
+def get_db() -> AnyDatabase:
+    global _db_instance
+    if _db_instance is None:
+        with _db_lock:
+            if _db_instance is None:
+                _db_instance = open_database()
+    return _db_instance
+
+
+def __getattr__(name: str) -> Any:
+    """Keep the historical `deps.db` spelling working against the lazy open.
+
+    Module-level `__getattr__` is only consulted when normal lookup fails, so
+    tests that assign `deps.db = ...` still shadow it the ordinary way.
+    """
+    if name == "db":
+        return get_db()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 notifier = TelegramNotifier(
     token=os.environ.get("TELEGRAM_TOKEN"),
@@ -38,10 +64,6 @@ ops_notifier = TelegramNotifier(
     token=os.environ.get("TELEGRAM_TOKEN"),
     chat_id=os.environ.get("TELEGRAM_OPS_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID"),
 )
-
-
-def get_db() -> AnyDatabase:
-    return db
 
 
 def get_notifier() -> TelegramNotifier:

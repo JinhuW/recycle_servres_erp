@@ -30,6 +30,27 @@ class DedupeResult:
     previous_price: str | None = None
 
 
+def message_fingerprint(
+    thread_id: str,
+    direction: str,
+    sender: str | None,
+    text: str | None,
+    sent_at: str | None,
+) -> str:
+    """Identity of one Messenger message, for idempotent re-reporting.
+
+    Scraped timestamps are unreliable ("5m ago"), so the fingerprint leans on
+    content. The known cost: the same party sending the identical text twice
+    with an identical (or absent) timestamp collapses into one message. That
+    loses a duplicate "hello?", never a distinct offer, and errs toward fewer
+    alerts — the survivable direction.
+    """
+    raw = "\x1f".join(
+        (thread_id, direction, sender or "", text or "", sent_at or "")
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()  # noqa: S324 - identity, not security
+
+
 def dedupe_key(marketplace: str, listing_id: str) -> str:
     return hashlib.sha1(f"{marketplace}:{listing_id}".encode()).hexdigest()
 

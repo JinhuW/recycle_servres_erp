@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, List
 from playwright.sync_api import Page
 
 from . import selectors as sel
-from .session import human_pause
+from .session import (
+    NAV_TIMEOUT_MS,
+    AccountRestrictedError,
+    human_pause,
+    raise_if_restricted,
+)
 from .state import PosterState
 
 if TYPE_CHECKING:
@@ -49,8 +54,9 @@ class GroupSharer:
         logger.info("Sharing '%s' to group '%s'", listing_title[:40], group_name)
 
         try:
-            self.page.goto(sel.YOUR_LISTINGS_URL, timeout=0)
+            self.page.goto(sel.YOUR_LISTINGS_URL, timeout=NAV_TIMEOUT_MS)
             self.page.wait_for_load_state("domcontentloaded")
+            raise_if_restricted(self.page, f"sharing to '{group_name}'")
             human_pause(2.0, 4.0)
 
             self.page.get_by_text(listing_title[:60], exact=False).first.click()
@@ -76,6 +82,9 @@ class GroupSharer:
 
             self.page.get_by_role("button", name=sel.POST_BUTTON_RE).first.click()
             self.page.wait_for_timeout(6000)
+        except AccountRestrictedError:
+            # A restriction ends the run; retrying other groups digs deeper.
+            raise
         except Exception as e:
             logger.warning("Group share to '%s' failed: %s", group_name, e)
             self.poster._screenshot("group-share-failed")

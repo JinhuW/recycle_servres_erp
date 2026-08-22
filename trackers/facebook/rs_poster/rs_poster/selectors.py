@@ -18,6 +18,27 @@ TWO_FACTOR_INPUT = 'input[name="approvals_code"], input[autocomplete="one-time-c
 COOKIE_ACCEPT_RE = re.compile(r"Allow all cookies|Allow cookies|Accept All", re.IGNORECASE)
 TRUST_DEVICE_RE = re.compile(r"Trust|Remember|Continue", re.IGNORECASE)
 
+# URL fragments that mean the account is parked on a challenge rather than a
+# usable page. Shared by login (is_logged_in) and the mid-run guard
+# (raise_if_restricted): Facebook can interrupt a session at any navigation,
+# not just at login.
+CHECKPOINT_URL_MARKERS = (
+    "/login",
+    "/checkpoint",
+    "two_step_verification",
+    "two_factor",
+    "/recover",
+)
+
+# Interstitial text Facebook shows when it rate-limits or restricts an account
+# without logging it out. Matched against visible page text after navigation,
+# so posting fails with a named condition instead of an opaque selector timeout.
+ACTION_BLOCKED_RE = re.compile(
+    r"You('|’)re Temporarily Blocked|Action Blocked|temporarily blocked from"
+    r"|temporarily restricted|You can('|’)t use this feature",
+    re.IGNORECASE,
+)
+
 # -- urls --------------------------------------------------------------------
 
 LOGIN_URL = "https://www.facebook.com/login/device-based/regular/login/"
@@ -49,8 +70,12 @@ PUBLISH_BUTTON_RE = re.compile(r"^Publish$", re.IGNORECASE)
 PUBLISH_ENABLED = 'div[aria-label="Publish"]:not([aria-disabled="true"])'
 CREATE_FORM_HEADING_RE = re.compile(r"Item for sale|Marketplace listing", re.IGNORECASE)
 
-# Leaving the create form after publishing pops a confirmation.
-LEAVE_PAGE_RE = re.compile(r"^Leave page$|^Leave$|^Discard$", re.IGNORECASE)
+# There is deliberately no "Leave page" selector here. The poster only ever
+# leaves the create form with a hard page.goto, so the confirmation Facebook
+# can raise is the browser's beforeunload dialog, not a DOM modal — and
+# Playwright's default is to DISMISS dialogs, which for beforeunload means
+# "stay on the page" and turns an abandoned form into a navigation timeout.
+# PosterSession.start registers a dialog handler that accepts it instead.
 
 # -- manage listings ---------------------------------------------------------
 

@@ -132,19 +132,6 @@ in; the column names and types line up one-for-one. Mind that `secret_blob` and
 `state_blob` are binary — export them hex-encoded and load into `BYTEA` with
 `decode(…, 'hex')`. There is no one-off script for this and it is not required.
 
-## Known gap: the CLI still uses SQLite
-
-`rs_coordinator/cli.py` constructs `Database(os.environ["RS_COORDINATOR_DB"])`
-directly instead of going through `open_database()`. So with `RS_DATABASE_URL`
-set, the **server** reads Postgres while `rsc status`, `rsc vault …` and friends
-still read and write the local SQLite file — they will appear to succeed and the
-server will not see the change.
-
-Until `cli.py` is switched over to `open_database()`, manage accounts through
-the admin HTTP endpoints when running on Postgres, or run the CLI from inside
-the coordinator's own environment only after that change lands. Fixing it is a
-two-line edit in `cli.py` (`cmd_status` and `_account_store`).
-
 ## Testing against a real Postgres
 
 The Postgres half of `tests/test_postgres.py` skips unless

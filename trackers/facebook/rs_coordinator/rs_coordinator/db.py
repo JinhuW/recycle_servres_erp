@@ -68,6 +68,73 @@ CREATE INDEX IF NOT EXISTS idx_listings_last_seen ON listings(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_listings_score ON listings(ai_score);
 CREATE INDEX IF NOT EXISTS idx_sightings_key ON sightings(dedupe_key);
 
+-- Alert outbox -------------------------------------------------------------
+-- Every message the coordinator owes Telegram, written in the same request
+-- that decided to alert and delivered by the background loop (background.py).
+-- Telegram being down therefore delays an alert instead of losing it: the
+-- listing used to be committed first and the send attempted once, inline, so
+-- a failed send left the listing looking like a duplicate forever and the
+-- alert was gone. A row is retried until delivered_at is set.
+CREATE TABLE IF NOT EXISTS outbox (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL,
+    dedupe_key      TEXT,
+    text            TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    last_error      TEXT,
+    delivered_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(delivered_at, next_attempt_at);
+
+-- Messenger bridge ----------------------------------------------------------
+-- Conversations scraped from each account's Marketplace inbox. The workers
+-- (rs-messenger) report whole thread snapshots; `messages.fingerprint` is what
+-- makes re-reporting idempotent, the same way listings.dedupe_key does for the
+-- search fleet. `human_claimed` is the operator's kill switch for auto-reply
+-- on one thread; `autoreplied_at` is the policy's own once-per-thread memory.
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id       TEXT PRIMARY KEY,
+    worker_id       TEXT,
+    counterpart     TEXT,
+    listing_title   TEXT,
+    last_message_at TEXT,
+    human_claimed   INTEGER NOT NULL DEFAULT 0,
+    autoreplied_at  TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    fingerprint TEXT PRIMARY KEY,
+    thread_id   TEXT NOT NULL,
+    direction   TEXT NOT NULL,
+    sender      TEXT,
+    text        TEXT,
+    sent_at     TEXT,
+    created_at  TEXT NOT NULL
+);
+
+-- Replies waiting for a messenger worker to type them into Facebook. Written
+-- by the auto-reply policy or an operator; a worker fetches its queue, sends,
+-- and acks. Nothing here sends anything itself.
+CREATE TABLE IF NOT EXISTS outbound_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id  TEXT NOT NULL,
+    worker_id  TEXT,
+    text       TEXT NOT NULL,
+    origin     TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'queued',
+    created_at TEXT NOT NULL,
+    sent_at    TEXT,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_outbound_status ON outbound_messages(status);
+
 -- Control plane ------------------------------------------------------------
 -- One row per Facebook account. Every secret for that account lives encrypted
 -- in secret_blob; nothing here is readable without the vault key.
@@ -134,6 +201,10 @@ WORKER_HEALTH_COLUMNS = (
     ("browser_ok", "INTEGER"),
     ("proxy_ok", "INTEGER"),
     ("vnc_url", "TEXT"),
+    # The liveness the sweeper last alerted on ("dead", or NULL). Persisted so a
+    # coordinator restart does not re-page ops about a worker it already
+    # reported dead.
+    ("alerted_liveness", "TEXT"),
 )
 
 
@@ -161,6 +232,27 @@ def postgres_url(env: Optional[Dict[str, str]] = None) -> Optional[str]:
 AnyDatabase = Union["Database", "PostgresDatabase"]
 
 
+def default_db_path() -> str:
+    """Where the SQLite database lives when nothing says otherwise.
+
+    RS_COORDINATOR_DB always wins. Without it, the default is anchored to the
+    tracker checkout this module sits in rather than to the current working
+    directory: a bare `data/coordinator.db` meant `rsc` run from
+    rs_coordinator/ and a server run from the repo root silently used two
+    different databases, and both files exist in the field to prove it. The
+    anchor is only trusted when it looks like a real checkout (it has
+    `configs/`); a site-packages install falls back to the old CWD-relative
+    form, and containers set RS_COORDINATOR_DB explicitly anyway.
+    """
+    env = os.environ.get("RS_COORDINATOR_DB")
+    if env:
+        return env
+    root = Path(__file__).resolve().parents[2]
+    if (root / "configs").is_dir():
+        return str(root / DEFAULT_DB_PATH)
+    return DEFAULT_DB_PATH
+
+
 def open_database(path: str | Path | None = None) -> AnyDatabase:
     """Open the configured backend.
 
@@ -169,7 +261,8 @@ def open_database(path: str | Path | None = None) -> AnyDatabase:
     never branch on which one they got.
 
     `path` is only consulted for the SQLite case; it defaults to
-    RS_COORDINATOR_DB and then to `data/coordinator.db`.
+    RS_COORDINATOR_DB and then to `data/coordinator.db` anchored to the
+    checkout (see `default_db_path`).
     """
     url = postgres_url()
     if url:
@@ -178,7 +271,7 @@ def open_database(path: str | Path | None = None) -> AnyDatabase:
         from .pg import PostgresDatabase
 
         return PostgresDatabase(url)
-    return Database(path or os.environ.get("RS_COORDINATOR_DB", DEFAULT_DB_PATH))
+    return Database(path or default_db_path())
 
 
 class Database:
@@ -316,6 +409,189 @@ class Database:
     def count_sightings(self: "Database", dedupe_key: str) -> int:
         with self.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS n FROM sightings WHERE dedupe_key = ?", (dedupe_key,))
+            return int(cur.fetchone()["n"])
+
+    # -- alert outbox ------------------------------------------------------
+
+    def enqueue_alert(
+        self: "Database", kind: str, text: str, dedupe_key: str | None = None
+    ) -> int:
+        """Queue an alert for the background sender; returns its outbox id."""
+        now = utcnow()
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO outbox (kind, dedupe_key, text, created_at, next_attempt_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (kind, dedupe_key, text, now, now),
+            )
+            return int(cur.lastrowid)
+
+    def due_alerts(self: "Database", now: str | None = None, limit: int = 20) -> List[Dict[str, Any]]:
+        """Undelivered alerts whose next attempt is due, oldest first."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM outbox WHERE delivered_at IS NULL AND next_attempt_at <= ? "
+                "ORDER BY id LIMIT ?",
+                (now or utcnow(), limit),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def mark_alert_delivered(self: "Database", alert_id: int) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE outbox SET delivered_at = ?, last_error = NULL WHERE id = ?",
+                (utcnow(), alert_id),
+            )
+
+    def mark_alert_failed(
+        self: "Database", alert_id: int, error: str, next_attempt_at: str
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE outbox SET attempts = attempts + 1, last_error = ?, "
+                "next_attempt_at = ? WHERE id = ?",
+                (error, next_attempt_at, alert_id),
+            )
+
+    def outbox_backlog(self: "Database") -> int:
+        """How many alerts are queued but not yet delivered."""
+        with self.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM outbox WHERE delivered_at IS NULL")
+            return int(cur.fetchone()["n"])
+
+    # -- messenger threads / messages --------------------------------------
+
+    def upsert_thread(self: "Database", thread_id: str, fields: Dict[str, Any]) -> None:
+        """Create or refresh a thread row, never blanking what a fuller
+        snapshot reported earlier (scrapes are best-effort and lossy)."""
+        record = {"thread_id": thread_id, "created_at": utcnow(), **fields}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["?"] * len(record))
+        assignments = ", ".join(
+            f"{name} = COALESCE(excluded.{name}, threads.{name})"
+            for name in fields
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO threads ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(thread_id) DO UPDATE SET {assignments}",
+                tuple(record.values()),
+            )
+
+    def get_thread(self: "Database", thread_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads WHERE thread_id = ?", (thread_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_threads(self: "Database", limit: int = 100) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM threads ORDER BY last_message_at DESC LIMIT ?", (limit,)
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def set_thread_fields(self: "Database", thread_id: str, fields: Dict[str, Any]) -> None:
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = :{name}" for name in fields)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE threads SET {assignments} WHERE thread_id = :thread_id",
+                {**fields, "thread_id": thread_id},
+            )
+
+    def claim_message(self: "Database", record: Dict[str, Any]) -> bool:
+        """Insert a message if its fingerprint is new; True if we did.
+
+        Workers re-report whole threads on every poll, so the same atomic
+        insert-or-nothing that keeps border listings to one alert keeps
+        re-scraped messages to one.
+        """
+        record = {"created_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(f":{name}" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO messages ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(fingerprint) DO NOTHING",
+                record,
+            )
+            return cur.rowcount > 0
+
+    def list_messages(self: "Database", thread_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM messages WHERE thread_id = ? ORDER BY created_at, fingerprint "
+                "LIMIT ?",
+                (thread_id, limit),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def count_messages(self: "Database", thread_id: str, direction: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS n FROM messages WHERE thread_id = ?"
+        params: List[Any] = [thread_id]
+        if direction:
+            sql += " AND direction = ?"
+            params.append(direction)
+        with self.cursor() as cur:
+            cur.execute(sql, params)
+            return int(cur.fetchone()["n"])
+
+    # -- outbound replies --------------------------------------------------
+
+    def enqueue_outbound(
+        self: "Database", thread_id: str, worker_id: str | None, text: str, origin: str
+    ) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO outbound_messages (thread_id, worker_id, text, origin, "
+                "status, created_at) VALUES (?, ?, ?, ?, 'queued', ?)",
+                (thread_id, worker_id, text, origin, utcnow()),
+            )
+            return int(cur.lastrowid)
+
+    def pending_outbound(
+        self: "Database", worker_id: str | None = None, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM outbound_messages WHERE status = 'queued'"
+        params: List[Any] = []
+        if worker_id:
+            # NULL worker_id means "whichever worker owns the thread" — an
+            # operator reply queued before the thread reported an owner.
+            sql += " AND (worker_id = ? OR worker_id IS NULL)"
+            params.append(worker_id)
+        sql += " ORDER BY id LIMIT ?"
+        params.append(limit)
+        with self.cursor() as cur:
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+
+    def get_outbound(self: "Database", outbound_id: int) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM outbound_messages WHERE id = ?", (outbound_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def mark_outbound(
+        self: "Database", outbound_id: int, status: str, error: str | None = None
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE outbound_messages SET status = ?, last_error = ?, "
+                "attempts = attempts + 1, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END "
+                "WHERE id = ?",
+                (status, error, status, utcnow(), outbound_id),
+            )
+
+    def count_autoreplies_since(self: "Database", since: str) -> int:
+        """Auto-replies queued since `since` — the daily-cap denominator."""
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM outbound_messages "
+                "WHERE origin = 'autoreply' AND created_at >= ?",
+                (since,),
+            )
             return int(cur.fetchone()["n"])
 
     # -- workers -----------------------------------------------------------

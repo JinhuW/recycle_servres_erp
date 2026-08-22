@@ -196,3 +196,213 @@ def test_target_selection_filters_and_validates():
         selected_targets(ads, "nope", None)
     with pytest.raises(PostingError, match="No ad/city"):
         selected_targets(ads, "buy_servers", "Atlantis, XX")
+
+
+# -- stale locks -----------------------------------------------------------
+
+
+def test_stale_lock_with_dead_pid_is_broken(tmp_path):
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-c", ""])
+    proc.wait()
+    lock = tmp_path / "fb.lock"
+    lock.write_text(str(proc.pid))
+
+    with account_lock(lock):  # a hard-killed run must not block forever
+        assert lock.exists()
+    assert not lock.exists()
+
+
+def test_malformed_lock_file_counts_as_stale(tmp_path):
+    lock = tmp_path / "fb.lock"
+    lock.write_text("not a pid")
+    with account_lock(lock):
+        assert lock.exists()
+
+
+def test_lock_held_by_a_live_process_still_blocks(tmp_path):
+    import os
+
+    lock = tmp_path / "fb.lock"
+    lock.write_text(str(os.getpid()))
+    with pytest.raises(SessionLockedError, match=str(os.getpid())):
+        with account_lock(lock):
+            pass
+
+
+# -- atomic writes ---------------------------------------------------------
+
+
+def test_interrupted_state_save_leaves_the_old_ledger_intact(tmp_path, monkeypatch):
+    path = tmp_path / "state.json"
+    state = PosterState(path)
+    state.upsert(make_record())
+    state.save()
+    before = path.read_text()
+
+    monkeypatch.setattr(Path, "write_text", _raise_io_error)
+    with pytest.raises(IOError):
+        state.save()
+    monkeypatch.undo()
+
+    assert path.read_text() == before
+    assert list(tmp_path.glob(".state.json.tmp-*")) == []
+
+
+def _raise_io_error(self, *args, **kwargs):
+    raise IOError("disk full")
+
+
+def test_atomic_write_text_is_owner_only_and_leaves_no_temp(tmp_path):
+    from rs_poster.cookies import atomic_write_text
+
+    path = tmp_path / "cred.json"
+    path.write_text("old")
+    atomic_write_text(path, "new")
+    assert path.read_text() == "new"
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert list(tmp_path.glob(".cred.json.tmp-*")) == []
+
+
+# -- session save gating ---------------------------------------------------
+
+
+class _FakeContext:
+    def __init__(self, cookies):
+        self._cookies = cookies
+
+    def cookies(self):
+        return self._cookies
+
+    def storage_state(self, indexed_db=False):
+        return {"cookies": self._cookies, "origins": []}
+
+
+class _FakeSessionPage:
+    def __init__(self, url, context):
+        self.url = url
+        self.context = context
+
+    def evaluate(self, script):
+        return "test-agent"
+
+
+def _session_with(tmp_path, url, cookies):
+    from rs_poster.session import PosterSession
+
+    session = PosterSession(storage_state_path=str(tmp_path / "fb_state.json"))
+    session._context = _FakeContext(cookies)
+    session.page = _FakeSessionPage(url, session._context)
+    return session
+
+
+def test_logged_out_run_does_not_overwrite_the_session_file(tmp_path):
+    path = tmp_path / "fb_state.json"
+    path.write_text('{"cookies": [{"name": "xs", "value": "live"}]}')
+
+    session = _session_with(tmp_path, "https://www.facebook.com/login/?next=x", [])
+    session.save_state()
+
+    # The stored session still holds the live cookie jar.
+    assert "live" in path.read_text()
+
+
+def test_logged_in_run_saves_the_session_atomically(tmp_path):
+    import json
+
+    cookies = [{"name": "xs", "value": "fresh"}]
+    session = _session_with(tmp_path, "https://www.facebook.com/marketplace/", cookies)
+    session.save_state()
+
+    path = tmp_path / "fb_state.json"
+    assert json.loads(path.read_text())["cookies"] == cookies
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert list(tmp_path.glob(".fb_state.json.tmp-*")) == []
+
+
+# -- publish failure and the ledger ----------------------------------------
+
+
+class _FakePosterPage:
+    url = "https://www.facebook.com/marketplace/create/item"
+
+    def goto(self, url, timeout=None):
+        pass
+
+    def wait_for_load_state(self, state):
+        pass
+
+    def set_input_files(self, selector, files):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+class _FakeSession:
+    page = _FakePosterPage()
+
+
+class _FakeLibrary:
+    def __init__(self, root):
+        self.root = Path(root)
+
+    def resolve(self, name):
+        return ["photo.jpg"]
+
+
+def _stubbed_poster(tmp_path, monkeypatch):
+    from rs_poster import poster as poster_mod
+
+    state = PosterState(tmp_path / "state.json")
+    poster = poster_mod.Poster(_FakeSession(), _FakeLibrary(tmp_path), state)
+    for method in ("_paced", "_fill_labeled", "_select_option", "_set_location"):
+        monkeypatch.setattr(poster_mod.Poster, method, lambda self, *a, **k: None)
+    monkeypatch.setattr(poster_mod, "raise_if_restricted", lambda *a, **k: None)
+    monkeypatch.setattr(poster_mod, "human_pause", lambda *a, **k: None)
+    return poster, state
+
+
+def _template():
+    return AdTemplate(
+        name="buy_servers",
+        title="We Buy Used Servers",
+        description="We buy them.",
+        price=1,
+        category="Electronics",
+        condition="Used - Good",
+        photo_set="default",
+        cities=["Denver, CO"],
+    )
+
+
+def test_failed_publish_counts_against_pacing_but_records_no_ad(tmp_path, monkeypatch):
+    from rs_poster import poster as poster_mod
+
+    poster, state = _stubbed_poster(tmp_path, monkeypatch)
+
+    def explode(self):
+        raise PostingError("form never closed")
+
+    monkeypatch.setattr(poster_mod.Poster, "_publish", explode)
+    with pytest.raises(PostingError):
+        poster.create_listing(_template(), "Denver, CO")
+
+    # The click reached Facebook, so pacing must count it...
+    assert state.last_action_at is not None
+    assert PosterState(tmp_path / "state.json").last_action_at == state.last_action_at
+    # ...but no phantom active record may occupy a cap slot.
+    assert state.ads == {}
+
+
+def test_successful_publish_records_an_active_ad(tmp_path, monkeypatch):
+    from rs_poster import poster as poster_mod
+
+    poster, state = _stubbed_poster(tmp_path, monkeypatch)
+    monkeypatch.setattr(poster_mod.Poster, "_publish", lambda self: None)
+
+    record = poster.create_listing(_template(), "Denver, CO")
+    assert record is not None and record.active
+    assert PosterState(tmp_path / "state.json").get("buy_servers", "Denver, CO")

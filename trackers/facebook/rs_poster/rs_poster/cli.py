@@ -15,7 +15,13 @@ except ModuleNotFoundError:  # Python < 3.11
 from .groups import GroupSharer
 from .photo_library import PhotoLibrary, PhotoLibraryError
 from .poster import AdTemplate, Poster, PostingError
-from .session import PosterSession, SessionLockedError, account_lock
+from .session import (
+    AccountRestrictedError,
+    PosterSession,
+    SessionExpiredError,
+    SessionLockedError,
+    account_lock,
+)
 from .state import PacingRules, PosterState
 
 ADS_DIR = Path(__file__).resolve().parents[1] / "ads"
@@ -96,7 +102,13 @@ def cmd_post(args: argparse.Namespace) -> int:
 
     with account_lock(args.lock_file, timeout=args.lock_timeout):
         with make_session(args) as session:
-            poster = Poster(session, library, state, dry_run=args.dry_run)
+            poster = Poster(
+                session,
+                library,
+                state,
+                dry_run=args.dry_run,
+                screenshot_dir=Path(args.ads_dir) / "screenshots",
+            )
             sharer = GroupSharer(poster)
             for ad, city in targets:
                 record = poster.create_listing(ad, city)
@@ -128,7 +140,13 @@ def cmd_renew(args: argparse.Namespace) -> int:
 
     with account_lock(args.lock_file, timeout=args.lock_timeout):
         with make_session(args) as session:
-            poster = Poster(session, library, state, dry_run=args.dry_run)
+            poster = Poster(
+                session,
+                library,
+                state,
+                dry_run=args.dry_run,
+                screenshot_dir=Path(args.ads_dir) / "screenshots",
+            )
             for ad, city in targets:
                 poster.renew(ad, city)
     return 0
@@ -202,6 +220,14 @@ def main(argv: List[str] | None = None) -> int:
     except SessionLockedError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    except SessionExpiredError as e:
+        # The message names the exact rs-session command to run; a traceback
+        # would bury it.
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    except AccountRestrictedError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 4
 
 
 if __name__ == "__main__":

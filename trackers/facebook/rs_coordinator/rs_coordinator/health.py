@@ -11,13 +11,16 @@ stuck CAPTCHA and ops would learn to ignore the channel. Alerts fire on a
 *change* only — `transition_alert` returns text once, when the fleet crosses a
 line, and None for every heartbeat that merely restates it.
 
-Note for whoever adds a background sweeper: nothing here can notice a worker
-that went dead, because a dead worker sends no heartbeat to react to. Detecting
-that means periodically walking `list_workers()` and looking at `liveness`.
+Heartbeat transitions cannot notice a worker that went *dead*, because a dead
+worker sends no heartbeat to react to. That case is `liveness_sweep` below:
+the background loop (background.py) walks `list_workers()` on an interval and
+this module decides, statelessly, which rows have crossed a line since the last
+alert — the `alerted_liveness` column on the row is the memory, so a
+coordinator restart does not re-page ops about a worker it already reported.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .schemas import WorkerState
 from .telegram_notify import escape_markdown
@@ -146,6 +149,39 @@ def enrich(row: Dict[str, Any], now: datetime | None = None) -> Dict[str, Any]:
         "session_days_left": None if days is None else round(days, 2),
         "needs_attention": needs_attention(row, moment),
     }
+
+
+def liveness_sweep(
+    rows: List[Dict[str, Any]], now: datetime | None = None
+) -> List[Tuple[str, str, Optional[str]]]:
+    """Alerts for workers that fell silent, or came back, since the last sweep.
+
+    Returns `(worker_id, alert_text, new_alerted_liveness)` triples; the caller
+    sends the text and persists the marker, so each crossing alerts exactly
+    once. Only DEAD is paged: STALE is one missed cycle, which the jittered
+    search interval produces in normal operation, and UNKNOWN is a deployment
+    that never started — visible in `rsc status`, but there is no "since" to
+    have crossed. Text is MarkdownV2, already escaped.
+    """
+    moment = _moment(now)
+    alerts: List[Tuple[str, str, Optional[str]]] = []
+    for row in rows:
+        worker_id = str(row.get("worker_id") or "")
+        state = liveness(row.get("last_heartbeat_at"), moment)
+        alerted = row.get("alerted_liveness")
+        name = escape_markdown(worker_id)
+        if state == DEAD and alerted != DEAD:
+            beat = escape_markdown(str(row.get("last_heartbeat_at") or "never"))
+            alerts.append(
+                (
+                    worker_id,
+                    f"*Worker {name} stopped reporting*\nLast heartbeat: {beat}",
+                    DEAD,
+                )
+            )
+        elif state == LIVE and alerted == DEAD:
+            alerts.append((worker_id, f"*Worker {name} is reporting again*", None))
+    return alerts
 
 
 def transition_alert(

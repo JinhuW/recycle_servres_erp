@@ -115,9 +115,17 @@ def client(tmp_path, monkeypatch):
     sent = []
     app_module.notifier.send = lambda text: (sent.append(text), True)[1]
 
+    # Alerts are queued in the outbox by the request and delivered by the
+    # background loop, which TestClient never starts. `drain()` runs one
+    # delivery pass synchronously, so tests exercise the whole pipeline.
+    from rs_coordinator.background import Background
+
+    pump = Background(deps_module.get_db, app_module.notifier, app_module.ops_notifier)
+
     test_client = TestClient(app_module.app)
     test_client.sent = sent
     test_client.db = app_module.db
+    test_client.drain = lambda: pump.drain_outbox(deps_module.get_db())
     yield test_client
 
 
@@ -142,13 +150,14 @@ def test_listings_endpoint_requires_valid_token(client):
 def test_same_listing_from_two_workers_alerts_once(client):
     payload = {"worker_id": "denver-1", "listings": [sample_listing()]}
     first = client.post("/api/v1/listings", json=payload, headers=AUTH).json()
-    assert first == {"accepted": 1, "duplicates": 0, "notified": 1}
+    assert first == {"accepted": 1, "duplicates": 0, "queued": 1}
 
     # A second worker whose region overlaps at the border reports the same item.
     payload_two = {"worker_id": "sw-1", "listings": [sample_listing()]}
     second = client.post("/api/v1/listings", json=payload_two, headers=AUTH).json()
-    assert second == {"accepted": 0, "duplicates": 1, "notified": 0}
+    assert second == {"accepted": 0, "duplicates": 1, "queued": 0}
 
+    client.drain()
     assert len(client.sent) == 1
     key = dedupe_key("facebook", "123456789")
     assert client.db.count_sightings(key) == 2
@@ -166,7 +175,8 @@ def test_price_drop_triggers_a_second_alert(client):
         headers=AUTH,
     ).json()
 
-    assert result["notified"] == 1
+    assert result["queued"] == 1
+    client.drain()
     assert "Price drop" in client.sent[-1]
 
     stored = client.db.get_listing(dedupe_key("facebook", "123456789"))
@@ -401,6 +411,7 @@ def test_losing_the_race_is_a_duplicate_not_a_second_alert(client, monkeypatch):
         json={"worker_id": "denver-1", "listings": [sample_listing()]},
         headers=AUTH,
     )
+    client.drain()
     assert len(client.sent) == 1
 
     # Make the *first* read of this request lie, exactly as a stale read does.
@@ -419,7 +430,8 @@ def test_losing_the_race_is_a_duplicate_not_a_second_alert(client, monkeypatch):
         headers=AUTH,
     )
     assert response.status_code == 200
-    assert response.json() == {"accepted": 0, "duplicates": 1, "notified": 0}
+    assert response.json() == {"accepted": 0, "duplicates": 1, "queued": 0}
+    client.drain()
     assert len(client.sent) == 1
 
 
@@ -451,6 +463,7 @@ def test_a_failing_listing_does_not_swallow_the_rest_of_the_batch(client, monkey
     assert (body["accepted"], body["failed"]) == (1, 1)
     # The good listing after the bad one still landed and still alerted.
     assert client.db.get_listing(dedupe_key("facebook", "222"))
+    client.drain()
     assert len(client.sent) == 1
 
 
@@ -527,6 +540,10 @@ def test_every_region_zips_its_city_columns():
         assert len(region["search_city"]) == len(region["city_name"]) == len(region["radius"]), name
 
 
+@pytest.mark.skipif(
+    not os.environ.get("AIMM_PYTHON"),
+    reason="Set AIMM_PYTHON to the interpreter with ai-marketplace-monitor installed",
+)
 def test_a_worker_console_url_survives_generation(tmp_path):
     """fleet.toml's per-worker vnc_url is the operator's way into a stuck
     browser, and it used to produce a config aimm could not load at all."""

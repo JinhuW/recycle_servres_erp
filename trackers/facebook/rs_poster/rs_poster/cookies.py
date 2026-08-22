@@ -15,6 +15,7 @@ token). Without both, the session is not authenticated.
 """
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -250,6 +251,27 @@ def to_storage_state(
     return {"cookies": cookies, "origins": origins or []}
 
 
+def atomic_write_text(path: str | Path, text: str, mode: int = 0o600) -> Path:
+    """Write via a temp file and rename, so an interrupted write cannot truncate.
+
+    Every file this touches is either a live credential or the only copy of the
+    account's state; a half-written one costs a human login with a 2FA code (or
+    a lost ledger) to recreate. The temp file lives in the same directory so the
+    rename is atomic, and gets its permissions before it holds any content.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f".{path.name}.tmp-{os.getpid()}"
+    try:
+        tmp.touch(mode=mode)
+        tmp.chmod(mode)  # touch's mode is filtered through the umask; be exact
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return path
+
+
 def meta_path_for(state_path: str | Path) -> Path:
     """Sidecar holding the environment a session was created in.
 
@@ -301,10 +323,7 @@ def write_session_meta(
         else:
             meta[key] = value
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(meta, indent=2))
-    path.chmod(0o600)
-    return path
+    return atomic_write_text(path, json.dumps(meta, indent=2))
 
 
 def read_session_meta(state_path: str | Path) -> Dict[str, Any]:
@@ -360,10 +379,8 @@ def write_storage_state(
             "in your browser and re-export."
         )
 
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     state = to_storage_state(facebook_cookies, filter_facebook_origins(origins))
-    path.write_text(json.dumps(state, indent=2))
-    # The file is a live credential: keep it owner-readable only.
-    path.chmod(0o600)
+    # The file is a live credential: atomic_write_text keeps it owner-readable
+    # only, and never half-written.
+    atomic_write_text(path, json.dumps(state, indent=2))
     return info

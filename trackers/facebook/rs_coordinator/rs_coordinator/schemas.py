@@ -135,6 +135,45 @@ class ResolveRequest(BaseModel):
     resolved_by: str | None = None
 
 
+# -- messenger --------------------------------------------------------------
+
+
+class MessageIn(BaseModel):
+    """One scraped Messenger message. `direction` is from the account's view:
+    'in' came from the counterpart, 'out' was sent by us (human or bot)."""
+
+    direction: str = "in"
+    sender: str | None = None
+    text: str | None = None
+    sent_at: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class ThreadIn(BaseModel):
+    thread_id: str
+    counterpart: str | None = None
+    listing_title: str | None = None
+    last_message_at: str | None = None
+    messages: List[MessageIn] = Field(default_factory=list)
+
+    model_config = {"extra": "ignore"}
+
+
+class MessagesSyncRequest(BaseModel):
+    worker_id: str | None = None
+    threads: List[ThreadIn] = Field(default_factory=list)
+
+
+class OutboundAck(BaseModel):
+    status: str  # 'sent' or 'failed'
+    error: str | None = None
+
+
+class OperatorReply(BaseModel):
+    text: str
+
+
 # -- health -----------------------------------------------------------------
 
 

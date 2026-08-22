@@ -20,11 +20,121 @@ deployed?" harder to answer.
 
 ### Added
 
+- **The Messenger bridge.** A buyer replying to a buy ad was invisible to every
+  line of code in this tree; now the conversation reaches the same Telegram
+  chat as the listing alerts, and can be answered without opening Facebook.
+  - New package `rs_messenger` (CLI `rs-messenger`): `poll` reads the N most
+    recent Marketplace conversations with the same saved session the poster
+    uses — and the same account lock, so one account never posts and messages
+    at once — reports thread snapshots to the coordinator, then fetches queued
+    replies and types them into the conversation, paced at no more than one
+    send per minute and verified to appear in the pane before being acked.
+    `run` polls on a jittered interval and stops outright on a checkpoint or
+    expired session rather than retrying Facebook. `poll --dry-run` prints
+    exactly what the selectors extracted without touching the coordinator or
+    the composer — the drift check for the least stable DOM this project reads.
+  - Coordinator message store and routes (`/v1/messages/sync`,
+    `/v1/messages/outbound`, `/v1/threads/...`): thread snapshots are
+    deduplicated by message fingerprint the same way listings are by item id,
+    so re-reporting a whole inbox every poll is free; each *new* inbound
+    message becomes a Telegram alert through the durable outbox. Message
+    direction is read from Facebook's own "You sent" markers and defaults to
+    incoming when unsure: a false "in" costs one redundant alert, a false
+    "out" would suppress a real one.
+  - Auto-reply, **off by default** (`RS_AUTOREPLY_ENABLED=1` to arm): at most
+    one templated reply per thread ever, only when no outgoing message exists,
+    never on a thread an operator claimed, capped per rolling day
+    (`RS_AUTOREPLY_MAX_PER_DAY`, default 20) and confined to waking hours
+    (`RS_AUTOREPLY_HOURS`, default 14-04 UTC ≈ 8am-10pm Denver). Every queued
+    auto-reply is announced in the Telegram chat, because silent automation is
+    how a bot talks to a seller for a week before anyone notices.
+  - Operator console: `rsc msg threads / show / reply / claim`. Replying
+    claims the thread, which permanently fences auto-reply out of it.
+- **A durable alert outbox.** Every Telegram alert — listings, Messenger,
+  liveness — is now written to the database in the same request that decided
+  to alert, and delivered by a background sender with exponential backoff
+  (5 s doubling to a 15-minute ceiling, retried until delivered, surviving
+  restarts). Previously the send happened inline and exactly once: a Telegram
+  outage silently cost every match found during it, because the listing was
+  already recorded and classified as a duplicate forever after. `/healthz` and
+  `rsc status` report the undelivered backlog; `notified_at` now means "the
+  alert actually reached Telegram".
+- **Dead-worker detection.** The background loop sweeps worker liveness every
+  ten minutes and pages the ops chat once when a worker crosses into DEAD
+  (six hours of silence), once more when it recovers. Heartbeat-transition
+  alerts could never catch this: a dead worker sends no heartbeat to react to.
 - README sections for version control and releases: what the vendor pin and the
   credential scanner are for, and what `scripts/release.sh` refuses to tag. The
   test command now shows `AIMM_PYTHON`, without which the generated worker
   configs are never validated against the monitor's real loader and a config the
   fleet cannot load passes anyway.
+
+### Changed
+
+- `POST /api/v1/listings` responds with `queued` (alerts handed to the outbox)
+  instead of `notified` (alerts sent inline, which no longer happens in the
+  request). Workers do not parse the field; the tests do.
+- The coordinator opens its database on first use instead of at import.
+  Before, a Postgres unreachable at boot failed the module import and the
+  container restart-looped with nothing answering `/healthz` to say why.
+- The SQLite default path is anchored to the checkout (`<repo>/data/
+  coordinator.db`) instead of the current working directory, which had already
+  produced two divergent databases — one from running `rsc` inside
+  rs_coordinator/, one from the repo root. `RS_COORDINATOR_DB` still wins.
+
+### Fixed
+
+- **The worker treated any 2xx from the coordinator as delivery** and cached
+  the whole batch as NOTIFIED, even when the response body said `failed > 0` —
+  those listings had reached neither storage nor Telegram and were never
+  re-sent. A batch with failures now stays unmarked and is re-sent next scan,
+  which the coordinator's dedupe makes free. (Vendored monitor patch; pin
+  updated.)
+- **A big batch could outlive the worker's own timeout.** The notifier's
+  1 msg/sec pacing ran inside the request handler, so ten new listings held
+  the HTTP request 11+ seconds against the worker's 10 s budget; the worker
+  timed out and retried work that had succeeded. Pacing now happens on the
+  background sender, and ingest returns immediately.
+- **The poster could save a logged-out session over a good one** — the same
+  0.2.0 monitor bug, still live on the poster side. Saves are refused unless
+  the browser is logged in, and every credential/ledger write (session file,
+  sidecar, ads/state.json, `--save-refreshed`) goes via temp file + rename so
+  an interrupted write cannot truncate it.
+- **A publish whose confirmation never appeared was recorded as a live
+  listing**; the next renew then deleted-and-reposted against a phantom. It is
+  now a hard failure with a screenshot, and the attempt still counts against
+  pacing so a retry loop cannot hammer the account.
+- **Renewing an ad could delete the wrong city's listing**: titles are
+  identical across cities and delete clicked the first title match. The match
+  is now verified against the city on the listing card, and deletion is
+  refused when no single candidate verifies (renew already skips the repost on
+  a failed delete, the safe direction).
+- **A mid-run checkpoint or "You're Temporarily Blocked" interstitial**
+  surfaced as an opaque selector timeout. Detected after navigation now and
+  raised as `AccountRestrictedError` (exit 4); an expired session likewise
+  prints its `rs-session` instructions instead of a traceback (exit 3).
+- A hard-killed poster run left a lock file that failed every future run with
+  exit 2. The lock's PID is probed for liveness and a dead holder's lock is
+  broken with a log line naming it.
+- Every poster `page.goto` ran with `timeout=0`, so a Facebook hang was a hung
+  process holding the account lock. Navigations are bounded at 90 s. (The
+  monitor's equivalent hang — ten hours on one item page, measured 2026-08-21 —
+  is fixed in the vendored patch set the pin now points at.)
+- A garbled `totp_digits`/`totp_period` in a session sidecar raised a bare
+  `ValueError` that skipped every `TotpError` handler.
+- Poster failure screenshots landed in whatever cwd the run started from; they
+  default to `<ads-dir>/screenshots` now.
+- A Telegram failure other than a network error (e.g. `BadStatusLine`) escaped
+  the notifier and could 500 the rest of a listing batch; the notifier's
+  contract is now genuinely "returns False, never raises".
+- The 403 for a fleet-token request to the code endpoints named a `rsc worker
+  token` command that does not exist; it now says `rsc mint-token --worker`.
+- A coordinator test read `AIMM_PYTHON` unguarded and failed collection when it
+  was unset — which `release.sh` treats as a failed suite — instead of
+  skipping like its siblings.
+- POSTGRES.md still documented the "CLI uses SQLite while the server uses
+  Postgres" gap that was fixed before 0.2.0; the section would have sent an
+  operator down a wrong path mid-incident.
 
 
 ## [0.2.0] - 2026-08-21

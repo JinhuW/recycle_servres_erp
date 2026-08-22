@@ -7,6 +7,7 @@ group shares we have done today.
 """
 
 import json
+import os
 import random
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -89,7 +90,14 @@ class PosterState:
             "share_log": self.share_log,
             "ads": {key: asdict(record) for key, record in self.ads.items()},
         }
-        self.path.write_text(json.dumps(payload, indent=2))
+        # Temp file + rename: this ledger is the only record of what the
+        # account has posted, and a write interrupted mid-json would lose it.
+        tmp = self.path.parent / f".{self.path.name}.tmp-{os.getpid()}"
+        try:
+            tmp.write_text(json.dumps(payload, indent=2))
+            os.replace(tmp, self.path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # -- pacing ------------------------------------------------------------
 

@@ -31,6 +31,7 @@ from . import selectors as sel
 from . import totp as totp_mod
 from .cookies import (
     CookieError,
+    atomic_write_text,
     describe,
     load_cookie_file,
     meta_path_for,
@@ -408,8 +409,10 @@ def cmd_check(args: argparse.Namespace) -> int:
             # Facebook rotates session cookies; saving after a successful load
             # keeps the stored session fresh. indexed_db=True so the refresh
             # keeps the device state too rather than narrowing the session to
-            # cookies on every check.
-            context.storage_state(path=str(path), indexed_db=True)
+            # cookies on every check. Written atomically: an interrupted save
+            # must not truncate a file that costs a human 2FA login to remake.
+            state = context.storage_state(indexed_db=True)
+            atomic_write_text(path, json.dumps(state, indent=2))
             print("Refreshed stored session.")
         browser.close()
 

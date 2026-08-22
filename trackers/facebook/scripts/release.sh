@@ -126,6 +126,7 @@ run_suite() {
 
 run_suite rs_coordinator "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
 run_suite rs_poster "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
+run_suite rs_messenger "$ROOT/.venv-coordinator/bin/python" -m pytest tests/ -q -p no:cacheprovider
 # test_facebook.py needs pytest-playwright, which the runtime venv does not have.
 run_suite ai-marketplace-monitor "$AIMM_PYTHON" -m pytest tests/ -q \
     --ignore=tests/test_facebook.py -p no:cacheprovider
@@ -140,10 +141,10 @@ fi
 step "bump to $NEW"
 printf '%s\n' "$NEW" > VERSION
 
-# The two packages carry the system version too, so `pip show` and an installed
-# console script agree with the tag instead of reporting a number frozen at
-# whenever the pyproject was written.
-for f in rs_coordinator/pyproject.toml rs_poster/pyproject.toml; do
+# The local packages carry the system version too, so `pip show` and an
+# installed console script agree with the tag instead of reporting a number
+# frozen at whenever the pyproject was written.
+for f in rs_coordinator/pyproject.toml rs_poster/pyproject.toml rs_messenger/pyproject.toml; do
     python3 - "$f" "$NEW" <<'PY'
 import re, sys
 path, new = sys.argv[1], sys.argv[2]
@@ -157,7 +158,8 @@ PY
     echo "  $f"
 done
 
-for f in rs_coordinator/rs_coordinator/__init__.py rs_poster/rs_poster/__init__.py; do
+for f in rs_coordinator/rs_coordinator/__init__.py rs_poster/rs_poster/__init__.py \
+         rs_messenger/rs_messenger/__init__.py; do
     python3 - "$f" "$NEW" <<'PY'
 import re, sys
 path, new = sys.argv[1], sys.argv[2]

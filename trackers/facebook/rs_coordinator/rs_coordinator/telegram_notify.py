@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from typing import Any, Dict
-from urllib import error, parse, request
+from urllib import parse, request
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,11 @@ class TelegramNotifier:
             try:
                 with request.urlopen(url, data=payload, timeout=30) as response:
                     ok = 200 <= response.status < 300
-            except (error.URLError, OSError) as e:
+            except Exception as e:  # noqa: BLE001 - the contract is False, never a raise
+                # Not just URLError/OSError: http.client raises its own family
+                # (BadStatusLine and friends) for a half-broken server, and an
+                # exception escaping here used to take the caller's whole
+                # request down with it.
                 logger.error("Telegram send failed: %s", e)
                 ok = False
             self._last_send = time.time()
@@ -74,6 +78,28 @@ class TelegramNotifier:
         self: "TelegramNotifier", record: Dict[str, Any], verdict: str, worker_id: str
     ) -> bool:
         return self.send(format_listing(record, verdict, worker_id))
+
+
+def format_message(thread: Dict[str, Any], message: Dict[str, Any]) -> str:
+    """A Messenger message as a Telegram alert, with enough context to answer.
+
+    The thread id is included verbatim so an operator can reply from the
+    console (`rsc msg reply <thread-id> "..."`) without opening Facebook.
+    """
+    counterpart = escape_markdown(str(thread.get("counterpart") or "Unknown"))
+    lines = [f"*Messenger — {counterpart}*"]
+    listing = thread.get("listing_title")
+    if listing:
+        lines.append(f"Re: {escape_markdown(str(listing))}")
+    lines.append("")
+    lines.append(escape_markdown(str(message.get("text") or "(no text)")))
+    lines.append("")
+    worker = thread.get("worker_id")
+    tail = f"Thread {escape_markdown(str(thread.get('thread_id') or '?'))}"
+    if worker:
+        tail += f" · worker {escape_markdown(str(worker))}"
+    lines.append(tail)
+    return "\n".join(lines)
 
 
 def format_listing(record: Dict[str, Any], verdict: str, worker_id: str) -> str:

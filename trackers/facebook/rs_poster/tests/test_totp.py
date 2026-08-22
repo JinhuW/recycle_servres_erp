@@ -198,3 +198,14 @@ def test_a_garbled_stored_secret_raises_rather_than_generating_wrong_codes(tmp_p
     meta_path_for(state).write_text(json.dumps({"totp_secret": "not-base32-at-all!"}))
     with pytest.raises(totp.TotpError):
         totp.resolve(state)
+
+
+def test_garbled_sidecar_parameters_raise_totp_error_not_value_error(tmp_path):
+    # totp_digits that will not int() used to escape as a bare ValueError,
+    # skipping every caller's TotpError handler.
+    state = tmp_path / "tx-1.json"
+    meta_path_for(state).write_text(
+        json.dumps({"totp_secret": DEMO_SECRET, "totp_digits": "six"})
+    )
+    with pytest.raises(totp.TotpError, match="unusable"):
+        totp.resolve(state)

@@ -60,7 +60,7 @@ def _resolve(worker: Optional[str], claimed_worker: Optional[str]) -> Tuple[str,
             status_code=403,
             detail="Releasing codes or credentials requires a per-worker token. The "
             "fleet-wide token is shared by every worker, so it cannot prove which "
-            "worker is calling. Mint one with `rsc worker token <worker-id>`.",
+            "worker is calling. Mint one with `rsc mint-token --worker <worker-id>`.",
         )
     if claimed_worker and claimed_worker != worker:
         logger.warning(

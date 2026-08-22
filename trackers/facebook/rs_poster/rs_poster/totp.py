@@ -210,13 +210,18 @@ def from_meta(meta: Dict[str, Any]) -> Optional[TotpConfig]:
     if not secret:
         return None
     config = parse_secret(str(secret))
-    return TotpConfig(
-        secret=config.secret,
-        digits=int(meta.get("totp_digits", config.digits)),
-        period=int(meta.get("totp_period", config.period)),
-        algorithm=str(meta.get("totp_algorithm", config.algorithm)).upper(),
-        label=meta.get("totp_label", config.label),
-    )
+    try:
+        return TotpConfig(
+            secret=config.secret,
+            digits=int(meta.get("totp_digits", config.digits)),
+            period=int(meta.get("totp_period", config.period)),
+            algorithm=str(meta.get("totp_algorithm", config.algorithm)).upper(),
+            label=meta.get("totp_label", config.label),
+        )
+    except (TypeError, ValueError) as e:
+        # A garbled sidecar must surface as a TotpError like every other bad
+        # secret, or it escapes the callers' handlers as a bare ValueError.
+        raise TotpError(f"Sidecar TOTP parameters are unusable: {e}") from e
 
 
 def resolve(

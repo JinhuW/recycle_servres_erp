@@ -19,7 +19,7 @@ from playwright.sync_api import Page
 
 from . import selectors as sel
 from .photo_library import PhotoLibrary
-from .session import PosterSession, human_pause
+from .session import NAV_TIMEOUT_MS, PosterSession, human_pause, raise_if_restricted
 from .state import AdRecord, PosterState, utcnow
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,11 @@ class Poster:
         self.library = library
         self.state = state
         self.dry_run = dry_run
-        self.screenshot_dir = Path(screenshot_dir) if screenshot_dir else Path("screenshots")
+        # Failure evidence must land somewhere findable, not wherever cwd
+        # happened to be; the ads dir is the one place every run shares.
+        self.screenshot_dir = (
+            Path(screenshot_dir) if screenshot_dir else library.root / "screenshots"
+        )
 
     @property
     def page(self: "Poster") -> Page:
@@ -188,8 +192,9 @@ class Poster:
         self._paced(f"create {ad.name}@{city}")
 
         logger.info("Creating '%s' in %s (%d photos)", ad.name, city, len(photos))
-        self.page.goto(sel.CREATE_ITEM_URL, timeout=0)
+        self.page.goto(sel.CREATE_ITEM_URL, timeout=NAV_TIMEOUT_MS)
         self.page.wait_for_load_state("domcontentloaded")
+        raise_if_restricted(self.page, f"opening the create form for {ad.name}@{city}")
         human_pause(2.0, 4.0)
 
         self.page.set_input_files(sel.PHOTO_INPUT, photos)
@@ -211,8 +216,14 @@ class Poster:
             logger.info("Dry run: form filled, not publishing.")
             return None
 
-        self._publish()
-        self.state.record_action()
+        try:
+            self._publish()
+        finally:
+            # The Publish click went to Facebook whether or not the
+            # confirmation was seen, so it counts against pacing either way —
+            # otherwise a crash-loop retries the account with no backoff.
+            self.state.record_action()
+            self.state.save()
 
         record = AdRecord(
             ad_name=ad.name,
@@ -249,23 +260,31 @@ class Poster:
                 self._screenshot("publish-failed")
                 raise PostingError(f"Could not click Publish: {e}") from e
 
-        # The create form's heading disappears once the listing is live.
+        # The create form's heading disappears once the listing is live. A
+        # missed confirmation is a hard failure: returning success here used to
+        # write an active ledger record for a listing that may not exist, which
+        # the next renew would then try to delete (or skip forever).
         try:
             self.page.get_by_role("heading", name=sel.CREATE_FORM_HEADING_RE).first.wait_for(
                 state="detached", timeout=60000
             )
-        except Exception:
-            logger.warning("Publish confirmation not detected; verify the listing manually.")
-            self._screenshot("publish-unconfirmed")
+        except Exception as e:
+            evidence = self._screenshot("publish-unconfirmed")
+            raise PostingError(
+                f"Publish was clicked but the create form never closed; the "
+                f"listing may or may not exist. Check {evidence} and the "
+                f"listings page before retrying. ({e})"
+            ) from e
 
         self.page.wait_for_timeout(3000)
 
-    def delete_listing(self: "Poster", title: str) -> bool:
+    def delete_listing(self: "Poster", title: str, city: str | None = None) -> bool:
         self._paced(f"delete '{title[:40]}'")
-        logger.info("Deleting listing titled '%s'", title[:60])
+        logger.info("Deleting listing titled '%s' (%s)", title[:60], city or "any city")
 
-        self.page.goto(sel.YOUR_LISTINGS_URL, timeout=0)
+        self.page.goto(sel.YOUR_LISTINGS_URL, timeout=NAV_TIMEOUT_MS)
         self.page.wait_for_load_state("domcontentloaded")
+        raise_if_restricted(self.page, f"opening your listings to delete '{title[:40]}'")
         human_pause(2.0, 4.0)
 
         try:
@@ -279,7 +298,11 @@ class Poster:
             return False
 
         try:
-            self.page.get_by_text(title[:60], exact=False).first.click()
+            target = self._matching_listing(title, city)
+            if target is None:
+                self._screenshot("delete-ambiguous")
+                return False
+            target.click()
             human_pause(1.0, 2.0)
             self.page.locator(sel.DELETE_BUTTON).first.click()
             human_pause(1.0, 2.0)
@@ -294,6 +317,56 @@ class Poster:
         self.state.save()
         return True
 
+    def _matching_listing(self: "Poster", title: str, city: str | None) -> Optional[Any]:
+        """The one search result that is this ad in this city, or None.
+
+        The same ad carries the same title in every city, so clicking the first
+        title match can delete a different city's listing — a silent mix-up the
+        location guard in _set_location exists to prevent on the posting side.
+        Each result card shows the listing's city, so verify against the card's
+        own text and refuse rather than guess.
+        """
+        matches = self.page.get_by_text(title[:60], exact=False)
+        count = matches.count()
+        if count == 0:
+            logger.warning("No listing found titled '%s'.", title[:60])
+            return None
+        if city is None:
+            if count > 1:
+                logger.warning(
+                    "%d listings share the title '%s' and no city was given; "
+                    "refusing to guess which to delete.",
+                    count,
+                    title[:60],
+                )
+                return None
+            return matches.first
+
+        city_part = city.split(",")[0].strip().lower()
+        verified = []
+        for index in range(min(count, 8)):
+            candidate = matches.nth(index)
+            try:
+                # The clickable card is the enclosing link; its text carries
+                # both the title and the listing's city.
+                card = candidate.locator("xpath=ancestor-or-self::a[1]").first
+                card_text = (card.inner_text() or "").lower()
+            except Exception:
+                continue
+            if city_part in card_text:
+                verified.append(card)
+        if len(verified) != 1:
+            logger.warning(
+                "Could not single out '%s' in %s: %d title matches, %d with the "
+                "city on the card. Refusing to delete the wrong listing.",
+                title[:60],
+                city,
+                count,
+                len(verified),
+            )
+            return None
+        return verified[0]
+
     def renew(self: "Poster", ad: AdTemplate, city: str) -> Optional[AdRecord]:
         """Delete then repost, which is the only way to bump a listing.
 
@@ -304,7 +377,7 @@ class Poster:
             logger.info("No existing record for %s@%s; creating instead.", ad.name, city)
             return self.create_listing(ad, city)
 
-        if not self.delete_listing(record.title):
+        if not self.delete_listing(record.title, record.city):
             logger.warning(
                 "Could not delete '%s' in %s; skipping repost to avoid a duplicate listing.",
                 ad.name,

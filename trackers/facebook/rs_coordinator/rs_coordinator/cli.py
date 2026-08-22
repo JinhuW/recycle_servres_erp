@@ -132,6 +132,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
         if args.urls:
             print(f"        {listing.get('post_url')}")
+
+    # Alerts owed to Telegram but not yet delivered. Non-zero while Telegram is
+    # merely slow is fine; growing while the fleet is quiet means delivery is
+    # failing and the background loop's log says why.
+    backlog = db.outbox_backlog()
+    if backlog:
+        print(f"\n{backlog} alert(s) queued for Telegram delivery (outbox backlog).")
     return 0
 
 
@@ -580,6 +587,80 @@ def cmd_mint_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_msg_threads(args: argparse.Namespace) -> int:
+    from .db import open_database
+
+    db = open_database()
+    threads = db.list_threads(limit=args.limit)
+    if not threads:
+        print("No Messenger threads have been reported yet.")
+        return 0
+    print(f"{'THREAD':<20} {'FROM':<24} {'LAST MESSAGE':<26} FLAGS")
+    for row in threads:
+        flags = []
+        if row.get("human_claimed"):
+            flags.append("claimed")
+        if row.get("autoreplied_at"):
+            flags.append("auto-replied")
+        print(
+            f"{str(row['thread_id']):<20} {str(row.get('counterpart') or '-'):<24} "
+            f"{str(row.get('last_message_at') or '-'):<26} {', '.join(flags) or '-'}"
+        )
+        if row.get("listing_title"):
+            print(f"    re: {row['listing_title']}")
+    return 0
+
+
+def cmd_msg_show(args: argparse.Namespace) -> int:
+    from .db import open_database
+
+    db = open_database()
+    if db.get_thread(args.thread_id) is None:
+        print(f"error: no thread {args.thread_id}", file=sys.stderr)
+        return 1
+    for message in db.list_messages(args.thread_id):
+        arrow = "<-" if message["direction"] == "in" else "->"
+        stamp = message.get("sent_at") or message.get("created_at") or ""
+        print(f"{arrow} [{stamp}] {message.get('sender') or ''}: {message.get('text') or ''}")
+    return 0
+
+
+def cmd_msg_reply(args: argparse.Namespace) -> int:
+    from .db import open_database
+
+    db = open_database()
+    row = db.get_thread(args.thread_id)
+    if row is None:
+        print(f"error: no thread {args.thread_id}", file=sys.stderr)
+        return 1
+    if not args.text.strip():
+        print("error: reply text is empty", file=sys.stderr)
+        return 1
+    outbound_id = db.enqueue_outbound(
+        args.thread_id, row.get("worker_id"), args.text.strip(), "operator"
+    )
+    # Replying claims the thread: the human is in the conversation now, so the
+    # auto-reply policy must stay out of it.
+    db.set_thread_fields(args.thread_id, {"human_claimed": 1})
+    print(
+        f"queued reply {outbound_id}; worker "
+        f"{row.get('worker_id') or '(unassigned)'} sends it on its next poll"
+    )
+    return 0
+
+
+def cmd_msg_claim(args: argparse.Namespace) -> int:
+    from .db import open_database
+
+    db = open_database()
+    if db.get_thread(args.thread_id) is None:
+        print(f"error: no thread {args.thread_id}", file=sys.stderr)
+        return 1
+    db.set_thread_fields(args.thread_id, {"human_claimed": 1})
+    print("claimed; auto-reply will not touch this thread")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rsc", description="Recycle Servers coordinator")
     # The first question during an incident is "which version is this box
@@ -699,6 +780,30 @@ def build_parser() -> argparse.ArgumentParser:
     token = sub.add_parser("mint-token", help="Print a worker's bearer token")
     token.add_argument("--worker", required=True, help="Worker id the token authenticates")
     token.set_defaults(func=cmd_mint_token)
+
+    msg = sub.add_parser("msg", help="Messenger threads: list, read, reply, claim")
+    msg_sub = msg.add_subparsers(dest="msg_command", required=True)
+
+    m_threads = msg_sub.add_parser("threads", help="List Messenger threads, newest first")
+    m_threads.add_argument("--limit", type=int, default=25)
+    m_threads.set_defaults(func=cmd_msg_threads)
+
+    m_show = msg_sub.add_parser("show", help="Print one thread's messages")
+    m_show.add_argument("thread_id")
+    m_show.set_defaults(func=cmd_msg_show)
+
+    m_reply = msg_sub.add_parser(
+        "reply", help="Queue a reply; the thread's worker sends it on its next poll"
+    )
+    m_reply.add_argument("thread_id")
+    m_reply.add_argument("text")
+    m_reply.set_defaults(func=cmd_msg_reply)
+
+    m_claim = msg_sub.add_parser(
+        "claim", help="Mark a thread human-handled so auto-reply never touches it"
+    )
+    m_claim.add_argument("thread_id")
+    m_claim.set_defaults(func=cmd_msg_claim)
 
     return parser
 

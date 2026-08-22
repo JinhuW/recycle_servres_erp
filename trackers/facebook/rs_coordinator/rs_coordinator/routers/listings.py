@@ -14,6 +14,7 @@ from ..db import utcnow
 from ..dedupe import Verdict, classify, dedupe_key
 from ..deps import require_worker
 from ..schemas import ListingsRequest
+from ..telegram_notify import format_listing
 
 logger = logging.getLogger(__name__)
 
@@ -49,23 +50,26 @@ def healthz(response: Response) -> Dict[str, Any]:
     Answers 503 when the database is unreachable, so the healthcheck fails
     instead of the operator having to notice.
     """
-    # Report the backend actually in use, not the SQLite path constant: during
-    # an incident "db: /data/coordinator.db" on a Postgres deployment sends the
-    # operator looking for a file that is not the source of truth.
-    postgres = type(deps.db).__name__ == "PostgresDatabase"
-    body: Dict[str, Any] = {
-        "status": "ok",
-        "telegram": deps.notifier.enabled,
-        "backend": "postgres" if postgres else "sqlite",
-        "db": "(remote postgres)" if postgres else deps.DB_PATH,
-    }
+    body: Dict[str, Any] = {"status": "ok", "telegram": deps.notifier.enabled}
 
     try:
-        # The cheapest statement that proves a usable connection: it takes one
-        # from the pool, round-trips it, and returns it.
-        with deps.db.cursor() as cur:
+        # The open itself is lazy and can fail (unreachable Postgres at boot);
+        # after that, the cheapest statement that proves a usable connection:
+        # it takes one from the pool, round-trips it, and returns it.
+        db = deps.db
+        # Report the backend actually in use, not the SQLite path constant:
+        # during an incident "db: /data/coordinator.db" on a Postgres
+        # deployment sends the operator looking for a file that is not the
+        # source of truth.
+        postgres = type(db).__name__ == "PostgresDatabase"
+        body["backend"] = "postgres" if postgres else "sqlite"
+        body["db"] = "(remote postgres)" if postgres else db.path
+        with db.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
+        # Alerts waiting on Telegram. A growing number with a live database
+        # means the *other* half of the job is failing, and quietly.
+        body["alert_backlog"] = db.outbox_backlog()
     except Exception as e:
         logger.exception("healthz could not reach the database")
         response.status_code = 503
@@ -87,12 +91,26 @@ def report_listings(
     db = deps.db
     accepted = 0
     duplicates = 0
-    notified = 0
+    queued = 0
     failed = 0
 
     for listing in payload.listings:
         try:
             verdict = _ingest_one(db, listing, worker_id)
+
+            if verdict.should_notify:
+                # Enqueued, not sent: the background loop (background.py) owns
+                # delivery, so a Telegram outage delays this alert instead of
+                # losing it, and a big batch does not hold this request behind
+                # the notifier's 1 msg/sec pacing past the worker's timeout.
+                key = dedupe_key(listing.marketplace, listing.id)
+                stored = db.get_listing(key) or listing.model_dump()
+                db.enqueue_alert(
+                    f"listing_{verdict.value}",
+                    format_listing(stored, verdict.value, worker_id),
+                    dedupe_key=key,
+                )
+                queued += 1
         except Exception:
             # One malformed or unlucky listing must not cost the worker the rest
             # of its batch: everything after it in the loop would go unrecorded
@@ -106,17 +124,8 @@ def report_listings(
         else:
             accepted += 1
 
-        if verdict.should_notify:
-            key = dedupe_key(listing.marketplace, listing.id)
-            stored = db.get_listing(key) or listing.model_dump()
-            if deps.notifier.send_listing(stored, verdict.value, worker_id):
-                db.update_listing(key, {"notified_at": utcnow()})
-                notified += 1
-            else:
-                logger.warning("Telegram alert failed for listing %s", listing.id)
-
     db.upsert_worker(worker_id, status="ok", heartbeat=True, saw_listing=True)
-    result = {"accepted": accepted, "duplicates": duplicates, "notified": notified}
+    result = {"accepted": accepted, "duplicates": duplicates, "queued": queued}
     if failed:
         result["failed"] = failed
     return result

@@ -1,12 +1,16 @@
 # facebook_tracker
 
-Facebook Marketplace tooling for Recycle Servers LLC. Two halves:
+Facebook Marketplace tooling for Recycle Servers LLC. Three halves:
 
 - **Monitor** — a fleet of worker VMs, each pinned to one region, searching
   Marketplace for used server hardware, filtering with an LLM, and reporting
   matches to a central coordinator that dedupes and alerts one Telegram chat.
 - **Poster** — publishes "we buy your used servers" ads with photos, and keeps
   them near the top of the feed by reposting on a schedule.
+- **Messenger** — bridges each account's Marketplace inbox to the same
+  Telegram chat, and (only when explicitly armed) sends one templated
+  auto-reply per new conversation so a seller is never left hanging while a
+  human gets to the alert.
 
 Python (the two upstream projects it builds on are Python), unlike the
 TypeScript trackers elsewhere in this workspace.
@@ -19,6 +23,7 @@ TypeScript trackers elsewhere in this workspace.
 | `facebook-marketplace-bot/` | Reference only. Stale Selenium; never run it. Its posting flow was reimplemented in `rs_poster`. |
 | `rs_coordinator/` | Coordinator service (FastAPI + SQLite) and the config sharding generator. CLI: `rsc`. |
 | `rs_poster/` | Buy-ad poster (Playwright). CLIs: `rs-poster`, and `rs-session` for password-free Facebook sessions. |
+| `rs_messenger/` | Marketplace inbox bridge (Playwright). CLI: `rs-messenger`. Reports conversations to the coordinator, which routes them to Telegram and queues (optional, default-off) auto-replies for it to send. |
 | `configs/` | `master.toml` (what the fleet searches), `fleet.toml` (which VM searches where), generated per-worker shards. |
 | `deploy/` | Docker Compose files and the per-node bringup checklist. |
 | `scripts/` | Deploy, measurement probes, and the release/vendor/secret checks. |
@@ -177,7 +182,8 @@ the only mechanism that works.
 
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
-pip install -e ./ai-marketplace-monitor -e ./rs_coordinator -e ./rs_poster
+pip install -e ./ai-marketplace-monitor -e ./rs_coordinator -e ./rs_poster \
+    -e ./rs_messenger
 playwright install chromium
 
 cp configs/secrets.env.example configs/secrets.env   # then fill it in
@@ -304,14 +310,58 @@ rs-poster renew                    # reposts only what is due
 rs-poster status
 ```
 
+Messenger:
+
+```bash
+rs-messenger poll --dry-run        # print what the selectors extract; touches nothing
+rs-messenger poll                  # one pass: read inbox, sync, send queued replies
+rs-messenger run --interval 300    # the same, on a jittered loop
+rs-messenger status                # offline: config, session, lock
+```
+
 Coordinator:
 
 ```bash
 rsc gen-configs      # regenerate worker shards after editing configs
 rsc serve            # run the API locally
-rsc status           # fleet health + recent finds
+rsc status           # fleet health + recent finds + alert backlog
 rsc test-telegram
+rsc msg threads      # Messenger conversations the fleet has reported
+rsc msg show <thread-id>
+rsc msg reply <thread-id> "On our way — does Saturday work?"
+rsc msg claim <thread-id>          # fence auto-reply out of a conversation
 ```
+
+### Messenger routing and auto-reply
+
+`rs-messenger` shares the poster's saved session **and its account lock**, so
+one Facebook account never posts and messages at the same time. Each poll it
+re-reports the N most recent conversations wholesale; the coordinator dedupes
+by message fingerprint (the inbox equivalent of the listing dedupe key), so
+re-reporting is free and only genuinely new inbound messages reach Telegram.
+Alerts ride the same durable outbox as listing alerts: a Telegram outage
+delays them, it cannot lose them.
+
+Auto-reply is **off until you set `RS_AUTOREPLY_ENABLED=1`** on the
+coordinator, and stays deliberately timid once on:
+
+- at most one automated reply per thread, ever — its only job is to keep a
+  seller warm until a human reads the alert;
+- never on a thread that already has *any* outgoing message, and never on one
+  an operator claimed (`rsc msg claim`, or implicitly by `rsc msg reply`);
+- capped fleet-wide per rolling day (`RS_AUTOREPLY_MAX_PER_DAY`, default 20)
+  and confined to waking hours (`RS_AUTOREPLY_HOURS`, default `14-4` UTC —
+  roughly 8am-10pm Denver);
+- every queued auto-reply is announced in the Telegram chat, so the bot never
+  talks to a seller behind the operator's back. The template
+  (`RS_AUTOREPLY_TEMPLATE`) answers honestly and asks for part numbers,
+  quantities and photos — the things a human needs to quote.
+
+The reply itself is typed by `rs-messenger` on its next poll, paced at no more
+than one send per minute, and acked back only after the text is seen in the
+conversation pane. Messenger's DOM is the least stable thing this project
+reads; `rs-messenger poll --dry-run` prints exactly what the selectors
+extracted and is the first thing to run when the bridge goes quiet.
 
 ## Tuning what gets found
 
@@ -475,7 +525,8 @@ most expensive way this project can fail.
 
 ```bash
 AIMM_PYTHON=$PWD/.venv-aimm/bin/python \
-    .venv-coordinator/bin/python -m pytest rs_coordinator/tests rs_poster/tests
+    .venv-coordinator/bin/python -m pytest \
+    rs_coordinator/tests rs_poster/tests rs_messenger/tests
 
 # The vendored monitor has its own venv. test_facebook.py needs
 # pytest-playwright, which the runtime environment does not install.

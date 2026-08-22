@@ -283,6 +283,187 @@ class PostgresDatabase:
             )
             return int(cur.fetchone()["n"])
 
+    # -- alert outbox ------------------------------------------------------
+
+    def enqueue_alert(
+        self: "PostgresDatabase", kind: str, text: str, dedupe_key: str | None = None
+    ) -> int:
+        now = utcnow()
+        with self.cursor() as cur:
+            # No `lastrowid` in Postgres — ask for the generated key back.
+            cur.execute(
+                "INSERT INTO outbox (kind, dedupe_key, text, created_at, next_attempt_at) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (kind, dedupe_key, text, now, now),
+            )
+            return int(cur.fetchone()["id"])
+
+    def due_alerts(
+        self: "PostgresDatabase", now: str | None = None, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM outbox WHERE delivered_at IS NULL AND next_attempt_at <= %s "
+                "ORDER BY id LIMIT %s",
+                (now or utcnow(), limit),
+            )
+            return _rows(cur.fetchall())
+
+    def mark_alert_delivered(self: "PostgresDatabase", alert_id: int) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE outbox SET delivered_at = %s, last_error = NULL WHERE id = %s",
+                (utcnow(), alert_id),
+            )
+
+    def mark_alert_failed(
+        self: "PostgresDatabase", alert_id: int, error: str, next_attempt_at: str
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE outbox SET attempts = attempts + 1, last_error = %s, "
+                "next_attempt_at = %s WHERE id = %s",
+                (error, next_attempt_at, alert_id),
+            )
+
+    def outbox_backlog(self: "PostgresDatabase") -> int:
+        with self.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM outbox WHERE delivered_at IS NULL")
+            return int(cur.fetchone()["n"])
+
+    # -- messenger threads / messages --------------------------------------
+
+    def upsert_thread(self: "PostgresDatabase", thread_id: str, fields: Dict[str, Any]) -> None:
+        record = {"thread_id": thread_id, "created_at": utcnow(), **fields}
+        columns = ", ".join(record)
+        placeholders = ", ".join(["%s"] * len(record))
+        assignments = ", ".join(
+            f"{name} = COALESCE(excluded.{name}, threads.{name})" for name in fields
+        )
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO threads ({columns}) VALUES ({placeholders}) "
+                f"ON CONFLICT(thread_id) DO UPDATE SET {assignments}",
+                tuple(record.values()),
+            )
+
+    def get_thread(self: "PostgresDatabase", thread_id: str) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads WHERE thread_id = %s", (thread_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def list_threads(self: "PostgresDatabase", limit: int = 100) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads ORDER BY last_message_at DESC LIMIT %s", (limit,))
+            return _rows(cur.fetchall())
+
+    def set_thread_fields(
+        self: "PostgresDatabase", thread_id: str, fields: Dict[str, Any]
+    ) -> None:
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = %({name})s" for name in fields)
+        with self.cursor() as cur:
+            cur.execute(
+                f"UPDATE threads SET {assignments} WHERE thread_id = %(thread_id)s",
+                {**fields, "thread_id": thread_id},
+            )
+
+    def claim_message(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
+        """See `Database.claim_message`. True only for the caller that inserted."""
+        record = {"created_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(f"%({name})s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO messages ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT (fingerprint) DO NOTHING",
+                record,
+            )
+            return cur.rowcount > 0
+
+    def list_messages(
+        self: "PostgresDatabase", thread_id: str, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM messages WHERE thread_id = %s ORDER BY created_at, fingerprint "
+                "LIMIT %s",
+                (thread_id, limit),
+            )
+            return _rows(cur.fetchall())
+
+    def count_messages(
+        self: "PostgresDatabase", thread_id: str, direction: str | None = None
+    ) -> int:
+        sql = "SELECT COUNT(*) AS n FROM messages WHERE thread_id = %s"
+        params: List[Any] = [thread_id]
+        if direction:
+            sql += " AND direction = %s"
+            params.append(direction)
+        with self.cursor() as cur:
+            cur.execute(sql, params)
+            return int(cur.fetchone()["n"])
+
+    # -- outbound replies --------------------------------------------------
+
+    def enqueue_outbound(
+        self: "PostgresDatabase",
+        thread_id: str,
+        worker_id: str | None,
+        text: str,
+        origin: str,
+    ) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO outbound_messages (thread_id, worker_id, text, origin, "
+                "status, created_at) VALUES (%s, %s, %s, %s, 'queued', %s) RETURNING id",
+                (thread_id, worker_id, text, origin, utcnow()),
+            )
+            return int(cur.fetchone()["id"])
+
+    def pending_outbound(
+        self: "PostgresDatabase", worker_id: str | None = None, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM outbound_messages WHERE status = 'queued'"
+        params: List[Any] = []
+        if worker_id:
+            sql += " AND (worker_id = %s OR worker_id IS NULL)"
+            params.append(worker_id)
+        sql += " ORDER BY id LIMIT %s"
+        params.append(limit)
+        with self.cursor() as cur:
+            cur.execute(sql, params)
+            return _rows(cur.fetchall())
+
+    def get_outbound(self: "PostgresDatabase", outbound_id: int) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM outbound_messages WHERE id = %s", (outbound_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def mark_outbound(
+        self: "PostgresDatabase", outbound_id: int, status: str, error: str | None = None
+    ) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "UPDATE outbound_messages SET status = %s, last_error = %s, "
+                "attempts = attempts + 1, "
+                "sent_at = CASE WHEN %s = 'sent' THEN %s ELSE sent_at END "
+                "WHERE id = %s",
+                (status, error, status, utcnow(), outbound_id),
+            )
+
+    def count_autoreplies_since(self: "PostgresDatabase", since: str) -> int:
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM outbound_messages "
+                "WHERE origin = 'autoreply' AND created_at >= %s",
+                (since,),
+            )
+            return int(cur.fetchone()["n"])
+
     # -- workers -----------------------------------------------------------
 
     def upsert_worker(
