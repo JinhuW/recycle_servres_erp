@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import autoreply, deps
+from ..ai import item_count_from_ai
 from ..db import utcnow
 from ..dedupe import message_fingerprint
 from ..deps import require_admin, require_worker
@@ -94,8 +95,13 @@ def _ingest_thread(
         fresh_inbound += 1
         row = db.get_thread(thread.thread_id) or {"thread_id": thread.thread_id}
         # Through the outbox, like every alert: a Telegram outage delays the
-        # message notification, it does not lose it.
-        db.enqueue_alert("message_in", format_message(row, record))
+        # message notification, it does not lose it. The item count is the
+        # AI's read of the seller's text; None (no key, outage, no quantity
+        # stated) just leaves the alert without a count.
+        db.enqueue_alert(
+            "message_in",
+            format_message(row, record, item_count=item_count_from_ai(record["text"])),
+        )
 
     replies = 0
     if fresh_inbound:

@@ -80,7 +80,9 @@ class TelegramNotifier:
         return self.send(format_listing(record, verdict, worker_id))
 
 
-def format_message(thread: Dict[str, Any], message: Dict[str, Any]) -> str:
+def format_message(
+    thread: Dict[str, Any], message: Dict[str, Any], item_count: str | None = None
+) -> str:
     """A Messenger message as a Telegram alert, with enough context to answer.
 
     The thread id is included verbatim so an operator can reply from the
@@ -98,6 +100,8 @@ def format_message(thread: Dict[str, Any], message: Dict[str, Any]) -> str:
     tail = f"Thread {escape_markdown(str(thread.get('thread_id') or '?'))}"
     if worker:
         tail += f" · worker {escape_markdown(str(worker))}"
+    if item_count:
+        tail += f" · count: {escape_markdown(item_count)}"
     lines.append(tail)
     return "\n".join(lines)
 

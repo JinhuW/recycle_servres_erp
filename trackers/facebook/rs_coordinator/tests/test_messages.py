@@ -7,6 +7,7 @@ thread ever, humans always win.
 """
 
 import importlib
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -27,6 +28,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("RS_AUTOREPLY_ENABLED", raising=False)
+    # Without a key the AI item count is skipped — tests never call OpenRouter.
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
     import rs_coordinator.app as app_module
     import rs_coordinator.deps as deps_module
@@ -83,7 +86,10 @@ def test_sync_requires_a_token(client):
     assert response.status_code == 401
 
 
-def test_sync_stores_the_thread_and_routes_the_message_to_telegram(client):
+def test_sync_stores_the_thread_and_routes_the_message_to_telegram(client, monkeypatch):
+    monkeypatch.setattr(
+        "rs_coordinator.routers.messages.item_count_from_ai", lambda text: "32 sticks"
+    )
     body = sync(client, snapshot()).json()
     assert body == {"threads": 1, "new_messages": 1, "queued_replies": 0}
 
@@ -95,6 +101,13 @@ def test_sync_stores_the_thread_and_routes_the_message_to_telegram(client):
     (alert,) = outbox_rows(client, kind="message_in")
     assert "Jamie Seller" in alert["text"]
     assert "DDR4 ECC" in alert["text"]
+    assert "count: 32 sticks" in alert["text"]
+
+
+def test_alert_omits_the_count_when_the_ai_has_none(client):
+    sync(client, snapshot())
+    (alert,) = outbox_rows(client, kind="message_in")
+    assert "count:" not in alert["text"]
 
 
 def test_resyncing_the_same_thread_is_free(client):
@@ -207,6 +220,55 @@ def test_policy_from_env_defaults_off_and_survives_garbage():
     assert policy.enabled is True
     assert policy.hours == (14, 4)
     assert policy.max_per_day == 20
+
+
+class _FakeAIResponse:
+    def __init__(self, content):
+        self._content = content
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps({"choices": [{"message": {"content": self._content}}]}).encode()
+
+
+def test_item_count_from_ai_parses_the_answer(monkeypatch):
+    from rs_coordinator import ai
+
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["url"] = req.full_url
+        seen["body"] = json.loads(req.data)
+        return _FakeAIResponse("  32 sticks \n")
+
+    monkeypatch.setattr(ai.request, "urlopen", fake_urlopen)
+    env = {"OPENROUTER_API_KEY": "test-key"}
+    assert ai.item_count_from_ai("I have 32 sticks of DDR4", env=env) == "32 sticks"
+    assert seen["url"] == ai.OPENROUTER_URL
+    assert seen["body"]["model"] == ai.DEFAULT_MODEL
+
+    monkeypatch.setattr(ai.request, "urlopen", lambda *a, **k: _FakeAIResponse("None."))
+    assert ai.item_count_from_ai("still interested?", env=env) is None
+
+
+def test_item_count_from_ai_fails_soft(monkeypatch):
+    from rs_coordinator import ai
+
+    def boom(*args, **kwargs):
+        raise OSError("openrouter is down")
+
+    monkeypatch.setattr(ai.request, "urlopen", boom)
+    env = {"OPENROUTER_API_KEY": "test-key"}
+    # An outage means no count, never an exception.
+    assert ai.item_count_from_ai("32 sticks here", env=env) is None
+    # No key and no text never reach the network (urlopen would raise).
+    assert ai.item_count_from_ai("32 sticks here", env={}) is None
+    assert ai.item_count_from_ai(None, env=env) is None
 
 
 def test_message_fingerprint_distinguishes_what_matters():
