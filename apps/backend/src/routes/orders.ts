@@ -1442,6 +1442,15 @@ orders.post('/draft', async (c) => {
     if (catErr) return c.json({ error: catErr }, 400);
   }
 
+  // A client that sends warehouseId at all must name a real warehouse — the
+  // label wizard once sent "" before a destination was picked, which sailed
+  // past `?? null` into the FK and 500ed.
+  const warehouseId = body?.warehouseId ?? null;
+  if (warehouseId !== null) {
+    const wh = await sql<{ id: string }[]>`SELECT id FROM warehouses WHERE id = ${warehouseId} LIMIT 1`;
+    if (!wh.length) return c.json({ error: 'Unknown warehouse' }, 400);
+  }
+
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   await sql.begin(async (tx) => {
@@ -1450,7 +1459,7 @@ orders.post('/draft', async (c) => {
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
         ${newId}, ${u.id}, ${body?.category ?? 'Mixed'},
-        ${body?.warehouseId ?? null}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
+        ${warehouseId}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
         ${null}, 'draft'
       )
     `;
