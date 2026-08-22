@@ -16,7 +16,7 @@ from urllib import request
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "google/gemini-2.5-flash"
+DEFAULT_MODEL = "openai/gpt-5.6-luna"
 
 _COUNT_PROMPT = (
     "A seller sent this Facebook Marketplace message to a used-server-hardware "

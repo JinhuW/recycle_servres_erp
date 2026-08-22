@@ -24,7 +24,7 @@ storage_state_path = "configs/sessions/personal.json"
 provider = "openai"
 base_url = "https://openrouter.ai/api/v1"
 api_key = "${OPENROUTER_API_KEY}"
-model = "google/gemini-2.5-flash"
+model = "openai/gpt-5.6-luna"
 timeout = 60
 
 # --------------------------------------------------------------------------
@@ -342,9 +342,10 @@ rating_prompt = """Rate this listing from 1 to 5:
 3 - Maybe: a qualifying component type but borderline quantity (around 3), unclear condition, or a memory lot whose generation cannot be determined from the text.
 4 - Good: a clear bulk lot of 3+ DDR4/DDR5 memory modules (server, desktop or laptop) or 3+ enterprise SSDs, with usable details.
 5 - Strong: a large or high-value bulk lot (many units, high capacity, or priced well below market). "Large" and "high-value" describe the lot, never a single unit.
-Conclude with:
+Conclude with two lines:
+"Count: <quantity>"
 "Rating <1-5>: <summary>"
-where <summary> names the component type, the unit count, and the price (max 25 words). Always state the count explicitly, e.g. "8x 32GB DDR4 ECC RDIMM"."""
+where <quantity> is the unit count you worked out from the text, as a short phrase (e.g. "8 sticks", "24 SSDs"), or "unknown" when the text gives nothing to count; and <summary> names the component type, the unit count, and the price (max 25 words). Always state the count explicitly, e.g. "8x 32GB DDR4 ECC RDIMM"."""
 
 # --------------------------------------------------------------------------
 # Regions — each worker VM is pinned to exactly one of these.

@@ -20,6 +20,18 @@ deployed?" harder to answer.
 
 ### Changed
 
+- **Listing alerts show the AI's unit count.** The rating prompt now asks the
+  model to state the quantity it worked out on its own `Count:` line, and the
+  compact alert prints it between the price and the link (`count: 8 sticks`).
+  When the text gives nothing to count, the alert is unchanged. The Messenger
+  alert's count (rs_coordinator) is unaffected.
+- **The AI model is now `openai/gpt-5.6-luna`** (was `google/gemini-2.5-flash`)
+  for both the monitor's listing evaluation (`configs/master.toml`) and the
+  coordinator's Messenger item count (`RS_AI_MODEL` default) — the budget tier
+  of the current GPT line on OpenRouter, ~10x cheaper on output than its full
+  siblings. After pulling this, regenerate configs (`sh
+  deploy/make-homelab-config.sh`) or just deploy.
+
 - **DDR3 and DDR2 memory are no longer bought.** The AI filter now accepts
   DDR4/DDR5 lots only (server RDIMM/LRDIMM, desktop DIMMs and laptop SODIMMs
   all still qualify); DDR3/DDR2-only lots are rejected, and a mixed-generation
