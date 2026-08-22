@@ -7,7 +7,9 @@ export type Carrier = 'UPS' | 'FedEx' | 'USPS';
 export const CARRIERS: Carrier[] = ['UPS', 'FedEx', 'USPS'];
 
 export function normalizeTracking(raw: string): string {
-  return raw.replace(/[\s-]+/g, '').toUpperCase();
+  // \s misses the zero-width/bidi characters chat apps and Outlook wrap
+  // pasted numbers in — they'd silently defeat every shape rule below.
+  return raw.replace(/[-\s\u200B-\u200F\u2060\uFEFF]+/g, '').toUpperCase();
 }
 
 export function detectCarriers(raw: string): Carrier[] {

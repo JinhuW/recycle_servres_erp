@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { deleteShipment, issueSellerLink, listShipments, voidShipment } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -44,9 +44,20 @@ export function ShippingPanel({ orderId, canEdit, onMutated, orderLifecycle }: P
   }, [orderId]);
   useEffect(() => { reload(); }, [reload]);
 
+  const copyTimer = useRef<number | null>(null);
+  const linkTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current != null) clearTimeout(copyTimer.current);
+    if (linkTimer.current != null) clearTimeout(linkTimer.current);
+  }, []);
+
   const copyTracking = (tn: string) => {
     navigator.clipboard?.writeText(tn)
-      .then(() => { setCopied(tn); setTimeout(() => setCopied(null), 1600); })
+      .then(() => {
+        setCopied(tn);
+        if (copyTimer.current != null) clearTimeout(copyTimer.current);
+        copyTimer.current = window.setTimeout(() => setCopied(null), 1600);
+      })
       .catch(() => { /* the visible number is selectable */ });
   };
 
@@ -78,7 +89,11 @@ export function ShippingPanel({ orderId, canEdit, onMutated, orderLifecycle }: P
 
   const copyLink = (tok: string) => {
     navigator.clipboard?.writeText(sellerUrl(tok))
-      .then(() => { setCopiedLink(tok); setTimeout(() => setCopiedLink(null), 1800); })
+      .then(() => {
+        setCopiedLink(tok);
+        if (linkTimer.current != null) clearTimeout(linkTimer.current);
+        linkTimer.current = window.setTimeout(() => setCopiedLink(null), 1800);
+      })
       .catch(() => { /* the link is also shown in the row title attr */ });
   };
 

@@ -123,10 +123,13 @@ export async function createPoFromPackage(pkg: TrackedPackage): Promise<{ orderI
 }
 
 /** Carrier public tracking pages — used when the provider gave us no URL. */
-export function carrierTrackingUrl(carrier: Carrier, trackingNumber: string): string {
+export function carrierTrackingUrl(carrier: Carrier, trackingNumber: string): string | null {
   switch (carrier) {
     case 'UPS': return `https://www.ups.com/track?tracknum=${encodeURIComponent(trackingNumber)}`;
     case 'FedEx': return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`;
     case 'USPS': return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(trackingNumber)}`;
+    // The type says this can't happen; the data (a server row, a stale mock)
+    // can — an <a> with no href is worse than no link.
+    default: return null;
   }
 }

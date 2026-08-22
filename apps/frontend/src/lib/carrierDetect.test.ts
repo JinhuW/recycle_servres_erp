@@ -5,6 +5,11 @@ describe('normalizeTracking', () => {
   it('strips spaces and hyphens and uppercases', () => {
     expect(normalizeTracking(' 1z 999-aa1 0123 456 784 ')).toBe('1Z999AA10123456784');
   });
+
+  it('strips zero-width and bidi characters from chat-app pastes', () => {
+    expect(normalizeTracking('1z\u200B999\u200Faa1\u2060 0123\u200E456 784\uFEFF'))
+      .toBe('1Z999AA10123456784');
+  });
 });
 
 describe('detectCarriers', () => {
@@ -38,6 +43,19 @@ describe('detectCarriers', () => {
 
   it('reports both FedEx and USPS for 96-prefixed long digit runs', () => {
     expect(detectCarriers('9612345678901234567890')).toEqual(['FedEx', 'USPS']);
+  });
+
+  it('keeps the FedEx-first order the add-label form relies on, at the 20-digit boundary', () => {
+    expect(detectCarriers('96123456789012345678')).toEqual(['FedEx', 'USPS']);
+  });
+
+  it('detects USPS from a lowercase international suffix', () => {
+    expect(detectCarriers('ec123456789us')).toEqual(['USPS']);
+  });
+
+  it('rejects 9-prefixed digit runs outside the 20–22 length window', () => {
+    expect(detectCarriers('9'.repeat(19))).toEqual([]);
+    expect(detectCarriers('9'.repeat(23))).toEqual([]);
   });
 
   it('returns nothing for incomplete input', () => {
