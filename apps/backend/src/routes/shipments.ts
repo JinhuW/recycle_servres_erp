@@ -49,6 +49,8 @@ export type ShipmentRow = {
   rate_currency: string;
   delivery_days: number | null;
   provider: string;
+  provider_shipment_id?: string | null;
+  quotes?: RateQuote[] | null;
   tracking_number: string | null;
   tracking_url: string | null;
   label_delivery_url: string | null;
@@ -75,7 +77,7 @@ const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql`
   weight_oz::float AS weight_oz, length_in::float AS length_in,
   width_in::float AS width_in, height_in::float AS height_in,
   carrier, service, rate_amount::float AS rate_amount, rate_currency, delivery_days,
-  provider, tracking_number, tracking_url, label_delivery_url,
+  provider, provider_shipment_id, quotes, tracking_number, tracking_url, label_delivery_url,
   label_cost::float AS label_cost, fees_applied,
   tracking_status, tracking_eta, last_tracked_at, seller_token, created_by, created_at
 `;
@@ -416,7 +418,13 @@ shipments.post('/:orderId/shipments/:sid/rates', async (c) => {
     return c.json({ error: 'The shipping provider could not return rates — try again' }, 502);
   }
 
-  await sql`UPDATE shipments SET status = 'quoted' WHERE id = ${sid} AND status IN ('draft','quoted')`;
+  // The buy handler resolves the picked rate_id against these stored quotes —
+  // the provider's buy response doesn't echo carrier/service, and a rate_id
+  // from another shipment must not be replayable here.
+  await sql`
+    UPDATE shipments SET status = 'quoted', quotes = ${sql.json(rates as never)}
+    WHERE id = ${sid} AND status IN ('draft','quoted')
+  `;
   return c.json({ rates });
 });
 
@@ -455,13 +463,21 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   const shipTo = await loadWarehouseShipTo(sql, order.warehouse_id);
   if ('error' in shipTo) return c.json({ error: shipTo.error }, 409);
 
+  // The rate must be one this shipment was quoted: the provider's buy
+  // response doesn't echo carrier/service (the quote carries them), and a
+  // rate_id minted for another shipment must not be replayable here.
+  const quote = (shipment.quotes ?? []).find((q) => q.rateId === rateId) ?? null;
+  if (!quote) return c.json({ error: 'That rate is no longer available — refresh rates' }, 409);
+
   // Charge → upload → record, in that order: the two non-transactional steps
   // come first, and once money has moved nothing below is allowed to turn the
   // response into an error the client would retry into a double-charge.
+  // The shipment id doubles as the provider-side idempotency key
+  // (platform_uk_id): a retried purchase returns the existing label.
   const client = pickShippingClient(c.env);
   let label;
   try {
-    label = await client.buyByRateId(rateId);
+    label = await client.buyByRateId(rateId, { platformUkId: sid, quote });
   } catch (err) {
     console.error('[shipping] label purchase failed', err);
     return c.json({ error: 'The shipping provider rejected the purchase — refresh rates and try again' }, 502);
@@ -474,8 +490,8 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   try {
     upload = await uploadAttachment(
       c.env,
-      new File([label.labelPdf as Uint8Array<ArrayBuffer>], `label-${label.trackingNumber}.pdf`, {
-        type: 'application/pdf',
+      new File([label.labelData as Uint8Array<ArrayBuffer>], `label-${label.trackingNumber}.${label.labelExt}`, {
+        type: label.labelContentType,
       }),
       `orders/${orderId}/shipments`,
     );
@@ -566,7 +582,10 @@ shipments.post('/:orderId/shipments/:sid/void', async (c) => {
   }
 
   const client = pickShippingClient(c.env);
-  const result = await client.voidLabel(shipment.tracking_number);
+  const result = await client.voidLabel({
+    shipmentNo: shipment.provider_shipment_id ?? null,
+    platformUkId: sid,
+  });
   if (!result.ok) {
     return c.json({ error: result.message ?? 'The carrier refused to void this label' }, 409);
   }
