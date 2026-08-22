@@ -477,6 +477,10 @@ export function LineDrawer({
             {cat === 'HDD' && <HddFields line={line} set={set} />}
             {cat === 'Other' && <OtherFields line={line} set={set} />}
 
+            {/* SSDs are received as anonymous bulk lots — nobody keys in
+                per-drive serials at purchase, so the field only invited
+                count-mismatch errors. */}
+            {cat !== 'SSD' && (
             <div className="field">
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
@@ -506,6 +510,7 @@ export function LineDrawer({
                   : t('serialNumbersHint')}
               </div>
             </div>
+            )}
 
             <div style={{
               display: 'grid',
