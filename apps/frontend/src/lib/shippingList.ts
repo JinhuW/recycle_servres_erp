@@ -29,7 +29,14 @@ export function fmtEta(iso: string | null, locale: string): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' });
+  // Carrier ETAs are calendar dates, not instants: a date-only value (or its
+  // UTC-midnight round trip through the DB) rendered in a western timezone
+  // would show the previous day.
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso) || /T00:00(:00(\.0+)?)?(Z|\+00:?00)$/.test(iso);
+  return d.toLocaleDateString(locale, {
+    weekday: 'short', month: 'short', day: 'numeric',
+    ...(dateOnly ? { timeZone: 'UTC' } : {}),
+  });
 }
 
 /** One row per shipment, newest shipment first. */
@@ -95,6 +102,7 @@ export function filterInbound(rows: InboundRow[], f: ShipFilter): InboundRow[] {
     if (!q) return true;
     return p.trackingNumber.toLowerCase().includes(q)
       || (p.sellerName ?? '').toLowerCase().includes(q)
+      || (p.note ?? '').toLowerCase().includes(q)
       || (p.orderId ?? '').toLowerCase().includes(q);
   });
 }

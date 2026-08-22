@@ -46,6 +46,7 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [sellerLink, setSellerLink] = useState<string | null>(null);
 
   const [from, setFrom] = useState<ShipmentAddressInput>(EMPTY_FROM);
   const [pkg, setPkg] = useState<PkgDraft>({ weightOz: '', lengthIn: '', widthIn: '', heightIn: '' });
@@ -114,12 +115,15 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
         .finally(() => { if (alive) setLoading(false); });
       return () => { alive = false; };
     }
+    let alive = true;
     api.get<{ items: Warehouse[] }>('/api/warehouses')
       .then(r => {
+        if (!alive) return;
         setWarehouses(r.items);
         if (r.items.length === 1) setWarehouseId(r.items[0].id);
       })
       .catch(handleFetchError);
+    return () => { alive = false; };
   }, [orderId, sid]);
 
   // Address book: the same client-side composition the dashboard uses — the
@@ -142,7 +146,10 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   }, []);
 
   const chosenWh: Warehouse | null = orderId ? (order?.warehouse ?? null) : (warehouses.find(w => w.id === warehouseId) ?? null);
-  const noShipAddr = !!chosenWh && !chosenWh.shipStreet1;
+  // Mirror the server's rule (street1+city+state+zip) — a partial address
+  // passes a street1-only check and then fails at the rates call.
+  const noShipAddr = !!chosenWh
+    && !(chosenWh.shipStreet1 && chosenWh.shipCity && chosenWh.shipState && chosenWh.shipZip);
 
   const pkgParsed = (): ShipmentPackageInput | null => {
     const n = (s: string) => { const v = Number(s); return Number.isFinite(v) && v > 0 ? v : null; };
@@ -152,20 +159,25 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   };
   const step1Ready = !!(from.name.trim() && from.street1.trim() && from.city.trim()
     && from.state.trim() && from.zip.trim() && pkgParsed())
-    && (orderId != null || !!warehouseId) && !noShipAddr;
+    && (orderId != null ? !!chosenWh : !!warehouseId) && !noShipAddr;
 
   // Label-first: the draft PO exists from the moment the wizard needs one.
-  const ensurePo = async (): Promise<string> => {
-    if (orderId) return orderId;
-    if (createdPo.current) return createdPo.current;
+  // Cached as the in-flight promise: "Copy seller link" and "Get Rates" run
+  // behind independent busy flags, so both can call this concurrently.
+  const poPromise = useRef<Promise<string> | null>(null);
+  const ensurePo = (): Promise<string> => {
+    if (orderId) return Promise.resolve(orderId);
+    if (poPromise.current) return poPromise.current;
     // The note marks the draft's origin so it reads sensibly in the PO list
     // until its lines arrive with the goods.
-    const r = await api.post<{ id: string }>('/api/orders/draft', {
+    poPromise.current = api.post<{ id: string }>('/api/orders/draft', {
       warehouseId,
       notes: 'Created from shipping label',
-    });
-    createdPo.current = r.id;
-    return r.id;
+    }).then(
+      (r) => { createdPo.current = r.id; return r.id; },
+      (e) => { poPromise.current = null; throw e; },
+    );
+    return poPromise.current;
   };
 
   // The no-typing path: hand the seller a link instead of transcribing chat.
@@ -183,9 +195,19 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
         setShipment(r.shipment);
         tok = r.shipment.sellerToken!;
       }
-      await navigator.clipboard?.writeText(`${window.location.origin}/s/${tok}`);
-      setLinkCopied(true);
-      produced.current = true; // a link out means the draft PO must survive
+      // The token now exists server-side — the draft PO must survive even if
+      // the clipboard write below fails.
+      produced.current = true;
+      const url = `${window.location.origin}/s/${tok}`;
+      setSellerLink(url);
+      // clipboard is undefined off HTTPS (LAN testing) and writeText can be
+      // denied — never claim "copied" then; the rendered link is the fallback.
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(url);
+          setLinkCopied(true);
+        } catch { /* link is rendered below */ }
+      }
     } catch (e) {
       setError((e as { message?: string })?.message ?? t('shipRatesFailed'));
     } finally {
@@ -266,7 +288,9 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
             <div className="ship-sec-title">{t('shipSecShipTo')}</div>
             {orderId ? (
               chosenWh ? <WarehouseCard w={chosenWh} selected fixed noShipAddr={noShipAddr} />
-                : <div className="ship-addr-warn">{t('shipPickWhNoAddr')}</div>
+                : order
+                  ? <div className="ship-addr-warn">{t('shipPoNoWarehouse')}</div>
+                  : <div className="ship-addr-warn">{t('shipPageOrderMissing')}</div>
             ) : (
               <div className="ship-addr-grid">
                 {warehouses.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>{t('loadingApp')}</span>}
@@ -289,8 +313,16 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="ship-seller-title">{t('shipAskSeller')}</div>
                 <div className="ship-seller-hint">
-                  {linkCopied ? t('shipLinkCopiedHint') : t('shipAskSellerHint')}
+                  {linkCopied ? t('shipLinkCopiedHint') : sellerLink ? t('shipLinkManualHint') : t('shipAskSellerHint')}
                 </div>
+                {sellerLink && (
+                  <div
+                    className="mono"
+                    style={{ fontSize: 11.5, marginTop: 4, wordBreak: 'break-all', userSelect: 'all' }}
+                  >
+                    {sellerLink}
+                  </div>
+                )}
               </div>
               <button
                 className={'btn sm' + (linkCopied ? '' : ' accent')}

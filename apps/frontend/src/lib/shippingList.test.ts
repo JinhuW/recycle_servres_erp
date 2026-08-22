@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  carriersOf, filterRows, flattenRows, inboundCarriers, inboundCounts, inboundToCsv,
+  carriersOf, filterRows, flattenRows, fmtEta, inboundCarriers, inboundCounts, inboundToCsv,
   matchSellers, mergeInbound, filterInbound, previousSellers, rowsToCsv, statusCounts,
   type PoLabels, type ShipRow,
 } from './shippingList';
@@ -45,6 +45,26 @@ const sections: PoLabels[] = [
     ],
   },
 ];
+
+describe('fmtEta', () => {
+  it('returns null for missing or unparseable input', () => {
+    expect(fmtEta(null, 'en-US')).toBeNull();
+    expect(fmtEta('not-a-date', 'en-US')).toBeNull();
+  });
+
+  it('renders date-only ETAs as that calendar date, not the local-time previous day', () => {
+    expect(fmtEta('2026-08-25', 'en-US')).toBe('Tue, Aug 25');
+  });
+
+  it('treats a UTC-midnight round trip through the DB as date-only', () => {
+    expect(fmtEta('2026-08-25T00:00:00.000Z', 'en-US')).toBe('Tue, Aug 25');
+    expect(fmtEta('2026-08-25T00:00:00Z', 'en-US')).toBe('Tue, Aug 25');
+  });
+
+  it('still formats real instants', () => {
+    expect(fmtEta('2026-08-25T15:30:00Z', 'en-US')).toBeTruthy();
+  });
+});
 
 describe('flattenRows', () => {
   it('emits one row per shipment, newest first', () => {
@@ -119,6 +139,21 @@ describe('previousSellers', () => {
     expect(previousSellers(secs)).toEqual([]);
   });
 
+  it('caps the address book at 50 entries, keeping the newest', () => {
+    const secs: PoLabels[] = [{
+      order: order({}),
+      shipments: Array.from({ length: 55 }, (_, i) =>
+        shipment({
+          id: `s${i}`,
+          from: addr(`Seller ${i}`, `${i} Main St`),
+          createdAt: `2026-07-01T00:00:${String(i).padStart(2, '0')}Z`,
+        })),
+    }];
+    const out = previousSellers(secs);
+    expect(out).toHaveLength(50);
+    expect(out[0].from.name).toBe('Seller 54'); // newest first survives the cap
+  });
+
   it('keeps sellers with the same name at different addresses separate', () => {
     const secs: PoLabels[] = [
       { order: order({}), shipments: [
@@ -180,6 +215,12 @@ describe('filterInbound', () => {
     expect(filterInbound(rows, { ...all, search: 'trench' })).toHaveLength(1);
     expect(filterInbound(rows, { ...all, search: '123456789012' })).toHaveLength(1);
   });
+
+  it('searches the package note — it renders on the row', () => {
+    const withNote = mergeInbound([], [pkg({ note: 'fragile RAM sticks' })]);
+    expect(filterInbound(withNote, { ...all, search: 'fragile' })).toHaveLength(1);
+    expect(filterInbound(withNote, { ...all, search: 'absent' })).toHaveLength(0);
+  });
 });
 
 describe('inboundCounts and inboundCarriers', () => {
@@ -202,6 +243,17 @@ describe('inboundToCsv', () => {
     expect(csv.split('\r\n')).toHaveLength(5);
     expect(csv).toContain('"Trench Corp"');
     expect(csv).toContain('"1Z999AA10123456784"');
+  });
+
+  it('neutralises formula-leading package cells too', () => {
+    const csv = inboundToCsv(mergeInbound([], [pkg({ sellerName: '=cmd()', trackingNumber: '+123' })]));
+    expect(csv).toContain('"\'=cmd()"');
+    expect(csv).toContain('"\'+123"');
+  });
+
+  it('quotes embedded quotes and newlines', () => {
+    const csv = inboundToCsv(mergeInbound([], [pkg({ sellerName: 'Acme "Deals"\r\nLLC' })]));
+    expect(csv).toContain('"Acme ""Deals""\r\nLLC"');
   });
 });
 

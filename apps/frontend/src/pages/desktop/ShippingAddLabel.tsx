@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { CARRIERS, detectCarriers, normalizeTracking, type Carrier } from '../../lib/carrierDetect';
 import { handleFetchError } from '../../lib/errorToast';
@@ -35,8 +35,12 @@ export function ShippingAddLabel({ showToast }: Props) {
   const unknownShape = tn.length >= 10 && detected.length === 0;
   const canSubmit = tn.length >= 8 && carrier != null && !busy;
 
+  // setBusy hasn't rendered yet when Enter fires twice in one tick — the ref
+  // is the same-tick guard the state can't be.
+  const submitting = useRef(false);
   const submit = async () => {
-    if (!canSubmit || carrier == null) return;
+    if (!canSubmit || carrier == null || submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     try {
       await addPackage({ trackingNumber: tn, carrier, sellerName, note });
@@ -44,6 +48,7 @@ export function ShippingAddLabel({ showToast }: Props) {
       navigate('/shipping');
     } catch (e) {
       handleFetchError(e);
+      submitting.current = false;
       setBusy(false);
     }
   };

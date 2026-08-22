@@ -83,6 +83,7 @@ function FocusedShipping({ orderId }: { orderId: string }) {
   useEffect(() => {
     let alive = true;
     setOrder(null);
+    setFailed(false);
     api.get<{ order: Order }>(`/api/orders/${orderId}`)
       .then(r => { if (alive) setOrder(r.order); })
       .catch((e) => { if (alive) { setFailed(true); handleFetchError(e); } });
@@ -133,7 +134,11 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
   const [carrier, setCarrier] = usePersisted<string>('desktop.shipping.carrier', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.shipping.search', '');
 
+  // Monotonic load generation: the composition takes many round trips, so a
+  // scope flip mid-flight would otherwise let the older response land last.
+  const loadGen = useRef(0);
   const reload = useCallback(async () => {
+    const gen = ++loadGen.current;
     try {
       const mine = isManager && scope === 'mine' ? '&mine=true' : '';
       const { orders } = await api.get<{ orders: OrderSummary[] }>(`/api/orders?limit=${ORDERS_SCANNED}${mine}`);
@@ -143,12 +148,14 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
           shipments: (await listShipments(order.id).catch(() => ({ items: [] as never[] }))).items,
         })),
       );
+      const packages = (await listPackages()).items;
+      if (gen !== loadGen.current) return;
       setSections(withShipments.filter(s => s.shipments.length > 0));
-      setPkgs((await listPackages()).items);
+      setPkgs(packages);
     } catch (e) {
-      handleFetchError(e);
+      if (gen === loadGen.current) handleFetchError(e);
     } finally {
-      setLoaded(true);
+      if (gen === loadGen.current) setLoaded(true);
     }
   }, [isManager, scope]);
   useEffect(() => { void reload(); }, [reload]);
@@ -191,14 +198,22 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
     [rows, status, carrier, search],
   );
 
+  const copyTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (copyTimer.current != null) clearTimeout(copyTimer.current); }, []);
   const copyTracking = (tn: string) => {
     navigator.clipboard?.writeText(tn)
-      .then(() => { setCopied(tn); setTimeout(() => setCopied(null), 1600); })
+      .then(() => {
+        setCopied(tn);
+        if (copyTimer.current != null) clearTimeout(copyTimer.current);
+        copyTimer.current = window.setTimeout(() => setCopied(null), 1600);
+      })
       .catch(() => { /* the visible number is selectable */ });
   };
 
   const exportCsv = () => {
-    const blob = new Blob([inboundToCsv(visible)], { type: 'text/csv;charset=utf-8;' });
+    // BOM so Excel decodes CJK seller names; the charset in the MIME type is
+    // ignored for downloaded .csv files.
+    const blob = new Blob(['\ufeff' + inboundToCsv(visible)], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -206,7 +221,8 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Synchronous revoke can cancel the download in Firefox/Safari.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
@@ -369,6 +385,7 @@ function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: 
   const [busy, setBusy] = useState(false);
   const chip = STATUS_CHIP[pkg.status];
   const eta = fmtEta(pkg.trackingEta, locale);
+  const trackUrl = carrierTrackingUrl(pkg.carrier, pkg.trackingNumber);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   const createPo = async () => {
@@ -437,15 +454,17 @@ function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: 
               {copied === pkg.trackingNumber ? t('shipCopied') : t('shipCopy')}
             </span>
           </button>
-          <a
-            href={carrierTrackingUrl(pkg.carrier, pkg.trackingNumber)}
-            target="_blank"
-            rel="noreferrer"
-            onClick={stop}
-            title={t('shipTrackOnCarrier', { carrier: pkg.carrier })}
-          >
-            ↗
-          </a>
+          {trackUrl && (
+            <a
+              href={trackUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={stop}
+              title={t('shipTrackOnCarrier', { carrier: pkg.carrier })}
+            >
+              ↗
+            </a>
+          )}
         </div>
       </td>
       <td className="num" style={{ cursor: 'default' }}>
