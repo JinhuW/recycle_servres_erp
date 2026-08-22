@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { carriersOf, filterRows, flattenRows, previousSellers, rowsToCsv, statusCounts, type PoLabels, type ShipRow } from './shippingList';
+import { carriersOf, filterRows, flattenRows, matchSellers, previousSellers, rowsToCsv, statusCounts, type PoLabels, type ShipRow } from './shippingList';
 import type { OrderSummary, Shipment } from './types';
 
 function order(over: Partial<OrderSummary>): OrderSummary {
@@ -91,7 +91,7 @@ describe('previousSellers', () => {
     name, phone: null, street1, street2: null, city: 'Denver', state: 'CO', zip, country: 'US',
   });
 
-  it('lists complete seller addresses newest first, deduped', () => {
+  it('lists complete seller addresses newest first, deduped with counts', () => {
     const secs: PoLabels[] = [
       { order: order({ id: 'PO-1' }), shipments: [
         shipment({ id: 'a', from: addr('Ana'), createdAt: '2026-08-01T00:00:00Z' }),
@@ -102,6 +102,9 @@ describe('previousSellers', () => {
     const out = previousSellers(secs);
     expect(out.map(p => p.from.name)).toEqual(['ANA', 'Bo']);
     expect(out[0].label).toBe('ANA · Denver, CO');
+    expect(out[0].count).toBe(2);
+    expect(out[0].lastUsed).toBe('2026-08-05T00:00:00Z');
+    expect(out[1].count).toBe(1);
   });
 
   it('skips incomplete addresses (seller-fill shells)', () => {
@@ -119,6 +122,25 @@ describe('previousSellers', () => {
       ] },
     ];
     expect(previousSellers(secs)).toHaveLength(2);
+  });
+});
+
+describe('matchSellers', () => {
+  const addr2 = (name: string) => ({
+    name, phone: null, street1: '1 Main St', street2: null, city: 'Denver', state: 'CO', zip: '80202', country: 'US',
+  });
+  const mk = (names: string[]): ReturnType<typeof previousSellers> =>
+    previousSellers([{ order: order({}), shipments: names.map((n, i) => shipment({ id: String(i), from: addr2(n) })) }]);
+
+  it('ranks prefix matches above substring matches', () => {
+    const list = mk(['Wang Jin', 'Jinhu Wang', 'Bo Li']);
+    expect(matchSellers(list, 'jin').map(p => p.from.name)).toEqual(['Jinhu Wang', 'Wang Jin']);
+  });
+
+  it('returns nothing for an empty query and caps at 6', () => {
+    const list = mk(['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7']);
+    expect(matchSellers(list, '')).toEqual([]);
+    expect(matchSellers(list, 'a')).toHaveLength(6);
   });
 });
 

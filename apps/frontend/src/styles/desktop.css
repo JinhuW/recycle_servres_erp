@@ -2747,12 +2747,48 @@ html.desktop, body.desktop, .desktop #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ship-contact-count { margin-left: 6px; font-size: 10.5px; font-weight: 600; color: var(--fg-subtle); }
+.ship-contact-meta { display: block; font-size: 11px; color: var(--fg-subtle); margin-top: 2px; }
 .ship-contacts-empty { font-size: 12px; color: var(--fg-subtle); line-height: 1.5; }
-/* Narrow windows: the rail drops below the form rather than squeezing it. */
+/* Narrow windows: hide the rail — the seller-name typeahead still reaches
+   every contact, and a card stranded below the form helps nobody. */
 @media (max-width: 1180px) {
   .ship-wizard-layout { grid-template-columns: 1fr; }
-  .ship-contacts { position: static; max-height: 320px; }
+  .ship-contacts { display: none; }
 }
+
+/* Seller-name typeahead. */
+.ship-name-field { position: relative; }
+.ship-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+  padding: 4px;
+}
+.ship-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.ship-suggest-row.active { background: var(--bg-soft); }
+.ship-suggest-sub { margin-left: auto; color: var(--fg-subtle); font-size: 11.5px; }
 
 .ship-or-divider {
   display: flex;
