@@ -63,6 +63,29 @@ export function statusCounts(rows: ShipRow[]): Record<ShipmentStatus | 'all', nu
   return counts;
 }
 
+export type PrevSeller = { key: string; label: string; from: Shipment['from'] };
+
+/**
+ * Address book composed from past shipments: every complete seller address the
+ * user can see, deduped (name + street + zip), newest first. Feeds the
+ * wizard's "previous sellers" picker until a real address book exists
+ * server-side.
+ */
+export function previousSellers(sections: PoLabels[]): PrevSeller[] {
+  const seen = new Set<string>();
+  const out: PrevSeller[] = [];
+  for (const { shipment: s } of flattenRows(sections)) {
+    const f = s.from;
+    if (!f.name || !f.street1 || !f.city || !f.state || !f.zip) continue;
+    const key = [f.name, f.street1, f.zip].join('|').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, label: `${f.name} · ${f.city}, ${f.state}`, from: f });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
 export function rowsToCsv(rows: ShipRow[]): string {
   const head = ['Order', 'Created', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #'];
   // Excel/Sheets execute cells starting with = + - @ as formulas; seller names

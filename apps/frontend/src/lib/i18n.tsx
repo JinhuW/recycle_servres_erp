@@ -988,6 +988,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipBackToShipping: 'Shipping',
     shipSecShipTo: 'Ship to',
     shipSecShipFrom: 'Ship from (seller)',
+    shipPrevSeller: 'Previous sellers — click to fill the address',
     shipSecPackage: 'Dimensions & weight',
     shipStep2Title: 'Pick a rate & buy',
     shipSellerName: 'Seller name',
