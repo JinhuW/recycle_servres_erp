@@ -186,6 +186,14 @@ resolve_branch() {
 # of origin/dev and an ancestry test (`git log base..HEAD`) reports "unmerged"
 # forever — which would make --prune reclaim nothing, ever.
 #
+# Content is checked against the base ref's HISTORY since the fork point, not
+# only its tip. A tip-only comparison rots: every PR bumps package.json (and
+# usually CHANGELOG.md, i18n.tsx, …), so the moment any later PR touches a file
+# this branch touched, an already-merged worktree reads as "unmerged" forever
+# and prune reclaims nothing. The squash commit carries the branch's final blobs
+# verbatim, so finding those blobs anywhere in merge-base..base proves the work
+# landed. See docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md.
+#
 # Uses HEAD, not a branch name, so a DETACHED worktree carrying commits is
 # still evaluated instead of falling through the check unexamined.
 #
@@ -193,7 +201,7 @@ resolve_branch() {
 # "nothing changed, safe to delete". Returning 1 (keep) on any error is the only
 # safe default for a function whose false answer deletes a directory.
 work_is_in_base() {
-  local wt="$1" merge_base head_sha changed file
+  local wt="$1" merge_base head_sha changed file blob
   merge_base="$(git -C "$wt" merge-base "$BASE_REF" HEAD 2>/dev/null)" || return 1
   head_sha="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
   # No commits beyond the fork point at all.
@@ -203,13 +211,24 @@ work_is_in_base() {
   # empty change set, the loop body never runs, and the function falls through
   # to `return 0` — reporting unmerged work as safe to delete.
   changed="$(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)" || return 1
-  # Otherwise every file this worktree touched must match the base byte for byte.
   while IFS= read -r file; do
     [ -n "$file" ] || continue
-    cmp -s \
-      <(git -C "$wt" show "HEAD:$file" 2>/dev/null || true) \
-      <(git -C "$wt" show "$BASE_REF:$file" 2>/dev/null || true) \
-      || return 1
+    if blob="$(git -C "$wt" rev-parse --verify --quiet "HEAD:$file")"; then
+      # Fast path: identical to the base tip right now.
+      [ "$blob" = "$(git -C "$wt" rev-parse --verify --quiet "$BASE_REF:$file" || true)" ] && continue
+      # Otherwise this exact content must appear somewhere in the base ref
+      # since the fork point (the squash commit that merged it). The range is
+      # deliberate: a blob that only existed BEFORE the fork (a revert-shaped
+      # branch) proves nothing about this branch's work having landed.
+      # `git log`, not `git rev-list`: rev-list doesn't accept --find-object
+      # (a diff option) at least through git 2.40 — it usage-errors, which the
+      # fail-safe here would silently read as "keep everything, forever".
+      [ -n "$(git -C "$wt" log -1 --format=%H --find-object="$blob" "$merge_base..$BASE_REF" 2>/dev/null)" ] \
+        || return 1
+    else
+      # The branch deleted this file; that landed only if the base lost it too.
+      git -C "$wt" rev-parse --verify --quiet "$BASE_REF:$file" >/dev/null && return 1
+    fi
   done <<< "$changed"
   return 0
 }
