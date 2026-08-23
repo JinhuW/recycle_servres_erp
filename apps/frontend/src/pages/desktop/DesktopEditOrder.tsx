@@ -102,6 +102,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // documenting it until Done. Mirrors the backend's notes-only gate.
   const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canAnnotate = !orderLocked && isOwnerOrManager;
+  // A Done order is a closed book, but managers keep one backward move:
+  // send it back to Reviewing (the backend guards lines committed to open
+  // sell orders). Everything else stays read-only until that reopen lands.
+  const canReopen = !isPurchaser && orderLocked;
   const allowedStatuses = isPurchaser
     ? effectiveStatus === 'Draft'      ? ['Draft', 'In Transit']
     : effectiveStatus === 'In Transit' ? ['In Transit', 'Reviewing']
@@ -518,7 +522,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
   const canSave =
-    dirty && !saving && !orderLocked && (!canEditOrder || lines.every(lineReady));
+    dirty && !saving && (!orderLocked || (canReopen && statusDirty))
+    && (!canEditOrder || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
   // capture screen asks the same question, and used to name the same blank
@@ -576,6 +581,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       // sending the line/pricing keys too would trip the backend's 403.
       if (!canEditOrder) {
         if (notesDirty) await api.patch(`/api/orders/${order.id}`, { notes });
+        // Manager reopening a Done order — the one stage move a closed order
+        // accepts. /advance cascades line statuses server-side, so no line
+        // patch is needed alongside it.
+        if (statusDirty && !isPurchaser) {
+          const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
+          await api.post(`/api/orders/${order.id}/advance`, { toStage });
+          setSavedStatus(status);
+        }
         onSaved('Saved ' + order.id);
         return;
       }
@@ -1127,13 +1140,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               const currentIdx = ORDER_STATUSES.indexOf(status as typeof ORDER_STATUSES[number]);
               const reached = currentIdx >= 0 && i <= currentIdx;
               const locked = isPurchaser && !allowedStatuses.includes(s);
+              // On a closed order the whole stepper freezes except the
+              // manager's reopen target (Done → Reviewing).
+              const stepDisabled = locked || (orderLocked && !(canReopen && s === 'Reviewing'));
               return (
                 <Fragment key={s}>
                   <button
                     type="button"
                     className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '') + (locked ? ' locked' : '')}
                     onClick={() => {
-                      if (locked || orderLocked) return;
+                      if (stepDisabled) return;
                       // Done gets the evidence dialog first; confirming stages
                       // the status, Save commits it. Re-open it even when already
                       // at Done so the user can add more notes / attachments.
@@ -1142,7 +1158,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       if (s === 'Done') { setDoneDialogOpen(true); return; }
                       setStatus(s);
                     }}
-                    disabled={locked || orderLocked}
+                    disabled={stepDisabled}
                     title={locked
                       ? t('eoStepLockedTooltip')
                       : t('eoSetStatusTo', { s })}
