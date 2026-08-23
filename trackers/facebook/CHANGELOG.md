@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **Alerts are grouped by priority into Telegram forum topics.** The AI's
+  counted units bucket every listing alert — 🔥 high (50+ units), ⚡ medium
+  (10–49), 🐢 low (5–9) — the emoji leads the alert title, and each bucket is
+  delivered into its own forum topic (`message_thread_id`) so the group's
+  topic sidebar doubles as a priority queue. Setup is one command after
+  enabling Topics on the group and making the bot a topics-managing admin:
+  `scripts/setup-telegram-topics.py` creates the three topics and prints the
+  `TELEGRAM_TOPIC_HIGH/MEDIUM/LOW` values for `configs/secrets.env`. Unset
+  topic ids and listings whose count the AI could not pin fall back to the
+  General topic — grouping never costs an alert. Fleet worker configs strip
+  the new keys the same way they strip the token: workers alert through the
+  coordinator, not Telegram.
+
 ### Changed
 
 - **The AI evaluation answers with one JSON object.** The single per-listing

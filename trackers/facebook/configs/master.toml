@@ -614,5 +614,12 @@ solid-state drives. Only interested in lots of 5+ drives. Not spinning HDDs."""
 [user.recycle]
 telegram_token = "${TELEGRAM_TOKEN}"
 telegram_chat_id = "${TELEGRAM_CHAT_ID}"
+# Forum-topic routing by the AI's counted units: 50+ -> high, 10-49 -> medium,
+# 5-9 -> low. Each id is a topic's message_thread_id in the (topics-enabled)
+# group above; scripts/setup-telegram-topics.py creates the topics and prints
+# these. Unset ids and uncounted listings fall back to the General topic.
+telegram_topic_high = "${TELEGRAM_TOPIC_HIGH}"
+telegram_topic_medium = "${TELEGRAM_TOPIC_MEDIUM}"
+telegram_topic_low = "${TELEGRAM_TOPIC_LOW}"
 # Do not re-notify about the same listing.
 remind = false

@@ -134,6 +134,12 @@ def build_worker_config(
     for user in config.get("user", {}).values():
         user.pop("telegram_token", None)
         user.pop("telegram_chat_id", None)
+        # Topic routing is the coordinator's business too: workers never
+        # message Telegram, so the ${TELEGRAM_TOPIC_*} placeholders would only
+        # warn about unset variables on every worker.
+        user.pop("telegram_topic_high", None)
+        user.pop("telegram_topic_medium", None)
+        user.pop("telegram_topic_low", None)
         user["notify_with"] = ["coordinator"]
 
     return config
