@@ -189,7 +189,11 @@ export async function rawFetch(
 // No category: an empty draft has no lines to derive one from, and each line
 // carries its own once they arrive.
 export const createDraftOrder = (
-  meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
+  meta?: {
+    warehouseId?: string; payment?: OrderSummary['payment']; notes?: string;
+    // Manager-only: file the draft for a purchaser (they become the owner).
+    onBehalfOfUserId?: string;
+  },
 ) => api.post<{ id: string }>('/api/orders/draft', { ...meta });
 
 // Create a PO already carrying its first line(s). The desktop submit form uses
@@ -202,6 +206,9 @@ export const createOrder = (body: {
   warehouseId?: string;
   payment?: OrderSummary['payment'];
   notes?: string | null;
+  // Manager-only: the purchaser who owns the order. Ownership is fixed at
+  // create — PATCH cannot reassign it — so it only travels on this call.
+  onBehalfOfUserId?: string;
   lines: unknown[];
   // lineIds comes back aligned 1:1 with `lines`, so the caller can attach
   // per-line photos that were buffered while the lines had no id yet.

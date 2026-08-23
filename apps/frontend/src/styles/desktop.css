@@ -2422,6 +2422,10 @@ html.desktop, body.desktop, .desktop #root {
   align-items: end;
   flex-shrink: 0;
 }
+/* Managers get a leading purchaser picker, so their grid grows a column. */
+.sub-commit-meta--behalf {
+  grid-template-columns: minmax(150px, 210px) minmax(180px, 260px) auto minmax(220px, 1fr);
+}
 .sub-commit-attach { padding: 12px 16px; min-height: 0; overflow-y: auto; }
 .sub-commit-files {
   margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
@@ -2459,6 +2463,11 @@ html.desktop, body.desktop, .desktop #root {
 @media (max-width: 1000px) {
   .sub-commit-meta { grid-template-columns: minmax(0, 1fr) auto; }
   .sub-commit-meta > :nth-child(3) { grid-column: 1 / -1; }
+  /* Four fields: purchaser + warehouse share the first row, payment keeps its
+     own slot, notes takes the full-width row instead. */
+  .sub-commit-meta--behalf { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .sub-commit-meta--behalf > :nth-child(3) { grid-column: auto; }
+  .sub-commit-meta--behalf > :nth-child(4) { grid-column: 1 / -1; }
   .sub-commit-total { margin-left: 0; }
   .sub-commit-actions { margin-left: auto; }
 }

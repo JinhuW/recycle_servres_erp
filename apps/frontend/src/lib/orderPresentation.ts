@@ -34,10 +34,14 @@ export function createdEventParts(detail: Record<string, unknown>, t: Translate)
   if (detail.backfilled) return category ? [category] : [];
   const lineCount = Number(detail.lineCount ?? 0);
   const qty = Number(detail.qty ?? 0);
+  // Present only when a manager filed the PO for a purchaser — the actor line
+  // above the row names the manager, so this names the owner.
+  const behalf = typeof detail.onBehalfOfName === 'string' ? detail.onBehalfOfName : null;
   return [
     category,
     lineCount > 0 ? t(lineCount === 1 ? 'acNLine' : 'acNLines', { n: lineCount }) : null,
     qty > 0 ? t(qty === 1 ? 'acNUnit' : 'acNUnits', { n: qty }) : null,
+    behalf ? t('acCreatedFor', { name: behalf }) : null,
   ].filter((p): p is string => !!p);
 }
 

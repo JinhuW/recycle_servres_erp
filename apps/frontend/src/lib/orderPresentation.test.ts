@@ -54,6 +54,14 @@ describe('createdEventParts', () => {
     expect(createdEventParts({ backfilled: true, category: 'HDD', lineCount: 9, qty: 40 }, t))
       .toEqual(['HDD']);
   });
+
+  it('names the purchaser when a manager filed the order for them', () => {
+    const tt = (key: string, vars?: Record<string, string | number>) =>
+      vars ? `${key}(${Object.values(vars).join(',')})` : key;
+    expect(createdEventParts(
+      { category: 'RAM', lineCount: 1, qty: 2, onBehalfOfName: 'Marcus Wright' }, tt,
+    )).toEqual(['RAM', 'acNLine(1)', 'acNUnits(2)', 'acCreatedFor(Marcus Wright)']);
+  });
 });
 
 // tests/i18nCoverage.test.ts only scans for `t('literal')`, so a key picked by
@@ -65,6 +73,7 @@ describe('the keys the audit rows name', () => {
     const spy = (key: string) => { asked.add(key); return key; };
     createdEventParts({ category: 'RAM', lineCount: 1, qty: 1 }, spy);
     createdEventParts({ category: 'RAM', lineCount: 2, qty: 2 }, spy);
+    createdEventParts({ category: 'RAM', lineCount: 1, qty: 1, onBehalfOfName: 'X' }, spy);
     const missing = [...asked].filter(k => !(k in I18N.en!) || !(k in zh));
     expect(missing).toEqual([]);
   });
