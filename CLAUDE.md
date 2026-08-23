@@ -82,11 +82,18 @@ switches the branch out from under the first.
   remove a clean, fully-merged, unlocked worktree, so a session that was
   created outside the launcher should be given a lock file if you want it
   protected.
-- **Prune compares file content, not commit ancestry.**  PRs land on `dev` as
-  squash commits, so a session branch's own commits are never ancestors of
-  `origin/dev`; an ancestry test (`git log origin/dev..HEAD`) would report
-  every worktree as unmerged forever and reclaim nothing.  See
-  [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md).
+- **Prune compares file content against `origin/dev`'s history, not commit
+  ancestry and not dev's tip.**  PRs land on `dev` as squash commits, so a
+  session branch's own commits are never ancestors of `origin/dev`; an
+  ancestry test (`git log origin/dev..HEAD`) would report every worktree as
+  unmerged forever.  Comparing against dev's *tip* rots almost as fast:
+  every PR bumps `package.json`, so any later merge makes an already-merged
+  worktree mismatch permanently.  The check therefore looks for the branch's
+  final blobs anywhere in `merge-base..origin/dev` (the squash commit carries
+  them verbatim).  See
+  [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md)
+  and
+  [docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md](./docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md).
 - `.claude/` is gitignored **except** `settings.json`, so the hook config is
   shared but worktrees and `settings.local.json` are not.
 
