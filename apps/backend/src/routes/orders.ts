@@ -74,6 +74,35 @@ async function assertCategoriesEnabled(
   return null;
 }
 
+// Managers may file a PO for a purchaser (`onBehalfOfUserId`). The raw role is
+// checked — not effectiveRole — so a manager previewing as purchaser keeps the
+// ability, and the target is validated up front so a typo'd id fails as a 400
+// rather than an FK 500. Returns the resolved owner or an error response.
+async function resolveOrderOwner(
+  sql: ReturnType<typeof getDb>,
+  u: User,
+  onBehalfOfUserId: unknown,
+): Promise<{ ownerId: string; ownerName: string | null } | { error: string; status: 400 | 403 }> {
+  if (onBehalfOfUserId === undefined || onBehalfOfUserId === null || onBehalfOfUserId === u.id) {
+    return { ownerId: u.id, ownerName: null };
+  }
+  if (typeof onBehalfOfUserId !== 'string') {
+    return { error: 'onBehalfOfUserId must be a user id', status: 400 };
+  }
+  if (u.role !== 'manager') {
+    return { error: 'Only managers can create orders on behalf of someone else', status: 403 };
+  }
+  const rows = await sql<{ id: string; name: string }[]>`
+    SELECT id, name FROM users
+    WHERE id = ${onBehalfOfUserId} AND active = TRUE AND role = 'purchaser'
+    LIMIT 1
+  `;
+  if (!rows.length) {
+    return { error: 'onBehalfOfUserId must name an active purchaser', status: 400 };
+  }
+  return { ownerId: onBehalfOfUserId, ownerName: rows[0].name };
+}
+
 // An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
 // description, and only for that category — the rest are self-describing.
@@ -670,12 +699,15 @@ orders.post('/', async (c) => {
         totalCost?: number;
         otherFees?: number;
         otherFeesNote?: string | null;
+        onBehalfOfUserId?: string;
         lines: LineInput[];
       }
     | null;
   if (!body || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'at least one line is required' }, 400);
   }
+  const owner = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
+  if ('error' in owner) return c.json({ error: owner.error }, owner.status);
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const cat = body.lines[i].category ?? body.category;
@@ -715,7 +747,7 @@ orders.post('/', async (c) => {
         other_fees, other_fees_note, lifecycle
       )
       VALUES (
-        ${newId}, ${u.id}, ${deriveCategory(lineCats) ?? lineCats[0]},
+        ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
@@ -777,6 +809,12 @@ orders.post('/', async (c) => {
       qty: body.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
       totalCost: body.totalCost ?? null,
       otherFees: body.otherFees ?? 0,
+      // Present only when a manager filed the PO for someone else, so the
+      // timeline can say who the order was created for. The name is snapshot
+      // here because events render without joining users on the owner.
+      ...(owner.ownerId !== u.id
+        ? { onBehalfOfUserId: owner.ownerId, onBehalfOfName: owner.ownerName }
+        : {}),
     });
   });
 
@@ -1430,8 +1468,14 @@ orders.post('/draft', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    | { category?: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
+    | {
+        category?: LineCategory; warehouseId?: string; payment?: 'company' | 'self';
+        notes?: string; onBehalfOfUserId?: string;
+      }
     | null;
+
+  const owner = await resolveOrderOwner(sql, u, body?.onBehalfOfUserId);
+  if ('error' in owner) return c.json({ error: owner.error }, owner.status);
 
   // No category required: the draft is empty, and the order's category is
   // derived from lines that don't exist yet. The column is NOT NULL, so an
@@ -1458,7 +1502,7 @@ orders.post('/draft', async (c) => {
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
-        ${newId}, ${u.id}, ${body?.category ?? 'Mixed'},
+        ${newId}, ${owner.ownerId}, ${body?.category ?? 'Mixed'},
         ${warehouseId}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
         ${null}, 'draft'
       )
@@ -1472,6 +1516,9 @@ orders.post('/draft', async (c) => {
       lineCount: 0,
       qty: 0,
       totalCost: null,
+      ...(owner.ownerId !== u.id
+        ? { onBehalfOfUserId: owner.ownerId, onBehalfOfName: owner.ownerName }
+        : {}),
     });
   });
 

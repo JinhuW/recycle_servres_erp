@@ -365,6 +365,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     acAndMore: '+{n} more',
     acNLines: '{n} lines',
     acNUnits: '{n} units',
+    acCreatedFor: 'for {name}',
     acNLine: '{n} line',
     acNUnit: '{n} unit',
     acQty: 'qty {n}',
@@ -737,6 +738,11 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     paymentReceiverLabel: 'Payment receiver',
     paymentReceiverNone: 'Not assigned',
     fieldPaymentReceiver: 'Payment receiver',
+
+    // Manager filing a PO for a purchaser
+    poOnBehalfLabel: 'Purchaser',
+    poOnBehalfSelf: 'Myself',
+    poOnBehalfLocked: 'The owner is fixed once the order is created',
 
     // StatusChangeDialog
     statusShippedTitle: 'Mark as Shipped',

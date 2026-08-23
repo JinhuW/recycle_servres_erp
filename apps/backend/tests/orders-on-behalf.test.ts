@@ -1,0 +1,103 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { resetDb } from './helpers/db';
+import { api } from './helpers/app';
+import { loginAs, ALEX, SOFIA, MARCUS, PRIYA } from './helpers/auth';
+
+const LINES = {
+  lines: [{ category: 'HDD', qty: 1, unitCost: 10, condition: 'New' }],
+};
+
+describe('POST /api/orders onBehalfOfUserId', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('lets a manager create an order owned by a purchaser, keeping the manager as actor', async () => {
+    const alex = await loginAs(ALEX);
+    const marcus = await loginAs(MARCUS);
+
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: { ...LINES, onBehalfOfUserId: marcus.user.id },
+    });
+    expect(r.status).toBe(201);
+
+    const got = await api<{ order: { userId: string } }>(
+      'GET', '/api/orders/' + r.body.id, { token: alex.token },
+    );
+    expect(got.body.order.userId).toBe(marcus.user.id);
+
+    const ev = await api<{ events: {
+      kind: string;
+      actor: { id: string } | null;
+      detail: { onBehalfOfUserId?: string; onBehalfOfName?: string };
+    }[] }>(
+      'GET', `/api/orders/${r.body.id}/events`, { token: alex.token },
+    );
+    const created = ev.body.events.find(e => e.kind === 'created');
+    expect(created?.actor?.id).toBe(alex.user.id);
+    expect(created?.detail.onBehalfOfUserId).toBe(marcus.user.id);
+    expect(created?.detail.onBehalfOfName).toBe('Marcus Wright');
+  });
+
+  it('rejects a purchaser trying to create on behalf of someone else', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token: marcus.token,
+      body: { ...LINES, onBehalfOfUserId: priya.user.id },
+    });
+    expect(r.status).toBe(403);
+  });
+
+  it('rejects a target that is not a purchaser', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: { ...LINES, onBehalfOfUserId: sofia.user.id },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/purchaser/i);
+  });
+
+  it('rejects an unknown target user', async () => {
+    const alex = await loginAs(ALEX);
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: { ...LINES, onBehalfOfUserId: '00000000-0000-0000-0000-000000000000' },
+    });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe('POST /api/orders/draft onBehalfOfUserId', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('lets a manager start a draft owned by a purchaser', async () => {
+    const alex = await loginAs(ALEX);
+    const marcus = await loginAs(MARCUS);
+
+    const r = await api<{ id: string }>('POST', '/api/orders/draft', {
+      token: alex.token,
+      body: { onBehalfOfUserId: marcus.user.id },
+    });
+    expect(r.status).toBe(201);
+
+    const got = await api<{ order: { userId: string } }>(
+      'GET', '/api/orders/' + r.body.id, { token: alex.token },
+    );
+    expect(got.body.order.userId).toBe(marcus.user.id);
+  });
+
+  it('rejects a purchaser trying to start a draft for someone else', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+
+    const r = await api<{ error: string }>('POST', '/api/orders/draft', {
+      token: marcus.token,
+      body: { onBehalfOfUserId: priya.user.id },
+    });
+    expect(r.status).toBe(403);
+  });
+});
