@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  carriersOf, filterRows, flattenRows, fmtEta, inboundCarriers, inboundCounts, inboundToCsv,
-  matchSellers, mergeInbound, filterInbound, rowsToCsv, statusCounts,
-  type PoLabels, type PrevSeller, type ShipRow,
+  filterRows, fmtEta, inboundCarriers, inboundCounts, inboundToCsv,
+  matchSellers, mergeInbound, filterInbound,
+  type PrevSeller, type ShipRow,
 } from './shippingList';
 import type { TrackedPackage } from './packages';
 import type { OrderSummary, Shipment } from './types';
@@ -30,19 +30,19 @@ function shipment(over: Partial<Shipment>): Shipment {
   };
 }
 
-const sections: PoLabels[] = [
+// Newest first — the order GET /api/shipments serves rows in.
+const rows: ShipRow[] = [
   {
     order: order({ id: 'PO-1', userName: 'Ada' }),
-    shipments: [
-      shipment({ id: 's1', status: 'in_transit', carrier: 'UPS', service: 'Ground', trackingNumber: '1Z999', createdAt: '2026-08-02T00:00:00Z', from: { ...shipment({}).from, name: 'Bo Li', city: 'Denver', state: 'CO' }, labelCost: 9.8 }),
-      shipment({ id: 's2', status: 'draft', createdAt: '2026-08-05T00:00:00Z' }),
-    ],
+    shipment: shipment({ id: 's2', status: 'draft', createdAt: '2026-08-05T00:00:00Z' }),
   },
   {
     order: order({ id: 'PO-2', userName: 'Kai' }),
-    shipments: [
-      shipment({ id: 's3', status: 'delivered', carrier: 'USPS', service: 'Priority', trackingNumber: '9400', createdAt: '2026-08-03T00:00:00Z' }),
-    ],
+    shipment: shipment({ id: 's3', status: 'delivered', carrier: 'USPS', service: 'Priority', trackingNumber: '9400', createdAt: '2026-08-03T00:00:00Z' }),
+  },
+  {
+    order: order({ id: 'PO-1', userName: 'Ada' }),
+    shipment: shipment({ id: 's1', status: 'in_transit', carrier: 'UPS', service: 'Ground', trackingNumber: '1Z999', createdAt: '2026-08-02T00:00:00Z', from: { ...shipment({}).from, name: 'Bo Li', city: 'Denver', state: 'CO' }, labelCost: 9.8 }),
   },
 ];
 
@@ -66,20 +66,7 @@ describe('fmtEta', () => {
   });
 });
 
-describe('flattenRows', () => {
-  it('emits one row per shipment, newest first', () => {
-    expect(flattenRows(sections).map(r => r.shipment.id)).toEqual(['s2', 's3', 's1']);
-  });
-});
-
-describe('carriersOf', () => {
-  it('lists distinct carriers, sorted, skipping unrated shipments', () => {
-    expect(carriersOf(flattenRows(sections))).toEqual(['UPS', 'USPS']);
-  });
-});
-
 describe('filterRows', () => {
-  const rows = flattenRows(sections);
   const all = { status: 'all', carrier: 'all', search: '' } as const;
 
   it('passes everything through on the neutral filter', () => {
@@ -97,17 +84,6 @@ describe('filterRows', () => {
     expect(filterRows(rows, { ...all, search: 'bo li' }).map(r => r.shipment.id)).toEqual(['s1']);
     expect(filterRows(rows, { ...all, search: '1z9' }).map(r => r.shipment.id)).toEqual(['s1']);
     expect(filterRows(rows, { ...all, search: 'nothing' })).toHaveLength(0);
-  });
-});
-
-describe('statusCounts', () => {
-  it('counts per status plus the total', () => {
-    const c = statusCounts(flattenRows(sections));
-    expect(c.all).toBe(3);
-    expect(c.draft).toBe(1);
-    expect(c.in_transit).toBe(1);
-    expect(c.delivered).toBe(1);
-    expect(c.voided).toBe(0);
   });
 });
 
@@ -140,32 +116,32 @@ function pkg(over: Partial<TrackedPackage>): TrackedPackage {
   return {
     id: 'p1', trackingNumber: '1Z999AA10123456784', carrier: 'UPS', status: 'in_transit',
     trackingEta: null, lastTrackedAt: null, sellerName: null, note: null, orderId: null,
-    createdAt: '2026-08-04T00:00:00Z',
+    trackingUrl: null, createdAt: '2026-08-04T00:00:00Z',
     ...over,
   };
 }
 
 describe('mergeInbound', () => {
   it('interleaves shipments and packages newest first', () => {
-    const rows = mergeInbound(flattenRows(sections), [pkg({ id: 'p1', createdAt: '2026-08-04T00:00:00Z' })]);
-    expect(rows.map(r => (r.kind === 'package' ? r.pkg.id : r.shipment.id))).toEqual(['s2', 'p1', 's3', 's1']);
+    const merged = mergeInbound(rows, [pkg({ id: 'p1', createdAt: '2026-08-04T00:00:00Z' })]);
+    expect(merged.map(r => (r.kind === 'package' ? r.pkg.id : r.shipment.id))).toEqual(['s2', 'p1', 's3', 's1']);
   });
 });
 
 describe('filterInbound', () => {
   const all = { status: 'all', carrier: 'all', search: '' } as const;
-  const rows = mergeInbound(flattenRows(sections), [
+  const merged = mergeInbound(rows, [
     pkg({ id: 'p1', status: 'delivered', carrier: 'FedEx', trackingNumber: '123456789012', sellerName: 'Trench Corp' }),
   ]);
 
   it('filters packages by status and carrier alongside shipments', () => {
-    expect(filterInbound(rows, { ...all, status: 'delivered' })).toHaveLength(2);
-    expect(filterInbound(rows, { ...all, carrier: 'FedEx' }).map(r => r.kind)).toEqual(['package']);
+    expect(filterInbound(merged, { ...all, status: 'delivered' })).toHaveLength(2);
+    expect(filterInbound(merged, { ...all, carrier: 'FedEx' }).map(r => r.kind)).toEqual(['package']);
   });
 
   it('searches package tracking numbers and seller names', () => {
-    expect(filterInbound(rows, { ...all, search: 'trench' })).toHaveLength(1);
-    expect(filterInbound(rows, { ...all, search: '123456789012' })).toHaveLength(1);
+    expect(filterInbound(merged, { ...all, search: 'trench' })).toHaveLength(1);
+    expect(filterInbound(merged, { ...all, search: '123456789012' })).toHaveLength(1);
   });
 
   it('searches the package note — it renders on the row', () => {
@@ -176,29 +152,39 @@ describe('filterInbound', () => {
 });
 
 describe('inboundCounts and inboundCarriers', () => {
-  const rows = mergeInbound(flattenRows(sections), [pkg({ status: 'delivered', carrier: 'FedEx' })]);
+  const merged = mergeInbound(rows, [pkg({ status: 'delivered', carrier: 'FedEx' })]);
 
   it('counts packages into the same status rail', () => {
-    const c = inboundCounts(rows);
+    const c = inboundCounts(merged);
     expect(c.all).toBe(4);
     expect(c.delivered).toBe(2);
+    expect(c.draft).toBe(1);
+    expect(c.in_transit).toBe(1);
+    expect(c.voided).toBe(0);
   });
 
   it('includes package carriers', () => {
-    expect(inboundCarriers(rows)).toEqual(['FedEx', 'UPS', 'USPS']);
+    expect(inboundCarriers(merged)).toEqual(['FedEx', 'UPS', 'USPS']);
   });
 });
 
 describe('inboundToCsv', () => {
-  it('exports package rows with empty order columns', () => {
-    const csv = inboundToCsv(mergeInbound(flattenRows(sections), [pkg({ sellerName: 'Trench Corp' })]));
-    expect(csv.split('\r\n')).toHaveLength(5);
+  it('renders a header plus one line per row, shipments included', () => {
+    const csv = inboundToCsv(mergeInbound(rows, [pkg({ sellerName: 'Trench Corp' })]));
+    const lines = csv.split('\r\n');
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toContain('"Tracking #"');
     expect(csv).toContain('"Trench Corp"');
     expect(csv).toContain('"1Z999AA10123456784"');
+    expect(csv).toContain('"1Z999"');
   });
 
-  it('neutralises formula-leading package cells too', () => {
-    const csv = inboundToCsv(mergeInbound([], [pkg({ sellerName: '=cmd()', trackingNumber: '+123' })]));
+  it('neutralises formula-leading cells on both row kinds', () => {
+    const shipRow: ShipRow = {
+      order: order({ id: 'PO-9' }),
+      shipment: shipment({ from: { ...shipment({}).from, name: '=cmd()' } }),
+    };
+    const csv = inboundToCsv(mergeInbound([shipRow], [pkg({ sellerName: '=cmd()', trackingNumber: '+123' })]));
     expect(csv).toContain('"\'=cmd()"');
     expect(csv).toContain('"\'+123"');
   });
@@ -206,23 +192,5 @@ describe('inboundToCsv', () => {
   it('quotes embedded quotes and newlines', () => {
     const csv = inboundToCsv(mergeInbound([], [pkg({ sellerName: 'Acme "Deals"\r\nLLC' })]));
     expect(csv).toContain('"Acme ""Deals""\r\nLLC"');
-  });
-});
-
-describe('rowsToCsv', () => {
-  it('renders a header plus one line per row', () => {
-    const csv = rowsToCsv(flattenRows(sections));
-    const lines = csv.split('\r\n');
-    expect(lines).toHaveLength(4);
-    expect(lines[0]).toContain('"Tracking #"');
-    expect(csv).toContain('"1Z999"');
-  });
-
-  it('neutralises formula-leading cells', () => {
-    const row: ShipRow = {
-      order: order({ id: 'PO-9' }),
-      shipment: shipment({ from: { ...shipment({}).from, name: '=cmd()' } }),
-    };
-    expect(rowsToCsv([row])).toContain('"\'=cmd()"');
   });
 });

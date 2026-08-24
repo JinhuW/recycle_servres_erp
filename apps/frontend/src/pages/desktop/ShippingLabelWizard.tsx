@@ -89,11 +89,18 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
       let alive = true;
       Promise.all([
         api.get<{ order: Order }>(`/api/orders/${orderId}`),
+        // GET /api/orders/:id returns only the {id, short, region} warehouse
+        // slice — no ship* fields — so the destination's shipping address must
+        // come from the warehouses list, exactly as in label-first mode.
+        // Without this, noShipAddr below reads undefined ship fields as "no
+        // address" and Get Rates is disabled on every existing PO.
+        api.get<{ items: Warehouse[] }>('/api/warehouses'),
         sid ? listShipments(orderId) : Promise.resolve(null),
       ])
-        .then(([o, list]) => {
+        .then(([o, whs, list]) => {
           if (!alive) return;
           setOrder(o.order);
+          setWarehouses(whs.items);
           const existing = list?.items.find(x => x.id === sid) ?? null;
           if (existing) {
             setShipment(existing);
@@ -136,7 +143,9 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
     return () => { alive = false; };
   }, []);
 
-  const chosenWh: Warehouse | null = orderId ? (order?.warehouse ?? null) : (warehouses.find(w => w.id === warehouseId) ?? null);
+  const chosenWh: Warehouse | null = orderId
+    ? (warehouses.find(w => w.id === order?.warehouse?.id) ?? null)
+    : (warehouses.find(w => w.id === warehouseId) ?? null);
   // Mirror the server's rule (street1+city+state+zip) — a partial address
   // passes a street1-only check and then fails at the rates call.
   const noShipAddr = !!chosenWh
@@ -156,19 +165,31 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   // Cached as the in-flight promise: "Copy seller link" and "Get Rates" run
   // behind independent busy flags, so both can call this concurrently.
   const poPromise = useRef<Promise<string> | null>(null);
-  const ensurePo = (): Promise<string> => {
-    if (orderId) return Promise.resolve(orderId);
-    if (poPromise.current) return poPromise.current;
-    // The note marks the draft's origin so it reads sensibly in the PO list
-    // until its lines arrive with the goods.
-    poPromise.current = api.post<{ id: string }>('/api/orders/draft', {
-      warehouseId,
-      notes: 'Created from shipping label',
-    }).then(
-      (r) => { createdPo.current = r.id; return r.id; },
-      (e) => { poPromise.current = null; throw e; },
-    );
-    return poPromise.current;
+  // Which warehouse the draft currently holds. The cards stay clickable after
+  // the draft exists, and the server resolves rates/buy from the PO row — a
+  // re-pick must be written through or the label quietly ships to the
+  // previously chosen warehouse.
+  const poWarehouse = useRef<string | null>(null);
+  const ensurePo = async (): Promise<string> => {
+    if (orderId) return orderId;
+    if (!poPromise.current) {
+      const chosen = warehouseId;
+      // The note marks the draft's origin so it reads sensibly in the PO list
+      // until its lines arrive with the goods.
+      poPromise.current = api.post<{ id: string }>('/api/orders/draft', {
+        warehouseId: chosen,
+        notes: 'Created from shipping label',
+      }).then(
+        (r) => { createdPo.current = r.id; poWarehouse.current = chosen; return r.id; },
+        (e) => { poPromise.current = null; throw e; },
+      );
+    }
+    const id = await poPromise.current;
+    if (poWarehouse.current !== warehouseId) {
+      await api.patch(`/api/orders/${id}`, { warehouseId });
+      poWarehouse.current = warehouseId;
+    }
+    return id;
   };
 
   // The no-typing path: hand the seller a link instead of transcribing chat.

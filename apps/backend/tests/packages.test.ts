@@ -70,6 +70,32 @@ describe('packages — add and list', () => {
     const all = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: mgr.token });
     expect(all.body.items).toHaveLength(1);
   });
+
+  it('mine=true pins a manager to their own rows, mirroring GET /api/shipments', async () => {
+    const marcus = await loginAs(MARCUS);
+    const mgr = await loginAs(ALEX);
+    await addPackage(marcus.token);
+
+    const mine = await api<{ items: Pkg[] }>('GET', '/api/packages?mine=true', { token: mgr.token });
+    expect(mine.body.items).toHaveLength(0);
+  });
+
+  it('normalizes the pasted number at the boundary so variants collide on the unique index', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token, { trackingNumber: ' 1z 999-aa1 0123 456 784 ' });
+    expect(pkg.trackingNumber).toBe(TN);
+
+    const dup = await api('POST', '/api/packages', {
+      token, body: { trackingNumber: TN, carrier: 'UPS' },
+    });
+    expect(dup.status).toBe(409);
+  });
+
+  it('serves the carrier tracking link server-side, like shipments.trackingUrl', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token) as Pkg & { trackingUrl: string | null };
+    expect(pkg.trackingUrl).toBe(`https://www.ups.com/track?tracknum=${TN}`);
+  });
 });
 
 describe('packages — delete guards', () => {
@@ -134,6 +160,28 @@ describe('packages — create-po', () => {
     // Idempotence guard: the second click cannot mint a second PO.
     const again = await api('POST', `/api/packages/${pkg.id}/create-po`, { token, body: {} });
     expect(again.status).toBe(409);
+  });
+
+  it('a manager clicking Create PO files it for the package creator, on-behalf style', async () => {
+    const marcus = await loginAs(MARCUS);
+    const mgr = await loginAs(ALEX);
+    const pkg = await addPackage(marcus.token);
+    const sql = getTestDb();
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
+
+    const r = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, {
+      token: mgr.token, body: {},
+    });
+    expect(r.status).toBe(201);
+
+    const order = (await sql`SELECT user_id FROM orders WHERE id = ${r.body.orderId}`)[0] as { user_id: string };
+    expect(order.user_id).toBe(marcus.user.id);
+
+    const created = (await sql<{ actor_id: string; detail: { onBehalfOfUserId?: string } }[]>`
+      SELECT actor_id, detail FROM order_events WHERE order_id = ${r.body.orderId} AND kind = 'created'
+    `)[0];
+    expect(created.actor_id).toBe(mgr.user.id);
+    expect(created.detail.onBehalfOfUserId).toBe(marcus.user.id);
   });
 
   it('only the creator or a manager may create the PO', async () => {

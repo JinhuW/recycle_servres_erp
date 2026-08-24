@@ -1,57 +1,24 @@
-import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
-import { CARRIERS, detectCarriers, normalizeTracking, type Carrier } from '../../lib/carrierDetect';
-import { handleFetchError } from '../../lib/errorToast';
+import { CARRIERS } from '../../lib/carrierDetect';
 import { useT } from '../../lib/i18n';
-import { addPackage } from '../../lib/packages';
 import { navigate } from '../../lib/route';
+import { FMT_HINT_KEY, useAddPackageForm } from '../../lib/useAddPackageForm';
 
 // Add an existing label (bought outside the system): paste the tracking
 // number, the carrier lights up from the number's shape, and the package joins
 // the inbound stream. A PO is created later, when the box arrives.
+// The form's state machine lives in lib/useAddPackageForm, shared with the
+// phone screen.
 
 type ToastKind = 'success' | 'error';
 type Props = { showToast: (msg: string, kind?: ToastKind) => void };
 
-const FMT_HINT_KEY: Record<Carrier, string> = {
-  UPS: 'shipFmtUps',
-  FedEx: 'shipFmtFedex',
-  USPS: 'shipFmtUsps',
-};
-
 export function ShippingAddLabel({ showToast }: Props) {
   const { t } = useT();
-  const [raw, setRaw] = useState('');
-  const [pick, setPick] = useState<Carrier | null>(null);
-  const [sellerName, setSellerName] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const tn = normalizeTracking(raw);
-  const detected = useMemo(() => detectCarriers(raw), [raw]);
-  // A single detection selects itself; ambiguity or no match leaves the pick
-  // to the user. A manual pick always wins.
-  const carrier = pick ?? (detected.length === 1 ? detected[0] : null);
-  const unknownShape = tn.length >= 10 && detected.length === 0;
-  const canSubmit = tn.length >= 8 && carrier != null && !busy;
-
-  // setBusy hasn't rendered yet when Enter fires twice in one tick — the ref
-  // is the same-tick guard the state can't be.
-  const submitting = useRef(false);
-  const submit = async () => {
-    if (!canSubmit || carrier == null || submitting.current) return;
-    submitting.current = true;
-    setBusy(true);
-    try {
-      await addPackage({ trackingNumber: tn, carrier, sellerName, note });
-      showToast(t('shipAddAdded', { carrier, tn }));
-      navigate('/shipping');
-    } catch (e) {
-      handleFetchError(e);
-      submitting.current = false;
-      setBusy(false);
-    }
-  };
+  const f = useAddPackageForm(({ carrier, tn }) => {
+    showToast(t('shipAddAdded', { carrier, tn }));
+    navigate('/shipping');
+  });
 
   return (
     <div className="ship-wizard ship-add">
@@ -67,9 +34,9 @@ export function ShippingAddLabel({ showToast }: Props) {
         <div className="ship-sec-title">{t('shipAddTrackingLabel')}</div>
         <input
           className="input mono ship-tn-input"
-          value={raw}
-          onChange={(e) => { setRaw(e.target.value); setPick(null); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+          value={f.raw}
+          onChange={(e) => f.setRaw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void f.submit(); }}
           placeholder={t('shipAddTrackingPh')}
           autoFocus
           autoComplete="off"
@@ -78,8 +45,8 @@ export function ShippingAddLabel({ showToast }: Props) {
         />
         <div className="ship-carrier-tiles" role="radiogroup" aria-label={t('shipAddCarrierTitle')}>
           {CARRIERS.map((c) => {
-            const lit = detected.includes(c);
-            const selected = carrier === c;
+            const lit = f.detected.includes(c);
+            const selected = f.carrier === c;
             return (
               <button
                 key={c}
@@ -88,7 +55,7 @@ export function ShippingAddLabel({ showToast }: Props) {
                 aria-checked={selected}
                 className={'ship-carrier-tile' + (lit ? ' lit' : '') + (selected ? ' selected' : '')}
                 data-carrier={c}
-                onClick={() => setPick(c)}
+                onClick={() => f.setPick(c)}
               >
                 <span className="ship-carrier-name">{c}</span>
                 <span className="ship-carrier-fmt mono">{t(FMT_HINT_KEY[c])}</span>
@@ -98,13 +65,7 @@ export function ShippingAddLabel({ showToast }: Props) {
           })}
         </div>
         <div className="ship-add-hint" aria-live="polite">
-          {carrier != null && detected.length === 1 && !pick
-            ? t('shipAddCarrierAuto')
-            : detected.length > 1 && !pick
-              ? t('shipAddCarrierPick')
-              : unknownShape && !pick
-                ? t('shipAddCarrierUnknown')
-                : ' '}
+          {f.hintKey ? t(f.hintKey) : ' '}
         </div>
       </section>
 
@@ -113,11 +74,11 @@ export function ShippingAddLabel({ showToast }: Props) {
         <div className="field-row">
           <div className="field">
             <label className="label">{t('shipSellerName')}</label>
-            <input className="input" value={sellerName} onChange={(e) => setSellerName(e.target.value)} autoComplete="off" />
+            <input className="input" value={f.sellerName} onChange={(e) => f.setSellerName(e.target.value)} autoComplete="off" />
           </div>
           <div className="field">
             <label className="label">{t('shipAddNote')}</label>
-            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} autoComplete="off" />
+            <input className="input" value={f.note} onChange={(e) => f.setNote(e.target.value)} autoComplete="off" />
           </div>
         </div>
       </section>
@@ -125,8 +86,8 @@ export function ShippingAddLabel({ showToast }: Props) {
       <div className="ship-wizard-foot">
         <span />
         <div className="ship-foot-right">
-          <button className="btn accent" disabled={!canSubmit} onClick={() => void submit()}>
-            {busy ? '…' : t('shipAddSubmit')}
+          <button className="btn accent" disabled={!f.canSubmit} onClick={() => void f.submit()}>
+            {f.busy ? '…' : t('shipAddSubmit')}
           </button>
         </div>
       </div>

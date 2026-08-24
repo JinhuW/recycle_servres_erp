@@ -10,7 +10,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
 import { navigate } from '../lib/route';
-import type { TrackedPackage } from '../lib/packages';
+import { listPackages } from '../lib/packages';
 import { mergeInbound, type ShipOrder } from '../lib/shippingList';
 import { inboundSummary } from '../lib/shippingInbound';
 import type { DashboardData, Shipment } from '../lib/types';
@@ -47,7 +47,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
     let alive = true;
     Promise.all([
       api.get<{ items: (Shipment & { order: ShipOrder })[] }>('/api/shipments?limit=200&mine=true'),
-      api.get<{ items: TrackedPackage[] }>('/api/packages'),
+      listPackages({ mine: true }),
     ])
       .then(([shipments, packages]) => {
         if (!alive) return;
@@ -176,7 +176,11 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           <Icon name="chevronRight" size={16} />
         </button>
 
-        {inbound && inbound.moving + inbound.needs > 0 && (
+        {/* Managers always get the card — the phone tab bar gives them
+            Inventory, not Shipping, so this row is their only way in. For
+            purchasers (who have the tab) it appears once there's something
+            to glance at. */}
+        {inbound && (isManager || inbound.moving + inbound.needs > 0) && (
           <button
             className="ph-row"
             onClick={() => navigate('/shipping')}
@@ -191,7 +195,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                 {[
                   inbound.moving > 0 ? t('shipMobMovingN', { n: inbound.moving }) : null,
                   inbound.needs > 0 ? t('shipMobNeedsN', { n: inbound.needs }) : null,
-                ].filter(Boolean).join(' · ')}
+                ].filter(Boolean).join(' · ') || t('shipMobEmptyTitle')}
               </div>
             </div>
             {inbound.needs > 0 && (

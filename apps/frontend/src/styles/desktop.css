@@ -2795,12 +2795,6 @@ html.desktop, body.desktop, .desktop #root {
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
-.ship-unit-suffix {
-  align-self: center;
-  font-size: 12px;
-  color: var(--fg-subtle);
-}
-
 /* Rate cards (step 2). */
 .ship-rate-card {
   display: flex;

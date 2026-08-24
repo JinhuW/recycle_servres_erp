@@ -94,7 +94,10 @@ async function resolveOrderOwner(
   if (onBehalfOfUserId === undefined || onBehalfOfUserId === null || onBehalfOfUserId === u.id) {
     return { ownerId: u.id, ownerName: null };
   }
-  if (typeof onBehalfOfUserId !== 'string') {
+  // The format gate matters, not just the lookup: users.id is uuid, so a
+  // malformed string would make the SELECT itself 22P02 into a 500.
+  if (typeof onBehalfOfUserId !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(onBehalfOfUserId)) {
     return { error: 'onBehalfOfUserId must be a user id', status: 400 };
   }
   if (u.role !== 'manager') {
@@ -109,6 +112,19 @@ async function resolveOrderOwner(
     return { error: 'onBehalfOfUserId must name an active purchaser', status: 400 };
   }
   return { ownerId: onBehalfOfUserId, ownerName: rows[0].name };
+}
+
+// A client that sends warehouseId at all must name a real warehouse — the
+// label wizard once sent "" before a destination was picked, which sailed
+// past `?? null` into the FK and 500ed. Every endpoint that writes the
+// column shares this boundary check.
+async function warehouseErr(
+  sql: ReturnType<typeof getDb>,
+  warehouseId: string | null,
+): Promise<string | null> {
+  if (warehouseId === null) return null;
+  const wh = await sql<{ id: string }[]>`SELECT id FROM warehouses WHERE id = ${warehouseId} LIMIT 1`;
+  return wh.length ? null : 'Unknown warehouse';
 }
 
 // An `Other` line has no spec fields to identify it, so its type carries the
@@ -716,6 +732,8 @@ orders.post('/', async (c) => {
   }
   const owner = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
   if ('error' in owner) return c.json({ error: owner.error }, owner.status);
+  const whErr = await warehouseErr(sql, body.warehouseId ?? null);
+  if (whErr) return c.json({ error: whErr }, 400);
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const cat = body.lines[i].category ?? body.category;
@@ -942,6 +960,13 @@ orders.patch('/:id', async (c) => {
 
   const feeErr = badFees(body);
   if (feeErr) return c.json({ error: feeErr }, 400);
+
+  // null clears the warehouse; a non-null value must exist (same boundary
+  // check as the create endpoints — "" would 500 on the FK inside the tx).
+  if (body.warehouseId !== undefined) {
+    const whErr = await warehouseErr(sql, body.warehouseId ?? null);
+    if (whErr) return c.json({ error: whErr }, 400);
+  }
 
   // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
   // a malformed value hits the order_lines CHECK constraint inside the tx
@@ -1494,14 +1519,9 @@ orders.post('/draft', async (c) => {
     if (catErr) return c.json({ error: catErr }, 400);
   }
 
-  // A client that sends warehouseId at all must name a real warehouse — the
-  // label wizard once sent "" before a destination was picked, which sailed
-  // past `?? null` into the FK and 500ed.
   const warehouseId = body?.warehouseId ?? null;
-  if (warehouseId !== null) {
-    const wh = await sql<{ id: string }[]>`SELECT id FROM warehouses WHERE id = ${warehouseId} LIMIT 1`;
-    if (!wh.length) return c.json({ error: 'Unknown warehouse' }, 400);
-  }
+  const whErr = await warehouseErr(sql, warehouseId);
+  if (whErr) return c.json({ error: whErr }, 400);
 
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;

@@ -125,6 +125,27 @@ describe('GET /api/shipments — scope and join', () => {
     expect(new Set(seen).size).toBe(3);
     expect(new Set(seen)).toEqual(new Set(ids));
   });
+
+  it('a malformed cursor falls back to the first page instead of a cast 500', async () => {
+    const marcus = await loginAs(MARCUS);
+    const po = await createPo(marcus.token);
+    await createShipment(marcus.token, po);
+
+    // Valid base64url of JSON that is not a {ts, id} cursor.
+    const garbage = Buffer.from(JSON.stringify({ ts: { nested: true } })).toString('base64url');
+    const r = await api<{ items: ListItem[] }>(
+      'GET', `/api/shipments?cursor=${encodeURIComponent(garbage)}`, { token: marcus.token });
+    expect(r.status).toBe(200);
+    expect(r.body.items).toHaveLength(1);
+
+    // Shape-valid but uncastable values — would 22007/22P02 inside the
+    // ::timestamptz/::uuid casts without the value guard.
+    const uncastable = Buffer.from(JSON.stringify({ ts: 'x', id: 'y' })).toString('base64url');
+    const r2 = await api<{ items: ListItem[] }>(
+      'GET', `/api/shipments?cursor=${encodeURIComponent(uncastable)}`, { token: marcus.token });
+    expect(r2.status).toBe(200);
+    expect(r2.body.items).toHaveLength(1);
+  });
 });
 
 describe('GET /api/shipping/contacts — seller address book', () => {

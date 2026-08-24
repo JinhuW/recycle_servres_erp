@@ -21,11 +21,15 @@ export type TrackedPackage = {
   sellerName: string | null;
   note: string | null;
   orderId: string | null;
+  // Server-built carrier deep link, same as shipments.trackingUrl — the
+  // carrier→URL table lives once, in the backend.
+  trackingUrl: string | null;
   createdAt: string;
 };
 
-export async function listPackages(): Promise<{ items: TrackedPackage[] }> {
-  return api.get<{ items: TrackedPackage[] }>('/api/packages');
+/** `mine` pins a manager to their own rows, mirroring GET /api/shipments. */
+export async function listPackages(opts?: { mine?: boolean }): Promise<{ items: TrackedPackage[] }> {
+  return api.get<{ items: TrackedPackage[] }>(`/api/packages${opts?.mine ? '?mine=true' : ''}`);
 }
 
 export async function addPackage(input: {
@@ -44,16 +48,4 @@ export async function removePackage(id: string): Promise<{ ok: true }> {
 /** Atomic on the server: mints the draft PO and links the package in one tx. */
 export async function createPoFromPackage(pkg: TrackedPackage): Promise<{ orderId: string }> {
   return api.post<{ orderId: string }>(`/api/packages/${pkg.id}/create-po`, {});
-}
-
-/** Carrier public tracking pages — used when the provider gave us no URL. */
-export function carrierTrackingUrl(carrier: Carrier, trackingNumber: string): string | null {
-  switch (carrier) {
-    case 'UPS': return `https://www.ups.com/track?tracknum=${encodeURIComponent(trackingNumber)}`;
-    case 'FedEx': return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`;
-    case 'USPS': return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(trackingNumber)}`;
-    // The type says this can't happen; the data (a server row) can — an <a>
-    // with no href is worse than no link.
-    default: return null;
-  }
 }

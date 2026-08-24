@@ -9,7 +9,7 @@ import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate, type ShippingRoute } from '../../lib/route';
 import {
-  carrierTrackingUrl, createPoFromPackage, listPackages, removePackage,
+  createPoFromPackage, listPackages, removePackage,
   type TrackedPackage,
 } from '../../lib/packages';
 import {
@@ -125,31 +125,54 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
   // Monotonic load generation so a scope flip mid-flight can't let the older
   // response land last.
   const loadGen = useRef(0);
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (silent = false) => {
     const gen = ++loadGen.current;
     try {
-      const mine = isManager && scope === 'mine' ? '&mine=true' : '';
-      const [shipments, packages] = await Promise.all([
-        api.get<{ items: (Shipment & { order: ShipOrder })[] }>(`/api/shipments?limit=200${mine}`),
-        listPackages(),
+      const mineOnly = isManager && scope === 'mine';
+      const mine = mineOnly ? '&mine=true' : '';
+      // Follow the keyset pages: this table is the ledger and feeds the CSV
+      // export, so it must see every row, not silently just the newest 200.
+      // The page cap only bounds a runaway cursor.
+      const fetchShipments = async () => {
+        const items: (Shipment & { order: ShipOrder })[] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < 10; page++) {
+          const qs = `limit=200${mine}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+          const r: { items: (Shipment & { order: ShipOrder })[]; nextCursor: string | null } =
+            await api.get(`/api/shipments?${qs}`);
+          items.push(...r.items);
+          cursor = r.nextCursor;
+          if (!cursor) break;
+        }
+        return items;
+      };
+      const [shipItems, packages] = await Promise.all([
+        fetchShipments(),
+        listPackages({ mine: mineOnly }),
       ]);
       if (gen !== loadGen.current) return;
-      setShipRows(shipments.items.map(({ order, ...shipment }) => ({ order, shipment })));
+      setShipRows(shipItems.map(({ order, ...shipment }) => ({ order, shipment })));
       setPkgs(packages.items);
     } catch (e) {
-      if (gen === loadGen.current) handleFetchError(e);
+      if (gen === loadGen.current && !silent) handleFetchError(e);
     } finally {
       if (gen === loadGen.current) setLoaded(true);
     }
   }, [isManager, scope]);
   useEffect(() => { void reload(); }, [reload]);
 
-  // Standalone packages track server-side; re-read on a slow tick so status
-  // moves show up without a manual refresh.
+  // Tracking moves server-side on a slow pass; re-read on a visible-tab tick
+  // so status moves show up without a manual refresh — a backgrounded tab
+  // polls nothing and catches up the moment it's back.
   useEffect(() => {
-    const h = setInterval(() => { listPackages().then(r => setPkgs(r.items)).catch(() => {}); }, 30_000);
-    return () => clearInterval(h);
-  }, []);
+    const h = setInterval(() => { if (!document.hidden) void reload(true); }, 30_000);
+    const onVisible = () => { if (!document.hidden) void reload(true); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(h);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [reload]);
 
   const rows = useMemo(() => mergeInbound(shipRows, pkgs), [shipRows, pkgs]);
   const carriers = useMemo(() => inboundCarriers(rows), [rows]);
@@ -349,7 +372,7 @@ function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: 
   const [busy, setBusy] = useState(false);
   const chip = STATUS_CHIP[pkg.status];
   const eta = fmtEta(pkg.trackingEta, locale);
-  const trackUrl = carrierTrackingUrl(pkg.carrier, pkg.trackingNumber);
+  const trackUrl = pkg.trackingUrl;
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   const createPo = async () => {
