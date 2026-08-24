@@ -497,7 +497,7 @@ function ReviewVolumeCard({ locale, stats }: {
   const alerts7 = sample
     ? SAMPLE_ALERTS_7D
     : series.slice(-7).reduce((sum, d) => sum + d.alerted, 0);
-  const passRate = last7 > 0 ? (alerts7 / last7) * 100 : 0;
+  const windowTotal = series.reduce((sum, d) => sum + d.reviewed, 0);
   const fmt = new Intl.NumberFormat(locale);
   const value = (n: number | string) => (loading ? '…' : typeof n === 'number' ? fmt.format(n) : n);
 
@@ -528,10 +528,21 @@ function ReviewVolumeCard({ locale, stats }: {
           </div>
           <div className="kpi">
             <div className="kpi-label">{t('fbcKpiPassRate')}</div>
-            <div className="kpi-value mono">{loading ? '…' : `${passRate.toFixed(1)}%`}</div>
+            <div className="kpi-value mono">
+              {loading ? '…' : last7 > 0 ? `${((alerts7 / last7) * 100).toFixed(1)}%` : '—'}
+            </div>
           </div>
         </div>
-        {!loading && <ReviewBars series={series} locale={locale} />}
+        {/* A window with no data yet gets an honest note, not a flatline of
+            one-pixel bars pretending to be a chart. */}
+        {!loading && (windowTotal > 0
+          ? <ReviewBars series={series} locale={locale} />
+          : (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', color: 'var(--fg-subtle)', fontSize: 12.5 }}>
+              <Icon name="info" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span style={{ maxWidth: '70ch' }}>{t('fbcReviewEmpty')}</span>
+            </div>
+          ))}
       </div>
     </div>
   );

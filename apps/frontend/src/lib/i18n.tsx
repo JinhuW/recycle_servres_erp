@@ -1913,6 +1913,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcKpi7d: 'Reviewed · 7 days',
     fbcKpiAlerts: 'Alerts sent · 7 days',
     fbcKpiPassRate: 'Pass rate · 7 days',
+    fbcReviewEmpty: 'No reviews recorded yet. Counting started 2026-08-24 and only fresh AI verdicts count — the chart appears with the first recorded day.',
     fbcChartLabel: 'Posts reviewed per day, last {n} days',
     fbcChartTooltip: '{n} posts reviewed',
     fbcPromptTitle: 'Content filter',

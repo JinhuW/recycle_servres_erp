@@ -1679,6 +1679,7 @@ const zh: Record<string, string> = {
   fbcKpi7d: '近 7 天已审核',
   fbcKpiAlerts: '近 7 天已发提醒',
   fbcKpiPassRate: '近 7 天通过率',
+  fbcReviewEmpty: '暂无审核记录。统计自 2026-08-24 开始，且只计入新的 AI 评估——有首个记录日后图表即会显示。',
   fbcChartLabel: '近 {n} 天每日审核帖子数',
   fbcChartTooltip: '审核 {n} 条帖子',
   fbcPromptTitle: '内容过滤器',
