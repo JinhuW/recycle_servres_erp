@@ -63,7 +63,7 @@ const zh: Record<string, string> = {
   serialCount: '{n} 个序列号',
   snScan: '扫描序列号二维码',
   snScanTitle: '扫描序列号',
-  snScanHint: '对准内存条上的二维码',
+  snScanHint: '靠近一点，将二维码对准框内',
   snScanCount: '已扫 {n} 个',
   snScanAll: '{n} 个已扫齐',
   snScanDup: '已扫描过',

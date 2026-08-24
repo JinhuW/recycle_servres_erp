@@ -382,10 +382,16 @@
 .ph-sn-scan:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .ph-snscan-frame {
+  /* Small centered square sized to a module's ~10 mm QR held close — it
+     mirrors (slightly under-covers) the decoder's center crop, so a code
+     that fits the box is a code that scans. */
   position: absolute;
-  left: 12%; right: 12%; top: 22%; bottom: 30%;
-  border: 1.5px dashed rgba(255,255,255,0.5);
-  border-radius: 10px;
+  left: 50%; top: 42%;
+  transform: translate(-50%, -50%);
+  width: min(58vw, 240px);
+  aspect-ratio: 1;
+  border: 1.5px dashed rgba(255,255,255,0.55);
+  border-radius: 12px;
   overflow: hidden;   /* clips .scan-line and the hit flash to the frame */
 }
 .ph-snscan-flash {

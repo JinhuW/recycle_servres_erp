@@ -41,10 +41,12 @@ export function SnScanner({ existing, target, onDone }: Props) {
       if (!navigator.mediaDevices?.getUserMedia) { setCamError(true); return; }
       try {
         const s = await navigator.mediaDevices.getUserMedia({
+          // Full sensor resolution, same as the label Camera — the QR on a
+          // module is ~10 mm and needs every pixel it can get.
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 3840 },
+            height: { ideal: 2160 },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             advanced: [{ focusMode: 'continuous' } as any],
           },
@@ -77,6 +79,20 @@ export function SnScanner({ existing, target, onDone }: Props) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     track.applyConstraints({ advanced: [{ torch } as any] }).catch(() => {});
   }, [torch, stream]);
+
+  // Mild optical/digital zoom where the hardware offers it: the main lens
+  // can't focus close enough to fill the frame with a 10 mm code, so 2×
+  // roughly doubles the pixels on the code at the same working distance.
+  useEffect(() => {
+    const track = stream?.getVideoTracks?.()[0];
+    if (!track || typeof track.applyConstraints !== 'function') return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const caps = (track.getCapabilities?.() ?? {}) as any;
+    if (!caps.zoom?.max || caps.zoom.max <= 1) return;
+    const zoom = Math.min(2, caps.zoom.max);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    track.applyConstraints({ advanced: [{ zoom } as any] }).catch(() => {});
+  }, [stream]);
 
   // Decode loop. A hit — new or duplicate — pauses decoding for a beat so one
   // physical code isn't re-read ten times while the user moves to the next

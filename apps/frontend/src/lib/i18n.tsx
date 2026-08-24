@@ -129,7 +129,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     serialCount: '{n} SN',
     snScan: 'Scan serial QR codes',
     snScanTitle: 'Scan serials',
-    snScanHint: 'Point at the QR code on the module',
+    snScanHint: 'Fit the QR code inside the box, up close',
     snScanCount: '{n} scanned',
     snScanAll: 'All {n} scanned',
     snScanDup: 'Already scanned',
