@@ -99,7 +99,7 @@ export function RamFields({ line, set, missing }: FieldsProps) {
           className="input mono"
           value={line.chipNumber ?? ''}
           aria-invalid={bad('chipNumber')}
-          onChange={e => set({ chipNumber: e.target.value })}
+          onChange={e => set({ chipNumber: e.target.value.toUpperCase() })}
         />
       </div>
       <div className={cls('partNumber')} style={{ gridColumn: 'span 2' }}>

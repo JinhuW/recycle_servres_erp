@@ -438,15 +438,26 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
         {/* The capture above is the AI's reading of a label; these are pictures
             of the goods themselves. The scan keeps its own thumbnail, so only
-            uploads are listed here and no image appears twice. */}
-        <LinePhotoStrip
-          photos={photoCtx.photosFor(line).filter(p => p.source === 'upload')}
-          pending={photoCtx.pendingFor(line)}
-          busy={photoCtx.busy}
-          onAdd={files => photoCtx.onAddFiles(line, files)}
-          onRemove={p => photoCtx.onRemoveSaved(line, p)}
-          onRemovePending={p => photoCtx.onRemovePending(line, p)}
-        />
+            uploads are listed here and no image appears twice. On RAM the AI
+            capture button sits directly above and supplies this line's photo,
+            so an empty "add a photo" slot would ask for something the flow
+            already covers — same rule as the desktop drawer. Once a picture
+            exists (scanned or uploaded) the strip earns its place. */}
+        {(() => {
+          const uploads = photoCtx.photosFor(line).filter(p => p.source === 'upload');
+          const queued = photoCtx.pendingFor(line);
+          if (category === 'RAM' && !showThumb && uploads.length === 0 && queued.length === 0) return null;
+          return (
+            <LinePhotoStrip
+              photos={uploads}
+              pending={queued}
+              busy={photoCtx.busy}
+              onAdd={files => photoCtx.onAddFiles(line, files)}
+              onRemove={p => photoCtx.onRemoveSaved(line, p)}
+              onRemovePending={p => photoCtx.onRemovePending(line, p)}
+            />
+          );
+        })()}
 
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 

@@ -117,6 +117,9 @@ export function normalizeFields(
       if (g) f.generation = g; else delete f.generation;
     }
     if (f.classification) f.classification = f.classification.toUpperCase();
+    // Chip markings are die codes (Micron D9XPF, Samsung K4A8G045WC…) — always
+    // printed upper-case; OCR case noise would fork one chip into two spellings.
+    if (f.chipNumber) f.chipNumber = f.chipNumber.toUpperCase();
     if (f.rank) f.rank = normRank(f.rank);
     if (f.speed) {
       const s = normSpeed(f.speed);

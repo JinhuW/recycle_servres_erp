@@ -688,6 +688,39 @@ describe('order line serial numbers', () => {
     expect(after.body.order.lines[0].chipNumber).toBeNull();
   });
 
+  it('upper-cases chip_number on create and edit — die codes have one spelling', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Micron', capacity: '32GB', type: 'DDR4',
+          partNumber: 'CHIP-CASE-1', condition: 'Pulled — Tested',
+          chipNumber: ' d9xpf ', qty: 1, unitCost: 10,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const before = await api<{ order: { lines: { id: string; chipNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    expect(before.body.order.lines[0].chipNumber).toBe('D9XPF');
+
+    const patched = await api('PATCH', '/api/orders/' + created.body.id, {
+      token, body: { lines: [{ id: before.body.order.lines[0].id, chipNumber: 'k4a8g045wc-bcwe' }] },
+    });
+    expect(patched.status).toBe(200);
+
+    const after = await api<{ order: { lines: { chipNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    expect(after.body.order.lines[0].chipNumber).toBe('K4A8G045WC-BCWE');
+  });
+
   it('defaults serial_number to null when omitted, and surfaces it in inventory', async () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {

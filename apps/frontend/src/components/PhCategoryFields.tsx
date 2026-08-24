@@ -124,7 +124,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('chipNumber')}{chipNumberRequired(value.brand) && <Req />}</label>
-          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value)} />
+          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value.toUpperCase())} />
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}<Req /></label>

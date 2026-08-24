@@ -44,6 +44,14 @@ function resolvePartNumber(
   return synthesizePartNumber(category ?? '', l);
 }
 
+// Chip markings are die codes, always printed upper-case on the module; case
+// noise (typed or OCR'd) would fork one chip into two spellings, so the column
+// is normalised at every write. `''` passes through untouched — PATCH uses it
+// as the explicit "clear this field" sentinel, distinct from undefined/"keep".
+function canonChipNumber(v: string | null | undefined): string | null {
+  return v == null ? null : v.trim().toUpperCase();
+}
+
 // Serial rules (shared with the frontend forms via @recycle-erp/shared):
 // DDR5 RAM must carry serials, and any entered serials must match qty.
 // Enforced here too so no client can write a violating line.
@@ -765,7 +773,7 @@ orders.post('/', async (c) => {
           ${newId}, ${lineCats[i]}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
+          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
           ${l.unitCost}, ${normSellPrice(l.sellPrice)}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
@@ -1285,7 +1293,7 @@ orders.patch('/:id', async (c) => {
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
               -- '' means "cleared by the user" (the edit forms always send the
               -- field); NULLIF turns it into NULL instead of storing ''.
-              chip_number    = NULLIF(COALESCE(${l.chipNumber ?? null}, chip_number), ''),
+              chip_number    = NULLIF(COALESCE(${canonChipNumber(l.chipNumber)}, chip_number), ''),
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = COALESCE(${l.health ?? null}, health),
               rpm            = COALESCE(${l.rpm ?? null}, rpm)
@@ -1313,7 +1321,7 @@ orders.patch('/:id', async (c) => {
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${normSellPrice(l.sellPrice)},
               ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
