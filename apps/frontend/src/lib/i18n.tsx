@@ -130,8 +130,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     snScan: 'Scan serial QR codes',
     snScanTitle: 'Scan serials',
     snScanHint: 'Fit the QR code inside the box, up close',
-    snScanCount: '{n} scanned',
-    snScanAll: 'All {n} scanned',
     snScanDup: 'Already scanned',
     snScanNoCamera: 'Camera unavailable — allow camera access, or type serials manually.',
     errDialogTitle: 'Something went wrong',

@@ -4,31 +4,26 @@ import { useT } from '../lib/i18n';
 import { createFrameDecoder } from '../lib/qr';
 
 type Props = {
-  // Serials already on the line — scanning one of these reads as a duplicate.
+  // Serials already on the line — scanning one of these reads as a duplicate
+  // and keeps the scanner open instead of adding it twice.
   existing: string[];
-  // Line qty; > 0 turns the tally into "n / qty" and auto-finishes at qty.
-  target: number;
-  // Fired with whatever was scanned this session (possibly []). Both Done and
-  // ✕ commit — the scanner is live input, not a dialog with cancel semantics,
-  // so a mis-tapped close never throws away captured serials.
+  // Fired with the captured serial ([value]) the moment a new code decodes,
+  // or [] when the user closes without a capture.
   onDone: (scanned: string[]) => void;
 };
 
-// Batch QR scanner for serial numbers: no shutter — every code that enters the
-// frame is decoded, deduped, and tallied until the user taps Done (or the
-// tally reaches the line qty, which is completion by the serials-must-equal-qty
-// rule, so the scanner finishes itself).
-export function SnScanner({ existing, target, onDone }: Props) {
+// Single-shot QR scanner for serial numbers: no shutter — the first code that
+// decodes flashes a confirmation and closes itself, handing the serial back
+// to the form. Scanning the next stick is one tap on the field button again.
+export function SnScanner({ existing, onDone }: Props) {
   const { t } = useT();
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [torch, setTorch] = useState(false);
-  const [scanned, setScanned] = useState<string[]>([]);
   const [lastHit, setLastHit] = useState<{ value: string; dup: boolean; tick: number } | null>(null);
   const [camError, setCamError] = useState(false);
-  const [complete, setComplete] = useState(false);
+  const [captured, setCaptured] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const seenRef = useRef<Set<string>>(new Set(existing));
-  const scannedRef = useRef<string[]>([]);
+  const existingRef = useRef<Set<string>>(new Set(existing));
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
 
@@ -94,9 +89,9 @@ export function SnScanner({ existing, target, onDone }: Props) {
     track.applyConstraints({ advanced: [{ zoom } as any] }).catch(() => {});
   }, [stream]);
 
-  // Decode loop. A hit — new or duplicate — pauses decoding for a beat so one
-  // physical code isn't re-read ten times while the user moves to the next
-  // stick, and so the flash/toast gets its moment.
+  // Decode loop. A duplicate pauses decoding for a beat (so one physical code
+  // isn't re-flagged ten times); a fresh serial stops the loop for good —
+  // green flash, then the scanner closes itself with the value.
   useEffect(() => {
     if (!stream) return;
     let stop = false;
@@ -111,21 +106,16 @@ export function SnScanner({ existing, target, onDone }: Props) {
           const value = await decode(v);
           if (stop) return;
           if (value) {
-            coolUntil = performance.now() + 1100;
-            if (seenRef.current.has(value)) {
+            if (existingRef.current.has(value)) {
+              coolUntil = performance.now() + 1100;
               setLastHit({ value, dup: true, tick: performance.now() });
             } else {
-              seenRef.current.add(value);
-              scannedRef.current = [...scannedRef.current, value];
-              setScanned(scannedRef.current);
+              stop = true;
+              setCaptured(value);
               setLastHit({ value, dup: false, tick: performance.now() });
               navigator.vibrate?.(35);
-              if (target > 0 && existing.length + scannedRef.current.length >= target) {
-                setComplete(true);
-                stop = true;
-                window.setTimeout(() => onDoneRef.current(scannedRef.current), 900);
-                return;
-              }
+              window.setTimeout(() => onDoneRef.current([value]), 650);
+              return;
             }
           }
         }
@@ -134,19 +124,16 @@ export function SnScanner({ existing, target, onDone }: Props) {
       step();
     })();
     return () => { stop = true; window.clearTimeout(timer); };
-  }, [stream, target, existing.length]);
-
-  const total = existing.length + scanned.length;
-  const tally = target > 0 ? `${total} / ${target}` : t('snScanCount', { n: scanned.length });
+  }, [stream]);
 
   return (
     <div className="ph-cam-screen">
       <div className="ph-cam-top">
         <button
-          onClick={() => onDone(scanned)}
+          onClick={() => { if (!captured) onDone([]); }}
           className="ph-cam-pill"
           style={{ background: 'rgba(255,255,255,0.12)' }}
-          aria-label={t('done')}
+          aria-label={t('cancel')}
         >
           <Icon name="x" size={14} />
         </button>
@@ -178,42 +165,36 @@ export function SnScanner({ existing, target, onDone }: Props) {
         />
         {!camError && (
           <div className="ph-snscan-frame">
-            {stream && !complete && <div className="scan-line" />}
-            {lastHit && !lastHit.dup && <div key={lastHit.tick} className="ph-snscan-flash" />}
+            {stream && !captured && <div className="scan-line" />}
+            {captured && <div className="ph-snscan-flash" />}
           </div>
-        )}
-
-        {!camError && (
-          <span
-            className="ph-cam-pill"
-            style={{
-              position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)',
-              fontVariantNumeric: 'tabular-nums',
-              ...(complete ? { background: 'rgba(22,163,74,0.9)', borderColor: 'transparent' } : {}),
-            }}
-          >
-            {complete ? <><Icon name="check2" size={13} /> {t('snScanAll', { n: total })}</> : tally}
-          </span>
         )}
 
         {camError ? (
           <div className="cam-hint" style={{ top: '46%', whiteSpace: 'normal', maxWidth: '82%', textAlign: 'center', lineHeight: 1.5 }}>
             {t('snScanNoCamera')}
           </div>
-        ) : lastHit && !complete ? (
-          <div className="ph-snscan-toast" role="status">
-            <Icon name={lastHit.dup ? 'info' : 'check2'} size={13} style={{ flexShrink: 0, color: lastHit.dup ? 'rgba(255,255,255,0.7)' : '#4ade80' }} />
-            <span className="mono">{lastHit.value}</span>
-            {lastHit.dup && <span style={{ color: 'rgba(255,255,255,0.7)', flexShrink: 0 }}>· {t('snScanDup')}</span>}
+        ) : captured ? (
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center' }}>
+            <div style={{ background: 'white', color: 'var(--accent-strong)', padding: '12px 18px', borderRadius: 999, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, maxWidth: '84%' }}>
+              <Icon name="check2" size={16} style={{ flexShrink: 0 }} />
+              <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{captured}</span>
+            </div>
           </div>
-        ) : !complete ? (
+        ) : lastHit?.dup ? (
+          <div className="ph-snscan-toast" role="status">
+            <Icon name="info" size={13} style={{ flexShrink: 0, color: 'rgba(255,255,255,0.7)' }} />
+            <span className="mono">{lastHit.value}</span>
+            <span style={{ color: 'rgba(255,255,255,0.7)', flexShrink: 0 }}>· {t('snScanDup')}</span>
+          </div>
+        ) : (
           <div className="cam-hint" style={{ bottom: 18 }}>{t('snScanHint')}</div>
-        ) : null}
+        )}
       </div>
 
       <div className="ph-cam-bottom">
-        <button className="ph-snscan-done" onClick={() => onDone(scanned)}>
-          <Icon name="check" size={16} /> {t('done')}{scanned.length > 0 ? ` · ${scanned.length}` : ''}
+        <button className="ph-snscan-done" onClick={() => { if (!captured) onDone([]); }}>
+          {t('cancel')}
         </button>
       </div>
     </div>

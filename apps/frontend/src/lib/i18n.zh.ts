@@ -64,8 +64,6 @@ const zh: Record<string, string> = {
   snScan: '扫描序列号二维码',
   snScanTitle: '扫描序列号',
   snScanHint: '靠近一点，将二维码对准框内',
-  snScanCount: '已扫 {n} 个',
-  snScanAll: '{n} 个已扫齐',
   snScanDup: '已扫描过',
   snScanNoCamera: '无法使用相机 — 请允许相机权限，或手动输入序列号。',
   errDialogTitle: '出错了',

@@ -647,7 +647,6 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       {snScanOpen && (
         <SnScanner
           existing={parseSerials(line.serialNumber)}
-          target={line.qty || 0}
           onDone={scannedSns => {
             setSnScanOpen(false);
             if (!scannedSns.length) return;
