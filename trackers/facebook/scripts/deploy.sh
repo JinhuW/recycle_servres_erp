@@ -102,7 +102,7 @@ rsync -az --delete --itemize-changes \
     --exclude '.pytest_cache' --exclude 'configs/secrets.env' --exclude 'configs/sessions' \
     --exclude 'data' --exclude 'logs' --exclude 'reports' --exclude '*.png' \
     ai-marketplace-monitor configs deploy scripts \
-    rs_coordinator rs_poster rs_messenger \
+    rs_coordinator rs_poster rs_messenger rs_console \
     CHANGELOG.md README.md VENDOR.md VERSION \
     "$VM:$REMOTE/"
 

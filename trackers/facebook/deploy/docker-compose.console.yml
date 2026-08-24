@@ -1,0 +1,81 @@
+# Console facade: the ONLY fleet surface exposed beyond this host.
+#
+# The ERP dashboard (running on Railway) reaches it through a Cloudflare
+# tunnel; the coordinator itself stays loopback-only. The facade forwards a
+# closed allowlist (fleet health, checkpoint queue + resolve, review stats,
+# the filter prompt) to the coordinator over the rs-fleet network and holds
+# the admin token so it never leaves the VM.
+#
+# Bound to 127.0.0.1: only the local cloudflared process may reach it, and
+# cloudflared only ever makes outbound connections to Cloudflare's edge.
+
+services:
+  console:
+    build:
+      context: ../rs_console
+      dockerfile: ../deploy/Dockerfile.console
+    image: rs-console:latest
+    container_name: rs-console
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8600:8600"
+
+    # RS_CONSOLE_TOKEN and RS_ADMIN_TOKEN both come from here; the facade
+    # accepts RS_ADMIN_TOKEN directly as its upstream credential.
+    env_file:
+      - ../configs/secrets.env
+
+    environment:
+      RS_COORDINATOR_URL: http://coordinator:8500
+      RS_MONITOR_CONFIG: /config/monitor.toml
+
+    volumes:
+      # The monitor's live config, for the filter-prompt endpoint. Read-only:
+      # this service must never be a path to changing what the monitor does.
+      - ../configs/homelab.toml:/config/monitor.toml:ro
+
+    networks:
+      - rs-fleet
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8600/healthz')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # The outbound-only path in: cloudflared keeps connections open to
+  # Cloudflare's edge and delivers fbc-api.recycleservers.com to the console
+  # over the docker network. No listening port anywhere. The tunnel identity
+  # lives in ~/.cloudflared (cert created by `cloudflared tunnel login`,
+  # credentials by `cloudflared tunnel create rs-console`).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rs-console-tunnel
+    restart: unless-stopped
+    # The image's default nonroot user (65532) cannot read the 0700
+    # ~/.cloudflared mount; run as the host user that owns it instead.
+    user: "1000:1000"
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ~/.cloudflared:/etc/cloudflared:ro
+    networks:
+      - rs-fleet
+    depends_on:
+      - console
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

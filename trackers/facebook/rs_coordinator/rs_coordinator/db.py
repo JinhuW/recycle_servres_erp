@@ -16,7 +16,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Union
 
@@ -68,6 +68,20 @@ CREATE TABLE IF NOT EXISTS workers (
 CREATE INDEX IF NOT EXISTS idx_listings_last_seen ON listings(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_listings_score ON listings(ai_score);
 CREATE INDEX IF NOT EXISTS idx_sightings_key ON sightings(dedupe_key);
+
+-- Review stats --------------------------------------------------------------
+-- Daily counts of listings the AI content filter freshly evaluated (and how
+-- many alerted), one row per worker per UTC day. Workers report per-cycle
+-- deltas; the upsert accumulates. Feeds the ERP dashboard's review-volume
+-- card and nothing in the alert path reads it.
+CREATE TABLE IF NOT EXISTS review_stats (
+    day        TEXT NOT NULL,
+    worker_id  TEXT NOT NULL,
+    reviewed   INTEGER NOT NULL DEFAULT 0,
+    alerted    INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (day, worker_id)
+);
 
 -- Alert outbox -------------------------------------------------------------
 -- Every message the coordinator owes Telegram, written in the same request
@@ -783,6 +797,51 @@ class Database:
                 f"ON CONFLICT(worker_id) DO UPDATE SET {assignments}",
                 (worker_id, *updates.values()),
             )
+
+    # -- review stats ------------------------------------------------------
+
+    def add_review_stats(
+        self: "Database",
+        worker_id: str,
+        reviewed: int = 0,
+        alerted: int = 0,
+        day: str | None = None,
+    ) -> None:
+        """Accumulate one cycle's counts into the worker's row for `day` (UTC)."""
+        day = day or utcnow()[:10]
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO review_stats (day, worker_id, reviewed, alerted, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(day, worker_id) DO UPDATE SET "
+                "  reviewed = review_stats.reviewed + excluded.reviewed,"
+                "  alerted = review_stats.alerted + excluded.alerted,"
+                "  updated_at = excluded.updated_at",
+                (day, worker_id, reviewed, alerted, utcnow()),
+            )
+
+    def review_stats_daily(self: "Database", days: int = 14) -> List[Dict[str, Any]]:
+        """Fleet-wide daily totals for the last `days` UTC days, oldest first.
+
+        Days with no reports are simply absent; the consumer fills gaps.
+        """
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)
+        ).strftime("%Y-%m-%d")
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT day, SUM(reviewed) AS reviewed, SUM(alerted) AS alerted "
+                "FROM review_stats WHERE day >= ? GROUP BY day ORDER BY day",
+                (cutoff,),
+            )
+            return [
+                {
+                    "day": row["day"],
+                    "reviewed": int(row["reviewed"]),
+                    "alerted": int(row["alerted"]),
+                }
+                for row in cur.fetchall()
+            ]
 
     # -- accounts ----------------------------------------------------------
 

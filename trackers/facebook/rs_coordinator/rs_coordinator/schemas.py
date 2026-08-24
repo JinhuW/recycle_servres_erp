@@ -232,6 +232,27 @@ class WorkerList(BaseModel):
     workers: List[WorkerOut]
 
 
+# -- review stats ------------------------------------------------------------
+
+
+class ReviewStatsReport(BaseModel):
+    """One search cycle's deltas: listings freshly AI-evaluated, and alerted."""
+
+    worker_id: str | None = None
+    reviewed: int = Field(default=0, ge=0)
+    alerted: int = Field(default=0, ge=0)
+
+
+class ReviewStatsDay(BaseModel):
+    day: str
+    reviewed: int
+    alerted: int
+
+
+class ReviewStatsList(BaseModel):
+    days: List[ReviewStatsDay]
+
+
 # -- session backup ---------------------------------------------------------
 
 

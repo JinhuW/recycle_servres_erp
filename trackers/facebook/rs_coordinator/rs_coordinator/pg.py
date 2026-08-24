@@ -28,7 +28,7 @@ import json
 import os
 import re
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -614,6 +614,50 @@ class PostgresDatabase:
                 f"ON CONFLICT(worker_id) DO UPDATE SET {assignments}",
                 (worker_id, *updates.values()),
             )
+
+    # -- review stats ------------------------------------------------------
+
+    def add_review_stats(
+        self: "PostgresDatabase",
+        worker_id: str,
+        reviewed: int = 0,
+        alerted: int = 0,
+        day: str | None = None,
+    ) -> None:
+        day = day or utcnow()[:10]
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO review_stats (day, worker_id, reviewed, alerted, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT(day, worker_id) DO UPDATE SET "
+                "  reviewed = review_stats.reviewed + excluded.reviewed,"
+                "  alerted = review_stats.alerted + excluded.alerted,"
+                "  updated_at = excluded.updated_at",
+                (day, worker_id, reviewed, alerted, utcnow()),
+            )
+
+    def review_stats_daily(
+        self: "PostgresDatabase", days: int = 14
+    ) -> List[Dict[str, Any]]:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)
+        ).strftime("%Y-%m-%d")
+        with self.cursor() as cur:
+            cur.execute(
+                "SELECT day, SUM(reviewed) AS reviewed, SUM(alerted) AS alerted "
+                "FROM review_stats WHERE day >= %s GROUP BY day ORDER BY day",
+                (cutoff,),
+            )
+            rows = _rows(cur.fetchall())
+        # SUM comes back as Decimal from psycopg; the API contract is int.
+        return [
+            {
+                "day": row["day"],
+                "reviewed": int(row["reviewed"]),
+                "alerted": int(row["alerted"]),
+            }
+            for row in rows
+        ]
 
     # -- accounts ----------------------------------------------------------
 
