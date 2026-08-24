@@ -16,6 +16,7 @@ import { showErrorDialog, showWarnToast } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { SnScanner } from '../components/SnScanner';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
 
@@ -165,6 +166,8 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // Serial-rule violation (DDR5 requires serials; serial count must equal
   // qty) caught at save time — shown as a blocking dialog, nothing persists.
   const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
+  // Full-screen QR scanner for the serial field.
+  const [snScanOpen, setSnScanOpen] = useState(false);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -512,14 +515,24 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>{t('serialCount', { n: snCount })}</span>
             )}
           </label>
-          <textarea
-            className="input mono"
-            rows={Math.min(Math.max(snCount, 2), 5)}
-            value={line.serialNumber ?? ''}
-            onChange={e => set('serialNumber', e.target.value)}
-            placeholder={t('serialNumbersPh')}
-            style={{ resize: 'vertical', lineHeight: 1.6 }}
-          />
+          <div style={{ position: 'relative' }}>
+            <textarea
+              className="input mono"
+              rows={Math.min(Math.max(snCount, 2), 5)}
+              value={line.serialNumber ?? ''}
+              onChange={e => set('serialNumber', e.target.value)}
+              placeholder={t('serialNumbersPh')}
+              style={{ resize: 'vertical', lineHeight: 1.6, paddingRight: 50 }}
+            />
+            <button
+              type="button"
+              className="ph-sn-scan"
+              aria-label={t('snScan')}
+              onClick={() => setSnScanOpen(true)}
+            >
+              <Icon name="scan" size={17} />
+            </button>
+          </div>
           <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
             {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
               ? t('serialNumbersHintDdr5')
@@ -630,6 +643,18 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       </div>
       {serialIssues && (
         <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
+      )}
+      {snScanOpen && (
+        <SnScanner
+          existing={parseSerials(line.serialNumber)}
+          target={line.qty || 0}
+          onDone={scannedSns => {
+            setSnScanOpen(false);
+            if (!scannedSns.length) return;
+            const cur = (line.serialNumber ?? '').replace(/\s+$/, '');
+            set('serialNumber', cur ? cur + '\n' + scannedSns.join('\n') : scannedSns.join('\n'));
+          }}
+        />
       )}
       {pnGen && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setPnGen(null); }}>

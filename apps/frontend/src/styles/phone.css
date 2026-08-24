@@ -362,6 +362,81 @@
   color: rgba(255,255,255,0.75);
 }
 
+/* ===== Serial QR scanner =====
+   Trigger docked inside the serial textarea's corner, and a batch-mode
+   viewfinder that reuses the Camera screen's shell (ph-cam-*) — same dark
+   stage, pills, and scan-line so both capture flows read as one family. */
+.ph-sn-scan {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--border-strong));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  display: grid;
+  place-items: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.ph-sn-scan:active { transform: scale(0.92); }
+.ph-sn-scan:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.ph-snscan-frame {
+  position: absolute;
+  left: 12%; right: 12%; top: 22%; bottom: 30%;
+  border: 1.5px dashed rgba(255,255,255,0.5);
+  border-radius: 10px;
+  overflow: hidden;   /* clips .scan-line and the hit flash to the frame */
+}
+.ph-snscan-flash {
+  position: absolute; inset: 0;
+  background: color-mix(in oklch, var(--pos, #16a34a) 45%, transparent);
+  animation: snscan-flash 0.5s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes snscan-flash {
+  0%   { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.ph-snscan-toast {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: white;
+}
+.ph-snscan-toast .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60vw;
+}
+.ph-snscan-done {
+  flex: 1;
+  height: 52px;
+  border-radius: 16px;
+  background: white;
+  color: #111;
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.ph-snscan-done:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) {
+  .ph-snscan-flash { animation: none; opacity: 0; }
+}
+
 /* AI extracted card */
 .ph-ai-card {
   background: var(--bg-elev);

@@ -12,7 +12,7 @@ export type IconName =
   | 'filter' | 'search' | 'lock' | 'eye' | 'edit' | 'trash'
   | 'plus' | 'x' | 'arrow' | 'arrowUp' | 'arrowDown'
   | 'chip' | 'drive' | 'box' | 'warehouse' | 'medal' | 'flag'
-  | 'clock' | 'info' | 'alert' | 'flash' | 'hash'
+  | 'clock' | 'info' | 'alert' | 'flash' | 'hash' | 'scan'
   | 'settings' | 'bell' | 'tag' | 'trendDown' | 'minus'
   | 'book' | 'star' | 'zap' | 'globe' | 'mail' | 'grip'
   | 'truck' | 'cash' | 'refresh' | 'label' | 'package'
@@ -70,6 +70,7 @@ const PATHS: Record<IconName, JSX.Element> = {
   alert: <><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></>,
   flash: <><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></>,
   hash:  <><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></>,
+  scan:  <><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.36.15.68.41.91.74"/></>,
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></>,
   tag:  <><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.2"/></>,
