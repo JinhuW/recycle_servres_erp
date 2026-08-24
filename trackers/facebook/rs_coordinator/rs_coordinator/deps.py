@@ -65,6 +65,22 @@ ops_notifier = TelegramNotifier(
     chat_id=os.environ.get("TELEGRAM_OPS_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID"),
 )
 
+# Per-buyer Messenger alerts go to the war-room supergroup, which must have
+# Topics enabled: the router opens one forum topic per conversation there.
+#
+# Deliberately NO fallback to the listings chat. The whole router feature —
+# per-buyer topic creation and the getUpdates reply consumer — activates only
+# when this is set to a distinct war room. Unset (the default, and the state
+# every existing deploy is in), it stays None and the coordinator behaves
+# exactly as before: buyer alerts land in the listings chat's General and
+# nothing reads Telegram. That is what lets the feature ship dark.
+_warroom_chat_id = os.environ.get("TELEGRAM_WARROOM_CHAT_ID")
+warroom_notifier: Optional[TelegramNotifier] = (
+    TelegramNotifier(token=os.environ.get("TELEGRAM_TOKEN"), chat_id=_warroom_chat_id)
+    if _warroom_chat_id
+    else None
+)
+
 
 def get_notifier() -> TelegramNotifier:
     return notifier
@@ -72,6 +88,10 @@ def get_notifier() -> TelegramNotifier:
 
 def get_ops_notifier() -> TelegramNotifier:
     return ops_notifier
+
+
+def get_warroom_notifier() -> Optional[TelegramNotifier]:
+    return warroom_notifier
 
 
 @lru_cache(maxsize=1)

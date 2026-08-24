@@ -42,7 +42,16 @@ class TelegramNotifier:
     def enabled(self: "TelegramNotifier") -> bool:
         return bool(self.token and self.chat_id)
 
-    def send(self: "TelegramNotifier", text: str) -> bool:
+    def send(
+        self: "TelegramNotifier", text: str, message_thread_id: int | None = None
+    ) -> bool:
+        """Send `text`, optionally into a forum topic (`message_thread_id`).
+
+        A topic id targets one thread of a Topics-enabled supergroup; without
+        it the message lands in General. An id for a topic that no longer
+        exists makes Telegram reject the send, which the caller treats as a
+        normal delivery failure and retries.
+        """
         if not self.enabled:
             logger.warning("Telegram not configured; dropping message")
             return False
@@ -52,14 +61,15 @@ class TelegramNotifier:
             if elapsed < self.min_interval:
                 time.sleep(self.min_interval - elapsed)
 
-            payload = parse.urlencode(
-                {
-                    "chat_id": self.chat_id,
-                    "text": text[:MAX_MESSAGE_LENGTH],
-                    "parse_mode": "MarkdownV2",
-                    "disable_web_page_preview": "false",
-                }
-            ).encode()
+            fields = {
+                "chat_id": self.chat_id,
+                "text": text[:MAX_MESSAGE_LENGTH],
+                "parse_mode": "MarkdownV2",
+                "disable_web_page_preview": "false",
+            }
+            if message_thread_id is not None:
+                fields["message_thread_id"] = message_thread_id
+            payload = parse.urlencode(fields).encode()
             url = f"{API_BASE}/bot{self.token}/sendMessage"
             try:
                 with request.urlopen(url, data=payload, timeout=30) as response:

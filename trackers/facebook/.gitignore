@@ -20,6 +20,13 @@ configs/sessions/
 cookies.txt
 cookies.json
 
+# Matrix bridge runtime config — carries the appservice as_token/hs_token and,
+# in mautrix-meta's config + state db, the live Facebook session. The setup docs
+# (configs/matrix/README.md) and the example config are committed; these are not.
+configs/matrix/**/config.yaml
+configs/matrix/**/registration.yaml
+configs/matrix/**/*.db
+
 # Runtime state
 *.db
 *.sqlite

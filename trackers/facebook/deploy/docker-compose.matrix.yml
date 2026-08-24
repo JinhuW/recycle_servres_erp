@@ -1,0 +1,117 @@
+# The Messenger router stack, on the homelab node.
+#
+# Three services that turn Facebook Marketplace DMs into per-buyer Telegram
+# topics staff can answer:
+#
+#   conduit       a tiny private Matrix homeserver (single binary, RocksDB)
+#   mautrix-meta  the Messenger↔Matrix bridge (one portal room per buyer)
+#   rs-router     reads those rooms → coordinator → Telegram topics, and back
+#
+# IMPORTANT — one account, one IP, one behaviour model. This bridge logs into
+# the SAME Facebook seller account the monitor already drives a browser on. Two
+# things keep that from tripping Meta's automation detection, and both are
+# operational, not code:
+#   * Residential IP. This runs on the homelab VM, behind the same WAN IP the
+#     account normally logs in from. Never move it to a VPS.
+#   * Human replies only. Staff type every answer in Telegram; the router only
+#     transports them. No mass-send, no auto-reply (that stays OFF on the
+#     coordinator). Human latency and wording are what keep the risk near zero.
+# mautrix-meta keeps its OWN messenger.com session (its own cookie), separate
+# from the Playwright storage_state — do not share the jar, and do not log the
+# bridge out (logging out invalidates the session). A checkpoint on this account
+# stops the monitor too; treat it as fleet-wide.
+#
+# First start is a one-time setup, in order:
+#   1. docker compose -f deploy/docker-compose.matrix.yml up -d conduit
+#   2. Register the router bot user + the bridge appservice on conduit, and put
+#      the bridge's registration.yaml where both can read it (configs/matrix/).
+#      Paste the bot's access token into secrets.env as MATRIX_ROUTER_TOKEN.
+#   3. up -d mautrix-meta; DM its bridge bot to log in the Facebook account
+#      (privacy-window messenger.com cookie). Confirm buyer DMs appear as rooms.
+#   4. rs-router status  (whoami works), then up -d rs-router.
+
+services:
+  conduit:
+    image: matrixconduit/matrix-conduit:latest
+    container_name: rs-conduit
+    restart: unless-stopped
+    environment:
+      CONDUIT_SERVER_NAME: rs.local
+      CONDUIT_DATABASE_BACKEND: rocksdb
+      CONDUIT_DATABASE_PATH: /var/lib/matrix-conduit/
+      CONDUIT_PORT: "6167"
+      CONDUIT_ALLOW_REGISTRATION: "false"
+      # Bridges register through an appservice file, not open registration.
+      CONDUIT_ALLOW_FEDERATION: "false"
+      CONDUIT_MAX_REQUEST_SIZE: "20000000"
+      CONDUIT_TRUSTED_SERVERS: "[]"
+    volumes:
+      - conduit-data:/var/lib/matrix-conduit/
+      # The bridge's appservice registration, readable by conduit.
+      - ../configs/matrix/conduit:/etc/conduit:ro
+    networks:
+      - rs-fleet
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  mautrix-meta:
+    image: dock.mau.dev/mautrix/meta:latest
+    container_name: rs-mautrix-meta
+    restart: unless-stopped
+    depends_on:
+      - conduit
+    volumes:
+      # config.yaml + registration.yaml + the bridge's own state db live here.
+      - ../configs/matrix/mautrix-meta:/data
+    networks:
+      - rs-fleet
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  rs-router:
+    build:
+      context: ../rs_router
+      dockerfile: ../deploy/Dockerfile.router
+    image: rs-router:latest
+    container_name: rs-router
+    # No restart:unless-stopped until the loop is trusted, same stance as
+    # rs-messenger — an unattended crash loop hammering the homeserver or the
+    # account is the pattern to avoid. Switch to unless-stopped once clean.
+    restart: "no"
+    depends_on:
+      - conduit
+    env_file:
+      # RS_COORDINATOR_URL/TOKEN, MATRIX_HOMESERVER_URL, MATRIX_ROUTER_TOKEN,
+      # RS_WORKER_ID=router all come from here.
+      - ../configs/secrets.env
+    environment:
+      # Default the homeserver to the compose service name; secrets.env can
+      # override. The coordinator is reached by its own service name.
+      MATRIX_HOMESERVER_URL: ${MATRIX_HOMESERVER_URL:-http://conduit:6167}
+      RS_WORKER_ID: ${RS_WORKER_ID:-router}
+      RS_ROUTER_STATE: /data/router_sync.json
+      RS_LOG_LEVEL: INFO
+    volumes:
+      - router-data:/data
+    networks:
+      - rs-fleet
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  conduit-data:
+  router-data:
+
+networks:
+  rs-fleet:
+    name: rs-fleet
+    external: true

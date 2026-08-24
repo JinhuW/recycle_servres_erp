@@ -158,6 +158,10 @@ class ThreadIn(BaseModel):
     counterpart: str | None = None
     listing_title: str | None = None
     last_message_at: str | None = None
+    # The mautrix-meta portal room this thread arrives from, when the reporter
+    # is the router. The Playwright scraper does not set it; None never blanks a
+    # room id an earlier router report already recorded (upsert COALESCEs).
+    matrix_room_id: str | None = None
     messages: List[MessageIn] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
@@ -175,6 +179,9 @@ class OutboundAck(BaseModel):
 
 class OperatorReply(BaseModel):
     text: str
+    # Which bridge delivers it: 'matrix' (mautrix-meta, the default) or
+    # 'playwright' (the legacy scraper, the fallback when the bridge is down).
+    transport: str = "matrix"
 
 
 # -- health -----------------------------------------------------------------

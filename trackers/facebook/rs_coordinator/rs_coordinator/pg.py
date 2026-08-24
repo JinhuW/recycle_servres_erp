@@ -28,10 +28,18 @@ import json
 import os
 import re
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .db import LISTING_EXTRA_COLUMNS, SCHEMA, WORKER_HEALTH_COLUMNS, utcnow
+from .db import (
+    LISTING_EXTRA_COLUMNS,
+    OUTBOUND_EXTRA_COLUMNS,
+    SCHEMA,
+    THREAD_EXTRA_COLUMNS,
+    WORKER_HEALTH_COLUMNS,
+    utcnow,
+)
 
 # Guards concurrent schema creation. Deliberately different from the reddit
 # tracker's 778431 so the two projects can never block each other if they ever
@@ -176,6 +184,15 @@ class PostgresDatabase:
                 conn.execute(postgres_schema())
                 self._migrate_workers(conn)
                 self._migrate_listings(conn)
+                self._migrate_columns(conn, "threads", THREAD_EXTRA_COLUMNS)
+                self._migrate_columns(conn, "outbound_messages", OUTBOUND_EXTRA_COLUMNS)
+                # Created after the migration adds the columns they index.
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_threads_topic ON threads(telegram_topic_id)"
+                )
                 conn.commit()
             finally:
                 conn.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_KEY,))
@@ -204,6 +221,19 @@ class PostgresDatabase:
         for column, decl in LISTING_EXTRA_COLUMNS:
             if column not in existing:
                 conn.execute(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column} {decl}")
+
+    @staticmethod
+    def _migrate_columns(conn: Any, table: str, columns: tuple) -> None:
+        """Add missing columns to `table`. `table` is a fixed module literal."""
+        cur = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = %s",
+            (table,),
+        )
+        existing = {row["column_name"] for row in cur.fetchall()}
+        for column, decl in columns:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {decl}")
 
     @contextmanager
     def cursor(self: "PostgresDatabase") -> Iterator[Any]:
@@ -344,6 +374,22 @@ class PostgresDatabase:
             cur.execute("SELECT COUNT(*) AS n FROM outbox WHERE delivered_at IS NULL")
             return int(cur.fetchone()["n"])
 
+    # -- telegram reply cursor ---------------------------------------------
+
+    def get_telegram_offset(self: "PostgresDatabase") -> int:
+        with self.cursor() as cur:
+            cur.execute("SELECT update_offset FROM telegram_offset WHERE id = 1")
+            row = cur.fetchone()
+        return int(row["update_offset"]) if row else 0
+
+    def set_telegram_offset(self: "PostgresDatabase", offset: int) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO telegram_offset (id, update_offset) VALUES (1, %s) "
+                "ON CONFLICT(id) DO UPDATE SET update_offset = excluded.update_offset",
+                (offset,),
+            )
+
     # -- messenger threads / messages --------------------------------------
 
     def upsert_thread(self: "PostgresDatabase", thread_id: str, fields: Dict[str, Any]) -> None:
@@ -382,6 +428,22 @@ class PostgresDatabase:
                 f"UPDATE threads SET {assignments} WHERE thread_id = %(thread_id)s",
                 {**fields, "thread_id": thread_id},
             )
+
+    def get_thread_by_topic(
+        self: "PostgresDatabase", topic_id: int
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads WHERE telegram_topic_id = %s", (topic_id,))
+            row = cur.fetchone()
+        return _row(row)
+
+    def get_thread_by_room(
+        self: "PostgresDatabase", matrix_room_id: str
+    ) -> Optional[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads WHERE matrix_room_id = %s", (matrix_room_id,))
+            row = cur.fetchone()
+        return _row(row)
 
     def claim_message(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
         """See `Database.claim_message`. True only for the caller that inserted."""
@@ -427,20 +489,28 @@ class PostgresDatabase:
         worker_id: str | None,
         text: str,
         origin: str,
+        transport: str = "playwright",
     ) -> int:
         with self.cursor() as cur:
             cur.execute(
                 "INSERT INTO outbound_messages (thread_id, worker_id, text, origin, "
-                "status, created_at) VALUES (%s, %s, %s, %s, 'queued', %s) RETURNING id",
-                (thread_id, worker_id, text, origin, utcnow()),
+                "transport, status, created_at) VALUES (%s, %s, %s, %s, %s, 'queued', %s) "
+                "RETURNING id",
+                (thread_id, worker_id, text, origin, transport, utcnow()),
             )
             return int(cur.fetchone()["id"])
 
     def pending_outbound(
-        self: "PostgresDatabase", worker_id: str | None = None, limit: int = 10
+        self: "PostgresDatabase",
+        worker_id: str | None = None,
+        limit: int = 10,
+        transport: str | None = None,
     ) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM outbound_messages WHERE status = 'queued'"
         params: List[Any] = []
+        if transport:
+            sql += " AND transport = %s"
+            params.append(transport)
         if worker_id:
             sql += " AND (worker_id = %s OR worker_id IS NULL)"
             params.append(worker_id)

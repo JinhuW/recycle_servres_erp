@@ -23,6 +23,7 @@ from fastapi import FastAPI
 from . import deps
 from .background import Background
 from .routers import auth, escalation, health, listings, messages, session
+from .telegram_consumer import TelegramUpdateConsumer
 
 logging.basicConfig(level=os.environ.get("RS_LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -30,17 +31,35 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Run the background loop while the server is up.
+    """Run the background loop (and the Telegram reply consumer) while up.
 
     Started here rather than at import so that importing this module (tests,
     tooling, `rsc` subcommands) never spawns a thread; only a served app does.
     """
-    loop = Background(deps.get_db, deps.get_notifier(), deps.get_ops_notifier())
+    loop = Background(
+        deps.get_db,
+        deps.get_notifier(),
+        deps.get_ops_notifier(),
+        deps.get_warroom_notifier(),
+    )
     loop.start()
+
+    # The reply consumer runs only when a war room is configured
+    # (TELEGRAM_WARROOM_CHAT_ID). Unset — every current deploy — it stays off and
+    # the coordinator never reads Telegram, so shipping this code changes nothing
+    # until the war room is turned on.
+    consumer = None
+    warroom = deps.get_warroom_notifier()
+    if warroom is not None and warroom.token and warroom.chat_id:
+        consumer = TelegramUpdateConsumer(deps.get_db, warroom.token, warroom.chat_id)
+        consumer.start()
+
     try:
         yield
     finally:
         loop.stop()
+        if consumer is not None:
+            consumer.stop()
 
 
 app = FastAPI(

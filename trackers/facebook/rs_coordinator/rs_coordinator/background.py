@@ -32,6 +32,7 @@ from . import health
 from .db import AnyDatabase, utcnow
 from .health import _moment, _parse_ts  # shared clock helpers, tested there
 from .telegram_notify import TelegramNotifier
+from .telegram_topics import ensure_topic
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +68,17 @@ class Background(threading.Thread):
         db_getter: Callable[[], AnyDatabase],
         notifier: TelegramNotifier,
         ops_notifier: TelegramNotifier,
+        warroom_notifier: TelegramNotifier | None = None,
     ) -> None:
         super().__init__(name="rs-background", daemon=True)
         self._db = db_getter
         self._notifier = notifier
         self._ops_notifier = ops_notifier
+        # Where per-buyer Messenger alerts go: a Topics-enabled war-room
+        # supergroup, one forum topic per conversation. None when no war room is
+        # configured — then buyer alerts fall back to the listings notifier's
+        # General with no topic routing, exactly as before the router existed.
+        self._warroom_notifier = warroom_notifier
         self._stop = threading.Event()
         self._last_sweep = 0.0
 
@@ -98,9 +105,26 @@ class Background(threading.Thread):
 
     def drain_outbox(self: "Background", db: AnyDatabase) -> None:
         for alert in db.due_alerts():
-            sender = self._ops_notifier if alert["kind"].startswith("ops") else self._notifier
+            kind = alert["kind"]
+            message_thread_id = None
+            if kind.startswith("ops"):
+                sender = self._ops_notifier
+            elif kind.startswith("message") and self._warroom_notifier is not None:
+                # Per-buyer Messenger alert with a war room configured: route it
+                # to the conversation's forum topic, opening one on first need.
+                # For message alerts `dedupe_key` carries the FB thread id (see
+                # routers/messages).
+                sender = self._warroom_notifier
+                ref = alert.get("dedupe_key")
+                thread = db.get_thread(ref) if ref else None
+                if thread:
+                    message_thread_id = ensure_topic(db, sender, thread)
+            else:
+                # No war room (or a listing alert): the pre-router path — the
+                # listings notifier's General, no topic.
+                sender = self._notifier
             try:
-                delivered = sender.send(alert["text"])
+                delivered = sender.send(alert["text"], message_thread_id=message_thread_id)
                 error = "send returned False"
             except Exception as e:  # noqa: BLE001 - a failed send is a retry, never a crash
                 delivered = False
@@ -110,7 +134,7 @@ class Background(threading.Thread):
                 db.mark_alert_delivered(alert["id"])
                 # notified_at means "the alert actually reached Telegram", so a
                 # Telegram inbox can be reconciled against the listings table.
-                if alert["kind"].startswith("listing") and alert.get("dedupe_key"):
+                if kind.startswith("listing") and alert.get("dedupe_key"):
                     db.update_listing(alert["dedupe_key"], {"notified_at": utcnow()})
             else:
                 retry_at = _retry_stamp(backoff_seconds(int(alert["attempts"] or 0)))

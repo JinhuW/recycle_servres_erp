@@ -113,7 +113,10 @@ def client(tmp_path, monkeypatch):
     importlib.reload(app_module)
 
     sent = []
-    app_module.notifier.send = lambda text: (sent.append(text), True)[1]
+    app_module.notifier.send = lambda text, message_thread_id=None: (
+        sent.append(text),
+        True,
+    )[1]
 
     # Alerts are queued in the outbox by the request and delivered by the
     # background loop, which TestClient never starts. `drain()` runs one

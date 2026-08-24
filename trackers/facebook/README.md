@@ -328,8 +328,17 @@ rsc status           # fleet health + recent finds + alert backlog
 rsc test-telegram
 rsc msg threads      # Messenger conversations the fleet has reported
 rsc msg show <thread-id>
-rsc msg reply <thread-id> "On our way — does Saturday work?"
+rsc msg reply <thread-id> "On our way — does Saturday work?"   # via the bridge
+rsc msg reply --via playwright <thread-id> "..."   # force the scraper fallback
 rsc msg claim <thread-id>          # fence auto-reply out of a conversation
+```
+
+Router (mautrix-meta bridge, on the homelab VM — see `configs/matrix/README.md`):
+
+```bash
+rs-router status                   # config, homeserver identity (whoami)
+rs-router poll --dry-run           # one sync: print portals + new messages, send nothing
+rs-router run --interval 2         # the loop: report messages, deliver queued replies
 ```
 
 ### Messenger routing and auto-reply
@@ -362,6 +371,45 @@ than one send per minute, and acked back only after the text is seen in the
 conversation pane. Messenger's DOM is the least stable thing this project
 reads; `rs-messenger poll --dry-run` prints exactly what the selectors
 extracted and is the first thing to run when the bridge goes quiet.
+
+### Messenger router (mautrix-meta → Telegram forum topics)
+
+The flat alert stream above answers "did someone message us"; it does not scale
+to *following* several buyers at once. The router adds that: a real Messenger
+bridge ([mautrix-meta]) puts each buyer in their own Matrix room, and a small
+worker (`rs-router`) reports those rooms to the coordinator, which opens **one
+Telegram forum topic per conversation** in a war-room supergroup. Staff answer
+inside a topic; the reply travels back out over Messenger through the bridge.
+Full bring-up is in `configs/matrix/README.md`; the stack (Conduit +
+mautrix-meta + rs-router) runs on the homelab VM via
+`deploy/docker-compose.matrix.yml`.
+
+Two automations now share one Facebook account, so the design keeps them from
+colliding:
+
+- **Identity.** The FB Marketplace thread id is the join key across all three
+  surfaces — the coordinator `threads` row, the mautrix-meta portal (its
+  `m.bridge` room state), and the legacy scraper's `/marketplace/t/<id>`. So the
+  bridge and `rs-messenger` reporting the same message dedupe by fingerprint,
+  and a thread's Matrix room and Telegram topic are remembered on its row
+  (`matrix_room_id`, `telegram_topic_id`).
+- **Sending.** Outbound replies are partitioned by `transport`: `rs-router`
+  drains only `matrix` rows, `rs-messenger` only `playwright` rows, so a reply
+  is never sent twice. mautrix-meta is primary; the scraper is the fallback.
+  Staff replies typed in a topic queue as `matrix`; `rsc msg reply --via
+  playwright` forces the fallback when the bridge is down.
+- **Behaviour, not protocol, is what gets an account banned.** Replies are
+  human-authored and relayed verbatim, so their latency and wording stay human.
+  No mass-send, and auto-reply stays off. The bridge keeps its own stable
+  messenger.com session (never the Playwright jar), on the same residential IP.
+
+The war room must be a **separate** Topics-enabled supergroup from the
+listing-alert chat (`TELEGRAM_WARROOM_CHAT_ID`), for the same reason the
+priority topics needed one: turning Topics on changes the chat id. The
+coordinator sends per-buyer alerts there and long-polls it for staff replies —
+the first time it reads Telegram rather than only writing to it.
+
+[mautrix-meta]: https://github.com/mautrix/meta
 
 ## Tuning what gets found
 

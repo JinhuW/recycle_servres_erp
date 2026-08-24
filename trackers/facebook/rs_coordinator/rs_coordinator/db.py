@@ -96,15 +96,24 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(delivered_at, next_attem
 -- makes re-reporting idempotent, the same way listings.dedupe_key does for the
 -- search fleet. `human_claimed` is the operator's kill switch for auto-reply
 -- on one thread; `autoreplied_at` is the policy's own once-per-thread memory.
+--
+-- The router columns tie one FB conversation to its two other faces: the
+-- mautrix-meta portal room it arrives from (`matrix_room_id`) and the Telegram
+-- forum topic staff answer it in (`telegram_topic_id`). Both are filled in
+-- lazily — a thread first seen by the legacy scraper has neither until the
+-- router touches it or its first alert opens a topic.
 CREATE TABLE IF NOT EXISTS threads (
-    thread_id       TEXT PRIMARY KEY,
-    worker_id       TEXT,
-    counterpart     TEXT,
-    listing_title   TEXT,
-    last_message_at TEXT,
-    human_claimed   INTEGER NOT NULL DEFAULT 0,
-    autoreplied_at  TEXT,
-    created_at      TEXT NOT NULL
+    thread_id        TEXT PRIMARY KEY,
+    worker_id        TEXT,
+    counterpart      TEXT,
+    listing_title    TEXT,
+    last_message_at  TEXT,
+    human_claimed    INTEGER NOT NULL DEFAULT 0,
+    autoreplied_at   TEXT,
+    matrix_room_id   TEXT,
+    telegram_topic_id INTEGER,
+    topic_state      TEXT DEFAULT 'open',
+    created_at       TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -117,15 +126,22 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at  TEXT NOT NULL
 );
 
--- Replies waiting for a messenger worker to type them into Facebook. Written
--- by the auto-reply policy or an operator; a worker fetches its queue, sends,
--- and acks. Nothing here sends anything itself.
+-- Replies waiting to be delivered to Facebook. Written by the auto-reply
+-- policy or an operator; a worker fetches its queue, sends, and acks. Nothing
+-- here sends anything itself.
+--
+-- `transport` decides WHICH worker owns a reply, which is what lets the
+-- Playwright bridge and the mautrix-meta router coexist on one account without
+-- double-sending: `rs-messenger` only ever drains 'playwright' rows,
+-- `rs-router` only ever drains 'matrix' rows. Default 'playwright' keeps the
+-- legacy bridge's behaviour unchanged.
 CREATE TABLE IF NOT EXISTS outbound_messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id  TEXT NOT NULL,
     worker_id  TEXT,
     text       TEXT NOT NULL,
     origin     TEXT NOT NULL,
+    transport  TEXT NOT NULL DEFAULT 'playwright',
     status     TEXT NOT NULL DEFAULT 'queued',
     created_at TEXT NOT NULL,
     sent_at    TEXT,
@@ -133,8 +149,20 @@ CREATE TABLE IF NOT EXISTS outbound_messages (
     last_error TEXT
 );
 
+-- The Telegram getUpdates cursor: one row, so the reply consumer resumes from
+-- the last update it processed across a coordinator restart instead of
+-- replaying the whole backlog or skipping what arrived while it was down.
+CREATE TABLE IF NOT EXISTS telegram_offset (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    update_offset INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
 CREATE INDEX IF NOT EXISTS idx_outbound_status ON outbound_messages(status);
+-- The threads(matrix_room_id) / threads(telegram_topic_id) indexes are created
+-- after the column migration below, not here: on a database predating those
+-- columns this schema runs before they exist, and indexing a missing column
+-- fails.
 
 -- Control plane ------------------------------------------------------------
 -- One row per Facebook account. Every secret for that account lives encrypted
@@ -212,6 +240,19 @@ WORKER_HEALTH_COLUMNS = (
 LISTING_EXTRA_COLUMNS = (
     # The AI's unit count as a display phrase ("8 sticks").
     ("ai_count", "TEXT"),
+)
+
+# Columns added to `threads` for the mautrix-meta router, same mechanism. A
+# field database created before the router picks them up on next start.
+THREAD_EXTRA_COLUMNS = (
+    ("matrix_room_id", "TEXT"),
+    ("telegram_topic_id", "INTEGER"),
+    ("topic_state", "TEXT DEFAULT 'open'"),
+)
+
+# Columns added to `outbound_messages` for transport routing, same mechanism.
+OUTBOUND_EXTRA_COLUMNS = (
+    ("transport", "TEXT NOT NULL DEFAULT 'playwright'"),
 )
 
 
@@ -297,6 +338,15 @@ class Database:
             self._conn.executescript(SCHEMA)
             self._migrate_workers()
             self._migrate_listings()
+            self._migrate_columns("threads", THREAD_EXTRA_COLUMNS)
+            self._migrate_columns("outbound_messages", OUTBOUND_EXTRA_COLUMNS)
+            # Created after the migration adds the columns they index.
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_room ON threads(matrix_room_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_threads_topic ON threads(telegram_topic_id)"
+            )
             self._conn.commit()
 
     def _migrate_workers(self: "Database") -> None:
@@ -316,6 +366,17 @@ class Database:
         for column, decl in LISTING_EXTRA_COLUMNS:
             if column not in existing:
                 self._conn.execute(f"ALTER TABLE listings ADD COLUMN {column} {decl}")
+
+    def _migrate_columns(self: "Database", table: str, columns: tuple) -> None:
+        """Add missing columns to `table`, same additive mechanism as above.
+
+        `table` is a fixed literal from this module, never user input, so the
+        f-string interpolation is safe.
+        """
+        existing = {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+        for column, decl in columns:
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     @contextmanager
     def cursor(self: "Database") -> Iterator[sqlite3.Cursor]:
@@ -474,6 +535,23 @@ class Database:
             cur.execute("SELECT COUNT(*) AS n FROM outbox WHERE delivered_at IS NULL")
             return int(cur.fetchone()["n"])
 
+    # -- telegram reply cursor ---------------------------------------------
+
+    def get_telegram_offset(self: "Database") -> int:
+        """The last getUpdates offset the reply consumer committed (0 if none)."""
+        with self.cursor() as cur:
+            cur.execute("SELECT update_offset FROM telegram_offset WHERE id = 1")
+            row = cur.fetchone()
+        return int(row["update_offset"]) if row else 0
+
+    def set_telegram_offset(self: "Database", offset: int) -> None:
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO telegram_offset (id, update_offset) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET update_offset = excluded.update_offset",
+                (offset,),
+            )
+
     # -- messenger threads / messages --------------------------------------
 
     def upsert_thread(self: "Database", thread_id: str, fields: Dict[str, Any]) -> None:
@@ -516,6 +594,20 @@ class Database:
                 {**fields, "thread_id": thread_id},
             )
 
+    def get_thread_by_topic(self: "Database", topic_id: int) -> Optional[Dict[str, Any]]:
+        """The thread a Telegram forum topic belongs to, for routing a reply."""
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads WHERE telegram_topic_id = ?", (topic_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_thread_by_room(self: "Database", matrix_room_id: str) -> Optional[Dict[str, Any]]:
+        """The thread a mautrix-meta portal room belongs to."""
+        with self.cursor() as cur:
+            cur.execute("SELECT * FROM threads WHERE matrix_room_id = ?", (matrix_room_id,))
+            row = cur.fetchone()
+        return dict(row) if row else None
+
     def claim_message(self: "Database", record: Dict[str, Any]) -> bool:
         """Insert a message if its fingerprint is new; True if we did.
 
@@ -556,21 +648,34 @@ class Database:
     # -- outbound replies --------------------------------------------------
 
     def enqueue_outbound(
-        self: "Database", thread_id: str, worker_id: str | None, text: str, origin: str
+        self: "Database",
+        thread_id: str,
+        worker_id: str | None,
+        text: str,
+        origin: str,
+        transport: str = "playwright",
     ) -> int:
         with self.cursor() as cur:
             cur.execute(
                 "INSERT INTO outbound_messages (thread_id, worker_id, text, origin, "
-                "status, created_at) VALUES (?, ?, ?, ?, 'queued', ?)",
-                (thread_id, worker_id, text, origin, utcnow()),
+                "transport, status, created_at) VALUES (?, ?, ?, ?, ?, 'queued', ?)",
+                (thread_id, worker_id, text, origin, transport, utcnow()),
             )
             return int(cur.lastrowid)
 
     def pending_outbound(
-        self: "Database", worker_id: str | None = None, limit: int = 10
+        self: "Database",
+        worker_id: str | None = None,
+        limit: int = 10,
+        transport: str | None = None,
     ) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM outbound_messages WHERE status = 'queued'"
         params: List[Any] = []
+        if transport:
+            # The transport partition is what keeps the two bridges from both
+            # sending the same reply — see the schema note on outbound_messages.
+            sql += " AND transport = ?"
+            params.append(transport)
         if worker_id:
             # NULL worker_id means "whichever worker owns the thread" — an
             # operator reply queued before the thread reported an owner.

@@ -20,8 +20,12 @@ class StubNotifier:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
         self.sent = []
+        # Set so telegram_topics.ensure_topic treats it as "not configured" and
+        # never tries to open a real forum topic during a drain.
+        self.token = None
+        self.chat_id = None
 
-    def send(self, text):
+    def send(self, text, message_thread_id=None):
         outcome = self.outcomes.pop(0) if self.outcomes else True
         if isinstance(outcome, Exception):
             raise outcome

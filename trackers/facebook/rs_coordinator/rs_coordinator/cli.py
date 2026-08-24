@@ -636,16 +636,21 @@ def cmd_msg_reply(args: argparse.Namespace) -> int:
     if not args.text.strip():
         print("error: reply text is empty", file=sys.stderr)
         return 1
+    transport = getattr(args, "via", "matrix")
+    # A matrix reply is claimed by transport, not worker id, so leave worker_id
+    # NULL for any router to pick up; a playwright reply targets the specific
+    # scraper worker that owns the thread.
+    worker_id = None if transport == "matrix" else row.get("worker_id")
     outbound_id = db.enqueue_outbound(
-        args.thread_id, row.get("worker_id"), args.text.strip(), "operator"
+        args.thread_id, worker_id, args.text.strip(), "operator", transport=transport
     )
     # Replying claims the thread: the human is in the conversation now, so the
     # auto-reply policy must stay out of it.
     db.set_thread_fields(args.thread_id, {"human_claimed": 1})
-    print(
-        f"queued reply {outbound_id}; worker "
-        f"{row.get('worker_id') or '(unassigned)'} sends it on its next poll"
+    carrier = "the router" if transport == "matrix" else (
+        f"worker {row.get('worker_id') or '(unassigned)'}"
     )
+    print(f"queued reply {outbound_id} via {transport}; {carrier} sends it on its next poll")
     return 0
 
 
@@ -797,6 +802,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m_reply.add_argument("thread_id")
     m_reply.add_argument("text")
+    m_reply.add_argument(
+        "--via",
+        choices=("matrix", "playwright"),
+        default="matrix",
+        help="Which bridge sends the reply: matrix (mautrix-meta, the default) "
+        "or playwright (the legacy scraper, the fallback when the bridge is down)",
+    )
     m_reply.set_defaults(func=cmd_msg_reply)
 
     m_claim = msg_sub.add_parser(

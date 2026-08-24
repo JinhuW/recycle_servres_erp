@@ -72,6 +72,7 @@ def _ingest_thread(
             "counterpart": thread.counterpart,
             "listing_title": thread.listing_title,
             "last_message_at": thread.last_message_at,
+            "matrix_room_id": thread.matrix_room_id,
         },
     )
 
@@ -98,9 +99,14 @@ def _ingest_thread(
         # message notification, it does not lose it. The item count is the
         # AI's read of the seller's text; None (no key, outage, no quantity
         # stated) just leaves the alert without a count.
+        # dedupe_key carries the FB thread id for message alerts: the delivery
+        # loop reads it to route the alert into this conversation's forum topic
+        # (opening one on first need). It is not a dedupe guard here — messages
+        # are already deduped by fingerprint above.
         db.enqueue_alert(
             "message_in",
             format_message(row, record, item_count=item_count_from_ai(record["text"])),
+            dedupe_key=thread.thread_id,
         )
 
     replies = 0
@@ -123,6 +129,7 @@ def _ingest_thread(
             db.enqueue_alert(
                 "message_autoreply",
                 f"_Auto\\-reply queued to {name}_\n{escape_markdown(reply)}",
+                dedupe_key=thread.thread_id,
             )
             replies = 1
 
@@ -133,11 +140,17 @@ def _ingest_thread(
 def fetch_outbound(
     limit: int = Query(default=10, ge=1, le=50),
     worker_id: str | None = Query(default=None),
+    transport: str = Query(default="playwright"),
     worker: Optional[str] = Depends(require_worker),
 ) -> Dict[str, Any]:
-    """The replies this worker should type into Facebook, oldest first."""
+    """The replies this worker should deliver, oldest first.
+
+    `transport` partitions the queue so the two bridges never both send one
+    reply: the legacy Playwright scraper omits it and gets 'playwright' rows,
+    the mautrix-meta router passes 'matrix' and gets only its own.
+    """
     identity = worker or worker_id
-    rows = deps.db.pending_outbound(worker_id=identity, limit=limit)
+    rows = deps.db.pending_outbound(worker_id=identity, limit=limit, transport=transport)
     return {
         "outbound": [
             {"id": row["id"], "thread_id": row["thread_id"], "text": row["text"],
@@ -195,8 +208,13 @@ def operator_reply(thread_id: str, payload: OperatorReply) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"No thread {thread_id}")
     if not payload.text.strip():
         raise HTTPException(status_code=422, detail="Reply text is empty")
+    if payload.transport not in ("matrix", "playwright"):
+        raise HTTPException(status_code=422, detail="transport must be 'matrix' or 'playwright'")
+    # A matrix reply is routed by transport, so any router claims it (worker_id
+    # NULL); a playwright reply targets the scraper worker that owns the thread.
+    worker_id = None if payload.transport == "matrix" else row.get("worker_id")
     outbound_id = deps.db.enqueue_outbound(
-        thread_id, row.get("worker_id"), payload.text.strip(), "operator"
+        thread_id, worker_id, payload.text.strip(), "operator", transport=payload.transport
     )
     deps.db.set_thread_fields(thread_id, {"human_claimed": 1})
     return {"status": "ok", "outbound_id": outbound_id}

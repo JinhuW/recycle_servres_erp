@@ -137,6 +137,23 @@ def test_a_fuller_snapshot_never_blanks_thread_fields(client):
     assert thread["listing_title"] == "WTB: used server RAM"
 
 
+def test_router_sync_records_the_room_and_tags_the_alert_for_its_topic(client):
+    """A router report carries the Matrix room; the alert carries the thread id
+    (in dedupe_key) so the delivery loop can route it to the buyer's topic."""
+    sync(client, snapshot(matrix_room_id="!portal:rs.local"))
+    thread = client.db.get_thread("t1")
+    assert thread["matrix_room_id"] == "!portal:rs.local"
+    assert client.db.get_thread_by_room("!portal:rs.local")["thread_id"] == "t1"
+
+    (alert,) = outbox_rows(client, kind="message_in")
+    assert alert["dedupe_key"] == "t1"
+
+    # The Playwright scraper omits the room id; a later sparse sync must not
+    # blank what the router recorded.
+    sync(client, snapshot(matrix_room_id=None))
+    assert client.db.get_thread("t1")["matrix_room_id"] == "!portal:rs.local"
+
+
 # -- auto-reply --------------------------------------------------------------
 
 
