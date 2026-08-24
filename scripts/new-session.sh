@@ -211,6 +211,7 @@ work_is_in_base() {
   # empty change set, the loop body never runs, and the function falls through
   # to `return 0` — reporting unmerged work as safe to delete.
   changed="$(git -C "$wt" diff --name-only "$merge_base" HEAD 2>/dev/null)" || return 1
+  local candidates commit carried
   while IFS= read -r file; do
     [ -n "$file" ] || continue
     if blob="$(git -C "$wt" rev-parse --verify --quiet "HEAD:$file")"; then
@@ -223,8 +224,22 @@ work_is_in_base() {
       # `git log`, not `git rev-list`: rev-list doesn't accept --find-object
       # (a diff option) at least through git 2.40 — it usage-errors, which the
       # fail-safe here would silently read as "keep everything, forever".
-      [ -n "$(git -C "$wt" log -1 --format=%H --find-object="$blob" "$merge_base..$BASE_REF" 2>/dev/null)" ] \
-        || return 1
+      #
+      # --find-object matches a commit whose diff touches the blob on EITHER
+      # side — including the commit that REMOVED this content. A branch that
+      # reverts a post-fork base commit holds exactly the blob that commit
+      # removed, and would read as "landed". So each candidate commit must
+      # actually CARRY the blob at this path in its tree.
+      candidates="$(git -C "$wt" log --format=%H --find-object="$blob" "$merge_base..$BASE_REF" 2>/dev/null)" || return 1
+      carried=""
+      while IFS= read -r commit; do
+        [ -n "$commit" ] || continue
+        if [ "$(git -C "$wt" rev-parse --verify --quiet "$commit:$file" || true)" = "$blob" ]; then
+          carried=1
+          break
+        fi
+      done <<< "$candidates"
+      [ -n "$carried" ] || return 1
     else
       # The branch deleted this file; that landed only if the base lost it too.
       git -C "$wt" rev-parse --verify --quiet "$BASE_REF:$file" >/dev/null && return 1

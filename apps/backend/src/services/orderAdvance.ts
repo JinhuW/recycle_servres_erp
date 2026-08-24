@@ -38,22 +38,21 @@ export async function advanceOrderTx(
   actor: AdvanceActor,
   toStage?: string,
 ): Promise<AdvanceOutcome> {
-  const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE)
-    .map((id, position) => ({ id, position }));
+  const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
   const cur = (await tx`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { user_id: string; lifecycle: string } | undefined;
   if (!cur) return { kind: 'notFound' };
 
-  const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
+  const curIdx = stages.indexOf(cur.lifecycle);
   let nextStageId: string;
   if (toStage) {
     if (actor?.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
-    if (!stages.find(s => s.id === toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
+    if (!stages.includes(toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
     nextStageId = toStage;
   } else {
     if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
-    nextStageId = stages[curIdx + 1].id;
+    nextStageId = stages[curIdx + 1];
   }
   // Purchaser (and the system) can only advance Draft → in_transit — but ANY
   // purchaser may, not just the PO's creator: whoever handles the goods

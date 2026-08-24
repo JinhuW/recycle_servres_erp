@@ -21,8 +21,20 @@ export function encodeCursor(c: Cursor): string {
 
 export function decodeCursor(raw: string | null | undefined): Cursor | null {
   if (!raw) return null;
-  try { return JSON.parse(fromBase64Url(raw)); }
-  catch { return null; }
+  try {
+    const c = JSON.parse(fromBase64Url(raw)) as unknown;
+    // Shape-checked here, not per route: consumers interpolate ts/id straight
+    // into ::timestamptz / ::uuid casts, so a crafted or truncated cursor
+    // would otherwise 500 instead of falling back to the first page.
+    if (
+      typeof c === 'object' && c !== null
+      && (typeof (c as Cursor).ts === 'string' || typeof (c as Cursor).ts === 'number')
+      && typeof (c as Cursor).id === 'string'
+    ) {
+      return c as Cursor;
+    }
+    return null;
+  } catch { return null; }
 }
 
 export function clampLimit(raw: string | null | undefined, def = 50, max = 200): number {

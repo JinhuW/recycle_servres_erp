@@ -4,16 +4,15 @@
 // poll (shipping/track.ts) moves these rows exactly like shipments.
 
 import { Hono } from 'hono';
+import { CARRIERS, normalizeTracking, type Carrier } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { nextHumanId } from '../lib/id-seq';
 import { writeOrderEvent } from '../services/orderAudit';
+import { carrierTrackingUrl } from '../shipping';
 
 const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
-
-const CARRIERS = ['UPS', 'FedEx', 'USPS'] as const;
-type Carrier = (typeof CARRIERS)[number];
 
 // The tracked subset of the shipment vocabulary — enforced by the table CHECK.
 type PackageStatus = 'purchased' | 'in_transit' | 'delivered' | 'exception';
@@ -49,6 +48,9 @@ function toApi(r: PackageRow) {
     sellerName: r.seller_name,
     note: r.note,
     orderId: r.order_id,
+    // Server-built like shipments.tracking_url, so the carrier→URL table
+    // lives once (shipping/types.ts) instead of per client.
+    trackingUrl: carrierTrackingUrl(r.carrier, r.tracking_number),
     createdAt: r.created_at,
   };
 }
@@ -62,7 +64,11 @@ function canMutate(u: User, row: PackageRow): boolean {
 packages.get('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
-  const scopeFrag = effectiveRole(u) === 'manager' ? sql`TRUE` : sql`created_by = ${u.id}`;
+  // `mine` pins a manager to their own rows, mirroring GET /api/shipments —
+  // without it the desktop Mine scope and the phone's personal glance would
+  // narrow shipments but still merge in everyone's packages.
+  const mineOnly = c.req.query('mine') === 'true';
+  const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
   const rows = (await sql`
     SELECT ${PACKAGE_COLS(sql)} FROM packages
     WHERE ${scopeFrag}
@@ -79,7 +85,11 @@ packages.post('/', async (c) => {
     | { trackingNumber?: unknown; carrier?: unknown; sellerName?: unknown; note?: unknown }
     | null;
 
-  const trackingNumber = typeof body?.trackingNumber === 'string' ? body.trackingNumber.trim() : '';
+  // Normalized at the boundary, not trusted from the client: the unique index
+  // is what guarantees one row per physical box, and '1z 999…' vs
+  // '1Z999…' must collide there, not mint two rows that both grow a PO.
+  const trackingNumber =
+    typeof body?.trackingNumber === 'string' ? normalizeTracking(body.trackingNumber) : '';
   if (trackingNumber.length < 8) return c.json({ error: 'A tracking number is required' }, 400);
   if (!CARRIERS.includes(body?.carrier as Carrier)) {
     return c.json({ error: 'carrier must be UPS, FedEx, or USPS' }, 400);
@@ -128,15 +138,25 @@ packages.post('/:id/create-po', async (c) => {
     const orderId = await nextHumanId(tx, 'PO', 'PO');
     const notes = ['Created from delivered package', row.carrier, row.tracking_number, row.seller_name]
       .filter(Boolean).join(' · ');
+    // The PO belongs to whoever tracked the box, not whoever clicked: the
+    // delivered notification goes to the creator, and ownership drives "my
+    // orders" and commission attribution. A manager acting on that
+    // notification files it for them — the same on-behalf semantics as
+    // POST /api/orders, with the same audit fields.
+    const ownerId = row.created_by ?? u.id;
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
-      VALUES (${orderId}, ${u.id}, 'Mixed', ${null}, 'company', ${notes}, ${null}, 'draft')
+      VALUES (${orderId}, ${ownerId}, 'Mixed', ${null}, 'company', ${notes}, ${null}, 'draft')
     `;
+    const ownerName = ownerId !== u.id
+      ? ((await tx`SELECT name FROM users WHERE id = ${ownerId} LIMIT 1`)[0] as { name: string } | undefined)?.name ?? null
+      : null;
     await writeOrderEvent(tx, orderId, u.id, 'created', {
       categories: [],
       lineCount: 0,
       qty: 0,
       totalCost: null,
+      ...(ownerId !== u.id ? { onBehalfOfUserId: ownerId, onBehalfOfName: ownerName } : {}),
     });
     await tx`UPDATE packages SET order_id = ${orderId} WHERE id = ${id}`;
     return { kind: 'ok', orderId };
@@ -166,7 +186,14 @@ packages.delete('/:id', async (c) => {
   if (!canMutate(u, row)) return c.json({ error: 'Forbidden' }, 403);
   if (row.order_id) return c.json({ error: 'This package already has a purchase order' }, 409);
 
-  await sql`DELETE FROM packages WHERE id = ${id} AND order_id IS NULL`;
+  // The DELETE re-checks the guard: a create-po landing between the SELECT
+  // above and here matches zero rows, and that must not read as success.
+  const deleted = (await sql`
+    DELETE FROM packages WHERE id = ${id} AND order_id IS NULL RETURNING id
+  `) as unknown as { id: string }[];
+  if (!deleted.length) {
+    return c.json({ error: 'This package already has a purchase order' }, 409);
+  }
   return c.json({ ok: true });
 });
 

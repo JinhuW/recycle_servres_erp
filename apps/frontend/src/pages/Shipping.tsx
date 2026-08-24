@@ -3,13 +3,12 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhoneListSkeleton } from '../components/Skeleton';
 import { api, listShipments } from '../lib/api';
-import { CARRIERS, detectCarriers, normalizeTracking, type Carrier } from '../lib/carrierDetect';
+import { CARRIERS } from '../lib/carrierDetect';
+import { FMT_HINT_KEY, useAddPackageForm } from '../lib/useAddPackageForm';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtDateShort, fmtMoney } from '../lib/format';
 import { useT } from '../lib/i18n';
-import {
-  addPackage, carrierTrackingUrl, createPoFromPackage, type TrackedPackage,
-} from '../lib/packages';
+import { createPoFromPackage, listPackages, type TrackedPackage } from '../lib/packages';
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
@@ -55,7 +54,7 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
       Promise.all([
         // Personal surface: always my own rows, managers included.
         api.get<{ items: (Shipment & { order: ShipOrder })[] }>('/api/shipments?limit=200&mine=true'),
-        api.get<{ items: TrackedPackage[] }>('/api/packages'),
+        listPackages({ mine: true }),
       ])
         .then(([shipments, packages]) => {
           if (!alive) return;
@@ -68,9 +67,17 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
         // A failed refresh tick keeps showing the last good list.
         .catch((e) => { if (alive && !loadedOnce) handleFetchError(e); });
     void load();
-    // Tracking moves server-side; a slow tick keeps the glance honest.
-    const h = setInterval(() => { void load(); }, 30_000);
-    return () => { alive = false; clearInterval(h); };
+    // Tracking moves server-side on a 45-min pass; a slow tick keeps the
+    // glance honest while it's actually being glanced at — a backgrounded
+    // tab polls nothing and refreshes the moment it's back.
+    const h = setInterval(() => { if (!document.hidden) void load(); }, 30_000);
+    const onVisible = () => { if (!document.hidden) void load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      clearInterval(h);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const groups = useMemo(() => groupInbound(rows ?? []), [rows]);
@@ -153,7 +160,7 @@ function InboundCard({ row, showToast, onCreatedPo }: {
   const tracking = row.kind === 'package' ? row.pkg.trackingNumber : row.shipment.trackingNumber;
   const carrier = row.kind === 'package' ? row.pkg.carrier : row.shipment.carrier;
   const trackUrl = row.kind === 'package'
-    ? carrierTrackingUrl(row.pkg.carrier, row.pkg.trackingNumber)
+    ? row.pkg.trackingUrl
     : row.shipment.trackingUrl;
   const poId = row.kind === 'package' ? row.pkg.orderId : row.order.id;
   const who = row.kind === 'package'
@@ -284,42 +291,13 @@ function JourneyStrip({ pos, tone }: { pos: number; tone: 'ok' | 'warn' | 'muted
 
 // ── /shipping/add — paste a tracking number ──────────────────────────────────
 
-const FMT_HINT_KEY: Record<Carrier, string> = {
-  UPS: 'shipFmtUps',
-  FedEx: 'shipFmtFedex',
-  USPS: 'shipFmtUsps',
-};
-
 function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: ToastKind) => void }) {
   const { t } = useT();
-  const [raw, setRaw] = useState('');
-  const [pick, setPick] = useState<Carrier | null>(null);
-  const [sellerName, setSellerName] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const tn = normalizeTracking(raw);
-  const detected = useMemo(() => detectCarriers(raw), [raw]);
-  // A single detection selects itself; ambiguity or no match leaves the pick
-  // to the user. A manual pick always wins.
-  const carrier = pick ?? (detected.length === 1 ? detected[0] : null);
-  const unknownShape = tn.length >= 10 && detected.length === 0;
-  const canSubmit = tn.length >= 8 && carrier != null && !busy;
-
-  const submitting = useRef(false);
-  const submit = async () => {
-    if (!canSubmit || carrier == null || submitting.current) return;
-    submitting.current = true;
-    setBusy(true);
-    try {
-      await addPackage({ trackingNumber: tn, carrier, sellerName });
-      showToast(t('shipAddAdded', { carrier, tn }));
-      navigate('/shipping');
-    } catch (e) {
-      handleFetchError(e);
-      submitting.current = false;
-      setBusy(false);
-    }
-  };
+  // Shared with the desktop page — see lib/useAddPackageForm.
+  const f = useAddPackageForm(({ carrier, tn }) => {
+    showToast(t('shipAddAdded', { carrier, tn }));
+    navigate('/shipping');
+  });
 
   return (
     <>
@@ -338,9 +316,9 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
           <label>{t('shipAddTrackingLabel')}</label>
           <input
             className="input mono"
-            value={raw}
-            onChange={(e) => { setRaw(e.target.value); setPick(null); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+            value={f.raw}
+            onChange={(e) => f.setRaw(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void f.submit(); }}
             placeholder={t('shipAddTrackingPh')}
             autoFocus
             autoComplete="off"
@@ -350,8 +328,8 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
 
         <div className="ph-ship-carriers" role="radiogroup" aria-label={t('shipAddCarrierTitle')}>
           {CARRIERS.map((c) => {
-            const lit = detected.includes(c);
-            const selected = carrier === c;
+            const lit = f.detected.includes(c);
+            const selected = f.carrier === c;
             return (
               <button
                 key={c}
@@ -359,7 +337,7 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
                 role="radio"
                 aria-checked={selected}
                 className={'ph-ship-carrier' + (lit ? ' lit' : '') + (selected ? ' selected' : '')}
-                onClick={() => setPick(c)}
+                onClick={() => f.setPick(c)}
               >
                 <span className="ph-ship-carrier-name">{c}</span>
                 <span className="ph-ship-carrier-fmt mono">{t(FMT_HINT_KEY[c])}</span>
@@ -368,23 +346,17 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
           })}
         </div>
         <div className="ph-ship-add-hint" aria-live="polite">
-          {carrier != null && detected.length === 1 && !pick
-            ? t('shipAddCarrierAuto')
-            : detected.length > 1 && !pick
-              ? t('shipAddCarrierPick')
-              : unknownShape && !pick
-                ? t('shipAddCarrierUnknown')
-                : ' '}
+          {f.hintKey ? t(f.hintKey) : ' '}
         </div>
 
         <div className="ph-field">
           <label>{t('shipSellerName')}</label>
-          <input className="input" value={sellerName} onChange={(e) => setSellerName(e.target.value)} autoComplete="off" />
+          <input className="input" value={f.sellerName} onChange={(e) => f.setSellerName(e.target.value)} autoComplete="off" />
         </div>
       </div>
       <div className="ph-action-bar">
-        <button className="ph-btn accent" disabled={!canSubmit} onClick={() => void submit()}>
-          {busy ? '…' : t('shipAddSubmit')}
+        <button className="ph-btn accent" disabled={!f.canSubmit} onClick={() => void f.submit()}>
+          {f.busy ? '…' : t('shipAddSubmit')}
         </button>
       </div>
     </>

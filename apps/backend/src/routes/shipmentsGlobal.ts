@@ -30,7 +30,16 @@ shipmentsList.get('/', async (c) => {
   const isManager = effectiveRole(u) === 'manager';
   const mineOnly = c.req.query('mine') === 'true';
   const limit = clampLimit(c.req.query('limit'), 100, 200);
-  const cursor = decodeCursor(c.req.query('cursor'));
+  // The fragment below casts to ::timestamptz/::uuid, so the values must be
+  // castable, not merely present — a garbage cursor falls back to the first
+  // page instead of a 22007/22P02 500.
+  const raw = decodeCursor(c.req.query('cursor'));
+  const cursor =
+    raw
+    && typeof raw.ts === 'string' && !Number.isNaN(Date.parse(raw.ts))
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw.id)
+      ? raw
+      : null;
 
   // Managers see the org's shipments; purchasers their own orders'. `mine`
   // pins a manager to their own, mirroring GET /api/orders.

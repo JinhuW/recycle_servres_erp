@@ -14,12 +14,11 @@ export type ShipOrder = {
   warehouse: { id?: string; name?: string | null; short: string; region: string } | null;
 };
 
-export type PoLabels = { order: ShipOrder; shipments: Shipment[] };
 export type ShipRow = { order: ShipOrder; shipment: Shipment };
 
 export type ShipFilter = {
   status: ShipmentStatus | 'all';
-  carrier: string; // 'all' or an exact carrier name from carriersOf()
+  carrier: string; // 'all' or an exact carrier name from inboundCarriers()
   search: string;
 };
 
@@ -48,18 +47,6 @@ export function fmtEta(iso: string | null, locale: string): string | null {
   });
 }
 
-/** One row per shipment, newest shipment first. */
-export function flattenRows(sections: PoLabels[]): ShipRow[] {
-  return sections
-    .flatMap(({ order, shipments }) => shipments.map(shipment => ({ order, shipment })))
-    .sort((a, b) => b.shipment.createdAt.localeCompare(a.shipment.createdAt));
-}
-
-/** Distinct carrier names across the rows, sorted. */
-export function carriersOf(rows: ShipRow[]): string[] {
-  return [...new Set(rows.map(r => r.shipment.carrier).filter((c): c is string => !!c))].sort();
-}
-
 export function filterRows(rows: ShipRow[], f: ShipFilter): ShipRow[] {
   const q = f.search.trim().toLowerCase();
   return rows.filter(({ order, shipment }) => {
@@ -71,13 +58,6 @@ export function filterRows(rows: ShipRow[], f: ShipFilter): ShipRow[] {
       || (shipment.from.name ?? '').toLowerCase().includes(q)
       || (shipment.trackingNumber ?? '').toLowerCase().includes(q);
   });
-}
-
-/** Row count per status (plus 'all') for the status-rail chips. */
-export function statusCounts(rows: ShipRow[]): Record<ShipmentStatus | 'all', number> {
-  const counts = { all: rows.length, draft: 0, quoted: 0, purchased: 0, in_transit: 0, delivered: 0, voided: 0, exception: 0 };
-  for (const r of rows) counts[r.shipment.status]++;
-  return counts;
 }
 
 // ── Inbound stream: shipments + standalone tracked packages ──────────────────
@@ -180,11 +160,6 @@ function pkgCsvCells(p: TrackedPackage): string[] {
     p.orderId ?? '', p.createdAt, p.status, p.sellerName ?? '', '', '', '',
     p.carrier, '', '', '', p.trackingNumber,
   ];
-}
-
-export function rowsToCsv(rows: ShipRow[]): string {
-  const lines = rows.map(r => shipCsvCells(r).map(csvEsc).join(','));
-  return [CSV_HEAD.map(csvEsc).join(','), ...lines].join('\r\n');
 }
 
 export function inboundToCsv(rows: InboundRow[]): string {

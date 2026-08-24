@@ -69,6 +69,49 @@ describe('POST /api/orders onBehalfOfUserId', () => {
     });
     expect(r.status).toBe(400);
   });
+
+  it('rejects a malformed id as a 400, not a uuid-cast 500', async () => {
+    const alex = await loginAs(ALEX);
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: { ...LINES, onBehalfOfUserId: 'marcus' },
+    });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe('warehouseId boundary check on every write path', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The label wizard once sent "" and got an FK 500; /draft was fixed —
+  // these pin the same guard on the sibling endpoints.
+  it('POST /api/orders rejects an unknown warehouse as 400', async () => {
+    const alex = await loginAs(ALEX);
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: { ...LINES, warehouseId: '' },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/warehouse/i);
+  });
+
+  it('PATCH /api/orders/:id rejects an unknown warehouse as 400 and null still clears', async () => {
+    const alex = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: alex.token, body: { ...LINES },
+    });
+    expect(created.status).toBe(201);
+
+    const bad = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
+      token: alex.token, body: { warehouseId: '' },
+    });
+    expect(bad.status).toBe(400);
+
+    const clear = await api('PATCH', `/api/orders/${created.body.id}`, {
+      token: alex.token, body: { warehouseId: null },
+    });
+    expect(clear.status).toBe(200);
+  });
 });
 
 describe('POST /api/orders/draft onBehalfOfUserId', () => {

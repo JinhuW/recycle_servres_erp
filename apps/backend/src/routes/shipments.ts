@@ -12,6 +12,7 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { writeOrderEvent } from '../services/orderAudit';
+import { FEE_NOTE_MAX, voidShipmentTx } from '../services/shipmentVoid';
 import { notifyManagers } from '../lib/notify';
 import { effectiveRole } from '../lib/role';
 import { pickShippingClient, carrierTrackingUrl } from '../shipping';
@@ -19,9 +20,6 @@ import type { RateQuote, ShipAddress, ShipPackage, ShipmentStatus } from '../shi
 import { canTransition } from '../shipping/status';
 
 const shipments = new Hono<{ Bindings: Env; Variables: { user: User } }>();
-
-// The note column caps at this length everywhere it's written (see orders.ts).
-const FEE_NOTE_MAX = 280;
 
 type OrderRow = { id: string; user_id: string; lifecycle: string; warehouse_id: string | null };
 
@@ -514,6 +512,11 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
           to_zip = ${shipTo.addr.zip}, to_country = ${shipTo.addr.country},
           carrier = ${label.carrier}, service = ${label.service},
           rate_amount = ${label.amount}, rate_currency = ${label.currency},
+          -- Re-stamp: the draft was stamped with whatever client was configured
+          -- at creation; a draft born under the stub and bought after real
+          -- credentials arrived must not stay provider='stub', or the tracking
+          -- poll (which filters on provider) skips this real label forever.
+          provider = ${client.provider},
           provider_rate_id = ${rateId}, provider_shipment_id = ${label.shipmentId},
           tracking_number = ${label.trackingNumber},
           tracking_url = ${label.trackingUrl ?? carrierTrackingUrl(label.carrier, label.trackingNumber)},
@@ -590,40 +593,14 @@ shipments.post('/:orderId/shipments/:sid/void', async (c) => {
     return c.json({ error: result.message ?? 'The carrier refused to void this label' }, 409);
   }
 
-  await sql.begin(async (tx) => {
-    await tx`SELECT 1 FROM orders WHERE id = ${orderId} FOR UPDATE`;
-    // Read the latch before clearing it (UPDATE … RETURNING yields new values,
-    // not old ones), all under the same row lock.
-    const prev = (await tx`
-      SELECT fees_applied, label_cost::float AS label_cost FROM shipments WHERE id = ${sid} FOR UPDATE
-    `)[0] as { fees_applied: boolean; label_cost: number | null };
-    await tx`UPDATE shipments SET status = 'voided', fees_applied = FALSE WHERE id = ${sid}`;
-    if (prev.fees_applied && prev.label_cost) {
-      // GREATEST: a manual fee edit may have lowered other_fees below the
-      // label cost since the buy; the column carries CHECK (>= 0).
-      await tx`
-        UPDATE orders SET
-          other_fees = GREATEST(other_fees - ${prev.label_cost}, 0),
-          other_fees_note = left(
-            concat_ws(' | ', nullif(other_fees_note, ''), ${'Label voided ' + shipment.tracking_number}::text),
-            ${FEE_NOTE_MAX}::int
-          )
-        WHERE id = ${orderId}
-      `;
-    }
-    await writeOrderEvent(tx, orderId, u.id, 'shipment_voided', {
-      shipmentId: sid,
+  await sql.begin(async (tx) =>
+    voidShipmentTx(tx, {
+      orderId,
+      sid,
       trackingNumber: shipment.tracking_number,
-      amount: prev.label_cost,
-    });
-    await notifyManagers(tx, {
-      kind: 'shipment_voided',
-      tone: 'warn',
-      icon: 'package',
-      title: `Shipping label voided on ${orderId}`,
-      body: `${u.name} voided ${shipment.carrier ?? ''} ${shipment.tracking_number}`.trim(),
-    });
-  });
+      carrier: shipment.carrier,
+      actor: { id: u.id, name: u.name },
+    }));
 
   const full = (await sql`
     SELECT ${SHIPMENT_COLS(sql)} FROM shipments WHERE id = ${sid} LIMIT 1

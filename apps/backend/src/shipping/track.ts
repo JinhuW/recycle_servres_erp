@@ -10,6 +10,7 @@ import type { ShipmentStatus, ShippingClient } from './types';
 import { canTransition } from './status';
 import { pickShippingClient } from './index';
 import { advanceOrderTx } from '../services/orderAdvance';
+import { voidShipmentTx } from '../services/shipmentVoid';
 import { notify } from '../lib/notify';
 
 const REFRESH_INTERVAL_MS = 45 * 60 * 1000;
@@ -35,21 +36,39 @@ export async function refreshShipmentTracking(
         info.normalized !== row.status && canTransition(row.status, info.normalized)
           ? info.normalized
           : null;
-      await sql`
-        UPDATE shipments SET
-          status          = ${next ?? row.status},
-          tracking_status = ${info.raw},
-          tracking_eta    = ${info.eta},
-          last_tracked_at = NOW()
-        WHERE id = ${row.id}
-      `;
+      // Status move and its consequences commit together: a transition the
+      // metadata UPDATE persisted but whose PO advance / fee reversal failed
+      // would never be retried — `next` is null on every later tick.
+      await sql.begin(async (tx) => {
+        if (next === 'voided') {
+          // Label cancelled outside the app (e.g. the ShipSaving dashboard):
+          // marking the row voided makes our /void route unreachable, so the
+          // fee reversal has to ride along here or the label cost stays baked
+          // into the PO's other_fees forever.
+          await voidShipmentTx(tx, {
+            orderId: row.order_id,
+            sid: row.id,
+            trackingNumber: row.tracking_number,
+            carrier: row.carrier,
+            actor: null,
+          });
+        }
+        await tx`
+          UPDATE shipments SET
+            status          = ${next ?? row.status},
+            tracking_status = ${info.raw},
+            tracking_eta    = ${info.eta},
+            last_tracked_at = NOW()
+          WHERE id = ${row.id}
+        `;
+        // The confirmed business rule, applied server-side: carrier movement
+        // moves a Draft PO to In Transit. The system actor is held to exactly
+        // that one transition, so a PO in any later stage is a quiet no-op.
+        if (next === 'in_transit' || next === 'delivered') {
+          await advanceOrderTx(tx, row.order_id, null);
+        }
+      });
       if (next) updated++;
-      // The confirmed business rule, applied server-side: carrier movement
-      // moves a Draft PO to In Transit. The system actor is held to exactly
-      // that one transition, so a PO in any later stage is a quiet no-op.
-      if (next === 'in_transit' || next === 'delivered') {
-        await sql.begin((tx) => advanceOrderTx(tx, row.order_id, null));
-      }
     } catch (err) {
       console.warn(`[shipping] tracking refresh failed for shipment ${row.id}; keeping previous state`, err);
     }

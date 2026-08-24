@@ -26,37 +26,54 @@ type Envelope<T> = { code?: string; msg?: string; data?: T };
 
 // One cached token per appKey — minting a new token invalidates the previous
 // one account-wide, so eagerly re-minting per request would self-DoS.
+// Mints are single-flighted for the same reason: two concurrent callers each
+// minting would invalidate each other's token and ping-pong 401s.
 const tokenCache = new Map<string, { token: string; expires: number }>();
+const mintInFlight = new Map<string, Promise<string>>();
 
 function base(env: Env): string {
   return (env.SHIPSAVING_API_URL ?? DEFAULT_BASE).replace(/\/$/, '');
 }
 
-async function mintToken(env: Env): Promise<string> {
+function mintToken(env: Env): Promise<string> {
   const key = env.SHIPSAVING_APP_KEY ?? '';
-  const secret = env.SHIPSAVING_APP_SECRET ?? '';
-  const res = await fetch(`${base(env)}/oauth2/token`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${btoa(`${key}:${secret}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'API' }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  const body = (await res.json().catch(() => null)) as
-    | { access_token?: string; expires_in?: number; error?: string }
-    | null;
-  if (!res.ok || !body?.access_token) {
-    throw new Error(`shipsaving oauth2/token failed: HTTP ${res.status} ${body?.error ?? ''}`.trim());
-  }
-  tokenCache.set(key, { token: body.access_token, expires: Date.now() + TOKEN_TTL_MS });
-  return body.access_token;
+  const inFlight = mintInFlight.get(key);
+  if (inFlight) return inFlight;
+  const p = (async () => {
+    const secret = env.SHIPSAVING_APP_SECRET ?? '';
+    const res = await fetch(`${base(env)}/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${btoa(`${key}:${secret}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'API' }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => null)) as
+      | { access_token?: string; expires_in?: number; error?: string }
+      | null;
+    if (!res.ok || !body?.access_token) {
+      throw new Error(`shipsaving oauth2/token failed: HTTP ${res.status} ${body?.error ?? ''}`.trim());
+    }
+    tokenCache.set(key, { token: body.access_token, expires: Date.now() + TOKEN_TTL_MS });
+    return body.access_token;
+  })().finally(() => mintInFlight.delete(key));
+  mintInFlight.set(key, p);
+  return p;
 }
 
 async function getToken(env: Env): Promise<string> {
   const cached = tokenCache.get(env.SHIPSAVING_APP_KEY ?? '');
   if (cached && cached.expires > Date.now()) return cached.token;
+  return mintToken(env);
+}
+
+// After a 401: someone else may have already re-minted (invalidating the token
+// this call used) — retry with the newer cached token before minting again.
+async function freshToken(env: Env, usedToken: string): Promise<string> {
+  const cached = tokenCache.get(env.SHIPSAVING_APP_KEY ?? '');
+  if (cached && cached.token !== usedToken && cached.expires > Date.now()) return cached.token;
   return mintToken(env);
 }
 
@@ -77,8 +94,9 @@ async function call<T>(
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
-  let res = await doFetch(await getToken(env));
-  if (res.status === 401) res = await doFetch(await mintToken(env));
+  const token = await getToken(env);
+  let res = await doFetch(token);
+  if (res.status === 401) res = await doFetch(await freshToken(env, token));
   if (!res.ok) {
     throw new Error(`shipsaving ${method} ${path} failed: HTTP ${res.status} ${await res.text().catch(() => '')}`.trim());
   }
@@ -124,12 +142,20 @@ function toAddressData(a: ShipAddress) {
   };
 }
 
+// The wire shapes are declared from the docs but have never been verified
+// against a live account (tokens pending) — every number passes through num()
+// because v1 demonstrably wired numbers as strings ("delivery_days": "4").
+function num(v: unknown): number | null {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
+}
+
 type WireRate = {
   rate_id: string;
   carrier_code: string;
   service_name: string;
   service_level: string;
-  price: number;
+  price: number | string;
   currency: string;
   delivery_days: string | null;
 };
@@ -138,8 +164,8 @@ type WireBuy = {
   shipment_no: string;
   tracking_no: string;
   currency: string;
-  total_fee: number;
-  label_fee: number | null;
+  total_fee: number | string;
+  label_fee: number | string | null;
   label_urls: string[] | null;
   duplicate_label: boolean;
 };
@@ -150,11 +176,15 @@ type WireTracking = {
   estimate_delivery_date: string | null;
 };
 
-// Local-time strings ("2025-08-26 22:37:27") and ISO both appear; parse
-// best-effort, drop what doesn't parse.
+// Carrier ETAs are calendar dates in the destination's timezone, wired as
+// local-time strings ("2025-08-26 22:37:27") or bare dates. Parsing them as
+// server-local instants would shift the calendar day for most viewers (the
+// server runs UTC), so store the date part as UTC midnight — the exact shape
+// the frontend's fmtEta renders as a timezone-free calendar date.
 function parseEta(s: string | null | undefined): Date | null {
   if (!s) return null;
-  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s.trim());
+  const d = m ? new Date(`${m[1]}T00:00:00Z`) : new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
@@ -201,15 +231,25 @@ export function shipSavingClient(env: Env): ShippingClient {
           }],
         },
       );
-      const rates = data?.[0]?.shipment_rate_data ?? [];
-      return rates.map((r) => ({
-        rateId: r.rate_id,
-        carrier: CARRIER_DISPLAY[r.carrier_code] ?? r.carrier_code,
-        service: r.service_name || r.service_level,
-        amount: r.price,
-        currency: r.currency || 'USD',
-        deliveryDays: r.delivery_days != null && r.delivery_days !== '' ? Number(r.delivery_days) : null,
-      })).filter((r) => r.rateId && Number.isFinite(r.amount));
+      // A shape surprise must throw (the route converts it to a 502), not
+      // read as "no carrier covers this address" — the silent-[] failure mode
+      // is indistinguishable from a real empty answer.
+      const rates = data?.[0]?.shipment_rate_data;
+      if (!Array.isArray(rates)) {
+        throw new Error('shipsaving: unexpected quick_rate response shape');
+      }
+      return rates.flatMap((r) => {
+        const amount = num(r.price);
+        if (!r.rate_id || amount === null) return [];
+        return [{
+          rateId: r.rate_id,
+          carrier: CARRIER_DISPLAY[r.carrier_code] ?? r.carrier_code,
+          service: r.service_name || r.service_level,
+          amount,
+          currency: r.currency || 'USD',
+          deliveryDays: num(r.delivery_days),
+        }];
+      });
     },
 
     async buyByRateId(rateId: string, ctx: BuyContext): Promise<PurchasedLabel> {
@@ -221,6 +261,16 @@ export function shipSavingClient(env: Env): ShippingClient {
         },
       });
       if (!data?.tracking_no) throw new Error('shipsaving create_and_pay returned no tracking number');
+      // Same platform_uk_id, different rate_id → ShipSaving returns the label
+      // it already sold, not a new purchase. The recorded carrier/service come
+      // from the freshly picked quote, so they may not describe this label —
+      // surface it for reconciliation instead of failing a charged purchase.
+      if (data.duplicate_label) {
+        console.warn(
+          `[shipping] create_and_pay returned an existing label for platform_uk_id ${ctx.platformUkId} `
+          + `(rate_id ${rateId}) — verify carrier/service against ShipSaving if the rate was re-picked`,
+        );
+      }
 
       const labelUrl = data.label_urls?.[0];
       if (!labelUrl) throw new Error(`shipsaving label ${data.tracking_no} bought but no label URL returned`);
@@ -237,7 +287,10 @@ export function shipSavingClient(env: Env): ShippingClient {
         // rate id resolved against carries it.
         carrier: ctx.quote?.carrier ?? '',
         service: ctx.quote?.service ?? '',
-        amount: data.label_fee ?? data.total_fee,
+        // Money is recorded (and .toFixed'd) after the charge already landed —
+        // a string or missing fee must degrade to the quoted price, not crash
+        // the recording step into the reconcile-manually path.
+        amount: num(data.label_fee) ?? num(data.total_fee) ?? ctx.quote?.amount ?? 0,
         currency: data.currency || ctx.quote?.currency || 'USD',
         labelData,
         labelContentType,
@@ -260,7 +313,13 @@ export function shipSavingClient(env: Env): ShippingClient {
     },
 
     async getShipment(trackingNumber: string, carrier: string | null): Promise<TrackingInfo> {
-      const carrierCode = CARRIER_CODE[(carrier ?? '').trim().toLowerCase()];
+      // listRates quotes every carrier the account has active, and an unmapped
+      // one is stored as its raw carrier_code (e.g. ONTRAC) — pass such codes
+      // through verbatim so those labels stay trackable instead of throwing on
+      // every poll tick forever.
+      const name = (carrier ?? '').trim();
+      const carrierCode = CARRIER_CODE[name.toLowerCase()]
+        ?? (/^[A-Z0-9_]+$/.test(name) ? name : null);
       if (!carrierCode) throw new Error(`shipsaving tracking needs a known carrier, got "${carrier ?? ''}"`);
       const data = await call<WireTracking>(env, 'GET', '/api/shipment/tracking_by_tracking_no', {
         query: { tracking_no: trackingNumber, carrier_code: carrierCode },
