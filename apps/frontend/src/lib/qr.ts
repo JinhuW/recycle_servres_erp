@@ -1,10 +1,11 @@
 // Frame decoding for the serial-number QR scanner.
 //
 // Native BarcodeDetector when the browser ships one (Android Chrome — the
-// hardware path, which also reads the DataMatrix / Code 128 symbols some
-// module labels carry); otherwise the pure-JS jsQR decoder (iOS Safari has
-// no BarcodeDetector). Both resolve lazily so nothing is downloaded until a
-// scanner actually opens.
+// hardware path); otherwise the zxing-wasm reader (iOS Safari has no
+// BarcodeDetector, and the module labels are DataMatrix, which pure-JS QR
+// decoders can't read). Both resolve lazily so nothing is downloaded until
+// a scanner actually opens, and the wasm is served from our own bundle —
+// zxing-wasm's default is a CDN fetch, which the PWA must not depend on.
 //
 // Both paths decode a centered square CROP of the frame, at native camera
 // resolution — module QR codes are tiny (~10 mm), and decoding the whole
@@ -70,11 +71,28 @@ export async function createFrameDecoder(): Promise<FrameDecoder> {
       // Format set unsupported — fall through to jsQR.
     }
   }
-  const { default: jsQR } = await import('jsqr');
+  const [{ prepareZXingModule, readBarcodes }, { default: wasmUrl }] = await Promise.all([
+    import('zxing-wasm/reader'),
+    import('zxing-wasm/reader/zxing_reader.wasm?url'),
+  ]);
+  prepareZXingModule({
+    overrides: {
+      locateFile: (path: string, prefix: string) =>
+        path.endsWith('.wasm') ? wasmUrl : prefix + path,
+    },
+  });
   return async (video) => {
     if (!cropFrame(video, canvas, ctx)) return null;
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const hit = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-    return hit?.data.trim() || null;
+    try {
+      const hits = await readBarcodes(img, {
+        formats: ['DataMatrix', 'QRCode', 'Code128'],
+        tryHarder: true,
+        maxNumberOfSymbols: 1,
+      });
+      return hits[0]?.text?.trim() || null;
+    } catch {
+      return null;
+    }
   };
 }
