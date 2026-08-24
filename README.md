@@ -42,8 +42,9 @@ shell, so each ships its own chunk):
 - **Backend** — Node 24, Hono, postgres.js, `@aws-sdk/client-s3` for R2,
   bcryptjs, `@tsndr/cloudflare-worker-jwt` for JWT.
 - **Frontend** — Vite 6, React 18, TypeScript 5, no UI framework.
-- **DB** — Postgres 16. 41 SQL migrations under `apps/backend/migrations/`,
-  applied automatically by the backend on startup.
+- **DB** — Postgres 16. Plain SQL migrations under `apps/backend/migrations/`
+  (numbered `NNNN_…sql`; the highest number is the head), applied
+  automatically by the backend on startup.
 - **Storage** — Cloudflare R2 via S3 API.  Label scans + sell-order
   attachments live under `recycle-erp-attachments`, public-served at
   `https://static.recycleservers.com/recycle-erp-attachments/`.
@@ -219,10 +220,11 @@ pnpm --filter recycle-erp-backend  test
 pnpm --filter recycle-erp-frontend test
 ```
 
-Backend tests are integration tests against a real Postgres (~60 files,
-~300 tests).  `vitest.config.ts` runs them serially with `pool: 'forks'`
-+ `fileParallelism: false`; the shared DB is reset per-file via an
-advisory lock to stop catalog-DDL races.
+Backend tests are integration tests against a real Postgres (130+ files).
+`vitest.config.ts` runs test files in parallel (`pool: 'forks'`, up to 8
+workers); each worker owns a private database and `resetDb()` re-clones it
+from a migrated+seeded template, so the suite finishes in ~15s.  See the
+Tests section in `CLAUDE.md` for the mechanics.
 
 ## Metrics
 

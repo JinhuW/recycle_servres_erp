@@ -194,8 +194,8 @@ switches the branch out from under the first.
 
 ## Database & migrations
 
-- Postgres 16.  41 migrations as of writing — the highest-numbered file in
-  `apps/backend/migrations/` is the head.
+- Postgres 16.  The highest-numbered file in `apps/backend/migrations/` is
+  the head.
 - FKs use `ON DELETE` rules added in `0041_fk_on_delete.sql`.  When adding
   a new child table, declare the rule explicitly; don't rely on default
   `NO ACTION`.

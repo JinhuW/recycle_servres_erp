@@ -39,8 +39,8 @@ function cropFrame(
   const side = Math.floor(Math.min(video.videoWidth, video.videoHeight) * CROP);
   const sx = Math.floor((video.videoWidth - side) / 2);
   const sy = Math.floor((video.videoHeight - side) / 2);
-  // Cap the output: past ~1100px jsQR's per-frame cost outruns the scan loop
-  // on mid-range phones, with no accuracy left to gain.
+  // Cap the output: past ~1100px the per-frame decode cost outruns the scan
+  // loop on mid-range phones, with no accuracy left to gain.
   const out = Math.min(side, 1100);
   canvas.width = out;
   canvas.height = out;
@@ -68,7 +68,7 @@ export async function createFrameDecoder(): Promise<FrameDecoder> {
         }
       };
     } catch {
-      // Format set unsupported — fall through to jsQR.
+      // Format set unsupported — fall through to zxing-wasm.
     }
   }
   const [{ prepareZXingModule, readBarcodes }, { default: wasmUrl }] = await Promise.all([
