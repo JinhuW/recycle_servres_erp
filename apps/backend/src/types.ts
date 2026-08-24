@@ -16,6 +16,14 @@ export type Env = {
   // 501 so the UI can show a "not configured" state instead of erroring.
   TRACKER_API_URL?: string;
   TRACKER_API_TOKEN?: string;
+  // Facebook fleet console facade (/api/coordinator/*). Both unset → proxy
+  // answers 501, same "not configured" contract as the tracker proxy.
+  COORDINATOR_API_URL?: string;
+  COORDINATOR_API_TOKEN?: string;
+  // Cloudflare Access service token guarding the facade's tunnel hostname.
+  // Optional: without them the proxy still works against an unguarded URL.
+  COORDINATOR_ACCESS_CLIENT_ID?: string;
+  COORDINATOR_ACCESS_CLIENT_SECRET?: string;
   // ShipSaving prepaid-label API. Either unset → deterministic stub provider
   // (demo rates/labels, no real purchases) and the tracking poll stays off.
   // ShipSaving v2 (docs.shipsaving.com/v2): OAuth client credentials.

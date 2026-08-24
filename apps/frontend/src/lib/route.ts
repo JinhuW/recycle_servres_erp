@@ -118,6 +118,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   transfers:  '/transfers',
   activity:   '/activity',
   tracker:    '/tracker',
+  coordinator: '/fleet',
   settings:   '/settings',
 } as const;
 
@@ -138,6 +139,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/transfers') return 'transfers';
   if (path === '/activity') return 'activity';
   if (path === '/tracker') return 'tracker';
+  if (path === '/fleet') return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }

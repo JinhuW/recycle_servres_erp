@@ -27,6 +27,7 @@ import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
+import coordinatorRoutes from './routes/coordinator';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
@@ -279,6 +280,8 @@ app.route('/api/activity', activityRoutes);
 app.route('/api/oauth/clients', oauthAdmin);
 // Self-applies authMiddleware + manager gate (oauthAdmin pattern).
 app.route('/api/tracker', trackerRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/coordinator', coordinatorRoutes);
 
 // Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
 // and are bearer-equivalent secrets — the only gate to a vendor's data. A

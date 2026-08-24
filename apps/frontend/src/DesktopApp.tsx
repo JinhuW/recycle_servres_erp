@@ -36,6 +36,7 @@ const DesktopTransfers = lazy(() => import('./pages/desktop/DesktopTransfers').t
 const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').then(m => ({ default: m.DesktopActivity })));
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
+const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
@@ -158,7 +159,7 @@ export function DesktopApp() {
   }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'tracker')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'tracker' || view === 'coordinator')
     ? 'dashboard'
     : view;
 
@@ -243,6 +244,7 @@ export function DesktopApp() {
             {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
             {view2 === 'activity'  && <DesktopActivity />}
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
+            {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
           </Suspense>
         </div>
