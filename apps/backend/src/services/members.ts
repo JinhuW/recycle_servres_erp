@@ -21,6 +21,7 @@ export interface MemberSummary {
   active: boolean;
   created_at: Date;
   last_seen_at: Date | null;
+  defaultWarehouseId: string | null;
   order_count: number;
   lifetime_profit: number;
 }
@@ -71,6 +72,7 @@ export async function listMembers(
     SELECT u.id, u.email, u.name, u.initials, u.role, u.team, u.phone, u.title,
            u.active, u.created_at,
            u.last_seen_at,
+           u.default_warehouse_id AS "defaultWarehouseId",
            COUNT(DISTINCT o.id)::int AS order_count,
            COALESCE((
              SELECT SUM((sol.unit_price - ${effUnitCost(sql)}) * sol.qty)

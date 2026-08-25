@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhoneListSkeleton } from '../components/Skeleton';
 import { api, listShipments } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { CARRIERS } from '../lib/carrierDetect';
 import { FMT_HINT_KEY, useAddPackageForm } from '../lib/useAddPackageForm';
 import { handleFetchError } from '../lib/errorToast';
@@ -150,9 +151,10 @@ function InboundCard({ row, showToast, onCreatedPo }: {
   onCreatedPo: (orderId: string) => void;
 }) {
   const { t, lang } = useT();
+  const { user } = useAuth();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [busy, setBusy] = useState(false);
-  const action = inboundAction(row);
+  const action = inboundAction(row, user?.role === 'manager');
 
   const status = row.kind === 'package' ? row.pkg.status : row.shipment.status;
   const chip = STATUS_CHIP[status];

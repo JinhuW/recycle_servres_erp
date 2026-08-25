@@ -14,9 +14,15 @@ export type InboundAction =
   | { kind: 'finish-desktop' }
   | null;
 
-export function inboundAction(row: InboundRow): InboundAction {
+export function inboundAction(row: InboundRow, manager = false): InboundAction {
   if (row.kind === 'package') {
-    return row.pkg.status === 'delivered' && !row.pkg.orderId ? { kind: 'create-po' } : null;
+    if (row.pkg.orderId) return null;
+    // Tracking isn't wired to a live carrier feed yet, so a package can stall
+    // before "delivered". Managers may mint the PO at any status (the server
+    // holds the same line); purchasers still wait for delivery. Grouping stays
+    // manager-blind — an undelivered package is still "moving", the early CTA
+    // just rides along on its card.
+    return row.pkg.status === 'delivered' || manager ? { kind: 'create-po' } : null;
   }
   const s = row.shipment;
   if (s.status === 'delivered') {

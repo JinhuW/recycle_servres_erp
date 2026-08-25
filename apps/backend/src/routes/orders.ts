@@ -90,9 +90,12 @@ async function resolveOrderOwner(
   sql: ReturnType<typeof getDb>,
   u: User,
   onBehalfOfUserId: unknown,
-): Promise<{ ownerId: string; ownerName: string | null } | { error: string; status: 400 | 403 }> {
+): Promise<
+  | { ownerId: string; ownerName: string | null; ownerDefaultWarehouseId: string | null }
+  | { error: string; status: 400 | 403 }
+> {
   if (onBehalfOfUserId === undefined || onBehalfOfUserId === null || onBehalfOfUserId === u.id) {
-    return { ownerId: u.id, ownerName: null };
+    return { ownerId: u.id, ownerName: null, ownerDefaultWarehouseId: u.defaultWarehouseId };
   }
   // The format gate matters, not just the lookup: users.id is uuid, so a
   // malformed string would make the SELECT itself 22P02 into a 500.
@@ -103,15 +106,19 @@ async function resolveOrderOwner(
   if (u.role !== 'manager') {
     return { error: 'Only managers can create orders on behalf of someone else', status: 403 };
   }
-  const rows = await sql<{ id: string; name: string }[]>`
-    SELECT id, name FROM users
+  const rows = await sql<{ id: string; name: string; defaultWarehouseId: string | null }[]>`
+    SELECT id, name, default_warehouse_id AS "defaultWarehouseId" FROM users
     WHERE id = ${onBehalfOfUserId} AND active = TRUE AND role = 'purchaser'
     LIMIT 1
   `;
   if (!rows.length) {
     return { error: 'onBehalfOfUserId must name an active purchaser', status: 400 };
   }
-  return { ownerId: onBehalfOfUserId, ownerName: rows[0].name };
+  return {
+    ownerId: onBehalfOfUserId,
+    ownerName: rows[0].name,
+    ownerDefaultWarehouseId: rows[0].defaultWarehouseId,
+  };
 }
 
 // A client that sends warehouseId at all must name a real warehouse — the
@@ -734,6 +741,10 @@ orders.post('/', async (c) => {
   if ('error' in owner) return c.json({ error: owner.error }, owner.status);
   const whErr = await warehouseErr(sql, body.warehouseId ?? null);
   if (whErr) return c.json({ error: whErr }, 400);
+  // No warehouse named → the owner's home warehouse (FK-valid by construction).
+  // The owner's, not the actor's: a manager filing on behalf ships to the
+  // purchaser's location.
+  const warehouseId = body.warehouseId ?? owner.ownerDefaultWarehouseId;
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const cat = body.lines[i].category ?? body.category;
@@ -774,7 +785,7 @@ orders.post('/', async (c) => {
       )
       VALUES (
         ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
-        ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+        ${warehouseId}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
       )
@@ -1553,9 +1564,10 @@ orders.post('/draft', async (c) => {
     if (catErr) return c.json({ error: catErr }, 400);
   }
 
-  const warehouseId = body?.warehouseId ?? null;
-  const whErr = await warehouseErr(sql, warehouseId);
+  const whErr = await warehouseErr(sql, body?.warehouseId ?? null);
   if (whErr) return c.json({ error: whErr }, 400);
+  // No warehouse named → the owner's home warehouse (FK-valid by construction).
+  const warehouseId = body?.warehouseId ?? owner.ownerDefaultWarehouseId;
 
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;

@@ -184,6 +184,34 @@ describe('packages — create-po', () => {
     expect(created.detail.onBehalfOfUserId).toBe(marcus.user.id);
   });
 
+  it('a manager may mint the PO before delivery; it still belongs to the label creator', async () => {
+    const marcus = await loginAs(MARCUS);
+    const mgr = await loginAs(ALEX);
+    const pkg = await addPackage(marcus.token);
+    expect(pkg.status).toBe('purchased');
+
+    // The creator (a purchaser) still waits for delivery…
+    const early = await api('POST', `/api/packages/${pkg.id}/create-po`, {
+      token: marcus.token, body: {},
+    });
+    expect(early.status).toBe(409);
+
+    // …but a manager can file it now — tracking isn't live, status may never move.
+    const r = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, {
+      token: mgr.token, body: {},
+    });
+    expect(r.status).toBe(201);
+
+    const sql = getTestDb();
+    const order = (await sql`
+      SELECT user_id, lifecycle, notes FROM orders WHERE id = ${r.body.orderId}
+    `)[0] as { user_id: string; lifecycle: string; notes: string };
+    expect(order.user_id).toBe(marcus.user.id);
+    expect(order.lifecycle).toBe('draft');
+    // The note stays honest: this box was not delivered when the PO was minted.
+    expect(order.notes).toBe(`Created from package · UPS · ${TN} · Bo Li`);
+  });
+
   it('only the creator or a manager may create the PO', async () => {
     const marcus = await loginAs(MARCUS);
     const priya = await loginAs(PRIYA);

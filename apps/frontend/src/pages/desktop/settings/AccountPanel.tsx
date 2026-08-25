@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
 import { useT } from '../../../lib/i18n';
+import { handleFetchError } from '../../../lib/errorToast';
+import type { Warehouse } from '../../../lib/types';
 import { Icon } from '../../../components/Icon';
 import { PasswordMeter } from '../../../components/PasswordMeter';
 import { pwStrengthLabels } from '../../../lib/passwordI18n';
@@ -15,7 +17,27 @@ import { SettingsHeader, type ToastFn } from './_shared';
 
 export function AccountPanel({ showToast }: { showToast?: ToastFn }) {
   const { t } = useT();
-  const { user } = useAuth();
+  const { user, setDefaultWarehouse } = useAuth();
+
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  useEffect(() => {
+    api.get<{ items: Warehouse[] }>('/api/warehouses')
+      .then(r => setWarehouses(r.items))
+      .catch(handleFetchError);
+  }, []);
+
+  const [savingWh, setSavingWh] = useState(false);
+  const changeDefaultWarehouse = async (id: string) => {
+    setSavingWh(true);
+    try {
+      await setDefaultWarehouse(id || null);
+      showToast?.(t('defaultWarehouseSaved'), 'success');
+    } catch (err) {
+      handleFetchError(err);
+    } finally {
+      setSavingWh(false);
+    }
+  };
 
   const [current, setCurrent] = useState('');
   const [next, setNext]       = useState('');
@@ -77,6 +99,36 @@ export function AccountPanel({ showToast }: { showToast?: ToastFn }) {
           <div style={{ display: 'flex', gap: 24, flexShrink: 0 }}>
             <Meta label={t('accountIdentityRole')} value={user.role === 'manager' ? t('role_manager') : t('role_purchaser')} />
             {user.team && <Meta label={t('memFieldTeam')} value={user.team} />}
+          </div>
+        </div>
+      </div>
+
+      {/* Default-warehouse card */}
+      <div className="card" style={{ marginTop: 'var(--gap)' }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="warehouse" size={13} style={{ color: 'var(--accent-strong)' }} />
+              {t('defaultWarehouse')}
+            </div>
+            <div className="card-sub" style={{ marginTop: 2 }}>{t('defaultWarehouseSub')}</div>
+          </div>
+        </div>
+        <div className="card-body" style={{ maxWidth: 480 }}>
+          <div className="field">
+            <label className="label" htmlFor="acc-default-wh">{t('warehouse')}</label>
+            <select
+              id="acc-default-wh"
+              className="select"
+              value={user.defaultWarehouseId ?? ''}
+              disabled={savingWh || warehouses.length === 0}
+              onChange={(e) => void changeDefaultWarehouse(e.target.value)}
+            >
+              <option value="">{t('defaultWarehouseNone')}</option>
+              {warehouses.map(w => (
+                <option key={w.id} value={w.id}>{w.name ?? w.short}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
