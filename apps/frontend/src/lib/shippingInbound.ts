@@ -82,7 +82,10 @@ export function groupInbound(rows: InboundRow[]): InboundGroups {
   return g;
 }
 
-/** Live counts for the home-screen card. */
+/** Live counts for a loaded row set. The home-screen card doesn't call this —
+ *  it reads GET /api/shipments/inbound-counts, whose SQL buckets mirror
+ *  groupInbound above; a membership change here must be mirrored there
+ *  (backend tests/shipments-inbound-counts.test.ts pins the truth table). */
 export function inboundSummary(rows: InboundRow[]): { moving: number; needs: number } {
   const g = groupInbound(rows);
   return { moving: g.moving.length, needs: g.needs.length };

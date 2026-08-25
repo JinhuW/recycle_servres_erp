@@ -175,7 +175,7 @@ export type OrderStatusMeta = Record<string, {
 // so they are dropped here rather than left declared and absent at runtime.
 export type Order =
   Omit<OrderSummary, 'lineCount' | 'qty' | 'revenue' | 'profit'>
-  & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
+  & { lines: OrderLine[]; statusMeta?: OrderStatusMeta; shipmentCount: number };
 
 export type OrderEventKind =
   | 'created'

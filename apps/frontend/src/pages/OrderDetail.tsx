@@ -11,7 +11,7 @@ import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { linePhotos } from '../lib/linePhotos';
-import { api, deleteOrder, archiveOrder, unarchiveOrder, listShipments } from '../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
@@ -85,16 +85,9 @@ export function OrderDetail({
   const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canAnnotate = !orderLocked && isOwnerOrManager;
 
-  // Shipping quick link — count only; the labels themselves live on /shipping.
-  // Silent on failure: a nav row that can't count just doesn't show.
-  const [shipmentCount, setShipmentCount] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    listShipments(order.id)
-      .then(r => { if (alive) setShipmentCount(r.items.length); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [order.id]);
+  // Shipping quick link — count only; the labels themselves live on /shipping,
+  // so the detail payload carries the number instead of a second fetch.
+  const shipmentCount = order.shipmentCount;
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // What the server says the order's meta is, as one comparable string. The

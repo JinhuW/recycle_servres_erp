@@ -98,6 +98,45 @@ shipmentsList.get('/', async (c) => {
   });
 });
 
+// Two integers for the home-screen inbound card, so it stops downloading a
+// 200-row joined list to render a badge. The buckets mirror groupInbound() in
+// apps/frontend/src/lib/shippingInbound.ts and must stay in lockstep with it
+// (the truth-table test in tests/shipments-inbound-counts.test.ts pins them):
+// counting is manager-blind, like the grouping — the early manager create-PO
+// CTA rides on the card without moving its row into "needs".
+shipmentsList.get('/inbound-counts', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const isManager = effectiveRole(u) === 'manager';
+  const mineOnly = c.req.query('mine') === 'true';
+  const shipScope = isManager && !mineOnly ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+  const pkgScope = isManager && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
+
+  const [ship] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE s.status IN ('purchased', 'in_transit'))::int AS moving,
+      COUNT(*) FILTER (
+        WHERE s.status IN ('draft', 'quoted', 'exception')
+           OR (s.status = 'delivered' AND o.lifecycle <> 'done')
+      )::int AS needs
+    FROM shipments s
+    JOIN orders o ON o.id = s.order_id
+    WHERE ${shipScope}
+  `) as unknown as { moving: number; needs: number }[];
+  const [pkg] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE status IN ('purchased', 'in_transit'))::int AS moving,
+      COUNT(*) FILTER (
+        WHERE status = 'exception'
+           OR (status = 'delivered' AND order_id IS NULL)
+      )::int AS needs
+    FROM packages
+    WHERE ${pkgScope}
+  `) as unknown as { moving: number; needs: number }[];
+
+  return c.json({ moving: ship.moving + pkg.moving, needs: ship.needs + pkg.needs });
+});
+
 export const shippingContacts = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
 type ContactRow = {
