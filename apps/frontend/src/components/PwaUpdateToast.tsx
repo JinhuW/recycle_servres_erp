@@ -1,19 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
-import { applyPwaUpdate } from '../lib/pwa';
+import { applyPwaUpdate, pwaUpdatePending } from '../lib/pwa';
 import { useT } from '../lib/i18n';
 
 import '../styles/pwa.css';
 
 export function PwaUpdateToast() {
   const { t } = useT();
-  const [open, setOpen] = useState(false);
+  // Initial state, not just the event: this component is lazy-loaded, so a
+  // 'pwa:needRefresh' fired before mount would otherwise be lost for good.
+  const [open, setOpen] = useState(() => pwaUpdatePending());
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const onNeedRefresh = () => setOpen(true);
     window.addEventListener('pwa:needRefresh', onNeedRefresh as EventListener);
-    return () => window.removeEventListener('pwa:needRefresh', onNeedRefresh as EventListener);
+    // Dismissal is a snooze, not a decline — the old build keeps serving until
+    // the update is applied, so re-surface when the user comes back to the app.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && pwaUpdatePending()) setOpen(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('pwa:needRefresh', onNeedRefresh as EventListener);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   if (!open) return null;
