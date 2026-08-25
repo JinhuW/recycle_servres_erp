@@ -4,6 +4,7 @@ import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 import { refreshShipmentTracking } from '../src/shipping/track';
 import { stubShippingClient } from '../src/shipping/stub';
+import type { ShippingClient } from '../src/shipping/types';
 
 type Shipment = {
   id: string;
@@ -108,7 +109,12 @@ describe('shipments — CRUD and role guards', () => {
     });
     expect(viaMgr.status).toBe(201);
 
-    const list = await api<{ items: Shipment[] }>('GET', `/api/orders/${po}/shipments`, { token: other.token });
+    // Reads share the order-detail scope: owner or manager only. A shipment
+    // row carries the seller's address and the PO's fee trail.
+    const denied2 = await api('GET', `/api/orders/${po}/shipments`, { token: other.token });
+    expect(denied2.status).toBe(403);
+
+    const list = await api<{ items: Shipment[] }>('GET', `/api/orders/${po}/shipments`, { token: mgr.token });
     expect(list.status).toBe(200);
     expect(list.body.items).toHaveLength(2);
   });
@@ -201,6 +207,27 @@ describe('shipments — buy folds the label cost into the PO', () => {
       WHERE n.kind = 'shipment_purchased' AND u.role = 'manager'
     `;
     expect(notes.length).toBeGreaterThan(0);
+  });
+
+  it('stores the quotes and refuses a rateId the shipment was never quoted', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+
+    const rates = await api('POST', `/api/orders/${po}/shipments/${s.id}/rates`, { token });
+    expect(rates.status).toBe(200);
+    const sql = getTestDb();
+    const row = (await sql`SELECT quotes FROM shipments WHERE id = ${s.id}`)[0] as { quotes: unknown[] };
+    expect(Array.isArray(row.quotes)).toBe(true);
+    expect(row.quotes.length).toBeGreaterThan(0);
+
+    // A rate_id minted elsewhere (or expired) must not buy on this shipment.
+    const replay = await api('POST', `/api/orders/${po}/shipments/${s.id}/buy`, {
+      token, body: { rateId: 'some-other-shipments-rate' },
+    });
+    expect(replay.status).toBe(409);
   });
 
   it('enforces the status guard: no buy on a draft, no double-buy, no void on a draft', async () => {
@@ -319,6 +346,47 @@ describe('shipments — tracking refresh', () => {
     await sql`UPDATE shipments SET status = 'delivered' WHERE id = ${s.id}`;
     const res2 = await refreshShipmentTracking(sql, stubShippingClient);
     expect(res2.checked).toBe(0);
+  });
+
+  it('carrier movement advances the draft PO to In Transit server-side, once', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+    await quoteAndBuy(token, po, s.id);
+
+    const sql = getTestDb();
+    await sql`UPDATE shipments SET provider = 'shipsaving' WHERE id = ${s.id}`;
+    await refreshShipmentTracking(sql, stubShippingClient);
+
+    const order = (await sql`SELECT lifecycle FROM orders WHERE id = ${po}`)[0] as { lifecycle: string };
+    expect(order.lifecycle).toBe('in_transit');
+
+    // The advance rides the normal audit path: a system-actor submitted event
+    // with the line snapshot, and lines cascaded to In Transit.
+    const events = await sql<{ kind: string; actor_id: string | null }[]>`
+      SELECT kind, actor_id FROM order_events WHERE order_id = ${po} AND kind = 'submitted'
+    `;
+    expect(events).toHaveLength(1);
+    expect(events[0].actor_id).toBeNull();
+    const lines = await sql<{ status: string }[]>`SELECT status FROM order_lines WHERE order_id = ${po}`;
+    expect(lines.every(l => l.status === 'In Transit')).toBe(true);
+    const notes = await sql<{ body: string }[]>`
+      SELECT body FROM notifications WHERE kind = 'order_submitted' AND title LIKE ${'%' + po + '%'}
+    `;
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes[0].body).toContain('Carrier movement');
+
+    // A later tick on the now-In-Transit PO is a quiet no-op for the order.
+    await sql`UPDATE shipments SET status = 'purchased' WHERE id = ${s.id}`;
+    await refreshShipmentTracking(sql, stubShippingClient);
+    const again = (await sql`SELECT lifecycle FROM orders WHERE id = ${po}`)[0] as { lifecycle: string };
+    expect(again.lifecycle).toBe('in_transit');
+    const events2 = await sql<{ kind: string }[]>`
+      SELECT kind FROM order_events WHERE order_id = ${po} AND kind = 'submitted'
+    `;
+    expect(events2).toHaveLength(1);
   });
 });
 
@@ -466,5 +534,73 @@ describe('warehouses — shipping address round-trip', () => {
     const la = r.body.items.find((w) => w.id === 'WH-LA1')!;
     expect(la.shipStreet1).toBe('4880 Ironton St');
     expect(la.shipCity).toBe('Denver');
+  });
+});
+
+describe('shipments — externally voided labels and provider re-stamp', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // A label cancelled on the ShipSaving dashboard reaches us only through the
+  // poll. Marking the row voided makes POST /void a 409 ('voided' is
+  // terminal), so the fee reversal has to ride the poll transaction or the
+  // label cost stays baked into the PO forever.
+  it('the tracking poll reverses fees when a label was voided outside the app', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+    const bought = await quoteAndBuy(token, po, s.id);
+    expect((await getOrder(token, po)).otherFees).toBe(bought.labelCost);
+
+    const sql = getTestDb();
+    await sql`UPDATE shipments SET provider = 'shipsaving' WHERE id = ${s.id}`;
+    const externallyVoided: ShippingClient = {
+      ...stubShippingClient,
+      async getShipment() {
+        return { raw: 'voided', normalized: 'voided', eta: null };
+      },
+    };
+    const res = await refreshShipmentTracking(sql, externallyVoided);
+    expect(res.updated).toBe(1);
+
+    const row = (await sql`
+      SELECT status, fees_applied FROM shipments WHERE id = ${s.id}
+    `)[0] as { status: string; fees_applied: boolean };
+    expect(row.status).toBe('voided');
+    expect(row.fees_applied).toBe(false);
+
+    const order = await getOrder(token, po);
+    expect(order.otherFees).toBe(0);
+    expect(order.otherFeesNote).toContain('Label voided');
+
+    // Same audit shape as POST /void, with the system (null) actor.
+    const events = await sql<{ kind: string; actor_id: string | null }[]>`
+      SELECT kind, actor_id FROM order_events WHERE order_id = ${po} AND kind = 'shipment_voided'
+    `;
+    expect(events).toHaveLength(1);
+    expect(events[0].actor_id).toBeNull();
+    const notes = await sql<{ body: string }[]>`
+      SELECT body FROM notifications WHERE kind = 'shipment_voided' AND title LIKE ${'%' + po + '%'}
+    `;
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes[0].body).toContain('outside the app');
+  });
+
+  // The draft row is stamped with whatever provider was configured when it was
+  // created; the buy must re-stamp it, or a draft born under the stub and
+  // bought after real credentials arrive is skipped by the tracking poll's
+  // provider filter forever.
+  it('buying re-stamps provider with the client that sold the label', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+
+    const sql = getTestDb();
+    await sql`UPDATE shipments SET provider = 'shipsaving' WHERE id = ${s.id}`;
+    const bought = await quoteAndBuy(token, po, s.id);
+    expect(bought.provider).toBe('stub');
   });
 });

@@ -20,11 +20,14 @@ import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
 import ordersRoutes from './routes/orders';
 import shipmentsRoutes from './routes/shipments';
+import { shipmentsList as shipmentsListRoutes, shippingContacts as shippingContactsRoutes } from './routes/shipmentsGlobal';
+import packagesRoutes from './routes/packages';
 import shippingPublicRoutes from './routes/shippingPublic';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
+import coordinatorRoutes from './routes/coordinator';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
@@ -238,12 +241,23 @@ app.use('/api/vendor-bids/*', authMiddleware);
 // The feed lives at the bare /api/activity, which `/*` alone doesn't cover.
 app.use('/api/activity', authMiddleware);
 app.use('/api/activity/*', authMiddleware);
+// Bare paths matter here too: the shipments list and packages list live at
+// the prefix root. /api/public/shipping stays public — /api/shipping/* does
+// not match it.
+app.use('/api/shipments', authMiddleware);
+app.use('/api/shipments/*', authMiddleware);
+app.use('/api/shipping/*', authMiddleware);
+app.use('/api/packages', authMiddleware);
+app.use('/api/packages/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/orders', ordersRoutes);
 // Second sub-app on the same prefix: /api/orders/:orderId/shipments/*.
 app.route('/api/orders', shipmentsRoutes);
+app.route('/api/shipments', shipmentsListRoutes);
+app.route('/api/shipping', shippingContactsRoutes);
+app.route('/api/packages', packagesRoutes);
 app.route('/api/market', marketRoutes);
 app.route('/api/scan', scanRoutes);
 app.route('/api/notifications', notificationsRoutes);
@@ -266,6 +280,8 @@ app.route('/api/activity', activityRoutes);
 app.route('/api/oauth/clients', oauthAdmin);
 // Self-applies authMiddleware + manager gate (oauthAdmin pattern).
 app.route('/api/tracker', trackerRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/coordinator', coordinatorRoutes);
 
 // Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
 // and are bearer-equivalent secrets — the only gate to a vendor's data. A

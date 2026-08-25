@@ -15,6 +15,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
+import { advanceOrderTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
@@ -41,6 +42,14 @@ function resolvePartNumber(
   const typed = l.partNumber?.trim();
   if (typed) return typed;
   return synthesizePartNumber(category ?? '', l);
+}
+
+// Chip markings are die codes, always printed upper-case on the module; case
+// noise (typed or OCR'd) would fork one chip into two spellings, so the column
+// is normalised at every write. `''` passes through untouched — PATCH uses it
+// as the explicit "clear this field" sentinel, distinct from undefined/"keep".
+function canonChipNumber(v: string | null | undefined): string | null {
+  return v == null ? null : v.trim().toUpperCase();
 }
 
 // Serial rules (shared with the frontend forms via @recycle-erp/shared):
@@ -71,6 +80,51 @@ async function assertCategoriesEnabled(
     if (!known.get(cat)) return `category ${cat} is disabled`;
   }
   return null;
+}
+
+// Managers may file a PO for a purchaser (`onBehalfOfUserId`). The raw role is
+// checked — not effectiveRole — so a manager previewing as purchaser keeps the
+// ability, and the target is validated up front so a typo'd id fails as a 400
+// rather than an FK 500. Returns the resolved owner or an error response.
+async function resolveOrderOwner(
+  sql: ReturnType<typeof getDb>,
+  u: User,
+  onBehalfOfUserId: unknown,
+): Promise<{ ownerId: string; ownerName: string | null } | { error: string; status: 400 | 403 }> {
+  if (onBehalfOfUserId === undefined || onBehalfOfUserId === null || onBehalfOfUserId === u.id) {
+    return { ownerId: u.id, ownerName: null };
+  }
+  // The format gate matters, not just the lookup: users.id is uuid, so a
+  // malformed string would make the SELECT itself 22P02 into a 500.
+  if (typeof onBehalfOfUserId !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(onBehalfOfUserId)) {
+    return { error: 'onBehalfOfUserId must be a user id', status: 400 };
+  }
+  if (u.role !== 'manager') {
+    return { error: 'Only managers can create orders on behalf of someone else', status: 403 };
+  }
+  const rows = await sql<{ id: string; name: string }[]>`
+    SELECT id, name FROM users
+    WHERE id = ${onBehalfOfUserId} AND active = TRUE AND role = 'purchaser'
+    LIMIT 1
+  `;
+  if (!rows.length) {
+    return { error: 'onBehalfOfUserId must name an active purchaser', status: 400 };
+  }
+  return { ownerId: onBehalfOfUserId, ownerName: rows[0].name };
+}
+
+// A client that sends warehouseId at all must name a real warehouse — the
+// label wizard once sent "" before a destination was picked, which sailed
+// past `?? null` into the FK and 500ed. Every endpoint that writes the
+// column shares this boundary check.
+async function warehouseErr(
+  sql: ReturnType<typeof getDb>,
+  warehouseId: string | null,
+): Promise<string | null> {
+  if (warehouseId === null) return null;
+  const wh = await sql<{ id: string }[]>`SELECT id FROM warehouses WHERE id = ${warehouseId} LIMIT 1`;
+  return wh.length ? null : 'Unknown warehouse';
 }
 
 // An `Other` line has no spec fields to identify it, so its type carries the
@@ -669,12 +723,17 @@ orders.post('/', async (c) => {
         totalCost?: number;
         otherFees?: number;
         otherFeesNote?: string | null;
+        onBehalfOfUserId?: string;
         lines: LineInput[];
       }
     | null;
   if (!body || !Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ error: 'at least one line is required' }, 400);
   }
+  const owner = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
+  if ('error' in owner) return c.json({ error: owner.error }, owner.status);
+  const whErr = await warehouseErr(sql, body.warehouseId ?? null);
+  if (whErr) return c.json({ error: whErr }, 400);
   const lineCats: string[] = [];
   for (let i = 0; i < body.lines.length; i++) {
     const cat = body.lines[i].category ?? body.category;
@@ -714,7 +773,7 @@ orders.post('/', async (c) => {
         other_fees, other_fees_note, lifecycle
       )
       VALUES (
-        ${newId}, ${u.id}, ${deriveCategory(lineCats) ?? lineCats[0]},
+        ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
         ${body.warehouseId ?? null}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
@@ -732,7 +791,7 @@ orders.post('/', async (c) => {
           ${newId}, ${lineCats[i]}, ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
           ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
           ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
+          ${resolvePartNumber(lineCats[i], l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty},
           ${l.unitCost}, ${normSellPrice(l.sellPrice)}, 'Draft',
           ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${i},
           ${l.health ?? null}, ${l.rpm ?? null}
@@ -776,6 +835,12 @@ orders.post('/', async (c) => {
       qty: body.lines.reduce((s, l) => s + Number(l.qty ?? 0), 0),
       totalCost: body.totalCost ?? null,
       otherFees: body.otherFees ?? 0,
+      // Present only when a manager filed the PO for someone else, so the
+      // timeline can say who the order was created for. The name is snapshot
+      // here because events render without joining users on the owner.
+      ...(owner.ownerId !== u.id
+        ? { onBehalfOfUserId: owner.ownerId, onBehalfOfName: owner.ownerName }
+        : {}),
     });
   });
 
@@ -895,6 +960,13 @@ orders.patch('/:id', async (c) => {
 
   const feeErr = badFees(body);
   if (feeErr) return c.json({ error: feeErr }, 400);
+
+  // null clears the warehouse; a non-null value must exist (same boundary
+  // check as the create endpoints — "" would 500 on the FK inside the tx).
+  if (body.warehouseId !== undefined) {
+    const whErr = await warehouseErr(sql, body.warehouseId ?? null);
+    if (whErr) return c.json({ error: whErr }, 400);
+  }
 
   // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
   // a malformed value hits the order_lines CHECK constraint inside the tx
@@ -1246,7 +1318,7 @@ orders.patch('/:id', async (c) => {
               serial_number  = COALESCE(${l.serialNumber ?? null}, serial_number),
               -- '' means "cleared by the user" (the edit forms always send the
               -- field); NULLIF turns it into NULL instead of storing ''.
-              chip_number    = NULLIF(COALESCE(${l.chipNumber ?? null}, chip_number), ''),
+              chip_number    = NULLIF(COALESCE(${canonChipNumber(l.chipNumber)}, chip_number), ''),
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = COALESCE(${l.health ?? null}, health),
               rpm            = COALESCE(${l.rpm ?? null}, rpm)
@@ -1274,7 +1346,7 @@ orders.patch('/:id', async (c) => {
               ${l.brand ?? null}, ${l.capacity ?? null}, ${l.generation ?? null}, ${l.type ?? null},
               ${l.classification ?? null}, ${l.rank ?? null}, ${l.speed ?? null},
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
-              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${l.chipNumber ?? null}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
+              ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${normSellPrice(l.sellPrice)},
               ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
@@ -1429,8 +1501,14 @@ orders.post('/draft', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    | { category?: LineCategory; warehouseId?: string; payment?: 'company' | 'self'; notes?: string }
+    | {
+        category?: LineCategory; warehouseId?: string; payment?: 'company' | 'self';
+        notes?: string; onBehalfOfUserId?: string;
+      }
     | null;
+
+  const owner = await resolveOrderOwner(sql, u, body?.onBehalfOfUserId);
+  if ('error' in owner) return c.json({ error: owner.error }, owner.status);
 
   // No category required: the draft is empty, and the order's category is
   // derived from lines that don't exist yet. The column is NOT NULL, so an
@@ -1441,6 +1519,10 @@ orders.post('/draft', async (c) => {
     if (catErr) return c.json({ error: catErr }, 400);
   }
 
+  const warehouseId = body?.warehouseId ?? null;
+  const whErr = await warehouseErr(sql, warehouseId);
+  if (whErr) return c.json({ error: whErr }, 400);
+
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   await sql.begin(async (tx) => {
@@ -1448,8 +1530,8 @@ orders.post('/draft', async (c) => {
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
       VALUES (
-        ${newId}, ${u.id}, ${body?.category ?? 'Mixed'},
-        ${body?.warehouseId ?? null}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
+        ${newId}, ${owner.ownerId}, ${body?.category ?? 'Mixed'},
+        ${warehouseId}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
         ${null}, 'draft'
       )
     `;
@@ -1462,6 +1544,9 @@ orders.post('/draft', async (c) => {
       lineCount: 0,
       qty: 0,
       totalCost: null,
+      ...(owner.ownerId !== u.id
+        ? { onBehalfOfUserId: owner.ownerId, onBehalfOfName: owner.ownerName }
+        : {}),
     });
   });
 
@@ -1939,145 +2024,19 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   return c.json({ ok: true });
 });
 
-// Canonical lifecycle ordering. The workflow_stages table was removed; this
-// map's key order (draft → in_transit → reviewing → done) is the source of
-// truth, matching the frontend's WORKFLOW_STAGES.
-// Purchasers may only move Draft → In Transit (and not back); that one
-// transition is open to every signed-in user, owner or not.
-const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
-  draft: 'Draft',
-  in_transit: 'In Transit',
-  reviewing: 'Reviewing',
-  done: 'Done',
-};
-
 orders.post('/:id/advance', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
 
-  const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE)
-    .map((id, position) => ({ id, position }));
-
   // The lifecycle read, all stage guards and the writes run inside one tx
-  // with the orders row locked FOR UPDATE. Reading lifecycle outside the tx
+  // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —
+  // shared with the shipping tracking poll). Reading lifecycle outside the tx
   // let a concurrent delete (which also guarded on a stale lifecycle read)
   // delete an order that was being advanced, and vice-versa.
-  type Outcome =
-    | { kind: 'notFound' }
-    | { kind: 'forbidden'; msg: string }
-    | { kind: 'badStage'; msg: string }
-    | { kind: 'finalStage' }
-    | { kind: 'committedLines'; offendingLineIds: string[] }
-    | { kind: 'ok'; nextStageId: string };
-
-  const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
-    const cur = (await tx`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
-      | { user_id: string; lifecycle: string } | undefined;
-    if (!cur) return { kind: 'notFound' };
-
-    const curIdx = stages.findIndex(s => s.id === cur.lifecycle);
-    let nextStageId: string;
-    if (body?.toStage) {
-      if (u.role !== 'manager') return { kind: 'forbidden', msg: 'Only managers can jump stages' };
-      if (!stages.find(s => s.id === body.toStage)) return { kind: 'badStage', msg: 'Unknown stage' };
-      nextStageId = body.toStage;
-    } else {
-      if (curIdx < 0 || curIdx >= stages.length - 1) return { kind: 'finalStage' };
-      nextStageId = stages[curIdx + 1].id;
-    }
-    // Purchaser can only advance Draft → in_transit — but ANY purchaser may,
-    // not just the PO's creator: whoever handles the goods submits the order.
-    // Every other transition stays manager-only.
-    if (u.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
-      return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
-    }
-
-    // Guard: if the transition would move non-Sold lines away from Done status,
-    // check whether any of those lines are committed to an open sell order.
-    // Un-doing a Done line that a sell order depends on leaves it in a status
-    // that validateSellLines rejects, making the sell order unpromotable/broken.
-    const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
-    if (newLineStatus && newLineStatus !== 'Done') {
-      // The transition sets lines to something other than Done — any lines
-      // currently Done that are referenced by open sell orders will break.
-      const committed = await tx<{ id: string }[]>`
-        SELECT DISTINCT ol.id
-        FROM order_lines ol
-        JOIN sell_order_lines sol ON sol.inventory_id = ol.id
-        JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE ol.order_id = ${id}
-          AND ol.status = 'Done'
-          AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
-      `;
-      if (committed.length > 0) {
-        return { kind: 'committedLines', offendingLineIds: committed.map(r => r.id) };
-      }
-    }
-    await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
-
-    // PO-level audit: the Draft → In Transit transition is the "submitted"
-    // baseline (snapshot of lineCount + totalCost); every subsequent advance
-    // is an `advanced` event with from/to.
-    if (cur.lifecycle === 'draft' && nextStageId === 'in_transit') {
-      const snap = (await tx`
-        SELECT COUNT(*)::int AS line_count,
-               COALESCE(SUM(qty), 0)::int AS qty,
-               COALESCE(SUM(qty * unit_cost), 0)::float AS total_cost
-        FROM order_lines WHERE order_id = ${id}
-      `)[0] as { line_count: number; qty: number; total_cost: number };
-      await writeOrderEvent(tx, id, u.id, 'submitted', {
-        lineCount: snap.line_count,
-        qty: snap.qty,
-        totalCost: snap.total_cost,
-      });
-    } else {
-      await writeOrderEvent(tx, id, u.id, 'advanced', {
-        from: cur.lifecycle,
-        to: nextStageId,
-      });
-    }
-    if (newLineStatus) {
-      // 'Sold' is a terminal post-sale state, not a lifecycle stage — a PO
-      // re-advance/stage-jump must never resurrect a sold-out line.
-      // All CTEs see the snapshot from before the statement, so `targets`
-      // captures the pre-update status while `upd` applies the new one.
-      // (A separate post-UPDATE SELECT would always read the already-
-      // updated status, so `status IS DISTINCT FROM $new` would be
-      // universally false and zero audit rows would ever be written.)
-      await tx`
-        WITH targets AS (
-          SELECT id, status AS old_status
-          FROM order_lines
-          WHERE order_id = ${id} AND status <> 'Sold'
-            AND status IS DISTINCT FROM ${newLineStatus}
-          FOR UPDATE
-        ),
-        upd AS (
-          UPDATE order_lines ol SET status = ${newLineStatus}
-          FROM targets t WHERE ol.id = t.id
-        )
-        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-        SELECT t.id, ${u.id}::uuid, 'status',
-               jsonb_build_object('field','status','from',t.old_status,'to',${newLineStatus}::text)
-        FROM targets t
-      `;
-    }
-    // PRD §10: managers want to see when a purchaser finalises an order.
-    // We fire this only on the first forward transition (Draft → In Transit)
-    // so they aren't spammed during later manager-driven moves.
-    if (nextStageId === 'in_transit') {
-      await notifyManagers(tx, {
-        kind: 'order_submitted',
-        tone: 'info',
-        icon: 'inventory',
-        title: `Order ${id} submitted`,
-        body: `${u.name} advanced ${id} to In Transit`,
-      });
-    }
-    return { kind: 'ok', nextStageId };
-  });
+  const outcome = await sql.begin(async (tx) =>
+    advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage));
 
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'forbidden') return c.json({ error: outcome.msg }, 403);

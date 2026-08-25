@@ -81,6 +81,29 @@ export function match(template: string, path: string): Record<string, string> | 
   return params;
 }
 
+// Shipping sub-routes. Parsed here (not ad-hoc in the shell) because
+// `/shipping/new` would otherwise be captured by the `/shipping/:orderId`
+// template as an order id — order of the checks is load-bearing.
+export type ShippingRoute =
+  | { kind: 'dashboard' }
+  | { kind: 'wizardNew' }
+  | { kind: 'addLabel' }
+  | { kind: 'wizardPo'; orderId: string; sid: string | null }
+  | { kind: 'focus'; orderId: string };
+
+export function parseShippingRoute(path: string): ShippingRoute | null {
+  if (path === '/shipping') return { kind: 'dashboard' };
+  if (path === '/shipping/new') return { kind: 'wizardNew' };
+  if (path === '/shipping/add') return { kind: 'addLabel' };
+  const cont = match('/shipping/:orderId/label/:sid', path);
+  if (cont) return { kind: 'wizardPo', orderId: cont.orderId!, sid: cont.sid! };
+  const fresh = match('/shipping/:orderId/label', path);
+  if (fresh) return { kind: 'wizardPo', orderId: fresh.orderId!, sid: null };
+  const focus = match('/shipping/:orderId', path);
+  if (focus) return { kind: 'focus', orderId: focus.orderId! };
+  return null;
+}
+
 // Desktop view ids ↔ URL paths. Source of truth for the sidebar/router.
 export const DESKTOP_VIEW_TO_PATH = {
   dashboard:  '/dashboard',
@@ -95,6 +118,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   transfers:  '/transfers',
   activity:   '/activity',
   tracker:    '/tracker',
+  coordinator: '/fleet',
   settings:   '/settings',
 } as const;
 
@@ -104,7 +128,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
   if (path === '/submit') return 'submit';
   if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
-  if (path === '/shipping' || match('/shipping/:orderId', path)) return 'shipping';
+  if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   // Analysis is a tab under Inventory — match it before the /inventory/:id edit
   // route so it isn't read as an item id.
@@ -115,6 +139,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/transfers') return 'transfers';
   if (path === '/activity') return 'activity';
   if (path === '/tracker') return 'tracker';
+  if (path === '/fleet') return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
 }
@@ -159,6 +184,7 @@ export function readSafeNext(search: string): string | null {
 export const MOBILE_VIEW_TO_PATH = {
   dashboard: '/dashboard',
   history:   '/purchase-orders',
+  shipping:  '/shipping',
   market:    '/market',
   inventory: '/inventory',
   me:        '/profile',
@@ -169,6 +195,7 @@ export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
 export function pathToMobileView(path: string): MobileViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
   if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
+  if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   if (path === '/inventory') return 'inventory';
   if (path === '/profile') return 'me';

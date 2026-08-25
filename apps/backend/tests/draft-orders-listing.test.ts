@@ -101,3 +101,34 @@ describe('GET /api/orders draft visibility', () => {
     expect(found!.lifecycle).toBe('in_transit');
   });
 });
+
+// The label wizard used to POST warehouseId:"" before a destination was
+// picked; unvalidated, that hit orders_warehouse_id_fkey and 500ed.
+describe('POST /api/orders/draft warehouse validation', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('rejects an empty-string warehouseId with 400, not 500', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ error: string }>('POST', '/api/orders/draft', {
+      token, body: { warehouseId: '' },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('rejects an unknown warehouseId with 400', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ error: string }>('POST', '/api/orders/draft', {
+      token, body: { warehouseId: 'no-such-warehouse' },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it('accepts a seeded warehouseId', async () => {
+    const { token } = await loginAs(MARCUS);
+    const whs = await api<{ items: { id: string }[] }>('GET', '/api/warehouses', { token });
+    const r = await api<{ id: string }>('POST', '/api/orders/draft', {
+      token, body: { warehouseId: whs.body.items[0].id },
+    });
+    expect(r.status).toBe(201);
+  });
+});

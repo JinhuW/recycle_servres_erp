@@ -1,5 +1,33 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { navigate, navigateBack, readSafeNext } from './route';
+import { navigate, navigateBack, parseShippingRoute, pathToDesktopView, readSafeNext } from './route';
+
+// `/shipping/new` shares a shape with `/shipping/:orderId`, so the parser's
+// check order is what keeps the wizard from being read as a PO id.
+describe('parseShippingRoute', () => {
+  it('distinguishes the wizard from an order id', () => {
+    expect(parseShippingRoute('/shipping/new')).toEqual({ kind: 'wizardNew' });
+    expect(parseShippingRoute('/shipping/PO-1372')).toEqual({ kind: 'focus', orderId: 'PO-1372' });
+  });
+
+  it('parses the dashboard and the per-PO wizard routes', () => {
+    expect(parseShippingRoute('/shipping')).toEqual({ kind: 'dashboard' });
+    expect(parseShippingRoute('/shipping/PO-1372/label'))
+      .toEqual({ kind: 'wizardPo', orderId: 'PO-1372', sid: null });
+    expect(parseShippingRoute('/shipping/PO-1372/label/sh_9'))
+      .toEqual({ kind: 'wizardPo', orderId: 'PO-1372', sid: 'sh_9' });
+  });
+
+  it('returns null off the shipping tree', () => {
+    expect(parseShippingRoute('/purchase-orders/PO-1372')).toBeNull();
+    expect(parseShippingRoute('/shipping/PO-1372/other')).toBeNull();
+  });
+
+  it('keeps every shipping shape on the shipping view', () => {
+    for (const p of ['/shipping', '/shipping/new', '/shipping/PO-1372', '/shipping/PO-1372/label', '/shipping/PO-1372/label/sh_9']) {
+      expect(pathToDesktopView(p)).toBe('shipping');
+    }
+  });
+});
 
 // `next` comes back from the backend's /oauth/authorize bounce and is then fed
 // straight to window.location.replace, so anything that escapes the origin here

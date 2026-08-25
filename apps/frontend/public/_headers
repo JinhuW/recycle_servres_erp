@@ -3,6 +3,12 @@
 # Assets default of `public, max-age=0, must-revalidate` — including the
 # content-hashed ones — so a repeat visit revalidates the whole bundle.
 
+# The Worker 308s plain http to https; HSTS makes repeat visitors skip even
+# that first insecure hop, so the Secure auth cookies are never in play on
+# http. Host-only on purpose — other subdomains are not ours to pin.
+/*
+  Strict-Transport-Security: max-age=31536000
+
 # Content-hashed by the build: the filename changes whenever the bytes do.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

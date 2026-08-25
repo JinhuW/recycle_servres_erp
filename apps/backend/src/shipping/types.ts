@@ -50,23 +50,47 @@ export interface PurchasedLabel {
   service: string;
   amount: number;
   currency: string;
-  labelPdf: Uint8Array;
+  // ShipSaving v2 serves PNG label files; the stub keeps serving PDF — the
+  // upload path carries whichever it got.
+  labelData: Uint8Array;
+  labelContentType: string;
+  labelExt: string;
   trackingUrl: string | null;
 }
 
 export interface TrackingInfo {
   // Provider status string, stored verbatim for display.
   raw: string;
-  normalized: 'purchased' | 'in_transit' | 'delivered' | 'exception';
+  // 'voided' covers a label cancelled outside this app (e.g. the ShipSaving
+  // dashboard) — the row is marked, but fees are only reversed by our /void.
+  normalized: 'purchased' | 'in_transit' | 'delivered' | 'exception' | 'voided';
   eta: Date | null;
+}
+
+// Context the buy call needs beyond the rate id: platformUkId is our shipment
+// id (ShipSaving v2's idempotency key — a retry returns the existing label
+// instead of double-charging), and quote is the stored rate the id resolved
+// to (v2's buy response doesn't echo carrier/service).
+export interface BuyContext {
+  platformUkId: string;
+  quote: RateQuote | null;
+}
+
+// Either handle identifies the shipment to void in v2; tracking number no
+// longer does.
+export interface VoidRef {
+  shipmentNo: string | null;
+  platformUkId: string | null;
 }
 
 export interface ShippingClient {
   provider: ShippingProvider;
   listRates(from: ShipAddress, to: ShipAddress, pkg: ShipPackage): Promise<RateQuote[]>;
-  buyByRateId(rateId: string): Promise<PurchasedLabel>;
-  voidLabel(trackingNumber: string): Promise<{ ok: boolean; message?: string }>;
-  getShipment(trackingNumber: string): Promise<TrackingInfo>;
+  buyByRateId(rateId: string, ctx: BuyContext): Promise<PurchasedLabel>;
+  voidLabel(ref: VoidRef): Promise<{ ok: boolean; message?: string }>;
+  // carrier is required by ShipSaving v2's tracking endpoint; null falls back
+  // to a best-effort call (the stub ignores it entirely).
+  getShipment(trackingNumber: string, carrier: string | null): Promise<TrackingInfo>;
 }
 
 // Backstop deep link rendered in the UI regardless of provider health, so a

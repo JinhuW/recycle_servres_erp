@@ -8,7 +8,7 @@ import { useAuth } from './lib/auth';
 import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
-  useRoute, match, navigate,
+  useRoute, match, navigate, parseShippingRoute,
   DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath, readSafeNext,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
@@ -36,6 +36,7 @@ const DesktopTransfers = lazy(() => import('./pages/desktop/DesktopTransfers').t
 const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').then(m => ({ default: m.DesktopActivity })));
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
+const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
@@ -59,8 +60,8 @@ export function DesktopApp() {
   // /inventory/:id opens the edit page; otherwise no item is being edited.
   // /inventory/analysis is the Analysis tab, not an item id — exclude it.
   const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
-  // /shipping/:orderId focuses the shipping page on one PO's labels.
-  const shippingOrderId = match('/shipping/:orderId', path)?.orderId ?? null;
+  // Dashboard / label wizard / one PO's labels — the parser owns the shapes.
+  const shippingRoute = parseShippingRoute(path);
 
   // Sync editingOrder with the URL hash. Loading the app at
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
@@ -158,7 +159,7 @@ export function DesktopApp() {
   }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'tracker')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'tracker' || view === 'coordinator')
     ? 'dashboard'
     : view;
 
@@ -196,6 +197,7 @@ export function DesktopApp() {
           + (view2 === 'inventory' && !editingItemId ? ' page-inventory' : '')
           + (view2 === 'analysis' ? ' page-analysis' : '')
           + (view2 === 'dashboard' ? ' page-dashboard' : '')
+          + (view2 === 'shipping' && shippingRoute?.kind === 'dashboard' ? ' page-shipping' : '')
           + (view2 === 'activity' ? ' page-activity' : '')}>
           {/* Inventory ▸ Analysis tab strip — shown on the list and the
               analysis tab, but not while editing a single item. */}
@@ -226,7 +228,7 @@ export function DesktopApp() {
               />
             )}
             {view2 === 'history'    && ordersOrEdit}
-            {view2 === 'shipping'   && <DesktopShipping orderId={shippingOrderId} showToast={showToast} />}
+            {view2 === 'shipping'   && shippingRoute && <DesktopShipping route={shippingRoute} showToast={showToast} />}
             {view2 === 'market'     && <DesktopMarket />}
             {view2 === 'inventory'  && inventoryOrEdit}
             {view2 === 'analysis'   && <DesktopAnalysis />}
@@ -242,6 +244,7 @@ export function DesktopApp() {
             {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
             {view2 === 'activity'  && <DesktopActivity />}
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
+            {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}
           </Suspense>
         </div>

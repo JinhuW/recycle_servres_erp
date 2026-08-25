@@ -6,6 +6,7 @@ import {
 } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
 import { chipNumberRequired } from '../../../lib/ramRequired';
+import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../../../lib/lineRequirements';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
 import { ItemTypePicker } from '../../../components/ItemTypePicker';
@@ -98,7 +99,7 @@ export function RamFields({ line, set, missing }: FieldsProps) {
           className="input mono"
           value={line.chipNumber ?? ''}
           aria-invalid={bad('chipNumber')}
-          onChange={e => set({ chipNumber: e.target.value })}
+          onChange={e => set({ chipNumber: e.target.value.toUpperCase() })}
         />
       </div>
       <div className={cls('partNumber')} style={{ gridColumn: 'span 2' }}>
@@ -121,11 +122,18 @@ export function RamFields({ line, set, missing }: FieldsProps) {
 
 export function SsdFields({ line, set }: FieldsProps) {
   const { t } = useT();
+  const brandRequired = ssdBrandRequired(line.capacity);
+  const brandMissing = brandRequired && !(line.brand ?? '').trim();
   return (
     <div className="grid-2">
       <div className="field">
-        <label className="label">{t('brand')} <span className="req">*</span></label>
-        <CatCombo value={line.brand} options={SSD_BRANDS} onChange={v => set({ brand: v })} />
+        <label className="label">{t('brand')} {brandRequired && <span className="req">*</span>}</label>
+        <CatCombo value={line.brand} options={SSD_BRANDS} invalid={brandMissing || undefined} onChange={v => set({ brand: v })} />
+        {brandMissing && (
+          <div style={{ fontSize: 11, color: 'var(--neg)', marginTop: 4 }}>
+            {t('ssdBrandNeededOverGb', { gb: SSD_BRAND_REQUIRED_OVER_GB })}
+          </div>
+        )}
       </div>
       <div className="field">
         <label className="label">{t('capacity')} <span className="req">*</span></label>
@@ -148,16 +156,7 @@ export function SsdFields({ line, set }: FieldsProps) {
           onChange={e => set({ partNumber: e.target.value })}
         />
       </div>
-      <div className="field">
-        <label className="label">{t('healthPct')}</label>
-        <input
-          type="number" min={0} max={100} step={0.1}
-          className="input"
-          value={line.health ?? ''}
-          onChange={e => set({ health: e.target.value === '' ? null : Number(e.target.value) })}
-        />
-      </div>
-      <div className="field">
+      <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('condition')} <span className="req">*</span></label>
         <CatSelect value={line.condition} options={CONDITIONS} onChange={v => set({ condition: v })} />
       </div>

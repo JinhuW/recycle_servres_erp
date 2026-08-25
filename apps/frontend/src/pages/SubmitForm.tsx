@@ -16,6 +16,7 @@ import { showErrorDialog, showWarnToast } from '../lib/errorToast';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { SnScanner } from '../components/SnScanner';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
 
@@ -165,6 +166,8 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // Serial-rule violation (DDR5 requires serials; serial count must equal
   // qty) caught at save time — shown as a blocking dialog, nothing persists.
   const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
+  // Full-screen QR scanner for the serial field.
+  const [snScanOpen, setSnScanOpen] = useState(false);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -438,15 +441,26 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
         {/* The capture above is the AI's reading of a label; these are pictures
             of the goods themselves. The scan keeps its own thumbnail, so only
-            uploads are listed here and no image appears twice. */}
-        <LinePhotoStrip
-          photos={photoCtx.photosFor(line).filter(p => p.source === 'upload')}
-          pending={photoCtx.pendingFor(line)}
-          busy={photoCtx.busy}
-          onAdd={files => photoCtx.onAddFiles(line, files)}
-          onRemove={p => photoCtx.onRemoveSaved(line, p)}
-          onRemovePending={p => photoCtx.onRemovePending(line, p)}
-        />
+            uploads are listed here and no image appears twice. On RAM the AI
+            capture button sits directly above and supplies this line's photo,
+            so an empty "add a photo" slot would ask for something the flow
+            already covers — same rule as the desktop drawer. Once a picture
+            exists (scanned or uploaded) the strip earns its place. */}
+        {(() => {
+          const uploads = photoCtx.photosFor(line).filter(p => p.source === 'upload');
+          const queued = photoCtx.pendingFor(line);
+          if (category === 'RAM' && !showThumb && uploads.length === 0 && queued.length === 0) return null;
+          return (
+            <LinePhotoStrip
+              photos={uploads}
+              pending={queued}
+              busy={photoCtx.busy}
+              onAdd={files => photoCtx.onAddFiles(line, files)}
+              onRemove={p => photoCtx.onRemoveSaved(line, p)}
+              onRemovePending={p => photoCtx.onRemovePending(line, p)}
+            />
+          );
+        })()}
 
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 
@@ -480,6 +494,14 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </div>
         </div>
 
+        {/* SSDs are received as anonymous bulk lots — nobody keys in per-drive
+            serials at purchase, so the field only invited count-mismatch
+            errors. A line that already carries serials (pre-rule data, scan
+            fill) keeps the field: the shared count-vs-qty validator still
+            checks them, and a hidden field would make its 400 unfixable.
+            String-typed (not non-blank) so clearing the textarea to retype
+            doesn't unmount it mid-edit — a fresh line starts undefined. */}
+        {(line.category !== 'SSD' || typeof line.serialNumber === 'string') && (
         <div className="ph-field">
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
@@ -493,20 +515,31 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>{t('serialCount', { n: snCount })}</span>
             )}
           </label>
-          <textarea
-            className="input mono"
-            rows={Math.min(Math.max(snCount, 2), 5)}
-            value={line.serialNumber ?? ''}
-            onChange={e => set('serialNumber', e.target.value)}
-            placeholder={t('serialNumbersPh')}
-            style={{ resize: 'vertical', lineHeight: 1.6 }}
-          />
+          <div style={{ position: 'relative' }}>
+            <textarea
+              className="input mono"
+              rows={Math.min(Math.max(snCount, 2), 5)}
+              value={line.serialNumber ?? ''}
+              onChange={e => set('serialNumber', e.target.value)}
+              placeholder={t('serialNumbersPh')}
+              style={{ resize: 'vertical', lineHeight: 1.6, paddingRight: 50 }}
+            />
+            <button
+              type="button"
+              className="ph-sn-scan"
+              aria-label={t('snScan')}
+              onClick={() => setSnScanOpen(true)}
+            >
+              <Icon name="scan" size={17} />
+            </button>
+          </div>
           <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
             {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
               ? t('serialNumbersHintDdr5')
               : t('serialNumbersHint')}
           </div>
         </div>
+        )}
 
         {/* Pricing row mirrors desktop LineDrawer: qty → unit → total
             (always shown so a purchaser can enter the negotiated bulk total
@@ -610,6 +643,17 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
       </div>
       {serialIssues && (
         <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
+      )}
+      {snScanOpen && (
+        <SnScanner
+          existing={parseSerials(line.serialNumber)}
+          onDone={scannedSns => {
+            setSnScanOpen(false);
+            if (!scannedSns.length) return;
+            const cur = (line.serialNumber ?? '').replace(/\s+$/, '');
+            set('serialNumber', cur ? cur + '\n' + scannedSns.join('\n') : scannedSns.join('\n'));
+          }}
+        />
       )}
       {pnGen && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setPnGen(null); }}>

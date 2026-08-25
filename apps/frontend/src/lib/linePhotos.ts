@@ -53,10 +53,6 @@ export function linePhotos(line: PhotoBearingLine | null | undefined): LinePhoto
 export const uploadedPhotoCount = (photos: readonly LinePhoto[] | null | undefined): number =>
   (photos ?? []).filter(p => p.source === 'upload').length;
 
-/** The thumbnail to show when there's room for exactly one. */
-export const primaryPhoto = (line: PhotoBearingLine | null | undefined): LinePhoto | null =>
-  linePhotos(line)[0] ?? null;
-
 export const uploadLinePhoto = (orderId: string, lineId: string, file: File) => {
   const form = new FormData();
   form.append('file', file);

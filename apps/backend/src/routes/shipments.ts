@@ -12,19 +12,18 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { writeOrderEvent } from '../services/orderAudit';
+import { FEE_NOTE_MAX, voidShipmentTx } from '../services/shipmentVoid';
 import { notifyManagers } from '../lib/notify';
+import { effectiveRole } from '../lib/role';
 import { pickShippingClient, carrierTrackingUrl } from '../shipping';
 import type { RateQuote, ShipAddress, ShipPackage, ShipmentStatus } from '../shipping';
 import { canTransition } from '../shipping/status';
 
 const shipments = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-// The note column caps at this length everywhere it's written (see orders.ts).
-const FEE_NOTE_MAX = 280;
-
 type OrderRow = { id: string; user_id: string; lifecycle: string; warehouse_id: string | null };
 
-type ShipmentRow = {
+export type ShipmentRow = {
   id: string;
   order_id: string;
   status: ShipmentStatus;
@@ -48,6 +47,8 @@ type ShipmentRow = {
   rate_currency: string;
   delivery_days: number | null;
   provider: string;
+  provider_shipment_id?: string | null;
+  quotes?: RateQuote[] | null;
   tracking_number: string | null;
   tracking_url: string | null;
   label_delivery_url: string | null;
@@ -74,12 +75,12 @@ const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql`
   weight_oz::float AS weight_oz, length_in::float AS length_in,
   width_in::float AS width_in, height_in::float AS height_in,
   carrier, service, rate_amount::float AS rate_amount, rate_currency, delivery_days,
-  provider, tracking_number, tracking_url, label_delivery_url,
+  provider, provider_shipment_id, quotes, tracking_number, tracking_url, label_delivery_url,
   label_cost::float AS label_cost, fees_applied,
   tracking_status, tracking_eta, last_tracked_at, seller_token, created_by, created_at
 `;
 
-function toApi(r: ShipmentRow) {
+export function toApi(r: ShipmentRow) {
   return {
     id: r.id,
     orderId: r.order_id,
@@ -230,10 +231,16 @@ function newSellerToken(): string {
 
 // ── List ─────────────────────────────────────────────────────────────────────
 shipments.get('/:orderId/shipments', async (c) => {
+  const u = c.var.user;
   const sql = getDb(c.env);
   const orderId = c.req.param('orderId');
   const order = await loadOrder(sql, orderId);
   if (!order) return c.json({ error: 'Not found' }, 404);
+  // Same scope as GET /api/orders/:id — a shipment row carries the seller's
+  // address and the PO's fee trail, not something every purchaser should read.
+  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
   const rows = (await sql`
     SELECT ${SHIPMENT_COLS(sql)} FROM shipments
     WHERE order_id = ${orderId}
@@ -409,7 +416,13 @@ shipments.post('/:orderId/shipments/:sid/rates', async (c) => {
     return c.json({ error: 'The shipping provider could not return rates — try again' }, 502);
   }
 
-  await sql`UPDATE shipments SET status = 'quoted' WHERE id = ${sid} AND status IN ('draft','quoted')`;
+  // The buy handler resolves the picked rate_id against these stored quotes —
+  // the provider's buy response doesn't echo carrier/service, and a rate_id
+  // from another shipment must not be replayable here.
+  await sql`
+    UPDATE shipments SET status = 'quoted', quotes = ${sql.json(rates as never)}
+    WHERE id = ${sid} AND status IN ('draft','quoted')
+  `;
   return c.json({ rates });
 });
 
@@ -448,13 +461,21 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   const shipTo = await loadWarehouseShipTo(sql, order.warehouse_id);
   if ('error' in shipTo) return c.json({ error: shipTo.error }, 409);
 
+  // The rate must be one this shipment was quoted: the provider's buy
+  // response doesn't echo carrier/service (the quote carries them), and a
+  // rate_id minted for another shipment must not be replayable here.
+  const quote = (shipment.quotes ?? []).find((q) => q.rateId === rateId) ?? null;
+  if (!quote) return c.json({ error: 'That rate is no longer available — refresh rates' }, 409);
+
   // Charge → upload → record, in that order: the two non-transactional steps
   // come first, and once money has moved nothing below is allowed to turn the
   // response into an error the client would retry into a double-charge.
+  // The shipment id doubles as the provider-side idempotency key
+  // (platform_uk_id): a retried purchase returns the existing label.
   const client = pickShippingClient(c.env);
   let label;
   try {
-    label = await client.buyByRateId(rateId);
+    label = await client.buyByRateId(rateId, { platformUkId: sid, quote });
   } catch (err) {
     console.error('[shipping] label purchase failed', err);
     return c.json({ error: 'The shipping provider rejected the purchase — refresh rates and try again' }, 502);
@@ -467,8 +488,8 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   try {
     upload = await uploadAttachment(
       c.env,
-      new File([label.labelPdf as Uint8Array<ArrayBuffer>], `label-${label.trackingNumber}.pdf`, {
-        type: 'application/pdf',
+      new File([label.labelData as Uint8Array<ArrayBuffer>], `label-${label.trackingNumber}.${label.labelExt}`, {
+        type: label.labelContentType,
       }),
       `orders/${orderId}/shipments`,
     );
@@ -491,6 +512,11 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
           to_zip = ${shipTo.addr.zip}, to_country = ${shipTo.addr.country},
           carrier = ${label.carrier}, service = ${label.service},
           rate_amount = ${label.amount}, rate_currency = ${label.currency},
+          -- Re-stamp: the draft was stamped with whatever client was configured
+          -- at creation; a draft born under the stub and bought after real
+          -- credentials arrived must not stay provider='stub', or the tracking
+          -- poll (which filters on provider) skips this real label forever.
+          provider = ${client.provider},
           provider_rate_id = ${rateId}, provider_shipment_id = ${label.shipmentId},
           tracking_number = ${label.trackingNumber},
           tracking_url = ${label.trackingUrl ?? carrierTrackingUrl(label.carrier, label.trackingNumber)},
@@ -559,45 +585,22 @@ shipments.post('/:orderId/shipments/:sid/void', async (c) => {
   }
 
   const client = pickShippingClient(c.env);
-  const result = await client.voidLabel(shipment.tracking_number);
+  const result = await client.voidLabel({
+    shipmentNo: shipment.provider_shipment_id ?? null,
+    platformUkId: sid,
+  });
   if (!result.ok) {
     return c.json({ error: result.message ?? 'The carrier refused to void this label' }, 409);
   }
 
-  await sql.begin(async (tx) => {
-    await tx`SELECT 1 FROM orders WHERE id = ${orderId} FOR UPDATE`;
-    // Read the latch before clearing it (UPDATE … RETURNING yields new values,
-    // not old ones), all under the same row lock.
-    const prev = (await tx`
-      SELECT fees_applied, label_cost::float AS label_cost FROM shipments WHERE id = ${sid} FOR UPDATE
-    `)[0] as { fees_applied: boolean; label_cost: number | null };
-    await tx`UPDATE shipments SET status = 'voided', fees_applied = FALSE WHERE id = ${sid}`;
-    if (prev.fees_applied && prev.label_cost) {
-      // GREATEST: a manual fee edit may have lowered other_fees below the
-      // label cost since the buy; the column carries CHECK (>= 0).
-      await tx`
-        UPDATE orders SET
-          other_fees = GREATEST(other_fees - ${prev.label_cost}, 0),
-          other_fees_note = left(
-            concat_ws(' | ', nullif(other_fees_note, ''), ${'Label voided ' + shipment.tracking_number}::text),
-            ${FEE_NOTE_MAX}::int
-          )
-        WHERE id = ${orderId}
-      `;
-    }
-    await writeOrderEvent(tx, orderId, u.id, 'shipment_voided', {
-      shipmentId: sid,
+  await sql.begin(async (tx) =>
+    voidShipmentTx(tx, {
+      orderId,
+      sid,
       trackingNumber: shipment.tracking_number,
-      amount: prev.label_cost,
-    });
-    await notifyManagers(tx, {
-      kind: 'shipment_voided',
-      tone: 'warn',
-      icon: 'package',
-      title: `Shipping label voided on ${orderId}`,
-      body: `${u.name} voided ${shipment.carrier ?? ''} ${shipment.tracking_number}`.trim(),
-    });
-  });
+      carrier: shipment.carrier,
+      actor: { id: u.id, name: u.name },
+    }));
 
   const full = (await sql`
     SELECT ${SHIPMENT_COLS(sql)} FROM shipments WHERE id = ${sid} LIMIT 1

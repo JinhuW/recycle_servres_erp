@@ -477,6 +477,15 @@ export function LineDrawer({
             {cat === 'HDD' && <HddFields line={line} set={set} />}
             {cat === 'Other' && <OtherFields line={line} set={set} />}
 
+            {/* SSDs are received as anonymous bulk lots — nobody keys in
+                per-drive serials at purchase, so the field only invited
+                count-mismatch errors. A line that already carries serials
+                (pre-rule data, scan fill) keeps the field: the shared
+                count-vs-qty validator still checks them, and a hidden field
+                would make its 400 unfixable. String-typed (not non-blank) so
+                clearing the textarea to retype doesn't unmount it mid-edit —
+                a fresh line starts undefined. */}
+            {(cat !== 'SSD' || typeof line.serialNumber === 'string') && (
             <div className="field">
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
@@ -506,6 +515,7 @@ export function LineDrawer({
                   : t('serialNumbersHint')}
               </div>
             </div>
+            )}
 
             <div style={{
               display: 'grid',

@@ -7,6 +7,15 @@ const API_PREFIXES = ['/api', '/oauth', '/.well-known'];
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // Force https before anything else. Cloudflare accepts plain-http hits and
+    // hands them to the Worker as-is; the backend's auth cookies are marked
+    // Secure, so a session established over http can never be stored — login
+    // returns 200 and every request after it 401s (2026-08-22 mobile login
+    // bounce). 308 preserves the method for the rare non-GET that lands here.
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:';
+      return Response.redirect(url.toString(), 308);
+    }
     const isApi = API_PREFIXES.some(
       (p) => url.pathname === p || url.pathname.startsWith(p + '/'),
     );

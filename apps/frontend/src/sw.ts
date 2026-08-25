@@ -2,7 +2,6 @@
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { NetworkOnly } from 'workbox-strategies';
-import { BackgroundSyncPlugin } from 'workbox-background-sync';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -17,18 +16,6 @@ const navRoute = new NavigationRoute(createHandlerBoundToURL('/index.html'), {
   denylist: [/^\/v\//, /^\/api\//, /^\/oauth\//, /^\/\.well-known\//, /^\/share-target$/],
 });
 registerRoute(navRoute);
-
-// Background-sync only for attachment uploads; the queue retries when
-// connectivity returns. Other mutations (status changes, etc.) must NOT be
-// auto-replayed — they could race with what the user did since.
-const attachmentQueue = new BackgroundSyncPlugin('recycle-erp-attachments', {
-  maxRetentionTime: 24 * 60,
-});
-registerRoute(
-  ({ url, request }) => url.pathname === '/api/attachments' && request.method === 'POST',
-  new NetworkOnly({ plugins: [attachmentQueue] }),
-  'POST',
-);
 
 // API / OAuth / well-known: never cache — auth is cookie-based and data changes.
 registerRoute(({ url }) => url.pathname.startsWith('/api/'), new NetworkOnly());

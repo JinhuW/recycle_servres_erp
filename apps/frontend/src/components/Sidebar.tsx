@@ -7,7 +7,7 @@ import type { Role } from '../lib/types';
 export type DesktopView =
   | 'dashboard' | 'submit' | 'history' | 'shipping' | 'market'
   | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers'
-  | 'activity' | 'tracker' | 'settings';
+  | 'activity' | 'tracker' | 'coordinator' | 'settings';
 
 type NavItem = { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string };
 
@@ -20,7 +20,7 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
       { id: 'dashboard',  tKey: 'nav_dashboard',  icon: 'dashboard',  roles: ['manager', 'purchaser'] },
       { id: 'submit',     tKey: 'nav_submit',     icon: 'submit',     roles: ['manager', 'purchaser'], badge: '+' },
       { id: 'history',    tKey: 'nav_history',    icon: 'history',    roles: ['manager', 'purchaser'] },
-      { id: 'shipping',   tKey: 'nav_shipping',   icon: 'truck',      roles: ['manager', 'purchaser'] },
+      { id: 'shipping',   tKey: 'nav_shipping',   icon: 'label',      roles: ['manager', 'purchaser'] },
       { id: 'market',     tKey: 'nav_market',     icon: 'tag',        roles: ['manager', 'purchaser'] },
       { id: 'inventory',  tKey: 'nav_inventory',  icon: 'inventory',  roles: ['manager'] },
       { id: 'sellorders', tKey: 'nav_sellorders', icon: 'tag',        roles: ['manager'] },
@@ -33,6 +33,7 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
     items: [
       { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
       { id: 'tracker',    tKey: 'nav_tracker',    icon: 'globe',      roles: ['manager'] },
+      { id: 'coordinator', tKey: 'nav_coordinator', icon: 'shield',   roles: ['manager'] },
       // Purchasers get Settings too (Account + Connectors — the MCP connect
       // page); the admin sections are filtered inside DesktopSettings.
       { id: 'settings',   tKey: 'nav_settings',   icon: 'settings',   roles: ['manager', 'purchaser'] },

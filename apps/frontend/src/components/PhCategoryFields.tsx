@@ -4,6 +4,7 @@ import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
 import { ItemTypePicker } from './ItemTypePicker';
 import { chipNumberRequired } from '../lib/ramRequired';
+import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../lib/lineRequirements';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -123,7 +124,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('chipNumber')}{chipNumberRequired(value.brand) && <Req />}</label>
-          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value)} />
+          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value.toUpperCase())} />
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}<Req /></label>
@@ -134,12 +135,19 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
   }
 
   if (category === 'SSD') {
+    const brandRequired = ssdBrandRequired(value.capacity);
+    const brandMissing = brandRequired && !(value.brand ?? '').trim();
     return (
       <>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('brand')}<Req /></label>
+            <label>{t('brand')}{brandRequired && <Req />}</label>
             <PhCatCombo className={inputClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
+            {brandMissing && (
+              <div style={{ fontSize: 11, color: 'var(--neg)', marginTop: 4 }}>
+                {t('ssdBrandNeededOverGb', { gb: SSD_BRAND_REQUIRED_OVER_GB })}
+              </div>
+            )}
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
@@ -156,23 +164,9 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
             <PhCatSelect className={selectClsFor('formFactor')} value={value.formFactor} options={SSD_FORM} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
-        <div className="ph-field-row">
-          <div className="ph-field">
-            <label>{t('partNumber')}</label>
-            <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={e => onChange('partNumber', e.target.value)} />
-          </div>
-          <div className="ph-field">
-            <label>{t('health')} (%)</label>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={0.1}
-              className={inputClsFor('health')}
-              value={value.health ?? ''}
-              onChange={e => onChange('health', e.target.value === '' ? null : Number(e.target.value))}
-            />
-          </div>
+        <div className="ph-field">
+          <label>{t('partNumber')}</label>
+          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={e => onChange('partNumber', e.target.value)} />
         </div>
       </>
     );

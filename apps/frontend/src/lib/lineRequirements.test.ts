@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { lineRequirements, missingFieldNames, type RequirementLine } from './lineRequirements';
+import {
+  lineRequirements, missingFieldNames, capacityGb, ssdBrandRequired,
+  type RequirementLine,
+} from './lineRequirements';
 
 // Capture, the editor and the phone form all gate on this. A disagreement here
 // is what let a line be blocked on one screen and saved on another.
@@ -31,9 +34,23 @@ describe('lineRequirements', () => {
     expect(lineRequirements(ram({ chipNumber: '' })).ready).toBe(true);
   });
 
-  it('wants only a brand from a drive', () => {
-    expect(lineRequirements({ category: 'SSD', qty: 4 }).missingKeys).toEqual(['brand']);
+  it('wants only a brand from an HDD', () => {
+    expect(lineRequirements({ category: 'HDD', qty: 4 }).missingKeys).toEqual(['brand']);
     expect(lineRequirements({ category: 'HDD', brand: 'Seagate', qty: 4 }).ready).toBe(true);
+  });
+
+  // Small SSDs move as anonymous bulk lots; above 800GB the brand is part of
+  // the line's identity and the form blocks until it's filled.
+  it('asks an SSD for its brand only above 800GB', () => {
+    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', qty: 4 }).missingKeys)
+      .toEqual(['brand']);
+    expect(lineRequirements({ category: 'SSD', capacity: '960GB', qty: 4 }).missingKeys)
+      .toEqual(['brand']);
+    expect(lineRequirements({ category: 'SSD', capacity: '800GB', qty: 4 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', capacity: '480GB', qty: 4 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', qty: 4 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', capacity: '960GB', brand: 'Intel', qty: 4 }).ready)
+      .toBe(true);
   });
 
   it('wants a type and a part number from an Other line', () => {
@@ -52,8 +69,8 @@ describe('lineRequirements', () => {
   // Blanks arrive as '' from the desktop form and null from the API, and a
   // field holding nothing but spaces is blank however it got there.
   it('treats whitespace, null and undefined alike', () => {
-    expect(lineRequirements({ category: 'SSD', brand: '   ', qty: 1 }).missingKeys).toEqual(['brand']);
-    expect(lineRequirements({ category: 'SSD', brand: null, qty: 1 }).missingKeys).toEqual(['brand']);
+    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', brand: '   ', qty: 1 }).missingKeys).toEqual(['brand']);
+    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', brand: null, qty: 1 }).missingKeys).toEqual(['brand']);
     expect(lineRequirements({ category: 'Other', itemType: ' ', partNumber: ' ', qty: 1 }).missingKeys)
       .toEqual(['lfItemType', 'lfPartSku']);
   });
@@ -71,6 +88,30 @@ describe('lineRequirements', () => {
   it('names the missing quantity with the label the drawer prints', () => {
     expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: 0 }).missingKeys)
       .toEqual(['qty']);
+  });
+});
+
+describe('capacityGb / ssdBrandRequired', () => {
+  it('reads the catalog capacity spellings', () => {
+    expect(capacityGb('240GB')).toBe(240);
+    expect(capacityGb('1.92TB')).toBe(1920);
+    expect(capacityGb('7.68tb')).toBe(7680);
+    expect(capacityGb(' 960 GB ')).toBe(960);
+  });
+
+  it('is null for blank or free-typed junk, which then requires no brand', () => {
+    expect(capacityGb('')).toBeNull();
+    expect(capacityGb(null)).toBeNull();
+    expect(capacityGb('a lot')).toBeNull();
+    expect(ssdBrandRequired('a lot')).toBe(false);
+    expect(ssdBrandRequired(null)).toBe(false);
+  });
+
+  it('flips exactly above 800GB', () => {
+    expect(ssdBrandRequired('800GB')).toBe(false);
+    expect(ssdBrandRequired('801GB')).toBe(true);
+    expect(ssdBrandRequired('0.8TB')).toBe(false);
+    expect(ssdBrandRequired('1TB')).toBe(true);
   });
 });
 

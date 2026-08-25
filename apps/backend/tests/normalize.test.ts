@@ -66,6 +66,11 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('HDD', { partNumber: 'ST4000NM0023-1MA107' }).partNumber).toBe('ST4000NM0023-1MA107');
   });
 
+  it('upper-cases the chip number — die codes are printed upper-case', () => {
+    expect(normalizeFields('RAM', { chipNumber: 'd9xpf' }).chipNumber).toBe('D9XPF');
+    expect(normalizeFields('RAM', { chipNumber: 'K4a8g045wc-Bcwe' }).chipNumber).toBe('K4A8G045WC-BCWE');
+  });
+
   it('drops blank/whitespace-only fields', () => {
     const f = normalizeFields('RAM', { brand: '  ', capacity: '32 GB' });
     expect(f.brand).toBeUndefined();

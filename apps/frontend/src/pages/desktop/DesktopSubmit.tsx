@@ -184,6 +184,18 @@ function OrderForm({
       .catch(handleFetchError);
   }, []);
 
+  // A manager may file the PO for a purchaser, who then owns it (commission,
+  // "my orders", notifications). '' means the manager keeps it themselves.
+  const isManager = user?.role === 'manager';
+  const [onBehalfOfUserId, setOnBehalfOfUserId] = useState('');
+  const [purchasers, setPurchasers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!isManager) return;
+    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
+      .then(r => setPurchasers(r.items.filter(m => m.role === 'purchaser')))
+      .catch(handleFetchError);
+  }, [isManager]);
+
   // Which category the next line defaults to. Persisted so a purchaser who
   // works through a pallet of drives doesn't re-pick on every session; the
   // add control offers all four regardless, so this only sets the first line.
@@ -490,7 +502,12 @@ function OrderForm({
         '/api/orders/' + orderId, { addLines: wireLines, ...m });
       return { orderId, lineIds: r.addedLineIds ?? [] };
     }
-    const r = await createOrder({ lines: wireLines, ...m });
+    // Ownership travels only on the create — PATCH can't reassign an owner,
+    // so appends deliberately leave it out.
+    const r = await createOrder({
+      lines: wireLines, ...m,
+      ...(onBehalfOfUserId ? { onBehalfOfUserId } : {}),
+    });
     setOrderId(r.id);
     return { orderId: r.id, lineIds: r.lineIds ?? [] };
   };
@@ -921,7 +938,27 @@ function OrderForm({
       {/* Commit bar: destination + payer + note, attachments, then the
           single figure the submit button commits. */}
       <div className="card sub-commit" ref={commitRef}>
-        <div className="sub-commit-meta">
+        <div className={isManager ? 'sub-commit-meta sub-commit-meta--behalf' : 'sub-commit-meta'}>
+          {isManager && (
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="label" htmlFor="sub-behalf">{t('poOnBehalfLabel')}</label>
+              <select
+                id="sub-behalf"
+                className="select"
+                value={onBehalfOfUserId}
+                onChange={e => setOnBehalfOfUserId(e.target.value)}
+                // The first confirmed line creates the PO and fixes its owner,
+                // so the picker locks from that moment on.
+                disabled={!!orderId}
+                title={orderId ? t('poOnBehalfLocked') : undefined}
+              >
+                <option value="">{t('poOnBehalfSelf')}</option>
+                {purchasers.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label" htmlFor="sub-warehouse">{t('warehouse')} <span className="req">*</span></label>
             <select
