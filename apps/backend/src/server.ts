@@ -10,12 +10,14 @@ import { buildEnv } from './env';
 import { getDb } from './db';
 import { startFxRefreshLoop } from './lib/fx';
 import { startShipmentTrackingLoop } from './shipping/track';
+import { startBankSyncLoop } from './banktx/sync';
 
 const env = buildEnv();
 const port = Number(process.env.PORT ?? 8787);
 
 startFxRefreshLoop(getDb(env));
 startShipmentTrackingLoop(getDb(env), env);
+startBankSyncLoop(env);
 
 serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
   console.log(`recycle-erp-backend listening on :${info.port}`);

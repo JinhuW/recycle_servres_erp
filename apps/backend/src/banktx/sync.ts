@@ -54,6 +54,33 @@ export function syncBankTransactions(env: Env, providersOverride?: BankProvider[
   return run;
 }
 
+// Background freshness (same shape as startShipmentTrackingLoop). Volumes are
+// tiny and the page has a Sync-now button, so a slow cadence is plenty. Never
+// starts when nothing is configured.
+const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+export function startBankSyncLoop(env: Env): { stop: () => void } {
+  if (pickBankProviders(env).providers.length === 0) return { stop: () => {} };
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      await syncBankTransactions(env);
+    } catch (err) {
+      console.warn('[banktx] sync pass failed', err);
+    }
+  };
+  void tick();
+  const handle = setInterval(tick, SYNC_INTERVAL_MS);
+  handle.unref?.();
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(handle);
+    },
+  };
+}
+
 async function doSync(env: Env, providersOverride?: BankProvider[]): Promise<SyncResult> {
   const picked = providersOverride
     ? { providers: providersOverride, notConfigured: [] as BankSource[] }
