@@ -206,8 +206,8 @@ export const createOrder = (body: {
   warehouseId?: string;
   payment?: OrderSummary['payment'];
   notes?: string | null;
-  // Manager-only: the purchaser who owns the order. Ownership is fixed at
-  // create — PATCH cannot reassign it — so it only travels on this call.
+  // Manager-only: the purchaser who owns the order. PATCH accepts the same
+  // key to reassign ownership later, up until the order is Done.
   onBehalfOfUserId?: string;
   lines: unknown[];
   // lineIds comes back aligned 1:1 with `lines`, so the caller can attach

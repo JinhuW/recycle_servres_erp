@@ -33,6 +33,7 @@ export const ACTIVITY_KIND_MAP: Record<
     line_removed:        'removed',
     line_edited:         'edited',
     meta_changed:        'edited',
+    owner_changed:       'edited',
     status_meta_changed: 'note',
     // Not `note` like the status attachment above: that kind covers a note and
     // a file under one name and can only be generalised, while these two say

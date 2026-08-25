@@ -5,7 +5,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
-  createdEventParts, linePhotoEventDetail, type Translate,
+  createdEventParts, linePhotoEventDetail, ownerChangedLine, type Translate,
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 
@@ -26,6 +26,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_removed: 'trash',
   line_edited:  'edit',
   meta_changed: 'settings',
+  owner_changed: 'user',
   status_meta_changed: 'paperclip',
   line_photo_added:   'image',
   line_photo_removed: 'image',
@@ -46,6 +47,7 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_removed: 'warn',
   line_edited:  'info',
   meta_changed: 'muted',
+  owner_changed: 'info',
   status_meta_changed: 'muted',
   // A photo is evidence hung off a line, so it tones like the attachment
   // events rather than like the line itself; losing one still warns.
@@ -170,6 +172,9 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'meta_changed': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
       return { title: 'Updated order details', lines: changes.map(c => changeLine(c, locale)) };
+    }
+    case 'owner_changed': {
+      return { title: t('acOwnerChanged'), lines: [ownerChangedLine(d)] };
     }
     case 'status_meta_changed': {
       const status = String(d.status ?? '');

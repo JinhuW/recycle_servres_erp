@@ -922,6 +922,7 @@ orders.patch('/:id', async (c) => {
         warehouseId?: string | null;
         payment?: 'company' | 'self';
         commissionRate?: number | null;
+        onBehalfOfUserId?: string | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
@@ -938,13 +939,26 @@ orders.patch('/:id', async (c) => {
       !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
       body.totalCost !== undefined || body.otherFees !== undefined ||
       body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
-      body.payment !== undefined || body.commissionRate !== undefined;
+      body.payment !== undefined || body.commissionRate !== undefined ||
+      body.onBehalfOfUserId !== undefined;
     if (existing.lifecycle === 'done' || editsBeyondNotes || body.notes === undefined) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
   }
   if (body.commissionRate !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can set the commission rate' }, 403);
+  }
+  // Owner reassignment: same manager-only rule as creating on behalf of
+  // someone else, validated up front so a bad target fails before the tx.
+  // `null` (or the manager's own id) hands the order back to the manager.
+  if (body.onBehalfOfUserId !== undefined && u.role !== 'manager') {
+    return c.json({ error: 'Only managers can change the order owner' }, 403);
+  }
+  let newOwner: { ownerId: string; ownerName: string | null } | undefined;
+  if (body.onBehalfOfUserId !== undefined) {
+    const resolved = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
+    if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+    newOwner = resolved;
   }
   if (
     body.commissionRate !== undefined &&
@@ -1098,14 +1112,15 @@ orders.patch('/:id', async (c) => {
       // a concurrent advance from changing lifecycle between our pre/post
       // snapshots, so the diff describes one settled state transition.
       const orderBefore = (await tx`
-        SELECT id, lifecycle, notes, warehouse_id, payment,
+        SELECT id, user_id, lifecycle, notes, warehouse_id, payment,
                total_cost::float AS total_cost,
                commission_rate::float AS commission_rate,
                other_fees::float AS other_fees,
                other_fees_note
         FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
       `)[0] as
-        | { id: string; lifecycle: string; notes: string | null; warehouse_id: string | null;
+        | { id: string; user_id: string; lifecycle: string; notes: string | null;
+            warehouse_id: string | null;
             payment: string; total_cost: number | null; commission_rate: number | null;
             other_fees: number; other_fees_note: string | null }
         | undefined;
@@ -1125,7 +1140,10 @@ orders.patch('/:id', async (c) => {
           // closed-book cost, not the free-append `notes` field.
           body.otherFees !== undefined ||
           body.otherFeesNote !== undefined ||
-          body.commissionRate !== undefined;
+          body.commissionRate !== undefined ||
+          // Ownership decides whose closed book this is — commission and
+          // "my orders" both key off it, so it freezes with the rest.
+          body.onBehalfOfUserId !== undefined;
         if (touchesFrozen) {
           // Outcome thrown out of the tx callback — the surrounding try/catch
           // re-throws unrecognised errors, so we encode the response intent
@@ -1202,6 +1220,22 @@ orders.patch('/:id', async (c) => {
             payment      = COALESCE(${body.payment ?? null}, payment)
           WHERE id = ${id}
         `;
+      }
+      // Owner moves under the same lock as the meta fields, with its own
+      // event kind: user_id isn't a META_FIELD (the timeline names people,
+      // not a uuid diff), and both names are snapshotted here because events
+      // render without joining users on the owner.
+      if (newOwner && newOwner.ownerId !== orderBefore.user_id) {
+        const prev = (await tx`
+          SELECT name FROM users WHERE id = ${orderBefore.user_id} LIMIT 1
+        `)[0] as { name: string } | undefined;
+        await tx`UPDATE orders SET user_id = ${newOwner.ownerId} WHERE id = ${id}`;
+        await writeOrderEvent(tx, id, u.id, 'owner_changed', {
+          fromUserId: orderBefore.user_id,
+          from: prev?.name ?? null,
+          toUserId: newOwner.ownerId,
+          to: newOwner.ownerName ?? u.name,
+        });
       }
       if (Array.isArray(body.removeLineIds) && body.removeLineIds.length) {
         const doomed = await tx`

@@ -45,6 +45,17 @@ export function createdEventParts(detail: Record<string, unknown>, t: Translate)
   ].filter((p): p is string => !!p);
 }
 
+/**
+ * The `owner_changed` event's one-line body: who held the PO, who holds it
+ * now. Names are snapshotted into the event, so a renamed or deactivated
+ * user still reads as they were at the time.
+ */
+export function ownerChangedLine(detail: Record<string, unknown>): string {
+  const from = typeof detail.from === 'string' && detail.from ? detail.from : '—';
+  const to = typeof detail.to === 'string' && detail.to ? detail.to : '—';
+  return `${from} → ${to}`;
+}
+
 const fmtBytes = (n: number): string =>
   n < 1024 ? `${n} B`
   : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
