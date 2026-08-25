@@ -20,6 +20,102 @@ deployed?" harder to answer.
 
 ### Added
 
+- **Alert hit rate: partner emoji reactions on Telegram alerts are now
+  captured and countable.** A partner marks an alert they are acting on by
+  reacting to it; nothing recorded that, so there was no measure of which
+  alerts get used. Two new halves, joined at query time on
+  `(chat_id, message_id)`: the monitor now keeps the `message_id` the Bot API
+  returns for each alert (previously discarded) and reports it — with listing
+  id, search city/phrase, priority topic and AI verdict — to the coordinator's
+  new `POST /v1/alerts/telegram` (fail-open, after the send, so a down
+  coordinator can never cost an alert); and the coordinator's Telegram update
+  consumer now also requests `message_reaction` updates and stores every
+  reaction raw (`alert_reaction_events` append-only, `alert_reactions` current
+  state — a removed reaction empties the state but keeps the row and the
+  history). `GET /v1/stats/alert-hits` (admin; forwarded by rs-console for the
+  ERP) serves sent-vs-hit counts bucketed by day, priority, item and search
+  city — the source data for tuning the prompt and the city list. Any current
+  reaction counts as a hit; raw emoji are stored so a taxonomy can be layered
+  on later. Reactions on messages with no recorded alert (sent before this, or
+  on a timed-out send) are kept and surfaced as `unmatched_reactions`, never
+  dropped. Enabling note: the consumer now starts whenever `TELEGRAM_TOKEN` +
+  `TELEGRAM_CHAT_ID` are set (it used to need the war room), so
+  `rsc telegram-chatid` must not be run while rs-coordinator is up — Telegram
+  allows one getUpdates poller per bot. Reporting from the monitor needs
+  `RS_ALERT_REPORT_URL=http://rs-coordinator:8500` in `secrets.env` (VM copy
+  too — deploys never sync that file); Telegram only delivers reactions made
+  after the consumer is live, so history before the deploy is unrecoverable
+  by design.
+
+### Changed
+
+- **The AI prompt now puts the listing last, so providers can cache the rest.**
+  `get_prompt` built the listing block (title, condition, price, location, URL,
+  description) in the middle of the prompt, ahead of the item's own criteria and
+  the JSON-verdict instructions — and provider-side prompt caching matches on an
+  identical *prefix*, so every call missed the cache from that point on, which
+  was most of the prompt. The listing block moved to the very end, after
+  everything that is constant for a given item. `configs/master.toml`'s prompt
+  was rewritten to state each rule once (the old text repeated the single-unit
+  rule four times), but deliberately **not** trimmed below ~1,100 tokens: OpenAI
+  will not cache a prefix shorter than 1024 tokens, and falling under that would
+  make every input token full price again.
+
+### Fixed
+
+- **A deploy can no longer ship a version that was already deployed.**
+  `scripts/deploy.sh` read `VERSION` for its Telegram notification and asked
+  nothing of it, while `scripts/release.sh` — the only script that bumps that
+  file — was one nobody was obliged to run. The 📦 Releases topic logged deploy
+  after deploy as the same `0.4.0`, and that number was not a release at all:
+  no `v0.4.0` tag, no release commit, just a hand-edited `VERSION` in a dirty
+  tree. `deploy.sh` now runs a version gate before it ships anything: the new
+  `scripts/check-release-tag.sh` requires a clean tree and a `v$VERSION` tag
+  that points at `HEAD`, and the VM is asked whether it already runs this
+  version via a `.rs-deployed` stamp written after each verified deploy.
+  `deploy.sh check` is exempt; `sync` is not. `scripts/deploy.sh --redeploy` is
+  the escape hatch for re-running a deploy that failed partway, and it labels
+  itself as a redeploy in the notification. The notification now reads
+  `v0.4.1 (abc1234)` rather than a bare number. `scripts/release.sh` also
+  refuses a "bump" that leaves `VERSION` unchanged or moves it backwards, which
+  is what let a hand-edited version be re-released as itself.
+
+- **The AI verdict cache now survives across sweeps.** The cache key included
+  `item_config.hash`, and `ItemConfig.searched_count` — a runtime counter that
+  increments after every sweep — was part of that hash, so the key rotated
+  every sweep and `AIResponse.from_cache` could never hit. Every listing still
+  sitting in the search results was re-billed to OpenRouter once per sweep:
+  over 2026-08-21→24 the fleet paid for 43,111 evaluations of 4,056 unique
+  listings (~10×), the worst listing 59 times. `searched_count` is now excluded
+  from the hash (the same treatment `Listing.hash` gives the rotating image
+  URL), the `ai_eval` OpenSearch event carries a `cached` flag so spend is
+  auditable, and a regression test pins the key stable across sweeps. Expect
+  the ERP dashboard's daily review counts to drop ~10× — they were inflated by
+  the same bug, since only "fresh" verdicts are counted. A manual `--check` of
+  a URL now also shares the sweep's cached verdict instead of re-querying the
+  model.
+
+## [0.4.0] - 2026-08-24
+
+### Fixed
+
+- **A Telegram send that times out is no longer resent.** The retry loop in
+  the vendored monitor's `telegram.py` treated `TimedOut` like any other
+  Telegram error and resent the message — but from the VM the Bot API answers
+  in 0.7–4s against python-telegram-bot's 5s default read timeout, so the
+  "failed" sends had usually been delivered, and one medium-priority alert
+  landed three times in its topic on 2026-08-24. The bot now uses a 30s read
+  timeout (10s connect), and a send that still times out is treated as
+  probably-delivered: logged, not resent. A rare genuinely-lost alert is the
+  accepted cost; the coordinator re-review recipe recovers those.
+
+### Added
+
+- **Deploy notifications go to a dedicated 📦 Releases forum topic.**
+  `scripts/setup-telegram-topics.py` now also creates the Releases topic and
+  prints its `TELEGRAM_TOPIC_RELEASES` id for `configs/secrets.env`; the
+  notification at the end of `scripts/deploy.sh` posts into it when the id is
+  set (General topic otherwise, as before).
 - **Alerts are grouped by priority into Telegram forum topics.** The AI's
   counted units bucket every listing alert — 🔥 high (50+ units), ⚡ medium
   (10–49), 🐢 low (5–9) — the emoji leads the alert title, and each bucket is
@@ -35,6 +131,21 @@ deployed?" harder to answer.
 
 ### Changed
 
+- **The AI prompt was deduplicated, and reordered for provider prompt
+  caching.** The `master.toml` evaluation prompt said the single-unit rule
+  four times and the 5-unit minimum three; each rule is now stated once
+  (~12% shorter, same rule set — brand lists, PC4/PC5 label decoding, the
+  mixed-lot and eBay-cross-post rules all kept). Bigger cost lever: the
+  vendored `get_prompt` used to splice the listing details into the middle
+  of the prompt, so no two calls shared a usable prefix; the listing block
+  now comes last, after all static instruction text (~1,500 tokens of it),
+  which is past OpenAI's 1024-token automatic-caching floor — every
+  evaluation after the first per item reuses the cached prefix at the
+  provider's discounted rate. Do not trim the static prompt below ~1,100
+  tokens or the discount vanishes and every token goes back to full price.
+  Changing the prompt rotates `marketplace_config.hash`, so lingering
+  listings get one fresh evaluation; `remind = false` keeps already-alerted
+  listings from re-alerting. Regenerated `configs/generated/*`.
 - **The AI evaluation answers with one JSON object.** The single per-listing
   call now concludes with `{"rating", "unit_count", "count_phrase", "summary"}`
   instead of two grep-able text lines, parsed once by a shared tolerant parser

@@ -212,6 +212,38 @@ scripts/deploy.sh sync     # config-only change: skip the image rebuild
 scripts/deploy.sh check    # verify only — is the VM running this tree right now?
 ```
 
+**Every deploy must carry a version no deploy has carried before.** Before it
+ships anything, `deploy.sh` runs a version gate — `scripts/check-release-tag.sh`
+plus one question for the VM — and all four conditions have to hold:
+
+| | |
+| --- | --- |
+| clean working tree | rsync ships the working tree, not the tag, so uncommitted edits make the tag a lie about what is running |
+| `v$(cat VERSION)` exists | only `scripts/release.sh` writes those tags, and it refuses to reuse one |
+| the tag is `HEAD` | commits made after the tag would otherwise ship wearing the previous release's number |
+| the VM does not already run it | a tag deployed twice is still a deploy with no bump behind it |
+
+So the working order is always: write `CHANGELOG.md` under `[Unreleased]`, run
+`scripts/release.sh patch`, then `scripts/deploy.sh`. `check` is exempt (it
+writes nothing); `sync` is **not** — a config change to the live fleet is
+exactly the kind of change "what is deployed?" has to be able to name.
+
+This exists because the pipeline had no such gate: `deploy.sh` read `VERSION`
+for its Telegram notification and asked nothing of it, while `release.sh` — the
+only script that ever bumps that file — was one nobody was obliged to run. The
+📦 Releases topic logged deploy after deploy as the same `0.4.0`, and that
+number was not a release at all: no tag, no release commit, just a hand-edited
+`VERSION` in a dirty tree. When every line says the same version, the release
+log cannot answer the one question it exists to answer.
+
+Re-running a deploy that failed partway is the one legitimate same-version
+deploy, so it has an explicit escape hatch which names itself in the
+notification:
+
+```bash
+scripts/deploy.sh --redeploy   # ship a version the VM already runs
+```
+
 `check` is the one to reach for whenever you are about to explain live
 behaviour from local source. It md5s every module inside the container against
 this tree, diffs the mounted `config.toml` against `configs/homelab.toml`, and
@@ -516,7 +548,10 @@ full result page per phrase in Facebook traffic, so keep the phrase count small.
 | `Failed to get search results` fires only on an actually empty result set | `facebook.py` (`search`) |
 | Structured AI verdict — the single evaluation call answers with one JSON object (rating, numeric `unit_count`, `count_phrase`, summary) parsed by a shared tolerant parser with a legacy two-line fallback; the AI cache key is versioned; a confident single-unit listing is suppressed in code whatever its score; exhausted retries raise instead of crashing unbound; an AI outage fails closed — unevaluated listings are withheld and re-scanned, with a one-time "AI evaluation DOWN" / "recovered" Telegram ops note per incident; the coordinator payload carries `ai_count`; completions are capped at a configurable `max_tokens` (default 8192) so OpenRouter prices the request at the cap, not the model's 65k output ceiling | `ai.py` (`AIResponse`, `parse_ai_answer`, both backends), `monitor.py` (unit-count gate, loud fail-open), `coordinator_notify.py` (`ai_count`) |
 | Rich Telegram listing alert (price, location, Count, AI rating, summary) and a configurable `min_unit_count` (default 2, i.e. only a confident single unit is suppressed; `master.toml` sets 5) | `notification.py` (`_listing_alert`), `marketplace.py` (`min_unit_count`), `monitor.py` (gate) |
+| Listing details moved to the END of the AI prompt, after all static instruction text, so every call for the same item shares an identical prefix and provider-side prompt caching (OpenAI engages at 1024+ prefix tokens) discounts the instruction block on every call after the first | `ai.py` (`get_prompt`) |
 | Priority-grouped alerts — the AI's `unit_count` buckets each alert (🔥 high 50+, ⚡ medium 10-49, 🐢 low 5-9), the emoji prefixes the title, and Telegram routes each bucket to its own forum topic (`telegram_topic_high/medium/low` = `message_thread_id`s, shown as the group's sidebar; create them with `scripts/setup-telegram-topics.py`). Unset topics and uncounted listings fall back to the General topic | `notification.py` (`alert_priority`, `PRIORITY_EMOJI`, `notify`), `telegram.py` (`telegram_topic_*`, `_topic_for_priority`), other backends accept and ignore `priority` |
+| The sweep counter stays out of the AI cache key — `ItemConfig.searched_count` increments every sweep and was hashed into `item_config.hash`, rotating the AI-verdict cache key so it never hit across sweeps and every lingering listing was re-billed each sweep (~10× spend, measured 43k evals / 4k unique listings over 3 days); the `ai_eval` event now also reports `cached` so spend is auditable | `marketplace.py` (`ItemConfig.hash`), `monitor.py` (`ai_eval` event) |
+| Alert delivery report — each successfully sent Telegram alert's `message_id` (captured from the Bot API response, previously discarded) is POSTed fail-open to the coordinator's `/v1/alerts/telegram` with the listing id, search city/phrase, priority topic and AI verdict, so partner emoji reactions can be joined back to listings for the alert hit rate. Off unless `alert_report_url`/`alert_report_token` are set; a timed-out send (delivered-unknown, no Message) reports nothing by design | `telegram.py` (`_sent_messages` capture, `_after_listing_alert`, `_post_alert_report`, `alert_report_*` fields), `notification.py` (`_after_listing_alert` hook in `notify`) |
 
 Before pulling upstream, rebase that branch rather than merging into it, then
 refresh the pin with `scripts/check-vendor.sh update`.
@@ -573,8 +608,9 @@ something*: a renamed environment variable, configs that must be regenerated, a
 credential no longer accepted. Those go under **Breaking** in the changelog with
 the command to run.
 
-The script refuses to tag when the tree is dirty, when `[Unreleased]` is empty,
-when a vendored checkout has drifted from its pin or has uncommitted work, when
+The script refuses to tag when the bump does not move `VERSION` (or moves it
+backwards), when the tree is dirty, when `[Unreleased]` is empty, when a
+vendored checkout has drifted from its pin or has uncommitted work, when
 `configs/generated` is not what `rsc gen-configs` produces, or when any suite
 fails. That list is not defensive padding — a release that quietly ships stale
 shards brings the fleet up healthy and searching the wrong cities, which is the

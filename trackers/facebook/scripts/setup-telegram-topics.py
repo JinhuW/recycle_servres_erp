@@ -35,10 +35,13 @@ from urllib import error, parse, request
 API_BASE = "https://api.telegram.org"
 
 # Keep in sync with PRIORITY_EMOJI in ai_marketplace_monitor/notification.py.
+# TELEGRAM_TOPIC_RELEASES is read by scripts/deploy.sh's notify step, not the
+# monitor.
 TOPICS = [
     ("TELEGRAM_TOPIC_HIGH", "🔥 High priority", "50+ units"),
     ("TELEGRAM_TOPIC_MEDIUM", "⚡ Medium priority", "10-49 units"),
     ("TELEGRAM_TOPIC_LOW", "🐢 Low priority", "5-9 units"),
+    ("TELEGRAM_TOPIC_RELEASES", "📦 Releases", "deploy notifications"),
 ]
 
 

@@ -4,6 +4,14 @@
 #   scripts/deploy.sh            # test, sync, rebuild, restart, verify
 #   scripts/deploy.sh check      # verify only — is the VM running this tree?
 #   scripts/deploy.sh sync       # sync + restart, no image rebuild (config-only)
+#   scripts/deploy.sh --redeploy # ship a version the VM already runs (see below)
+#
+# Every deploy must carry a version no deploy has carried before. `check` is
+# exempt (it writes nothing); `sync` is not — a config change to the live fleet
+# is exactly the kind of change "what is deployed?" has to be able to name.
+# So the order is always: write CHANGELOG.md, `scripts/release.sh patch`, then
+# this. --redeploy is the escape hatch for re-running a deploy that failed
+# partway, and it says so in the Telegram notification.
 #
 # The failure this exists to prevent: the container kept running an image built
 # hours earlier, so `title_prefilter` and `build_search_url` were in this tree,
@@ -24,7 +32,20 @@ C="${RS_MONITOR_CONTAINER:-rs-monitor}"
 IMAGE="${RS_MONITOR_IMAGE:-aimm-recycle:latest}"
 PKG=/usr/local/lib/python3.12/site-packages/ai_marketplace_monitor
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# What the VM says it is running. It lives at the root of $REMOTE, outside every
+# directory rsync transfers, so --delete never prunes it.
+STAMP=".rs-deployed"
 cd "$ROOT"
+
+MODE=deploy
+REDEPLOY=0
+for arg in "$@"; do
+    case "$arg" in
+        check|sync|deploy) MODE="$arg" ;;
+        --redeploy)        REDEPLOY=1 ;;
+        *) echo "usage: $0 [check|sync|deploy] [--redeploy]" >&2; exit 2 ;;
+    esac
+done
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
@@ -78,9 +99,52 @@ verify() {
     echo; echo "verified: $C is running this tree."
 }
 
-case "${1:-deploy}" in
-check) verify; exit 0 ;;
-esac
+if [ "$MODE" = "check" ]; then
+    verify
+    exit 0
+fi
+
+# ---------------------------------------------------------------- version gate
+# Refuse to ship a version that is not a real release, or one the VM already
+# runs. See scripts/check-release-tag.sh for the three git-side conditions and
+# the release log this went wrong in; the fourth condition needs the VM.
+step "version gate"
+sh scripts/check-release-tag.sh
+
+VERSION=$(cat "$ROOT/VERSION")
+SHA=$(git -C "$ROOT" rev-parse --short HEAD)
+REDEPLOY_NOTE=""
+
+# A tag at HEAD proves the version was bumped once. It does not stop the same
+# tag being deployed twice, which is still a deploy with no bump behind it —
+# and repeated same-version lines are exactly what made the release log
+# unreadable. The VM is the only honest record of what it is running.
+#
+# An unreachable VM reads as "no stamp" and is allowed through: this gate exists
+# to keep the release log honest, not to test connectivity, and the sync step
+# below is where an unreachable VM properly fails the deploy.
+LAST=$(ssh -o ConnectTimeout=10 "$VM" "cat $REMOTE/$STAMP 2>/dev/null" 2>/dev/null || true)
+LAST_VERSION=${LAST%% *}
+
+if [ -n "$LAST_VERSION" ] && [ "$LAST_VERSION" = "$VERSION" ]; then
+    if [ "$REDEPLOY" = "1" ]; then
+        echo "  $VM already runs $LAST"
+        echo "  --redeploy given — shipping $VERSION again, and saying so in Telegram."
+        REDEPLOY_NOTE=" (REDEPLOY - same version as the previous deploy)"
+    else
+        echo "  $VM already runs $LAST_VERSION — this tree is $VERSION too." >&2
+        echo "  Deploying it again would log a second '$VERSION' to the Releases topic," >&2
+        echo "  and nothing would say which of the two the fleet is running." >&2
+        echo >&2
+        echo "  bump it:      write CHANGELOG.md [Unreleased], then scripts/release.sh patch" >&2
+        echo "  retrying a failed deploy?  scripts/deploy.sh --redeploy" >&2
+        exit 1
+    fi
+elif [ -n "$LAST_VERSION" ]; then
+    echo "  $VM runs $LAST_VERSION, shipping $VERSION"
+else
+    echo "  $VM has no deploy stamp yet — recording one after this deploy"
+fi
 
 # ---------------------------------------------------------------- test
 # Local gate first. Pushing a tree whose tests fail just moves the failure
@@ -107,7 +171,7 @@ rsync -az --delete --itemize-changes \
     "$VM:$REMOTE/"
 
 # ---------------------------------------------------------------- build
-if [ "${1:-deploy}" != "sync" ]; then
+if [ "$MODE" != "sync" ]; then
     step "rebuild $IMAGE"
     # NOT `docker build ... | tail -5`.
     #
@@ -144,18 +208,29 @@ ssh "$VM" "sleep 20"
 
 verify
 
+# ---------------------------------------------------------------- record
+# Stamp the VM with what it now runs, so the next deploy can refuse to ship
+# this version a second time. Written only after verify passed: stamping a
+# deploy that did not land would block the retry that fixes it.
+step "record $VERSION on $VM"
+ssh "$VM" "printf '%s %s %s\n' '$VERSION' '$SHA' \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" > $REMOTE/$STAMP"
+echo "  $VERSION $SHA"
+
 # ---------------------------------------------------------------- notify
 # Tell the Telegram chat a deploy happened, reusing the coordinator's live
 # credentials on the VM (the laptop deliberately has none). Non-fatal: a
 # missed notification must never mark a verified deploy as failed.
 step "notify telegram"
-DEPLOY_DESC="$(cat "$ROOT/VERSION" 2>/dev/null || echo '?') $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
+DEPLOY_DESC="v$VERSION ($SHA)$REDEPLOY_NOTE"
 if ssh "$VM" "docker exec -i rs-coordinator python - \"Deployed facebook_tracker $DEPLOY_DESC to rs-monitor - verified running this tree.\"" <<'PYEOF'
 import os, sys, urllib.parse, urllib.request
 
-data = urllib.parse.urlencode(
-    {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": sys.argv[1]}
-).encode()
+params = {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": sys.argv[1]}
+# Post into the 📦 Releases forum topic when configured (secrets.env,
+# created by scripts/setup-telegram-topics.py); General topic otherwise.
+if os.environ.get("TELEGRAM_TOPIC_RELEASES"):
+    params["message_thread_id"] = os.environ["TELEGRAM_TOPIC_RELEASES"]
+data = urllib.parse.urlencode(params).encode()
 urllib.request.urlopen(
     "https://api.telegram.org/bot" + os.environ["TELEGRAM_TOKEN"] + "/sendMessage",
     data,

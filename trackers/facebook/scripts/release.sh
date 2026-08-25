@@ -43,6 +43,19 @@ case "$BUMP" in
     *) echo "error: '$BUMP' is not a bump keyword or an X.Y.Z version" >&2; exit 2 ;;
 esac
 
+if [ "$NEW" = "$CURRENT" ]; then
+    echo "error: VERSION is already $CURRENT — a release has to move it" >&2
+    exit 2
+fi
+
+# Refuse to go backwards. Deploys are gated on "the VM does not already run
+# this version", so a version that walks back over ground already deployed
+# makes the release log ambiguous in the other direction.
+if [ "$(printf '%s\n%s\n' "$CURRENT" "$NEW" | sort -V | tail -1)" != "$NEW" ]; then
+    echo "error: $NEW is older than the current $CURRENT" >&2
+    exit 2
+fi
+
 echo "release: $CURRENT -> $NEW${DRY:+  (dry run)}"
 
 # ---------------------------------------------------------------- preflight
@@ -75,6 +88,9 @@ sh scripts/check-secrets.sh --all
 
 step "credential scanner still works"
 sh scripts/tests/test-check-secrets.sh
+
+step "deploy version gate still works"
+sh scripts/tests/test-version-gate.sh
 
 step "vendored checkouts match VENDOR.md"
 sh scripts/check-vendor.sh
