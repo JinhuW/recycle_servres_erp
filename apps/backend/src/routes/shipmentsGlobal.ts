@@ -11,9 +11,14 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
-import { toApi, type ShipmentRow } from './shipments';
+import { shipmentColsSql, toApi, type ShipmentRow } from './shipments';
 
-type ListRow = ShipmentRow & {
+// The list never reads the stored quotes or the provider's shipment id, so
+// the SELECT omits them — and the type says so instead of claiming fields
+// that are absent at runtime.
+const LIST_OMIT: ReadonlySet<string> = new Set(['quotes', 'provider_shipment_id']);
+
+type ListRow = Omit<ShipmentRow, 'quotes' | 'provider_shipment_id'> & {
   o_user_name: string;
   o_lifecycle: string;
   wh_id: string | null;
@@ -52,15 +57,7 @@ shipmentsList.get('/', async (c) => {
 
   const rows = (await sql`
     SELECT
-      s.id, s.order_id, s.status,
-      s.from_name, s.from_phone, s.from_street1, s.from_street2,
-      s.from_city, s.from_state, s.from_zip, s.from_country,
-      s.weight_oz::float AS weight_oz, s.length_in::float AS length_in,
-      s.width_in::float AS width_in, s.height_in::float AS height_in,
-      s.carrier, s.service, s.rate_amount::float AS rate_amount, s.rate_currency, s.delivery_days,
-      s.provider, s.tracking_number, s.tracking_url, s.label_delivery_url,
-      s.label_cost::float AS label_cost, s.fees_applied,
-      s.tracking_status, s.tracking_eta, s.last_tracked_at, s.seller_token, s.created_by, s.created_at,
+      ${sql.unsafe(shipmentColsSql('s.', LIST_OMIT))},
       u.name AS o_user_name, o.lifecycle AS o_lifecycle,
       w.id AS wh_id, w.name AS wh_name, w.short AS wh_short, w.region AS wh_region
     FROM shipments s
@@ -96,6 +93,45 @@ shipmentsList.get('/', async (c) => {
     })),
     nextCursor,
   });
+});
+
+// Two integers for the home-screen inbound card, so it stops downloading a
+// 200-row joined list to render a badge. The buckets mirror groupInbound() in
+// apps/frontend/src/lib/shippingInbound.ts and must stay in lockstep with it
+// (the truth-table test in tests/shipments-inbound-counts.test.ts pins them):
+// counting is manager-blind, like the grouping — the early manager create-PO
+// CTA rides on the card without moving its row into "needs".
+shipmentsList.get('/inbound-counts', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const isManager = effectiveRole(u) === 'manager';
+  const mineOnly = c.req.query('mine') === 'true';
+  const shipScope = isManager && !mineOnly ? sql`TRUE` : sql`o.user_id = ${u.id}`;
+  const pkgScope = isManager && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
+
+  const [ship] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE s.status IN ('purchased', 'in_transit'))::int AS moving,
+      COUNT(*) FILTER (
+        WHERE s.status IN ('draft', 'quoted', 'exception')
+           OR (s.status = 'delivered' AND o.lifecycle <> 'done')
+      )::int AS needs
+    FROM shipments s
+    JOIN orders o ON o.id = s.order_id
+    WHERE ${shipScope}
+  `) as unknown as { moving: number; needs: number }[];
+  const [pkg] = (await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE status IN ('purchased', 'in_transit'))::int AS moving,
+      COUNT(*) FILTER (
+        WHERE status = 'exception'
+           OR (status = 'delivered' AND order_id IS NULL)
+      )::int AS needs
+    FROM packages
+    WHERE ${pkgScope}
+  `) as unknown as { moving: number; needs: number }[];
+
+  return c.json({ moving: ship.moving + pkg.moving, needs: ship.needs + pkg.needs });
 });
 
 export const shippingContacts = new Hono<{ Bindings: Env; Variables: { user: User } }>();

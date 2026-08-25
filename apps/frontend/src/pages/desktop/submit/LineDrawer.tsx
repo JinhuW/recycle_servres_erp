@@ -89,10 +89,17 @@ export function LineDrawer({
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
 
-  // AI label dropzone — RAM submit only. The editing variant already shows a
-  // captured-image thumb in the drawer header, so re-scanning there would be
-  // a confusing flow; keep the dropzone scoped to the new-order path.
-  const showDropzone = cat === 'RAM' && !editing;
+  // AI label dropzone — RAM lines that don't already carry a scan. POs raised
+  // outside the submit flow (packages → create-PO) enter their lines on the
+  // edit page, so the editing variant offers the scan too — but only while the
+  // line arrived scanless: one that already had a scan shows the header thumb
+  // instead, and re-scanning over it would be a confusing flow. Frozen at
+  // mount so a scan performed here doesn't unmount the dropzone (and the
+  // confidence notice rendered inside it) the moment it succeeds.
+  // readOnly must gate it explicitly: the dropzone is a div, so the disabled
+  // fieldset wrapping the form doesn't inert it the way it does real inputs.
+  const [hadScanAtMount] = useState(!!scanUrl);
+  const showDropzone = cat === 'RAM' && !readOnly && (!editing || !hadScanAtMount);
   const aiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiDragOver, setAiDragOver] = useState(false);

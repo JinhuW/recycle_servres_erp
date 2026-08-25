@@ -803,6 +803,55 @@ describe('PATCH /api/orders/:id line status is not client-settable', () => {
   });
 });
 
+describe('PATCH /api/orders/:id — AI scan fields persist', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The desktop edit page lets a RAM line be filled from an AI label scan.
+  // The scan's image key and confidence must survive both write paths —
+  // adding a new line and patching an existing hand-entered one — or the
+  // saved order silently loses the label photo the fill came from.
+  it('persists scanImageId/scanConfidence through addLines and a line patch', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    const added = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: {
+        addLines: [{
+          category: 'RAM', brand: 'SK Hynix', qty: 2, unitCost: 20,
+          condition: 'New', scanImageId: 'scan-added-1', scanConfidence: 0.91,
+        }],
+      },
+    });
+    expect(added.status).toBe(200);
+
+    type ScanLine = { id: string; scanImageId: string | null; scanConfidence: number | null };
+    const mid = await api<{ order: { lines: ScanLine[] } }>('GET', '/api/orders/' + id, { token });
+    const newLine = mid.body.order.lines.find(l => l.scanImageId === 'scan-added-1');
+    expect(newLine?.scanConfidence).toBeCloseTo(0.91);
+
+    const handEntered = mid.body.order.lines.find(l => l.scanImageId == null)!;
+    const patched = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: { lines: [{ id: handEntered.id, brand: 'Samsung', scanImageId: 'scan-patched-1', scanConfidence: 0.87 }] },
+    });
+    expect(patched.status).toBe(200);
+
+    const after = await api<{ order: { lines: ScanLine[] } }>('GET', '/api/orders/' + id, { token });
+    const patchedLine = after.body.order.lines.find(l => l.id === handEntered.id)!;
+    expect(patchedLine.scanImageId).toBe('scan-patched-1');
+    expect(patchedLine.scanConfidence).toBeCloseTo(0.87);
+  });
+});
+
 describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
   beforeEach(async () => { await resetDb(); });
 

@@ -5,6 +5,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtMoney } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { navigate } from '../../lib/route';
+import { needsCompletePo, waitingSeller } from '../../lib/shippingInbound';
 import { STATUS_CHIP, fmtEta } from '../../lib/shippingList';
 import type { Shipment, ShipmentStatus } from '../../lib/types';
 
@@ -156,7 +157,7 @@ export function ShippingPanel({ orderId, canEdit, onMutated, orderLifecycle }: P
                     : t('shipAwaitingSellerTitle')}
                 </span>
               )}
-              {isPending && !s.complete && s.sellerToken ? (
+              {waitingSeller(s) ? (
                 <span className="chip warn dot" style={{ fontSize: 11 }}>{t('shipWaitingSeller')}</span>
               ) : (
                 <span className={'chip dot ' + chip.cls} style={{ fontSize: 11 }}>{t(chip.key)}</span>
@@ -204,7 +205,7 @@ export function ShippingPanel({ orderId, canEdit, onMutated, orderLifecycle }: P
               </div>
             )}
 
-            {s.status === 'delivered' && orderLifecycle != null && orderLifecycle !== 'done' && (
+            {needsCompletePo(s.status, orderLifecycle) && (
               <div className="ship-delivered-cta">
                 <Icon name="check2" size={15} />
                 <span>{t('shipDeliveredCtaHint')}</span>

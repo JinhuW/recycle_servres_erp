@@ -11,7 +11,7 @@ import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { linePhotos } from '../lib/linePhotos';
-import { api, deleteOrder, archiveOrder, unarchiveOrder, listShipments } from '../lib/api';
+import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
@@ -85,16 +85,9 @@ export function OrderDetail({
   const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canAnnotate = !orderLocked && isOwnerOrManager;
 
-  // Shipping quick link — count only; the labels themselves live on /shipping.
-  // Silent on failure: a nav row that can't count just doesn't show.
-  const [shipmentCount, setShipmentCount] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    listShipments(order.id)
-      .then(r => { if (alive) setShipmentCount(r.items.length); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [order.id]);
+  // Shipping quick link — count only; the labels themselves live on /shipping,
+  // so the detail payload carries the number instead of a second fetch.
+  const shipmentCount = order.shipmentCount;
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // What the server says the order's meta is, as one comparable string. The
@@ -659,6 +652,13 @@ export function OrderDetail({
               {order.commissionRate != null ? (order.commissionRate * 100).toFixed(2) + '%' : '—'}
             </span>
           </div>
+
+          {order.paypalTxnId && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8 }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('poPaypalTxn')}</span>
+              <span className="mono" style={{ fontWeight: 600 }}>{order.paypalTxnId}</span>
+            </div>
+          )}
 
           {/* Goods, then fees, then the total they add up to — the same stack
               the desktop edit page shows, so the number is never a surprise. */}

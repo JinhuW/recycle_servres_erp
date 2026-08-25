@@ -12,7 +12,7 @@ function order(over: Partial<OrderSummary>): OrderSummary {
     id: 'PO-1', userId: 'u1', userName: 'Ada', userInitials: 'A', commissionRate: null,
     category: 'RAM', categories: [], payment: 'company', notes: null, lifecycle: 'draft',
     archivedAt: null, createdAt: '2026-08-01T00:00:00Z', totalCost: null, otherFees: 0,
-    otherFeesNote: null, warehouse: null, qty: 0, revenue: 0, profit: 0, lineCount: 0, status: 'Draft',
+    otherFeesNote: null, paypalTxnId: null, warehouse: null, qty: 0, revenue: 0, profit: 0, lineCount: 0, status: 'Draft',
     ...over,
   };
 }
@@ -115,7 +115,8 @@ describe('matchSellers', () => {
 function pkg(over: Partial<TrackedPackage>): TrackedPackage {
   return {
     id: 'p1', trackingNumber: '1Z999AA10123456784', carrier: 'UPS', status: 'in_transit',
-    trackingEta: null, lastTrackedAt: null, sellerName: null, note: null, orderId: null,
+    trackingEta: null, lastTrackedAt: null, sellerName: null, note: null,
+    paypalTxnId: null, paymentScreenshotUrl: null, orderId: null,
     trackingUrl: null, createdAt: '2026-08-04T00:00:00Z',
     ...over,
   };

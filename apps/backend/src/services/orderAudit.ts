@@ -42,6 +42,7 @@ export const META_FIELDS = [
   'commission_rate',
   'other_fees',
   'other_fees_note',
+  'paypal_txn_id',
 ] as const;
 
 // Line-level fields PATCH may update. Excludes ids/positions/scan refs and the

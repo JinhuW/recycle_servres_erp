@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhoneListSkeleton } from '../components/Skeleton';
@@ -354,6 +355,52 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
         <div className="ph-field">
           <label>{t('shipSellerName')}</label>
           <input className="input" value={f.sellerName} onChange={(e) => f.setSellerName(e.target.value)} autoComplete="off" />
+        </div>
+
+        <div className="ph-field">
+          <label>{t('shipPayTitle')}</label>
+          <div className="ph-ship-add-hint">{t('shipPaySub')}</div>
+          {f.screenshot ? (
+            <div className="ship-pay-shot">
+              <img src={f.screenshot.preview} alt={t('shipPayTitle')} />
+              <button className="btn ghost sm" onClick={f.removeScreenshot}>
+                {t('shipPayRemoveShot')}
+              </button>
+            </div>
+          ) : (
+            <AttachmentDropzone
+              onFiles={(files) => void f.handlePaymentFile(files)}
+              uploading={f.scanBusy}
+              accept="image/*"
+              multiple={false}
+              capture="environment"
+              compact
+              boxHint={t('shipPayBoxHint')}
+            />
+          )}
+          {f.scanNoticeKey && (
+            <div className="ph-ship-add-hint" role="status">{t(f.scanNoticeKey)}</div>
+          )}
+          {f.scanError && (
+            <div className="ph-ship-add-hint" role="alert">
+              {f.scanError === 'images-only' ? t('aiOnlyImages') : t('shipPayScanFailed')}
+            </div>
+          )}
+        </div>
+
+        <div className="ph-field">
+          <label>{t('shipPayTxnLabel')}</label>
+          <input
+            className="input mono"
+            value={f.paypalTxnId}
+            onChange={(e) => f.setPaypalTxnId(e.target.value)}
+            placeholder={t('shipPayTxnPh')}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <div className="ph-ship-add-hint" aria-live="polite">
+            {f.txnLooksOdd ? t('shipPayTxnFormatHint') : ' '}
+          </div>
         </div>
       </div>
       <div className="ph-action-bar">

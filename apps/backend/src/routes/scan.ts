@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { uploadAttachment } from '../r2';
 import { scanLabel } from '../ai';
+import { extractPaypalTxn } from '../ai/paypal';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
 import { appendErrorRecord } from '../lib/error-log';
@@ -16,6 +17,17 @@ const scanTimestamps = new Map<string, number[]>();
 const SCAN_WINDOW_MS = 60_000;
 const SCAN_MAX = 20;
 
+// Shared budget across both scan kinds — same user, same abuse surface.
+function rateLimited(userId: string): number | null {
+  const now = Date.now();
+  const cutoff = now - SCAN_WINDOW_MS;
+  const prev = (scanTimestamps.get(userId) ?? []).filter(t => t > cutoff);
+  if (prev.length >= SCAN_MAX) return Math.ceil((prev[0]! - cutoff) / 1000);
+  prev.push(now);
+  scanTimestamps.set(userId, prev);
+  return null;
+}
+
 // Single endpoint: receive a multipart upload, store the image in R2 (same
 // bucket as sell-order attachments, under a label-scans/ prefix), run OCR,
 // persist a label_scan row, return the extraction. The camera flow on phone
@@ -23,20 +35,10 @@ const SCAN_MAX = 20;
 scan.post('/label', async (c) => {
   const u = c.var.user;
 
-  // Rate-limit check: slide the window forward, then count.
-  const now = Date.now();
-  const cutoff = now - SCAN_WINDOW_MS;
-  const prev = (scanTimestamps.get(u.id) ?? []).filter(t => t > cutoff);
-  if (prev.length >= SCAN_MAX) {
-    const retryAfter = Math.ceil((prev[0]! - cutoff) / 1000);
-    return c.json(
-      { error: 'Too many scans, please wait.' },
-      429,
-      { 'Retry-After': String(retryAfter) },
-    );
+  const retryAfter = rateLimited(u.id);
+  if (retryAfter !== null) {
+    return c.json({ error: 'Too many scans, please wait.' }, 429, { 'Retry-After': String(retryAfter) });
   }
-  prev.push(now);
-  scanTimestamps.set(u.id, prev);
   const sql = getDb(c.env);
 
   const form = await c.req.formData().catch(() => null);
@@ -149,6 +151,61 @@ scan.post('/label', async (c) => {
     imageId: uploaded.storageKey,
     deliveryUrl,
     extracted: result.fields,
+    confidence: result.confidence,
+    provider: result.provider,
+  });
+});
+
+// PayPal payment screenshot → transaction id, for the add-package form. Same
+// shape as /label minus the category machinery. Nothing is persisted here:
+// label_scans is category-checked, and the screenshot reference only matters
+// once the package row exists — POST /api/packages carries it there. An
+// abandoned scan leaves just an R2 object, like an abandoned label shot.
+scan.post('/payment', async (c) => {
+  const u = c.var.user;
+
+  const retryAfter = rateLimited(u.id);
+  if (retryAfter !== null) {
+    return c.json({ error: 'Too many scans, please wait.' }, 429, { 'Retry-After': String(retryAfter) });
+  }
+  const sql = getDb(c.env);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'multipart/form-data required' }, 400);
+  const file = form.get('file') as File | null;
+  if (!(file instanceof File)) return c.json({ error: 'file is required' }, 400);
+
+  const { maxBytes, allowedMime } = await getUploadLimits(sql);
+  const imageMime = new Set([...allowedMime].filter(m => m.startsWith('image/')));
+  const mime = file.type || '';
+  if (!imageMime.has(mime)) {
+    return c.json({ error: `unsupported image type: ${mime || 'unknown'}` }, 415);
+  }
+  if (file.size > maxBytes) {
+    return c.json({ error: `file too large (max ${maxBytes} bytes)` }, 413);
+  }
+
+  const uploaded = await uploadAttachment(c.env, file, 'payment-screens').catch((e) => {
+    console.error('payment screenshot upload error', e);
+    return null;
+  });
+  if (!uploaded) return c.json({ error: 'image upload failed' }, 502);
+  const deliveryUrl = uploaded.provider === 'stub'
+    ? `data:image/placeholder;name=${uploaded.storageKey}`
+    : uploaded.deliveryUrl;
+
+  let result;
+  try {
+    result = await extractPaypalTxn(c.env, await file.arrayBuffer());
+  } catch (e) {
+    console.error('payment ocr error', e);
+    return c.json({ error: 'payment OCR failed — retry the shot' }, 502);
+  }
+
+  return c.json({
+    storageKey: uploaded.storageKey,
+    deliveryUrl,
+    txnId: result.txnId,
     confidence: result.confidence,
     provider: result.provider,
   });

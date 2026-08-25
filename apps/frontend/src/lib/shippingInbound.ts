@@ -14,19 +14,44 @@ export type InboundAction =
   | { kind: 'finish-desktop' }
   | null;
 
+// The three per-row decisions below are shared with the desktop surfaces
+// (DesktopShipping, ShippingPanel), which present them differently — chip vs
+// CTA — but must agree on when they apply.
+
+/** A standalone package can grow its PO: delivered normally, any status for a
+ *  manager — tracking isn't wired to a live carrier feed yet, so a package can
+ *  stall before "delivered" and the server holds the same line. */
+export function canCreatePo(
+  pkg: { orderId: string | null; status: string }, manager: boolean,
+): boolean {
+  return !pkg.orderId && (pkg.status === 'delivered' || manager);
+}
+
+/** A delivered label asks for the PO to be completed until its book closes. */
+export function needsCompletePo(
+  status: string, orderLifecycle: string | null | undefined,
+): boolean {
+  return status === 'delivered' && orderLifecycle != null && orderLifecycle !== 'done';
+}
+
+/** The seller link is out and the seller hasn't finished the form. */
+export function waitingSeller(
+  s: { status: string; complete: boolean; sellerToken: string | null },
+): boolean {
+  return (s.status === 'draft' || s.status === 'quoted') && !s.complete && !!s.sellerToken;
+}
+
 export function inboundAction(row: InboundRow, manager = false): InboundAction {
   if (row.kind === 'package') {
-    if (row.pkg.orderId) return null;
-    // Tracking isn't wired to a live carrier feed yet, so a package can stall
-    // before "delivered". Managers may mint the PO at any status (the server
-    // holds the same line); purchasers still wait for delivery. Grouping stays
-    // manager-blind — an undelivered package is still "moving", the early CTA
-    // just rides along on its card.
-    return row.pkg.status === 'delivered' || manager ? { kind: 'create-po' } : null;
+    // Grouping stays manager-blind — an undelivered package is still "moving",
+    // the early manager CTA just rides along on its card.
+    return canCreatePo(row.pkg, manager) ? { kind: 'create-po' } : null;
   }
   const s = row.shipment;
   if (s.status === 'delivered') {
-    return row.order.lifecycle !== 'done' ? { kind: 'complete-po', orderId: row.order.id } : null;
+    return needsCompletePo(s.status, row.order.lifecycle)
+      ? { kind: 'complete-po', orderId: row.order.id }
+      : null;
   }
   if (s.status === 'draft' || s.status === 'quoted') {
     // Buying happens on desktop; the phone's job is the honest handoff.
@@ -82,7 +107,10 @@ export function groupInbound(rows: InboundRow[]): InboundGroups {
   return g;
 }
 
-/** Live counts for the home-screen card. */
+/** Live counts for a loaded row set. The home-screen card doesn't call this —
+ *  it reads GET /api/shipments/inbound-counts, whose SQL buckets mirror
+ *  groupInbound above; a membership change here must be mirrored there
+ *  (backend tests/shipments-inbound-counts.test.ts pins the truth table). */
 export function inboundSummary(rows: InboundRow[]): { moving: number; needs: number } {
   const g = groupInbound(rows);
   return { moving: g.moving.length, needs: g.needs.length };

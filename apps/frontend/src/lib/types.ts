@@ -147,6 +147,9 @@ export type OrderSummary = {
   totalCost: number | null;
   otherFees: number;
   otherFeesNote: string | null;
+  // PayPal payment reference, seeded from the tracked package's screenshot
+  // scan when the PO is minted from one; manager-editable after submission.
+  paypalTxnId: string | null;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,
@@ -175,7 +178,7 @@ export type OrderStatusMeta = Record<string, {
 // so they are dropped here rather than left declared and absent at runtime.
 export type Order =
   Omit<OrderSummary, 'lineCount' | 'qty' | 'revenue' | 'profit'>
-  & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
+  & { lines: OrderLine[]; statusMeta?: OrderStatusMeta; shipmentCount: number };
 
 export type OrderEventKind =
   | 'created'

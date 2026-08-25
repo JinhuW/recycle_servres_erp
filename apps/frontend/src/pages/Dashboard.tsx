@@ -10,10 +10,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
 import { navigate } from '../lib/route';
-import { listPackages } from '../lib/packages';
-import { mergeInbound, type ShipOrder } from '../lib/shippingList';
-import { inboundSummary } from '../lib/shippingInbound';
-import type { DashboardData, Shipment } from '../lib/types';
+import type { DashboardData } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
 type Props = {
@@ -45,17 +42,8 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
   const [inbound, setInbound] = useState<{ moving: number; needs: number } | null>(null);
   useEffect(() => {
     let alive = true;
-    Promise.all([
-      api.get<{ items: (Shipment & { order: ShipOrder })[] }>('/api/shipments?limit=200&mine=true'),
-      listPackages({ mine: true }),
-    ])
-      .then(([shipments, packages]) => {
-        if (!alive) return;
-        setInbound(inboundSummary(mergeInbound(
-          shipments.items.map(({ order, ...shipment }) => ({ order, shipment })),
-          packages.items,
-        )));
-      })
+    api.get<{ moving: number; needs: number }>('/api/shipments/inbound-counts?mine=true')
+      .then(r => { if (alive) setInbound(r); })
       .catch(() => {});
     return () => { alive = false; };
   }, [effRole]);
