@@ -28,6 +28,7 @@ import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
 import coordinatorRoutes from './routes/coordinator';
+import bankTxRoutes from './routes/bankTx';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
@@ -283,6 +284,8 @@ app.route('/api/oauth/clients', oauthAdmin);
 app.route('/api/tracker', trackerRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/coordinator', coordinatorRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/bank-transactions', bankTxRoutes);
 
 // Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
 // and are bearer-equivalent secrets — the only gate to a vendor's data. A
