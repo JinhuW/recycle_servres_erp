@@ -80,6 +80,16 @@ export function Orders({ onEdit, onToast }: Props) {
     return () => { alive = false; };
   }, [openId]);
 
+  // The all-status view hides Done POs — the "Done" chip is the explicit way
+  // to see them. A deep-linked done order stays visible while expanded so
+  // /purchase-orders/:id links keep working.
+  const visibleOrders = useMemo(
+    () => statusFilter === 'all'
+      ? orders.filter(o => !isCompleted(o.status) || o.id === openId)
+      : orders,
+    [orders, statusFilter, openId],
+  );
+
   // CC-5: when the URL matches /purchase-orders/:id, expand that row and (if
   // editable) push to the review screen. Fires whenever route or the
   // currently-loaded list changes. We track the last-handled id in a
@@ -111,7 +121,7 @@ export function Orders({ onEdit, onToast }: Props) {
     <>
       <PhHeader
         title={t('ordersHeading')}
-        sub={t('ordersSubmitted', { n: orders.length })}
+        sub={t('ordersSubmitted', { n: visibleOrders.length })}
         scrolled={scrolled}
         trailing={
           <button
@@ -163,7 +173,7 @@ export function Orders({ onEdit, onToast }: Props) {
           </button>
         </div>
         {!loadedOnce && <PhoneListSkeleton rows={5} variant="order" />}
-        {loadedOnce && orders.length === 0 && (
+        {loadedOnce && visibleOrders.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {t('noOrdersMatch')}
           </div>
@@ -172,13 +182,13 @@ export function Orders({ onEdit, onToast }: Props) {
         {loadedOnce && (() => {
           const q = searchQ.trim().toLowerCase();
           const filtered = q
-            ? orders.filter(o =>
+            ? visibleOrders.filter(o =>
                 o.id.toLowerCase().includes(q) ||
                 (o.warehouse?.short ?? '').toLowerCase().includes(q) ||
                 (o.warehouse?.region ?? '').toLowerCase().includes(q) ||
                 o.userName.toLowerCase().includes(q)
               )
-            : orders;
+            : visibleOrders;
           return filtered.slice(0, 30).map(o => {
           const isOpen = openId === o.id;
           const unpriced = o.unpricedLineCount ?? 0;
