@@ -1,7 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
-import { notifyManagers } from '../lib/notify';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
 import {
@@ -17,6 +16,7 @@ import {
 } from '../lib/categoryColumns';
 import { advanceOrderTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
+import { insertDraftOrderTx } from '../services/orderDraft';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
@@ -1576,27 +1576,14 @@ orders.post('/draft', async (c) => {
   // Allocated inside the transaction so a rollback also rolls back the counter.
   let newId!: string;
   await sql.begin(async (tx) => {
-    newId = await nextHumanId(tx, 'PO', 'PO');
-    await tx`
-      INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
-      VALUES (
-        ${newId}, ${owner.ownerId}, ${body?.category ?? 'Mixed'},
-        ${warehouseId}, ${body?.payment ?? 'company'}, ${body?.notes ?? null},
-        ${null}, 'draft'
-      )
-    `;
-    await writeOrderEvent(tx, newId, u.id, 'created', {
-      // Omitted rather than null when the draft has no category yet: the
-      // timeline interpolates whatever is here, and a null rendered as the
-      // literal text "null" as the first line of every phone-started PO.
-      ...(body?.category ? { category: body.category } : {}),
-      categories: [],
-      lineCount: 0,
-      qty: 0,
-      totalCost: null,
-      ...(owner.ownerId !== u.id
-        ? { onBehalfOfUserId: owner.ownerId, onBehalfOfName: owner.ownerName }
-        : {}),
+    newId = await insertDraftOrderTx(tx, {
+      ownerId: owner.ownerId,
+      actorId: u.id,
+      category: body?.category,
+      warehouseId,
+      payment: body?.payment,
+      notes: body?.notes,
+      onBehalfOfName: owner.ownerName,
     });
   });
 

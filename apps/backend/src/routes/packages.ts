@@ -8,8 +8,7 @@ import { CARRIERS, normalizeTracking, type Carrier } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
-import { nextHumanId } from '../lib/id-seq';
-import { writeOrderEvent } from '../services/orderAudit';
+import { insertDraftOrderTx } from '../services/orderDraft';
 import { carrierTrackingUrl } from '../shipping';
 
 const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -137,7 +136,6 @@ packages.post('/:id/create-po', async (c) => {
     // still wait for delivery.
     if (row.status !== 'delivered' && u.role !== 'manager') return { kind: 'notDelivered' };
 
-    const orderId = await nextHumanId(tx, 'PO', 'PO');
     const source = row.status === 'delivered' ? 'Created from delivered package' : 'Created from package';
     const notes = [source, row.carrier, row.tracking_number, row.seller_name]
       .filter(Boolean).join(' · ');
@@ -158,17 +156,12 @@ packages.post('/:id/create-po', async (c) => {
     const warehouseId = ownerId !== u.id
       ? ownerRow?.defaultWarehouseId ?? null
       : u.defaultWarehouseId;
-    await tx`
-      INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
-      VALUES (${orderId}, ${ownerId}, 'Mixed', ${warehouseId}, 'company', ${notes}, ${null}, 'draft')
-    `;
-    const ownerName = ownerRow?.name ?? null;
-    await writeOrderEvent(tx, orderId, u.id, 'created', {
-      categories: [],
-      lineCount: 0,
-      qty: 0,
-      totalCost: null,
-      ...(ownerId !== u.id ? { onBehalfOfUserId: ownerId, onBehalfOfName: ownerName } : {}),
+    const orderId = await insertDraftOrderTx(tx, {
+      ownerId,
+      actorId: u.id,
+      warehouseId,
+      notes,
+      onBehalfOfName: ownerRow?.name ?? null,
     });
     await tx`UPDATE packages SET order_id = ${orderId} WHERE id = ${id}`;
     return { kind: 'ok', orderId };
