@@ -121,6 +121,10 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const [stageFilter, setStageFilter] = usePersisted<'all' | string>('desktop.orders.stageFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.orders.search', '');
   const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.orders.showArchived', false);
+  // Off by default: the list opens on active POs only. A specific stage pick
+  // (including Done itself) is an explicit request, so the prune only applies
+  // to the all-stages view — same contract as the sell-order list.
+  const [showDone, setShowDone] = usePersisted<boolean>('desktop.orders.showDone', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -194,10 +198,18 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
     return orders.filter(o => o.id.toLowerCase().includes(q) || o.userName.toLowerCase().includes(q));
   }, [orders, search]);
 
+  // The all-stages view hides Done POs unless the toggle is on; the stage
+  // rail's own Done chip still shows them because a stage pick bypasses the
+  // prune — same contract as the sell-order list.
+  const activeVisible = useMemo(
+    () => showDone ? visible : visible.filter(o => !isCompleted(o.status)),
+    [visible, showDone],
+  );
+
   // Apply stage filter on top of scope/search.
   const stageFiltered = useMemo(
-    () => stageFilter === 'all' ? visible : visible.filter(o => o.lifecycle === stageFilter),
-    [visible, stageFilter],
+    () => stageFilter === 'all' ? activeVisible : visible.filter(o => o.lifecycle === stageFilter),
+    [visible, activeVisible, stageFilter],
   );
 
   // Sort comes last — after all filters.
@@ -300,6 +312,24 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn"
+              onClick={() => setShowDone(v => !v)}
+              aria-pressed={showDone}
+              disabled={stageFilter !== 'all'}
+              title={stageFilter !== 'all'
+                ? t('closedDoneToggleAllOnly')
+                : showDone ? t('hideDonePOs') : t('showDonePOs')}
+              style={{
+                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: showDone ? 'var(--bg-soft)' : undefined,
+                borderColor: showDone ? 'var(--border-strong)' : undefined,
+                color: showDone ? 'var(--fg)' : 'var(--fg-muted)',
+              }}
+            >
+              <Icon name="check2" size={12} />
+              {showDone ? t('hideDoneBtn') : t('showDoneBtn')}
+            </button>
             <button
               className="btn"
               onClick={() => setShowArchived(v => !v)}
@@ -420,7 +450,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
               onClick={() => setStageFilter('all')}
             >
               {t('all')}
-              <span className="mono sc-n">{visible.length}</span>
+              <span className="mono sc-n">{activeVisible.length}</span>
             </button>
             {stages.map(s => {
               const agg = stageAgg[s.id] ?? { count: 0, revenue: 0 };
