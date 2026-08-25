@@ -45,6 +45,15 @@ describe('inboundAction', () => {
     expect(inboundAction(pkgRow({ status: 'delivered', orderId: 'PO-9' }))).toBeNull();
   });
 
+  it('a manager may create the PO before delivery — tracking-stall workaround', () => {
+    expect(inboundAction(pkgRow({ status: 'purchased' }), true)).toEqual({ kind: 'create-po' });
+    expect(inboundAction(pkgRow({ status: 'in_transit' }), true)).toEqual({ kind: 'create-po' });
+    // Already linked: nothing to mint, manager or not.
+    expect(inboundAction(pkgRow({ status: 'in_transit', orderId: 'PO-9' }), true)).toBeNull();
+    // Non-managers still wait for delivery.
+    expect(inboundAction(pkgRow({ status: 'in_transit' }), false)).toBeNull();
+  });
+
   it('delivered shipment on an unfinished PO asks to complete it', () => {
     expect(inboundAction(shipRow({ id: 'PO-3', lifecycle: 'in_transit' }, { status: 'delivered' })))
       .toEqual({ kind: 'complete-po', orderId: 'PO-3' });

@@ -131,12 +131,15 @@ packages.post('/:id/create-po', async (c) => {
     if (!row) return { kind: 'notFound' };
     if (!canMutate(u, row)) return { kind: 'forbidden' };
     if (row.order_id) return { kind: 'linked', orderId: row.order_id };
-    // The agreed flow is PO-on-delivery; the button only shows then, and the
-    // server holds the same line.
-    if (row.status !== 'delivered') return { kind: 'notDelivered' };
+    // The agreed flow is PO-on-delivery, but tracking isn't wired to a live
+    // carrier feed yet, so rows can sit in purchased/in_transit forever.
+    // Managers may mint the PO at any status as the workaround; purchasers
+    // still wait for delivery.
+    if (row.status !== 'delivered' && u.role !== 'manager') return { kind: 'notDelivered' };
 
     const orderId = await nextHumanId(tx, 'PO', 'PO');
-    const notes = ['Created from delivered package', row.carrier, row.tracking_number, row.seller_name]
+    const source = row.status === 'delivered' ? 'Created from delivered package' : 'Created from package';
+    const notes = [source, row.carrier, row.tracking_number, row.seller_name]
       .filter(Boolean).join(' · ');
     // The PO belongs to whoever tracked the box, not whoever clicked: the
     // delivered notification goes to the creator, and ownership drives "my
@@ -144,13 +147,22 @@ packages.post('/:id/create-po', async (c) => {
     // notification files it for them — the same on-behalf semantics as
     // POST /api/orders, with the same audit fields.
     const ownerId = row.created_by ?? u.id;
+    // The box lands at the owner's home warehouse unless they say otherwise —
+    // same defaulting as POST /api/orders.
+    const ownerRow = ownerId !== u.id
+      ? (await tx`
+          SELECT name, default_warehouse_id AS "defaultWarehouseId"
+          FROM users WHERE id = ${ownerId} LIMIT 1
+        `)[0] as { name: string; defaultWarehouseId: string | null } | undefined
+      : undefined;
+    const warehouseId = ownerId !== u.id
+      ? ownerRow?.defaultWarehouseId ?? null
+      : u.defaultWarehouseId;
     await tx`
       INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
-      VALUES (${orderId}, ${ownerId}, 'Mixed', ${null}, 'company', ${notes}, ${null}, 'draft')
+      VALUES (${orderId}, ${ownerId}, 'Mixed', ${warehouseId}, 'company', ${notes}, ${null}, 'draft')
     `;
-    const ownerName = ownerId !== u.id
-      ? ((await tx`SELECT name FROM users WHERE id = ${ownerId} LIMIT 1`)[0] as { name: string } | undefined)?.name ?? null
-      : null;
+    const ownerName = ownerRow?.name ?? null;
     await writeOrderEvent(tx, orderId, u.id, 'created', {
       categories: [],
       lineCount: 0,
