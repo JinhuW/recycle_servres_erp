@@ -188,10 +188,12 @@ function OrderForm({
   // "my orders", notifications). '' means the manager keeps it themselves.
   const isManager = user?.role === 'manager';
   const [onBehalfOfUserId, setOnBehalfOfUserId] = useState('');
-  const [purchasers, setPurchasers] = useState<{ id: string; name: string }[]>([]);
+  const [purchasers, setPurchasers] = useState<
+    { id: string; name: string; defaultWarehouseId?: string | null }[]
+  >([]);
   useEffect(() => {
     if (!isManager) return;
-    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
+    api.get<{ items: { id: string; name: string; role: string; defaultWarehouseId?: string | null }[] }>('/api/members')
       .then(r => setPurchasers(r.items.filter(m => m.role === 'purchaser')))
       .catch(handleFetchError);
   }, [isManager]);
@@ -329,12 +331,21 @@ function OrderForm({
     [allDrafts, user?.id, orderId],
   );
 
-  // Default the warehouse to the first one once they load.
+  // The warehouse follows the order's owner until it's picked by hand: the
+  // on-behalf purchaser's home warehouse when filing for someone, else the
+  // current user's, else the first in the list.
+  const [warehouseTouched, setWarehouseTouched] = useState(false);
+  const ownerDefaultWh = onBehalfOfUserId
+    ? purchasers.find(p => p.id === onBehalfOfUserId)?.defaultWarehouseId
+    : user?.defaultWarehouseId;
   useEffect(() => {
-    if (warehouses.length && !meta.warehouseId) {
-      setMeta(m => ({ ...m, warehouseId: warehouses[0].id }));
-    }
-  }, [warehouses, meta.warehouseId]);
+    if (!warehouses.length || warehouseTouched) return;
+    const preferred =
+      ownerDefaultWh && warehouses.some(w => w.id === ownerDefaultWh)
+        ? ownerDefaultWh
+        : warehouses[0].id;
+    setMeta(m => (m.warehouseId === preferred ? m : { ...m, warehouseId: preferred }));
+  }, [warehouses, warehouseTouched, ownerDefaultWh]);
 
   const totals = useMemo(() => {
     let units = 0, cost = 0;
@@ -965,7 +976,10 @@ function OrderForm({
               id="sub-warehouse"
               className="select"
               value={meta.warehouseId}
-              onChange={e => setMeta(m => ({ ...m, warehouseId: e.target.value }))}
+              onChange={e => {
+                setWarehouseTouched(true);
+                setMeta(m => ({ ...m, warehouseId: e.target.value }));
+              }}
             >
               {warehouses.length === 0 && <option value="">{t('loadingApp')}</option>}
               {warehouses.map(w => (

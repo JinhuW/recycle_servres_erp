@@ -85,6 +85,7 @@ export const authMiddleware: MiddlewareHandler<{
   const sql = getDb(c.env);
   const rows = await sql<User[]>`
     SELECT id, email, name, initials, role, team, language,
+           default_warehouse_id AS "defaultWarehouseId",
            COALESCE(preferences, '{}'::jsonb) AS preferences
     FROM users
     WHERE id = ${payload.sub} AND active = TRUE

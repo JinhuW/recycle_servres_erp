@@ -333,6 +333,7 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
                     key={row.pkg.id}
                     pkg={row.pkg}
                     locale={locale}
+                    isManager={isManager}
                     copied={copied}
                     onCopy={copyTracking}
                     onMutated={reload}
@@ -360,9 +361,10 @@ function GlobalShipping({ showToast }: { showToast: (msg: string, kind?: ToastKi
 
 // A standalone tracked package: an external label with no PO behind it yet.
 // The PO is born when the box arrives — that's the whole point of the row.
-function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: {
+function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, showToast }: {
   pkg: TrackedPackage;
   locale: string;
+  isManager: boolean;
   copied: string | null;
   onCopy: (tn: string) => void;
   onMutated: () => void;
@@ -454,7 +456,9 @@ function PackageTableRow({ pkg, locale, copied, onCopy, onMutated, showToast }: 
       </td>
       <td className="num" style={{ cursor: 'default' }}>
         <div style={{ display: 'inline-flex', gap: 6 }}>
-          {pkg.status === 'delivered' && !pkg.orderId && (
+          {/* Tracking isn't live yet, so status can stall before "delivered" —
+              managers may mint the PO early; the server enforces the same rule. */}
+          {!pkg.orderId && (pkg.status === 'delivered' || isManager) && (
             <button className="btn accent sm" disabled={busy} onClick={() => void createPo()}>
               {t('shipCreatePo')}
             </button>

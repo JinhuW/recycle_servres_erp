@@ -48,13 +48,30 @@ me.get('/', async (c) => {
 });
 
 me.patch('/', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { language?: 'en' | 'zh' } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    | { language?: 'en' | 'zh'; defaultWarehouseId?: string | null }
+    | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
 
   const u = c.var.user;
   const sql = getDb(c.env);
   if (body.language && (body.language === 'en' || body.language === 'zh')) {
     await sql`UPDATE users SET language = ${body.language} WHERE id = ${u.id}`;
+  }
+  // null clears the default; a non-null value must name a real warehouse so a
+  // stale client can't wedge an id the FK would 500 on.
+  if (body.defaultWarehouseId !== undefined) {
+    const whId = body.defaultWarehouseId;
+    if (whId !== null) {
+      if (typeof whId !== 'string') {
+        return c.json({ error: 'defaultWarehouseId must be a warehouse id or null' }, 400);
+      }
+      const wh = await sql<{ id: string }[]>`
+        SELECT id FROM warehouses WHERE id = ${whId} LIMIT 1
+      `;
+      if (!wh.length) return c.json({ error: 'Unknown warehouse' }, 400);
+    }
+    await sql`UPDATE users SET default_warehouse_id = ${whId} WHERE id = ${u.id}`;
   }
   return c.json({ ok: true });
 });
