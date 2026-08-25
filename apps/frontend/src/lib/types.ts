@@ -184,6 +184,7 @@ export type OrderEventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'owner_changed'
   | 'status_meta_changed'
   | 'line_photo_added'
   | 'line_photo_removed'
