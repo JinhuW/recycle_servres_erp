@@ -717,7 +717,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // Manager filing a PO for a purchaser
     poOnBehalfLabel: 'Purchaser',
     poOnBehalfSelf: 'Myself',
-    poOnBehalfLocked: 'The owner is fixed once the order is created',
+    poOnBehalfLocked: 'Owner is set — change it from the order page',
+    eoOwnerLockedDone: 'A Done order keeps its owner',
+    acOwnerChanged: 'Purchaser changed',
 
     // StatusChangeDialog
     statusShippedTitle: 'Mark as Shipped',

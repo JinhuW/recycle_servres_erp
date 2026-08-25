@@ -310,6 +310,33 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     return () => { alive = false; };
   }, []);
 
+  // A manager may hand the PO to a different purchaser (or take it back) at
+  // any stage short of Done — ownership drives commission and "my orders".
+  const [ownerId, setOwnerId] = useState(order.userId);
+  const [purchasers, setPurchasers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (isPurchaser) return;
+    let alive = true;
+    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
+      .then(r => { if (alive) setPurchasers(r.items.filter(m => m.role === 'purchaser')); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [isPurchaser]);
+  const ownerDirty = ownerId !== order.userId;
+  // The member list holds purchasers only; the current owner (possibly a
+  // manager) and the signed-in manager both need a row so the select can
+  // show the order as-is and offer "take it back".
+  const ownerOptions = useMemo(() => {
+    const opts = purchasers.map(p => ({ ...p }));
+    const ensure = (id?: string, name?: string | null) => {
+      if (!id || opts.some(o => o.id === id)) return;
+      opts.unshift({ id, name: name ?? id });
+    };
+    ensure(order.userId, order.userName);
+    ensure(user?.id, user?.name);
+    return opts;
+  }, [purchasers, order.userId, order.userName, user?.id, user?.name]);
+
   // Escape closes the drawer; if none open, closes the page.
   // When the delete modal is open, Escape dismisses it (if not mid-delete)
   // and does NOT fall through to the page-close / drawer-close logic.
@@ -516,7 +543,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   const dirty =
     statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
-    || commissionDirty || otherFeesDirty || otherFeesNoteDirty;
+    || commissionDirty || otherFeesDirty || otherFeesNoteDirty || ownerDirty;
 
   const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
@@ -600,6 +627,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
+        onBehalfOfUserId: ownerDirty ? ownerId : undefined,
         otherFees:     otherFeesDirty ? parsedOtherFees + shipFees : undefined,
         otherFeesNote: otherFeesNoteDirty
           ? ([otherFeesNote.trim(), ...(shipSplit?.notes ?? [])].filter(Boolean).join(' | ') || null)
@@ -1320,6 +1348,26 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 onChange={e => setCommissionPct(e.target.value)}
               />
             </div>
+            {!isPurchaser && (
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label" htmlFor="eo-owner">{t('poOnBehalfLabel')}</label>
+                <select
+                  id="eo-owner"
+                  className="select"
+                  value={ownerId}
+                  onChange={e => setOwnerId(e.target.value)}
+                  // A Done PO is a closed book — ownership (commission,
+                  // "my orders") is part of the record and stays put.
+                  disabled={orderLocked}
+                  title={orderLocked ? t('eoOwnerLockedDone') : undefined}
+                  style={{ width: '100%' }}
+                >
+                  {ownerOptions.map(o => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {/* Notes gets its own row and spans the full grid so there's
                 room to write more than a single short phrase. */}
             <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>

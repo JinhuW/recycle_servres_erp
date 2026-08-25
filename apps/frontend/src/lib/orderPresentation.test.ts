@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { I18N } from './i18n';
 import zh from './i18n.zh';
 import {
-  createdEventParts, linePhotoEventDetail, profitTone, signedUSD0,
+  createdEventParts, linePhotoEventDetail, ownerChangedLine, profitTone, signedUSD0,
 } from './orderPresentation';
 
 // Stands in for useT: names the key it was asked for and the count it was
@@ -76,6 +76,17 @@ describe('the keys the audit rows name', () => {
     createdEventParts({ category: 'RAM', lineCount: 1, qty: 1, onBehalfOfName: 'X' }, spy);
     const missing = [...asked].filter(k => !(k in I18N.en!) || !(k in zh));
     expect(missing).toEqual([]);
+  });
+});
+
+describe('ownerChangedLine', () => {
+  it('reads old owner → new owner from the snapshotted names', () => {
+    expect(ownerChangedLine({ from: 'Alex Chen', to: 'Marcus Wright' }))
+      .toBe('Alex Chen → Marcus Wright');
+  });
+
+  it('shows a dash for a name the event never captured', () => {
+    expect(ownerChangedLine({ to: 'Marcus Wright' })).toBe('— → Marcus Wright');
   });
 });
 
