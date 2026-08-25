@@ -210,8 +210,8 @@ orders.get('/', async (c) => {
   // matching what the FE shows so the two layers can't disagree.
   const isManager = effectiveRole(u) === 'manager';
 
-  // The mobile shell is a personal submission surface — it asks for `mine` so a
-  // manager sees only their own POs there, not the whole org's.
+  // The mobile capture flow's draft picker asks for `mine` so a manager only
+  // ever appends scanned items to their own POs, not someone else's draft.
   const mineOnly = c.req.query('mine') === 'true';
   const category = c.req.query('category');                 // RAM/SSD/Other
   const status = c.req.query('status');                     // order stage label (Draft/In Transit/…)
@@ -253,6 +253,14 @@ orders.get('/', async (c) => {
     ? (STATUS_TO_LIFECYCLE[status]
         ? sql`o.lifecycle = ${STATUS_TO_LIFECYCLE[status]}`
         : sql`FALSE`)
+    : sql`TRUE`;
+  // The org-wide default view drowns in finished POs, so clients can carve a
+  // stage out (mobile sends excludeStatus=Done unless the Done chip is
+  // active). An unknown label excludes nothing — the mirror of `status`,
+  // where an unknown label matches nothing.
+  const excludeStatus = c.req.query('excludeStatus');
+  const excludeFrag = excludeStatus && STATUS_TO_LIFECYCLE[excludeStatus]
+    ? sql`o.lifecycle <> ${STATUS_TO_LIFECYCLE[excludeStatus]}`
     : sql`TRUE`;
   // Archived orders drop out of the default view; clients opt in to see them.
   const archivedFrag = includeArchived ? sql`TRUE` : sql`o.archived_at IS NULL`;
@@ -321,7 +329,7 @@ orders.get('/', async (c) => {
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN order_lines l ON l.order_id = o.id
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${archivedFrag} ${cursorFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
