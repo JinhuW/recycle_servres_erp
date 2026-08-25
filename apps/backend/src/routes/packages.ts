@@ -26,6 +26,9 @@ type PackageRow = {
   last_tracked_at: Date | null;
   seller_name: string | null;
   note: string | null;
+  paypal_txn_id: string | null;
+  payment_screenshot_key: string | null;
+  payment_screenshot_url: string | null;
   order_id: string | null;
   created_by: string | null;
   created_at: Date;
@@ -33,7 +36,8 @@ type PackageRow = {
 
 const PACKAGE_COLS = (sql: ReturnType<typeof getDb>) => sql`
   id, tracking_number, carrier, status, tracking_status, tracking_eta,
-  last_tracked_at, seller_name, note, order_id, created_by, created_at
+  last_tracked_at, seller_name, note, paypal_txn_id, payment_screenshot_key,
+  payment_screenshot_url, order_id, created_by, created_at
 `;
 
 function toApi(r: PackageRow) {
@@ -46,6 +50,9 @@ function toApi(r: PackageRow) {
     lastTrackedAt: r.last_tracked_at,
     sellerName: r.seller_name,
     note: r.note,
+    paypalTxnId: r.paypal_txn_id,
+    // The R2 key stays internal; clients only ever need the public URL.
+    paymentScreenshotUrl: r.payment_screenshot_url,
     orderId: r.order_id,
     // Server-built like shipments.tracking_url, so the carrier→URL table
     // lives once (shipping/types.ts) instead of per client.
@@ -81,7 +88,10 @@ packages.post('/', async (c) => {
   const u = c.var.user;
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as
-    | { trackingNumber?: unknown; carrier?: unknown; sellerName?: unknown; note?: unknown }
+    | {
+        trackingNumber?: unknown; carrier?: unknown; sellerName?: unknown; note?: unknown;
+        paypalTxnId?: unknown; paymentScreenshotKey?: unknown; paymentScreenshotUrl?: unknown;
+      }
     | null;
 
   // Normalized at the boundary, not trusted from the client: the unique index
@@ -94,12 +104,24 @@ packages.post('/', async (c) => {
     return c.json({ error: 'carrier must be UPS, FedEx, or USPS' }, 400);
   }
   const opt = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  // Same uppercase-no-spaces canon as the AI extractor, but lenient on shape:
+  // a hand-typed id the user swears by must not bounce the whole package.
+  const paypalTxnId = opt(body?.paypalTxnId)?.replace(/\s+/g, '').toUpperCase() ?? null;
+  if (paypalTxnId !== null && paypalTxnId.length > 64) {
+    return c.json({ error: 'PayPal transaction ID is too long' }, 400);
+  }
 
   // ON CONFLICT instead of a pre-check so two concurrent pastes of the same
   // number can't both slip past a SELECT.
   const inserted = (await sql`
-    INSERT INTO packages (tracking_number, carrier, seller_name, note, created_by)
-    VALUES (${trackingNumber}, ${body!.carrier as Carrier}, ${opt(body?.sellerName)}, ${opt(body?.note)}, ${u.id})
+    INSERT INTO packages (
+      tracking_number, carrier, seller_name, note,
+      paypal_txn_id, payment_screenshot_key, payment_screenshot_url, created_by
+    )
+    VALUES (
+      ${trackingNumber}, ${body!.carrier as Carrier}, ${opt(body?.sellerName)}, ${opt(body?.note)},
+      ${paypalTxnId}, ${opt(body?.paymentScreenshotKey)}, ${opt(body?.paymentScreenshotUrl)}, ${u.id}
+    )
     ON CONFLICT (tracking_number) DO NOTHING
     RETURNING ${PACKAGE_COLS(sql)}
   `) as unknown as PackageRow[];
@@ -161,6 +183,7 @@ packages.post('/:id/create-po', async (c) => {
       actorId: u.id,
       warehouseId,
       notes,
+      paypalTxnId: row.paypal_txn_id,
       onBehalfOfName: ownerRow?.name ?? null,
     });
     await tx`UPDATE packages SET order_id = ${orderId} WHERE id = ${id}`;

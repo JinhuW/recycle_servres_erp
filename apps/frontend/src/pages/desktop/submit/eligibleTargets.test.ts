@@ -6,7 +6,7 @@ const base: OrderSummary = {
   id: 'PO-1', userId: 'me', userName: 'Me', userInitials: 'ME',
   commissionRate: null, category: 'RAM', categories: ['RAM'], payment: 'company', notes: null,
   lifecycle: 'draft', archivedAt: null, createdAt: '2026-05-29T00:00:00Z',
-  totalCost: 100, otherFees: 0, otherFeesNote: null,
+  totalCost: 100, otherFees: 0, otherFeesNote: null, paypalTxnId: null,
   warehouse: null, qty: 0, revenue: 0, profit: 0,
   lineCount: 2, status: 'Draft',
 };

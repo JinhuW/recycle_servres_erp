@@ -2923,6 +2923,13 @@ html.desktop, body.desktop, .desktop #root {
 
 .ship-add-hint { min-height: 18px; font-size: 12px; color: var(--fg-muted); }
 
+/* PayPal payment screenshot preview (add-package, both shells) */
+.ship-pay-shot { display: flex; align-items: flex-start; gap: 12px; }
+.ship-pay-shot img {
+  max-width: 220px; max-height: 160px; border-radius: 10px;
+  border: 1px solid var(--border-strong); object-fit: contain; background: var(--bg-soft);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ship-carrier-tile { transition: none; }
 }

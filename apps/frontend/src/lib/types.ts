@@ -147,6 +147,9 @@ export type OrderSummary = {
   totalCost: number | null;
   otherFees: number;
   otherFeesNote: string | null;
+  // PayPal payment reference, seeded from the tracked package's screenshot
+  // scan when the PO is minted from one; manager-editable after submission.
+  paypalTxnId: string | null;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,

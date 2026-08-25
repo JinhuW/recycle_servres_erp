@@ -653,6 +653,13 @@ export function OrderDetail({
             </span>
           </div>
 
+          {order.paypalTxnId && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8 }}>
+              <span style={{ color: 'var(--fg-subtle)' }}>{t('poPaypalTxn')}</span>
+              <span className="mono" style={{ fontWeight: 600 }}>{order.paypalTxnId}</span>
+            </div>
+          )}
+
           {/* Goods, then fees, then the total they add up to — the same stack
               the desktop edit page shows, so the number is never a surprise. */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>

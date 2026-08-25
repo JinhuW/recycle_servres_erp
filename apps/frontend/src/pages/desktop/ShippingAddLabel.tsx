@@ -1,3 +1,4 @@
+import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { Icon } from '../../components/Icon';
 import { CARRIERS } from '../../lib/carrierDetect';
 import { useT } from '../../lib/i18n';
@@ -79,6 +80,50 @@ export function ShippingAddLabel({ showToast }: Props) {
           <div className="field">
             <label className="label">{t('shipAddNote')}</label>
             <input className="input" value={f.note} onChange={(e) => f.setNote(e.target.value)} autoComplete="off" />
+          </div>
+        </div>
+      </section>
+
+      <section className="ship-wizard-section">
+        <div className="ship-sec-title">{t('shipPayTitle')}</div>
+        <div className="ship-add-hint" style={{ marginBottom: 8 }}>{t('shipPaySub')}</div>
+        {f.screenshot ? (
+          <div className="ship-pay-shot">
+            <img src={f.screenshot.preview} alt={t('shipPayTitle')} />
+            <button className="btn ghost sm" onClick={f.removeScreenshot}>
+              {t('shipPayRemoveShot')}
+            </button>
+          </div>
+        ) : (
+          <AttachmentDropzone
+            onFiles={(files) => void f.handlePaymentFile(files)}
+            uploading={f.scanBusy}
+            accept="image/*"
+            multiple={false}
+            compact
+            boxHint={t('shipPayBoxHint')}
+          />
+        )}
+        {f.scanNoticeKey && (
+          <div className="ship-add-hint" role="status">{t(f.scanNoticeKey)}</div>
+        )}
+        {f.scanError && (
+          <div className="ship-add-hint" role="alert">
+            {f.scanError === 'images-only' ? t('aiOnlyImages') : t('shipPayScanFailed')}
+          </div>
+        )}
+        <div className="field" style={{ marginTop: 10 }}>
+          <label className="label">{t('shipPayTxnLabel')}</label>
+          <input
+            className="input mono"
+            value={f.paypalTxnId}
+            onChange={(e) => f.setPaypalTxnId(e.target.value)}
+            placeholder={t('shipPayTxnPh')}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <div className="ship-add-hint" aria-live="polite">
+            {f.txnLooksOdd ? t('shipPayTxnFormatHint') : ' '}
           </div>
         </div>
       </section>

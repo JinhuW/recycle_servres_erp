@@ -291,6 +291,7 @@ orders.get('/', async (c) => {
       o.total_cost::float AS total_cost,
       o.other_fees::float AS other_fees,
       o.other_fees_note,
+      o.paypal_txn_id,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
@@ -354,6 +355,7 @@ orders.get('/', async (c) => {
       totalCost: r.total_cost,
       otherFees: r.other_fees,
       otherFeesNote: r.other_fees_note,
+      paypalTxnId: r.paypal_txn_id,
       warehouse: r.warehouse_id ? { id: r.warehouse_id, short: r.warehouse_short, region: r.warehouse_region } : null,
       qty: r.qty,
       revenue: r.revenue,
@@ -381,6 +383,7 @@ orders.get('/:id', async (c) => {
            o.total_cost::float AS total_cost,
            o.other_fees::float AS other_fees,
            o.other_fees_note,
+           o.paypal_txn_id,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
@@ -474,6 +477,7 @@ orders.get('/:id', async (c) => {
       totalCost: order.total_cost,
       otherFees: order.other_fees,
       otherFeesNote: order.other_fees_note,
+      paypalTxnId: order.paypal_txn_id,
       commissionRate: order.commission_rate,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
@@ -604,7 +608,7 @@ orders.get('/:id/spreadsheet', async (c) => {
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
            o.total_cost::float AS total_cost, o.commission_rate::float AS commission_rate,
-           o.other_fees::float AS other_fees, o.other_fees_note,
+           o.other_fees::float AS other_fees, o.other_fees_note, o.paypal_txn_id,
            u.name AS user_name,
            w.short AS warehouse_short, w.region AS warehouse_region
     FROM orders o
@@ -706,6 +710,7 @@ orders.get('/:id/spreadsheet', async (c) => {
     { field: 'Commission rate',       value: commissionRate != null ? `${(commissionRate * 100).toFixed(2)}%` : '—' },
     { field: 'Commission amount',     value: commissionAmount != null ? commissionAmount : '—' },
     { field: 'Notes',                 value: String(order.notes ?? '') },
+    { field: 'PayPal transaction ID', value: String(order.paypal_txn_id ?? '') },
   ];
 
   const buf = await buildXlsxWorkbook([
@@ -937,6 +942,7 @@ orders.patch('/:id', async (c) => {
         warehouseId?: string | null;
         payment?: 'company' | 'self';
         commissionRate?: number | null;
+        paypalTxnId?: string | null;
         onBehalfOfUserId?: string | null;
       }
     | null;
@@ -955,7 +961,7 @@ orders.patch('/:id', async (c) => {
       body.totalCost !== undefined || body.otherFees !== undefined ||
       body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
       body.payment !== undefined || body.commissionRate !== undefined ||
-      body.onBehalfOfUserId !== undefined;
+      body.paypalTxnId !== undefined || body.onBehalfOfUserId !== undefined;
     if (existing.lifecycle === 'done' || editsBeyondNotes || body.notes === undefined) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
@@ -974,6 +980,9 @@ orders.patch('/:id', async (c) => {
     const resolved = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
     if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
     newOwner = resolved;
+  }
+  if (typeof body.paypalTxnId === 'string' && body.paypalTxnId.replace(/\s+/g, '').length > 64) {
+    return c.json({ error: 'PayPal transaction ID is too long' }, 400);
   }
   if (
     body.commissionRate !== undefined &&
@@ -1131,13 +1140,14 @@ orders.patch('/:id', async (c) => {
                total_cost::float AS total_cost,
                commission_rate::float AS commission_rate,
                other_fees::float AS other_fees,
-               other_fees_note
+               other_fees_note,
+               paypal_txn_id
         FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
             payment: string; total_cost: number | null; commission_rate: number | null;
-            other_fees: number; other_fees_note: string | null }
+            other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
       // A Done PO is the closed-book record of what was bought / sold. Any
@@ -1156,6 +1166,8 @@ orders.patch('/:id', async (c) => {
           body.otherFees !== undefined ||
           body.otherFeesNote !== undefined ||
           body.commissionRate !== undefined ||
+          // The payment reference is part of the closed book too.
+          body.paypalTxnId !== undefined ||
           // Ownership decides whose closed book this is — commission and
           // "my orders" both key off it, so it freezes with the rest.
           body.onBehalfOfUserId !== undefined;
@@ -1208,7 +1220,8 @@ orders.patch('/:id', async (c) => {
         body.notes !== undefined ||
         body.warehouseId !== undefined ||
         body.payment !== undefined ||
-        body.commissionRate !== undefined;
+        body.commissionRate !== undefined ||
+        body.paypalTxnId !== undefined;
       if (touchesOrder) {
         // Nullable fields use a CASE WHEN sentinel so the client can clear
         // them by sending `null`; bare COALESCE would treat null as "no
@@ -1220,12 +1233,19 @@ orders.patch('/:id', async (c) => {
         const setCommission = body.commissionRate !== undefined ? 1 : 0;
         const setOtherFees = body.otherFees     !== undefined ? 1 : 0;
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
+        const setPaypal    = body.paypalTxnId   !== undefined ? 1 : 0;
+        // Same canon as the add-package boundary — a pasted id with spaces or
+        // lowercase must diff clean against the AI-extracted value.
+        const normPaypal = typeof body.paypalTxnId === 'string'
+          ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
+          : null;
         await tx`
           UPDATE orders SET
             total_cost   = CASE WHEN ${setTotalCost}::int = 1 THEN ${statedGoods ?? null}      ELSE total_cost   END,
             notes        = CASE WHEN ${setNotes}::int     = 1 THEN ${body.notes ?? null}       ELSE notes        END,
             warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
             commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${clampedRate ?? null} ELSE commission_rate END,
+            paypal_txn_id = CASE WHEN ${setPaypal}::int = 1 THEN ${normPaypal} ELSE paypal_txn_id END,
             -- other_fees is NOT NULL: a client clearing the field sends null and
             -- means 0, so the sentinel writes 0 rather than passing the null
             -- through into the constraint. The note is nullable and follows the
@@ -1458,7 +1478,7 @@ orders.patch('/:id', async (c) => {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
-                 other_fees::float AS other_fees, other_fees_note
+                 other_fees::float AS other_fees, other_fees_note, paypal_txn_id
           FROM orders WHERE id = ${id} LIMIT 1
         `)[0] as Record<string, unknown>;
         const metaChanges = diff(
