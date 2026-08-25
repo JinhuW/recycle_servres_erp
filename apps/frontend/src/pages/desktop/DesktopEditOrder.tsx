@@ -7,6 +7,7 @@ import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../../lib/poTotals';
+import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers,
@@ -253,6 +254,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
   );
   const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
+  // Kept in the server's canon (uppercase, no spaces) so dirty-compare is
+  // exact against what a save round-trips.
+  const [paypalTxn, setPaypalTxn] = useState<string>(order.paypalTxnId ?? '');
   // null until the PO's shipments load; the fee inputs then re-seed to the
   // user-only remainder. Clamped to the stored column so the tape's rows
   // always sum to exactly what the server holds, even after manual fee edits.
@@ -496,6 +500,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const otherFeesNoteDirty = shipSplit
     ? otherFeesNote.trim() !== splitFeeNote(order.otherFeesNote).userNote
     : otherFeesNote.trim() !== (order.otherFeesNote ?? '');
+  const paypalDirty = paypalTxn !== (order.paypalTxnId ?? '');
 
   // The goods total is no longer editable here: it is the sum of the lines, and
   // anything paid on top of the goods is the fee — so line costs + fee is what
@@ -543,7 +548,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   const dirty =
     statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
-    || commissionDirty || otherFeesDirty || otherFeesNoteDirty || ownerDirty;
+    || commissionDirty || otherFeesDirty || otherFeesNoteDirty || paypalDirty || ownerDirty;
 
   const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
@@ -627,6 +632,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
+        paypalTxnId:   paypalDirty     ? (paypalTxn || null)   : undefined,
         onBehalfOfUserId: ownerDirty ? ownerId : undefined,
         otherFees:     otherFeesDirty ? parsedOtherFees + shipFees : undefined,
         otherFeesNote: otherFeesNoteDirty
@@ -1368,6 +1374,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 </select>
               </div>
             )}
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="label">{t('poPaypalTxn')}</label>
+              <input
+                className="input mono"
+                value={paypalTxn}
+                onChange={e => setPaypalTxn(normalizePaypalTxnInput(e.target.value))}
+                placeholder={canEditOrder ? t('shipPayTxnPh') : '—'}
+                disabled={!canEditOrder}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
             {/* Notes gets its own row and spans the full grid so there's
                 room to write more than a single short phrase. */}
             <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>

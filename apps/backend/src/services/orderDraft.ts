@@ -18,15 +18,17 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
   warehouseId: string | null;
   payment?: 'company' | 'self';
   notes?: string | null;
+  /** Payment reference carried over from a tracked package's screenshot scan. */
+  paypalTxnId?: string | null;
   /** Only read when ownerId !== actorId. */
   onBehalfOfName?: string | null;
 }): Promise<string> {
   const orderId = await nextHumanId(tx, 'PO', 'PO');
   await tx`
-    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle)
+    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, paypal_txn_id)
     VALUES (
       ${orderId}, ${opts.ownerId}, ${opts.category ?? 'Mixed'}, ${opts.warehouseId},
-      ${opts.payment ?? 'company'}, ${opts.notes ?? null}, ${null}, 'draft'
+      ${opts.payment ?? 'company'}, ${opts.notes ?? null}, ${null}, 'draft', ${opts.paypalTxnId ?? null}
     )
   `;
   await writeOrderEvent(tx, orderId, opts.actorId, 'created', {

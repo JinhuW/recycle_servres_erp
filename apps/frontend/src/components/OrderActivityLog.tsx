@@ -114,6 +114,7 @@ const FIELD_LABEL: Record<string, string> = {
   commission_rate: 'Commission rate',
   other_fees:      'Other fees',
   other_fees_note: 'Other fees note',
+  paypal_txn_id:   'PayPal transaction ID',
 };
 
 const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);

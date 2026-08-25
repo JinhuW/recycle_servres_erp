@@ -20,6 +20,8 @@ export type TrackedPackage = {
   lastTrackedAt: string | null;
   sellerName: string | null;
   note: string | null;
+  paypalTxnId: string | null;
+  paymentScreenshotUrl: string | null;
   orderId: string | null;
   // Server-built carrier deep link, same as shipments.trackingUrl — the
   // carrier→URL table lives once, in the backend.
@@ -37,8 +39,30 @@ export async function addPackage(input: {
   carrier: Carrier;
   sellerName?: string;
   note?: string;
+  paypalTxnId?: string;
+  paymentScreenshotKey?: string;
+  paymentScreenshotUrl?: string;
 }): Promise<{ package: TrackedPackage }> {
   return api.post<{ package: TrackedPackage }>('/api/packages', input);
+}
+
+// ── PayPal payment screenshot scan ───────────────────────────────────────────
+// Scan-first, like /api/scan/label: the screenshot lands in R2 and the AI
+// reads the transaction id in one round trip; nothing persists until the
+// add-package submit carries the reference.
+
+export type PaymentScanResponse = {
+  storageKey: string;
+  deliveryUrl: string;
+  txnId: string | null;
+  confidence: number;
+  provider: 'stub' | 'openrouter';
+};
+
+export async function scanPaymentScreenshot(file: File | Blob, filename = 'paypal.jpg'): Promise<PaymentScanResponse> {
+  const form = new FormData();
+  form.append('file', file, filename);
+  return api.upload<PaymentScanResponse>('/api/scan/payment', form);
 }
 
 export async function removePackage(id: string): Promise<{ ok: true }> {

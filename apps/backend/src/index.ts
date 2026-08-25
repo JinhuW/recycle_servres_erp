@@ -164,6 +164,7 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 // under it buffer 50 MiB bodies.
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
+  path === '/api/scan/payment' ||
   path === '/api/attachments' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
   // A line photo comes straight off a phone camera at several MB, uncompressed.
