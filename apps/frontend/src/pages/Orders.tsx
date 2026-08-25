@@ -57,11 +57,17 @@ export function Orders({ onEdit, onToast }: Props) {
   useEffect(() => {
     let alive = true;
     const params = new URLSearchParams();
-    // Mobile is a personal submission surface — always scope to my own POs,
-    // even for managers (who'd otherwise see the whole org's).
-    params.set('mine', 'true');
+    // Managers see the whole org's POs here, same as desktop; everyone else
+    // stays scoped to their own. The camera capture flow is unaffected — its
+    // draft picker pins mine=true itself (MobileApp.startSubmit), so scanned
+    // items always land on the manager's own PO.
+    const isManager = effRole === 'manager';
+    if (!isManager) params.set('mine', 'true');
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
+    // Org-wide, the default view would drown in finished POs — hide Done
+    // until the Done chip asks for them explicitly.
+    else if (isManager) params.set('excludeStatus', 'Done');
     if (showArchived) params.set('includeArchived', 'true');
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
       .then(r => { if (alive) setOrders(r.orders); })
