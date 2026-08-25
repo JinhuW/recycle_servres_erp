@@ -117,6 +117,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   vendorbids: '/vendor-bids',
   transfers:  '/transfers',
   activity:   '/activity',
+  payments:   '/payments',
   tracker:    '/tracker',
   coordinator: '/fleet',
   settings:   '/settings',
@@ -138,6 +139,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/vendor-bids' || match('/vendor-bids/:id', path)) return 'vendorbids';
   if (path === '/transfers') return 'transfers';
   if (path === '/activity') return 'activity';
+  if (path === '/payments') return 'payments';
   if (path === '/tracker') return 'tracker';
   if (path === '/fleet') return 'coordinator';
   if (path === '/settings') return 'settings';
