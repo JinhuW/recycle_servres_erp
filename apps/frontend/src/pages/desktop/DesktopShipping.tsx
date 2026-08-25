@@ -16,6 +16,7 @@ import {
   STATUS_CHIP, filterInbound, fmtEta, inboundCarriers, inboundCounts,
   inboundToCsv, mergeInbound, type ShipOrder, type ShipRow,
 } from '../../lib/shippingList';
+import { canCreatePo, needsCompletePo, waitingSeller } from '../../lib/shippingInbound';
 import { useEffectiveUser } from '../../lib/tweaks';
 import type { Order, Shipment, ShipmentStatus } from '../../lib/types';
 import { ShippingAddLabel } from './ShippingAddLabel';
@@ -456,9 +457,7 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
       </td>
       <td className="num" style={{ cursor: 'default' }}>
         <div style={{ display: 'inline-flex', gap: 6 }}>
-          {/* Tracking isn't live yet, so status can stall before "delivered" —
-              managers may mint the PO early; the server enforces the same rule. */}
-          {!pkg.orderId && (pkg.status === 'delivered' || isManager) && (
+          {canCreatePo(pkg, isManager) && (
             <button className="btn accent sm" disabled={busy} onClick={() => void createPo()}>
               {t('shipCreatePo')}
             </button>
@@ -485,8 +484,8 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
   const { order, shipment: s } = row;
   const chip = STATUS_CHIP[s.status];
   const eta = fmtEta(s.trackingEta, locale);
-  const waitingSeller = (s.status === 'draft' || s.status === 'quoted') && !s.complete && !!s.sellerToken;
-  const showDeliveredCta = s.status === 'delivered' && order.lifecycle !== 'done';
+  const waiting = waitingSeller(s);
+  const showDeliveredCta = needsCompletePo(s.status, order.lifecycle);
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   return (
@@ -502,7 +501,7 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
       <td>
         {s.from.name
           ? <span style={{ fontWeight: 600 }}>{s.from.name}</span>
-          : waitingSeller
+          : waiting
             ? <span className="chip warn dot" style={{ fontSize: 11 }}>{t('shipWaitingSeller')}</span>
             : <span className="muted">—</span>}
         {(s.from.city || s.from.state) && (

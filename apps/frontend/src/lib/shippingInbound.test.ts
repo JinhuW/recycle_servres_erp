@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  groupInbound, inboundAction, inboundSummary, journeyPos,
+  canCreatePo, groupInbound, inboundAction, inboundSummary, journeyPos,
+  needsCompletePo, waitingSeller,
 } from './shippingInbound';
 import type { InboundRow, ShipOrder } from './shippingList';
 import type { TrackedPackage } from './packages';
@@ -150,3 +151,27 @@ describe('journeyPos', () => {
 function rowId(r: InboundRow): string {
   return r.kind === 'package' ? r.pkg.id : r.shipment.id;
 }
+
+describe('shared row predicates (desktop chips/CTAs use these too)', () => {
+  it('canCreatePo: delivered for everyone, any status for managers, never once linked', () => {
+    expect(canCreatePo(pkg({ status: 'delivered' }), false)).toBe(true);
+    expect(canCreatePo(pkg({ status: 'in_transit' }), false)).toBe(false);
+    expect(canCreatePo(pkg({ status: 'in_transit' }), true)).toBe(true);
+    expect(canCreatePo(pkg({ status: 'delivered', orderId: 'PO-9' }), true)).toBe(false);
+  });
+
+  it('needsCompletePo: delivered and the book still open; unknown lifecycle stays quiet', () => {
+    expect(needsCompletePo('delivered', 'confirmed')).toBe(true);
+    expect(needsCompletePo('delivered', 'done')).toBe(false);
+    expect(needsCompletePo('delivered', undefined)).toBe(false);
+    expect(needsCompletePo('in_transit', 'confirmed')).toBe(false);
+  });
+
+  it('waitingSeller: pending, incomplete, and the link is out', () => {
+    expect(waitingSeller(shipment({ status: 'draft', sellerToken: 'tok' }))).toBe(true);
+    expect(waitingSeller(shipment({ status: 'quoted', sellerToken: 'tok' }))).toBe(true);
+    expect(waitingSeller(shipment({ status: 'draft' }))).toBe(false);
+    expect(waitingSeller(shipment({ status: 'draft', sellerToken: 'tok', complete: true }))).toBe(false);
+    expect(waitingSeller(shipment({ status: 'purchased', sellerToken: 'tok' }))).toBe(false);
+  });
+});

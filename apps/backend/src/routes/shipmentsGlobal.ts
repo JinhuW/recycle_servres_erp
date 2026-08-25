@@ -11,9 +11,14 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
-import { toApi, type ShipmentRow } from './shipments';
+import { shipmentColsSql, toApi, type ShipmentRow } from './shipments';
 
-type ListRow = ShipmentRow & {
+// The list never reads the stored quotes or the provider's shipment id, so
+// the SELECT omits them — and the type says so instead of claiming fields
+// that are absent at runtime.
+const LIST_OMIT: ReadonlySet<string> = new Set(['quotes', 'provider_shipment_id']);
+
+type ListRow = Omit<ShipmentRow, 'quotes' | 'provider_shipment_id'> & {
   o_user_name: string;
   o_lifecycle: string;
   wh_id: string | null;
@@ -52,15 +57,7 @@ shipmentsList.get('/', async (c) => {
 
   const rows = (await sql`
     SELECT
-      s.id, s.order_id, s.status,
-      s.from_name, s.from_phone, s.from_street1, s.from_street2,
-      s.from_city, s.from_state, s.from_zip, s.from_country,
-      s.weight_oz::float AS weight_oz, s.length_in::float AS length_in,
-      s.width_in::float AS width_in, s.height_in::float AS height_in,
-      s.carrier, s.service, s.rate_amount::float AS rate_amount, s.rate_currency, s.delivery_days,
-      s.provider, s.tracking_number, s.tracking_url, s.label_delivery_url,
-      s.label_cost::float AS label_cost, s.fees_applied,
-      s.tracking_status, s.tracking_eta, s.last_tracked_at, s.seller_token, s.created_by, s.created_at,
+      ${sql.unsafe(shipmentColsSql('s.', LIST_OMIT))},
       u.name AS o_user_name, o.lifecycle AS o_lifecycle,
       w.id AS wh_id, w.name AS wh_name, w.short AS wh_short, w.region AS wh_region
     FROM shipments s

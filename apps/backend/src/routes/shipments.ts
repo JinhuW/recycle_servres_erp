@@ -69,16 +69,33 @@ export function shipmentComplete(r: Pick<ShipmentRow,
     && r.weight_oz && r.length_in && r.width_in && r.height_in);
 }
 
-const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql`
-  id, order_id, status,
-  from_name, from_phone, from_street1, from_street2, from_city, from_state, from_zip, from_country,
-  weight_oz::float AS weight_oz, length_in::float AS length_in,
-  width_in::float AS width_in, height_in::float AS height_in,
-  carrier, service, rate_amount::float AS rate_amount, rate_currency, delivery_days,
-  provider, provider_shipment_id, quotes, tracking_number, tracking_url, label_delivery_url,
-  label_cost::float AS label_cost, fees_applied,
-  tracking_status, tracking_eta, last_tracked_at, seller_token, created_by, created_at
-`;
+// One authoritative column list. The per-order routes render it bare via
+// SHIPMENT_COLS; the cross-PO list (shipmentsGlobal.ts) renders it prefixed
+// and without the heavy `quotes` JSONB / provider_shipment_id it never reads.
+const SHIPMENT_COL_NAMES = [
+  'id', 'order_id', 'status',
+  'from_name', 'from_phone', 'from_street1', 'from_street2',
+  'from_city', 'from_state', 'from_zip', 'from_country',
+  'weight_oz', 'length_in', 'width_in', 'height_in',
+  'carrier', 'service', 'rate_amount', 'rate_currency', 'delivery_days',
+  'provider', 'provider_shipment_id', 'quotes',
+  'tracking_number', 'tracking_url', 'label_delivery_url',
+  'label_cost', 'fees_applied',
+  'tracking_status', 'tracking_eta', 'last_tracked_at',
+  'seller_token', 'created_by', 'created_at',
+] as const;
+const FLOAT_COLS: ReadonlySet<string> =
+  new Set(['weight_oz', 'length_in', 'width_in', 'height_in', 'rate_amount', 'label_cost']);
+
+/** Static column list for interpolation via sql.unsafe — no runtime input. */
+export function shipmentColsSql(prefix = '', omit: ReadonlySet<string> = new Set()): string {
+  return SHIPMENT_COL_NAMES
+    .filter((c) => !omit.has(c))
+    .map((c) => (FLOAT_COLS.has(c) ? `${prefix}${c}::float AS ${c}` : `${prefix}${c}`))
+    .join(', ');
+}
+
+const SHIPMENT_COLS = (sql: ReturnType<typeof getDb>) => sql.unsafe(shipmentColsSql());
 
 export function toApi(r: ShipmentRow) {
   return {
