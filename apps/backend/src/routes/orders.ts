@@ -383,7 +383,8 @@ orders.get('/:id', async (c) => {
            o.other_fees_note,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
-           w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region
+           w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
+           (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
@@ -477,6 +478,9 @@ orders.get('/:id', async (c) => {
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
         : null,
+      // Count only — the mobile detail page renders a nav badge and shouldn't
+      // have to download the labels themselves (those live on /shipping).
+      shipmentCount: order.shipment_count,
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
