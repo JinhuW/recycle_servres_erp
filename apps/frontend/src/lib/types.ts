@@ -17,6 +17,7 @@ export type User = {
   role: Role;
   team: string | null;
   language: Lang;
+  defaultWarehouseId?: string | null;
   preferences?: Record<string, unknown>;
 };
 

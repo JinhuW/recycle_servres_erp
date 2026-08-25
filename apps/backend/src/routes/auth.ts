@@ -57,10 +57,12 @@ auth.post('/login', async (c) => {
     {
       id: string; email: string; name: string; initials: string;
       role: string; team: string | null; language: string;
+      defaultWarehouseId: string | null;
       preferences: Record<string, unknown>; password_hash: string;
     }[]
   >`
     SELECT id, email, name, initials, role, team, language,
+           default_warehouse_id AS "defaultWarehouseId",
            COALESCE(preferences, '{}'::jsonb) AS preferences,
            password_hash
     FROM users
@@ -92,6 +94,7 @@ auth.post('/login', async (c) => {
     user: {
       id: u.id, email: u.email, name: u.name, initials: u.initials,
       role: u.role, team: u.team, language: u.language,
+      defaultWarehouseId: u.defaultWarehouseId,
       preferences: u.preferences ?? {},
     },
   });
