@@ -1759,6 +1759,10 @@ function editLineToPatch(l: EditLine, status?: string) {
     condition:      l.condition,
     health:         l.health ?? null,
     rpm:            l.rpm ?? null,
+    // A scan performed in the drawer must survive Save; null keeps the stored
+    // value (the backend applies these with COALESCE, like every field here).
+    scanImageId:    l.scanImageId ?? null,
+    scanConfidence: l.scanConfidence ?? null,
   };
 }
 
@@ -1787,5 +1791,7 @@ function editLineToInsert(l: EditLine, status: string) {
     condition:      l.condition,
     health:         l.health ?? null,
     rpm:            l.rpm ?? null,
+    scanImageId:    l.scanImageId ?? null,
+    scanConfidence: l.scanConfidence ?? null,
   };
 }

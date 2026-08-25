@@ -1370,7 +1370,9 @@ orders.patch('/:id', async (c) => {
               chip_number    = NULLIF(COALESCE(${canonChipNumber(l.chipNumber)}, chip_number), ''),
               condition      = COALESCE(${l.condition ?? null}, condition),
               health         = COALESCE(${l.health ?? null}, health),
-              rpm            = COALESCE(${l.rpm ?? null}, rpm)
+              rpm            = COALESCE(${l.rpm ?? null}, rpm),
+              scan_image_id  = COALESCE(${l.scanImageId ?? null}, scan_image_id),
+              scan_confidence = COALESCE(${l.scanConfidence ?? null}, scan_confidence)
             WHERE id = ${l.id} AND order_id = ${id}
           `;
         }
