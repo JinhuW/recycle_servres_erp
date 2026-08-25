@@ -3,6 +3,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
+import { useTweaks, type RolePreview } from '../lib/tweaks';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
@@ -23,6 +24,7 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user, logout, setDefaultWarehouse } = useAuth();
+  const { rolePreview, setRolePreview } = useTweaks();
   const [stats, setStats] = useState<Stats | null>(null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -70,6 +72,25 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
     },
     { id: 'about', icon: 'info', label: t('about'),         sub: t('aboutSub'),         onClick: onOpenAbout },
   ];
+  // Managers only: the RolePicker gate shows on login, but a restored session
+  // never re-asks — without this row a mobile manager who once picked
+  // Purchaser has no way back until their next fresh login.
+  if (user.role === 'manager') {
+    items.splice(items.length - 1, 0, {
+      id: 'role', icon: 'shield', label: t('roleViewLabel'), sub: t('roleViewSub'),
+      trailing: (
+        <select
+          className="select"
+          value={rolePreview}
+          onChange={e => setRolePreview(e.target.value as RolePreview)}
+          style={{ maxWidth: 130, fontSize: 12, padding: '6px 8px' }}
+        >
+          <option value="actual">{t('role_admin')}</option>
+          <option value="as_purchaser">{t('role_purchaser')}</option>
+        </select>
+      ),
+    });
+  }
 
   return (
     <>
