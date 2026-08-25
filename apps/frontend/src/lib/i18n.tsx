@@ -365,6 +365,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payEmptyUnlinked: 'Nothing left to reconcile',
     payMoreLoading: 'Loading…',
     payMoreScroll: 'Scroll for more',
+    payLedgerTitle: 'Bank payments',
+    payLedgerOpen: 'Open Payments',
+    payLedgerNet: 'Net paid',
 
     // ── Activity — the global audit register ──
     acTitle: 'Activity',

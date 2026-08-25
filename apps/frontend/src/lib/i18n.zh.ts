@@ -1740,6 +1740,9 @@ const zh: Record<string, string> = {
   payEmptyUnlinked: '全部对账完成',
   payMoreLoading: '加载中…',
   payMoreScroll: '滚动加载更多',
+  payLedgerTitle: '银行付款',
+  payLedgerOpen: '打开付款对账',
+  payLedgerNet: '实付净额',
 };
 
 export default zh;
