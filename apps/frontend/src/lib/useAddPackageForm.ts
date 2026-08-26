@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { detectCarriers, normalizeTracking, type Carrier } from './carrierDetect';
+import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from './carrierDetect';
 import { handleFetchError } from './errorToast';
 import { blobToDataUrl, compressForUpload } from './image-compress';
 import { addPackage, scanPaymentScreenshot } from './packages';
@@ -38,12 +38,16 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   // to the user. A manual pick always wins.
   const carrier = pick ?? (detected.length === 1 ? detected[0] : null);
   const unknownShape = tn.length >= 10 && detected.length === 0;
+  // Long enough to be a submit attempt, but not storable: junk characters or
+  // a whole-barcode dump. Mirrors the server's isValidTracking rejection.
+  const invalidShape = tn.length >= 8 && !isValidTracking(tn);
   // A mid-scan submit would race the screenshot reference; wait it out.
-  const canSubmit = tn.length >= 8 && carrier != null && !busy && !scanBusy;
+  const canSubmit = isValidTracking(tn) && carrier != null && !busy && !scanBusy;
 
   /** i18n key for the live hint line, or null for the quiet placeholder. */
   const hintKey =
-    carrier != null && detected.length === 1 && !pick ? 'shipAddCarrierAuto'
+    invalidShape ? 'shipAddTrackingInvalid'
+    : carrier != null && detected.length === 1 && !pick ? 'shipAddCarrierAuto'
     : detected.length > 1 && !pick ? 'shipAddCarrierPick'
     : unknownShape && !pick ? 'shipAddCarrierUnknown'
     : null;

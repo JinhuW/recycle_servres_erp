@@ -18,7 +18,7 @@ import {
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
-import { groupInbound, inboundAction, journeyPos, type InboundAction } from '../lib/shippingInbound';
+import { canCreatePo, groupInbound, inboundAction, journeyPos, type InboundAction } from '../lib/shippingInbound';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Order, Shipment } from '../lib/types';
 
@@ -56,6 +56,7 @@ type ScanState =
 
 function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
   const { t } = useT();
+  const { user } = useAuth();
   const [rows, setRows] = useState<InboundRow[] | null>(null);
   const [showVoided, setShowVoided] = useState(false);
   const [scan, setScan] = useState<ScanState | null>(null);
@@ -63,11 +64,17 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
+  // Latest scan wins: on dock Wi-Fi a slow lookup can outlive a rescan, and a
+  // stale response swapping the sheet under the user invites a PO on the
+  // wrong box.
+  const lookupSeq = useRef(0);
   const onScanned = (scanned: string[]) => {
     if (!scanned.length) { setScan(null); return; }
     setScan(null);
+    const seq = ++lookupSeq.current;
     lookupPackage(scanned[0])
       .then(({ package: pkg }) => {
+        if (seq !== lookupSeq.current) return;
         setScan(pkg ? { phase: 'found', pkg } : { phase: 'notFound', code: scanned[0] });
       })
       .catch(handleFetchError);
@@ -79,6 +86,11 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
     try {
       const { orderId } = await createPoFromPackage(pkg);
       showToast(t('shipPoCreated', { id: orderId }));
+      // Settle the sheet before handing off: onCreatedPo's follow-up fetch can
+      // fail and strand the screen mounted, and poBusy is screen-level state —
+      // left true it would brick Create PO for every later scan.
+      setScan(null);
+      setPoBusy(false);
       onCreatedPo(orderId);
     } catch (e) {
       handleFetchError(e);
@@ -143,7 +155,13 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
         <SnScanner existing={[]} onDone={onScanned} title={t('shipScanTitle')} hint={t('shipScanHint')} />
       )}
       {scan?.phase === 'found' && (
-        <PackageSheet pkg={scan.pkg} busy={poBusy} onCreatePo={createPo} onClose={() => setScan(null)} />
+        <PackageSheet
+          pkg={scan.pkg}
+          busy={poBusy}
+          canCreate={canCreatePo(scan.pkg, user?.role === 'manager')}
+          onCreatePo={createPo}
+          onClose={() => setScan(null)}
+        />
       )}
       {scan?.phase === 'notFound' && (
         <ScanNotFoundSheet code={scan.code} onClose={() => setScan(null)} />
@@ -197,9 +215,11 @@ function rowKey(r: InboundRow): string {
 
 // ── Scan result sheets ───────────────────────────────────────────────────────
 
-function PackageSheet({ pkg, busy, onCreatePo, onClose }: {
+function PackageSheet({ pkg, busy, canCreate, onCreatePo, onClose }: {
   pkg: LookedUpPackage;
   busy: boolean;
+  /** Same delivered-or-manager rule the cards and the backend apply. */
+  canCreate: boolean;
   onCreatePo: (pkg: TrackedPackage) => void;
   onClose: () => void;
 }) {
@@ -209,7 +229,7 @@ function PackageSheet({ pkg, busy, onCreatePo, onClose }: {
   return (
     <>
       <div className="ph-sheet-backdrop" onClick={onClose} />
-      <div className="ph-sheet" style={{ paddingBottom: 24 }}>
+      <div className="ph-sheet">
         <div className="ph-sheet-grabber" />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 12px' }}>
           {pkg.carrier && <span className="ship-carrier-chip">{pkg.carrier}</span>}
@@ -254,10 +274,14 @@ function PackageSheet({ pkg, busy, onCreatePo, onClose }: {
             >
               {pkg.orderId} →
             </button>
-          ) : (
+          ) : canCreate ? (
             <button className="ph-btn accent" style={{ width: '100%' }} disabled={busy} onClick={() => onCreatePo(pkg)}>
               {busy ? '…' : t('shipCreatePo')}
             </button>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--fg-muted)', textAlign: 'center', padding: '4px 4px 0' }}>
+              {t('shipScanPoAfterDelivery')}
+            </div>
           )}
         </div>
       </div>
@@ -267,10 +291,13 @@ function PackageSheet({ pkg, busy, onCreatePo, onClose }: {
 
 function ScanNotFoundSheet({ code, onClose }: { code: string; onClose: () => void }) {
   const { t } = useT();
+  // One extraction feeds both the preview and the stored prefill — computed
+  // twice they could drift.
+  const extracted = extractTrackingFromBarcode(code);
   return (
     <>
       <div className="ph-sheet-backdrop" onClick={onClose} />
-      <div className="ph-sheet" style={{ paddingBottom: 24 }}>
+      <div className="ph-sheet">
         <div className="ph-sheet-grabber" />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 10px' }}>
           <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('shipScanNotFoundTitle')}</div>
@@ -283,14 +310,14 @@ function ScanNotFoundSheet({ code, onClose }: { code: string; onClose: () => voi
         </div>
         <div style={{ fontSize: 13, color: 'var(--fg-muted)', padding: '0 4px' }}>{t('shipScanNotFoundBody')}</div>
         <div className="mono" style={{ fontSize: 13, padding: '10px 4px 0', overflowWrap: 'anywhere', color: 'var(--fg-subtle)' }}>
-          {extractTrackingFromBarcode(code)}
+          {extracted}
         </div>
         <div style={{ marginTop: 16 }}>
           <button
             className="ph-btn accent"
             style={{ width: '100%' }}
             onClick={() => {
-              try { sessionStorage.setItem(SCANNED_TN_KEY, extractTrackingFromBarcode(code)); } catch { /* storage may be unavailable */ }
+              try { sessionStorage.setItem(SCANNED_TN_KEY, extracted); } catch { /* storage may be unavailable */ }
               navigate('/shipping/add');
             }}
           >
@@ -346,6 +373,9 @@ function InboundCard({ row, showToast, onCreatedPo }: {
     try {
       const { orderId } = await createPoFromPackage(row.pkg);
       showToast(t('shipPoCreated', { id: orderId }));
+      // onCreatedPo's follow-up fetch can fail and leave this card mounted;
+      // the button must come back rather than stay stuck on "…".
+      setBusy(false);
       onCreatedPo(orderId);
     } catch (e) {
       handleFetchError(e);

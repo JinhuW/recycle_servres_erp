@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { detectCarriers, extractTrackingFromBarcode, normalizeTracking } from './carrierDetect';
+import {
+  detectCarriers, extractTrackingFromBarcode, isValidTracking, normalizeTracking,
+} from './carrierDetect';
 
 describe('normalizeTracking', () => {
   it('strips spaces and hyphens and uppercases', () => {
@@ -9,6 +11,30 @@ describe('normalizeTracking', () => {
   it('strips zero-width and bidi characters from chat-app pastes', () => {
     expect(normalizeTracking('1z\u200B999\u200Faa1\u2060 0123\u200E456 784\uFEFF'))
       .toBe('1Z999AA10123456784');
+  });
+
+  it('strips barcode control characters (FNC1/GS) a raw decoder can emit', () => {
+    expect(normalizeTracking('9400\x1d1118 9922 3333 333333')).toBe('9400111899223333333333');
+  });
+});
+
+describe('isValidTracking', () => {
+  it('accepts real carrier numbers', () => {
+    expect(isValidTracking('1Z999AA10123456784')).toBe(true);
+    expect(isValidTracking('9400111899223333333333')).toBe(true);
+    expect(isValidTracking(' 1z 999-aa1 0123 456 784 ')).toBe(true);
+  });
+
+  it('rejects too-short input and whole-barcode dumps', () => {
+    expect(isValidTracking('1234567')).toBe(false);
+    // A FedEx-96 barcode left unwrapped runs ~34 digits \u2014 never a number to store.
+    expect(isValidTracking('9'.repeat(34))).toBe(false);
+  });
+
+  it('rejects anything beyond letters and digits', () => {
+    expect(isValidTracking('12%45678')).toBe(false);
+    expect(isValidTracking('1234_5678')).toBe(false);
+    expect(isValidTracking('https://t.co/abc12345')).toBe(false);
   });
 });
 
@@ -29,6 +55,11 @@ describe('extractTrackingFromBarcode', () => {
 
   it('leaves a 420-prefixed scan alone when the remainder is not a USPS number', () => {
     expect(extractTrackingFromBarcode('42080229123456')).toBe('42080229123456');
+  });
+
+  it('unwraps an IMpb scan whose FNC1 separator lands after the routing prefix', () => {
+    expect(extractTrackingFromBarcode('42080229\x1d9400111899223333333333'))
+      .toBe('9400111899223333333333');
   });
 
   it('passes unrecognized input through normalized', () => {

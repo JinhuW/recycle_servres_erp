@@ -29,7 +29,6 @@ import {
 import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 
 import { useAuth } from './lib/auth';
-import { useEffectiveUser } from './lib/tweaks';
 import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
@@ -106,10 +105,6 @@ const toDraftLine = (l: OrderLine): DraftLine => ({
 
 function Shell() {
   const { user, loading, logout, pendingRoleChoice } = useAuth();
-  // The tab bar follows the effective role so a manager who picked "Continue as
-  // Purchaser" sees the purchaser tabs (Market, not Inventory), matching the
-  // desktop sidebar and the purchaser-scoped data.
-  const effUser = useEffectiveUser();
   const { t, lang } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
