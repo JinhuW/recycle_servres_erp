@@ -39,6 +39,7 @@ type LegRow = {
   linked_by: string | null;
   linked_at: Date | null;
   ignored: boolean;
+  category: string;
 };
 
 function shapeLeg(l: LegRow) {
@@ -59,7 +60,7 @@ async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
   return sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
-           linked_by, linked_at, ignored
+           linked_by, linked_at, ignored, category
     FROM bank_transactions
     WHERE id = ${id}
        OR pair_id = (SELECT pair_id FROM bank_transactions WHERE id = ${id} AND pair_id IS NOT NULL)`;
@@ -77,9 +78,10 @@ bankTx.get('/', async (c) => {
   const cursor = decodeCursor(c.req.query('cursor'));
 
   const statusFrag =
-    status === 'unlinked' ? sql`bt.order_id IS NULL AND NOT bt.ignored`
+    status === 'unlinked' ? sql`bt.order_id IS NULL AND NOT bt.ignored AND bt.category = 'external'`
     : status === 'linked' ? sql`bt.order_id IS NOT NULL`
     : status === 'ignored' ? sql`bt.ignored`
+    : status === 'transfer' ? sql`bt.category = 'transfer'`
     : sql`TRUE`;
   // A paired payment involves both sources, so it matches either filter; the
   // display leg of a pair is always the PayPal one.
@@ -106,7 +108,7 @@ bankTx.get('/', async (c) => {
   const rows = await sql`
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
-           bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored,
+           bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            u.name AS linked_by_name,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
@@ -147,6 +149,7 @@ bankTx.get('/', async (c) => {
       linkedAt: r.linked_at,
       linkedByName: r.linked_by_name ?? null,
       ignored: r.ignored,
+      category: r.category,
     })),
     nextCursor,
   });
@@ -158,8 +161,9 @@ bankTx.get('/stats', async (c) => {
   const sql = getDb(c.env);
   const [agg] = await sql`
     SELECT
-      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored)::int                    AS unlinked_count,
-      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored), 0)::float AS unlinked_amount,
+      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external')::int AS unlinked_count,
+      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external'), 0)::float AS unlinked_amount,
+      COUNT(*) FILTER (WHERE category = 'transfer')::int                               AS transfer_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL)::int                                AS linked_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund')::int       AS refund_count,
       COALESCE(SUM(amount) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund'), 0)::float AS refund_amount,
@@ -173,6 +177,7 @@ bankTx.get('/stats', async (c) => {
     linked: { count: agg.linked_count },
     refunds: { count: agg.refund_count, amount: agg.refund_amount },
     ignored: { count: agg.ignored_count },
+    transfers: { count: agg.transfer_count },
     sources: sources.map((s) => ({ source: s.source, lastSyncedAt: s.last_synced_at })),
   });
 });
@@ -311,6 +316,31 @@ bankTx.post('/:id/unignore', async (c) => {
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
   await sql`
     UPDATE bank_transactions SET ignored = FALSE
+    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  return c.json({ ok: true });
+});
+
+// ─── Mark / unmark transfer ──────────────────────────────────────────────────
+// A human category verdict; category_manual keeps every future sync (and
+// transfer-pairing) from overturning it.
+
+bankTx.post('/:id/mark-transfer', async (c) => {
+  const sql = getDb(c.env);
+  const group = await groupOf(sql, c.req.param('id'));
+  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+  if (group[0].order_id) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
+  await sql`
+    UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
+    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  return c.json({ ok: true });
+});
+
+bankTx.post('/:id/unmark-transfer', async (c) => {
+  const sql = getDb(c.env);
+  const group = await groupOf(sql, c.req.param('id'));
+  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+  await sql`
+    UPDATE bank_transactions SET category = 'external', category_manual = TRUE
     WHERE id IN ${sql(group.map((l) => l.id))}`;
   return c.json({ ok: true });
 });

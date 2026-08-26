@@ -33,6 +33,7 @@ type PaymentRow = Omit<Leg, 'source'> & {
   linkedAt: string | null;
   linkedByName: string | null;
   ignored: boolean;
+  category: 'external' | 'transfer';
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
@@ -42,6 +43,7 @@ type Stats = {
   linked: { count: number };
   refunds: { count: number; amount: number };
   ignored: { count: number };
+  transfers: { count: number };
   sources: { source: string; lastSyncedAt: string | null }[];
 };
 
@@ -58,7 +60,7 @@ type Suggestion = {
   reason: 'txn' | 'amount' | 'search';
 };
 
-type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored';
+type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored' | 'transfer';
 
 const FILTER_SELECT: CSSProperties = {
   width: 'auto', minWidth: 132, height: 32, fontSize: 12.5,
@@ -185,6 +187,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     { key: 'unlinked', label: t('payTileUnlinked'), count: stats.unlinked.count, sub: fmtUSD(stats.unlinked.amount, locale), tone: 'warn' },
     { key: 'linked', label: t('payTileLinked'), count: stats.linked.count, sub: null, tone: 'pos' },
     { key: 'refunds', label: t('payTileRefunds'), count: stats.refunds.count, sub: fmtUSD(stats.refunds.amount, locale), tone: 'cool' },
+    { key: 'transfer', label: t('payTileTransfers'), count: stats.transfers.count, sub: null, tone: 'info' },
     { key: 'ignored', label: t('payTileIgnored'), count: stats.ignored.count, sub: null, tone: 'muted' },
   ] : [];
 
@@ -216,7 +219,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
         {tiles.map(tile => (
           <button
             key={tile.key}
@@ -240,7 +243,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
       <div className="card">
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div className="seg" role="tablist">
-            {(['all', 'unlinked', 'linked', 'ignored'] as const).map(s => (
+            {(['all', 'unlinked', 'linked', 'transfer', 'ignored'] as const).map(s => (
               <button
                 key={s}
                 type="button"
@@ -331,6 +334,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
 
 function StatusChip({ row, t }: { row: PaymentRow; t: (k: string) => string }) {
   if (row.ignored) return <span className="chip muted">{t('payStatusIgnored')}</span>;
+  if (!row.orderId && row.category === 'transfer') {
+    return <span className="chip info">{t('payStatusTransfer')}</span>;
+  }
   if (!row.orderId) return <span className="chip dot warn">{t('payStatusUnlinked')}</span>;
   return (
     <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
@@ -464,6 +470,17 @@ function ExpandedDetail({ row, locale, act, onToast }: {
           <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unpair`)}>
             {t('payUnpair')}
           </button>
+        )}
+        {!row.orderId && (
+          row.category === 'transfer' ? (
+            <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unmark-transfer`)}>
+              {t('payNotTransfer')}
+            </button>
+          ) : !row.ignored && (
+            <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/mark-transfer`)}>
+              {t('payMarkTransfer')}
+            </button>
+          )
         )}
       </div>
     </div>

@@ -36,6 +36,8 @@ type LegRow = {
   amount: string;
   posted_at: Date;
   paypal_txn_id: string | null;
+  category: string;
+  category_manual: boolean;
   order_id: string | null;
   link_kind: string | null;
   link_auto: boolean;
@@ -133,16 +135,18 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       // the tombstones are human state and must survive every re-sync.
       const [row] = await tx<{ fresh: boolean }[]>`
         INSERT INTO bank_transactions
-          (source, external_id, account_id, posted_at, amount, counterparty, description, paypal_txn_id, raw)
+          (source, external_id, account_id, posted_at, amount, counterparty, description, paypal_txn_id, category, raw)
         VALUES
           (${source}, ${t.externalId}, ${accountId}, ${t.postedAt}, ${t.amount},
-           ${t.counterparty}, ${t.description}, ${t.paypalTxnId}, ${tx.json(t.raw as never)})
+           ${t.counterparty}, ${t.description}, ${t.paypalTxnId}, ${t.category}, ${tx.json(t.raw as never)})
         ON CONFLICT (source, external_id) DO UPDATE SET
           posted_at = EXCLUDED.posted_at,
           amount = EXCLUDED.amount,
           counterparty = EXCLUDED.counterparty,
           description = EXCLUDED.description,
           paypal_txn_id = EXCLUDED.paypal_txn_id,
+          category = CASE WHEN bank_transactions.category_manual
+                          THEN bank_transactions.category ELSE EXCLUDED.category END,
           raw = EXCLUDED.raw
         RETURNING (xmax = 0) AS fresh`;
       if (row.fresh) inserted++; else updated++;
@@ -163,12 +167,16 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
 async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id,
-           order_id, link_kind, link_auto, linked_by, linked_at
+           category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at
     FROM bank_transactions
     WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored`;
 
-  const mercury = legs.filter((l) => l.source === 'mercury');
-  const paypalById = new Map(legs.filter((l) => l.source === 'paypal').map((l) => [l.external_id, l]));
+  // Payment pairing is external-only: a transfer leg's sibling has the
+  // OPPOSITE sign (money leaving Mercury lands in PayPal), so it would only
+  // ever false-positive here — transferPair below handles it.
+  const external = legs.filter((l) => l.category !== 'transfer');
+  const mercury = external.filter((l) => l.source === 'mercury');
+  const paypalById = new Map(external.filter((l) => l.source === 'paypal').map((l) => [l.external_id, l]));
   const taken = new Set<string>();
   const pairs: Array<[LegRow, LegRow]> = [];
 
@@ -185,7 +193,7 @@ async function autoPair(tx: Tx): Promise<number> {
   // Amount+date: bucket the leftovers by amount; only a 1:1 bucket within the
   // window is safe to pair — anything else waits for a human.
   const byAmount = new Map<string, { m: LegRow[]; p: LegRow[] }>();
-  for (const l of legs) {
+  for (const l of external) {
     if (taken.has(l.id)) continue;
     const key = Number(l.amount).toFixed(2);
     const bucket = byAmount.get(key) ?? { m: [], p: [] };
@@ -214,7 +222,42 @@ async function autoPair(tx: Tx): Promise<number> {
         WHERE pair_id = ${pairId} AND order_id IS NULL`;
     }
   }
-  return pairs.length;
+
+  const transferPairs = await transferPair(tx, legs, taken);
+  return pairs.length + transferPairs;
+}
+
+// A PayPal transfer leg (classified by event code) and its Mercury sibling
+// carry opposite signs. Only an unambiguous 1:1 absolute-amount match within
+// the window pairs; the Mercury side is then a transfer too — unless a human
+// already ruled otherwise.
+async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise<number> {
+  const byAbs = new Map<string, { m: LegRow[]; p: LegRow[] }>();
+  for (const l of legs) {
+    if (taken.has(l.id) || l.order_id) continue;
+    if (l.source === 'paypal' && l.category !== 'transfer') continue;
+    const key = Math.abs(Number(l.amount)).toFixed(2);
+    const bucket = byAbs.get(key) ?? { m: [], p: [] };
+    (l.source === 'mercury' ? bucket.m : bucket.p).push(l);
+    byAbs.set(key, bucket);
+  }
+
+  let paired = 0;
+  for (const { m, p } of byAbs.values()) {
+    if (m.length !== 1 || p.length !== 1) continue;
+    if (Number(m[0].amount) !== -Number(p[0].amount)) continue;
+    const dt = Math.abs(m[0].posted_at.getTime() - p[0].posted_at.getTime());
+    if (dt > PAIR_WINDOW_MS) continue;
+    const pairId = crypto.randomUUID();
+    await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m[0].id}, ${p[0].id})`;
+    await tx`
+      UPDATE bank_transactions SET category = 'transfer'
+      WHERE id = ${m[0].id} AND NOT category_manual`;
+    taken.add(m[0].id);
+    taken.add(p[0].id);
+    paired++;
+  }
+  return paired;
 }
 
 // ─── Auto-link ────────────────────────────────────────────────────────────────
@@ -226,7 +269,8 @@ async function autoLink(tx: Tx): Promise<number> {
   const groups = await tx<{ ids: string[]; ptxn: string; amount: string }[]>`
     SELECT ARRAY_AGG(id::text) AS ids, MAX(paypal_txn_id) AS ptxn, MAX(amount::text) AS amount
     FROM bank_transactions
-    WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored AND paypal_txn_id IS NOT NULL
+    WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
+      AND paypal_txn_id IS NOT NULL AND category <> 'transfer'
     GROUP BY COALESCE(pair_id, id)`;
 
   let linked = 0;

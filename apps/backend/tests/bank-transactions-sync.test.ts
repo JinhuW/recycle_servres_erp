@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { syncBankTransactions } from '../src/banktx/sync';
+import { paypalTxnCategory } from '../src/banktx/paypal';
 import type { BankProvider, BankSource, NormalizedTxn } from '../src/banktx/types';
 
 const NOW = Date.now();
@@ -24,6 +25,7 @@ function fakeProvider(source: BankSource, txns: TxnSpec[]): BankProvider {
           counterparty: null,
           description: null,
           paypalTxnId: source === 'paypal' ? t.externalId : null,
+          category: 'external' as const,
           raw: { id: t.externalId },
           ...t,
         })),
@@ -43,13 +45,15 @@ type LegRow = {
   no_auto_link: boolean;
   ignored: boolean;
   description: string | null;
+  category: string;
+  category_manual: boolean;
 };
 
 async function legs(): Promise<Map<string, LegRow>> {
   const db = getTestDb();
   const rows = await db<LegRow[]>`
     SELECT external_id, pair_id, no_auto_pair, order_id, link_kind, link_auto,
-           linked_by, no_auto_link, ignored, description
+           linked_by, no_auto_link, ignored, description, category, category_manual
     FROM bank_transactions`;
   return new Map(rows.map((r) => [r.external_id, r]));
 }
@@ -209,6 +213,83 @@ describe('bank transaction sync', () => {
     ]);
     const rows = await legs();
     expect(rows.get(TXN_A)).toMatchObject({ order_id: poId, link_kind: 'refund' });
+  });
+
+  it('classifies PayPal bank-transfer event codes as transfer', () => {
+    expect(paypalTxnCategory('T0300')).toBe('transfer'); // bank deposit into PayPal
+    expect(paypalTxnCategory('T0403')).toBe('transfer'); // withdrawal to bank
+    expect(paypalTxnCategory('T0006')).toBe('external'); // regular payment
+    expect(paypalTxnCategory(undefined)).toBe('external');
+  });
+
+  it('transfer-pairs a PayPal funding credit with the opposite-sign Mercury debit', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: 2000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'm-topup', amount: -2000, postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-topup')!.pair_id).toBeTruthy();
+    expect(rows.get('m-topup')!.pair_id).toBe(rows.get(TXN_A)!.pair_id);
+    // The Mercury side of a transfer pair is a transfer too.
+    expect(rows.get('m-topup')!.category).toBe('transfer');
+  });
+
+  it('never transfer-pairs when two Mercury debits carry the same amount', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: 2000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'm-t1', amount: -2000, postedAt: new Date(NOW - DAY) },
+        { externalId: 'm-t2', amount: -2000, postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const rows = await legs();
+    for (const id of [TXN_A, 'm-t1', 'm-t2']) {
+      expect(rows.get(id)!.pair_id).toBeNull();
+    }
+  });
+
+  it('transfer legs never join payment amount+date pairing', async () => {
+    // Same signed amount, same window — the old payment matcher would pair
+    // this funding credit with the unrelated Mercury refund.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: 120, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'm-refund', amount: 120, postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get(TXN_A)!.pair_id).toBeNull();
+    expect(rows.get('m-refund')!.pair_id).toBeNull();
+  });
+
+  it('auto-link skips transfer legs even on an exact txn id match', async () => {
+    await createPO(TXN_A);
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: TXN_A, amount: 2000, category: 'transfer' }]),
+    ]);
+    const rows = await legs();
+    expect(rows.get(TXN_A)!.order_id).toBeNull();
+  });
+
+  it('a manual category verdict sticks across re-syncs', async () => {
+    const providers = [
+      fakeProvider('paypal', [{ externalId: TXN_A, amount: 2000, category: 'transfer' as const }]),
+    ];
+    await syncBankTransactions(testEnv, providers);
+    const db = getTestDb();
+    await db`UPDATE bank_transactions SET category = 'external', category_manual = TRUE`;
+
+    await syncBankTransactions(testEnv, providers);
+    const rows = await legs();
+    expect(rows.get(TXN_A)).toMatchObject({ category: 'external', category_manual: true });
   });
 
   it('one failing provider does not block the other', async () => {
