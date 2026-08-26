@@ -1732,6 +1732,8 @@ const zh: Record<string, string> = {
   payUnpair: '拆分',
   payMarkTransfer: '标记为内部转账',
   payNotTransfer: '不是内部转账',
+  payTransferRuleToast: '已标记为内部转账 — 来自 {name} 的交易将自动分类（另有 {n} 笔已更新）',
+  payTransferRuleRemovedToast: '已取消 {name} 的自动分类',
   payLinkedBy: '由 {name} 关联',
   payLinkedAuto: '自动关联',
   payTxnId: '交易号',

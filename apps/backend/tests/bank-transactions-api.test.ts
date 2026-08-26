@@ -203,6 +203,48 @@ describe('bank transactions API', () => {
     expect((await api('POST', `/api/bank-transactions/${pairedLegId}/mark-transfer`, { token })).status).toBe(400);
   });
 
+  it('mark-transfer teaches a counterparty rule that covers existing and future rows', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-hk1', amount: 89261, counterparty: 'HK GREEN ENERGY', postedAt: new Date(NOW - 3 * DAY) },
+        { externalId: 'm-hk2', amount: 42000, counterparty: 'HK GREEN ENERGY', postedAt: new Date(NOW - 8 * DAY) },
+        { externalId: 'm-wire', amount: -560, counterparty: 'Reddit Seller', postedAt: new Date(NOW - 5 * DAY) },
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+
+    const mark = await api<{ ok: boolean; ruleCounterparty: string | null; alsoMarked: number }>(
+      'POST', `/api/bank-transactions/${await idOf('m-hk1')}/mark-transfer`, { token });
+    expect(mark.status).toBe(200);
+    expect(mark.body.ruleCounterparty).toBe('HK GREEN ENERGY');
+    expect(mark.body.alsoMarked).toBe(1); // m-hk2 came along
+
+    const db = getTestDb();
+    const after = await db`SELECT external_id, category, category_manual FROM bank_transactions ORDER BY external_id`;
+    expect(after.find((r) => r.external_id === 'm-hk2')).toMatchObject({ category: 'transfer', category_manual: false });
+    expect(after.find((r) => r.external_id === 'm-wire')!.category).toBe('external');
+
+    // A future sync classifies new rows from the taught counterparty.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-hk3', amount: 2500, counterparty: 'HK GREEN ENERGY', postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const hk3 = await db`SELECT category FROM bank_transactions WHERE external_id = 'm-hk3'`;
+    expect(hk3[0].category).toBe('transfer');
+
+    // Unmark drops the rule and reverts the rows the rule classified.
+    const unmark = await api<{ ok: boolean; ruleRemoved: boolean }>(
+      'POST', `/api/bank-transactions/${await idOf('m-hk1')}/unmark-transfer`, { token });
+    expect(unmark.status).toBe(200);
+    expect(unmark.body.ruleRemoved).toBe(true);
+    const rules = await db`SELECT 1 FROM bank_transfer_counterparties`;
+    expect(rules).toHaveLength(0);
+    const reverted = await db`
+      SELECT external_id, category FROM bank_transactions WHERE counterparty = 'HK GREEN ENERGY' ORDER BY external_id`;
+    expect(reverted.every((r) => r.category === 'external')).toBe(true);
+  });
+
   it('keyset-paginates without skips or duplicates', async () => {
     const txns: TxnSpec[] = Array.from({ length: 5 }, (_, i) => ({
       externalId: `m-${i}`, amount: -(i + 1), postedAt: new Date(NOW - i * DAY),
