@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-26
+
 ### Changed
 
 - **The 99 new city centres are now searched FIRST.** The monitor walks
