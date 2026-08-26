@@ -96,6 +96,24 @@ describe('packages — add and list', () => {
     const pkg = await addPackage(token) as Pkg & { trackingUrl: string | null };
     expect(pkg.trackingUrl).toBe(`https://www.ups.com/track?tracknum=${TN}`);
   });
+
+  it('rejects junk that cannot be a tracking number: metacharacters, URLs, whole-barcode dumps', async () => {
+    const { token } = await loginAs(MARCUS);
+    for (const bad of ['12%45678', 'https://t.co/abc12345', '9'.repeat(34)]) {
+      const r = await api('POST', '/api/packages', {
+        token, body: { trackingNumber: bad, carrier: 'UPS' },
+      });
+      expect(r.status, bad).toBe(400);
+    }
+  });
+
+  it('strips a FNC1/GS control character before storing the number', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token, {
+      trackingNumber: '9400\x1d111899223333333333', carrier: 'USPS',
+    });
+    expect(pkg.trackingNumber).toBe('9400111899223333333333');
+  });
 });
 
 describe('packages — lookup by scanned barcode', () => {
@@ -159,6 +177,31 @@ describe('packages — lookup by scanned barcode', () => {
     expect(missing.status).toBe(400);
     const short = await api('GET', '/api/packages/lookup?code=123', { token });
     expect(short.status).toBe(400);
+  });
+
+  it('treats the stored number as a literal suffix, not a LIKE pattern', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sql = getTestDb();
+    // Rows predating boundary validation can hold LIKE metacharacters.
+    await sql`
+      INSERT INTO packages (tracking_number, carrier, created_by)
+      VALUES (${'12%45678'}, 'UPS', ${marcus.user.id})
+    `;
+    const r = await api<Lookup>('GET', '/api/packages/lookup?code=12XXXX45678', { token: marcus.token });
+    expect(r.status).toBe(200);
+    expect(r.body.package).toBeNull();
+  });
+
+  it('survives a stored number ending in the LIKE escape character', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sql = getTestDb();
+    await sql`
+      INSERT INTO packages (tracking_number, carrier, created_by)
+      VALUES (${'1234567\\'}, 'UPS', ${marcus.user.id})
+    `;
+    const r = await api<Lookup>('GET', '/api/packages/lookup?code=1Z000XX00000000000', { token: marcus.token });
+    expect(r.status).toBe(200);
+    expect(r.body.package).toBeNull();
   });
 
   it('reports the linked PO once create-po has run', async () => {

@@ -4,7 +4,7 @@
 // poll (shipping/track.ts) moves these rows exactly like shipments.
 
 import { Hono } from 'hono';
-import { CARRIERS, normalizeTracking, type Carrier } from '@recycle-erp/shared';
+import { CARRIERS, isValidTracking, normalizeTracking, type Carrier } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
@@ -93,19 +93,20 @@ packages.get('/lookup', async (c) => {
   }
   // No `mine` here: the point is a manager scanning any box in the receiving
   // pile, whoever tracked it. Purchasers stay pinned to their own rows.
-  const scopeFrag = effectiveRole(u) === 'manager' ? sql`TRUE` : sql`p.created_by = ${u.id}`;
+  const scopeFrag = effectiveRole(u) === 'manager' ? sql`TRUE` : sql`created_by = ${u.id}`;
   // Carrier barcodes wrap the tracking number — USPS IMpb prefixes 420+ZIP,
   // FedEx 96 barcodes run ~34 digits ending in the number, UPS 1Z is verbatim —
-  // so fall back to "scan ends with the stored number". Seq scan by design:
-  // this table is one row per inbound box, tens of rows.
+  // so fall back to "scan ends with the stored number". right(), not LIKE:
+  // a stored number holding %/_/\ (rows predate boundary validation) must
+  // match literally, never as a pattern. Seq scan by design: this table is
+  // one row per inbound box, tens of rows.
   const rows = (await sql`
-    SELECT p.id, p.tracking_number, p.carrier, p.status, p.tracking_status,
-           p.tracking_eta, p.last_tracked_at, p.seller_name, p.note,
-           p.paypal_txn_id, p.payment_screenshot_key, p.payment_screenshot_url,
-           p.order_id, p.created_by, p.created_at, us.name AS creator_name
-    FROM packages p LEFT JOIN users us ON us.id = p.created_by
-    WHERE ${scopeFrag} AND (p.tracking_number = ${code} OR ${code} LIKE '%' || p.tracking_number)
-    ORDER BY (p.tracking_number = ${code}) DESC, length(p.tracking_number) DESC
+    SELECT ${PACKAGE_COLS(sql)},
+           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name
+    FROM packages
+    WHERE ${scopeFrag}
+      AND (tracking_number = ${code} OR right(${code}, length(tracking_number)) = tracking_number)
+    ORDER BY (tracking_number = ${code}) DESC, length(tracking_number) DESC
     LIMIT 1
   `) as unknown as (PackageRow & { creator_name: string | null })[];
   // A miss is a normal outcome (a box nobody tracked yet), and a purchaser
@@ -132,6 +133,11 @@ packages.post('/', async (c) => {
   const trackingNumber =
     typeof body?.trackingNumber === 'string' ? normalizeTracking(body.trackingNumber) : '';
   if (trackingNumber.length < 8) return c.json({ error: 'A tracking number is required' }, 400);
+  // Junk here is worse than a rejection: an unresolvable "number" (QR payload,
+  // whole FedEx-96 barcode) becomes a dead row that shadows the real one.
+  if (!isValidTracking(trackingNumber)) {
+    return c.json({ error: 'A tracking number is letters and digits, at most 30 characters' }, 400);
+  }
   if (!CARRIERS.includes(body?.carrier as Carrier)) {
     return c.json({ error: 'carrier must be UPS, FedEx, or USPS' }, 400);
   }

@@ -4,5 +4,6 @@
 // existing frontend import paths.
 
 export {
-  CARRIERS, detectCarriers, extractTrackingFromBarcode, normalizeTracking, type Carrier,
+  CARRIERS, detectCarriers, extractTrackingFromBarcode, isValidTracking, normalizeTracking,
+  type Carrier,
 } from '@recycle-erp/shared';
