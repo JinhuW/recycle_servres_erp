@@ -3,14 +3,18 @@ import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhoneListSkeleton } from '../components/Skeleton';
+import { SnScanner } from '../components/SnScanner';
 import { api, listShipments } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { CARRIERS } from '../lib/carrierDetect';
+import { CARRIERS, extractTrackingFromBarcode } from '../lib/carrierDetect';
 import { FMT_HINT_KEY, useAddPackageForm } from '../lib/useAddPackageForm';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtDateShort, fmtMoney } from '../lib/format';
 import { useT } from '../lib/i18n';
-import { createPoFromPackage, listPackages, type TrackedPackage } from '../lib/packages';
+import {
+  createPoFromPackage, listPackages, lookupPackage,
+  type LookedUpPackage, type TrackedPackage,
+} from '../lib/packages';
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
@@ -26,6 +30,9 @@ import type { Order, Shipment } from '../lib/types';
 // wizard.
 
 type ToastKind = 'success' | 'error';
+
+// Scan → not-found → Add handoff, same sessionStorage bridge as pwa:sharedFile.
+const SCANNED_TN_KEY = 'ship:scannedTracking';
 type Props = {
   route: ShippingRoute;
   showToast: (msg: string, kind?: ToastKind) => void;
@@ -42,12 +49,42 @@ export function MobileShipping({ route, showToast, onCreatedPo }: Props) {
 
 // ── /shipping — the inbound glance ───────────────────────────────────────────
 
+type ScanState =
+  | { phase: 'camera' }
+  | { phase: 'found'; pkg: LookedUpPackage }
+  | { phase: 'notFound'; code: string };
+
 function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
   const { t } = useT();
   const [rows, setRows] = useState<InboundRow[] | null>(null);
   const [showVoided, setShowVoided] = useState(false);
+  const [scan, setScan] = useState<ScanState | null>(null);
+  const [poBusy, setPoBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
+
+  const onScanned = (scanned: string[]) => {
+    if (!scanned.length) { setScan(null); return; }
+    setScan(null);
+    lookupPackage(scanned[0])
+      .then(({ package: pkg }) => {
+        setScan(pkg ? { phase: 'found', pkg } : { phase: 'notFound', code: scanned[0] });
+      })
+      .catch(handleFetchError);
+  };
+
+  const createPo = async (pkg: TrackedPackage) => {
+    if (poBusy) return;
+    setPoBusy(true);
+    try {
+      const { orderId } = await createPoFromPackage(pkg);
+      showToast(t('shipPoCreated', { id: orderId }));
+      onCreatedPo(orderId);
+    } catch (e) {
+      handleFetchError(e);
+      setPoBusy(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -92,11 +129,25 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
         sub={rows ? t('shipMobCount', { n: rows.length }) : undefined}
         scrolled={scrolled}
         trailing={
-          <button className="ph-icon-btn" onClick={() => navigate('/shipping/add')} aria-label={t('shipAddLabel')}>
-            <Icon name="plus" size={16} />
-          </button>
+          <>
+            <button className="ph-icon-btn" onClick={() => setScan({ phase: 'camera' })} aria-label={t('shipScanBtn')}>
+              <Icon name="scan" size={16} />
+            </button>
+            <button className="ph-icon-btn" onClick={() => navigate('/shipping/add')} aria-label={t('shipAddLabel')}>
+              <Icon name="plus" size={16} />
+            </button>
+          </>
         }
       />
+      {scan?.phase === 'camera' && (
+        <SnScanner existing={[]} onDone={onScanned} title={t('shipScanTitle')} hint={t('shipScanHint')} />
+      )}
+      {scan?.phase === 'found' && (
+        <PackageSheet pkg={scan.pkg} busy={poBusy} onCreatePo={createPo} onClose={() => setScan(null)} />
+      )}
+      {scan?.phase === 'notFound' && (
+        <ScanNotFoundSheet code={scan.code} onClose={() => setScan(null)} />
+      )}
       <div className="ph-scroll" ref={scrollRef}>
         {rows === null && <PhoneListSkeleton rows={5} />}
 
@@ -142,6 +193,113 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
 
 function rowKey(r: InboundRow): string {
   return r.kind === 'package' ? `p:${r.pkg.id}` : `s:${r.shipment.id}`;
+}
+
+// ── Scan result sheets ───────────────────────────────────────────────────────
+
+function PackageSheet({ pkg, busy, onCreatePo, onClose }: {
+  pkg: LookedUpPackage;
+  busy: boolean;
+  onCreatePo: (pkg: TrackedPackage) => void;
+  onClose: () => void;
+}) {
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+  const chip = STATUS_CHIP[pkg.status];
+  return (
+    <>
+      <div className="ph-sheet-backdrop" onClick={onClose} />
+      <div className="ph-sheet" style={{ paddingBottom: 24 }}>
+        <div className="ph-sheet-grabber" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 12px' }}>
+          {pkg.carrier && <span className="ship-carrier-chip">{pkg.carrier}</span>}
+          <span className={'chip dot ' + chip.cls}>{t(chip.key)}</span>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: 'var(--accent-strong)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
+          >
+            {t('cancel')}
+          </button>
+        </div>
+
+        <div className="mono" style={{ fontSize: 15, fontWeight: 600, padding: '0 4px', overflowWrap: 'anywhere' }}>
+          {pkg.trackingNumber}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--fg-subtle)', padding: '4px 4px 0' }}>
+          {[
+            pkg.creatorName ? t('shipScanTrackedBy', { name: pkg.creatorName }) : null,
+            fmtDateShort(pkg.createdAt, locale),
+            pkg.sellerName,
+          ].filter(Boolean).join(' · ')}
+        </div>
+
+        {/* The purchaser's note is what the receiver came for — box contents,
+            dock instructions — so it gets the card, not a footnote. */}
+        {pkg.note && (
+          <div className="ph-card" style={{ marginTop: 12, padding: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+              {t('shipScanNoteLabel')}
+            </div>
+            <div style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{pkg.note}</div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          {pkg.orderId ? (
+            <button
+              className="ph-btn"
+              style={{ width: '100%' }}
+              onClick={() => { onClose(); navigate(`/purchase-orders/${pkg.orderId}`); }}
+            >
+              {pkg.orderId} →
+            </button>
+          ) : (
+            <button className="ph-btn accent" style={{ width: '100%' }} disabled={busy} onClick={() => onCreatePo(pkg)}>
+              {busy ? '…' : t('shipCreatePo')}
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ScanNotFoundSheet({ code, onClose }: { code: string; onClose: () => void }) {
+  const { t } = useT();
+  return (
+    <>
+      <div className="ph-sheet-backdrop" onClick={onClose} />
+      <div className="ph-sheet" style={{ paddingBottom: 24 }}>
+        <div className="ph-sheet-grabber" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 10px' }}>
+          <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{t('shipScanNotFoundTitle')}</div>
+          <button
+            onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: 'var(--accent-strong)', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', padding: 4, cursor: 'pointer' }}
+          >
+            {t('cancel')}
+          </button>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--fg-muted)', padding: '0 4px' }}>{t('shipScanNotFoundBody')}</div>
+        <div className="mono" style={{ fontSize: 13, padding: '10px 4px 0', overflowWrap: 'anywhere', color: 'var(--fg-subtle)' }}>
+          {extractTrackingFromBarcode(code)}
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <button
+            className="ph-btn accent"
+            style={{ width: '100%' }}
+            onClick={() => {
+              try { sessionStorage.setItem(SCANNED_TN_KEY, extractTrackingFromBarcode(code)); } catch { /* storage may be unavailable */ }
+              navigate('/shipping/add');
+            }}
+          >
+            <Icon name="plus" size={15} /> {t('shipScanAddBtn')}
+          </button>
+        </div>
+      </div>
+    </>
+  );
 }
 
 // ── One card ─────────────────────────────────────────────────────────────────
@@ -301,6 +459,18 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
     showToast(t('shipAddAdded', { carrier, tn }));
     navigate('/shipping');
   });
+
+  // Consume the scan → not-found handoff exactly once.
+  useEffect(() => {
+    try {
+      const scanned = sessionStorage.getItem(SCANNED_TN_KEY);
+      if (scanned) {
+        sessionStorage.removeItem(SCANNED_TN_KEY);
+        f.setRaw(scanned);
+      }
+    } catch { /* storage may be unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>

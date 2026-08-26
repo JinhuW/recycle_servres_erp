@@ -14,6 +14,26 @@ export function normalizeTracking(raw: string): string {
   return raw.replace(/[-\s\u200B-\u200F\u2060\uFEFF]+/g, '').toUpperCase();
 }
 
+// Label barcodes can wrap the tracking number in routing data. Only the USPS
+// IMpb 420+ZIP prefix is stripped — it's unambiguous (the remainder must still
+// scan as a USPS number). FedEx 96 barcodes are left whole on purpose: any
+// 15-digit suffix of a digit run "detects" as FedEx, so extraction could
+// silently prefill a wrong number. This feeds the add-package form only; the
+// server-side lookup matches wrapped scans by suffix instead.
+export function extractTrackingFromBarcode(raw: string): string {
+  const tn = normalizeTracking(raw);
+  const impb = /^420(?:\d{9}|\d{5})/.exec(tn);
+  if (impb) {
+    // Try the ZIP9 variant first — a ZIP5 strip of a ZIP9 barcode leaves
+    // four routing digits glued to the front of the number.
+    for (const cut of impb[0].length === 12 ? [12, 8] : [8]) {
+      const rest = tn.slice(cut);
+      if (detectCarriers(rest).includes('USPS')) return rest;
+    }
+  }
+  return tn;
+}
+
 // Format rules only — no checksum validation; ambiguous shapes return every
 // plausible carrier and the form lets the user pick.
 export function detectCarriers(raw: string): Carrier[] {

@@ -98,6 +98,83 @@ describe('packages — add and list', () => {
   });
 });
 
+describe('packages — lookup by scanned barcode', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  type Lookup = { package: (Pkg & { trackingUrl: string | null; creatorName: string | null }) | null };
+
+  it('finds the exact tracking number from a messy scan, with the creator named', async () => {
+    const marcus = await loginAs(MARCUS);
+    const pkg = await addPackage(marcus.token, { note: 'two servers, dock B' });
+
+    const r = await api<Lookup>('GET', `/api/packages/lookup?code=${encodeURIComponent(' 1z 999-aa1 0123 456 784 ')}`, {
+      token: marcus.token,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.package?.id).toBe(pkg.id);
+    expect(r.body.package?.trackingNumber).toBe(TN);
+    expect(r.body.package?.note).toBe('two servers, dock B');
+    expect(r.body.package?.trackingUrl).toBe(`https://www.ups.com/track?tracknum=${TN}`);
+    expect(r.body.package?.orderId).toBeNull();
+
+    const sql = getTestDb();
+    const { name } = (await sql`SELECT name FROM users WHERE id = ${marcus.user.id}`)[0] as { name: string };
+    expect(r.body.package?.creatorName).toBe(name);
+  });
+
+  it('matches a carrier barcode that wraps the tracking number (USPS IMpb prefix)', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token, { trackingNumber: '9400111899223333333333', carrier: 'USPS' });
+
+    const r = await api<Lookup>('GET', '/api/packages/lookup?code=420802299400111899223333333333', { token });
+    expect(r.status).toBe(200);
+    expect(r.body.package?.id).toBe(pkg.id);
+  });
+
+  it('scopes like the list: another purchaser gets null, a manager finds any box', async () => {
+    const marcus = await loginAs(MARCUS);
+    const priya = await loginAs(PRIYA);
+    const mgr = await loginAs(ALEX);
+    const pkg = await addPackage(marcus.token);
+
+    const hidden = await api<Lookup>('GET', `/api/packages/lookup?code=${TN}`, { token: priya.token });
+    expect(hidden.status).toBe(200);
+    expect(hidden.body.package).toBeNull();
+
+    const found = await api<Lookup>('GET', `/api/packages/lookup?code=${TN}`, { token: mgr.token });
+    expect(found.status).toBe(200);
+    expect(found.body.package?.id).toBe(pkg.id);
+    expect(found.body.package?.creatorName).toBeTruthy();
+  });
+
+  it('returns null for an unknown number and 400 for a missing or too-short code', async () => {
+    const { token } = await loginAs(MARCUS);
+    await addPackage(token);
+
+    const miss = await api<Lookup>('GET', '/api/packages/lookup?code=1Z000XX00000000000', { token });
+    expect(miss.status).toBe(200);
+    expect(miss.body.package).toBeNull();
+
+    const missing = await api('GET', '/api/packages/lookup', { token });
+    expect(missing.status).toBe(400);
+    const short = await api('GET', '/api/packages/lookup?code=123', { token });
+    expect(short.status).toBe(400);
+  });
+
+  it('reports the linked PO once create-po has run', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${pkg.id}`;
+    const created = await api<{ orderId: string }>('POST', `/api/packages/${pkg.id}/create-po`, { token, body: {} });
+    expect(created.status).toBe(201);
+
+    const r = await api<Lookup>('GET', `/api/packages/lookup?code=${TN}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.package?.orderId).toBe(created.body.orderId);
+  });
+});
+
 describe('packages — delete guards', () => {
   beforeEach(async () => { await resetDb(); });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectCarriers, normalizeTracking } from './carrierDetect';
+import { detectCarriers, extractTrackingFromBarcode, normalizeTracking } from './carrierDetect';
 
 describe('normalizeTracking', () => {
   it('strips spaces and hyphens and uppercases', () => {
@@ -9,6 +9,30 @@ describe('normalizeTracking', () => {
   it('strips zero-width and bidi characters from chat-app pastes', () => {
     expect(normalizeTracking('1z\u200B999\u200Faa1\u2060 0123\u200E456 784\uFEFF'))
       .toBe('1Z999AA10123456784');
+  });
+});
+
+describe('extractTrackingFromBarcode', () => {
+  it('passes a UPS 1Z scan through normalized', () => {
+    expect(extractTrackingFromBarcode(' 1z 999-aa1 0123 456 784 ')).toBe('1Z999AA10123456784');
+  });
+
+  it('strips the USPS IMpb 420+ZIP5 routing prefix', () => {
+    expect(extractTrackingFromBarcode('420802299400111899223333333333'))
+      .toBe('9400111899223333333333');
+  });
+
+  it('strips the USPS IMpb 420+ZIP9 routing prefix', () => {
+    expect(extractTrackingFromBarcode('4208022912349400111899223333333333'))
+      .toBe('9400111899223333333333');
+  });
+
+  it('leaves a 420-prefixed scan alone when the remainder is not a USPS number', () => {
+    expect(extractTrackingFromBarcode('42080229123456')).toBe('42080229123456');
+  });
+
+  it('passes unrecognized input through normalized', () => {
+    expect(extractTrackingFromBarcode('hello world')).toBe('HELLOWORLD');
   });
 });
 
