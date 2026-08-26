@@ -165,6 +165,7 @@ export function scanToLinePatch(scan: ScanResponse): Partial<Line> {
     ...(f.interface    ? { interface: f.interface }       : {}),
     ...(f.formFactor   ? { formFactor: f.formFactor }     : {}),
     ...(f.description  ? { description: f.description }   : {}),
+    ...(f.rpm          ? { rpm: Number(f.rpm) }           : {}),
     ...(f.partNumber   ? { partNumber: f.partNumber }     : {}),
   };
 }
