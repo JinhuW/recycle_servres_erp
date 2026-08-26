@@ -31,6 +31,16 @@ export type Env = {
   SHIPSAVING_API_URL?: string;
   SHIPSAVING_APP_KEY?: string;
   SHIPSAVING_APP_SECRET?: string;
+  // Bank-transaction sync (manager Payments page). A source with no keys is
+  // reported as "not configured" — there is NO silent stub fallback here.
+  // BANKTX_STUB=1 explicitly opts into deterministic canned data for dev.
+  // API_URL overrides exist for tests; defaults are the live endpoints.
+  MERCURY_API_URL?: string;
+  MERCURY_API_TOKEN?: string;
+  PAYPAL_API_URL?: string;
+  PAYPAL_CLIENT_ID?: string;
+  PAYPAL_CLIENT_SECRET?: string;
+  BANKTX_STUB?: string;
   // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
   // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
   R2_S3_ENDPOINT?: string;

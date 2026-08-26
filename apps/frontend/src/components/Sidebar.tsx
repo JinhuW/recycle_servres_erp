@@ -7,7 +7,7 @@ import type { Role } from '../lib/types';
 export type DesktopView =
   | 'dashboard' | 'submit' | 'history' | 'shipping' | 'market'
   | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers'
-  | 'activity' | 'tracker' | 'coordinator' | 'settings';
+  | 'activity' | 'payments' | 'tracker' | 'coordinator' | 'settings';
 
 type NavItem = { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string };
 
@@ -32,6 +32,7 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
     tKey: 'nav_group_oversight',
     items: [
       { id: 'activity',   tKey: 'nav_activity',   icon: 'clock',      roles: ['manager'] },
+      { id: 'payments',   tKey: 'nav_payments',   icon: 'dollar',     roles: ['manager'] },
       { id: 'tracker',    tKey: 'nav_tracker',    icon: 'globe',      roles: ['manager'] },
       { id: 'coordinator', tKey: 'nav_coordinator', icon: 'shield',   roles: ['manager'] },
       // Purchasers get Settings too (Account + Connectors — the MCP connect

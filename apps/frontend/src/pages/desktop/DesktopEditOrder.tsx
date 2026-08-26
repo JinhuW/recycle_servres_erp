@@ -1149,6 +1149,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           )}
         </div>
 
+        {/* Bank payments linked to this PO on the Payments page. Manager-only
+            (the API 403s everyone else) and invisible until something links. */}
+        {user?.role === 'manager' && <PoPaymentsLedger orderId={order.id} locale={locale} />}
+
         {/* PO audit log — lives under Payment detail in the side column, fully
             foldable. The component hides its own card chrome before load and
             handles the empty-state copy for drafts. */}
@@ -1812,4 +1816,67 @@ function editLineToInsert(l: EditLine, status: string) {
     scanImageId:    l.scanImageId ?? null,
     scanConfidence: l.scanConfidence ?? null,
   };
+}
+
+// Read-only ledger of bank transactions linked to this PO on the Payments
+// page. Renders nothing until a payment is linked, so most POs pay no cost.
+function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale: string }) {
+  const { t } = useT();
+  const [ledger, setLedger] = useState<{
+    payments: {
+      id: string; source: string; postedAt: string; amount: number;
+      counterparty: string | null; linkKind: 'payment' | 'refund' | null; linkAuto: boolean;
+    }[];
+    net: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.get<NonNullable<typeof ledger>>(`/api/bank-transactions/by-order/${encodeURIComponent(orderId)}`)
+      .then(r => { if (alive) setLedger(r); })
+      // Silent: the ledger is a side panel, not the page — a fetch hiccup
+      // must not throw a dialog over an otherwise working order edit.
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [orderId]);
+
+  if (!ledger || ledger.payments.length === 0) return null;
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{t('payLedgerTitle')}</div>
+        <button
+          type="button"
+          className="btn sm ghost"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => navigate('/payments')}
+        >
+          {t('payLedgerOpen')}
+        </button>
+      </div>
+      <div style={{ marginTop: 10, display: 'grid', gap: 6, fontSize: 12.5 }}>
+        {ledger.payments.map(p => (
+          <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+            <span className={'chip dot ' + (p.linkKind === 'refund' ? 'cool' : 'pos')} style={{ fontSize: 10.5 }}>
+              {t(p.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
+            </span>
+            <span className="muted">{fmtDateShort(p.postedAt, locale)}</span>
+            <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {p.counterparty ?? (p.source === 'paired' ? 'PayPal + Mercury' : p.source)}
+            </span>
+            <span className="mono" style={{ marginLeft: 'auto', color: p.amount > 0 ? 'var(--pos)' : undefined }}>
+              {(p.amount < 0 ? '−' : '+') + fmtUSD(Math.abs(p.amount), locale)}
+            </span>
+          </div>
+        ))}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between',
+          paddingTop: 6, borderTop: '1px dashed var(--border)', fontWeight: 600,
+        }}>
+          <span>{t('payLedgerNet')}</span>
+          <span className="mono">{(ledger.net < 0 ? '−' : '+') + fmtUSD(Math.abs(ledger.net), locale)}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
