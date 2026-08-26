@@ -3,4 +3,7 @@
 // the exact same normalization — this module only re-exports them for the
 // existing frontend import paths.
 
-export { CARRIERS, detectCarriers, normalizeTracking, type Carrier } from '@recycle-erp/shared';
+export {
+  CARRIERS, detectCarriers, extractTrackingFromBarcode, isValidTracking, normalizeTracking,
+  type Carrier,
+} from '@recycle-erp/shared';

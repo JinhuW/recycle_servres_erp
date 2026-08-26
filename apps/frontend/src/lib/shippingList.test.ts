@@ -85,6 +85,15 @@ describe('filterRows', () => {
     expect(filterRows(rows, { ...all, search: '1z9' }).map(r => r.shipment.id)).toEqual(['s1']);
     expect(filterRows(rows, { ...all, search: 'nothing' })).toHaveLength(0);
   });
+
+  it('searches the order PayPal transaction id — it renders on the row', () => {
+    const withTxn: ShipRow[] = [{
+      order: order({ id: 'PO-7', paypalTxnId: '8AB12345CD678901E' }),
+      shipment: shipment({ id: 's7' }),
+    }];
+    expect(filterRows(withTxn, { ...all, search: '8ab12345' }).map(r => r.shipment.id)).toEqual(['s7']);
+    expect(filterRows(withTxn, { ...all, search: 'absent' })).toHaveLength(0);
+  });
 });
 
 describe('matchSellers', () => {
@@ -150,6 +159,12 @@ describe('filterInbound', () => {
     expect(filterInbound(withNote, { ...all, search: 'fragile' })).toHaveLength(1);
     expect(filterInbound(withNote, { ...all, search: 'absent' })).toHaveLength(0);
   });
+
+  it('searches the package PayPal transaction id — it renders on the row', () => {
+    const withTxn = mergeInbound([], [pkg({ paypalTxnId: '9XY87654ZW321001Q' })]);
+    expect(filterInbound(withTxn, { ...all, search: '9xy876' })).toHaveLength(1);
+    expect(filterInbound(withTxn, { ...all, search: 'absent' })).toHaveLength(0);
+  });
 });
 
 describe('inboundCounts and inboundCarriers', () => {
@@ -178,6 +193,17 @@ describe('inboundToCsv', () => {
     expect(csv).toContain('"Trench Corp"');
     expect(csv).toContain('"1Z999AA10123456784"');
     expect(csv).toContain('"1Z999"');
+  });
+
+  it('carries the PayPal transaction id on both row kinds', () => {
+    const shipRow: ShipRow = {
+      order: order({ id: 'PO-7', paypalTxnId: '8AB12345CD678901E' }),
+      shipment: shipment({ id: 's7' }),
+    };
+    const csv = inboundToCsv(mergeInbound([shipRow], [pkg({ paypalTxnId: '9XY87654ZW321001Q' })]));
+    expect(csv.split('\r\n')[0]).toContain('"PayPal txn"');
+    expect(csv).toContain('"8AB12345CD678901E"');
+    expect(csv).toContain('"9XY87654ZW321001Q"');
   });
 
   it('neutralises formula-leading cells on both row kinds', () => {

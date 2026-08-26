@@ -419,6 +419,9 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
           ? <span style={{ fontWeight: 600 }}>{pkg.sellerName}</span>
           : <span className="muted">—</span>}
         {pkg.note && <div className="ship-cell-sub">{pkg.note}</div>}
+        {pkg.paypalTxnId && (
+          <div className="ship-cell-sub mono" title={t('shipPayTxnLabel')}>PayPal {pkg.paypalTxnId}</div>
+        )}
       </td>
       <td><span className="muted">—</span></td>
       <td>
@@ -506,6 +509,9 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
             : <span className="muted">—</span>}
         {(s.from.city || s.from.state) && (
           <div className="ship-cell-sub">{[s.from.city, s.from.state].filter(Boolean).join(', ')}</div>
+        )}
+        {order.paypalTxnId && (
+          <div className="ship-cell-sub mono" title={t('shipPayTxnLabel')}>PayPal {order.paypalTxnId}</div>
         )}
       </td>
       <td>

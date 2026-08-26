@@ -36,7 +36,9 @@
 #   3. Sweep any remaining idle worktrees.
 #   4. Copy the gitignored local files a worktree needs to run (.env).
 #   5. `pnpm install` inside it (hardlinks from the pnpm store, so it is cheap).
-#   6. cd there and exec `claude`.
+#   6. Inside tmux, rename the tab to the session (`feat/x` → `x`;
+#      a timestamp branch → `erp-<HH:MM>`).
+#   7. cd there and exec `claude`.
 #
 # Permission prompts are off for this repo via permissions.defaultMode in
 # .claude/settings.json, which applies to sessions started any way — not just
@@ -383,6 +385,26 @@ prune_sessions() {
   log "removed $removed, kept $kept"
 }
 
+# Name the tmux tab after the session, so side-by-side sessions are tellable
+# apart — otherwise every tab shows the same claude process title. A topic
+# branch names the tab after its topic (`feat/po-labels` → `po-labels`); a
+# default `session/<timestamp>` branch carries no topic, so the tab gets the
+# repo hint plus start time (`erp-11:27`). rename-window also switches off
+# tmux's automatic-rename for the window, so the name sticks.
+rename_tmux_window() {
+  [ -n "${TMUX:-}" ] || return 0
+  local branch name hhmm
+  branch="$(git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null)" || return 0
+  case "$branch" in
+    session/*-[0-9][0-9][0-9][0-9][0-9][0-9])
+      hhmm="${branch##*-}"
+      name="erp-${hhmm:0:2}:${hhmm:2:2}"
+      ;;
+    *) name="${branch##*/}" ;;
+  esac
+  tmux rename-window "$name" 2>/dev/null || true
+}
+
 provision_worktree() {
   local wt="$1" f
   for f in "${LOCAL_FILES[@]}"; do
@@ -519,6 +541,7 @@ case "$MODE" in
     # No PID to watch — the caller is an already-running session that will
     # EnterWorktree into this path — so the claim expires on a timer instead.
     claim_worktree "$target" "claimed:$(date +%s)"
+    rename_tmux_window "$target"
     printf '%s\n' "$target"
     ;;
   launch)
@@ -526,6 +549,7 @@ case "$MODE" in
     [ -n "$target" ] || exit 1
     log "session branch ready — launching claude in $target"
     cd "$target"
+    rename_tmux_window "$target"
     # `exec` keeps this PID, so the lock names the claude process itself and the
     # slot frees automatically when that session exits.
     claim_worktree "$target" "$$"

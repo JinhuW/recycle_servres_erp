@@ -21,6 +21,7 @@ const LIST_OMIT: ReadonlySet<string> = new Set(['quotes', 'provider_shipment_id'
 type ListRow = Omit<ShipmentRow, 'quotes' | 'provider_shipment_id'> & {
   o_user_name: string;
   o_lifecycle: string;
+  o_paypal_txn_id: string | null;
   wh_id: string | null;
   wh_name: string | null;
   wh_short: string | null;
@@ -58,7 +59,7 @@ shipmentsList.get('/', async (c) => {
   const rows = (await sql`
     SELECT
       ${sql.unsafe(shipmentColsSql('s.', LIST_OMIT))},
-      u.name AS o_user_name, o.lifecycle AS o_lifecycle,
+      u.name AS o_user_name, o.lifecycle AS o_lifecycle, o.paypal_txn_id AS o_paypal_txn_id,
       w.id AS wh_id, w.name AS wh_name, w.short AS wh_short, w.region AS wh_region
     FROM shipments s
     JOIN orders o ON o.id = s.order_id
@@ -86,6 +87,7 @@ shipmentsList.get('/', async (c) => {
         id: r.order_id,
         userName: r.o_user_name,
         lifecycle: r.o_lifecycle,
+        paypalTxnId: r.o_paypal_txn_id,
         warehouse: r.wh_id
           ? { id: r.wh_id, name: r.wh_name, short: r.wh_short, region: r.wh_region }
           : null,

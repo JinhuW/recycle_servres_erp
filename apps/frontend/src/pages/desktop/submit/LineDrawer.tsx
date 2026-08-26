@@ -15,7 +15,7 @@ import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhoto
 import { linePhotos, type LinePhoto } from '../../../lib/linePhotos';
 import { MarketAssist } from '../../../components/MarketAssist';
 import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
-import { addableCategories, categoryTone } from '../../../lib/lookups';
+import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
@@ -89,17 +89,18 @@ export function LineDrawer({
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
 
-  // AI label dropzone — RAM lines that don't already carry a scan. POs raised
-  // outside the submit flow (packages → create-PO) enter their lines on the
-  // edit page, so the editing variant offers the scan too — but only while the
-  // line arrived scanless: one that already had a scan shows the header thumb
-  // instead, and re-scanning over it would be a confusing flow. Frozen at
-  // mount so a scan performed here doesn't unmount the dropzone (and the
-  // confidence notice rendered inside it) the moment it succeeds.
+  // AI label dropzone — ai_capture categories (RAM, SSD) whose line doesn't
+  // already carry a scan. POs raised outside the submit flow (packages →
+  // create-PO) enter their lines on the edit page, so the editing variant
+  // offers the scan too — but only while the line arrived scanless: one that
+  // already had a scan shows the header thumb instead, and re-scanning over it
+  // would be a confusing flow. Frozen at mount so a scan performed here
+  // doesn't unmount the dropzone (and the confidence notice rendered inside
+  // it) the moment it succeeds.
   // readOnly must gate it explicitly: the dropzone is a div, so the disabled
   // fieldset wrapping the form doesn't inert it the way it does real inputs.
   const [hadScanAtMount] = useState(!!scanUrl);
-  const showDropzone = cat === 'RAM' && !readOnly && (!editing || !hadScanAtMount);
+  const showDropzone = aiCaptureEnabled(cat) && !readOnly && (!editing || !hadScanAtMount);
   const aiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiDragOver, setAiDragOver] = useState(false);

@@ -29,7 +29,6 @@ import {
 import { lineRequirements, missingFieldNames } from './lib/lineRequirements';
 
 import { useAuth } from './lib/auth';
-import { useEffectiveUser } from './lib/tweaks';
 import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
@@ -106,10 +105,6 @@ const toDraftLine = (l: OrderLine): DraftLine => ({
 
 function Shell() {
   const { user, loading, logout, pendingRoleChoice } = useAuth();
-  // The tab bar follows the effective role so a manager who picked "Continue as
-  // Purchaser" sees the purchaser tabs (Market, not Inventory), matching the
-  // desktop sidebar and the purchaser-scoped data.
-  const effUser = useEffectiveUser();
   const { t, lang } = useT();
   const { path } = useRoute();
   const view: View = pathToMobileView(path);
@@ -666,10 +661,10 @@ function Shell() {
     });
   };
 
-  // Re-open the Camera page from the RAM form. The in-progress draft is
-  // carried through so the new scan merges into it (auto-fill semantics)
-  // rather than rebuilding the line from scratch.
-  const rescanRam = (draft: DraftLine) => {
+  // Re-open the Camera page from the line form (any ai_capture category).
+  // The in-progress draft is carried through so the new scan merges into it
+  // (auto-fill semantics) rather than rebuilding the line from scratch.
+  const rescanLine = (draft: DraftLine) => {
     setCapture(c => {
       if (c.phase !== 'form') return c;
       return {
@@ -778,7 +773,7 @@ function Shell() {
           onSaveLine={onSaveLine}
           onCancel={cancelCapture}
           onBack={goBack}
-          onRescan={rescanRam}
+          onRescan={rescanLine}
           rescanDraft={capture.rescanDraft ?? null}
           photoCtx={{
             photosFor,
@@ -906,7 +901,7 @@ function Shell() {
           It is a focused task screen like the capture flow, and the header's
           back button is the way out of it. */}
       {!orderDetailOpen && !shippingTaskOpen && (
-        <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} role={effUser?.role ?? user.role} />
+        <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} />
       )}
 
       {overlayEl}

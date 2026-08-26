@@ -5,6 +5,7 @@ import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../lib/status';
 import { validateScan, stripUnmatched } from '../lib/scanValidation';
+import { aiCaptureEnabled } from '../lib/lookups';
 import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
@@ -83,6 +84,7 @@ const aiPatch = (scan: ScanResponse): Partial<DraftLine> => {
   if (f.interface)      out.interface      = f.interface as string;
   if (f.formFactor)     out.formFactor     = f.formFactor as string;
   if (f.description)    out.description    = f.description as string;
+  if (f.rpm)            out.rpm            = Number(f.rpm);
   if (f.partNumber)     out.partNumber     = f.partNumber as string;
   out.scanImageId = scan.imageId ?? null;
   out.scanConfidence = scan.confidence ?? null;
@@ -104,6 +106,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
     interface:      (f.interface as string)      ?? null,
     formFactor:     (f.formFactor as string)     ?? null,
     description:    (f.description as string)    ?? null,
+    rpm:            f.rpm ? Number(f.rpm) : null,
     partNumber:     (f.partNumber as string)     ?? '',
     qty: 0,
     unitCost: 0,
@@ -273,7 +276,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         }
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
-        {category === 'RAM' && (
+        {aiCaptureEnabled(category) && (
           <button
             type="button"
             className="ph-ai-capture"
@@ -441,15 +444,15 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
 
         {/* The capture above is the AI's reading of a label; these are pictures
             of the goods themselves. The scan keeps its own thumbnail, so only
-            uploads are listed here and no image appears twice. On RAM the AI
-            capture button sits directly above and supplies this line's photo,
-            so an empty "add a photo" slot would ask for something the flow
-            already covers — same rule as the desktop drawer. Once a picture
-            exists (scanned or uploaded) the strip earns its place. */}
+            uploads are listed here and no image appears twice. On ai_capture
+            categories the capture button sits directly above and supplies this
+            line's photo, so an empty "add a photo" slot would ask for something
+            the flow already covers — same rule as the desktop drawer. Once a
+            picture exists (scanned or uploaded) the strip earns its place. */}
         {(() => {
           const uploads = photoCtx.photosFor(line).filter(p => p.source === 'upload');
           const queued = photoCtx.pendingFor(line);
-          if (category === 'RAM' && !showThumb && uploads.length === 0 && queued.length === 0) return null;
+          if (aiCaptureEnabled(category) && !showThumb && uploads.length === 0 && queued.length === 0) return null;
           return (
             <LinePhotoStrip
               photos={uploads}

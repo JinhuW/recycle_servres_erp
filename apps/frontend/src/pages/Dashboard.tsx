@@ -164,10 +164,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           <Icon name="chevronRight" size={16} />
         </button>
 
-        {/* Managers always get the card — the phone tab bar gives them
-            Inventory, not Shipping, so this row is their only way in. For
-            purchasers (who have the tab) it appears once there's something
-            to glance at. */}
+        {/* Everyone has the Shipping tab; this row is the glanceable count.
+            Managers always see it — they receive the boxes — while for
+            purchasers it appears once there's something to glance at. */}
         {inbound && (isManager || inbound.moving + inbound.needs > 0) && (
           <button
             className="ph-row"
@@ -207,6 +206,22 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
               <Icon name="tag" size={16} />
             </div>
             <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeMarketLink')}</div>
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
+
+        {/* Inventory left the manager tab bar when Shipping took its slot;
+            this row is its home now, mirroring the Market link above. */}
+        {isManager && (
+          <button
+            className="ph-row"
+            onClick={() => navigate('/inventory')}
+            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
+              <Icon name="inventory" size={16} />
+            </div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeInventoryLink')}</div>
             <Icon name="chevronRight" size={15} className="arrow" />
           </button>
         )}
