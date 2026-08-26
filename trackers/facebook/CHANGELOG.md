@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-26
+
 ### Added
 
 - **Alert hit rate: partner emoji reactions on Telegram alerts are now
