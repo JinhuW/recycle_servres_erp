@@ -49,6 +49,35 @@ deployed?" harder to answer.
 
 ### Changed
 
+- **Coverage went nationwide: 28 city centres to 127, every mainland state
+  except California.** Coverage comes from the number of search centres, not
+  from the radius around them — a metro with no `search_city` entry of its own
+  is invisible however wide the circle on its neighbour (the Louisville case
+  in `master.toml`). The list was the US east only, so most of the country was
+  simply never searched. It now spans all 48 mainland states ex-California:
+  20 had no entry at all (NJ, DE, SC, TN, AL, WV, VT, IN, WI, IA, NE, KS, MS,
+  AR, OK, ND, SD, WY, ID, NV) and major metros were missing inside states
+  already listed (Harrisburg, Albany, Greensboro, Savannah, Huntsville,
+  Portland ME, Lexington and more). California is excluded by owner decision;
+  Alaska and Hawaii remain out of scope. All six `[region.*]` blocks were
+  rebuilt to keep `rsc gen-configs`' coverage invariant satisfied, and
+  `rs_west` is Pacific Northwest only now that `sac` and `la` are gone
+  (Seattle, Portland, Spokane, Tacoma, Eugene).
+  `search_city` is one location per line with the city named in a trailing
+  comment — a third of the entries are opaque numeric ids, and packed five to
+  a line they could only be audited by counting positions across into
+  `city_name`.
+
+  A full sweep goes from ~1.7 h to ~7.8 h (127 centres x 2 active items at
+  ~110 s a search). That is deliberate and costs nothing: `date_listed` is
+  `last 7 days`, so every listing stays visible for ~19 sweeps.
+
+  **One worker now searches 127 cities from a single un-proxied Denver IP.**
+  `fleet.toml` pairs each region with a proxy in that part of the country
+  precisely because a Marketplace search far from the account's IP is what
+  Facebook checkpoints on. The sharded fleet is designed for this load; only
+  `homelab-1` exists. Bringing up the other five is what actually de-risks it.
+
 - **The AI prompt now puts the listing last, so providers can cache the rest.**
   `get_prompt` built the listing block (title, condition, price, location, URL,
   description) in the middle of the prompt, ahead of the item's own criteria and
@@ -62,6 +91,27 @@ deployed?" harder to answer.
   make every input token full price again.
 
 ### Fixed
+
+- **`scripts/find-city-id.py` was silently failing on correct cities.** Five
+  bugs, each of which reported a city as unresolvable when the lookup had
+  actually worked, found while resolving the nationwide list:
+  `STATE_NAMES` held 15 states, so anything outside the original east-coast
+  set (`Springfield, IL`) could not be state-matched at all; the typeahead was
+  only ever given the bare city name, and typing `Nashville` offers Nashville
+  OHIO and Nashville PA and *no Tennessee whatsoever* until the full state name
+  is typed; the id regex allowed `[a-z0-9]` only, so the qualified slugs
+  Facebook hands out for name collisions (`portland_maine`, `fort-myers-fl`)
+  were unmatchable and the city was reported unresolved with its id on screen
+  (`vegas` is another non-obvious one — Las Vegas is not `lasvegas`);
+  the "id must differ from the one the redirect left" guard made a city
+  unresolvable whenever it happened to be the location already applied to the
+  session; and requiring the state name in the option label rejected cities big
+  enough that Facebook labels them without one — `Cincinnati` offers
+  "Cincinnati City" and the *Corryville neighbourhood* as "Corryville, OH", so
+  the right answer was discarded while the wrong one stayed on the list. The
+  state fallback is an exact name match and nothing looser, because anything
+  fuzzier reintroduces the silent-wrong-city failure the script exists to
+  prevent.
 
 - **A deploy can no longer ship a version that was already deployed.**
   `scripts/deploy.sh` read `VERSION` for its Telegram notification and asked

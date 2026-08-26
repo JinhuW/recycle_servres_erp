@@ -57,72 +57,216 @@ max_tokens = 4096
 # occasions Facebook interrupts a restored session.
 login_wait_time = 120
 
-# Single-machine run: the US east, centred on Virginia. Sharded workers ignore
-# this and use search_region = "<their region>" instead.
+# Nationwide single-machine run — every mainland state except California.
+# Sharded workers ignore this and use search_region = "<their region>" instead.
 #
-# Every slug here was verified with scripts/check-cities.py — always do that
-# before adding one, because the failures are silent and four candidates have
-# already been rejected this way:
-#   norfolk, hartford, newhaven  — do not resolve at all. Facebook then searches
-#                                  from the account's own city and returns
-#                                  plausible results from the wrong region.
+# THE CITY LIST IS THE COVERAGE. A metro is invisible until it has its own entry
+# here; the radius around a neighbouring centre does not reach it. That is
+# measured, not assumed — see the radius block below and the Louisville case in
+# the region section. So this list is long on purpose, and it is grouped by the
+# region that will own each centre once the fleet is sharded.
+#
+# California is excluded by owner decision (2026-08-25). Alaska and Hawaii stay
+# out of scope — mainland only, see fleet.toml.
+#
+# EVERY ENTRY WAS RESOLVED AGAINST FACEBOOK'S OWN LOCATION PICKER with
+# scripts/find-city-id.py, and the label it returned was checked against the
+# state asked for. Do that for anything added here rather than guessing a
+# spelling, because the failure is SILENT: an unrecognised slug makes Facebook
+# search the ACCOUNT'S OWN city and return plausible listings from the wrong
+# part of the country instead of erroring. Cases already paid for, kept here so
+# they are not re-learned:
+#   norfolk, hartford, newhaven  — do not resolve at all.
 #   arlington                    — resolves to Arlington, TEXAS.
-#   portland                     — resolves to Portland, OREGON. Maine's coastal
-#                                  cities are reached via "bangor" instead.
+#   portland                     — is Portland, OREGON. Portland, MAINE is a
+#                                  different location entirely: "portland_maine".
+#   nashville                    — typing the bare name offers Nashville OHIO
+#                                  and Nashville PA and no Tennessee at all;
+#                                  the full state name has to be typed.
+#   sac                          — Sacramento, and NOT "sacramento".
+#   vegas                        — Las Vegas, and NOT "lasvegas".
+#   cincinnati                   — resolves, but its picker entry is labelled
+#                                  "Cincinnati City" with NO state, while the
+#                                  Corryville NEIGHBOURHOOD is labelled
+#                                  "Corryville, OH". Match the name exactly.
+#
+# Numeric ids and qualified slugs ("portland_maine", "fort-myers-fl") are as
+# valid as plain ones — take whatever the picker gives back.
 #
 # Many centres at a tight radius rather than a few at 500 km. A wide radius
 # looks like it covers everything and does not: Facebook ranks and truncates
 # results, so distant listings that are geographically "in range" never appear.
 # Searching from a nearby centre is the only way to see them.
 search_city = [
-    # Ordered by how much decommissioned server hardware the area produces.
-    #
-    # Tier 1 — the big datacenter markets. Note that "Data Center Alley" itself
-    # (Ashburn, Reston, Manassas, Sterling) has no Marketplace slug of its own;
-    # all of it sits inside dc's 100-mile circle, which is why dc is the single
-    # most valuable entry here.
-    "dc", "nyc", "atlanta", "philly", "columbus",
-    # Tier 2 — real datacenter presence, and the corridors gear moves through.
-    "richmond", "charlotte", "raleigh", "boston", "baltimore",
-    "miami", "cleveland", "pittsburgh",
-    # Ohio Valley. Added after a $150 Samsung PM883 + PC4-2666V ECC lot in
-    # Louisville (item 955960664200505, listed 4 days) was missed entirely.
-    # A search centred on louisville puts it at POSITION 1 and returns 64
-    # Louisville-area listings; the same phrase from columbus returns ZERO of
-    # them at radius 100, 250 OR 500, and returns zero with deliveryMethod and
-    # daysSinceListed dropped as well. Cincinnati, 89 mi from the seller, also
-    # returns zero. Neither radius nor the filters are the knob: results are
-    # anchored to the city in the URL path, so the only way to see a metro's
-    # listings is to search from that metro. Louisville is 189 mi from
-    # columbus, the nearest centre this list had.
-    "louisville",
-    # Tier 3 — regional coverage. Lower datacenter density, but they catch
-    # business and lab clear-outs the hubs miss.
-    "virginiabeach", "providence", "buffalo", "rochester", "syracuse",
-    "tampa", "orlando", "jacksonville", "bangor",
-    # New England fill-in. These are NUMERIC LOCATION IDS, not slugs, and that
-    # is not a stylistic choice: `worcester`, `hartford`, `newhaven`, `lowell`
-    # and `springfield` are all rejected by Facebook, which then answers from
-    # the ACCOUNT'S OWN city instead of erroring — a silently wrong search.
-    # Every id below was read out of Facebook's own location picker by
-    # `scripts/find-city-id.py` and is paired with its label in city_name.
-    #
-    # Chosen for geography Boston's circle does not already reach: inland MA,
-    # all of Connecticut (previously uncovered — Hartford and New Haven are
-    # insurance/finance datacenter country), and southern NH. Cambridge, Lowell
-    # and Nashua were resolved too but deliberately LEFT OUT: they sit inside
-    # Boston's 100 mi and would mostly re-search the same listings.
-    "105596609473837", "112781448736001", "108119482550253",
-    "108541499165950", "107634079257154",
+    # ---- Northeast (24) ----
+    "108119482550253",  # Hartford, CT
+    "108541499165950",  # New Haven, CT
+    "boston",           # Boston, MA
+    "112781448736001",  # Springfield, MA
+    "105596609473837",  # Worcester, MA
+    "bangor",           # Bangor, ME
+    "portland_maine",   # Portland, ME
+    "107634079257154",  # Manchester, NH
+    "105580889476291",  # Atlantic City, NJ
+    "108398645850982",  # Newark, NJ
+    "105466899487612",  # Trenton, NJ
+    "107384699291109",  # Albany, NY
+    "buffalo",          # Buffalo, NY
+    "nyc",              # New York, NY
+    "rochester",        # Rochester, NY
+    "syracuse",         # Syracuse, NY
+    "103129393060364",  # Allentown, PA
+    "108306975863361",  # Erie, PA
+    "107976589222439",  # Harrisburg, PA
+    "philly",           # Philadelphia, PA
+    "pittsburgh",       # Pittsburgh, PA
+    "104088049626788",  # Scranton, PA
+    "providence",       # Providence, RI
+    "112673872077767",  # Burlington, VT
+    # ---- Southeast / Mid-Atlantic (28) ----
+    "dc",               # Washington, DC
+    "105957942768622",  # Wilmington, DE
+    "fort-myers-fl",    # Fort Myers, FL
+    "jacksonville",     # Jacksonville, FL
+    "miami",            # Miami, FL
+    "orlando",          # Orlando, FL
+    "pensacola",        # Pensacola, FL
+    "107903159238479",  # Tallahassee, FL
+    "tampa",            # Tampa, FL
+    "108251189197758",  # West Palm Beach, FL
+    "atlanta",          # Atlanta, GA
+    "augusta",          # Augusta, GA
+    "104019619634224",  # Savannah, GA
+    "baltimore",        # Baltimore, MD
+    "108079649219516",  # Hagerstown, MD
+    "104063499628686",  # Asheville, NC
+    "charlotte",        # Charlotte, NC
+    "107812615908638",  # Greensboro, NC
+    "raleigh",          # Raleigh, NC
+    "wilmington",       # Wilmington, NC
+    "charleston",       # Charleston, SC
+    "104052009631991",  # Columbia, SC
+    "greenville",       # Greenville, SC
+    "richmond",         # Richmond, VA
+    "roanoke-va",       # Roanoke, VA
+    "virginiabeach",    # Virginia Beach, VA
+    "109514829067837",  # Charleston, WV
+    "108205955874066",  # Morgantown, WV
+    # ---- Midwest / Ohio Valley (25) ----
+    "cedar-rapids",     # Cedar Rapids, IA
+    "desmoines",        # Des Moines, IA
+    "chicago",          # Chicago, IL
+    "113848465291957",  # Peoria, IL
+    "108768365814696",  # Rockford, IL
+    "104023752968315",  # Springfield, IL
+    "fort-wayne",       # Fort Wayne, IN
+    "indianapolis",     # Indianapolis, IN
+    "lexington",        # Lexington, KY
+    "louisville",       # Louisville, KY
+    "detroit",          # Detroit, MI
+    "grandrapids",      # Grand Rapids, MI
+    "106102649421844",  # Lansing, MI
+    "duluth",           # Duluth, MN
+    "minneapolis",      # Minneapolis, MN
+    "103941732976595",  # Rochester, MN
+    "104114042957938",  # Akron, OH
+    "cincinnati",       # Cincinnati, OH
+    "cleveland",        # Cleveland, OH
+    "columbus",         # Columbus, OH
+    "104023459634857",  # Dayton, OH
+    "106021666096708",  # Toledo, OH
+    "greenbay",         # Green Bay, WI
+    "madison",          # Madison, WI
+    "milwaukee",        # Milwaukee, WI
+    # ---- South Central (27) ----
+    "109434842408576",       # Birmingham, AL
+    "huntsville",            # Huntsville, AL
+    "mobile_alabama",        # Mobile, AL
+    "107906675905496",       # Montgomery, AL
+    "108357722519215",       # Fayetteville, AR
+    "littlerock",            # Little Rock, AR
+    "112136275468553",       # Topeka, KS
+    "wichita",               # Wichita, KS
+    "batonrouge",            # Baton Rouge, LA
+    "neworleans",            # New Orleans, LA
+    "108894155797150",       # Shreveport, LA
+    "kansascity",            # Kansas City, MO
+    "springfield_missouri",  # Springfield, MO
+    "stlouis",               # St. Louis, MO
+    "jackson-ms",            # Jackson, MS
+    "oklahoma",              # Oklahoma City, OK
+    "tulsa",                 # Tulsa, OK
+    "chattanooga-tn",        # Chattanooga, TN
+    "knoxville",             # Knoxville, TN
+    "memphis",               # Memphis, TN
+    "nashville",             # Nashville, TN
+    "austin",                # Austin, TX
+    "dallas",                # Dallas, TX
+    "elpaso",                # El Paso, TX
+    "houston",               # Houston, TX
+    "lubbock-tx",            # Lubbock, TX
+    "sanantonio",            # San Antonio, TX
+    # ---- Mountain / Plains (18) ----
+    "phoenix",           # Phoenix, AZ
+    "tucson",            # Tucson, AZ
+    "coloradosprings",   # Colorado Springs, CO
+    "denver",            # Denver, CO
+    "112825518732186",   # Fort Collins, CO
+    "boise",             # Boise, ID
+    "112454482100538",   # Billings, MT
+    "112775412068008",   # Missoula, MT
+    "111902158823110",   # Fargo, ND
+    "lincoln_nebraska",  # Lincoln, NE
+    "omaha",             # Omaha, NE
+    "albuquerque",       # Albuquerque, NM
+    "vegas",             # Las Vegas, NV
+    "reno",              # Reno, NV
+    "sioux-falls",       # Sioux Falls, SD
+    "saltlakecity",      # Salt Lake City, UT
+    "109287255756240",   # Casper, WY
+    "109588499067433",   # Cheyenne, WY
+    # ---- West Coast (5) ----
+    "107915639228865",  # Eugene, OR
+    "portland",         # Portland, OR
+    "seattle",          # Seattle, WA
+    "spokane",          # Spokane, WA
+    "108707615821090",  # Tacoma, WA
 ]
 city_name = [
-    "Washington, DC", "New York, NY", "Atlanta, GA", "Philadelphia, PA", "Columbus, OH",
-    "Richmond, VA", "Charlotte, NC", "Raleigh, NC", "Boston, MA", "Baltimore, MD",
-    "Miami, FL", "Cleveland, OH", "Pittsburgh, PA", "Louisville, KY",
-    "Virginia Beach, VA", "Providence, RI", "Buffalo, NY", "Rochester, NY", "Syracuse, NY",
-    "Tampa, FL", "Orlando, FL", "Jacksonville, FL", "Bangor, ME",
-    "Worcester, MA", "Springfield, MA", "Hartford, CT",
-    "New Haven, CT", "Manchester, NH",
+    "Hartford, CT", "New Haven, CT", "Boston, MA", "Springfield, MA",
+    "Worcester, MA", "Bangor, ME", "Portland, ME", "Manchester, NH",
+    "Atlantic City, NJ", "Newark, NJ", "Trenton, NJ", "Albany, NY",
+    "Buffalo, NY", "New York, NY", "Rochester, NY", "Syracuse, NY",
+    "Allentown, PA", "Erie, PA", "Harrisburg, PA", "Philadelphia, PA",
+    "Pittsburgh, PA", "Scranton, PA", "Providence, RI", "Burlington, VT",
+    "Washington, DC", "Wilmington, DE", "Fort Myers, FL", "Jacksonville, FL",
+    "Miami, FL", "Orlando, FL", "Pensacola, FL", "Tallahassee, FL",
+    "Tampa, FL", "West Palm Beach, FL", "Atlanta, GA", "Augusta, GA",
+    "Savannah, GA", "Baltimore, MD", "Hagerstown, MD", "Asheville, NC",
+    "Charlotte, NC", "Greensboro, NC", "Raleigh, NC", "Wilmington, NC",
+    "Charleston, SC", "Columbia, SC", "Greenville, SC", "Richmond, VA",
+    "Roanoke, VA", "Virginia Beach, VA", "Charleston, WV", "Morgantown, WV",
+    "Cedar Rapids, IA", "Des Moines, IA", "Chicago, IL", "Peoria, IL",
+    "Rockford, IL", "Springfield, IL", "Fort Wayne, IN", "Indianapolis, IN",
+    "Lexington, KY", "Louisville, KY", "Detroit, MI", "Grand Rapids, MI",
+    "Lansing, MI", "Duluth, MN", "Minneapolis, MN", "Rochester, MN",
+    "Akron, OH", "Cincinnati, OH", "Cleveland, OH", "Columbus, OH",
+    "Dayton, OH", "Toledo, OH", "Green Bay, WI", "Madison, WI",
+    "Milwaukee, WI",
+    "Birmingham, AL", "Huntsville, AL", "Mobile, AL", "Montgomery, AL",
+    "Fayetteville, AR", "Little Rock, AR", "Topeka, KS", "Wichita, KS",
+    "Baton Rouge, LA", "New Orleans, LA", "Shreveport, LA", "Kansas City, MO",
+    "Springfield, MO", "St. Louis, MO", "Jackson, MS", "Oklahoma City, OK",
+    "Tulsa, OK", "Chattanooga, TN", "Knoxville, TN", "Memphis, TN",
+    "Nashville, TN", "Austin, TX", "Dallas, TX", "El Paso, TX",
+    "Houston, TX", "Lubbock, TX", "San Antonio, TX",
+    "Phoenix, AZ", "Tucson, AZ", "Colorado Springs, CO", "Denver, CO",
+    "Fort Collins, CO", "Boise, ID", "Billings, MT", "Missoula, MT",
+    "Fargo, ND", "Lincoln, NE", "Omaha, NE", "Albuquerque, NM",
+    "Las Vegas, NV", "Reno, NV", "Sioux Falls, SD", "Salt Lake City, UT",
+    "Casper, WY", "Cheyenne, WY",
+    "Eugene, OR", "Portland, OR", "Seattle, WA", "Spokane, WA",
+    "Tacoma, WA",
 ]
 # Two things about radius, both measured 2026-08-20, both surprising.
 #
@@ -158,13 +302,17 @@ city_name = [
 # neighbours rather than add anything, and every duplicate search costs a full
 # sweep slot.
 radius = [
-    100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100,
-    100, 100, 100, 100,
-    100, 100, 100, 100, 100,
-    100, 100, 100, 100,
-    60, 60, 60,
-    60, 60,
+    60, 60, 100, 60, 60, 100, 100, 60, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100,
 ]
 currency = "USD"
 
@@ -377,98 +525,274 @@ where:
 # wrong part of the country rather than erroring. Re-verify with
 # `python scripts/check-cities.py` after editing this section. Three entries are
 # not the obvious spelling:
-#   - Sacramento is "sac"; "sacramento" is not a location.
 #   - Billings has no slug at all, so its numeric location id is used.
+#   - Portland, MAINE is "portland_maine"; bare "portland" is Oregon.
 #   - The five New England ids are numeric for the same reason — `worcester`,
 #     `hartford`, `newhaven`, `lowell` and `springfield` are all rejected.
 # Numeric ids are equally valid wherever a slug is (see upstream config.toml).
 # --------------------------------------------------------------------------
 [region.rs_northeast]
 full_name = "Northeast"
-# The heaviest region by a wide margin, and deliberately so: New England is
-# dense with small centres Boston's circle does not reach, and the corridor from
-# NY to Boston produces more clear-outs than anywhere except DC. ne-1 carries a
-# longer search_interval in fleet.toml to keep its request rate in line.
+# 24 centres: CT, MA, ME, NH, NJ, NY, PA, RI, VT
+# New England is dense with small centres Boston's circle does not reach,
+# and the corridor from NY to Boston produces more clear-outs than anywhere
+# except DC. ne-1 carries a longer search_interval in fleet.toml to keep its
+# request rate in line.
 search_city = [
-    "boston", "nyc", "philly", "pittsburgh",
-    "providence", "buffalo", "rochester", "syracuse", "bangor",
-    # Numeric ids: Worcester MA, Springfield MA, Hartford CT, New Haven CT,
-    # Manchester NH. Paired with their labels in city_name, in this order.
-    "105596609473837", "112781448736001", "108119482550253",
-    "108541499165950", "107634079257154",
+    "108119482550253",  # Hartford, CT
+    "108541499165950",  # New Haven, CT
+    "boston",           # Boston, MA
+    "112781448736001",  # Springfield, MA
+    "105596609473837",  # Worcester, MA
+    "bangor",           # Bangor, ME
+    "portland_maine",   # Portland, ME
+    "107634079257154",  # Manchester, NH
+    "105580889476291",  # Atlantic City, NJ
+    "108398645850982",  # Newark, NJ
+    "105466899487612",  # Trenton, NJ
+    "107384699291109",  # Albany, NY
+    "buffalo",          # Buffalo, NY
+    "nyc",              # New York, NY
+    "rochester",        # Rochester, NY
+    "syracuse",         # Syracuse, NY
+    "103129393060364",  # Allentown, PA
+    "108306975863361",  # Erie, PA
+    "107976589222439",  # Harrisburg, PA
+    "philly",           # Philadelphia, PA
+    "pittsburgh",       # Pittsburgh, PA
+    "104088049626788",  # Scranton, PA
+    "providence",       # Providence, RI
+    "112673872077767",  # Burlington, VT
 ]
 city_name = [
-    "Boston, MA", "New York, NY", "Philadelphia, PA", "Pittsburgh, PA",
-    "Providence, RI", "Buffalo, NY", "Rochester, NY", "Syracuse, NY", "Bangor, ME",
-    "Worcester, MA", "Springfield, MA", "Hartford, CT",
-    "New Haven, CT", "Manchester, NH",
+    "Hartford, CT", "New Haven, CT", "Boston, MA", "Springfield, MA",
+    "Worcester, MA", "Bangor, ME", "Portland, ME", "Manchester, NH",
+    "Atlantic City, NJ", "Newark, NJ", "Trenton, NJ", "Albany, NY",
+    "Buffalo, NY", "New York, NY", "Rochester, NY", "Syracuse, NY",
+    "Allentown, PA", "Erie, PA", "Harrisburg, PA", "Philadelphia, PA",
+    "Pittsburgh, PA", "Scranton, PA", "Providence, RI", "Burlington, VT",
 ]
 radius = [
-    100, 100, 100, 100,
-    100, 100, 100, 100, 100,
-    60, 60, 60, 60, 60,
+    60, 60, 100, 60, 60, 100, 100, 60, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
 ]
 currency = "USD"
 
 [region.rs_southeast]
 full_name = "Southeast / Mid-Atlantic"
+# 28 centres: DC, DE, FL, GA, MD, NC, SC, VA, WV
 # dc is the single most valuable centre in the fleet: "Data Center Alley"
 # (Ashburn, Reston, Manassas, Sterling) has no Marketplace slug of its own and
 # all of it sits inside dc's circle.
 search_city = [
-    "dc", "baltimore", "richmond", "virginiabeach",
-    "charlotte", "raleigh", "atlanta",
-    "jacksonville", "tampa", "orlando", "miami",
+    "dc",               # Washington, DC
+    "105957942768622",  # Wilmington, DE
+    "fort-myers-fl",    # Fort Myers, FL
+    "jacksonville",     # Jacksonville, FL
+    "miami",            # Miami, FL
+    "orlando",          # Orlando, FL
+    "pensacola",        # Pensacola, FL
+    "107903159238479",  # Tallahassee, FL
+    "tampa",            # Tampa, FL
+    "108251189197758",  # West Palm Beach, FL
+    "atlanta",          # Atlanta, GA
+    "augusta",          # Augusta, GA
+    "104019619634224",  # Savannah, GA
+    "baltimore",        # Baltimore, MD
+    "108079649219516",  # Hagerstown, MD
+    "104063499628686",  # Asheville, NC
+    "charlotte",        # Charlotte, NC
+    "107812615908638",  # Greensboro, NC
+    "raleigh",          # Raleigh, NC
+    "wilmington",       # Wilmington, NC
+    "charleston",       # Charleston, SC
+    "104052009631991",  # Columbia, SC
+    "greenville",       # Greenville, SC
+    "richmond",         # Richmond, VA
+    "roanoke-va",       # Roanoke, VA
+    "virginiabeach",    # Virginia Beach, VA
+    "109514829067837",  # Charleston, WV
+    "108205955874066",  # Morgantown, WV
 ]
 city_name = [
-    "Washington, DC", "Baltimore, MD", "Richmond, VA", "Virginia Beach, VA",
-    "Charlotte, NC", "Raleigh, NC", "Atlanta, GA",
-    "Jacksonville, FL", "Tampa, FL", "Orlando, FL", "Miami, FL",
+    "Washington, DC", "Wilmington, DE", "Fort Myers, FL", "Jacksonville, FL",
+    "Miami, FL", "Orlando, FL", "Pensacola, FL", "Tallahassee, FL",
+    "Tampa, FL", "West Palm Beach, FL", "Atlanta, GA", "Augusta, GA",
+    "Savannah, GA", "Baltimore, MD", "Hagerstown, MD", "Asheville, NC",
+    "Charlotte, NC", "Greensboro, NC", "Raleigh, NC", "Wilmington, NC",
+    "Charleston, SC", "Columbia, SC", "Greenville, SC", "Richmond, VA",
+    "Roanoke, VA", "Virginia Beach, VA", "Charleston, WV", "Morgantown, WV",
 ]
-radius = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100]
+radius = [
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100,
+]
 currency = "USD"
 
 [region.rs_midwest]
 full_name = "Midwest / Ohio Valley"
+# 25 centres: IA, IL, IN, KY, MI, MN, OH, WI
 # louisville is here because of item 955960664200505 — a $150 Samsung PM883 +
 # PC4-2666V ECC lot that sat listed for four days and was never seen, because
 # the nearest centre the fleet had was columbus. It is the case that established
 # the rule at the top of this section.
 search_city = [
-    "columbus", "cleveland", "louisville",
-    "detroit", "chicago", "minneapolis", "stlouis",
+    "cedar-rapids",     # Cedar Rapids, IA
+    "desmoines",        # Des Moines, IA
+    "chicago",          # Chicago, IL
+    "113848465291957",  # Peoria, IL
+    "108768365814696",  # Rockford, IL
+    "104023752968315",  # Springfield, IL
+    "fort-wayne",       # Fort Wayne, IN
+    "indianapolis",     # Indianapolis, IN
+    "lexington",        # Lexington, KY
+    "louisville",       # Louisville, KY
+    "detroit",          # Detroit, MI
+    "grandrapids",      # Grand Rapids, MI
+    "106102649421844",  # Lansing, MI
+    "duluth",           # Duluth, MN
+    "minneapolis",      # Minneapolis, MN
+    "103941732976595",  # Rochester, MN
+    "104114042957938",  # Akron, OH
+    "cincinnati",       # Cincinnati, OH
+    "cleveland",        # Cleveland, OH
+    "columbus",         # Columbus, OH
+    "104023459634857",  # Dayton, OH
+    "106021666096708",  # Toledo, OH
+    "greenbay",         # Green Bay, WI
+    "madison",          # Madison, WI
+    "milwaukee",        # Milwaukee, WI
 ]
 city_name = [
-    "Columbus, OH", "Cleveland, OH", "Louisville, KY",
-    "Detroit, MI", "Chicago, IL", "Minneapolis, MN", "St. Louis, MO",
+    "Cedar Rapids, IA", "Des Moines, IA", "Chicago, IL", "Peoria, IL",
+    "Rockford, IL", "Springfield, IL", "Fort Wayne, IN", "Indianapolis, IN",
+    "Lexington, KY", "Louisville, KY", "Detroit, MI", "Grand Rapids, MI",
+    "Lansing, MI", "Duluth, MN", "Minneapolis, MN", "Rochester, MN",
+    "Akron, OH", "Cincinnati, OH", "Cleveland, OH", "Columbus, OH",
+    "Dayton, OH", "Toledo, OH", "Green Bay, WI", "Madison, WI",
+    "Milwaukee, WI",
 ]
-radius = [100, 100, 100, 100, 100, 100, 100]
+radius = [
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100,
+]
 currency = "USD"
 
 [region.rs_south_central]
 full_name = "South Central"
-search_city = ["memphis", "dallas", "houston", "neworleans"]
-city_name = ["Memphis, TN", "Dallas, TX", "Houston, TX", "New Orleans, LA"]
-radius = [100, 100, 100, 100]
+# 27 centres: AL, AR, KS, LA, MO, MS, OK, TN, TX
+# Huntsville AL is the one to watch here: Redstone Arsenal and its defence
+# contractors retire enterprise gear in quantity, and nothing in the fleet
+# reached it before 2026-08-25.
+search_city = [
+    "109434842408576",       # Birmingham, AL
+    "huntsville",            # Huntsville, AL
+    "mobile_alabama",        # Mobile, AL
+    "107906675905496",       # Montgomery, AL
+    "108357722519215",       # Fayetteville, AR
+    "littlerock",            # Little Rock, AR
+    "112136275468553",       # Topeka, KS
+    "wichita",               # Wichita, KS
+    "batonrouge",            # Baton Rouge, LA
+    "neworleans",            # New Orleans, LA
+    "108894155797150",       # Shreveport, LA
+    "kansascity",            # Kansas City, MO
+    "springfield_missouri",  # Springfield, MO
+    "stlouis",               # St. Louis, MO
+    "jackson-ms",            # Jackson, MS
+    "oklahoma",              # Oklahoma City, OK
+    "tulsa",                 # Tulsa, OK
+    "chattanooga-tn",        # Chattanooga, TN
+    "knoxville",             # Knoxville, TN
+    "memphis",               # Memphis, TN
+    "nashville",             # Nashville, TN
+    "austin",                # Austin, TX
+    "dallas",                # Dallas, TX
+    "elpaso",                # El Paso, TX
+    "houston",               # Houston, TX
+    "lubbock-tx",            # Lubbock, TX
+    "sanantonio",            # San Antonio, TX
+]
+city_name = [
+    "Birmingham, AL", "Huntsville, AL", "Mobile, AL", "Montgomery, AL",
+    "Fayetteville, AR", "Little Rock, AR", "Topeka, KS", "Wichita, KS",
+    "Baton Rouge, LA", "New Orleans, LA", "Shreveport, LA", "Kansas City, MO",
+    "Springfield, MO", "St. Louis, MO", "Jackson, MS", "Oklahoma City, OK",
+    "Tulsa, OK", "Chattanooga, TN", "Knoxville, TN", "Memphis, TN",
+    "Nashville, TN", "Austin, TX", "Dallas, TX", "El Paso, TX",
+    "Houston, TX", "Lubbock, TX", "San Antonio, TX",
+]
+radius = [
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100,
+]
 currency = "USD"
 
 [region.rs_mountain]
 full_name = "Mountain / Plains"
-# 112454482100538 = Billings, MT. It is the only one of these with no slug; it
-# anchors the northern plains, which nothing else reaches.
-search_city = ["denver", "112454482100538", "saltlakecity", "albuquerque"]
-city_name = ["Denver, CO", "Billings, MT", "Salt Lake City, UT", "Albuquerque, NM"]
-radius = [100, 100, 100, 100]
+# 18 centres: AZ, CO, ID, MT, ND, NE, NM, NV, SD, UT, WY
+# Billings, MT (112454482100538) anchors the northern plains, which nothing
+# else here reaches. Several of these are numeric ids rather than slugs — the
+# names are in the trailing comments, and an id is as valid as a slug. Denver
+# is home base, so this region's worker needs no proxy (see fleet.toml).
+search_city = [
+    "phoenix",           # Phoenix, AZ
+    "tucson",            # Tucson, AZ
+    "coloradosprings",   # Colorado Springs, CO
+    "denver",            # Denver, CO
+    "112825518732186",   # Fort Collins, CO
+    "boise",             # Boise, ID
+    "112454482100538",   # Billings, MT
+    "112775412068008",   # Missoula, MT
+    "111902158823110",   # Fargo, ND
+    "lincoln_nebraska",  # Lincoln, NE
+    "omaha",             # Omaha, NE
+    "albuquerque",       # Albuquerque, NM
+    "vegas",             # Las Vegas, NV
+    "reno",              # Reno, NV
+    "sioux-falls",       # Sioux Falls, SD
+    "saltlakecity",      # Salt Lake City, UT
+    "109287255756240",   # Casper, WY
+    "109588499067433",   # Cheyenne, WY
+]
+city_name = [
+    "Phoenix, AZ", "Tucson, AZ", "Colorado Springs, CO", "Denver, CO",
+    "Fort Collins, CO", "Boise, ID", "Billings, MT", "Missoula, MT",
+    "Fargo, ND", "Lincoln, NE", "Omaha, NE", "Albuquerque, NM",
+    "Las Vegas, NV", "Reno, NV", "Sioux Falls, SD", "Salt Lake City, UT",
+    "Casper, WY", "Cheyenne, WY",
+]
+radius = [
+    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100, 100, 100,
+]
 currency = "USD"
 
 [region.rs_west]
 full_name = "West Coast"
-search_city = ["seattle", "portland", "sac", "la", "phoenix"]
-city_name = ["Seattle, WA", "Portland, OR", "Sacramento, CA", "Los Angeles, CA", "Phoenix, AZ"]
-radius = [100, 100, 100, 100, 100]
+# 5 centres: OR, WA
+# CALIFORNIA IS DELIBERATELY ABSENT — owner call, 2026-08-25. sac and la were
+# removed with it, which is why this region is now only the Pacific Northwest.
+# Re-adding CA means adding it here AND to the phase-1 list above.
+search_city = [
+    "107915639228865",  # Eugene, OR
+    "portland",         # Portland, OR
+    "seattle",          # Seattle, WA
+    "spokane",          # Spokane, WA
+    "108707615821090",  # Tacoma, WA
+]
+city_name = [
+    "Eugene, OR", "Portland, OR", "Seattle, WA", "Spokane, WA",
+    "Tacoma, WA",
+]
+radius = [
+    100, 100, 100, 100, 100,
+]
 currency = "USD"
 
-# --------------------------------------------------------------------------
 # Buying criteria — three component types only, bulk lots of 5+. The item
 # NAME (server_ram / server_cpu / enterprise_ssd) also drives the alert's
 # category tag (RAM / CPU / SSD), so keep those keywords in the names.

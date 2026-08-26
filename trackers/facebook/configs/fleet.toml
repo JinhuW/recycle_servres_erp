@@ -8,20 +8,23 @@
 # from the number of city centres, not from the radius around them, and the
 # hardware is on the east coast. See the region block in master.toml.
 #
-#   worker     region            n   cities
+#   worker     region            n   states covered
 #   ---------  ----------------  --  --------------------------------------------
-#   ne-1       rs_northeast      14  Boston, NY, Philadelphia, Pittsburgh,
-#                                    Providence, Buffalo, Rochester, Syracuse,
-#                                    Bangor, Worcester, Springfield, Hartford,
-#                                    New Haven, Manchester
-#   se-1       rs_southeast      11  Washington DC, Baltimore, Richmond,
-#                                    Virginia Beach, Charlotte, Raleigh, Atlanta,
-#                                    Jacksonville, Tampa, Orlando, Miami
-#   mw-1       rs_midwest         7  Columbus, Cleveland, Louisville, Detroit,
-#                                    Chicago, Minneapolis, St. Louis
-#   sc-1       rs_south_central   4  Memphis, Dallas, Houston, New Orleans
-#   denver-1   rs_mountain        4  Denver, Billings, Salt Lake City, Albuquerque
-#   wc-1       rs_west            5  Seattle, Portland, Sacramento, LA, Phoenix
+#   ne-1       rs_northeast      24  CT, MA, ME, NH, NJ, NY, PA, RI, VT
+#   se-1       rs_southeast      28  DC, DE, FL, GA, MD, NC, SC, VA, WV
+#   mw-1       rs_midwest        25  IA, IL, IN, KY, MI, MN, OH, WI
+#   sc-1       rs_south_central  27  AL, AR, KS, LA, MO, MS, OK, TN, TX
+#   denver-1   rs_mountain       18  AZ, CO, ID, MT, ND, NE, NM, NV, SD, UT, WY
+#   wc-1       rs_west            5  OR, WA
+#
+# 127 centres in total. Listed by state rather than by city: at this
+# size a city-by-city table goes stale the first time one is added, and a
+# stale table is worse than none — this is the first thing read when asking
+# who searches where. The authoritative lists are the [region.*] blocks in
+# master.toml.
+#
+# California is excluded by owner decision (2026-08-25), which is why wc-1
+# is Pacific Northwest only.
 #
 # Mainland only — Alaska and Hawaii are out of scope, and no region here
 # reaches them.
