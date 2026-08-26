@@ -322,27 +322,71 @@ bankTx.post('/:id/unignore', async (c) => {
 
 // ─── Mark / unmark transfer ──────────────────────────────────────────────────
 // A human category verdict; category_manual keeps every future sync (and
-// transfer-pairing) from overturning it.
+// transfer-pairing) from overturning it. The verdict also teaches: marking a
+// row with a counterparty records a rule that classifies that counterparty's
+// other rows now and on every future sync; unmarking retracts it.
+
+function counterpartyRulesOf(group: { source: string; counterparty: string | null }[]) {
+  const seen = new Set<string>();
+  return group.flatMap((l) => {
+    if (!l.counterparty || seen.has(`${l.source}\n${l.counterparty}`)) return [];
+    seen.add(`${l.source}\n${l.counterparty}`);
+    return [{ source: l.source, counterparty: l.counterparty }];
+  });
+}
 
 bankTx.post('/:id/mark-transfer', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
   if (group[0].order_id) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
-  await sql`
-    UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
-  return c.json({ ok: true });
+
+  const rules = counterpartyRulesOf(group);
+  let alsoMarked = 0;
+  await sql.begin(async (tx) => {
+    await tx`
+      UPDATE bank_transactions SET category = 'transfer', category_manual = TRUE
+      WHERE id IN ${tx(group.map((l) => l.id))}`;
+    for (const r of rules) {
+      await tx`
+        INSERT INTO bank_transfer_counterparties (source, counterparty, created_by)
+        VALUES (${r.source}, ${r.counterparty}, ${c.var.user.id})
+        ON CONFLICT (source, counterparty) DO NOTHING`;
+      const updated = await tx`
+        UPDATE bank_transactions SET category = 'transfer'
+        WHERE source = ${r.source} AND counterparty = ${r.counterparty}
+          AND category = 'external' AND NOT category_manual AND order_id IS NULL`;
+      alsoMarked += updated.count;
+    }
+  });
+  return c.json({ ok: true, ruleCounterparty: rules[0]?.counterparty ?? null, alsoMarked });
 });
 
 bankTx.post('/:id/unmark-transfer', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  await sql`
-    UPDATE bank_transactions SET category = 'external', category_manual = TRUE
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
-  return c.json({ ok: true });
+
+  const rules = counterpartyRulesOf(group);
+  let ruleRemoved = false;
+  await sql.begin(async (tx) => {
+    await tx`
+      UPDATE bank_transactions SET category = 'external', category_manual = TRUE
+      WHERE id IN ${tx(group.map((l) => l.id))}`;
+    for (const r of rules) {
+      const del = await tx`
+        DELETE FROM bank_transfer_counterparties
+        WHERE source = ${r.source} AND counterparty = ${r.counterparty}`;
+      if (del.count === 0) continue;
+      ruleRemoved = true;
+      // Rows the rule classified carry no manual flag — revert them with it.
+      await tx`
+        UPDATE bank_transactions SET category = 'external'
+        WHERE source = ${r.source} AND counterparty = ${r.counterparty}
+          AND category = 'transfer' AND NOT category_manual AND order_id IS NULL`;
+    }
+  });
+  return c.json({ ok: true, ruleRemoved });
 });
 
 // ─── Link-picker suggestions ─────────────────────────────────────────────────

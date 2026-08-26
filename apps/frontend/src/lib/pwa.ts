@@ -14,6 +14,8 @@ import { vendorTokenFromPath } from './vendor';
 let applyUpdateFn: (() => Promise<void>) | null = null;
 let updatePending = false;
 
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
 // The 'pwa:needRefresh' event is fire-and-forget and the update toast is
 // lazy-loaded, so a listener mounted after the event would miss it — with a
 // waiting SW left over from a previous session, onNeedRefresh fires almost
@@ -39,6 +41,20 @@ export function registerPwa(): void {
   }
 
   const updateSW = registerSW({
+    // A browser only re-fetches sw.js on a navigation, and an installed PWA
+    // resumes from the home screen without one — left alone, a device that
+    // never cold-starts never learns a deploy happened. Ask explicitly on
+    // every return to the foreground, plus hourly while the app stays open.
+    onRegisteredSW(_swUrl, reg) {
+      if (!reg) return;
+      const check = () => {
+        reg.update().catch(() => { /* offline — the next check will reach it */ });
+      };
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') check();
+      });
+      setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+    },
     onNeedRefresh() {
       applyUpdateFn = () => updateSW(true);
       updatePending = true;

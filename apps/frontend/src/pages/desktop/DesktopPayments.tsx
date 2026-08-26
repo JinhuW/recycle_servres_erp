@@ -62,6 +62,14 @@ type Suggestion = {
 
 type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored' | 'transfer';
 
+// Union of the mutation responses; only mark/unmark-transfer read past `ok`.
+type ActResult = {
+  ok: boolean;
+  ruleCounterparty?: string | null;
+  alsoMarked?: number;
+  ruleRemoved?: boolean;
+};
+
 const FILTER_SELECT: CSSProperties = {
   width: 'auto', minWidth: 132, height: 32, fontSize: 12.5,
 };
@@ -165,14 +173,14 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     }
   };
 
-  const act = async (path: string, body?: unknown) => {
+  const act = async (path: string, body?: unknown): Promise<ActResult | null> => {
     try {
-      await api.post(`/api/bank-transactions/${path}`, body ?? {});
+      const r = await api.post<ActResult>(`/api/bank-transactions/${path}`, body ?? {});
       afterMutation();
-      return true;
+      return r;
     } catch (e) {
       handleFetchError(e);
-      return false;
+      return null;
     }
   };
 
@@ -353,7 +361,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   open: boolean;
   onToggle: () => void;
   locale: string;
-  act: (path: string, body?: unknown) => Promise<boolean>;
+  act: (path: string, body?: unknown) => Promise<ActResult | null>;
   onToast: (msg: string) => void;
 }) {
   const { t } = useT();
@@ -430,7 +438,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
 function ExpandedDetail({ row, locale, act, onToast }: {
   row: PaymentRow;
   locale: string;
-  act: (path: string, body?: unknown) => Promise<boolean>;
+  act: (path: string, body?: unknown) => Promise<ActResult | null>;
   onToast: (msg: string) => void;
 }) {
   const { t } = useT();
@@ -473,11 +481,25 @@ function ExpandedDetail({ row, locale, act, onToast }: {
         )}
         {!row.orderId && (
           row.category === 'transfer' ? (
-            <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unmark-transfer`)}>
+            <button
+              type="button" className="btn sm ghost"
+              onClick={() => void act(`${row.id}/unmark-transfer`).then(r => {
+                if (r?.ruleRemoved && row.counterparty) {
+                  onToast(t('payTransferRuleRemovedToast', { name: row.counterparty }));
+                }
+              })}
+            >
               {t('payNotTransfer')}
             </button>
           ) : !row.ignored && (
-            <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/mark-transfer`)}>
+            <button
+              type="button" className="btn sm ghost"
+              onClick={() => void act(`${row.id}/mark-transfer`).then(r => {
+                if (r?.ruleCounterparty) {
+                  onToast(t('payTransferRuleToast', { name: r.ruleCounterparty, n: r.alsoMarked ?? 0 }));
+                }
+              })}
+            >
               {t('payMarkTransfer')}
             </button>
           )
