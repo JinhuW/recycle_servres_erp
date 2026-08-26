@@ -22,7 +22,7 @@ from fastapi import FastAPI
 
 from . import deps
 from .background import Background
-from .routers import auth, escalation, health, listings, messages, session, stats
+from .routers import alerts, auth, escalation, health, listings, messages, session, stats
 from .telegram_consumer import TelegramUpdateConsumer
 
 logging.basicConfig(level=os.environ.get("RS_LOG_LEVEL", "INFO"))
@@ -44,14 +44,26 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     loop.start()
 
-    # The reply consumer runs only when a war room is configured
-    # (TELEGRAM_WARROOM_CHAT_ID). Unset — every current deploy — it stays off and
-    # the coordinator never reads Telegram, so shipping this code changes nothing
-    # until the war room is turned on.
+    # The update consumer runs when there is anything for it to read: staff
+    # replies need a war room (TELEGRAM_WARROOM_CHAT_ID), partner reactions
+    # need the listings chat (TELEGRAM_CHAT_ID). Either alone is enough; a
+    # chat left unset keeps its branch inert. With neither set the coordinator
+    # never reads Telegram at all.
     consumer = None
     warroom = deps.get_warroom_notifier()
-    if warroom is not None and warroom.token and warroom.chat_id:
-        consumer = TelegramUpdateConsumer(deps.get_db, warroom.token, warroom.chat_id)
+    notifier = deps.get_notifier()
+    warroom_chat = warroom.chat_id if warroom is not None else None
+    alerts_chat = notifier.chat_id if notifier is not None else None
+    token = (warroom.token if warroom is not None else None) or (
+        notifier.token if notifier is not None else None
+    )
+    if token and (warroom_chat or alerts_chat):
+        consumer = TelegramUpdateConsumer(
+            deps.get_db,
+            token,
+            warroom_chat_id=warroom_chat,
+            alerts_chat_id=alerts_chat,
+        )
         consumer.start()
 
     try:
@@ -73,6 +85,7 @@ app.include_router(escalation.router, tags=["escalation"])
 app.include_router(session.router, tags=["session"])
 app.include_router(messages.router, tags=["messages"])
 app.include_router(stats.router, tags=["stats"])
+app.include_router(alerts.router, tags=["alerts"])
 
 
 def __getattr__(name: str) -> Any:

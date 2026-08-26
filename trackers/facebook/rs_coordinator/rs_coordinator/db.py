@@ -83,6 +83,66 @@ CREATE TABLE IF NOT EXISTS review_stats (
     PRIMARY KEY (day, worker_id)
 );
 
+-- Alert hit tracking ---------------------------------------------------------
+-- The homelab monitor sends listing alerts straight to Telegram and reports
+-- each delivered message here (fail-open, after the send). Partners mark an
+-- alert they are acting on with an emoji reaction; the update consumer stores
+-- those below. The two sides join on (chat_id, message_id) at query time only,
+-- so a reaction on an alert sent before this feature existed is kept, not lost.
+CREATE TABLE IF NOT EXISTS alert_messages (
+    chat_id       TEXT NOT NULL,
+    message_id    INTEGER NOT NULL,
+    worker_id     TEXT,
+    topic_id      INTEGER,
+    priority      TEXT,
+    part          INTEGER NOT NULL DEFAULT 1,
+    parts         INTEGER NOT NULL DEFAULT 1,
+    listing_id    TEXT,
+    post_url      TEXT,
+    item_name     TEXT,
+    search_city   TEXT,
+    search_phrase TEXT,
+    ai_score      INTEGER,
+    unit_count    INTEGER,
+    prompt_hash   TEXT,
+    sent_at       TEXT NOT NULL,
+    PRIMARY KEY (chat_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_messages_sent ON alert_messages(sent_at);
+
+-- Every reaction change Telegram delivers, verbatim. Append-only: this is the
+-- long-term source data for prompt/region tuning, so nothing is interpreted
+-- here — old_reaction/new_reaction hold Telegram's raw JSON.
+CREATE TABLE IF NOT EXISTS alert_reaction_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id      TEXT NOT NULL,
+    message_id   INTEGER NOT NULL,
+    user_id      TEXT NOT NULL,
+    user_name    TEXT,
+    old_reaction TEXT NOT NULL DEFAULT '[]',
+    new_reaction TEXT NOT NULL DEFAULT '[]',
+    reacted_at   TEXT,
+    recorded_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reaction_events_msg
+    ON alert_reaction_events(chat_id, message_id);
+
+-- Current reaction state per (message, user): `emoji` is a JSON array of what
+-- the user's reaction is NOW ('[]' after removal — the row survives so the
+-- history stays visible next to the event log). Hit-rate queries read this.
+CREATE TABLE IF NOT EXISTS alert_reactions (
+    chat_id          TEXT NOT NULL,
+    message_id       INTEGER NOT NULL,
+    user_id          TEXT NOT NULL,
+    user_name        TEXT,
+    emoji            TEXT NOT NULL DEFAULT '[]',
+    first_reacted_at TEXT,
+    last_updated_at  TEXT NOT NULL,
+    PRIMARY KEY (chat_id, message_id, user_id)
+);
+
 -- Alert outbox -------------------------------------------------------------
 -- Every message the coordinator owes Telegram, written in the same request
 -- that decided to alert and delivered by the background loop (background.py).
@@ -268,6 +328,54 @@ THREAD_EXTRA_COLUMNS = (
 OUTBOUND_EXTRA_COLUMNS = (
     ("transport", "TEXT NOT NULL DEFAULT 'playwright'"),
 )
+
+
+# The hit-rate queries, shared verbatim by both backends ({p} is the
+# placeholder style, `?` or `%s`). An alert can span several Telegram messages
+# (rare long-text splits) and a listing can legitimately be alerted more than
+# once; grouping by listing_id (falling back to the message id for rows
+# without one) counts each alerted listing once and credits a reaction on any
+# of its messages.
+ALERT_HIT_SQL = """
+    SELECT substr(m.sent_at, 1, 10) AS day,
+           m.priority, m.item_name, m.search_city,
+           COUNT(*) AS sent,
+           SUM(CASE WHEN r.n > 0 THEN 1 ELSE 0 END) AS hit
+    FROM alert_messages m
+    LEFT JOIN (
+        SELECT am.chat_id,
+               COALESCE(am.listing_id, CAST(am.message_id AS TEXT)) AS gid,
+               COUNT(*) AS n
+        FROM alert_reactions ar
+        JOIN alert_messages am
+          ON am.chat_id = ar.chat_id AND am.message_id = ar.message_id
+        WHERE ar.emoji != '[]'
+        GROUP BY am.chat_id, COALESCE(am.listing_id, CAST(am.message_id AS TEXT))
+    ) r ON r.chat_id = m.chat_id
+       AND r.gid = COALESCE(m.listing_id, CAST(m.message_id AS TEXT))
+    WHERE m.part = 1 AND m.sent_at >= {p}
+    GROUP BY substr(m.sent_at, 1, 10), m.priority, m.item_name, m.search_city
+    ORDER BY day
+"""
+
+# Reactions partners left on messages we never recorded an alert for: alerts
+# sent before the ledger existed, or delivered on a timed-out send the monitor
+# could not capture a message_id from. Kept raw, surfaced as a count so the
+# hit-rate denominator's blind spot stays visible.
+UNMATCHED_REACTIONS_SQL = """
+    SELECT COUNT(*) AS n FROM alert_reactions ar
+    WHERE ar.emoji != '[]' AND ar.last_updated_at >= {p}
+      AND NOT EXISTS (
+          SELECT 1 FROM alert_messages am
+          WHERE am.chat_id = ar.chat_id AND am.message_id = ar.message_id)
+"""
+
+
+def stats_cutoff(days: int) -> str:
+    """The first UTC day inside a `days`-long window ending today."""
+    return (
+        datetime.now(timezone.utc) - timedelta(days=max(1, days) - 1)
+    ).strftime("%Y-%m-%d")
 
 
 DEFAULT_DB_PATH = "data/coordinator.db"
@@ -842,6 +950,102 @@ class Database:
                 }
                 for row in cur.fetchall()
             ]
+
+    # -- alert hit tracking ------------------------------------------------
+
+    def add_alert_message(self: "Database", record: Dict[str, Any]) -> bool:
+        """Record one delivered Telegram alert message; False if already known.
+
+        The monitor may report the same message twice (a retried POST), so the
+        insert is claim-style: the first report wins, duplicates are no-ops.
+        """
+        record = {"sent_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(f":{name}" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO alert_messages ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT(chat_id, message_id) DO NOTHING",
+                record,
+            )
+            return cur.rowcount > 0
+
+    def record_alert_reaction(
+        self: "Database",
+        chat_id: str,
+        message_id: int,
+        user_id: str,
+        user_name: str | None,
+        old_reaction: str,
+        new_reaction: str,
+        emoji: str,
+        reacted_at: str | None,
+    ) -> None:
+        """Append one reaction event and upsert the user's current state.
+
+        `emoji` is the extracted current-state JSON array ('[]' when the user
+        removed their reaction); old_reaction/new_reaction are Telegram's raw
+        JSON. first_reacted_at is only ever set once, and only by an event
+        that actually carries a reaction.
+        """
+        now = utcnow()
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO alert_reaction_events (chat_id, message_id, user_id, "
+                "user_name, old_reaction, new_reaction, reacted_at, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    chat_id,
+                    message_id,
+                    user_id,
+                    user_name,
+                    old_reaction,
+                    new_reaction,
+                    reacted_at,
+                    now,
+                ),
+            )
+            cur.execute(
+                "INSERT INTO alert_reactions (chat_id, message_id, user_id, user_name, "
+                "emoji, first_reacted_at, last_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(chat_id, message_id, user_id) DO UPDATE SET "
+                "  user_name = excluded.user_name,"
+                "  emoji = excluded.emoji,"
+                "  first_reacted_at = COALESCE(alert_reactions.first_reacted_at,"
+                "                              excluded.first_reacted_at),"
+                "  last_updated_at = excluded.last_updated_at",
+                (
+                    chat_id,
+                    message_id,
+                    user_id,
+                    user_name,
+                    emoji,
+                    (reacted_at or now) if emoji != "[]" else None,
+                    now,
+                ),
+            )
+
+    def alert_hit_stats(self: "Database", days: int = 14) -> List[Dict[str, Any]]:
+        """Sent vs reacted alert counts per day/priority/item/city, oldest first."""
+        with self.cursor() as cur:
+            cur.execute(ALERT_HIT_SQL.format(p="?"), (stats_cutoff(days),))
+            return [
+                {
+                    "day": row["day"],
+                    "priority": row["priority"],
+                    "item_name": row["item_name"],
+                    "search_city": row["search_city"],
+                    "sent": int(row["sent"]),
+                    "hit": int(row["hit"]),
+                }
+                for row in cur.fetchall()
+            ]
+
+    def unmatched_reaction_count(self: "Database", days: int = 14) -> int:
+        """Live reactions on messages with no recorded alert (pre-feature sends)."""
+        with self.cursor() as cur:
+            cur.execute(UNMATCHED_REACTIONS_SQL.format(p="?"), (stats_cutoff(days),))
+            return int(cur.fetchone()["n"])
 
     # -- accounts ----------------------------------------------------------
 

@@ -162,6 +162,10 @@ def cmd_telegram_chatid(args: argparse.Namespace) -> int:
     A bot cannot start a conversation, so the recipient must message it once.
     This polls getUpdates until that message arrives, records the chat id in
     the env file, and sends a confirmation.
+
+    Stop rs-coordinator first: its update consumer holds the bot's one global
+    getUpdates cursor, so two pollers steal each other's updates (and Telegram
+    409s concurrent polls).
     """
     import json
     import time

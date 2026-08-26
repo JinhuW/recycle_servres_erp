@@ -182,7 +182,9 @@ def test_a_staff_reply_in_a_topic_queues_a_matrix_reply_and_claims(tmp_path):
     seed_thread(db)
     db.set_thread_fields("t1", {"telegram_topic_id": 42})
 
-    outbound_id = handle_update(db, WARROOM_CHAT, topic_message(10, 42, "still available?"))
+    outbound_id = handle_update(
+        db, WARROOM_CHAT, None, topic_message(10, 42, "still available?")
+    )
 
     assert outbound_id is not None
     (reply,) = db.pending_outbound(transport="matrix")
@@ -206,7 +208,20 @@ def test_the_consumer_ignores_what_is_not_a_buyer_reply(tmp_path):
                                      "from": {"is_bot": False}, "text": "no topic"}},
     ]
     for update in ignored:
-        assert handle_update(db, WARROOM_CHAT, update) is None
+        assert handle_update(db, WARROOM_CHAT, None, update) is None
+
+    assert db.pending_outbound(transport="matrix") == []
+    assert db.get_thread("t1")["human_claimed"] == 0
+
+
+def test_without_a_war_room_the_message_branch_stays_inert(tmp_path):
+    """Reactions turning the consumer on must not activate staff replies: with
+    no war room configured, a perfectly-formed topic message is ignored."""
+    db = Database(tmp_path / "router.db")
+    seed_thread(db)
+    db.set_thread_fields("t1", {"telegram_topic_id": 42})
+
+    assert handle_update(db, None, "-1004", topic_message(10, 42, "hello?")) is None
 
     assert db.pending_outbound(transport="matrix") == []
     assert db.get_thread("t1")["human_claimed"] == 0

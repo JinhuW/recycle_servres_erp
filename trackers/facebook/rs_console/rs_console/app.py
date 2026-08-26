@@ -8,7 +8,7 @@ this facade is what gets exposed through the Cloudflare tunnel instead.
 
 The safety property, stated once: **the coordinator admin token never leaves
 this process, and no auth/credential/session route is forwarded.** The routes
-below are a closed allowlist — six reads and one write (resolving a
+below are a closed allowlist — seven reads and one write (resolving a
 checkpoint). A full compromise of this service's own token yields fleet
 metadata, not accounts.
 
@@ -125,6 +125,11 @@ async def challenge_screenshot(challenge_id: int) -> Response:
 @app.get("/v1/stats/reviews", dependencies=[Depends(require_token)])
 async def review_stats(days: int = Query(default=14, ge=1, le=92)) -> Response:
     return await _forward("GET", "/v1/stats/reviews", params={"days": days})
+
+
+@app.get("/v1/stats/alert-hits", dependencies=[Depends(require_token)])
+async def alert_hit_stats(days: int = Query(default=14, ge=1, le=92)) -> Response:
+    return await _forward("GET", "/v1/stats/alert-hits", params={"days": days})
 
 
 @app.get("/v1/config/filter-prompt", dependencies=[Depends(require_token)])

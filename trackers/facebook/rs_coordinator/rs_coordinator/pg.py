@@ -33,11 +33,14 @@ from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .db import (
+    ALERT_HIT_SQL,
     LISTING_EXTRA_COLUMNS,
     OUTBOUND_EXTRA_COLUMNS,
     SCHEMA,
     THREAD_EXTRA_COLUMNS,
+    UNMATCHED_REACTIONS_SQL,
     WORKER_HEALTH_COLUMNS,
+    stats_cutoff,
     utcnow,
 )
 
@@ -658,6 +661,92 @@ class PostgresDatabase:
             }
             for row in rows
         ]
+
+    # -- alert hit tracking ------------------------------------------------
+
+    def add_alert_message(self: "PostgresDatabase", record: Dict[str, Any]) -> bool:
+        """See `Database.add_alert_message`. True only for the first report."""
+        record = {"sent_at": utcnow(), **record}
+        columns = ", ".join(record)
+        placeholders = ", ".join(f"%({name})s" for name in record)
+        with self.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO alert_messages ({columns}) VALUES ({placeholders}) "
+                "ON CONFLICT (chat_id, message_id) DO NOTHING",
+                record,
+            )
+            return cur.rowcount > 0
+
+    def record_alert_reaction(
+        self: "PostgresDatabase",
+        chat_id: str,
+        message_id: int,
+        user_id: str,
+        user_name: str | None,
+        old_reaction: str,
+        new_reaction: str,
+        emoji: str,
+        reacted_at: str | None,
+    ) -> None:
+        """See `Database.record_alert_reaction`."""
+        now = utcnow()
+        with self.cursor() as cur:
+            cur.execute(
+                "INSERT INTO alert_reaction_events (chat_id, message_id, user_id, "
+                "user_name, old_reaction, new_reaction, reacted_at, recorded_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    chat_id,
+                    message_id,
+                    user_id,
+                    user_name,
+                    old_reaction,
+                    new_reaction,
+                    reacted_at,
+                    now,
+                ),
+            )
+            cur.execute(
+                "INSERT INTO alert_reactions (chat_id, message_id, user_id, user_name, "
+                "emoji, first_reacted_at, last_updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (chat_id, message_id, user_id) DO UPDATE SET "
+                "  user_name = excluded.user_name,"
+                "  emoji = excluded.emoji,"
+                "  first_reacted_at = COALESCE(alert_reactions.first_reacted_at,"
+                "                              excluded.first_reacted_at),"
+                "  last_updated_at = excluded.last_updated_at",
+                (
+                    chat_id,
+                    message_id,
+                    user_id,
+                    user_name,
+                    emoji,
+                    (reacted_at or now) if emoji != "[]" else None,
+                    now,
+                ),
+            )
+
+    def alert_hit_stats(self: "PostgresDatabase", days: int = 14) -> List[Dict[str, Any]]:
+        with self.cursor() as cur:
+            cur.execute(ALERT_HIT_SQL.format(p="%s"), (stats_cutoff(days),))
+            rows = _rows(cur.fetchall())
+        # COUNT/SUM come back as Decimal from psycopg; the API contract is int.
+        return [
+            {
+                "day": row["day"],
+                "priority": row["priority"],
+                "item_name": row["item_name"],
+                "search_city": row["search_city"],
+                "sent": int(row["sent"]),
+                "hit": int(row["hit"]),
+            }
+            for row in rows
+        ]
+
+    def unmatched_reaction_count(self: "PostgresDatabase", days: int = 14) -> int:
+        with self.cursor() as cur:
+            cur.execute(UNMATCHED_REACTIONS_SQL.format(p="%s"), (stats_cutoff(days),))
+            return int(cur.fetchone()["n"])
 
     # -- accounts ----------------------------------------------------------
 

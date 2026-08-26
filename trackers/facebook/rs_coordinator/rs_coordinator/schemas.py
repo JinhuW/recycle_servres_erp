@@ -253,6 +253,48 @@ class ReviewStatsList(BaseModel):
     days: List[ReviewStatsDay]
 
 
+# -- alert hit tracking ------------------------------------------------------
+
+
+class AlertMessageReport(BaseModel):
+    """One delivered Telegram alert message, reported by the monitor after the
+    send so partner reactions can be joined back to the listing."""
+
+    worker_id: str | None = None
+    chat_id: str
+    message_id: int
+    part: int = Field(default=1, ge=1)
+    parts: int = Field(default=1, ge=1)
+    topic_id: int | None = None
+    priority: str | None = None
+    listing_id: str | None = None
+    post_url: str | None = None
+    item_name: str | None = None
+    search_city: str | None = None
+    search_phrase: str | None = None
+    ai_score: int | None = None
+    unit_count: int | None = None
+    prompt_hash: str | None = None
+
+
+class AlertHitRow(BaseModel):
+    """Sent vs reacted counts for one (day, priority, item, city) bucket."""
+
+    day: str
+    priority: str | None = None
+    item_name: str | None = None
+    search_city: str | None = None
+    sent: int
+    hit: int
+
+
+class AlertHitList(BaseModel):
+    rows: List[AlertHitRow]
+    # Live reactions on messages with no recorded alert (sent before the
+    # ledger existed, or on a timed-out send) — the denominator's blind spot.
+    unmatched_reactions: int = 0
+
+
 # -- session backup ---------------------------------------------------------
 
 

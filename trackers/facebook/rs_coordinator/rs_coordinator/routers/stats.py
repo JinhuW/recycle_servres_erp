@@ -15,7 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import deps
 from ..deps import require_admin, require_worker
-from ..schemas import ReviewStatsDay, ReviewStatsList, ReviewStatsReport, StatusResponse
+from ..schemas import (
+    AlertHitList,
+    AlertHitRow,
+    ReviewStatsDay,
+    ReviewStatsList,
+    ReviewStatsReport,
+    StatusResponse,
+)
 
 router = APIRouter()
 
@@ -47,4 +54,20 @@ def report_reviews(
 def daily_reviews(days: int = Query(default=14, ge=1, le=MAX_DAYS)) -> ReviewStatsList:
     return ReviewStatsList(
         days=[ReviewStatsDay(**row) for row in deps.db.review_stats_daily(days)]
+    )
+
+
+@router.get(
+    "/v1/stats/alert-hits", response_model=AlertHitList, dependencies=[Depends(require_admin)]
+)
+def alert_hits(days: int = Query(default=14, ge=1, le=MAX_DAYS)) -> AlertHitList:
+    """Sent-vs-reacted counts per (day, priority, item, city) bucket.
+
+    A "hit" is an alerted listing at least one partner currently has an emoji
+    reaction on. Raw emoji stay in the database; nothing is interpreted here,
+    so a taxonomy (bought / bad alert / ...) can be layered on later.
+    """
+    return AlertHitList(
+        rows=[AlertHitRow(**row) for row in deps.db.alert_hit_stats(days)],
+        unmatched_reactions=deps.db.unmatched_reaction_count(days),
     )

@@ -55,6 +55,7 @@ def test_token_required_everywhere(client):
         "/v1/challenges",
         "/v1/challenges/1/screenshot",
         "/v1/stats/reviews",
+        "/v1/stats/alert-hits",
         "/v1/config/filter-prompt",
     ):
         assert client.get(path).status_code == 401, path
@@ -94,6 +95,18 @@ def test_stats_days_param_forwarded_and_bounded(client):
     (request,) = client.calls
     assert request.url.params["days"] == "30"
     assert client.get("/v1/stats/reviews?days=5000", headers=AUTH).status_code == 422
+
+
+def test_alert_hits_forwarded_with_admin_token(client):
+    res = client.get("/v1/stats/alert-hits?days=30", headers=AUTH)
+    assert res.status_code == 200
+
+    (request,) = client.calls
+    assert request.url.path == "/v1/stats/alert-hits"
+    assert request.url.params["days"] == "30"
+    assert request.headers["Authorization"] == "Bearer admin-secret"
+    assert "admin-secret" not in res.text
+    assert client.get("/v1/stats/alert-hits?days=0", headers=AUTH).status_code == 422
 
 
 def test_filter_prompt_returns_three_fields_only(client):

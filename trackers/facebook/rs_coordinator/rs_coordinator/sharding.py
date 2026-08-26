@@ -140,6 +140,11 @@ def build_worker_config(
         user.pop("telegram_topic_high", None)
         user.pop("telegram_topic_medium", None)
         user.pop("telegram_topic_low", None)
+        # The alert-message report rides the Telegram send path, which workers
+        # do not have; same reasoning as the topic ids above.
+        user.pop("alert_report_url", None)
+        user.pop("alert_report_token", None)
+        user.pop("alert_report_worker_id", None)
         user["notify_with"] = ["coordinator"]
 
     return config
