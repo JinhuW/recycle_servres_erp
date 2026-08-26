@@ -373,7 +373,6 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
               uploading={f.scanBusy}
               accept="image/*"
               multiple={false}
-              capture="environment"
               compact
               boxHint={t('shipPayBoxHint')}
             />
