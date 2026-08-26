@@ -15,6 +15,11 @@ const isStringArray: Validator = (v) =>
 
 const isBoolean: Validator = (v) => typeof v === 'boolean';
 
+// Category ids live in a DB lookup table, so this one can't be pinned to a
+// literal union like the keys above — bound the length instead.
+const isShortString: Validator = (v) =>
+  typeof v === 'string' && v.length > 0 && v.length <= 64;
+
 // Keys map to validators. Unknown keys are rejected.
 const SCHEMA: Record<string, Validator> = {
   'language':                 isOneOf('en', 'zh'),
@@ -25,6 +30,7 @@ const SCHEMA: Record<string, Validator> = {
   'analysis.collapsed':       isStringArray,
   'orders.cols':              isStringArray,
   'market.showStaleOnly':     isBoolean,
+  'submit.lastCategory':      isShortString,
 };
 
 export type PreferencePatchResult =

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
@@ -59,6 +59,10 @@ type Suggestion = {
 };
 
 type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored';
+
+const FILTER_SELECT: CSSProperties = {
+  width: 'auto', minWidth: 132, height: 32, fontSize: 12.5,
+};
 
 const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
   mercury: 'Mercury',
@@ -250,12 +254,14 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <select className="select" value={source} onChange={e => setSource(e.target.value)} style={{ height: 32, fontSize: 12.5 }}>
+            {/* .select is width:100% in tokens.css — left alone each dropdown
+                claims a full row and the strip stacks under the tabs. */}
+            <select className="select" value={source} onChange={e => setSource(e.target.value)} style={FILTER_SELECT}>
               <option value="all">{t('paySourceAll')}</option>
               <option value="mercury">Mercury</option>
               <option value="paypal">PayPal</option>
             </select>
-            <select className="select" value={direction} onChange={e => setDirection(e.target.value)} style={{ height: 32, fontSize: 12.5 }}>
+            <select className="select" value={direction} onChange={e => setDirection(e.target.value)} style={FILTER_SELECT}>
               <option value="all">{t('payDirAll')}</option>
               <option value="out">{t('payDirOut')}</option>
               <option value="in">{t('payDirIn')}</option>
