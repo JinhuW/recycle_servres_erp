@@ -18,6 +18,34 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **The 99 new city centres are now searched FIRST.** The monitor walks
+  `search_city` in order and a full pass takes many hours, so the geographic
+  ordering v0.5.0 shipped put the whole Northeast — almost all of it already
+  covered — ahead of every metro the expansion added. Measured after the first
+  restart: 4 cities searched, 0 of them new. The 99 additions each carry up to
+  a full 7-day backlog on their first visit, while the original 28 have been
+  swept every couple of hours for weeks and hold almost nothing new, so the
+  backlog now goes first and the originals follow. Only the phase-1 arrays
+  moved; the `[region.*]` blocks are untouched, because their order is a
+  per-worker concern and gen-configs' invariant is set equality, not sequence.
+  Once the new centres have each been visited a few times this ordering stops
+  earning its keep and can go back to geographic.
+
+### Added
+
+- **`scripts/sweep-report.py` — the search funnel, posted to Telegram, split
+  original-28 vs new-99.** A fleet-wide funnel cannot answer the only question
+  the expansion raises: whether the new metros produce anything. The 28
+  originals generate enough volume to drown 99 quiet ones either way, so every
+  figure — searches, listings skipped, AI evaluations, drops at the 5-unit gate
+  and the rating gate, alerts, and the score spread — is reported twice, once
+  per side. A window with no new-city activity says so in words rather than
+  printing zeroes that read as "not measured". Runs from cron on the VM against
+  the OpenSearch index the monitor already ships to; `--dry-run` prints without
+  sending, `--hours` changes the window.
+
 ## [0.5.0] - 2026-08-26
 
 ### Added
