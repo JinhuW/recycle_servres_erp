@@ -92,6 +92,7 @@ export function mercuryProvider(env: Env): BankProvider {
               paypalTxnId: paypalTxnFromDescription(
                 [t.counterpartyName, description].filter(Boolean).join(' ') || null,
               ),
+              category: 'external',
               raw: t,
             });
           }

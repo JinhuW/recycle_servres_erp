@@ -4,6 +4,10 @@
 
 export type BankSource = 'mercury' | 'paypal';
 
+// 'transfer' = an internal Mercury<->PayPal move (top-up, withdrawal, the
+// funding leg of a bank-funded payment) — never linkable to a purchase order.
+export type BankTxnCategory = 'external' | 'transfer';
+
 export type NormalizedTxn = {
   source: BankSource;
   externalId: string;
@@ -15,6 +19,9 @@ export type NormalizedTxn = {
   // PayPal legs: the transaction id itself. Mercury legs: parsed from the
   // bank description when it mentions PayPal. Feeds auto-pair + auto-link.
   paypalTxnId: string | null;
+  // Only PayPal metadata can classify at fetch time; Mercury legs arrive
+  // 'external' and are reclassified when transfer-pairing settles them.
+  category: BankTxnCategory;
   raw: unknown;
 };
 

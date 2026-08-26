@@ -2,12 +2,14 @@
 // explicit BANKTX_STUB flag — never as a silent fallback for missing keys
 // (the OCR module's silent stub already burned us once).
 
-import type { BankFetch, BankProvider, NormalizedTxn } from './types';
+import type { BankFetch, BankProvider, BankTxnCategory, NormalizedTxn } from './types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function txn(partial: Omit<NormalizedTxn, 'raw'>): NormalizedTxn {
-  return { ...partial, raw: { stub: true, id: partial.externalId } };
+function txn(
+  partial: Omit<NormalizedTxn, 'raw' | 'category'> & { category?: BankTxnCategory },
+): NormalizedTxn {
+  return { category: 'external', ...partial, raw: { stub: true, id: partial.externalId } };
 }
 
 // A fixed anchor keeps re-syncs idempotent within a process while staying
@@ -46,6 +48,12 @@ export function stubMercuryProvider(): BankProvider {
             postedAt: new Date(anchor - 3 * DAY_MS), amount: -312.55,
             counterparty: 'AWS', description: 'AWS EMEA', paypalTxnId: null,
           }),
+          // Bank side of a PayPal top-up — transfer-pairs with stub-p-topup.
+          txn({
+            source: 'mercury', externalId: 'stub-m-5', accountExternalId: 'stub-checking',
+            postedAt: new Date(anchor - 4 * DAY_MS), amount: -800,
+            counterparty: 'PayPal', description: 'PAYPAL TRANSFER', paypalTxnId: null,
+          }),
         ],
       };
     },
@@ -70,6 +78,13 @@ export function stubPaypalProvider(): BankProvider {
             postedAt: new Date(anchor - 6 * DAY_MS), amount: -89.99,
             counterparty: 'Parts Plus', description: 'Heatsinks',
             paypalTxnId: '9ZY87654WV321012K',
+          }),
+          // Funding credit from the bank (T0300 shape) — the Transfers case.
+          txn({
+            source: 'paypal', externalId: '5TR00000TRANSFER1', accountExternalId: 'primary',
+            postedAt: new Date(anchor - 4 * DAY_MS), amount: 800,
+            counterparty: null, description: 'Bank Deposit to PP Account',
+            paypalTxnId: '5TR00000TRANSFER1', category: 'transfer',
           }),
         ],
       };
