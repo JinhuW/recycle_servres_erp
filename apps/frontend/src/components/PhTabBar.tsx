@@ -1,6 +1,5 @@
 import { Icon, type IconName } from './Icon';
 import { useT } from '../lib/i18n';
-import type { Role } from '../lib/types';
 
 export type View = 'dashboard' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'me';
 
@@ -8,23 +7,18 @@ type Props = {
   view: View;
   setView: (v: View) => void;
   onCenterPress: () => void;
-  role: Role;
 };
 
-export function PhTabBar({ view, setView, onCenterPress, role }: Props) {
+export function PhTabBar({ view, setView, onCenterPress }: Props) {
   const { t } = useT();
-  // Purchasers get Shipping where Market used to sit — their field work is
-  // inbound boxes, and Market keeps a quick link on Home. Managers keep
-  // Inventory; they reach /shipping through the Home inbound card.
-  const fourth = role === 'manager'
-    ? { id: 'inventory' as View, label: t('tabInventory'), icon: 'inventory' as IconName }
-    : { id: 'shipping' as View,  label: t('tabShipping'),  icon: 'truck' as IconName };
-
+  // Shipping for every role: purchasers track the boxes they buy, managers
+  // receive them at the dock (and scan labels there). Market and Inventory
+  // both live as quick links on Home instead.
   const tabs: { id: View; label: string; icon: IconName; center?: boolean }[] = [
     { id: 'dashboard', label: t('tabHome'),    icon: 'dashboard' },
     { id: 'history',   label: t('tabOrders'),  icon: 'history' },
     { id: 'submit',    label: t('tabCapture'), icon: 'camera', center: true },
-    fourth,
+    { id: 'shipping',  label: t('tabShipping'), icon: 'truck' },
     { id: 'me',        label: t('tabProfile'), icon: 'user' },
   ];
 

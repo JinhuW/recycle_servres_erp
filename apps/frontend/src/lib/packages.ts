@@ -65,6 +65,20 @@ export async function scanPaymentScreenshot(file: File | Blob, filename = 'paypa
   return api.upload<PaymentScanResponse>('/api/scan/payment', form);
 }
 
+export type LookedUpPackage = TrackedPackage & { creatorName: string | null };
+
+/**
+ * Resolves a scanned label barcode to a tracked package. The server matches
+ * tolerantly (carrier barcodes wrap the tracking number in routing digits)
+ * and answers null both for "nobody tracked this box" and for rows outside
+ * the caller's scope.
+ */
+export async function lookupPackage(code: string): Promise<{ package: LookedUpPackage | null }> {
+  return api.get<{ package: LookedUpPackage | null }>(
+    `/api/packages/lookup?code=${encodeURIComponent(code)}`,
+  );
+}
+
 export async function removePackage(id: string): Promise<{ ok: true }> {
   return api.delete<{ ok: true }>(`/api/packages/${id}`);
 }

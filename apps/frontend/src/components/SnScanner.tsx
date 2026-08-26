@@ -10,12 +10,16 @@ type Props = {
   // Fired with the captured serial ([value]) the moment a new code decodes,
   // or [] when the user closes without a capture.
   onDone: (scanned: string[]) => void;
+  // The chrome defaults to serial-number wording; the shipping scan overrides
+  // it — "fit the QR code in the box" is the wrong aim hint for a 1D barcode.
+  title?: string;
+  hint?: string;
 };
 
 // Single-shot QR scanner for serial numbers: no shutter — the first code that
 // decodes flashes a confirmation and closes itself, handing the serial back
 // to the form. Scanning the next stick is one tap on the field button again.
-export function SnScanner({ existing, onDone }: Props) {
+export function SnScanner({ existing, onDone, title, hint }: Props) {
   const { t } = useT();
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [torch, setTorch] = useState(false);
@@ -138,7 +142,7 @@ export function SnScanner({ existing, onDone }: Props) {
           <Icon name="x" size={14} />
         </button>
         <span className="ph-cam-pill">
-          <Icon name="hash" size={12} /> {t('snScanTitle')}
+          <Icon name="hash" size={12} /> {title ?? t('snScanTitle')}
         </span>
         <button
           className="ph-cam-pill"
@@ -188,7 +192,7 @@ export function SnScanner({ existing, onDone }: Props) {
             <span style={{ color: 'rgba(255,255,255,0.7)', flexShrink: 0 }}>· {t('snScanDup')}</span>
           </div>
         ) : (
-          <div className="cam-hint" style={{ bottom: 18 }}>{t('snScanHint')}</div>
+          <div className="cam-hint" style={{ bottom: 18 }}>{hint ?? t('snScanHint')}</div>
         )}
       </div>
 

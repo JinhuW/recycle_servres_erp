@@ -83,6 +83,38 @@ packages.get('/', async (c) => {
   return c.json({ items: rows.map(toApi) });
 });
 
+// ── Lookup by scanned barcode ────────────────────────────────────────────────
+packages.get('/lookup', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const code = normalizeTracking(c.req.query('code') ?? '');
+  if (code.length < 8 || code.length > 64) {
+    return c.json({ error: 'A scanned barcode is required' }, 400);
+  }
+  // No `mine` here: the point is a manager scanning any box in the receiving
+  // pile, whoever tracked it. Purchasers stay pinned to their own rows.
+  const scopeFrag = effectiveRole(u) === 'manager' ? sql`TRUE` : sql`p.created_by = ${u.id}`;
+  // Carrier barcodes wrap the tracking number — USPS IMpb prefixes 420+ZIP,
+  // FedEx 96 barcodes run ~34 digits ending in the number, UPS 1Z is verbatim —
+  // so fall back to "scan ends with the stored number". Seq scan by design:
+  // this table is one row per inbound box, tens of rows.
+  const rows = (await sql`
+    SELECT p.id, p.tracking_number, p.carrier, p.status, p.tracking_status,
+           p.tracking_eta, p.last_tracked_at, p.seller_name, p.note,
+           p.paypal_txn_id, p.payment_screenshot_key, p.payment_screenshot_url,
+           p.order_id, p.created_by, p.created_at, us.name AS creator_name
+    FROM packages p LEFT JOIN users us ON us.id = p.created_by
+    WHERE ${scopeFrag} AND (p.tracking_number = ${code} OR ${code} LIKE '%' || p.tracking_number)
+    ORDER BY (p.tracking_number = ${code}) DESC, length(p.tracking_number) DESC
+    LIMIT 1
+  `) as unknown as (PackageRow & { creator_name: string | null })[];
+  // A miss is a normal outcome (a box nobody tracked yet), and a purchaser
+  // must not learn that someone else's number exists — both come back null.
+  return c.json({
+    package: rows.length ? { ...toApi(rows[0]), creatorName: rows[0].creator_name } : null,
+  });
+});
+
 // ── Add ──────────────────────────────────────────────────────────────────────
 packages.post('/', async (c) => {
   const u = c.var.user;
