@@ -24,6 +24,20 @@ describe('POST /api/scan/label', () => {
     expect(rows[0].provider).toBe('stub');
   });
 
+  it('SSD category: stub extraction returns SSD fields and persists with category SSD', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await multipart('/api/scan/label', { file: jpeg(), category: 'SSD' }, { token });
+    expect(r.status).toBe(200);
+    const body = r.body as { provider: string; extracted: Record<string, string> };
+    expect(body.provider).toBe('stub');
+    expect(body.extracted.interface).toBe('NVMe');
+    expect(body.extracted.formFactor).toBe('M.2 22110');
+    expect(body.extracted.partNumber).toBe('MZ1L21T9HCLS-00A07');
+    const sql = getTestDb();
+    const rows = await sql`SELECT provider FROM label_scans WHERE category = 'SSD'`;
+    expect(rows.length).toBe(1);
+  });
+
   it('openrouter path: env key + mocked fetch → provider openrouter', async () => {
     vi.stubGlobal(
       'fetch',

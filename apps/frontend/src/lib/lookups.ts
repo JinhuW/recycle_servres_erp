@@ -57,10 +57,21 @@ export type CategoryInfo = {
   label: string;
   icon: string;
   enabled: boolean;
+  aiCapture: boolean;
   defaultMargin: number;
   position: number;
 };
 export const categories: CategoryInfo[] = [];
+
+/**
+ * Whether the AI label scanner is offered for lines of this category —
+ * `categories.ai_capture`, toggleable in settings. Falls back to the RAM-only
+ * behaviour before the lookups fetch lands.
+ */
+export function aiCaptureEnabled(category: string): boolean {
+  const c = categories.find(c => c.id === category);
+  return c ? c.aiCapture : category === 'RAM';
+}
 
 // ── Item types (the `Other` line classifier vocabulary) ─────────────────────
 // Anyone may add one from the line drawer, so this list grows during a session

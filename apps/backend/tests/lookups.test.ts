@@ -26,6 +26,18 @@ describe('GET /api/lookups', () => {
     expect(r.body.categories.some((x: { id: string }) => x.id === 'CPU')).toBe(true);
   });
 
+  it('exposes ai_capture so the forms can gate the AI scanner per category', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/lookups', { token });
+    expect(r.status).toBe(200);
+    const byId = Object.fromEntries(
+      r.body.categories.map((x: { id: string; aiCapture: boolean }) => [x.id, x.aiCapture]),
+    );
+    expect(byId.RAM).toBe(true);
+    expect(byId.SSD).toBe(true);
+    expect(byId.HDD).toBe(false);
+  });
+
   // 1024GB is not how these drives are labelled; 1TB replaces it in the same
   // slot so the list still reads in ascending size order.
   it('offers 1TB and not 1024GB in the SSD capacity catalog', async () => {

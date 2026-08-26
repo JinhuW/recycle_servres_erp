@@ -31,7 +31,7 @@ lookups.get('/', async (c) => {
       ORDER BY position
     `,
     sql`
-      SELECT id, label, icon, enabled, default_margin::float AS default_margin, position
+      SELECT id, label, icon, enabled, ai_capture, default_margin::float AS default_margin, position
       FROM categories
       ORDER BY position
     `,
@@ -64,6 +64,7 @@ lookups.get('/', async (c) => {
       label: r.label as string,
       icon: r.icon as string,
       enabled: r.enabled as boolean,
+      aiCapture: r.ai_capture as boolean,
       defaultMargin: r.default_margin as number,
       position: r.position as number,
     })),

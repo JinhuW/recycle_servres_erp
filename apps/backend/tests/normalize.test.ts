@@ -91,6 +91,8 @@ describe('normalizeFields — SSD/HDD', () => {
     const f = normalizeFields('SSD', { capacity: '1.92 TB', interface: 'nvme' });
     expect(f.capacity).toBe('1.92TB');
     expect(f.interface).toBe('NVMe');
+    expect(normalizeFields('SSD', { interface: 'sata' }).interface).toBe('SATA');
+    expect(normalizeFields('SSD', { capacity: '960 GB' }).capacity).toBe('960GB');
   });
   it('reduces rpm to digits', () => {
     expect(normalizeFields('HDD', { rpm: '7200 RPM' }).rpm).toBe('7200');
