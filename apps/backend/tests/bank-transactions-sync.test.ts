@@ -3,6 +3,7 @@ import { resetDb, getTestDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 import { syncBankTransactions } from '../src/banktx/sync';
+import { mercuryTxnCategory } from '../src/banktx/mercury';
 import { paypalTxnCategory } from '../src/banktx/paypal';
 import type { BankProvider, BankSource, NormalizedTxn } from '../src/banktx/types';
 
@@ -290,6 +291,65 @@ describe('bank transaction sync', () => {
     await syncBankTransactions(testEnv, providers);
     const rows = await legs();
     expect(rows.get(TXN_A)).toMatchObject({ category: 'external', category_manual: true });
+  });
+
+  it('classifies Mercury internal-account moves as transfer', () => {
+    expect(mercuryTxnCategory('internalTransfer')).toBe('transfer'); // own accounts
+    expect(mercuryTxnCategory('treasuryTransfer')).toBe('transfer');
+    expect(mercuryTxnCategory('incomingDomesticWire')).toBe('external');
+    expect(mercuryTxnCategory(undefined)).toBe('external');
+  });
+
+  it('a counterparty rule classifies matching syncs, skipping linked and manual rows', async () => {
+    const db = getTestDb();
+    await db`
+      INSERT INTO bank_transfer_counterparties (source, counterparty)
+      VALUES ('mercury', 'HK GREEN ENERGY')`;
+    const poId = await createPO();
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-hk1', amount: 89261, counterparty: 'HK GREEN ENERGY' },
+        { externalId: 'm-hk2', amount: 5000, counterparty: 'HK GREEN ENERGY' },
+        { externalId: 'm-other', amount: 5000, counterparty: 'Reddit Seller' },
+      ]),
+    ]);
+    await db`
+      UPDATE bank_transactions
+      SET order_id = ${poId}, link_kind = 'refund', linked_at = NOW(), category = 'external'
+      WHERE external_id = 'm-hk2'`;
+    await db`
+      UPDATE bank_transactions SET category = 'external', category_manual = TRUE
+      WHERE external_id = 'm-hk1'`;
+
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-hk1', amount: 89261, counterparty: 'HK GREEN ENERGY' },
+        { externalId: 'm-hk2', amount: 5000, counterparty: 'HK GREEN ENERGY' },
+        { externalId: 'm-hk3', amount: 2500, counterparty: 'HK GREEN ENERGY' },
+        { externalId: 'm-other', amount: 5000, counterparty: 'Reddit Seller' },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-hk3')).toMatchObject({ category: 'transfer', category_manual: false });
+    expect(rows.get('m-hk1')!.category).toBe('external'); // human verdict wins
+    expect(rows.get('m-hk2')!.category).toBe('external'); // linked rows untouched
+    expect(rows.get('m-other')!.category).toBe('external');
+  });
+
+  it('never transfer-pairs a Mercury leg that is already a transfer itself', async () => {
+    // A Savings->Checking move's sibling is the other Mercury account, not a
+    // same-amount PayPal funding credit that happens to be in the window.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: 5000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'm-internal', amount: -5000, category: 'transfer', postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get(TXN_A)!.pair_id).toBeNull();
+    expect(rows.get('m-internal')!.pair_id).toBeNull();
   });
 
   it('one failing provider does not block the other', async () => {

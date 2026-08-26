@@ -357,6 +357,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payUnpair: 'Unpair',
     payMarkTransfer: 'Mark as transfer',
     payNotTransfer: 'Not a transfer',
+    payTransferRuleToast: 'Marked as transfer — {name} is now auto-classified ({n} more updated)',
+    payTransferRuleRemovedToast: 'Auto-classification for {name} removed',
     payLinkedBy: 'Linked by {name}',
     payLinkedAuto: 'Linked automatically',
     payTxnId: 'Txn',

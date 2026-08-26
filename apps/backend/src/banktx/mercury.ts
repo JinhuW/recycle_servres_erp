@@ -5,7 +5,7 @@
 
 import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';
-import type { BankAccountInfo, BankFetch, BankProvider, NormalizedTxn } from './types';
+import type { BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, NormalizedTxn } from './types';
 
 const DEFAULT_BASE = 'https://api.mercury.com';
 const TIMEOUT_MS = 20_000;
@@ -15,6 +15,7 @@ type WireAccount = { id: string; name?: string | null; nickname?: string | null 
 type WireTxn = {
   id: string;
   amount: number | string;
+  kind?: string;
   status?: string;
   createdAt?: string;
   postedAt?: string | null;
@@ -38,6 +39,13 @@ export function paypalTxnFromDescription(text: string | null): string | null {
   if (!text || !/paypal/i.test(text)) return null;
   const m = text.toUpperCase().match(/\b[A-Z0-9]{17}\b/);
   return m && PAYPAL_TXN_STRICT.test(m[0]) ? m[0] : null;
+}
+
+// Moves between the company's own Mercury accounts (and treasury sweeps) are
+// internal by definition. A wire from a sibling company is NOT identifiable
+// here — those are taught per-counterparty (bank_transfer_counterparties).
+export function mercuryTxnCategory(kind: string | undefined): BankTxnCategory {
+  return kind === 'internalTransfer' || kind === 'treasuryTransfer' ? 'transfer' : 'external';
 }
 
 async function call<T>(env: Env, path: string, query: Record<string, string>): Promise<T> {
@@ -92,7 +100,7 @@ export function mercuryProvider(env: Env): BankProvider {
               paypalTxnId: paypalTxnFromDescription(
                 [t.counterpartyName, description].filter(Boolean).join(' ') || null,
               ),
-              category: 'external',
+              category: mercuryTxnCategory(t.kind),
               raw: t,
             });
           }

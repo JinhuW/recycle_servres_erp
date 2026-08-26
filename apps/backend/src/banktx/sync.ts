@@ -152,6 +152,14 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       if (row.fresh) inserted++; else updated++;
     }
 
+    // Counterparty-taught transfers: re-applied after every upsert, because
+    // the upsert resets non-manual categories to what the provider said.
+    await tx`
+      UPDATE bank_transactions bt SET category = 'transfer'
+      FROM bank_transfer_counterparties r
+      WHERE bt.source = r.source AND bt.counterparty = r.counterparty
+        AND bt.category = 'external' AND NOT bt.category_manual AND bt.order_id IS NULL`;
+
     const paired = await autoPair(tx);
     const autoLinked = await autoLink(tx);
     return { inserted, updated, paired, autoLinked };
@@ -235,7 +243,10 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
   const byAbs = new Map<string, { m: LegRow[]; p: LegRow[] }>();
   for (const l of legs) {
     if (taken.has(l.id) || l.order_id) continue;
-    if (l.source === 'paypal' && l.category !== 'transfer') continue;
+    // PayPal candidates must already be transfers (event code); Mercury
+    // candidates must NOT be — a leg Mercury or a rule already classified has
+    // its sibling elsewhere (the other Mercury account, the sibling company).
+    if (l.category !== (l.source === 'paypal' ? 'transfer' : 'external')) continue;
     const key = Math.abs(Number(l.amount)).toFixed(2);
     const bucket = byAbs.get(key) ?? { m: [], p: [] };
     (l.source === 'mercury' ? bucket.m : bucket.p).push(l);
