@@ -640,7 +640,7 @@ function PoShippingScreen({ orderId, showToast }: { orderId: string; showToast: 
         {order && items?.map((s) => {
           const row: InboundRow = {
             kind: 'shipment',
-            order: { id: order.id, userName: '', lifecycle: order.lifecycle, warehouse: order.warehouse ?? null },
+            order: { id: order.id, userName: '', lifecycle: order.lifecycle, paypalTxnId: order.paypalTxnId, warehouse: order.warehouse ?? null },
             shipment: s,
           };
           const chip = STATUS_CHIP[s.status];
