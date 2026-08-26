@@ -11,6 +11,7 @@ export type ShipOrder = {
   id: string;
   userName: string;
   lifecycle: string;
+  paypalTxnId: string | null;
   warehouse: { id?: string; name?: string | null; short: string; region: string } | null;
 };
 
@@ -55,6 +56,7 @@ export function filterRows(rows: ShipRow[], f: ShipFilter): ShipRow[] {
     if (!q) return true;
     return order.id.toLowerCase().includes(q)
       || order.userName.toLowerCase().includes(q)
+      || (order.paypalTxnId ?? '').toLowerCase().includes(q)
       || (shipment.from.name ?? '').toLowerCase().includes(q)
       || (shipment.trackingNumber ?? '').toLowerCase().includes(q);
   });
@@ -92,6 +94,7 @@ export function filterInbound(rows: InboundRow[], f: ShipFilter): InboundRow[] {
     return p.trackingNumber.toLowerCase().includes(q)
       || (p.sellerName ?? '').toLowerCase().includes(q)
       || (p.note ?? '').toLowerCase().includes(q)
+      || (p.paypalTxnId ?? '').toLowerCase().includes(q)
       || (p.orderId ?? '').toLowerCase().includes(q);
   });
 }
@@ -132,7 +135,7 @@ export function matchSellers(list: PrevSeller[], q: string): PrevSeller[] {
   return [...pre, ...sub].slice(0, 6);
 }
 
-const CSV_HEAD = ['Order', 'Created', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #'];
+const CSV_HEAD = ['Order', 'Created', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #', 'PayPal txn'];
 
 // Excel/Sheets execute cells starting with = + - @ as formulas; seller names
 // and tracking numbers are external text.
@@ -152,13 +155,14 @@ function shipCsvCells({ order, shipment: s }: ShipRow): string[] {
     s.labelCost != null ? String(s.labelCost) : '',
     s.rateCurrency,
     s.trackingNumber ?? '',
+    order.paypalTxnId ?? '',
   ];
 }
 
 function pkgCsvCells(p: TrackedPackage): string[] {
   return [
     p.orderId ?? '', p.createdAt, p.status, p.sellerName ?? '', '', '', '',
-    p.carrier, '', '', '', p.trackingNumber,
+    p.carrier, '', '', '', p.trackingNumber, p.paypalTxnId ?? '',
   ];
 }
 

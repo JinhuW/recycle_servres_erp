@@ -16,6 +16,7 @@ type ListItem = {
     id: string;
     userName: string;
     lifecycle: string;
+    paypalTxnId: string | null;
     warehouse: { id: string; name: string | null; short: string; region: string } | null;
   };
 };
@@ -90,12 +91,17 @@ describe('GET /api/shipments — scope and join', () => {
     const marcus = await loginAs(MARCUS);
     const po = await createPo(marcus.token);
     await createShipment(marcus.token, po);
+    const patched = await api('PATCH', `/api/orders/${po}`, {
+      token: marcus.token, body: { paypalTxnId: '8AB12345CD678901E' },
+    });
+    expect(patched.status).toBe(200);
 
     const r = await api<{ items: ListItem[] }>('GET', '/api/shipments', { token: marcus.token });
     const item = r.body.items[0];
     expect(item.order.id).toBe(po);
     expect(item.order.userName).toBeTruthy();
     expect(item.order.lifecycle).toBe('draft');
+    expect(item.order.paypalTxnId).toBe('8AB12345CD678901E');
     expect(item.order.warehouse?.id).toBe('WH-LA1');
     expect(item.order.warehouse?.short).toBeTruthy();
     expect(item.from.name).toBe(FROM.name);

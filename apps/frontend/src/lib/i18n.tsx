@@ -1132,7 +1132,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poPaypalTxn: 'PayPal transaction',
     shipAddedLabelTag: 'Added label',
     shipColNoPo: 'No PO yet',
-    shipCreatePo: 'Create purchase order',
+    shipCreatePo: 'Create PO',
     shipPoCreated: 'Draft {id} created from the delivered package',
     shipPkgRemove: 'Remove',
     shipEstDelivery: 'Est. {eta}',

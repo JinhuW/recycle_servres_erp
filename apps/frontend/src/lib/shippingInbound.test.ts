@@ -8,7 +8,7 @@ import type { TrackedPackage } from './packages';
 import type { Shipment } from './types';
 
 function order(over: Partial<ShipOrder>): ShipOrder {
-  return { id: 'PO-1', userName: 'Ada', lifecycle: 'confirmed', warehouse: null, ...over };
+  return { id: 'PO-1', userName: 'Ada', lifecycle: 'confirmed', paypalTxnId: null, warehouse: null, ...over };
 }
 
 function shipment(over: Partial<Shipment>): Shipment {
