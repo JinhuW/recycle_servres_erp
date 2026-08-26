@@ -4,7 +4,7 @@
 // range is fetched in chunks.
 
 import type { Env } from '../types';
-import type { BankFetch, BankProvider, NormalizedTxn } from './types';
+import type { BankFetch, BankProvider, BankTxnCategory, NormalizedTxn } from './types';
 
 const DEFAULT_BASE = 'https://api-m.paypal.com';
 const TIMEOUT_MS = 20_000;
@@ -16,6 +16,7 @@ const TOKEN_HEADROOM_MS = 5 * 60 * 1000;
 type WireTxn = {
   transaction_info?: {
     transaction_id?: string;
+    transaction_event_code?: string;
     transaction_status?: string;
     transaction_initiation_date?: string;
     transaction_subject?: string | null;
@@ -86,6 +87,12 @@ async function listPage(env: Env, query: Record<string, string>): Promise<{ rows
   return { rows: body.transaction_details ?? [], totalPages: body.total_pages ?? 1 };
 }
 
+// T03xx = bank deposit into PayPal, T04xx = withdrawal back to a bank —
+// internal transfers, never seller money. Everything else is external.
+export function paypalTxnCategory(eventCode: string | undefined): BankTxnCategory {
+  return eventCode && /^T0[34]/.test(eventCode) ? 'transfer' : 'external';
+}
+
 function counterpartyOf(t: WireTxn): string | null {
   const name = t.payer_info?.payer_name;
   return (
@@ -128,6 +135,7 @@ export function paypalProvider(env: Env): BankProvider {
               counterparty: counterpartyOf(t),
               description: info.transaction_subject ?? info.transaction_note ?? null,
               paypalTxnId: externalId,
+              category: paypalTxnCategory(info.transaction_event_code),
               raw: t,
             });
           }

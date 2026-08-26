@@ -24,6 +24,7 @@ function fakeProvider(source: BankSource, txns: TxnSpec[]): BankProvider {
           counterparty: null,
           description: null,
           paypalTxnId: source === 'paypal' ? t.externalId : null,
+          category: 'external' as const,
           raw: { id: t.externalId },
           ...t,
         })),
@@ -88,6 +89,8 @@ describe('bank transactions API', () => {
       ['POST', '/api/bank-transactions/x/unpair'],
       ['POST', '/api/bank-transactions/x/ignore'],
       ['POST', '/api/bank-transactions/x/unignore'],
+      ['POST', '/api/bank-transactions/x/mark-transfer'],
+      ['POST', '/api/bank-transactions/x/unmark-transfer'],
       ['GET', '/api/bank-transactions/x/suggestions'],
     ] as const) {
       const r = await api(method, path, { token });
@@ -145,6 +148,59 @@ describe('bank transactions API', () => {
       `GET`, `/api/bank-transactions?q=m-settle`, { token });
     expect(byRef.body.rows).toHaveLength(1);
     expect(byRef.body.rows[0].source).toBe('paired');
+  });
+
+  it('transfers stay out of the unlinked queue and get their own filter + stat', async () => {
+    await seedPairedAndSingles();
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: '9ZY87654WV321012K', amount: 2000, category: 'transfer', postedAt: new Date(NOW - 4 * DAY) },
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+
+    const unlinked = await api<{ rows: (PaymentRow & { category: string })[] }>(
+      'GET', '/api/bank-transactions?status=unlinked', { token });
+    expect(unlinked.body.rows.every((r) => r.category === 'external')).toBe(true);
+    expect(unlinked.body.rows).toHaveLength(3);
+
+    const transfers = await api<{ rows: (PaymentRow & { category: string })[] }>(
+      'GET', '/api/bank-transactions?status=transfer', { token });
+    expect(transfers.body.rows).toHaveLength(1);
+    expect(transfers.body.rows[0].category).toBe('transfer');
+    expect(transfers.body.rows[0].amount).toBe(2000);
+
+    const stats = await api<{ unlinked: { count: number }; transfers: { count: number } }>(
+      'GET', '/api/bank-transactions/stats', { token });
+    expect(stats.body.transfers.count).toBe(1);
+    expect(stats.body.unlinked.count).toBe(3);
+  });
+
+  it('mark-transfer / unmark-transfer flip the whole group with a sticky manual verdict', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+
+    // Marking one leg of the pair reclassifies both.
+    const pairedLegId = await idOf('m-settle');
+    const mark = await api('POST', `/api/bank-transactions/${pairedLegId}/mark-transfer`, { token });
+    expect(mark.status).toBe(200);
+    const marked = await db`
+      SELECT category, category_manual FROM bank_transactions
+      WHERE external_id IN ('7AB12345CD678901E', 'm-settle')`;
+    expect(marked).toHaveLength(2);
+    expect(marked.every((l) => l.category === 'transfer' && l.category_manual === true)).toBe(true);
+
+    const unmark = await api('POST', `/api/bank-transactions/${pairedLegId}/unmark-transfer`, { token });
+    expect(unmark.status).toBe(200);
+    const unmarked = await db`
+      SELECT category, category_manual FROM bank_transactions WHERE external_id = 'm-settle'`;
+    expect(unmarked[0]).toMatchObject({ category: 'external', category_manual: true });
+
+    // A linked payment must be unlinked before it can be called a transfer.
+    const poId = await createPO(token);
+    await api('POST', `/api/bank-transactions/${pairedLegId}/link`, { token, body: { orderId: poId } });
+    expect((await api('POST', `/api/bank-transactions/${pairedLegId}/mark-transfer`, { token })).status).toBe(400);
   });
 
   it('keyset-paginates without skips or duplicates', async () => {
