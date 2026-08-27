@@ -19,8 +19,9 @@ export type InboundAction =
 // CTA — but must agree on when they apply.
 
 /** A standalone package can grow its PO: delivered normally, any status for a
- *  manager — tracking isn't wired to a live carrier feed yet, so a package can
- *  stall before "delivered" and the server holds the same line. */
+ *  manager — a carrier can go quiet or a number can be unregistrable, so a
+ *  package can still stall before "delivered" and the server holds the same
+ *  line. */
 export function canCreatePo(
   pkg: { orderId: string | null; status: string }, manager: boolean,
 ): boolean {

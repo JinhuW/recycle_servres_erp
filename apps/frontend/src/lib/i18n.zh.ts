@@ -915,6 +915,8 @@ const zh: Record<string, string> = {
   shipCreatePo: '创建采购单',
   shipPoCreated: '已从送达包裹创建草稿 {id}',
   shipPkgRemove: '移除',
+  shipRefresh: '刷新',
+  shipRefreshHint: '立即向承运商查询，不必等下一次更新',
   shipDeliveredCtaHint: '包裹已送达 —— 把收到的货品录入采购单。',
   shipEstDelivery: '预计 {eta}',
   shipEmptyPageTitle: '暂无运单',

@@ -83,6 +83,27 @@ export interface VoidRef {
   platformUkId: string | null;
 }
 
+// Tracking is picked independently of the label provider: Shippo tracks any
+// carrier's number without owning the label, so packages keep moving while
+// labels are still on the stub. ShippingClient satisfies this structurally,
+// so the ShipSaving client doubles as a tracking source unchanged.
+export interface TrackingSource {
+  getShipment(trackingNumber: string, carrier: string | null): Promise<TrackingInfo>;
+}
+
+// Carrier ETAs are calendar dates in the destination's timezone, wired as
+// local-time strings ("2025-08-26 22:37:27"), bare dates, or full UTC instants
+// (Shippo). Parsing them as server-local instants would shift the calendar day
+// for most viewers (the server runs UTC), so store the date part as UTC
+// midnight — the exact shape the frontend's fmtEta renders as a timezone-free
+// calendar date.
+export function parseEta(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s.trim());
+  const d = m ? new Date(`${m[1]}T00:00:00Z`) : new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export interface ShippingClient {
   provider: ShippingProvider;
   listRates(from: ShipAddress, to: ShipAddress, pkg: ShipPackage): Promise<RateQuote[]>;

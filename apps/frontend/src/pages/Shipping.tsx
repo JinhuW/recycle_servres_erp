@@ -12,7 +12,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtDateShort, fmtMoney } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
-  createPoFromPackage, listPackages, lookupPackage,
+  createPoFromPackage, listPackages, lookupPackage, refreshPackage,
   type LookedUpPackage, type TrackedPackage,
 } from '../lib/packages';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
@@ -99,6 +99,8 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
     }
   };
 
+  const reload = useRef<() => void>(() => {});
+
   useEffect(() => {
     let alive = true;
     let loadedOnce = false;
@@ -118,6 +120,7 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
         })
         // A failed refresh tick keeps showing the last good list.
         .catch((e) => { if (alive && !loadedOnce) handleFetchError(e); });
+    reload.current = () => { void load(); };
     void load();
     // Tracking moves server-side on a 45-min pass; a slow tick keeps the
     // glance honest while it's actually being glanced at — a backgrounded
@@ -184,19 +187,19 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
         {groups.needs.length > 0 && (
           <>
             <div className="ph-section-h"><span>{t('shipGroupNeeds')}</span><span className="mono">{groups.needs.length}</span></div>
-            {groups.needs.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} />)}
+            {groups.needs.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} onRefreshed={() => reload.current()} />)}
           </>
         )}
         {groups.moving.length > 0 && (
           <>
             <div className="ph-section-h"><span>{t('shipGroupMoving')}</span><span className="mono">{groups.moving.length}</span></div>
-            {groups.moving.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} />)}
+            {groups.moving.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} onRefreshed={() => reload.current()} />)}
           </>
         )}
         {groups.arrived.length > 0 && (
           <>
             <div className="ph-section-h"><span>{t('shipGroupArrived')}</span><span className="mono">{groups.arrived.length}</span></div>
-            {groups.arrived.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} />)}
+            {groups.arrived.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} onRefreshed={() => reload.current()} />)}
           </>
         )}
         {groups.voided.length > 0 && (
@@ -204,7 +207,7 @@ function InboundListScreen({ showToast, onCreatedPo }: Omit<Props, 'route'>) {
             {showVoided ? t('shipMobHideVoided') : t('shipMobShowVoided', { n: groups.voided.length })}
           </button>
         )}
-        {showVoided && groups.voided.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} />)}
+        {showVoided && groups.voided.map(r => <InboundCard key={rowKey(r)} row={r} showToast={showToast} onCreatedPo={onCreatedPo} onRefreshed={() => reload.current()} />)}
       </div>
     </>
   );
@@ -333,10 +336,11 @@ function ScanNotFoundSheet({ code, onClose }: { code: string; onClose: () => voi
 
 // ── One card ─────────────────────────────────────────────────────────────────
 
-function InboundCard({ row, showToast, onCreatedPo }: {
+function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
   row: InboundRow;
   showToast: (msg: string, kind?: ToastKind) => void;
   onCreatedPo: (orderId: string) => void;
+  onRefreshed: () => void;
 }) {
   const { t, lang } = useT();
   const { user } = useAuth();
@@ -399,6 +403,20 @@ function InboundCard({ row, showToast, onCreatedPo }: {
       .catch(() => { /* the visible number is selectable */ });
   };
 
+  // Only packages can be asked directly: a shipment's label is the provider's
+  // own and moves on the poll.
+  const refresh = row.kind === 'package' ? async () => {
+    setBusy(true);
+    try {
+      await refreshPackage(row.pkg.id);
+      onRefreshed();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setBusy(false);
+    }
+  } : undefined;
+
   const openFocus = row.kind === 'shipment' ? () => navigate(`/shipping/${row.order.id}`) : undefined;
 
   return (
@@ -431,6 +449,11 @@ function InboundCard({ row, showToast, onCreatedPo }: {
           </button>
           {trackUrl && (
             <a href={trackUrl} target="_blank" rel="noreferrer" className="ph-ship-out" aria-label={t('shipTrackOnCarrier', { carrier: carrier ?? '' })}>↗</a>
+          )}
+          {refresh && row.kind === 'package' && row.pkg.status !== 'delivered' && (
+            <button className="btn ghost sm" disabled={busy} onClick={() => void refresh()}>
+              {t('shipRefresh')}
+            </button>
           )}
         </div>
       )}

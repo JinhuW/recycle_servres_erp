@@ -31,6 +31,12 @@ export type Env = {
   SHIPSAVING_API_URL?: string;
   SHIPSAVING_APP_KEY?: string;
   SHIPSAVING_APP_SECRET?: string;
+  // Shippo tracking (tracking only — never buys labels). Unset means tracking
+  // falls back to ShipSaving, and then to a stub that never ticks.
+  SHIPPO_API_URL?: string;
+  SHIPPO_API_TOKEN?: string;
+  // The credential in the webhook URL. Unset makes the receiver answer 404.
+  SHIPPO_WEBHOOK_SECRET?: string;
   // Bank-transaction sync (manager Payments page). A source with no keys is
   // reported as "not configured" — there is NO silent stub fallback here.
   // BANKTX_STUB=1 explicitly opts into deterministic canned data for dev.
