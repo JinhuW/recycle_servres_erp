@@ -4,7 +4,7 @@ import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
 import {
-  diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange,
+  diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange, type SqlLike,
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
@@ -173,6 +173,32 @@ function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | 
 // save — so store NULL rather than an empty string.
 function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
+}
+
+// A purchaser edit puts a submitted order back in Draft, so "is a draft" no
+// longer means "was never submitted". Delete, Archive and the client all read
+// the history instead of the stage — and they must agree, or an order lands in
+// a state that refuses both.
+async function wasEverSubmitted(sql: SqlLike, id: string): Promise<boolean> {
+  return !!(await sql`
+    SELECT 1 FROM order_events
+    WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
+  `)[0];
+}
+
+// A `reverted` event stays pending until a `revert_ack` names its id. A
+// timestamp watermark loses any revert whose PATCH commits after the ack:
+// order_events.created_at is transaction-START time, and the ack cannot see
+// the still-uncommitted row it would need to cover. Acks written before this
+// carried no ids and keep falling back to the timestamp.
+function unackedRevertFrag(sql: SqlLike, id: string) {
+  return sql`
+    NOT EXISTS (
+      SELECT 1 FROM order_events a
+      WHERE a.order_id = ${id} AND a.kind = 'revert_ack'
+        AND (a.detail->'ackedIds' @> to_jsonb(e.id::text)
+             OR (a.detail->'ackedIds' IS NULL AND a.created_at > e.created_at))
+    )`;
 }
 
 
@@ -451,12 +477,7 @@ orders.get('/:id', async (c) => {
       uploadedAt: String(p.uploaded_at),
     });
   }
-  // A purchaser edit puts a submitted order back in Draft, so "is a draft" no
-  // longer means "was never submitted" — and delete follows the history.
-  const everSubmitted = !!(await sql`
-    SELECT 1 FROM order_events
-    WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
-  `)[0];
+  const everSubmitted = await wasEverSubmitted(sql, id);
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
@@ -468,10 +489,7 @@ orders.get('/:id', async (c) => {
         FROM order_events e
         LEFT JOIN users act ON act.id = e.actor_id
         WHERE e.order_id = ${id} AND e.kind = 'reverted'
-          AND e.created_at > COALESCE(
-            (SELECT MAX(created_at) FROM order_events
-              WHERE order_id = ${id} AND kind = 'revert_ack'),
-            '-infinity'::timestamptz)
+          AND ${unackedRevertFrag(sql, id)}
         ORDER BY e.created_at DESC, e.id DESC
       `).map(r => ({
         id: r.id,
@@ -617,18 +635,20 @@ orders.post('/:id/revert-ack', async (c) => {
   if (!order) return c.json({ error: 'Not found' }, 404);
 
   const acknowledged = await sql.begin(async (tx) => {
-    const [{ n }] = await tx<{ n: number }[]>`
-      SELECT COUNT(*)::int AS n FROM order_events
-      WHERE order_id = ${id} AND kind = 'reverted'
-        AND created_at > COALESCE(
-          (SELECT MAX(created_at) FROM order_events
-            WHERE order_id = ${id} AND kind = 'revert_ack'),
-          '-infinity'::timestamptz)
+    const pending = await tx<{ id: string }[]>`
+      SELECT e.id FROM order_events e
+      WHERE e.order_id = ${id} AND e.kind = 'reverted'
+        AND ${unackedRevertFrag(tx, id)}
     `;
     // Nothing pending: acking anyway would leave a row saying a manager
     // reviewed changes that were already reviewed.
-    if (n > 0) await writeOrderEvent(tx, id, u.id, 'revert_ack', { acknowledged: n });
-    return n;
+    if (pending.length > 0) {
+      await writeOrderEvent(tx, id, u.id, 'revert_ack', {
+        acknowledged: pending.length,
+        ackedIds: pending.map(r => r.id),
+      });
+    }
+    return pending.length;
   });
 
   return c.json({ ok: true, acknowledged });
@@ -979,6 +999,73 @@ type LineFields = {
 };
 type LinePatch = LineFields & { id: string };
 
+// `materialEdit` below says the request *carries* a field the manager review is
+// about. These say it actually *changes* one, compared under the same
+// normalisations the UPDATE writes with — so a purchaser re-saving a line
+// untouched, or a queued autosave replaying, never drops a submitted order back
+// to Draft and hands a manager an empty change set to review.
+function sameStoredValue(before: unknown, after: unknown): boolean {
+  const blank = (v: unknown) => v === null || v === undefined || v === '';
+  if (typeof before === 'number' || typeof after === 'number') {
+    if (blank(before) || blank(after)) return blank(before) && blank(after);
+    const a = Number(before);
+    const b = Number(after);
+    // NUMERIC columns arrive as floats, and a client that rounds one for
+    // display sends back a value that differs only in the last bits.
+    return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-9;
+  }
+  return JSON.stringify(blank(before) ? null : before) === JSON.stringify(blank(after) ? null : after);
+}
+
+const LINE_FIELD_SET: ReadonlySet<string> = new Set(LINE_FIELDS);
+
+function changesMaterialField(
+  body: {
+    lines?: LinePatch[]; addLines?: unknown[]; removeLineIds?: string[];
+    totalCost?: number | null; otherFees?: number | null; otherFeesNote?: string | null;
+    warehouseId?: string | null; payment?: string; paypalTxnId?: string | null;
+  },
+  before: Record<string, unknown>,
+  linesBefore: Map<string, Record<string, unknown>>,
+): boolean {
+  if (body.addLines?.length) return true;
+  // Ids this order no longer holds delete nothing — the DELETE is keyed off the
+  // rows it finds, not off the request's list.
+  if (body.removeLineIds?.some(lineId => linesBefore.has(lineId))) return true;
+
+  for (const patch of body.lines ?? []) {
+    const row = linesBefore.get(patch.id);
+    if (!row) continue;
+    for (const [key, value] of Object.entries(patch)) {
+      if (key === 'id') continue;
+      const col = key.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
+      // Anything outside LINE_FIELDS is not part of the record a manager
+      // reviews (scan refs, positions) and does not cost the order its stage.
+      if (!LINE_FIELD_SET.has(col)) continue;
+      if (!sameStoredValue(row[col], value)) return true;
+    }
+  }
+
+  // Only a positive figure is a stated goods total; anything else is "not
+  // stated" and writes nothing. Same reading as the UPDATE below.
+  if (body.totalCost !== undefined && Number(body.totalCost) > 0
+      && !sameStoredValue(before.total_cost, Number(body.totalCost))) return true;
+  if (body.otherFees !== undefined
+      && !sameStoredValue(before.other_fees, Number(body.otherFees ?? 0))) return true;
+  if (body.otherFeesNote !== undefined
+      && !sameStoredValue(before.other_fees_note, normFeeNote(body.otherFeesNote))) return true;
+  if (body.warehouseId !== undefined
+      && !sameStoredValue(before.warehouse_id, body.warehouseId)) return true;
+  if (body.payment !== undefined && body.payment !== before.payment) return true;
+  if (body.paypalTxnId !== undefined) {
+    const norm = typeof body.paypalTxnId === 'string'
+      ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
+      : null;
+    if (!sameStoredValue(before.paypal_txn_id, norm)) return true;
+  }
+  return false;
+}
+
 // The stored shape PATCH reads before writing: enough to merge a patch against
 // (category/serial/item-type rules) and to tell a synthetic part number from a
 // typed one when a line changes category.
@@ -1270,20 +1357,6 @@ orders.patch('/:id', async (c) => {
         if (u.role !== 'manager') throw new Error('__PURCHASER_DONE__');
       }
 
-      // Back to Draft before anything is written, so the lines this request
-      // adds are inserted at the stage the order is landing in rather than the
-      // one it is leaving. The committed-line guard inside runs against the
-      // pre-edit lines, so the ids it reports are the ones the client can see.
-      if (u.role !== 'manager' && orderBefore.lifecycle !== 'draft' && materialEdit) {
-        const outcome = await revertOrderToDraftTx(tx, id, u);
-        if (outcome.kind === 'committedLines') {
-          committedLineIds = outcome.offendingLineIds;
-          throw new Error('__REVERT_COMMITTED__');
-        }
-        revertedFrom = outcome.from;
-        lifecycleAfter = 'draft';
-      }
-
       // Read before anything moves: afterwards a goods total that merely went
       // stale is indistinguishable from one that was negotiated. Only asked
       // when this request will actually change the lines, and skipped when it
@@ -1302,7 +1375,12 @@ orders.patch('/:id', async (c) => {
       // Snapshot the lines we'll edit / remove so we can diff after the writes.
       // NUMERIC columns come back as strings from postgres.js by default; cast
       // to float so the diff compares numbers, not "120.00" string forms.
-      const editIds = Array.isArray(body.lines) ? body.lines.map(l => l.id) : [];
+      // The ids being removed ride along so the no-op check below can tell a
+      // real removal from a replay naming rows that are already gone.
+      const editIds = [
+        ...(Array.isArray(body.lines) ? body.lines.map(l => l.id) : []),
+        ...(Array.isArray(body.removeLineIds) ? body.removeLineIds : []),
+      ];
       const linesBefore = editIds.length
         ? await tx`
             SELECT id, status, qty, category, brand, capacity, type, generation, classification,
@@ -1315,6 +1393,27 @@ orders.patch('/:id', async (c) => {
         : [];
       const beforeMap = new Map<string, Record<string, unknown>>(
         linesBefore.map(l => [l.id as string, l as Record<string, unknown>]));
+
+      // Back to Draft before anything is written, so the lines this request
+      // adds are inserted at the stage the order is landing in rather than the
+      // one it is leaving. The snapshot above is a read, so it is safe to take
+      // first — and it is what tells a real edit from a no-op re-save. The
+      // guards inside run against the pre-edit lines, so the ids they report
+      // are the ones the client can see.
+      if (u.role !== 'manager' && orderBefore.lifecycle !== 'draft' && materialEdit
+          && changesMaterialField(body, orderBefore as unknown as Record<string, unknown>, beforeMap)) {
+        const outcome = await revertOrderToDraftTx(tx, id, u, orderBefore.lifecycle);
+        if (outcome.kind === 'committedLines') {
+          committedLineIds = outcome.offendingLineIds;
+          throw new Error('__REVERT_COMMITTED__');
+        }
+        if (outcome.kind === 'transferClaimed') {
+          committedLineIds = outcome.offendingLineIds;
+          throw new Error('__REVERT_TRANSFER__');
+        }
+        revertedFrom = outcome.from;
+        lifecycleAfter = 'draft';
+      }
 
       let removedSnapshots: Array<{ id: string; category: string; part_number: string | null; qty: number; unit_cost: number }> = [];
 
@@ -1690,6 +1789,12 @@ orders.patch('/:id', async (c) => {
         offendingLineIds: committedLineIds,
       }, 409);
     }
+    if (msg.includes('__REVERT_TRANSFER__')) {
+      return c.json({
+        error: 'Lines in this order are out on an open transfer order. Receive or discard that transfer before editing it.',
+        offendingLineIds: committedLineIds,
+      }, 409);
+    }
     if (msg.includes('__ORDER_WOULD_BE_EMPTY__')) {
       return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
     }
@@ -1785,11 +1890,7 @@ orders.delete('/:id', async (c) => {
     // current stage, so once it has left Draft it can only be archived.
     // `reverted` counts on its own — an order can only be reverted from a
     // later stage, and rows seeded past Draft have no `submitted` event.
-    const submitted = (await tx`
-      SELECT 1 FROM order_events
-      WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
-    `)[0];
-    if (submitted) return { kind: 'wasSubmitted' };
+    if (await wasEverSubmitted(tx, id)) return { kind: 'wasSubmitted' };
 
     const sold = (await tx`
       SELECT 1 FROM sell_order_lines sol
@@ -1873,8 +1974,13 @@ async function setArchived(c: OrderCtx, archive: boolean) {
     if (!existing) return { kind: 'notFound' };
     if (u.role !== 'manager' && existing.user_id !== u.id) return { kind: 'forbidden' };
     // Draft orders use Delete, not Archive — Archive only applies once an
-    // order is part of the business record.
-    if (existing.lifecycle === 'draft') return { kind: 'isDraft' };
+    // order is part of the business record. A reverted order is a Draft that
+    // HAS been submitted, and Delete refuses exactly those, so the history has
+    // to decide here too or the order can be neither deleted nor archived.
+    // Unarchiving is never blocked: whatever got archived can always go back.
+    if (archive && existing.lifecycle === 'draft' && !(await wasEverSubmitted(tx, id))) {
+      return { kind: 'isDraft' };
+    }
     const wasArchived = existing.archived_at !== null;
     if (wasArchived === archive) return { kind: 'noChange' };
 
@@ -2260,6 +2366,12 @@ orders.post('/:id/advance', async (c) => {
   if (outcome.kind === 'committedLines') {
     return c.json({
       error: 'Lines committed to open sell orders — cancel those sell orders first.',
+      offendingLineIds: outcome.offendingLineIds,
+    }, 409);
+  }
+  if (outcome.kind === 'transferClaimed') {
+    return c.json({
+      error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
       offendingLineIds: outcome.offendingLineIds,
     }, 409);
   }

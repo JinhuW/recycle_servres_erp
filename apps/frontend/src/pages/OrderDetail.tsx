@@ -131,6 +131,14 @@ export function OrderDetail({
   const [revertConfirm, setRevertConfirm] = useState<((ok: boolean) => void) | null>(null);
   const [revertAcked, setRevertAcked] = useState(false);
   const [pendingRevert, setPendingRevert] = useState(initialOrder.pendingRevert ?? []);
+  // MobileApp swaps one order for another in place rather than remounting this
+  // screen, so seeding from the initial prop alone leaves order A's change set
+  // on screen under order B — and "Got it" then acks B, clearing changes nobody
+  // read. The revert acknowledgement is per-visit and doesn't carry over either.
+  useEffect(() => {
+    setPendingRevert(initialOrder.pendingRevert ?? []);
+    setRevertAcked(false);
+  }, [initialOrder]);
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -147,7 +155,11 @@ export function OrderDetail({
   // archive is reversible so we keep the gesture short, matching the
   // platform's "one tap, one sheet" rhythm.
   const isArchived = !!order.archivedAt;
-  const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
+  // Mirrors the backend: a reverted order is a Draft that HAS been submitted,
+  // and Delete refuses exactly those — so Archive has to take it, or the order
+  // offers neither. Unarchiving is always available once archived.
+  const canArchive = isOwnerOrManager
+    && (isArchived || effectiveStatus !== 'Draft' || !!order.everSubmitted);
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
@@ -214,6 +226,18 @@ export function OrderDetail({
         resolve(ok);
       });
     });
+  };
+
+  // The line editor is a different screen and writes straight through when it
+  // saves, so the warning has to happen here — before the purchaser starts.
+  // Nothing on the capture side has a dialog to raise.
+  const editLine = async (i: number) => {
+    if (!(await askRevert())) return;
+    onEditLine(order, i);
+  };
+  const addLine = async (cat: Category) => {
+    if (!(await askRevert())) return;
+    onAddLine(order, cat);
   };
 
   const save = async () => {
@@ -528,7 +552,7 @@ export function OrderDetail({
             <div
               key={l.id}
               className="ph-line"
-              onClick={canEditOrder ? () => onEditLine(order, i) : undefined}
+              onClick={canEditOrder ? () => { void editLine(i); } : undefined}
               style={canEditOrder ? { cursor: 'pointer' } : undefined}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -556,7 +580,7 @@ export function OrderDetail({
                 {canEditOrder && (
                   <>
                     <button
-                      onClick={(e) => { e.stopPropagation(); onEditLine(order, i); }}
+                      onClick={(e) => { e.stopPropagation(); void editLine(i); }}
                       className="ph-icon-btn"
                       style={{ width: 28, height: 28, color: 'var(--fg-subtle)' }}
                       aria-label={t('edit')}
@@ -642,7 +666,7 @@ export function OrderDetail({
               {addableCategories().map(cat => (
                 <button
                   key={cat}
-                  onClick={() => onAddLine(order, cat as Category)}
+                  onClick={() => { void addLine(cat as Category); }}
                   aria-label={t('subAddCatLine', { cat })}
                   style={{
                     minHeight: 54, borderRadius: 13,

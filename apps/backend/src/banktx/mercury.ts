@@ -48,9 +48,14 @@ export function paypalTxnFromDescription(text: string | null): string | null {
 // external (they settle real vendor payments). A wire from a sibling company
 // is NOT identifiable here — those are taught per-counterparty
 // (bank_transfer_counterparties).
+// Exported because transfer-pairing has to tell *why* a Mercury leg is a
+// transfer: this descriptor says the sibling is on PayPal, every other reason
+// says it is elsewhere.
+export const PAYPAL_ACH_DESCRIPTOR = /^PAYPAL;/;
+
 export function mercuryTxnCategory(kind: string | undefined, description: string | null): BankTxnCategory {
   if (kind === 'internalTransfer' || kind === 'treasuryTransfer') return 'transfer';
-  return description && /^PAYPAL;/.test(description) ? 'transfer' : 'external';
+  return description && PAYPAL_ACH_DESCRIPTOR.test(description) ? 'transfer' : 'external';
 }
 
 async function call<T>(env: Env, path: string, query: Record<string, string>): Promise<T> {

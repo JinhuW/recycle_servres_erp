@@ -8,6 +8,7 @@ import type { TransactionSql } from 'postgres';
 import { getDb } from '../db';
 import type { Env } from '../types';
 import { pickBankProviders } from './index';
+import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedTxn } from './types';
 
 const OVERLAP_MS = 5 * 24 * 60 * 60 * 1000;
@@ -36,6 +37,7 @@ type LegRow = {
   amount: string;
   posted_at: Date;
   paypal_txn_id: string | null;
+  description: string | null;
   category: string;
   category_manual: boolean;
   order_id: string | null;
@@ -145,7 +147,10 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
           counterparty = EXCLUDED.counterparty,
           description = EXCLUDED.description,
           paypal_txn_id = EXCLUDED.paypal_txn_id,
-          category = CASE WHEN bank_transactions.category_manual
+          -- A human verdict wins, and so does a link: re-classifying a row
+          -- someone tied to an order would drop it out of payment pairing
+          -- behind their back (the state mark-transfer refuses to create).
+          category = CASE WHEN bank_transactions.category_manual OR bank_transactions.order_id IS NOT NULL
                           THEN bank_transactions.category ELSE EXCLUDED.category END,
           raw = EXCLUDED.raw
         RETURNING (xmax = 0) AS fresh`;
@@ -174,7 +179,7 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
 
 async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
-    SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id,
+    SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
            category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at
     FROM bank_transactions
     WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored`;
@@ -211,7 +216,12 @@ async function autoPair(tx: Tx): Promise<number> {
   for (const { m, p } of byAmount.values()) {
     if (m.length !== 1 || p.length !== 1) continue;
     const dt = Math.abs(m[0].posted_at.getTime() - p[0].posted_at.getTime());
-    if (dt <= PAIR_WINDOW_MS) pairs.push([m[0], p[0]]);
+    if (dt > PAIR_WINDOW_MS) continue;
+    pairs.push([m[0], p[0]]);
+    // Claim both legs, or transferPair re-examines them and can steal one into
+    // a transfer pair — overwriting this pair_id and orphaning the sibling.
+    taken.add(m[0].id);
+    taken.add(p[0].id);
   }
 
   for (const [m, p] of pairs) {
@@ -243,10 +253,16 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
   const byAbs = new Map<string, { m: LegRow[]; p: LegRow[] }>();
   for (const l of legs) {
     if (taken.has(l.id) || l.order_id) continue;
-    // PayPal candidates must already be transfers (event code); Mercury
-    // candidates must NOT be — a leg Mercury or a rule already classified has
-    // its sibling elsewhere (the other Mercury account, the sibling company).
-    if (l.category !== (l.source === 'paypal' ? 'transfer' : 'external')) continue;
+    // PayPal candidates must already be transfers (event code). A Mercury
+    // candidate is either still external, or a transfer *because of the
+    // PayPal ACH descriptor* — which says its sibling is on PayPal, which is
+    // precisely this pairing. A Mercury leg that is a transfer for any other
+    // reason (kind, counterparty rule) has its sibling elsewhere: the other
+    // Mercury account, or the sibling company.
+    const eligible = l.source === 'paypal'
+      ? l.category === 'transfer'
+      : l.category === 'external' || (!!l.description && PAYPAL_ACH_DESCRIPTOR.test(l.description));
+    if (!eligible) continue;
     const key = Math.abs(Number(l.amount)).toFixed(2);
     const bucket = byAbs.get(key) ?? { m: [], p: [] };
     (l.source === 'mercury' ? bucket.m : bucket.p).push(l);

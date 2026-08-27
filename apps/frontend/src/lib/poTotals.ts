@@ -36,6 +36,14 @@ export function parseFeeInput(raw: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// Money columns are NUMERIC(12,2), and a fee input is seeded from `.toFixed(2)`
+// while its baseline is a raw float subtraction — so `===` on the two reports a
+// change that only exists in the last bits. Dirty checks compare at the
+// precision the value is actually stored with.
+export function feeEq(a: number, b: number): boolean {
+  return Math.round(a * 100) === Math.round(b * 100);
+}
+
 export type StoredGoodsTotal = {
   /**
    * What to hand `poEffectiveCost` as `totalCostOverride`. Null when the stored
