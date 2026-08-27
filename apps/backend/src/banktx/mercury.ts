@@ -42,10 +42,15 @@ export function paypalTxnFromDescription(text: string | null): string | null {
 }
 
 // Moves between the company's own Mercury accounts (and treasury sweeps) are
-// internal by definition. A wire from a sibling company is NOT identifiable
-// here — those are taught per-counterparty (bank_transfer_counterparties).
-export function mercuryTxnCategory(kind: string | undefined): BankTxnCategory {
-  return kind === 'internalTransfer' || kind === 'treasuryTransfer' ? 'transfer' : 'external';
+// internal by definition, and so are ACH moves against our own PayPal balance
+// — those carry the "PAYPAL; <type>; <account holder>" descriptor. Card
+// purchases at PayPal merchants descriptor as "PAYPAL *name" and stay
+// external (they settle real vendor payments). A wire from a sibling company
+// is NOT identifiable here — those are taught per-counterparty
+// (bank_transfer_counterparties).
+export function mercuryTxnCategory(kind: string | undefined, description: string | null): BankTxnCategory {
+  if (kind === 'internalTransfer' || kind === 'treasuryTransfer') return 'transfer';
+  return description && /^PAYPAL;/.test(description) ? 'transfer' : 'external';
 }
 
 async function call<T>(env: Env, path: string, query: Record<string, string>): Promise<T> {
@@ -100,7 +105,7 @@ export function mercuryProvider(env: Env): BankProvider {
               paypalTxnId: paypalTxnFromDescription(
                 [t.counterpartyName, description].filter(Boolean).join(' ') || null,
               ),
-              category: mercuryTxnCategory(t.kind),
+              category: mercuryTxnCategory(t.kind, description),
               raw: t,
             });
           }

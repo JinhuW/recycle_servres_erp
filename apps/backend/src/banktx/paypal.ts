@@ -87,10 +87,12 @@ async function listPage(env: Env, query: Record<string, string>): Promise<{ rows
   return { rows: body.transaction_details ?? [], totalPages: body.total_pages ?? 1 };
 }
 
-// T03xx = bank deposit into PayPal, T04xx = withdrawal back to a bank —
-// internal transfers, never seller money. Everything else is external.
+// T03xx = bank deposit into PayPal, T04xx = withdrawal back to a bank,
+// T07xx = card deposit into the balance (on our own account that card is
+// always our own Mercury debit card funding a payment) — internal transfers,
+// never seller money. Everything else is external.
 export function paypalTxnCategory(eventCode: string | undefined): BankTxnCategory {
-  return eventCode && /^T0[34]/.test(eventCode) ? 'transfer' : 'external';
+  return eventCode && /^T0[347]/.test(eventCode) ? 'transfer' : 'external';
 }
 
 function counterpartyOf(t: WireTxn): string | null {
