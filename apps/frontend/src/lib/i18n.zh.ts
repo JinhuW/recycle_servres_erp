@@ -1236,6 +1236,8 @@ const zh: Record<string, string> = {
   drawerLineSaved: '第 {n} 行已保存',
   selectPlaceholder: '请选择…',
   comboUseCustom: '使用“{value}”',
+  comboSearching: '搜索中…',
+  pnSuggestHint: '继续输入以查找已有型号',
   healthPct: '健康度 (%)',
   lfItemDescription: '物品描述',
   lfItemType: '物品类型',

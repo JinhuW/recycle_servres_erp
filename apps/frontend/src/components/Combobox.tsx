@@ -12,6 +12,7 @@ import { useT } from '../lib/i18n';
  */
 export function Combobox({
   value, options, onChange, placeholder, className = 'input', invalid = false,
+  filterOptions = true, meta, loading = false, emptyText,
 }: {
   value: string | null | undefined;
   options: readonly string[];
@@ -20,6 +21,18 @@ export function Combobox({
   className?: string;
   /** Announced on the inner input: the field is one a save is waiting on. */
   invalid?: boolean;
+  /**
+   * False when `options` is already an answer to what's typed (a server-side
+   * search). The local filter below matches raw substrings, which would drop a
+   * stored "PN: ABC 123" the server correctly returned for a typed "abc1".
+   */
+  filterOptions?: boolean;
+  /** Secondary text for a row — what the option is, beside what it's called. */
+  meta?: (option: string) => string | undefined;
+  /** A search is in flight; say so instead of showing an empty menu. */
+  loading?: boolean;
+  /** Replaces "No matches." — a searched menu is empty for a different reason. */
+  emptyText?: string;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
@@ -42,7 +55,9 @@ export function Combobox({
   // full list again so presets stay reachable.
   const q = (value ?? '').trim().toLowerCase();
   const exact = options.some(o => o.toLowerCase() === q);
-  const filtered = q && !exact ? options.filter(o => o.toLowerCase().includes(q)) : options;
+  const filtered = filterOptions && q && !exact
+    ? options.filter(o => o.toLowerCase().includes(q))
+    : options;
   const offerCustom = !!q && !exact;
 
   // Keep the highlight in range as the filtered list shrinks/grows.
@@ -134,10 +149,19 @@ export function Combobox({
               {t('comboUseCustom', { value: (value ?? '').trim() })}
             </button>
           )}
+          {/* Not gated on `offerCustom` the way the empty state below is: a
+              search is in flight on exactly the keystrokes that also offer the
+              typed value, so gating it there would never let it show. */}
+          {loading && (
+            <div style={{ padding: '10px 12px', fontSize: 12.5, color: 'var(--fg-subtle)' }}>
+              {t('comboSearching')}
+            </div>
+          )}
           <div style={{ maxHeight: 240, overflowY: 'auto' }}>
             {filtered.map((o, i) => {
               const selected = o === value;
               const highlit = i === active;
+              const sub = meta?.(o);
               return (
                 <button
                   key={o}
@@ -157,13 +181,23 @@ export function Combobox({
                   }}
                 >
                   <span>{o}</span>
-                  {selected && <Icon name="check" size={13} style={{ color: 'var(--accent)' }} />}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    {sub && (
+                      <span style={{
+                        fontSize: 11.5, color: 'var(--fg-subtle)', fontWeight: 400,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {sub}
+                      </span>
+                    )}
+                    {selected && <Icon name="check" size={13} style={{ color: 'var(--accent)' }} />}
+                  </span>
                 </button>
               );
             })}
-            {filtered.length === 0 && !offerCustom && (
+            {filtered.length === 0 && !offerCustom && !loading && (
               <div style={{ padding: 16, fontSize: 12.5, color: 'var(--fg-subtle)', textAlign: 'center' }}>
-                {t('sodNoMatches')}
+                {emptyText ?? t('sodNoMatches')}
               </div>
             )}
           </div>

@@ -2,6 +2,7 @@ import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
+import { PartNumberField } from './PartNumberField';
 import { ItemTypePicker } from './ItemTypePicker';
 import { chipNumberRequired } from '../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../lib/lineRequirements';
@@ -128,7 +129,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}<Req /></label>
-          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
         </div>
       </>
     );
@@ -166,7 +167,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
-          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={e => onChange('partNumber', e.target.value)} />
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={v => onChange('partNumber', v)} />
         </div>
       </>
     );
@@ -220,7 +221,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
-          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
         </div>
       </>
     );
@@ -241,7 +242,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         {/* Named as the drawer names it, since it's the field the "still
             needed" toast lists for an Other line. */}
         <label>{t('lfPartSku')}<Req /></label>
-        <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+        <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
       </div>
     </>
   );

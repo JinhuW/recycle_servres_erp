@@ -6,6 +6,7 @@ import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
+import { PartNumberField } from '../../components/PartNumberField';
 import { CONDITIONS } from '../../lib/catalog';
 import { FormSkeleton } from '../../components/Skeleton';
 
@@ -462,10 +463,9 @@ function DetailsPanel({
           <div className="grid-2">
             <div className="field">
               <label className="label">{t('partNumber')}</label>
-              <input
-                className="input mono"
+              <PartNumberField
                 value={draft.partNumber}
-                onChange={e => set({ partNumber: e.target.value })}
+                onChange={v => set({ partNumber: v })}
                 placeholder="—"
               />
             </div>
