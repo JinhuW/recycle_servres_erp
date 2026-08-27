@@ -852,7 +852,7 @@ describe('PATCH /api/orders/:id — AI scan fields persist', () => {
   });
 });
 
-describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
+describe('PATCH /api/orders/:id — purchaser edits revert the PO to Draft', () => {
   beforeEach(async () => { await resetDb(); });
 
   async function createDraft(token: string): Promise<string> {
@@ -871,39 +871,106 @@ describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
     return created.body.id;
   }
 
-  it('owner keeps notes after submission but loses pricing edits; manager keeps both', async () => {
+  type Detail = { order: { lifecycle: string; lines: { id: string; status: string }[] } };
+  const detail = (id: string, token: string) =>
+    api<Detail>('GET', `/api/orders/${id}`, { token });
+
+  it('sends an In Transit order back to Draft when the owner edits a line', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const id = await createDraft(pur);
-
-    // Draft: owner can edit.
-    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'draft note' } })).status).toBe(200);
-
-    // Submit → in_transit: the note stays the owner's, everything else doesn't.
     await api('POST', `/api/orders/${id}/advance`, { token: pur });
-    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'late edit' } })).status).toBe(200);
-    const lines = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${id}`, { token: pur });
-    const deniedLines = await api('PATCH', `/api/orders/${id}`, {
-      token: pur,
-      body: { lines: [{ id: lines.body.order.lines[0].id, unitCost: 0.01 }] },
-    });
-    expect(deniedLines.status).toBe(403);
-    // A note riding alongside a line rewrite doesn't smuggle the rewrite through.
-    const deniedMixed = await api('PATCH', `/api/orders/${id}`, {
-      token: pur,
-      body: { notes: 'nice try', lines: [{ id: lines.body.order.lines[0].id, unitCost: 0.01 }] },
-    });
-    expect(deniedMixed.status).toBe(403);
-    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { payment: 'self' } })).status).toBe(403);
-    expect((await api('PATCH', `/api/orders/${id}`, {
-      token: pur, body: { notes: 'fees', otherFees: 250 },
-    })).status).toBe(403);
 
-    // Manager still edits post-submission.
+    const before = await detail(id, pur);
+    expect(before.body.order.lifecycle).toBe('in_transit');
+    const lineId = before.body.order.lines[0].id;
+
+    const patched = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { lines: [{ id: lineId, unitCost: 0.01 }] },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.lifecycle).toBe('draft');
+
+    const after = await detail(id, pur);
+    expect(after.body.order.lifecycle).toBe('draft');
+    expect(after.body.order.lines[0].status).toBe('Draft');
+  });
+
+  it('reverts from Reviewing too, and records a `reverted` event', async () => {
+    const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
-    expect((await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { notes: 'manager note' } })).status).toBe(200);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+    await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'reviewing' } });
 
-    // Done: the order is closed to the owner entirely, note included.
-    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'done' } })).status).toBe(200);
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { otherFees: 250 },
+    })).status).toBe(200);
+    expect((await detail(id, pur)).body.order.lifecycle).toBe('draft');
+
+    const events = await api<{ events: { kind: string; detail: Record<string, unknown> }[] }>(
+      'GET', `/api/orders/${id}/events`, { token: mgr });
+    const reverted = events.body.events.filter(e => e.kind === 'reverted');
+    expect(reverted).toHaveLength(1);
+    expect(reverted[0].detail.from).toBe('reviewing');
+    expect(reverted[0].detail.to).toBe('draft');
+  });
+
+  it('leaves the stage alone for a notes-only edit', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+
+    const patched = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { notes: 'receipt arrived late' },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.lifecycle).toBe('in_transit');
+    expect((await detail(id, pur)).body.order.lifecycle).toBe('in_transit');
+
+    const events = await api<{ events: { kind: string }[] }>(
+      'GET', `/api/orders/${id}/events`, { token: mgr });
+    expect(events.body.events.some(e => e.kind === 'reverted')).toBe(false);
+  });
+
+  it('does not revert when the editor is a manager', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { otherFees: 120 },
+    })).status).toBe(200);
+    expect((await detail(id, mgr)).body.order.lifecycle).toBe('in_transit');
+  });
+
+  it('keeps a Done order closed to the owner, note included', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+    expect((await api('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'done' },
+    })).status).toBe(200);
+
     expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'too late' } })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { payment: 'self' } })).status).toBe(403);
+    expect((await detail(id, mgr)).body.order.lifecycle).toBe('done');
+  });
+
+  it('still refuses the manager-only fields at every stage', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { commissionRate: 0.5 },
+    })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { onBehalfOfUserId: null },
+    })).status).toBe(403);
+    const after = await api<Detail>('GET', `/api/orders/${id}`, { token: pur });
+    expect(after.body.order.lifecycle).toBe('in_transit');
   });
 });

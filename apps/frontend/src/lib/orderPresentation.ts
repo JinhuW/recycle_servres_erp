@@ -3,7 +3,8 @@
 // timeline and the global register render the same event — when the rule lives
 // inside one of them the other drifts and the same PO reads two ways.
 
-import { fmtUSD0 } from './format';
+import { fmtUSD, fmtUSD0 } from './format';
+import type { OrderEventChange } from './types';
 
 /** `t` from useT(), passed down so these stay pure functions. */
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
@@ -54,6 +55,62 @@ export function ownerChangedLine(detail: Record<string, unknown>): string {
   const from = typeof detail.from === 'string' && detail.from ? detail.from : '—';
   const to = typeof detail.to === 'string' && detail.to ? detail.to : '—';
   return `${from} → ${to}`;
+}
+
+export const LIFECYCLE_LABEL: Record<string, string> = {
+  draft:      'Draft',
+  in_transit: 'In Transit',
+  reviewing:  'Reviewing',
+  done:       'Done',
+};
+
+// Friendly labels for the fields we surface on line_edited / meta_changed
+// events and in the revert-review dialog. Anything not listed falls back to
+// the raw db column name.
+export const FIELD_LABEL: Record<string, string> = {
+  sell_price:      'Sell price',
+  qty:             'Qty',
+  unit_cost:       'Unit cost',
+  brand:           'Brand',
+  capacity:        'Capacity',
+  type:            'Type',
+  generation:      'Generation',
+  classification:  'Classification',
+  rank:            'Rank',
+  speed:           'Speed',
+  interface:       'Interface',
+  form_factor:     'Form factor',
+  description:     'Description',
+  part_number:     'Part number',
+  serial_number:   'Serial number',
+  chip_number:     'Chip number',
+  condition:       'Condition',
+  health:          'Health',
+  rpm:             'RPM',
+  notes:           'Notes',
+  warehouse_id:    'Warehouse',
+  payment:         'Payment',
+  total_cost:      'Goods total',
+  commission_rate: 'Commission rate',
+  other_fees:      'Other fees',
+  other_fees_note: 'Other fees note',
+  paypal_txn_id:   'PayPal transaction ID',
+};
+
+const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);
+
+/** One side of a field change, in the units that field is read in. */
+export function renderValue(field: string, v: unknown, locale: string): string {
+  if (v === null || v === undefined || v === '') return '—';
+  if (field === 'commission_rate' && typeof v === 'number') return (v * 100).toFixed(2) + '%';
+  if (MONEY_FIELDS.has(field) && typeof v === 'number') return fmtUSD(v, locale);
+  return String(v);
+}
+
+/** `Qty: 4 → 8`, the one form a field change takes wherever it is shown. */
+export function changeLine(c: OrderEventChange, locale: string): string {
+  const label = FIELD_LABEL[c.field] ?? c.field;
+  return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
 }
 
 const fmtBytes = (n: number): string =>

@@ -10,6 +10,7 @@ import type { BankProvider, BankSource, NormalizedTxn } from '../src/banktx/type
 const NOW = Date.now();
 const DAY = 24 * 60 * 60 * 1000;
 const TXN_A = '7AB12345CD678901E';
+const TXN_B = '9XY98765ZW432109F';
 
 type TxnSpec = Partial<NormalizedTxn> & { externalId: string; amount: number };
 
@@ -219,6 +220,8 @@ describe('bank transaction sync', () => {
   it('classifies PayPal bank-transfer event codes as transfer', () => {
     expect(paypalTxnCategory('T0300')).toBe('transfer'); // bank deposit into PayPal
     expect(paypalTxnCategory('T0403')).toBe('transfer'); // withdrawal to bank
+    expect(paypalTxnCategory('T0700')).toBe('transfer'); // card-funded top-up
+    expect(paypalTxnCategory('T0701')).toBe('transfer'); // card deposit for negative balance
     expect(paypalTxnCategory('T0006')).toBe('external'); // regular payment
     expect(paypalTxnCategory(undefined)).toBe('external');
   });
@@ -294,10 +297,21 @@ describe('bank transaction sync', () => {
   });
 
   it('classifies Mercury internal-account moves as transfer', () => {
-    expect(mercuryTxnCategory('internalTransfer')).toBe('transfer'); // own accounts
-    expect(mercuryTxnCategory('treasuryTransfer')).toBe('transfer');
-    expect(mercuryTxnCategory('incomingDomesticWire')).toBe('external');
-    expect(mercuryTxnCategory(undefined)).toBe('external');
+    expect(mercuryTxnCategory('internalTransfer', null)).toBe('transfer'); // own accounts
+    expect(mercuryTxnCategory('treasuryTransfer', null)).toBe('transfer');
+    expect(mercuryTxnCategory('incomingDomesticWire', null)).toBe('external');
+    expect(mercuryTxnCategory(undefined, null)).toBe('external');
+  });
+
+  it('classifies Mercury PayPal ACH descriptor rows as transfer, card settlements as external', () => {
+    // ACH moves between our own PayPal and Mercury carry the "PAYPAL; …" descriptor.
+    expect(mercuryTxnCategory('other', 'PAYPAL; RETRY PYMT; RECYCLE SERVERS LLC')).toBe('transfer');
+    expect(mercuryTxnCategory('other', 'PAYPAL; TRANSFER; RECYCLE SERVERS LLC')).toBe('transfer');
+    expect(mercuryTxnCategory('other', 'PAYPAL; PURCHASE; RECYCLE SERVERS LLC')).toBe('transfer');
+    // Card purchases at PayPal merchants use "PAYPAL *name" — real payments,
+    // must stay pairable with the PayPal payment leg.
+    expect(mercuryTxnCategory('debitCardTransaction', 'PAYPAL *tywhitsett')).toBe('external');
+    expect(mercuryTxnCategory('other', 'ACME SUPPLY CO ACH')).toBe('external');
   });
 
   it('a counterparty rule classifies matching syncs, skipping linked and manual rows', async () => {
@@ -350,6 +364,75 @@ describe('bank transaction sync', () => {
     const rows = await legs();
     expect(rows.get(TXN_A)!.pair_id).toBeNull();
     expect(rows.get('m-internal')!.pair_id).toBeNull();
+  });
+
+  it('transfer-pairs a Mercury PayPal-ACH leg with its PayPal sibling', async () => {
+    // The descriptor already classified this leg a transfer, but its sibling
+    // is still on PayPal — the pair must form anyway, or the Transfers tab
+    // shows both legs as separate moves forever.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: 3000, category: 'transfer', postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+      fakeProvider('mercury', [
+        {
+          externalId: 'm-ach',
+          amount: -3000,
+          description: 'PAYPAL; TRANSFER; RECYCLE SERVERS LLC',
+          category: 'transfer',
+          postedAt: new Date(NOW - DAY),
+        },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-ach')!.pair_id).toBeTruthy();
+    expect(rows.get('m-ach')!.pair_id).toBe(rows.get(TXN_A)!.pair_id);
+  });
+
+  it('transfer-pairing never steals a leg out of a payment pair', async () => {
+    // A card-funded payment posts three times: the Mercury card debit, the
+    // T07xx deposit into the PayPal balance, and the payment itself. The card
+    // debit belongs to the payment; the deposit must not claim it.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: -500, postedAt: new Date(NOW - DAY) },
+        { externalId: TXN_B, amount: 500, category: 'transfer', postedAt: new Date(NOW - DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'm-card', amount: -500, description: 'PAYPAL *tywhitsett', postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-card')!.pair_id).toBeTruthy();
+    expect(rows.get('m-card')!.pair_id).toBe(rows.get(TXN_A)!.pair_id);
+    expect(rows.get('m-card')!.category).toBe('external');
+    expect(rows.get(TXN_B)!.pair_id).toBeNull();
+  });
+
+  it('a re-sync never re-categorizes a row that is linked to an order', async () => {
+    const poId = await createPO();
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'm-pay', amount: -800, description: 'PAYPAL *vendor' }]),
+    ]);
+    const db = getTestDb();
+    await db`
+      UPDATE bank_transactions
+      SET order_id = ${poId}, link_kind = 'payment', linked_at = NOW()
+      WHERE external_id = 'm-pay'`;
+
+    // The provider now reads it as a transfer. A linked row must not move
+    // behind the reconciler's back — that is the state mark-transfer refuses
+    // to create.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{
+        externalId: 'm-pay',
+        amount: -800,
+        description: 'PAYPAL; PURCHASE; RECYCLE SERVERS LLC',
+        category: 'transfer',
+      }]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-pay')).toMatchObject({ category: 'external', order_id: poId });
   });
 
   it('one failing provider does not block the other', async () => {

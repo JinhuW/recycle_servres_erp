@@ -17,6 +17,11 @@ export type EventKind =
   | 'created'
   | 'submitted'
   | 'advanced'
+  // A purchaser edited the order after submitting it, sending it back to
+  // Draft. Carries the whole change set so the manager review dialog can
+  // render it from one row.
+  | 'reverted'
+  | 'revert_ack'
   | 'line_added'
   | 'line_removed'
   | 'line_edited'
