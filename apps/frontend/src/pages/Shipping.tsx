@@ -582,7 +582,9 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
           )}
           {f.scanError && (
             <div className="ph-ship-add-hint" role="alert">
-              {f.scanError === 'images-only' ? t('aiOnlyImages') : t('shipPayScanFailed')}
+              {f.scanError === 'images-only' ? t('aiOnlyImages')
+                : f.scanError === 'ai-unavailable' ? t('aiUnavailable')
+                : t('shipPayScanFailed')}
             </div>
           )}
         </div>

@@ -28,6 +28,28 @@ function rateLimited(userId: string): number | null {
   return null;
 }
 
+// A scan the recognition service never answered. The user is told to try again
+// and then to escalate, so leave the operator something to find when they do:
+// one record in the same sink as the partial-fill warnings, carrying who hit it
+// and what the provider actually said.
+type ScanCtx = { var: { requestId?: string }; req: { method: string; url: string } };
+function logScanFailure(c: ScanCtx, u: User, kind: 'label' | 'payment', e: unknown): void {
+  console.error(`${kind} ocr error`, e);
+  const dir = process.env.ERROR_LOG_DIR;
+  if (!dir) return;
+  void appendErrorRecord(dir, {
+    ts: new Date().toISOString(),
+    requestId: c.var.requestId ?? 'unknown',
+    level: 'error',
+    method: c.req.method,
+    path: new URL(c.req.url).pathname,
+    userId: u.id,
+    userEmail: u.email,
+    message: `${kind} OCR failed: ${e instanceof Error ? e.message : String(e)}`,
+    context: { kind },
+  });
+}
+
 // Single endpoint: receive a multipart upload, store the image in R2 (same
 // bucket as sell-order attachments, under a label-scans/ prefix), run OCR,
 // persist a label_scan row, return the extraction. The camera flow on phone
@@ -88,8 +110,10 @@ scan.post('/label', async (c) => {
   try {
     result = await scanLabel(c.env, category, bytes);
   } catch (e) {
-    console.error('ocr error', e);
-    return c.json({ error: 'label OCR failed — retry the shot' }, 502);
+    logScanFailure(c, u, 'label', e);
+    return c.json({
+      error: 'label OCR failed — the AI recognition service is unavailable; contact your system manager if it persists',
+    }, 502);
   }
 
   // Canonicalise to the catalog vocabulary before it is stored or returned —
@@ -198,8 +222,10 @@ scan.post('/payment', async (c) => {
   try {
     result = await extractPaypalTxn(c.env, await file.arrayBuffer());
   } catch (e) {
-    console.error('payment ocr error', e);
-    return c.json({ error: 'payment OCR failed — retry the shot' }, 502);
+    logScanFailure(c, u, 'payment', e);
+    return c.json({
+      error: 'payment OCR failed — the AI recognition service is unavailable; contact your system manager if it persists',
+    }, 502);
   }
 
   return c.json({
