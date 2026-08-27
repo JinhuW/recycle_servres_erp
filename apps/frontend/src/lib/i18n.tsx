@@ -90,6 +90,12 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     extractedConf: 'Extracted with {pct}% confidence',
     lowConfVerify: 'Low confidence ({pct}%) — please verify every field below before saving.',
     unreadableLabel: "AI couldn't read this label clearly. Please retake the photo, or enter the details manually.",
+    // Distinct from unreadableLabel: there the AI answered and the photo was
+    // the problem, so retaking it helps. Here the scan pipeline never answered
+    // — recognition or the image store — and nothing the person in the
+    // warehouse does will change that, so don't name a subsystem they can't
+    // check. Which one failed is in the backend's error log.
+    aiUnavailable: 'Scanning is unavailable. Please try again — if it keeps failing, contact your system manager. You can still enter the details by hand.',
     retakePhoto: 'Retake photo',
     enterManually: 'Enter manually',
     stubScanWarn: 'Demo OCR — the values below are canned sample data, not a real reading. Set OPENROUTER_API_KEY on the backend to enable real label scanning.',
@@ -365,7 +371,26 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payPickSearch: 'Search PO id or purchaser…',
     payPickNone: 'No matching purchase orders',
     payReasonTxn: 'Txn id match',
-    payReasonAmount: 'Amount match',
+    payReasonExact: 'Amount match',
+    payReasonNear: 'Close amount',
+    payTileSuggested: 'Suggested',
+    payTileSuggestedSub: 'with a likely PO',
+    payFilterHasMatch: 'Has match',
+    payMatchLikely: 'Likely {id} · {when}',
+    payMatchCountOne: '1 possible PO',
+    // The pool is capped, so a count larger than the list has to say so —
+    // otherwise working all of them and finding nothing looks conclusive.
+    payMatchShowing: 'showing {shown} of {total}',
+    payMatchCount: '{n} possible POs',
+    payMatchNotIt: 'Not it',
+    payMatchSuggested: 'Suggested purchase orders',
+    payMatchBest: 'best match',
+    payMatchDayGap: '{n}d apart',
+    payMatchSameDay: 'same day',
+    payMatchAmountOff: 'off by {amt}',
+    payMatchAlreadyPaid: 'already paid {amt}',
+    payMatchSeller: 'seller {name}',
+    payMatchAffinity: 'usual purchaser',
     payLinkedToast: 'Linked to {id}',
     payUnlinkedToast: 'Link removed',
     payEmpty: 'No transactions',
@@ -1050,6 +1075,12 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipSecPackage: 'Dimensions & weight',
     shipStep2Title: 'Pick a rate & buy',
     shipSellerName: 'Seller name',
+    shipSource: 'Source',
+    shipSourcePick: 'Choose a source…',
+    shipSource_facebook: 'Facebook',
+    shipSource_local: 'Local',
+    shipSource_reddit: 'Reddit',
+    shipSource_other: 'Other',
     shipSellerPhone: 'Phone',
     shipStreet: 'Street',
     shipStreet2: 'Street line 2',
@@ -1650,6 +1681,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // Misc
     generalErrorMsg: 'Something went wrong. Please try again.',
+    errBoundaryTitle: 'This page stopped responding',
+    errBoundaryBody: 'Reloading usually fixes it. If it happens again, contact your system manager.',
+    errBoundaryReload: 'Reload',
 
     // InventoryProductTable
     iptProduct: 'Product',

@@ -43,6 +43,14 @@ export function clampLimit(raw: string | null | undefined, def = 50, max = 200):
   return Math.min(n, max);
 }
 
+// A user's search box is not a pattern language. Without this an ACH
+// descriptor containing `%` turns `id ILIKE $1` into "every row", and `_`
+// quietly matches a character the person did not type. Backslash is LIKE's
+// default escape, so escaping it first keeps a literal one literal.
+export function escapeLike(raw: string): string {
+  return raw.replace(/[\\%_]/g, (c) => '\\' + c);
+}
+
 const ALLOWED_SORT: Record<string, Set<string>> = {
   orders: new Set(['created_at', 'total_cost', 'lifecycle']),
   inventory: new Set(['created_at', 'qty', 'sell_price', 'unit_cost']),

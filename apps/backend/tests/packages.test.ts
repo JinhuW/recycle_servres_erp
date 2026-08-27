@@ -13,7 +13,9 @@ type Pkg = {
   status: string;
   sellerName: string | null;
   note: string | null;
+  source: string | null;
   orderId: string | null;
+  creatorName: string | null;
 };
 
 const TN = '1Z999AA10123456784';
@@ -21,7 +23,7 @@ const TN = '1Z999AA10123456784';
 async function addPackage(token: string, over: Record<string, unknown> = {}): Promise<Pkg> {
   const r = await api<{ package: Pkg }>('POST', '/api/packages', {
     token,
-    body: { trackingNumber: TN, carrier: 'UPS', sellerName: 'Bo Li', ...over },
+    body: { trackingNumber: TN, carrier: 'UPS', source: 'other', sellerName: 'Bo Li', ...over },
   });
   expect(r.status).toBe(201);
   return r.body.package;
@@ -44,15 +46,15 @@ describe('packages — add and list', () => {
     const { token } = await loginAs(MARCUS);
     await addPackage(token);
     const dup = await api('POST', '/api/packages', {
-      token, body: { trackingNumber: TN, carrier: 'UPS' },
+      token, body: { trackingNumber: TN, carrier: 'UPS', source: 'other' },
     });
     expect(dup.status).toBe(409);
     const badCarrier = await api('POST', '/api/packages', {
-      token, body: { trackingNumber: '9400111899223333333333', carrier: 'DHL' },
+      token, body: { trackingNumber: '9400111899223333333333', carrier: 'DHL', source: 'other' },
     });
     expect(badCarrier.status).toBe(400);
     const short = await api('POST', '/api/packages', {
-      token, body: { trackingNumber: '123', carrier: 'UPS' },
+      token, body: { trackingNumber: '123', carrier: 'UPS', source: 'other' },
     });
     expect(short.status).toBe(400);
   });
@@ -71,6 +73,19 @@ describe('packages — add and list', () => {
     expect(all.body.items).toHaveLength(1);
   });
 
+  it('names who submitted each row, on the add and on the list', async () => {
+    const marcus = await loginAs(MARCUS);
+    const mgr = await loginAs(ALEX);
+    const sql = getTestDb();
+    const { name } = (await sql`SELECT name FROM users WHERE id = ${marcus.user.id}`)[0] as { name: string };
+
+    const added = await addPackage(marcus.token);
+    expect(added.creatorName).toBe(name);
+
+    const all = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: mgr.token });
+    expect(all.body.items[0].creatorName).toBe(name);
+  });
+
   it('mine=true pins a manager to their own rows, mirroring GET /api/shipments', async () => {
     const marcus = await loginAs(MARCUS);
     const mgr = await loginAs(ALEX);
@@ -86,9 +101,28 @@ describe('packages — add and list', () => {
     expect(pkg.trackingNumber).toBe(TN);
 
     const dup = await api('POST', '/api/packages', {
-      token, body: { trackingNumber: TN, carrier: 'UPS' },
+      token, body: { trackingNumber: TN, carrier: 'UPS', source: 'other' },
     });
     expect(dup.status).toBe(409);
+  });
+
+  it('requires a recognised source, and round-trips it', async () => {
+    const { token } = await loginAs(MARCUS);
+    const missing = await api('POST', '/api/packages', {
+      token, body: { trackingNumber: TN, carrier: 'UPS' },
+    });
+    expect(missing.status).toBe(400);
+    const bogus = await api('POST', '/api/packages', {
+      token, body: { trackingNumber: TN, carrier: 'UPS', source: 'craigslist' },
+    });
+    expect(bogus.status).toBe(400);
+
+    for (const [i, src] of ['facebook', 'local', 'reddit', 'other'].entries()) {
+      const pkg = await addPackage(token, { trackingNumber: `1Z999AA1012345678${i}`, source: src });
+      expect(pkg.source, src).toBe(src);
+      const list = await api<{ items: Pkg[] }>('GET', '/api/packages', { token });
+      expect(list.body.items.find(p => p.id === pkg.id)?.source, src).toBe(src);
+    }
   });
 
   it('serves the carrier tracking link server-side, like shipments.trackingUrl', async () => {
@@ -101,7 +135,7 @@ describe('packages — add and list', () => {
     const { token } = await loginAs(MARCUS);
     for (const bad of ['12%45678', 'https://t.co/abc12345', '9'.repeat(34)]) {
       const r = await api('POST', '/api/packages', {
-        token, body: { trackingNumber: bad, carrier: 'UPS' },
+        token, body: { trackingNumber: bad, carrier: 'UPS', source: 'other' },
       });
       expect(r.status, bad).toBe(400);
     }

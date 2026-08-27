@@ -3,7 +3,9 @@ import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from
 import { handleFetchError } from './errorToast';
 import { blobToDataUrl, compressForUpload } from './image-compress';
 import { addPackage, scanPaymentScreenshot } from './packages';
+import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput, isStrictPaypalTxnId } from './paypalTxn';
+import { scanErrorBanner, type ScanErrorBanner } from './scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
 
 // The add-package form's whole non-JSX state machine, shared by the desktop
@@ -24,13 +26,14 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   const [pick, setPick] = useState<Carrier | null>(null);
   const [sellerName, setSellerName] = useState('');
   const [note, setNote] = useState('');
+  const [source, setSource] = useState<PackageSource | null>(null);
   const [busy, setBusy] = useState(false);
   const [paypalTxnId, setPaypalTxnIdState] = useState('');
   const [screenshot, setScreenshot] = useState<PaymentShot | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
   // i18n key for the scan-result banner (stub / unreadable / verify), or null.
   const [scanNoticeKey, setScanNoticeKey] = useState<string | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<ScanErrorBanner | null>(null);
 
   const tn = normalizeTracking(raw);
   const detected = useMemo(() => detectCarriers(raw), [raw]);
@@ -42,7 +45,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   // a whole-barcode dump. Mirrors the server's isValidTracking rejection.
   const invalidShape = tn.length >= 8 && !isValidTracking(tn);
   // A mid-scan submit would race the screenshot reference; wait it out.
-  const canSubmit = isValidTracking(tn) && carrier != null && !busy && !scanBusy;
+  const canSubmit = isValidTracking(tn) && carrier != null && source != null && !busy && !scanBusy;
 
   /** i18n key for the live hint line, or null for the quiet placeholder. */
   const hintKey =
@@ -67,25 +70,40 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
     if (scanBusy || !files) return;
     const file = Array.from(files).find(f => f.type.startsWith('image/'));
     if (!file) {
-      if (files.length) setScanError('images-only');
+      if (files.length) setScanError({ key: 'aiOnlyImages' });
       return;
     }
     setScanBusy(true);
     setScanError(null);
     setScanNoticeKey(null);
     try {
-      const compressed = await compressForUpload(file);
-      const preview = await blobToDataUrl(compressed);
-      const scan = await scanPaymentScreenshot(compressed, file.name);
-      setScreenshot({ key: scan.storageKey, url: scan.deliveryUrl, preview });
+      // Compression and the preview are local canvas work. A HEIC or a corrupt
+      // screenshot throws here, and it is not an ApiError — reported through
+      // the same classifier it would read as an outage and send the user off
+      // to escalate, when re-saving as JPEG is the actual fix.
+      const local = await compressForUpload(file)
+        .then(async (compressed) => ({ compressed, preview: await blobToDataUrl(compressed) }))
+        .catch((e: unknown) => { console.error('[scan] could not read the image locally', e); return null; });
+      if (!local) {
+        setScanError({ key: 'shipPayScanFailed' });
+        return;
+      }
+      const scan = await scanPaymentScreenshot(local.compressed, file.name);
+      setScreenshot({ key: scan.storageKey, url: scan.deliveryUrl, preview: local.preview });
       // Scan wins, the user corrects after — same contract as the label scan.
       setPaypalTxnIdState(scan.txnId ?? '');
+      // Only when the scan actually read one: a screenshot whose id is legible
+      // but whose name isn't must not wipe a name the user already typed.
+      if (scan.sellerName) setSellerName(scan.sellerName);
       if (scan.provider === 'stub') setScanNoticeKey('stubScanWarn');
       else if (scan.txnId === null || scan.confidence < AI_UNREADABLE_FLOOR) setScanNoticeKey('shipPayNoTxnFound');
       else if (scan.confidence < AI_CONFIDENCE_FLOOR) setScanNoticeKey('shipPayVerifyTxn');
     } catch (e) {
       // A failed scan never blocks the package: the id can be typed by hand.
-      setScanError(e instanceof Error ? e.message : 'scan failed');
+      // The pipeline being down reads differently from a 4xx the backend has
+      // already explained (rate limit, unsupported type, too large), so keep
+      // its own words rather than collapsing them into "couldn't read it".
+      setScanError(scanErrorBanner(e));
     } finally {
       setScanBusy(false);
     }
@@ -101,12 +119,12 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   // is the same-tick guard the state can't be.
   const submitting = useRef(false);
   const submit = async () => {
-    if (!canSubmit || carrier == null || submitting.current) return;
+    if (!canSubmit || carrier == null || source == null || submitting.current) return;
     submitting.current = true;
     setBusy(true);
     try {
       await addPackage({
-        trackingNumber: tn, carrier, sellerName, note,
+        trackingNumber: tn, carrier, source, sellerName, note,
         ...(paypalTxnId ? { paypalTxnId } : {}),
         ...(screenshot ? { paymentScreenshotKey: screenshot.key, paymentScreenshotUrl: screenshot.url } : {}),
       });
@@ -120,6 +138,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
 
   return {
     raw, setRaw, pick, setPick, sellerName, setSellerName, note, setNote,
+    source, setSource,
     busy, tn, detected, carrier, canSubmit, hintKey, submit,
     paypalTxnId, setPaypalTxnId, txnLooksOdd,
     screenshot, scanBusy, scanNoticeKey, scanError, handlePaymentFile, removeScreenshot,

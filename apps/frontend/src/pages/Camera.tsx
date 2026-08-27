@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { api } from '../lib/api';
 import { compressForUpload, blobToDataUrl } from '../lib/image-compress';
+import { scanErrorMessage } from '../lib/scanError';
 import type { Category, ScanResponse } from '../lib/types';
 
 type Props = {
@@ -123,7 +124,7 @@ export function Camera({ category, onDetected, onClose, onBack }: Props) {
       setTimeout(() => onDetected(res), 450);
     } catch (e) {
       setPhase('framing');
-      setError(e instanceof Error ? e.message : 'Scan failed');
+      setError(scanErrorMessage(e, t));
       setCaptured(null);
     }
   };

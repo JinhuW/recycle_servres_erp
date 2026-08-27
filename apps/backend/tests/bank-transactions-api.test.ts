@@ -413,7 +413,7 @@ describe('bank transactions API', () => {
     expect(r.status).toBe(200);
     const reasons = new Map(r.body.suggestions.map((s) => [s.id, s.reason]));
     expect(reasons.get(poTxn)).toBe('txn');
-    expect(reasons.get(poAmount)).toBe('amount');
+    expect(reasons.get(poAmount)).toBe('exact');
     expect(r.body.suggestions[0].id).toBe(poTxn);
 
     const searched = await api<{ suggestions: { id: string; reason: string }[] }>(

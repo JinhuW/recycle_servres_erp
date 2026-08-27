@@ -1,6 +1,7 @@
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
 import { Icon } from '../../components/Icon';
 import { CARRIERS } from '../../lib/carrierDetect';
+import { PACKAGE_SOURCES, packageSourceLabelKey } from '../../lib/packageSource';
 import { useT } from '../../lib/i18n';
 import { navigate } from '../../lib/route';
 import { FMT_HINT_KEY, useAddPackageForm } from '../../lib/useAddPackageForm';
@@ -71,6 +72,23 @@ export function ShippingAddLabel({ showToast }: Props) {
       </section>
 
       <section className="ship-wizard-section">
+        <div className="ship-sec-title">{t('shipSource')}</div>
+        <div className="field">
+          <select
+            className="input"
+            value={f.source ?? ''}
+            onChange={(e) => f.setSource(e.target.value as typeof PACKAGE_SOURCES[number])}
+            aria-label={t('shipSource')}
+          >
+            <option value="" disabled>{t('shipSourcePick')}</option>
+            {PACKAGE_SOURCES.map((src) => (
+              <option key={src} value={src}>{t(packageSourceLabelKey(src))}</option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <section className="ship-wizard-section">
         <div className="ship-sec-title">{t('shipAddDetailsTitle')}</div>
         <div className="field-row">
           <div className="field">
@@ -109,7 +127,7 @@ export function ShippingAddLabel({ showToast }: Props) {
         )}
         {f.scanError && (
           <div className="ship-add-hint" role="alert">
-            {f.scanError === 'images-only' ? t('aiOnlyImages') : t('shipPayScanFailed')}
+            {'text' in f.scanError ? f.scanError.text : t(f.scanError.key)}
           </div>
         )}
         <div className="field" style={{ marginTop: 10 }}>

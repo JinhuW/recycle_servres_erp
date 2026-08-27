@@ -4,6 +4,7 @@ import { ImageLightbox } from '../../../components/ImageLightbox';
 import { api } from '../../../lib/api';
 import { showWarnToast } from '../../../lib/errorToast';
 import { fmtUSD } from '../../../lib/format';
+import { scanErrorMessage } from '../../../lib/scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
 import type { Category, ScanResponse } from '../../../lib/types';
 import type { Line } from '../DesktopSubmit';
@@ -141,7 +142,7 @@ export function LineDrawer({
         setAiNoticeSeverity('warn');
       }
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'AI scan failed');
+      setAiError(scanErrorMessage(err, t));
     } finally {
       setAiBusy(false);
     }

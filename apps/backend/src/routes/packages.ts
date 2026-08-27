@@ -4,7 +4,10 @@
 // poll (shipping/track.ts) moves these rows exactly like shipments.
 
 import { Hono } from 'hono';
-import { CARRIERS, isValidTracking, normalizeTracking, type Carrier } from '@recycle-erp/shared';
+import {
+  CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking,
+  type Carrier, type PackageSource,
+} from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
@@ -16,6 +19,8 @@ const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 // The tracked subset of the shipment vocabulary — enforced by the table CHECK.
 type PackageStatus = 'purchased' | 'in_transit' | 'delivered' | 'exception';
 
+const SOURCES = new Set<string>(PACKAGE_SOURCES);
+
 type PackageRow = {
   id: string;
   tracking_number: string;
@@ -26,6 +31,7 @@ type PackageRow = {
   last_tracked_at: Date | null;
   seller_name: string | null;
   note: string | null;
+  source: PackageSource | null;
   paypal_txn_id: string | null;
   payment_screenshot_key: string | null;
   payment_screenshot_url: string | null;
@@ -36,11 +42,11 @@ type PackageRow = {
 
 const PACKAGE_COLS = (sql: ReturnType<typeof getDb>) => sql`
   id, tracking_number, carrier, status, tracking_status, tracking_eta,
-  last_tracked_at, seller_name, note, paypal_txn_id, payment_screenshot_key,
+  last_tracked_at, seller_name, note, source, paypal_txn_id, payment_screenshot_key,
   payment_screenshot_url, order_id, created_by, created_at
 `;
 
-function toApi(r: PackageRow) {
+function toApi(r: PackageRow, creatorName: string | null) {
   return {
     id: r.id,
     trackingNumber: r.tracking_number,
@@ -50,6 +56,7 @@ function toApi(r: PackageRow) {
     lastTrackedAt: r.last_tracked_at,
     sellerName: r.seller_name,
     note: r.note,
+    source: r.source,
     paypalTxnId: r.paypal_txn_id,
     // The R2 key stays internal; clients only ever need the public URL.
     paymentScreenshotUrl: r.payment_screenshot_url,
@@ -57,6 +64,9 @@ function toApi(r: PackageRow) {
     // Server-built like shipments.tracking_url, so the carrier→URL table
     // lives once (shipping/types.ts) instead of per client.
     trackingUrl: carrierTrackingUrl(r.carrier, r.tracking_number),
+    // Who tracked the box — the shipping table's answer to "whose is this?",
+    // the same question order.userName answers for a shipment row.
+    creatorName,
     createdAt: r.created_at,
   };
 }
@@ -76,11 +86,13 @@ packages.get('/', async (c) => {
   const mineOnly = c.req.query('mine') === 'true';
   const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
   const rows = (await sql`
-    SELECT ${PACKAGE_COLS(sql)} FROM packages
+    SELECT ${PACKAGE_COLS(sql)},
+           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name
+    FROM packages
     WHERE ${scopeFrag}
     ORDER BY created_at DESC
-  `) as unknown as PackageRow[];
-  return c.json({ items: rows.map(toApi) });
+  `) as unknown as (PackageRow & { creator_name: string | null })[];
+  return c.json({ items: rows.map(r => toApi(r, r.creator_name)) });
 });
 
 // ── Lookup by scanned barcode ────────────────────────────────────────────────
@@ -112,7 +124,7 @@ packages.get('/lookup', async (c) => {
   // A miss is a normal outcome (a box nobody tracked yet), and a purchaser
   // must not learn that someone else's number exists — both come back null.
   return c.json({
-    package: rows.length ? { ...toApi(rows[0]), creatorName: rows[0].creator_name } : null,
+    package: rows.length ? toApi(rows[0], rows[0].creator_name) : null,
   });
 });
 
@@ -123,6 +135,7 @@ packages.post('/', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | {
         trackingNumber?: unknown; carrier?: unknown; sellerName?: unknown; note?: unknown;
+        source?: unknown;
         paypalTxnId?: unknown; paymentScreenshotKey?: unknown; paymentScreenshotUrl?: unknown;
       }
     | null;
@@ -141,6 +154,11 @@ packages.post('/', async (c) => {
   if (!CARRIERS.includes(body?.carrier as Carrier)) {
     return c.json({ error: 'carrier must be UPS, FedEx, or USPS' }, 400);
   }
+  // Required here even though the column is nullable: pre-existing rows have
+  // no answer, but every new box does.
+  if (!SOURCES.has(body?.source as string)) {
+    return c.json({ error: 'source must be Facebook, Local, Reddit, or Other' }, 400);
+  }
   const opt = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
   // Same uppercase-no-spaces canon as the AI extractor, but lenient on shape:
   // a hand-typed id the user swears by must not bounce the whole package.
@@ -153,11 +171,12 @@ packages.post('/', async (c) => {
   // number can't both slip past a SELECT.
   const inserted = (await sql`
     INSERT INTO packages (
-      tracking_number, carrier, seller_name, note,
+      tracking_number, carrier, seller_name, note, source,
       paypal_txn_id, payment_screenshot_key, payment_screenshot_url, created_by
     )
     VALUES (
       ${trackingNumber}, ${body!.carrier as Carrier}, ${opt(body?.sellerName)}, ${opt(body?.note)},
+      ${body!.source as PackageSource},
       ${paypalTxnId}, ${opt(body?.paymentScreenshotKey)}, ${opt(body?.paymentScreenshotUrl)}, ${u.id}
     )
     ON CONFLICT (tracking_number) DO NOTHING
@@ -166,7 +185,7 @@ packages.post('/', async (c) => {
   if (!inserted.length) {
     return c.json({ error: 'This tracking number is already being tracked' }, 409);
   }
-  return c.json({ package: toApi(inserted[0]) }, 201);
+  return c.json({ package: toApi(inserted[0], u.name) }, 201);
 });
 
 // ── Create the PO the delivered box becomes ──────────────────────────────────
@@ -196,8 +215,8 @@ packages.post('/:id/create-po', async (c) => {
     // still wait for delivery.
     if (row.status !== 'delivered' && u.role !== 'manager') return { kind: 'notDelivered' };
 
-    const source = row.status === 'delivered' ? 'Created from delivered package' : 'Created from package';
-    const notes = [source, row.carrier, row.tracking_number, row.seller_name]
+    const origin = row.status === 'delivered' ? 'Created from delivered package' : 'Created from package';
+    const notes = [origin, row.carrier, row.tracking_number, row.seller_name]
       .filter(Boolean).join(' · ');
     // The PO belongs to whoever tracked the box, not whoever clicked: the
     // delivered notification goes to the creator, and ownership drives "my

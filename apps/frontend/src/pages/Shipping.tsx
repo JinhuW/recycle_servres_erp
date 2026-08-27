@@ -15,6 +15,7 @@ import {
   createPoFromPackage, listPackages, lookupPackage,
   type LookedUpPackage, type TrackedPackage,
 } from '../lib/packages';
+import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
@@ -251,6 +252,7 @@ function PackageSheet({ pkg, busy, canCreate, onCreatePo, onClose }: {
             pkg.creatorName ? t('shipScanTrackedBy', { name: pkg.creatorName }) : null,
             fmtDateShort(pkg.createdAt, locale),
             pkg.sellerName,
+            pkg.source ? t(packageSourceLabelKey(pkg.source)) : null,
           ].filter(Boolean).join(' · ')}
         </div>
 
@@ -409,6 +411,9 @@ function InboundCard({ row, showToast, onCreatedPo }: {
       <JourneyStrip pos={journeyPos(row)} tone={tone} />
       <div className="ph-ship-sub">
         {who && <span className="ph-ship-who">{who}</span>}
+        {row.kind === 'package' && row.pkg.source && (
+          <span className="chip muted">{t(packageSourceLabelKey(row.pkg.source))}</span>
+        )}
         {poId
           ? <button className="ship-po-pill" onClick={(e) => { e.stopPropagation(); navigate(`/purchase-orders/${poId}`); }}>{poId}</button>
           : <span className="chip muted">{t('shipColNoPo')}</span>}
@@ -558,6 +563,24 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
         </div>
 
         <div className="ph-field">
+          <label>{t('shipSource')}</label>
+          <div className="ph-ship-carriers" role="radiogroup" aria-label={t('shipSource')}>
+            {PACKAGE_SOURCES.map((src) => (
+              <button
+                key={src}
+                type="button"
+                role="radio"
+                aria-checked={f.source === src}
+                className={'ph-ship-carrier' + (f.source === src ? ' selected' : '')}
+                onClick={() => f.setSource(src)}
+              >
+                <span className="ph-ship-carrier-name">{t(packageSourceLabelKey(src))}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="ph-field">
           <label>{t('shipPayTitle')}</label>
           <div className="ph-ship-add-hint">{t('shipPaySub')}</div>
           {f.screenshot ? (
@@ -582,7 +605,7 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
           )}
           {f.scanError && (
             <div className="ph-ship-add-hint" role="alert">
-              {f.scanError === 'images-only' ? t('aiOnlyImages') : t('shipPayScanFailed')}
+              {'text' in f.scanError ? f.scanError.text : t(f.scanError.key)}
             </div>
           )}
         </div>
