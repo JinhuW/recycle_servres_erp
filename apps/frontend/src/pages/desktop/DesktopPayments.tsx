@@ -24,9 +24,26 @@ type Leg = {
   paypalTxnId: string | null;
 };
 
+type MatchConfidence = 'high' | 'medium' | 'low';
+
+type MatchSummary = {
+  count: number;
+  confidence: MatchConfidence;
+  best: {
+    id: string;
+    totalCost: number | null;
+    createdAt: string;
+    dayGap: number | null;
+    createdByName: string | null;
+  };
+};
+
 type PaymentRow = Omit<Leg, 'source'> & {
   source: 'mercury' | 'paypal' | 'paired';
   legs: Leg[];
+  // Server-ranked PO candidates. Present only on rows still in the queue —
+  // a linked, ignored or transfer row carries null.
+  match: MatchSummary | null;
   orderId: string | null;
   linkKind: 'payment' | 'refund' | null;
   linkAuto: boolean;
@@ -40,6 +57,7 @@ type Feed = { rows: PaymentRow[]; nextCursor: string | null };
 
 type Stats = {
   unlinked: { count: number; amount: number };
+  suggested: { count: number };
   linked: { count: number };
   refunds: { count: number; amount: number };
   ignored: { count: number };
@@ -56,8 +74,16 @@ type Suggestion = {
   id: string;
   totalCost: number | null;
   createdAt: string;
+  lifecycle: string;
   createdByName: string | null;
-  reason: 'txn' | 'amount' | 'search';
+  reason: 'txn' | 'exact' | 'near' | 'search';
+  dayGap: number | null;
+  amountDiff: number | null;
+  confidence: MatchConfidence;
+  linkedTotal: number;
+  sellerName: string | null;
+  affinity: boolean;
+  covered: boolean;
 };
 
 type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored' | 'transfer';
@@ -86,6 +112,23 @@ function fmtSigned(n: number, locale: string): string {
   return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
 }
 
+type T = (k: string, vars?: Record<string, string | number>) => string;
+
+// How far the PO sits from the payment date — the tie-breaker a manager reads
+// first, so it is spelled out rather than shown as a raw number.
+function gapLabel(dayGap: number | null, t: T): string {
+  if (dayGap === null) return '';
+  return dayGap === 0 ? t('payMatchSameDay') : t('payMatchDayGap', { n: dayGap });
+}
+
+const CONFIDENCE_TONE: Record<MatchConfidence, string> = {
+  high: 'pos', medium: 'warn', low: 'muted',
+};
+
+const REASON_TKEY: Record<Suggestion['reason'], string | null> = {
+  txn: 'payReasonTxn', exact: 'payReasonExact', near: 'payReasonNear', search: null,
+};
+
 export function DesktopPayments({ onToast }: { onToast: (msg: string) => void }) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
@@ -94,6 +137,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [source, setSource] = usePersisted('desktop.payments.source', 'all');
   const [direction, setDirection] = usePersisted('desktop.payments.direction', 'all');
   const [q, setQ] = usePersisted('desktop.payments.q', '');
+  const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
   const [feed, setFeed] = useState<Feed | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -108,9 +152,10 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     if (source !== 'all') p.set('source', source);
     if (direction !== 'all') p.set('direction', direction);
     if (q.trim()) p.set('q', q.trim());
+    if (hasMatch) p.set('hasMatch', '1');
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [status, source, direction, q]);
+  }, [status, source, direction, q, hasMatch]);
 
   const refreshStats = useCallback(() => {
     api.get<Stats>('/api/bank-transactions/stats').then(setStats).catch(handleFetchError);
@@ -191,22 +236,29 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     return times.length ? new Date(Math.max(...times)) : null;
   }, [stats]);
 
-  const tiles: { key: StatusFilter | 'refunds'; label: string; count: number; sub: string | null; tone: string }[] = stats ? [
+  type TileKey = StatusFilter | 'refunds' | 'suggested';
+  const tiles: { key: TileKey; label: string; count: number; sub: string | null; tone: string }[] = stats ? [
     { key: 'unlinked', label: t('payTileUnlinked'), count: stats.unlinked.count, sub: fmtUSD(stats.unlinked.amount, locale), tone: 'warn' },
+    { key: 'suggested', label: t('payTileSuggested'), count: stats.suggested.count, sub: t('payTileSuggestedSub'), tone: 'accent' },
     { key: 'linked', label: t('payTileLinked'), count: stats.linked.count, sub: null, tone: 'pos' },
     { key: 'refunds', label: t('payTileRefunds'), count: stats.refunds.count, sub: fmtUSD(stats.refunds.amount, locale), tone: 'cool' },
     { key: 'transfer', label: t('payTileTransfers'), count: stats.transfers.count, sub: null, tone: 'info' },
     { key: 'ignored', label: t('payTileIgnored'), count: stats.ignored.count, sub: null, tone: 'muted' },
   ] : [];
 
-  const tileActive = (key: StatusFilter | 'refunds') =>
-    key === 'refunds' ? status === 'linked' && direction === 'in' : status === key && direction === 'all';
+  const tileActive = (key: TileKey) =>
+    key === 'refunds' ? status === 'linked' && direction === 'in'
+    : key === 'suggested' ? status === 'unlinked' && hasMatch
+    // Unlinked and Suggested are nested, so only the narrower one lights up.
+    : status === key && direction === 'all' && !hasMatch;
 
-  const clickTile = (key: StatusFilter | 'refunds') => {
-    if (tileActive(key)) { setStatus('all'); setDirection('all'); return; }
-    if (key === 'refunds') { setStatus('linked'); setDirection('in'); return; }
+  const clickTile = (key: TileKey) => {
+    if (tileActive(key)) { setStatus('all'); setDirection('all'); setHasMatch(false); return; }
+    if (key === 'refunds') { setStatus('linked'); setDirection('in'); setHasMatch(false); return; }
+    if (key === 'suggested') { setStatus('unlinked'); setDirection('all'); setHasMatch(true); return; }
     setStatus(key);
     setDirection('all');
+    setHasMatch(false);
   };
 
   return (
@@ -227,7 +279,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
         {tiles.map(tile => (
           <button
             key={tile.key}
@@ -272,6 +324,15 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               <option value="mercury">Mercury</option>
               <option value="paypal">PayPal</option>
             </select>
+            <button
+              type="button"
+              className={'btn sm' + (hasMatch ? '' : ' ghost')}
+              aria-pressed={hasMatch}
+              onClick={() => setHasMatch(v => !v)}
+            >
+              <Icon name="zap" size={12} />
+              {t('payFilterHasMatch')}
+            </button>
             <select className="select" value={direction} onChange={e => setDirection(e.target.value)} style={FILTER_SELECT}>
               <option value="all">{t('payDirAll')}</option>
               <option value="out">{t('payDirOut')}</option>
@@ -366,6 +427,9 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
 }) {
   const { t } = useT();
   const [picking, setPicking] = useState(false);
+  // Dismissal is per page load on purpose: suggestions are read-time only, so
+  // persisting a "not it" would be the same mistake as persisting a match.
+  const [dismissed, setDismissed] = useState(false);
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
@@ -374,6 +438,12 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
       setPicking(false);
     }
   };
+
+  // One-click only when the server found exactly one candidate and is sure of
+  // it; anything else has to be looked at before it is linked.
+  const likely = !dismissed && row.match?.count === 1 && row.match.confidence === 'high'
+    ? row.match : null;
+  const ambiguous = !likely && (row.match?.count ?? 0) > 0 ? row.match : null;
 
   return (
     <>
@@ -410,16 +480,49 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
               {t('payUnignore')}
             </button>
           ) : (
-            <span style={{ display: 'inline-flex', gap: 6 }} onClick={stop}>
-              <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
-                {t('payLink')}
-              </button>
-              <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
-                {t('payIgnore')}
-              </button>
+            <span style={{ display: 'inline-grid', gap: 5, justifyItems: 'start' }} onClick={stop}>
+              {likely && (
+                <span className="chip dot pos" style={{ fontSize: 10.5 }}>
+                  {t('payMatchLikely', {
+                    id: likely.best.id,
+                    when: gapLabel(likely.best.dayGap, t),
+                  })}
+                </span>
+              )}
+              {ambiguous && (
+                <button
+                  type="button"
+                  className="chip warn"
+                  style={{ fontSize: 10.5, border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                  onClick={onToggle}
+                >
+                  {row.match!.count === 1
+                    ? t('payMatchCountOne')
+                    : t('payMatchCount', { n: row.match!.count })}
+                </button>
+              )}
+              <span style={{ display: 'inline-flex', gap: 6 }}>
+                {likely ? (
+                  <>
+                    <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
+                      {t('payLink')}
+                    </button>
+                    <button type="button" className="btn sm ghost" onClick={() => setDismissed(true)}>
+                      {t('payMatchNotIt')}
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
+                    {t('payLink')}
+                  </button>
+                )}
+                <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
+                  {t('payIgnore')}
+                </button>
+              </span>
             </span>
           )}
-          {picking && !row.orderId && (
+          {(picking || (dismissed && !row.orderId && !row.ignored)) && !row.orderId && (
             <PoPicker txnId={row.id} onPick={link} onClose={() => setPicking(false)} locale={locale} />
           )}
         </td>
@@ -427,7 +530,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
       {open && (
         <tr>
           <td colSpan={7} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
-            <ExpandedDetail row={row} locale={locale} act={act} onToast={onToast} />
+            <ExpandedDetail row={row} locale={locale} act={act} onToast={onToast} onLink={link} />
           </td>
         </tr>
       )}
@@ -435,15 +538,19 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   );
 }
 
-function ExpandedDetail({ row, locale, act, onToast }: {
+function ExpandedDetail({ row, locale, act, onToast, onLink }: {
   row: PaymentRow;
   locale: string;
   act: (path: string, body?: unknown) => Promise<ActResult | null>;
   onToast: (msg: string) => void;
+  onLink: (orderId: string) => void;
 }) {
   const { t } = useT();
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
+      {row.match && !row.orderId && !row.ignored && (
+        <MatchList txnId={row.id} locale={locale} onLink={onLink} />
+      )}
       <div style={{ display: 'grid', gap: 4 }}>
         {row.legs.map(leg => (
           <div key={leg.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -509,6 +616,87 @@ function ExpandedDetail({ row, locale, act, onToast }: {
   );
 }
 
+// The ranked candidate list behind the row's "{n} matches" badge. Fetched when
+// the row opens rather than with the feed: the badge only needs the count, and
+// most rows are never expanded.
+function MatchList({ txnId, locale, onLink }: {
+  txnId: string;
+  locale: string;
+  onLink: (orderId: string) => void;
+}) {
+  const { t } = useT();
+  const [rows, setRows] = useState<Suggestion[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.get<{ suggestions: Suggestion[] }>(`/api/bank-transactions/${txnId}/suggestions`)
+      .then(r => { if (live) setRows(r.suggestions); })
+      .catch(handleFetchError);
+    return () => { live = false; };
+  }, [txnId]);
+
+  if (rows === null) return <div className="muted">{t('payMoreLoading')}</div>;
+  if (rows.length === 0) return null;
+
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div className="muted" style={{ fontWeight: 600 }}>{t('payMatchSuggested')}</div>
+      {rows.map((s, i) => (
+        <div
+          key={s.id}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            padding: '6px 8px', borderRadius: 8,
+            background: 'var(--bg-elev)', border: '1px solid var(--border)',
+          }}
+        >
+          <span className="mono" style={{ fontWeight: 600 }}>{s.id}</span>
+          <span className="mono">{fmtUSD(s.totalCost, locale)}</span>
+          <span className="muted">{fmtDateShort(s.createdAt, locale)}</span>
+          {s.dayGap !== null && (
+            <span className={'chip ' + CONFIDENCE_TONE[s.confidence]} style={{ fontSize: 10.5 }}>
+              {gapLabel(s.dayGap, t)}
+            </span>
+          )}
+          {/* Ranked first overall, which is not always the closest in time —
+              a seller-name or txn-id hit outweighs the date gap. */}
+          {i === 0 && rows.length > 1 && (
+            <span className="chip info" style={{ fontSize: 10.5 }}>{t('payMatchBest')}</span>
+          )}
+          {s.createdByName && <span className="muted">{s.createdByName}</span>}
+          {s.reason === 'near' && s.amountDiff !== null && (
+            <span className="chip muted" style={{ fontSize: 10.5 }}>
+              {t('payMatchAmountOff', { amt: fmtUSD(Math.abs(s.amountDiff), locale) })}
+            </span>
+          )}
+          {s.reason === 'txn' && (
+            <span className="chip accent" style={{ fontSize: 10.5 }}>{t('payReasonTxn')}</span>
+          )}
+          {s.sellerName && (
+            <span className="chip pos" style={{ fontSize: 10.5 }}>
+              {t('payMatchSeller', { name: s.sellerName })}
+            </span>
+          )}
+          {s.affinity && !s.sellerName && (
+            <span className="chip info" style={{ fontSize: 10.5 }}>{t('payMatchAffinity')}</span>
+          )}
+          {s.covered && (
+            <span className="chip warn" style={{ fontSize: 10.5 }}>
+              {t('payMatchAlreadyPaid', { amt: fmtUSD(s.linkedTotal, locale) })}
+            </span>
+          )}
+          <button
+            type="button" className="btn sm" style={{ marginLeft: 'auto' }}
+            onClick={() => onLink(s.id)}
+          >
+            {t('payLink')}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Searchable PO dropdown (CustomerPicker shape). Opens with the server's
 // ranked suggestions — txn-id match first, then same-amount orders — and
 // switches to free search as the manager types.
@@ -542,10 +730,6 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
     }, query ? 250 : 0);
     return () => clearTimeout(timer);
   }, [txnId, query]);
-
-  const REASON_TKEY: Record<Suggestion['reason'], string | null> = {
-    txn: 'payReasonTxn', amount: 'payReasonAmount', search: null,
-  };
 
   return (
     <div
@@ -593,6 +777,7 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
               <span className="mono" style={{ fontWeight: 600 }}>{s.id}</span>
               <span className="muted" style={{ fontSize: 12 }}>
                 {fmtUSD(s.totalCost, locale)} · {fmtDateShort(s.createdAt, locale)}
+                {s.dayGap !== null ? ` · ${gapLabel(s.dayGap, t)}` : ''}
                 {s.createdByName ? ` · ${s.createdByName}` : ''}
               </span>
               {reasonKey && (

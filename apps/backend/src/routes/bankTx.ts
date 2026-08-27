@@ -9,6 +9,7 @@
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
+import { fetchCandidates, hasMatchFrag, matchSummaries, type MatchLeg } from '../banktx/match';
 import { syncBankTransactions } from '../banktx/sync';
 import { getDb } from '../db';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
@@ -74,6 +75,7 @@ bankTx.get('/', async (c) => {
   const source = c.req.query('source') ?? 'all';
   const direction = c.req.query('direction') ?? 'all';
   const q = c.req.query('q')?.trim() ?? '';
+  const hasMatch = c.req.query('hasMatch') === '1';
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const cursor = decodeCursor(c.req.query('cursor'));
 
@@ -104,6 +106,9 @@ bankTx.get('/', async (c) => {
   const cursorFrag = cursor
     ? sql`AND (bt.posted_at, bt.id) < (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`
     : sql`AND TRUE`;
+  // In the WHERE rather than applied to the page, so keyset pagination over
+  // the filtered set doesn't return short pages.
+  const matchFrag = hasMatch ? hasMatchFrag(sql, 'bt') : sql`TRUE`;
 
   const rows = await sql`
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
@@ -120,7 +125,8 @@ bankTx.get('/', async (c) => {
     FROM bank_transactions bt
     LEFT JOIN users u ON u.id = bt.linked_by
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
-      AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag} ${cursorFrag}
+      AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
+      AND ${matchFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
   `;
@@ -133,9 +139,23 @@ bankTx.get('/', async (c) => {
       })
     : null;
 
+  // Only the rows the manager can still act on need candidates; a linked,
+  // ignored or transfer row is already off the queue.
+  const openLegs: MatchLeg[] = slice
+    .filter((r) => !r.order_id && !r.ignored && r.category === 'external')
+    .map((r) => ({
+      id: r.id as string,
+      amount: Number(r.amount),
+      posted_at: r.posted_at as Date,
+      counterparty: (r.counterparty as string | null) ?? null,
+      paypal_txn_id: (r.paypal_txn_id as string | null) ?? null,
+    }));
+  const matches = await matchSummaries(sql, openLegs);
+
   return c.json({
     rows: slice.map((r) => ({
       id: r.id,
+      match: matches.get(r.id as string) ?? null,
       source: r.pair_id ? 'paired' : r.source,
       postedAt: r.posted_at,
       amount: Number(r.amount),
@@ -170,10 +190,17 @@ bankTx.get('/stats', async (c) => {
       COUNT(*) FILTER (WHERE ignored)::int                                             AS ignored_count
     FROM bank_transactions
     WHERE pair_id IS NULL OR source = 'paypal'`;
+  const [suggested] = await sql`
+    SELECT COUNT(*)::int AS count
+    FROM bank_transactions bt
+    WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
+      AND bt.order_id IS NULL AND NOT bt.ignored AND bt.category = 'external'
+      AND ${hasMatchFrag(sql, 'bt')}`;
   const sources = await sql`
     SELECT source, MAX(last_synced_at) AS last_synced_at FROM bank_accounts GROUP BY source`;
   return c.json({
     unlinked: { count: agg.unlinked_count, amount: agg.unlinked_amount },
+    suggested: { count: suggested.count },
     linked: { count: agg.linked_count },
     refunds: { count: agg.refund_count, amount: agg.refund_amount },
     ignored: { count: agg.ignored_count },
@@ -390,9 +417,10 @@ bankTx.post('/:id/unmark-transfer', async (c) => {
 });
 
 // ─── Link-picker suggestions ─────────────────────────────────────────────────
-// Ranked candidates, computed at read time and never persisted: an exact
-// PayPal-txn-id hit first (even when ambiguous — the human decides), then
-// same-amount orders near the payment date, then free-text search.
+// Ranked candidates, computed at read time and never persisted (see
+// banktx/match.ts). Amount + date proximity while the box is untouched; free
+// text takes over the moment the manager types, because then they know
+// something the ranking doesn't.
 
 bankTx.get('/:id/suggestions', async (c) => {
   const sql = getDb(c.env);
@@ -400,53 +428,49 @@ bankTx.get('/:id/suggestions', async (c) => {
   if (!leg) return c.json({ error: 'Not found' }, 404);
   const q = c.req.query('q')?.trim() ?? '';
 
+  if (!q) {
+    const ranked = await fetchCandidates(sql, {
+      id: leg.id,
+      amount: Number(leg.amount),
+      posted_at: leg.posted_at,
+      counterparty: leg.counterparty,
+      paypal_txn_id: leg.paypal_txn_id,
+    });
+    return c.json({ suggestions: ranked });
+  }
+
   type OrderRow = {
     id: string; total_cost: number | null; created_at: Date; lifecycle: string;
-    created_by_name: string | null;
+    created_by_name: string | null; seller_name: string | null;
   };
-  const shape = (r: OrderRow, reason: string) => ({
-    id: r.id,
-    totalCost: r.total_cost === null ? null : Number(r.total_cost),
-    createdAt: r.created_at,
-    lifecycle: r.lifecycle,
-    createdByName: r.created_by_name,
-    reason,
+  const like = `%${q}%`;
+  const rows = await sql<OrderRow[]>`
+    SELECT o.id, o.total_cost::float AS total_cost, o.created_at, o.lifecycle,
+           u.name AS created_by_name,
+           (SELECT p.seller_name FROM packages p
+            WHERE p.order_id = o.id AND p.seller_name ILIKE ${like} LIMIT 1) AS seller_name
+    FROM orders o JOIN users u ON u.id = o.user_id
+    WHERE o.id ILIKE ${like} OR u.name ILIKE ${like}
+       OR EXISTS (SELECT 1 FROM packages p2
+                  WHERE p2.order_id = o.id AND p2.seller_name ILIKE ${like})
+    ORDER BY o.created_at DESC LIMIT 10`;
+  return c.json({
+    suggestions: rows.map((r) => ({
+      id: r.id,
+      totalCost: r.total_cost === null ? null : Number(r.total_cost),
+      createdAt: r.created_at,
+      lifecycle: r.lifecycle,
+      createdByName: r.created_by_name,
+      reason: 'search' as const,
+      dayGap: null,
+      amountDiff: null,
+      confidence: 'low' as const,
+      linkedTotal: 0,
+      sellerName: r.seller_name,
+      affinity: false,
+      covered: false,
+    })),
   });
-
-  const seen = new Set<string>();
-  const out: ReturnType<typeof shape>[] = [];
-  const push = (rows: OrderRow[], reason: string) => {
-    for (const r of rows) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      out.push(shape(r, reason));
-    }
-  };
-
-  if (leg.paypal_txn_id) {
-    push(await sql<OrderRow[]>`
-      SELECT o.id, o.total_cost::float AS total_cost, o.created_at, o.lifecycle, u.name AS created_by_name
-      FROM orders o JOIN users u ON u.id = o.user_id
-      WHERE UPPER(o.paypal_txn_id) = ${leg.paypal_txn_id}
-      ORDER BY o.created_at DESC LIMIT 5`, 'txn');
-  }
-  if (!q) {
-    push(await sql<OrderRow[]>`
-      SELECT o.id, o.total_cost::float AS total_cost, o.created_at, o.lifecycle, u.name AS created_by_name
-      FROM orders o JOIN users u ON u.id = o.user_id
-      WHERE o.total_cost = ${Math.abs(Number(leg.amount))}
-        AND o.created_at BETWEEN ${leg.posted_at}::timestamptz - INTERVAL '90 days'
-                             AND ${leg.posted_at}::timestamptz + INTERVAL '90 days'
-      ORDER BY o.created_at DESC LIMIT 10`, 'amount');
-  } else {
-    const like = `%${q}%`;
-    push(await sql<OrderRow[]>`
-      SELECT o.id, o.total_cost::float AS total_cost, o.created_at, o.lifecycle, u.name AS created_by_name
-      FROM orders o JOIN users u ON u.id = o.user_id
-      WHERE o.id ILIKE ${like} OR u.name ILIKE ${like}
-      ORDER BY o.created_at DESC LIMIT 10`, 'search');
-  }
-  return c.json({ suggestions: out });
 });
 
 export default bankTx;
