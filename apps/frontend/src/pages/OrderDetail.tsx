@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
+import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
 import { StatusChangeDialog, type StatusAttachment } from '../components/StatusChangeDialog';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { AttachmentDropzone } from '../components/AttachmentDropzone';
@@ -74,11 +75,14 @@ export function OrderDetail({
   const isPurchaser = user?.role !== 'manager';
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
   const orderLocked = isCompleted(effectiveStatus);
-  // Past Draft, a purchaser owns only the notes: the backend rejects a PATCH
-  // from them carrying lines, fees, warehouse or payment (routes/orders.ts).
-  // This used to allow In Transit, which offered an edit that always 403'd.
-  const canEditOrder = !orderLocked && (!isPurchaser || effectiveStatus === 'Draft');
-  const canDelete = canEditOrder && effectiveStatus === 'Draft';
+  // The purchaser keeps their order until it is Done. Past Draft the edit
+  // costs them the stage: the backend sends the order back to Draft, so
+  // `revertOnSave` warns before the first write that does it.
+  const canEditOrder = !orderLocked;
+  const revertOnSave = isPurchaser && !orderLocked && effectiveStatus !== 'Draft';
+  // A reverted order is a Draft again but not a fresh one — once submitted it
+  // is archived, never deleted (the backend enforces the same).
+  const canDelete = canEditOrder && effectiveStatus === 'Draft' && !order.everSubmitted;
   // The note outlives the purchaser's edit window — the manager owns pricing
   // from Reviewing on, but whoever raised the PO keeps documenting it until
   // Done. Mirrors the backend's notes-only gate.
@@ -122,6 +126,11 @@ export function OrderDetail({
   // first few and says how many more there are.
   const [expandedPhotos, setExpandedPhotos] = useState<ReadonlySet<string>>(() => new Set());
   const [removingLineId, setRemovingLineId] = useState<string | null>(null);
+  // Holds the answer callback while the "this returns the order to Draft"
+  // warning is up; acknowledging once covers the rest of the visit.
+  const [revertConfirm, setRevertConfirm] = useState<((ok: boolean) => void) | null>(null);
+  const [revertAcked, setRevertAcked] = useState(false);
+  const [pendingRevert, setPendingRevert] = useState(initialOrder.pendingRevert ?? []);
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -194,8 +203,24 @@ export function OrderDetail({
     }
   };
 
+  // A purchaser's first write to a submitted order costs it the stage. Ask
+  // once per visit, then let the rest of the visit through.
+  const askRevert = (): Promise<boolean> => {
+    if (!revertOnSave || revertAcked) return Promise.resolve(true);
+    return new Promise<boolean>(resolve => {
+      setRevertConfirm(() => (ok: boolean) => {
+        setRevertConfirm(null);
+        if (ok) setRevertAcked(true);
+        resolve(ok);
+      });
+    });
+  };
+
   const save = async () => {
     if (!canAnnotate) return;
+    // A note is not a change to the order itself and leaves the stage alone.
+    const material = warehouseDirty || paymentDirty || feesDirty;
+    if (material && !(await askRevert())) return;
     setSaving(true);
     try {
       // Only what changed. Sending a field the user didn't touch is how the
@@ -225,6 +250,7 @@ export function OrderDetail({
   // line, which is the one case the user needs told about.
   const removeLine = async (lineId: string) => {
     setRemovingLineId(null);
+    if (!(await askRevert())) return;
     try {
       await api.patch(`/api/orders/${order.id}`, { removeLineIds: [lineId] });
       await refetchOrder();
@@ -235,11 +261,13 @@ export function OrderDetail({
     }
   };
 
-  // Purchasers cap at Reviewing; managers can move all the way to Done.
+  // Submitting is the purchaser's one stage move — everything past it belongs
+  // to the manager, and the backend rejects the rest from them anyway.
   const nextStatus: string | null = (() => {
     if (effectiveStatus === 'Draft') return 'In Transit';
+    if (isPurchaser) return null;
     if (effectiveStatus === 'In Transit') return 'Reviewing';
-    if (effectiveStatus === 'Reviewing' && !isPurchaser) return 'Done';
+    if (effectiveStatus === 'Reviewing') return 'Done';
     return null;
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
@@ -894,6 +922,41 @@ export function OrderDetail({
           </button>
         )}
       </div>
+
+      {revertConfirm && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) revertConfirm(false); }}>
+          <div className="modal-shell" style={{ maxWidth: 380, width: '92vw' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="rotate" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">{t('revertWarnTitle')}</div>
+                  <div className="modal-sub">{t('revertWarnBody')}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => revertConfirm(false)}>{t('cancel')}</button>
+              <button className="btn primary" onClick={() => revertConfirm(true)}>{t('revertWarnConfirm')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingRevert.length > 0 && (
+        <RevertNoticeDialog
+          orderId={order.id}
+          changes={pendingRevert}
+          onAcknowledged={() => { setPendingRevert([]); setActivityRefreshKey(k => k + 1); }}
+          onDismiss={() => setPendingRevert([])}
+        />
+      )}
 
       {removingLineId && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setRemovingLineId(null); }}>

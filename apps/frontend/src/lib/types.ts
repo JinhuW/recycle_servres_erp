@@ -178,12 +178,48 @@ export type OrderStatusMeta = Record<string, {
 // so they are dropped here rather than left declared and absent at runtime.
 export type Order =
   Omit<OrderSummary, 'lineCount' | 'qty' | 'revenue' | 'profit'>
-  & { lines: OrderLine[]; statusMeta?: OrderStatusMeta; shipmentCount: number };
+  & {
+    lines: OrderLine[]; statusMeta?: OrderStatusMeta; shipmentCount: number;
+    // Managers only, and null for everyone else: the purchaser's changes since
+    // the last time a manager acknowledged them.
+    pendingRevert?: PendingRevert[] | null;
+    // An order sent back to Draft by an edit is a draft that has already been
+    // submitted — deletable only while this is false.
+    everSubmitted?: boolean;
+  };
+
+export type RevertLineSnapshot = {
+  lineId: string;
+  category?: string | null;
+  partNumber: string | null;
+  qty: number;
+  unitCost: number;
+};
+
+export type RevertChangeSet = {
+  from: string;
+  to: string;
+  fields: OrderEventChange[];
+  lines: {
+    added: RevertLineSnapshot[];
+    removed: RevertLineSnapshot[];
+    edited: { lineId: string; partNumber: string | null; changes: OrderEventChange[] }[];
+  };
+};
+
+export type PendingRevert = {
+  id: string;
+  createdAt: string;
+  actor: { id: string; name: string; initials: string } | null;
+  detail: RevertChangeSet;
+};
 
 export type OrderEventKind =
   | 'created'
   | 'submitted'
   | 'advanced'
+  | 'reverted'
+  | 'revert_ack'
   | 'line_added'
   | 'line_removed'
   | 'line_edited'

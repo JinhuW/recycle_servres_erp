@@ -29,6 +29,8 @@ export const ACTIVITY_KIND_MAP: Record<
     created:             'created',
     submitted:           'status',
     advanced:            'status',
+    reverted:            'status',
+    revert_ack:          'status',
     line_added:          'added',
     line_removed:        'removed',
     line_edited:         'edited',

@@ -4,7 +4,7 @@ import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
 import {
-  diff, writeOrderEvent, META_FIELDS, LINE_FIELDS,
+  diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange,
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
@@ -14,7 +14,7 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
-import { advanceOrderTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
+import { advanceOrderTx, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -451,6 +451,38 @@ orders.get('/:id', async (c) => {
       uploadedAt: String(p.uploaded_at),
     });
   }
+  // A purchaser edit puts a submitted order back in Draft, so "is a draft" no
+  // longer means "was never submitted" — and delete follows the history.
+  const everSubmitted = !!(await sql`
+    SELECT 1 FROM order_events
+    WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
+  `)[0];
+
+  // Changes a purchaser made after submitting, that no manager has looked at
+  // yet — the edit page opens a review dialog on them. Managers only: the
+  // purchaser is the one who made the changes.
+  const pendingRevert = effectiveRole(u) === 'manager'
+    ? (await sql`
+        SELECT e.id, e.detail, e.created_at,
+               act.id AS actor_id, act.name AS actor_name, act.initials AS actor_initials
+        FROM order_events e
+        LEFT JOIN users act ON act.id = e.actor_id
+        WHERE e.order_id = ${id} AND e.kind = 'reverted'
+          AND e.created_at > COALESCE(
+            (SELECT MAX(created_at) FROM order_events
+              WHERE order_id = ${id} AND kind = 'revert_ack'),
+            '-infinity'::timestamptz)
+        ORDER BY e.created_at DESC, e.id DESC
+      `).map(r => ({
+        id: r.id,
+        createdAt: r.created_at,
+        detail: r.detail,
+        actor: r.actor_id
+          ? { id: r.actor_id, name: r.actor_name ?? '', initials: r.actor_initials ?? '' }
+          : null,
+      }))
+    : null;
+
   const statusMeta: Record<string, {
     note: string | null; when: string;
     attachments: { id: string; filename: string; size: number; mime: string; url: string; uploadedAt: string }[];
@@ -481,6 +513,8 @@ orders.get('/:id', async (c) => {
       archivedAt: order.archived_at,
       status,
       statusMeta,
+      pendingRevert,
+      everSubmitted,
       createdAt: order.created_at,
       totalCost: order.total_cost,
       otherFees: order.other_fees,
@@ -567,6 +601,37 @@ orders.get('/:id/events', async (c) => {
         : null,
     })),
   });
+});
+
+// ── Mark the purchaser's post-submission changes as reviewed. One manager
+// acknowledging clears the dialog for all of them: the point is that somebody
+// looked, not that everybody did. A later edit writes a newer `reverted` event
+// and arms it again.
+orders.post('/:id/revert-ack', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+
+  if (effectiveRole(u) !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const order = (await sql`SELECT id FROM orders WHERE id = ${id} LIMIT 1`)[0];
+  if (!order) return c.json({ error: 'Not found' }, 404);
+
+  const acknowledged = await sql.begin(async (tx) => {
+    const [{ n }] = await tx<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM order_events
+      WHERE order_id = ${id} AND kind = 'reverted'
+        AND created_at > COALESCE(
+          (SELECT MAX(created_at) FROM order_events
+            WHERE order_id = ${id} AND kind = 'revert_ack'),
+          '-infinity'::timestamptz)
+    `;
+    // Nothing pending: acking anyway would leave a row saying a manager
+    // reviewed changes that were already reviewed.
+    if (n > 0) await writeOrderEvent(tx, id, u.id, 'revert_ack', { acknowledged: n });
+    return n;
+  });
+
+  return c.json({ ok: true, acknowledged });
 });
 
 const LIFECYCLE_LABEL: Record<string, string> = {
@@ -959,18 +1024,24 @@ orders.patch('/:id', async (c) => {
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
-  // Post-submission the purchaser hands pricing and line edits to the manager,
-  // but the paper trail stays theirs: a note can still be added at any stage
-  // short of Done (receipts and shipping details keep arriving after the goods
-  // leave). Anything beyond `notes` remains manager-only.
+  // The purchaser owns their order until it is Done: goods arrive miscounted,
+  // fees land late, a line turns out to be something else. What they may not
+  // do is change it under a manager who has already reviewed it — so a change
+  // to anything the review is about sends the order back to Draft (below, in
+  // the tx, where the lifecycle read is locked). `notes` is not such a field:
+  // receipts and shipping details keep arriving after the goods leave, and
+  // appending one leaves the order where it stands.
+  const materialEdit =
+    !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
+    body.totalCost !== undefined || body.otherFees !== undefined ||
+    body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
+    body.payment !== undefined || body.paypalTxnId !== undefined;
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
-    const editsBeyondNotes =
-      !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
-      body.totalCost !== undefined || body.otherFees !== undefined ||
-      body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
-      body.payment !== undefined || body.commissionRate !== undefined ||
-      body.paypalTxnId !== undefined || body.onBehalfOfUserId !== undefined;
-    if (existing.lifecycle === 'done' || editsBeyondNotes || body.notes === undefined) {
+    // A Done PO is a closed book to the purchaser, note included.
+    if (existing.lifecycle === 'done') {
+      return c.json({ error: 'Only managers can edit an order after submission' }, 403);
+    }
+    if (!materialEdit && body.notes === undefined) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
   }
@@ -1138,6 +1209,14 @@ orders.patch('/:id', async (c) => {
   // inside the tx and only read after the tx commits.
   const addedLineIds: string[] = [];
 
+  // Where the order ends up. Returned to the client so an edit that moved the
+  // stage doesn't need a refetch to be shown correctly.
+  let lifecycleAfter = existing.lifecycle as string;
+  // The stage a purchaser edit pulled the order back from — set only when the
+  // revert ran, and the flag the audit block writes its `reverted` event on.
+  let revertedFrom: string | null = null;
+  let committedLineIds: string[] = [];
+
   try {
     await sql.begin(async (tx) => {
       // Lock the order + read fields we need for audit-diffing. The lock keeps
@@ -1158,6 +1237,7 @@ orders.patch('/:id', async (c) => {
             other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
+      lifecycleAfter = orderBefore.lifecycle;
       // A Done PO is the closed-book record of what was bought / sold. Any
       // edit to lines, costs, or commission corrupts that record (and may
       // also confuse downstream sell-order / commission math). Re-open via
@@ -1185,6 +1265,23 @@ orders.patch('/:id', async (c) => {
           // on the error message instead.
           throw new Error('__DONE_LOCKED__');
         }
+        // The pre-tx read may have seen an earlier stage: a concurrent advance
+        // to Done must close the book on the purchaser here too, not revert it.
+        if (u.role !== 'manager') throw new Error('__PURCHASER_DONE__');
+      }
+
+      // Back to Draft before anything is written, so the lines this request
+      // adds are inserted at the stage the order is landing in rather than the
+      // one it is leaving. The committed-line guard inside runs against the
+      // pre-edit lines, so the ids it reports are the ones the client can see.
+      if (u.role !== 'manager' && orderBefore.lifecycle !== 'draft' && materialEdit) {
+        const outcome = await revertOrderToDraftTx(tx, id, u);
+        if (outcome.kind === 'committedLines') {
+          committedLineIds = outcome.offendingLineIds;
+          throw new Error('__REVERT_COMMITTED__');
+        }
+        revertedFrom = outcome.from;
+        lifecycleAfter = 'draft';
       }
 
       // Read before anything moves: afterwards a goods total that merely went
@@ -1427,7 +1524,7 @@ orders.patch('/:id', async (c) => {
               ${l.interface ?? null}, ${l.formFactor ?? null}, ${l.description ?? null}, ${l.itemType?.trim() || null},
               ${resolvePartNumber(cat, l)}, ${l.serialNumber ?? null}, ${canonChipNumber(l.chipNumber)}, ${l.condition ?? 'Pulled — Tested'}, ${l.qty ?? 1},
               ${l.unitCost ?? 0}, ${normSellPrice(l.sellPrice)},
-              ${LINE_STATUS_FOR_LIFECYCLE[existing.lifecycle as string] ?? 'In Transit'},
+              ${LINE_STATUS_FOR_LIFECYCLE[lifecycleAfter] ?? 'In Transit'},
               ${l.scanImageId ?? null}, ${l.scanConfidence ?? null}, ${pos++},
               ${l.health ?? null}, ${l.rpm ?? null}
             )
@@ -1482,6 +1579,12 @@ orders.patch('/:id', async (c) => {
       // Also entered on a lines-only patch: total_cost is a META_FIELD that the
       // derivation above may have just moved, and `diff` reports nothing when
       // it hasn't, so the extra read costs a query and never a false event.
+      // Collected alongside the per-kind events below so a revert can carry
+      // the whole change set on one row: the review dialog renders from it
+      // without stitching sibling events together by timestamp.
+      const revertFields: AuditChange[] = [];
+      const revertLinesEdited: Array<Record<string, unknown>> = [];
+
       if (touchesOrder || touchesLines) {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
@@ -1496,6 +1599,7 @@ orders.patch('/:id', async (c) => {
         );
         if (metaChanges.length) {
           await writeOrderEvent(tx, id, u.id, 'meta_changed', { changes: metaChanges });
+          revertFields.push(...metaChanges);
         }
       }
       // Fetch the post-write snapshot for every edited line in ONE query,
@@ -1523,11 +1627,13 @@ orders.patch('/:id', async (c) => {
           if (!before || !after) continue;
           const changes = diff(before, after, LINE_FIELDS);
           if (changes.length) {
-            await writeOrderEvent(tx, id, u.id, 'line_edited', {
+            const detail = {
               lineId: patch.id,
               partNumber: after.part_number ?? null,
               changes,
-            });
+            };
+            await writeOrderEvent(tx, id, u.id, 'line_edited', detail);
+            revertLinesEdited.push(detail);
           }
         }
       }
@@ -1550,11 +1656,39 @@ orders.patch('/:id', async (c) => {
         });
       }
 
+      const lineSnapshot = (r: { id: string; category: string; part_number: string | null; qty: number; unit_cost: number }) => ({
+        lineId: r.id,
+        category: r.category,
+        partNumber: r.part_number,
+        qty: r.qty,
+        unitCost: r.unit_cost,
+      });
+      if (revertedFrom) {
+        await writeOrderEvent(tx, id, u.id, 'reverted', {
+          from: revertedFrom,
+          to: 'draft',
+          fields: revertFields,
+          lines: {
+            added: addedRows.map(lineSnapshot),
+            removed: removedSnapshots.map(lineSnapshot),
+            edited: revertLinesEdited,
+          },
+        });
+      }
     });
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
     if (msg.includes('__DONE_LOCKED__')) {
       return c.json({ error: 'Order is Done and cannot be modified. Use the advance-back flow if needed.' }, 409);
+    }
+    if (msg.includes('__PURCHASER_DONE__')) {
+      return c.json({ error: 'Only managers can edit an order after submission' }, 403);
+    }
+    if (msg.includes('__REVERT_COMMITTED__')) {
+      return c.json({
+        error: 'Lines in this order are committed to open sell orders. Cancel those sell orders before editing it.',
+        offendingLineIds: committedLineIds,
+      }, 409);
     }
     if (msg.includes('__ORDER_WOULD_BE_EMPTY__')) {
       return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
@@ -1571,7 +1705,7 @@ orders.patch('/:id', async (c) => {
   const unswept = await deleteAttachments(c.env, removedScanKeys);
   if (unswept.length) console.error('r2 delete (line removed)', unswept);
 
-  return c.json({ ok: true, addedLineIds });
+  return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter });
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as
@@ -1634,6 +1768,7 @@ orders.delete('/:id', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'forbidden' }
     | { kind: 'notDraft' }
+    | { kind: 'wasSubmitted' }
     | { kind: 'sold' }
     | { kind: 'hasLabels' }
     | { kind: 'ok'; scanned: { k: string }[] };
@@ -1645,6 +1780,16 @@ orders.delete('/:id', async (c) => {
     if (!existing) return { kind: 'notFound' };
     if (u.role !== 'manager' && existing.user_id !== u.id) return { kind: 'forbidden' };
     if (existing.lifecycle !== 'draft') return { kind: 'notDraft' };
+    // A purchaser edit puts a submitted order back in Draft, which would
+    // otherwise re-open this door: delete follows the order's history, not its
+    // current stage, so once it has left Draft it can only be archived.
+    // `reverted` counts on its own — an order can only be reverted from a
+    // later stage, and rows seeded past Draft have no `submitted` event.
+    const submitted = (await tx`
+      SELECT 1 FROM order_events
+      WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
+    `)[0];
+    if (submitted) return { kind: 'wasSubmitted' };
 
     const sold = (await tx`
       SELECT 1 FROM sell_order_lines sol
@@ -1677,6 +1822,9 @@ orders.delete('/:id', async (c) => {
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'forbidden') return c.json({ error: 'Forbidden' }, 403);
   if (outcome.kind === 'notDraft') return c.json({ error: 'Only Draft orders can be deleted' }, 403);
+  if (outcome.kind === 'wasSubmitted') {
+    return c.json({ error: 'This order has already been submitted — archive it instead' }, 403);
+  }
   if (outcome.kind === 'sold') {
     return c.json({ error: 'A line in this order is referenced by a sell-order and cannot be deleted' }, 409);
   }

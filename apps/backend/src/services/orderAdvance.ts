@@ -32,6 +32,98 @@ export type AdvanceOutcome =
   | { kind: 'committedLines'; offendingLineIds: string[] }
   | { kind: 'ok'; nextStageId: string };
 
+// Lines of this order that sit at one of `lineStatuses` and are claimed by an
+// open sell order. Moving them off that status leaves the sell order holding
+// inventory validateSellLines rejects, so both the backward advance and the
+// purchaser-edit revert refuse rather than strand it.
+async function committedLineIds(
+  tx: SqlLike,
+  orderId: string,
+  lineStatuses: string[],
+): Promise<string[]> {
+  const rows = await tx`
+    SELECT DISTINCT ol.id
+    FROM order_lines ol
+    JOIN sell_order_lines sol ON sol.inventory_id = ol.id
+    JOIN sell_orders so ON so.id = sol.sell_order_id
+    WHERE ol.order_id = ${orderId}
+      AND ol.status = ANY(${lineStatuses})
+      AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
+  ` as unknown as { id: string }[];
+  return rows.map(r => r.id);
+}
+
+// Move every non-Sold line to `newLineStatus`, recording one inventory_events
+// row per line that actually moved.
+//
+// 'Sold' is a terminal post-sale state, not a lifecycle stage — a PO
+// re-advance/stage-jump must never resurrect a sold-out line.
+// All CTEs see the snapshot from before the statement, so `targets`
+// captures the pre-update status while `upd` applies the new one.
+// (A separate post-UPDATE SELECT would always read the already-updated
+// status, so `status IS DISTINCT FROM $new` would be universally false and
+// zero audit rows would ever be written.)
+async function cascadeLineStatusesTx(
+  tx: SqlLike,
+  orderId: string,
+  actorId: string | null,
+  newLineStatus: string,
+): Promise<void> {
+  await tx`
+    WITH targets AS (
+      SELECT id, status AS old_status
+      FROM order_lines
+      WHERE order_id = ${orderId} AND status <> 'Sold'
+        AND status IS DISTINCT FROM ${newLineStatus}
+      FOR UPDATE
+    ),
+    upd AS (
+      UPDATE order_lines ol SET status = ${newLineStatus}
+      FROM targets t WHERE ol.id = t.id
+    )
+    INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+    SELECT t.id, ${actorId}::uuid, 'status',
+           jsonb_build_object('field','status','from',t.old_status,'to',${newLineStatus}::text)
+    FROM targets t
+  `;
+}
+
+export type RevertOutcome =
+  | { kind: 'committedLines'; offendingLineIds: string[] }
+  | { kind: 'ok'; from: string };
+
+// A purchaser who changes a submitted PO puts it back in their own hands: the
+// order returns to Draft and has to be re-submitted, so a manager never
+// reviews a version that has since moved. The caller must already hold the
+// orders row FOR UPDATE and have established that the order is past Draft.
+//
+// The `reverted` audit event is NOT written here — only the caller, after its
+// own writes, knows both sides of the change set the event carries.
+//
+// A live shipment can pull the order straight back to In Transit on the next
+// tracking poll (shipping/track.ts). That's intended: carrier movement is
+// ground truth, the edits survive it, and the manager's review dialog keys off
+// the event rather than the stage.
+export async function revertOrderToDraftTx(
+  tx: SqlLike,
+  id: string,
+  actor: AdvanceActor,
+): Promise<RevertOutcome> {
+  const cur = (await tx`SELECT lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0] as
+    | { lifecycle: string } | undefined;
+  if (!cur) return { kind: 'committedLines', offendingLineIds: [] };
+
+  // 'Reviewing' joins 'Done' here, unlike the backward-advance guard: a
+  // Reviewing line is already sellable, so dropping it to Draft breaks any
+  // sell order that named it.
+  const committed = await committedLineIds(tx, id, ['Done', 'Reviewing']);
+  if (committed.length > 0) return { kind: 'committedLines', offendingLineIds: committed };
+
+  await tx`UPDATE orders SET lifecycle = 'draft' WHERE id = ${id}`;
+  await cascadeLineStatusesTx(tx, id, actor?.id ?? null, LINE_STATUS_FOR_LIFECYCLE.draft);
+  return { kind: 'ok', from: cur.lifecycle };
+}
+
 export async function advanceOrderTx(
   tx: SqlLike,
   id: string,
@@ -67,17 +159,9 @@ export async function advanceOrderTx(
   // that validateSellLines rejects, making the sell order unpromotable/broken.
   const newLineStatus = LINE_STATUS_FOR_LIFECYCLE[nextStageId];
   if (newLineStatus && newLineStatus !== 'Done') {
-    const committed = await tx`
-      SELECT DISTINCT ol.id
-      FROM order_lines ol
-      JOIN sell_order_lines sol ON sol.inventory_id = ol.id
-      JOIN sell_orders so ON so.id = sol.sell_order_id
-      WHERE ol.order_id = ${id}
-        AND ol.status = 'Done'
-        AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
-    ` as unknown as { id: string }[];
+    const committed = await committedLineIds(tx, id, ['Done']);
     if (committed.length > 0) {
-      return { kind: 'committedLines', offendingLineIds: committed.map(r => r.id) };
+      return { kind: 'committedLines', offendingLineIds: committed };
     }
   }
   await tx`UPDATE orders SET lifecycle = ${nextStageId} WHERE id = ${id}`;
@@ -104,30 +188,7 @@ export async function advanceOrderTx(
     });
   }
   if (newLineStatus) {
-    // 'Sold' is a terminal post-sale state, not a lifecycle stage — a PO
-    // re-advance/stage-jump must never resurrect a sold-out line.
-    // All CTEs see the snapshot from before the statement, so `targets`
-    // captures the pre-update status while `upd` applies the new one.
-    // (A separate post-UPDATE SELECT would always read the already-
-    // updated status, so `status IS DISTINCT FROM $new` would be
-    // universally false and zero audit rows would ever be written.)
-    await tx`
-      WITH targets AS (
-        SELECT id, status AS old_status
-        FROM order_lines
-        WHERE order_id = ${id} AND status <> 'Sold'
-          AND status IS DISTINCT FROM ${newLineStatus}
-        FOR UPDATE
-      ),
-      upd AS (
-        UPDATE order_lines ol SET status = ${newLineStatus}
-        FROM targets t WHERE ol.id = t.id
-      )
-      INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
-      SELECT t.id, ${actor?.id ?? null}::uuid, 'status',
-             jsonb_build_object('field','status','from',t.old_status,'to',${newLineStatus}::text)
-      FROM targets t
-    `;
+    await cascadeLineStatusesTx(tx, id, actor?.id ?? null, newLineStatus);
   }
   // PRD §10: managers want to see when a purchaser finalises an order.
   // We fire this only on the first forward transition (Draft → In Transit)

@@ -5,7 +5,8 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
 import {
-  createdEventParts, linePhotoEventDetail, ownerChangedLine, type Translate,
+  createdEventParts, linePhotoEventDetail, ownerChangedLine, changeLine, renderValue,
+  LIFECYCLE_LABEL, type Translate,
 } from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 
@@ -22,6 +23,8 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   created:      'file',
   submitted:    'inventory',
   advanced:     'flag',
+  reverted:     'rotate',
+  revert_ack:   'check',
   line_added:   'plus',
   line_removed: 'trash',
   line_edited:  'edit',
@@ -43,6 +46,9 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   created:      'muted',
   submitted:    'pos',
   advanced:     'info',
+  // A submitted order moved backwards under whoever was reviewing it.
+  reverted:     'warn',
+  revert_ack:   'muted',
   line_added:   'pos',
   line_removed: 'warn',
   line_edited:  'info',
@@ -78,59 +84,6 @@ const TONE_FG: Record<Tone, string> = {
   muted: 'var(--fg-subtle)',
 };
 
-const LIFECYCLE_LABEL: Record<string, string> = {
-  draft:      'Draft',
-  in_transit: 'In Transit',
-  reviewing:  'Reviewing',
-  done:       'Done',
-};
-
-// Friendly labels for the fields we surface on line_edited / meta_changed
-// events. Anything not listed falls back to the raw db column name.
-const FIELD_LABEL: Record<string, string> = {
-  sell_price:      'Sell price',
-  qty:             'Qty',
-  unit_cost:       'Unit cost',
-  brand:           'Brand',
-  capacity:        'Capacity',
-  type:            'Type',
-  generation:      'Generation',
-  classification:  'Classification',
-  rank:            'Rank',
-  speed:           'Speed',
-  interface:       'Interface',
-  form_factor:     'Form factor',
-  description:     'Description',
-  part_number:     'Part number',
-  serial_number:   'Serial number',
-  chip_number:     'Chip number',
-  condition:       'Condition',
-  health:          'Health',
-  rpm:             'RPM',
-  notes:           'Notes',
-  warehouse_id:    'Warehouse',
-  payment:         'Payment',
-  total_cost:      'Goods total',
-  commission_rate: 'Commission rate',
-  other_fees:      'Other fees',
-  other_fees_note: 'Other fees note',
-  paypal_txn_id:   'PayPal transaction ID',
-};
-
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);
-
-function renderValue(field: string, v: unknown, locale: string): string {
-  if (v === null || v === undefined || v === '') return '—';
-  if (field === 'commission_rate' && typeof v === 'number') return (v * 100).toFixed(2) + '%';
-  if (MONEY_FIELDS.has(field) && typeof v === 'number') return fmtUSD(v, locale);
-  return String(v);
-}
-
-function changeLine(c: OrderEventChange, locale: string): string {
-  const label = FIELD_LABEL[c.field] ?? c.field;
-  return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
-}
-
 function summary(ev: OrderEvent, locale: string, t: Translate): { title: string; lines: string[] } {
   const d = ev.detail as Record<string, unknown>;
   switch (ev.kind) {
@@ -152,6 +105,15 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
       const from = LIFECYCLE_LABEL[(d.from as string) ?? ''] ?? (d.from as string);
       const to = LIFECYCLE_LABEL[(d.to as string) ?? ''] ?? (d.to as string);
       return { title: `Advanced ${from} → ${to}`, lines: [] };
+    }
+    case 'reverted': {
+      // The change set itself is written out by the sibling meta/line events
+      // sitting right beside this one — here it only needs to say what moved.
+      const from = LIFECYCLE_LABEL[(d.from as string) ?? ''] ?? (d.from as string);
+      return { title: t('acReverted'), lines: from ? [t('acRevertFrom', { stage: from })] : [] };
+    }
+    case 'revert_ack': {
+      return { title: t('acRevertAck'), lines: [] };
     }
     case 'line_added': {
       const pn = (d.partNumber as string) ?? '(no part number)';
