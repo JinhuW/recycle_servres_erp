@@ -1,5 +1,6 @@
 import { api } from './api';
 import type { Carrier } from './carrierDetect';
+import type { PackageSource } from './packageSource';
 
 // ── Tracked packages: standalone inbound labels, no PO yet ───────────────────
 //
@@ -20,6 +21,8 @@ export type TrackedPackage = {
   lastTrackedAt: string | null;
   sellerName: string | null;
   note: string | null;
+  /** Buying channel, answered at add time. Null on rows added before v1.100.0. */
+  source: PackageSource | null;
   paypalTxnId: string | null;
   paymentScreenshotUrl: string | null;
   orderId: string | null;
@@ -39,6 +42,7 @@ export async function listPackages(opts?: { mine?: boolean }): Promise<{ items: 
 export async function addPackage(input: {
   trackingNumber: string;
   carrier: Carrier;
+  source: PackageSource;
   sellerName?: string;
   note?: string;
   paypalTxnId?: string;
@@ -57,6 +61,7 @@ export type PaymentScanResponse = {
   storageKey: string;
   deliveryUrl: string;
   txnId: string | null;
+  sellerName: string | null;
   confidence: number;
   provider: 'stub' | 'openrouter';
 };

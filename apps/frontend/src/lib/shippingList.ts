@@ -96,6 +96,7 @@ export function filterInbound(rows: InboundRow[], f: ShipFilter): InboundRow[] {
       || (p.sellerName ?? '').toLowerCase().includes(q)
       || (p.note ?? '').toLowerCase().includes(q)
       || (p.paypalTxnId ?? '').toLowerCase().includes(q)
+      || (p.source ?? '').includes(q)
       || (p.orderId ?? '').toLowerCase().includes(q);
   });
 }
@@ -136,7 +137,7 @@ export function matchSellers(list: PrevSeller[], q: string): PrevSeller[] {
   return [...pre, ...sub].slice(0, 6);
 }
 
-const CSV_HEAD = ['Order', 'Created', 'Submitted by', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #', 'PayPal txn'];
+const CSV_HEAD = ['Order', 'Created', 'Submitted by', 'Status', 'Seller', 'Seller city', 'Seller state', 'Warehouse', 'Carrier', 'Service', 'Label cost', 'Currency', 'Tracking #', 'PayPal txn', 'Source'];
 
 // Excel/Sheets execute cells starting with = + - @ as formulas; seller names
 // and tracking numbers are external text.
@@ -158,13 +159,14 @@ function shipCsvCells({ order, shipment: s }: ShipRow): string[] {
     s.rateCurrency,
     s.trackingNumber ?? '',
     order.paypalTxnId ?? '',
+    '',
   ];
 }
 
 function pkgCsvCells(p: TrackedPackage): string[] {
   return [
     p.orderId ?? '', p.createdAt, p.creatorName ?? '', p.status, p.sellerName ?? '', '', '', '',
-    p.carrier, '', '', '', p.trackingNumber, p.paypalTxnId ?? '',
+    p.carrier, '', '', '', p.trackingNumber, p.paypalTxnId ?? '', p.source ?? '',
   ];
 }
 

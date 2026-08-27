@@ -3,6 +3,7 @@ import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from
 import { handleFetchError } from './errorToast';
 import { blobToDataUrl, compressForUpload } from './image-compress';
 import { addPackage, scanPaymentScreenshot } from './packages';
+import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput, isStrictPaypalTxnId } from './paypalTxn';
 import { isAiServiceFailure } from './scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
@@ -25,6 +26,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   const [pick, setPick] = useState<Carrier | null>(null);
   const [sellerName, setSellerName] = useState('');
   const [note, setNote] = useState('');
+  const [source, setSource] = useState<PackageSource | null>(null);
   const [busy, setBusy] = useState(false);
   const [paypalTxnId, setPaypalTxnIdState] = useState('');
   const [screenshot, setScreenshot] = useState<PaymentShot | null>(null);
@@ -43,7 +45,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   // a whole-barcode dump. Mirrors the server's isValidTracking rejection.
   const invalidShape = tn.length >= 8 && !isValidTracking(tn);
   // A mid-scan submit would race the screenshot reference; wait it out.
-  const canSubmit = isValidTracking(tn) && carrier != null && !busy && !scanBusy;
+  const canSubmit = isValidTracking(tn) && carrier != null && source != null && !busy && !scanBusy;
 
   /** i18n key for the live hint line, or null for the quiet placeholder. */
   const hintKey =
@@ -81,6 +83,9 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
       setScreenshot({ key: scan.storageKey, url: scan.deliveryUrl, preview });
       // Scan wins, the user corrects after — same contract as the label scan.
       setPaypalTxnIdState(scan.txnId ?? '');
+      // Only when the scan actually read one: a screenshot whose id is legible
+      // but whose name isn't must not wipe a name the user already typed.
+      if (scan.sellerName) setSellerName(scan.sellerName);
       if (scan.provider === 'stub') setScanNoticeKey('stubScanWarn');
       else if (scan.txnId === null || scan.confidence < AI_UNREADABLE_FLOOR) setScanNoticeKey('shipPayNoTxnFound');
       else if (scan.confidence < AI_CONFIDENCE_FLOOR) setScanNoticeKey('shipPayVerifyTxn');
@@ -104,12 +109,12 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   // is the same-tick guard the state can't be.
   const submitting = useRef(false);
   const submit = async () => {
-    if (!canSubmit || carrier == null || submitting.current) return;
+    if (!canSubmit || carrier == null || source == null || submitting.current) return;
     submitting.current = true;
     setBusy(true);
     try {
       await addPackage({
-        trackingNumber: tn, carrier, sellerName, note,
+        trackingNumber: tn, carrier, source, sellerName, note,
         ...(paypalTxnId ? { paypalTxnId } : {}),
         ...(screenshot ? { paymentScreenshotKey: screenshot.key, paymentScreenshotUrl: screenshot.url } : {}),
       });
@@ -123,6 +128,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
 
   return {
     raw, setRaw, pick, setPick, sellerName, setSellerName, note, setNote,
+    source, setSource,
     busy, tn, detected, carrier, canSubmit, hintKey, submit,
     paypalTxnId, setPaypalTxnId, txnLooksOdd,
     screenshot, scanBusy, scanNoticeKey, scanError, handlePaymentFile, removeScreenshot,
