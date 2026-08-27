@@ -27,7 +27,10 @@ type Leg = {
 type MatchConfidence = 'high' | 'medium' | 'low';
 
 type MatchSummary = {
+  // The whole pool. `shown` is what survived the server's cap — they differ
+  // when a round-number payment matches more POs than the list can carry.
   count: number;
+  shown: number;
   confidence: MatchConfidence;
   best: {
     id: string;
@@ -57,7 +60,10 @@ type Feed = { rows: PaymentRow[]; nextCursor: string | null };
 
 type Stats = {
   unlinked: { count: number; amount: number };
-  suggested: { count: number };
+  // Added in v1.99.0. The SPA and the API deploy on independent pipelines, so
+  // a freshly deployed page runs for minutes against a backend that has never
+  // heard of this key — optional here so every read has to survive it.
+  suggested?: { count: number };
   linked: { count: number };
   refunds: { count: number; amount: number };
   ignored: { count: number };
@@ -239,7 +245,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   type TileKey = StatusFilter | 'refunds' | 'suggested';
   const tiles: { key: TileKey; label: string; count: number; sub: string | null; tone: string }[] = stats ? [
     { key: 'unlinked', label: t('payTileUnlinked'), count: stats.unlinked.count, sub: fmtUSD(stats.unlinked.amount, locale), tone: 'warn' },
-    { key: 'suggested', label: t('payTileSuggested'), count: stats.suggested.count, sub: t('payTileSuggestedSub'), tone: 'accent' },
+    { key: 'suggested', label: t('payTileSuggested'), count: stats.suggested?.count ?? 0, sub: t('payTileSuggestedSub'), tone: 'accent' },
     { key: 'linked', label: t('payTileLinked'), count: stats.linked.count, sub: null, tone: 'pos' },
     { key: 'refunds', label: t('payTileRefunds'), count: stats.refunds.count, sub: fmtUSD(stats.refunds.amount, locale), tone: 'cool' },
     { key: 'transfer', label: t('payTileTransfers'), count: stats.transfers.count, sub: null, tone: 'info' },
@@ -279,7 +285,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         {tiles.map(tile => (
           <button
             key={tile.key}
@@ -310,7 +316,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                 role="tab"
                 aria-selected={status === s}
                 className={status === s ? 'active' : ''}
-                onClick={() => setStatus(s)}
+                onClick={() => { setStatus(s); setHasMatch(false); }}
               >
                 {t(`payFilter_${s}`)}
               </button>
@@ -507,7 +513,10 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
                     <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
                       {t('payLink')}
                     </button>
-                    <button type="button" className="btn sm ghost" onClick={() => setDismissed(true)}>
+                    <button
+                      type="button" className="btn sm ghost"
+                      onClick={() => { setDismissed(true); setPicking(true); }}
+                    >
                       {t('payMatchNotIt')}
                     </button>
                   </>
@@ -522,7 +531,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
               </span>
             </span>
           )}
-          {(picking || (dismissed && !row.orderId && !row.ignored)) && !row.orderId && (
+          {picking && !row.orderId && (
             <PoPicker txnId={row.id} onPick={link} onClose={() => setPicking(false)} locale={locale} />
           )}
         </td>
@@ -626,12 +635,13 @@ function MatchList({ txnId, locale, onLink }: {
 }) {
   const { t } = useT();
   const [rows, setRows] = useState<Suggestion[] | null>(null);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     let live = true;
-    api.get<{ suggestions: Suggestion[] }>(`/api/bank-transactions/${txnId}/suggestions`)
-      .then(r => { if (live) setRows(r.suggestions); })
-      .catch(handleFetchError);
+    api.get<{ suggestions: Suggestion[]; total: number }>(`/api/bank-transactions/${txnId}/suggestions`)
+      .then(r => { if (live) { setRows(r.suggestions); setTotal(r.total); } })
+      .catch(e => { if (live) setRows([]); handleFetchError(e); });
     return () => { live = false; };
   }, [txnId]);
 
@@ -640,7 +650,14 @@ function MatchList({ txnId, locale, onLink }: {
 
   return (
     <div style={{ display: 'grid', gap: 6 }}>
-      <div className="muted" style={{ fontWeight: 600 }}>{t('payMatchSuggested')}</div>
+      <div className="muted" style={{ fontWeight: 600 }}>
+        {t('payMatchSuggested')}
+        {total > rows.length && (
+          <span style={{ fontWeight: 400, marginLeft: 6 }}>
+            ({t('payMatchShowing', { shown: rows.length, total })})
+          </span>
+        )}
+      </div>
       {rows.map((s, i) => (
         <div
           key={s.id}
@@ -682,7 +699,7 @@ function MatchList({ txnId, locale, onLink }: {
           )}
           {s.covered && (
             <span className="chip warn" style={{ fontSize: 10.5 }}>
-              {t('payMatchAlreadyPaid', { amt: fmtUSD(s.linkedTotal, locale) })}
+              {t('payMatchAlreadyPaid', { amt: fmtUSD(Math.max(0, s.linkedTotal), locale) })}
             </span>
           )}
           <button

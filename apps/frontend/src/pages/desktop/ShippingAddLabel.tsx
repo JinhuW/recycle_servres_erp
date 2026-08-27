@@ -127,9 +127,7 @@ export function ShippingAddLabel({ showToast }: Props) {
         )}
         {f.scanError && (
           <div className="ship-add-hint" role="alert">
-            {f.scanError === 'images-only' ? t('aiOnlyImages')
-              : f.scanError === 'ai-unavailable' ? t('aiUnavailable')
-              : t('shipPayScanFailed')}
+            {'text' in f.scanError ? f.scanError.text : t(f.scanError.key)}
           </div>
         )}
         <div className="field" style={{ marginTop: 10 }}>

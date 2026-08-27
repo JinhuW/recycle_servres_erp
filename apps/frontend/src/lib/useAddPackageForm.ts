@@ -5,7 +5,7 @@ import { blobToDataUrl, compressForUpload } from './image-compress';
 import { addPackage, scanPaymentScreenshot } from './packages';
 import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput, isStrictPaypalTxnId } from './paypalTxn';
-import { isAiServiceFailure } from './scanError';
+import { scanErrorBanner, type ScanErrorBanner } from './scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
 
 // The add-package form's whole non-JSX state machine, shared by the desktop
@@ -33,7 +33,7 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   const [scanBusy, setScanBusy] = useState(false);
   // i18n key for the scan-result banner (stub / unreadable / verify), or null.
   const [scanNoticeKey, setScanNoticeKey] = useState<string | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<ScanErrorBanner | null>(null);
 
   const tn = normalizeTracking(raw);
   const detected = useMemo(() => detectCarriers(raw), [raw]);
@@ -70,17 +70,26 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
     if (scanBusy || !files) return;
     const file = Array.from(files).find(f => f.type.startsWith('image/'));
     if (!file) {
-      if (files.length) setScanError('images-only');
+      if (files.length) setScanError({ key: 'aiOnlyImages' });
       return;
     }
     setScanBusy(true);
     setScanError(null);
     setScanNoticeKey(null);
     try {
-      const compressed = await compressForUpload(file);
-      const preview = await blobToDataUrl(compressed);
-      const scan = await scanPaymentScreenshot(compressed, file.name);
-      setScreenshot({ key: scan.storageKey, url: scan.deliveryUrl, preview });
+      // Compression and the preview are local canvas work. A HEIC or a corrupt
+      // screenshot throws here, and it is not an ApiError — reported through
+      // the same classifier it would read as an outage and send the user off
+      // to escalate, when re-saving as JPEG is the actual fix.
+      const local = await compressForUpload(file)
+        .then(async (compressed) => ({ compressed, preview: await blobToDataUrl(compressed) }))
+        .catch((e: unknown) => { console.error('[scan] could not read the image locally', e); return null; });
+      if (!local) {
+        setScanError({ key: 'shipPayScanFailed' });
+        return;
+      }
+      const scan = await scanPaymentScreenshot(local.compressed, file.name);
+      setScreenshot({ key: scan.storageKey, url: scan.deliveryUrl, preview: local.preview });
       // Scan wins, the user corrects after — same contract as the label scan.
       setPaypalTxnIdState(scan.txnId ?? '');
       // Only when the scan actually read one: a screenshot whose id is legible
@@ -91,9 +100,10 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
       else if (scan.confidence < AI_CONFIDENCE_FLOOR) setScanNoticeKey('shipPayVerifyTxn');
     } catch (e) {
       // A failed scan never blocks the package: the id can be typed by hand.
-      // The service being down reads differently from a screenshot it couldn't
-      // make sense of, so the render side can say which.
-      setScanError(isAiServiceFailure(e) ? 'ai-unavailable' : 'scan-failed');
+      // The pipeline being down reads differently from a 4xx the backend has
+      // already explained (rate limit, unsupported type, too large), so keep
+      // its own words rather than collapsing them into "couldn't read it".
+      setScanError(scanErrorBanner(e));
     } finally {
       setScanBusy(false);
     }

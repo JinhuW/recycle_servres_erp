@@ -8,7 +8,7 @@ import { logger } from 'hono/logger';
 import { bodyLimit } from 'hono/body-limit';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
-import { appendErrorRecord } from './lib/error-log';
+import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
 
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
@@ -286,27 +286,6 @@ app.route('/api/tracker', trackerRoutes);
 app.route('/api/coordinator', coordinatorRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
-
-// Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
-// and are bearer-equivalent secrets — the only gate to a vendor's data. A
-// transient 500 on such a request must not write a replayable token into the
-// durable error log. Strip the token segment (and sensitive query values)
-// before anything reaches the sink.
-function redactSensitivePath(pathname: string): string {
-  return pathname.replace(/^(\/api\/public\/vendor\/)[^/]+/, '$1<redacted>');
-}
-const SENSITIVE_QUERY_KEYS = new Set([
-  'token', 'code', 'access_token', 'refresh_token', 'client_secret', 'at', 'rt',
-]);
-function redactSensitiveQuery(search: string): string | undefined {
-  if (!search) return undefined;
-  const params = new URLSearchParams(search);
-  let changed = false;
-  for (const k of [...params.keys()]) {
-    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) { params.set(k, '<redacted>'); changed = true; }
-  }
-  return changed ? `?${params.toString()}` : search;
-}
 
 app.onError((err, c) => {
   // Log the full error server-side with the request ID for correlation, but
