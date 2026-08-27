@@ -12,7 +12,8 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { insertDraftOrderTx } from '../services/orderDraft';
-import { carrierTrackingUrl } from '../shipping';
+import { carrierTrackingUrl, pickTrackingClient } from '../shipping';
+import { applyPackageTracking } from '../shipping/track';
 
 const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -38,12 +39,13 @@ type PackageRow = {
   order_id: string | null;
   created_by: string | null;
   created_at: Date;
+  tracking_registered_at: Date | null;
 };
 
 const PACKAGE_COLS = (sql: ReturnType<typeof getDb>) => sql`
   id, tracking_number, carrier, status, tracking_status, tracking_eta,
   last_tracked_at, seller_name, note, source, paypal_txn_id, payment_screenshot_key,
-  payment_screenshot_url, order_id, created_by, created_at
+  payment_screenshot_url, order_id, created_by, created_at, tracking_registered_at
 `;
 
 function toApi(r: PackageRow, creatorName: string | null) {
@@ -185,7 +187,58 @@ packages.post('/', async (c) => {
   if (!inserted.length) {
     return c.json({ error: 'This tracking number is already being tracked' }, 409);
   }
-  return c.json({ package: toApi(inserted[0], u.name) }, 201);
+
+  // Subscribe the number so the carrier's own scans push updates in. Best
+  // effort by design: a provider blip must not cost the user their entry, and
+  // the tracking loop's sweep registers whatever this misses.
+  const row = inserted[0];
+  const tracking = pickTrackingClient(c.env);
+  if (tracking.register) {
+    try {
+      await tracking.register.registerTracking(row.tracking_number, row.carrier, `package ${row.id}`);
+      await sql`UPDATE packages SET tracking_registered_at = NOW() WHERE id = ${row.id}`;
+    } catch (err) {
+      console.warn(`[packages] tracking registration failed for ${row.id}; the sweep will retry`, err);
+    }
+  }
+  return c.json({ package: toApi(row, u.name) }, 201);
+});
+
+// ── Ask the carrier now ──────────────────────────────────────────────────────
+// Updates normally arrive by webhook, and failing that on the 45-minute poll.
+// This is for the human standing at the receiving bench who wants the answer
+// before either.
+packages.post('/:id/refresh', async (c) => {
+  const u = c.var.user;
+  const sql = getDb(c.env);
+  const id = c.req.param('id');
+
+  const row = (await sql`
+    SELECT ${PACKAGE_COLS(sql)},
+           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name
+    FROM packages WHERE id = ${id} LIMIT 1
+  `)[0] as (PackageRow & { creator_name: string | null }) | undefined;
+  if (!row) return c.json({ error: 'Not found' }, 404);
+  if (!canMutate(u, row)) return c.json({ error: 'Forbidden' }, 403);
+
+  const tracking = pickTrackingClient(c.env);
+  if (tracking.provider === 'stub') {
+    return c.json({ error: 'Tracking is not configured — set SHIPPO_API_TOKEN' }, 501);
+  }
+
+  let info;
+  try {
+    info = await tracking.source.getShipment(row.tracking_number, row.carrier);
+  } catch (err) {
+    console.warn(`[packages] manual tracking refresh failed for ${id}`, err);
+    return c.json({ error: 'The tracking provider could not be reached — try again' }, 502);
+  }
+  await applyPackageTracking(sql, row, info);
+
+  const fresh = (await sql`
+    SELECT ${PACKAGE_COLS(sql)} FROM packages WHERE id = ${id} LIMIT 1
+  `)[0] as PackageRow;
+  return c.json({ package: toApi(fresh, row.creator_name) });
 });
 
 // ── Create the PO the delivered box becomes ──────────────────────────────────

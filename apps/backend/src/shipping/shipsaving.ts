@@ -16,6 +16,7 @@ import type {
   BuyContext, PurchasedLabel, RateQuote, ShipAddress, ShipPackage,
   ShippingClient, TrackingInfo, VoidRef,
 } from './types';
+import { parseEta } from './types';
 
 const DEFAULT_BASE = 'https://x-api.shipsaving.com';
 const TIMEOUT_MS = 20_000;
@@ -175,18 +176,6 @@ type WireTracking = {
   message: string | null;
   estimate_delivery_date: string | null;
 };
-
-// Carrier ETAs are calendar dates in the destination's timezone, wired as
-// local-time strings ("2025-08-26 22:37:27") or bare dates. Parsing them as
-// server-local instants would shift the calendar day for most viewers (the
-// server runs UTC), so store the date part as UTC midnight — the exact shape
-// the frontend's fmtEta renders as a timezone-free calendar date.
-function parseEta(s: string | null | undefined): Date | null {
-  if (!s) return null;
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s.trim());
-  const d = m ? new Date(`${m[1]}T00:00:00Z`) : new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
 
 function normalizeStatus(raw: string): TrackingInfo['normalized'] {
   switch (raw) {
