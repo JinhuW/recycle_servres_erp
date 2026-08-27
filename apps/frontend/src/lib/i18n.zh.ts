@@ -36,6 +36,7 @@ const zh: Record<string, string> = {
   gotIt: '识别成功', extractedConf: '识别置信度 {pct}%',
   lowConfVerify: '置信度偏低（{pct}%）——保存前请逐项核对下方所有字段。',
   unreadableLabel: 'AI 未能清晰识别此标签。请重新拍摄，或手动录入。',
+  aiUnavailable: 'AI 识别服务暂不可用。请重试；若仍然失败，请联系系统管理员。您仍可手动录入。',
   retakePhoto: '重新拍摄',
   enterManually: '手动录入',
   stubScanWarn: '示例 OCR —— 下方为内置样例数据，并非真实识别结果。请在后端配置 OPENROUTER_API_KEY 以启用真正的标签识别。',

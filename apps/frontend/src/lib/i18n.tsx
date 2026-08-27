@@ -90,6 +90,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     extractedConf: 'Extracted with {pct}% confidence',
     lowConfVerify: 'Low confidence ({pct}%) — please verify every field below before saving.',
     unreadableLabel: "AI couldn't read this label clearly. Please retake the photo, or enter the details manually.",
+    // Distinct from unreadableLabel: there the AI answered and the photo was
+    // the problem, so retaking it helps. Here the service never answered, and
+    // nothing the person in the warehouse does will change that.
+    aiUnavailable: 'AI recognition is unavailable. Please try again — if it keeps failing, contact your system manager. You can still enter the details by hand.',
     retakePhoto: 'Retake photo',
     enterManually: 'Enter manually',
     stubScanWarn: 'Demo OCR — the values below are canned sample data, not a real reading. Set OPENROUTER_API_KEY on the backend to enable real label scanning.',

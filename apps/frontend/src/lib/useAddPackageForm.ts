@@ -4,6 +4,7 @@ import { handleFetchError } from './errorToast';
 import { blobToDataUrl, compressForUpload } from './image-compress';
 import { addPackage, scanPaymentScreenshot } from './packages';
 import { normalizePaypalTxnInput, isStrictPaypalTxnId } from './paypalTxn';
+import { isAiServiceFailure } from './scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
 
 // The add-package form's whole non-JSX state machine, shared by the desktop
@@ -85,7 +86,9 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
       else if (scan.confidence < AI_CONFIDENCE_FLOOR) setScanNoticeKey('shipPayVerifyTxn');
     } catch (e) {
       // A failed scan never blocks the package: the id can be typed by hand.
-      setScanError(e instanceof Error ? e.message : 'scan failed');
+      // The service being down reads differently from a screenshot it couldn't
+      // make sense of, so the render side can say which.
+      setScanError(isAiServiceFailure(e) ? 'ai-unavailable' : 'scan-failed');
     } finally {
       setScanBusy(false);
     }
