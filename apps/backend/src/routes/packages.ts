@@ -46,7 +46,7 @@ const PACKAGE_COLS = (sql: ReturnType<typeof getDb>) => sql`
   payment_screenshot_url, order_id, created_by, created_at
 `;
 
-function toApi(r: PackageRow, creatorName: string | null = null) {
+function toApi(r: PackageRow, creatorName: string | null) {
   return {
     id: r.id,
     trackingNumber: r.tracking_number,

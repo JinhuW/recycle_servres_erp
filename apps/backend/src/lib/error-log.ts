@@ -26,6 +26,29 @@ export interface ErrorRecord {
   context?: Record<string, unknown>;
 }
 
+// Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
+// and are bearer-equivalent secrets — the only gate to a vendor's data. A
+// record written about such a request must not carry a replayable token into
+// the durable log. Lives here rather than beside app.onError because every
+// writer into this sink needs it, not just the unhandled-500 path.
+export function redactSensitivePath(pathname: string): string {
+  return pathname.replace(/^(\/api\/public\/vendor\/)[^/]+/, '$1<redacted>');
+}
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  'token', 'code', 'access_token', 'refresh_token', 'client_secret', 'at', 'rt',
+]);
+
+export function redactSensitiveQuery(search: string): string | undefined {
+  if (!search) return undefined;
+  const params = new URLSearchParams(search);
+  let changed = false;
+  for (const k of [...params.keys()]) {
+    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) { params.set(k, '<redacted>'); changed = true; }
+  }
+  return changed ? `?${params.toString()}` : search;
+}
+
 export interface AppendOptions {
   maxBytes?: number;
   maxFiles?: number;

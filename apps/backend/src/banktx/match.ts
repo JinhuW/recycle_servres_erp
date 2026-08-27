@@ -14,7 +14,11 @@ type SqlClient = ReturnType<typeof getDb>;
 // Candidates outside this window are not offered at all; inside it, the day
 // gap only ranks. STRONG is the window a payment is normally entered within,
 // and is what separates a confident match from a plausible one.
-export const MATCH_WINDOW_DAYS = 30;
+//
+// The pool window is wide on purpose: routes/packages.ts mints a draft PO when
+// a box is *delivered*, so for those the distance from the payment is the
+// shipment's transit time. A narrow pool doesn't rank those low, it hides them.
+export const MATCH_WINDOW_DAYS = 90;
 export const STRONG_WINDOW_DAYS = 7;
 
 // Cents of drift (rounding, an FX cent) should still match; a restocking fee
@@ -29,6 +33,9 @@ const EXACT_EPSILON = 0.005;
 // Same cap on both paths, so the row badge's count and the expanded list agree.
 const CANDIDATE_CAP = 25;
 
+// The TS mirror of tolFrag below. Both exist because the feed's filter has no
+// TypeScript leg to compute against; banktx-match.test.ts asserts they agree,
+// so changing one and not the other fails rather than silently ships.
 export function nearTolerance(amount: number): number {
   return Math.min(TOL_MAX, Math.max(TOL_MIN, Math.abs(amount) * TOL_PCT));
 }
@@ -51,6 +58,7 @@ export type CandidateRow = {
   seller_name: string | null;
   txn_hit: boolean;
   affinity: boolean;
+  pool_total: number;
 };
 
 export type MatchReason = 'txn' | 'exact' | 'near' | 'search';
@@ -72,8 +80,14 @@ export type RankedCandidate = {
   covered: boolean;
 };
 
+// `total` is the whole pool, `shown` what survived the cap. They differ often
+// enough that reporting only the capped number reads as "these are all of
+// them" when 35 more were never offered.
+export type CandidatePool = { ranked: RankedCandidate[]; total: number };
+
 export type MatchSummary = {
   count: number;
+  shown: number;
   confidence: MatchConfidence;
   best: {
     id: string;
@@ -87,48 +101,104 @@ export type MatchSummary = {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const WINDOW_INTERVAL = `${MATCH_WINDOW_DAYS} days`;
 
+// Floor, not round: a rounded gap puts "same day" next to two different dates,
+// and makes the strong window 7.5 days wide.
 function dayGapOf(createdAt: Date, postedAt: Date): number {
-  return Math.round(Math.abs(createdAt.getTime() - postedAt.getTime()) / MS_PER_DAY);
+  return Math.floor(Math.abs(createdAt.getTime() - postedAt.getTime()) / MS_PER_DAY);
+}
+
+export function tolFrag(sql: SqlClient, legAlias: string) {
+  const a = sql(legAlias);
+  return sql`LEAST(${TOL_MAX}, GREATEST(${TOL_MIN}, ABS(${a}.amount) * ${TOL_PCT}))`;
 }
 
 // Same-ish amount, near-ish in time. Drafts stay in — a payment very often
 // belongs to a PO that was only half entered.
-function amountDateFrag(sql: SqlClient, legAlias: string) {
+//
+// Two things this shape is load-bearing for:
+//   * The column is bare on the left of a BETWEEN, never wrapped in ABS(), so
+//     Postgres can turn it into a range and use the (total_cost, created_at)
+//     index. ABS(o.total_cost - amount) <= tol means the same thing and costs
+//     a full scan of `orders` per leg.
+//   * total_cost is the GOODS total (services/orderGoodsTotal.ts derives it
+//     from the lines); other_fees — PayPal fees, freight, a bought label —
+//     is a separate column the bank very much did charge. Matching only the
+//     goods total misses every PO with a fee bigger than TOL_MAX, i.e. most.
+function amountDateFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
   const a = sql(legAlias);
+  const o = sql(orderAlias);
+  const tol = tolFrag(sql, legAlias);
   return sql`
-    o.total_cost IS NOT NULL
-    AND ABS(o.total_cost - ABS(${a}.amount))
-          <= LEAST(${TOL_MAX}, GREATEST(${TOL_MIN}, ABS(${a}.amount) * ${TOL_PCT}))
-    AND o.created_at BETWEEN ${a}.posted_at - ${WINDOW_INTERVAL}::interval
-                         AND ${a}.posted_at + ${WINDOW_INTERVAL}::interval`;
+    ${o}.created_at BETWEEN ${a}.posted_at - ${WINDOW_INTERVAL}::interval
+                        AND ${a}.posted_at + ${WINDOW_INTERVAL}::interval
+    AND (
+      ${o}.total_cost BETWEEN ABS(${a}.amount) - ${tol} AND ABS(${a}.amount) + ${tol}
+      OR ${o}.total_cost + ${o}.other_fees
+           BETWEEN ABS(${a}.amount) - ${tol} AND ABS(${a}.amount) + ${tol}
+    )`;
 }
 
 // The PayPal txn id is an exact identifier, so it qualifies a PO on its own —
 // the amount legitimately differs when the payment covered fees the PO's goods
 // total doesn't. `packages` is included because that is where the OCR'd id
 // lands first, and often the only place it ever lands.
-function txnHitFrag(sql: SqlClient, legAlias: string) {
+function txnHitFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
   const a = sql(legAlias);
+  const o = sql(orderAlias);
   return sql`
     COALESCE(${a}.paypal_txn_id, '') <> '' AND (
-      UPPER(o.paypal_txn_id) = ${a}.paypal_txn_id
+      UPPER(${o}.paypal_txn_id) = UPPER(${a}.paypal_txn_id)
       OR EXISTS (SELECT 1 FROM packages p2
-                 WHERE p2.order_id = o.id AND UPPER(p2.paypal_txn_id) = ${a}.paypal_txn_id))`;
+                 WHERE p2.order_id = ${o}.id
+                   AND UPPER(p2.paypal_txn_id) = UPPER(${a}.paypal_txn_id)))`;
 }
 
-// The candidate set, defined once and correlated against whichever leg alias
-// the caller has in scope: `l` for the batch payload, `bt` for the feed's
-// EXISTS filter.
-function candidateFrag(sql: SqlClient, legAlias: string) {
-  return sql`o.archived_at IS NULL
-    AND ((${amountDateFrag(sql, legAlias)}) OR (${txnHitFrag(sql, legAlias)}))`;
+// Bank descriptors are not seller names: 'PAYPAL *JOHNSSERV' against a
+// hand-typed "John's Servers". Compare the letters-and-digits of each and
+// accept containment either way. The length floor keeps a two-character name
+// from matching every descriptor there is.
+function compressedFrag(sql: SqlClient, expr: ReturnType<SqlClient>) {
+  return sql`regexp_replace(upper(${expr}), '[^A-Z0-9]', '', 'g')`;
+}
+
+function sellerNameFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
+  const a = sql(legAlias);
+  const o = sql(orderAlias);
+  const cp = compressedFrag(sql, sql`${a}.counterparty`);
+  const seller = compressedFrag(sql, sql`p.seller_name`);
+  return sql`(
+    SELECT p.seller_name FROM packages p
+    WHERE p.order_id = ${o}.id AND p.seller_name IS NOT NULL
+      AND length(${cp}) >= 4 AND length(${seller}) >= 4
+      AND (strpos(${cp}, ${seller}) > 0 OR strpos(${seller}, ${cp}) > 0)
+    LIMIT 1
+  )`;
+}
+
+// A row the manager can still act on. Defined once so the status filter, the
+// `hasMatch` toggle, the stats tile and the rows that get a `match` payload
+// cannot drift apart — they did, and the toggle then returned linked rows
+// carrying no match at all.
+export function openRowFrag(sql: SqlClient, legAlias: string) {
+  const a = sql(legAlias);
+  return sql`${a}.order_id IS NULL AND NOT ${a}.ignored AND ${a}.category = 'external'`;
 }
 
 // For the list filter and the stats tile, where only "does this row have any
 // candidate at all" matters. Sits in the feed query's own WHERE so keyset
 // pagination over the filtered set stays honest.
+//
+// Two EXISTS rather than one with an OR inside: a single OR spanning the
+// amount range and the txn-id lookup can use neither index, and this predicate
+// runs once per open transaction on the Payments mount and after every
+// mutation.
 export function hasMatchFrag(sql: SqlClient, legAlias: string) {
-  return sql`EXISTS (SELECT 1 FROM orders o WHERE ${candidateFrag(sql, legAlias)})`;
+  return sql`(
+    EXISTS (SELECT 1 FROM orders o
+            WHERE o.archived_at IS NULL AND ${amountDateFrag(sql, legAlias)})
+    OR EXISTS (SELECT 1 FROM orders o
+               WHERE o.archived_at IS NULL AND ${txnHitFrag(sql, legAlias)})
+  )`;
 }
 
 // Ranking, in order: a PO that already has its money last, then a txn-id hit,
@@ -178,8 +248,12 @@ export function rankCandidates(leg: MatchLeg, rows: CandidateRow[]): RankedCandi
 
   return scored.map(({ exact, ...s }) => {
     let confidence: MatchConfidence = 'low';
-    if (s.reason === 'txn') confidence = 'high';
-    else if (s.covered) confidence = 'low';
+    // Covered comes first, and specifically before the txn-id branch: a
+    // settlement leg that failed auto-pairing finds its own already-linked PO
+    // by identifier, and `count === 1 && confidence === 'high'` is exactly what
+    // arms the one-click Link that would pay it twice.
+    if (s.covered) confidence = 'low';
+    else if (s.reason === 'txn') confidence = 'high';
     else if (exact && s.dayGap <= STRONG_WINDOW_DAYS) {
       confidence = strong.length === 1 ? 'high' : 'medium';
     } else if (exact && exactAny.length === 1) confidence = 'medium';
@@ -194,8 +268,8 @@ export async function fetchCandidatesBatch(
   sql: SqlClient,
   legs: MatchLeg[],
   limit: number,
-): Promise<Map<string, RankedCandidate[]>> {
-  const out = new Map<string, RankedCandidate[]>();
+): Promise<Map<string, CandidatePool>> {
+  const out = new Map<string, CandidatePool>();
   if (legs.length === 0) return out;
 
   const rows = await sql<(CandidateRow & { leg_id: string })[]>`
@@ -214,22 +288,19 @@ export async function fetchCandidatesBatch(
            o.total_cost::float AS total_cost,
            o.created_at,
            o.lifecycle,
+           o.txn_hit,
+           o.pool_total::int AS pool_total,
            u.name AS created_by_name,
+           -- Signed, and one row per logical payment: a paired charge writes
+           -- both legs, and a refund is money back. Summing ABS() over every
+           -- leg reported a $1,000 paired payment as $2,000 and read a
+           -- refunded PO as fully paid. Same guard GET /by-order/:id uses.
            COALESCE((
-             SELECT SUM(ABS(bt.amount)) FROM bank_transactions bt
+             SELECT -SUM(bt.amount) FROM bank_transactions bt
              WHERE bt.order_id = o.id AND NOT bt.ignored
+               AND (bt.pair_id IS NULL OR bt.source = 'paypal')
            ), 0)::float AS linked_total,
-           (
-             SELECT p.seller_name FROM packages p
-             WHERE p.order_id = o.id AND p.seller_name IS NOT NULL
-               AND l.counterparty <> '' AND p.seller_name ILIKE l.counterparty
-             LIMIT 1
-           ) AS seller_name,
-           (l.paypal_txn_id <> '' AND (
-              UPPER(o.paypal_txn_id) = l.paypal_txn_id
-              OR EXISTS (SELECT 1 FROM packages p2
-                         WHERE p2.order_id = o.id AND UPPER(p2.paypal_txn_id) = l.paypal_txn_id)
-           )) AS txn_hit,
+           ${sellerNameFrag(sql, 'l')} AS seller_name,
            EXISTS (
              SELECT 1 FROM bank_transactions bt2
              JOIN orders o2 ON o2.id = bt2.order_id
@@ -238,9 +309,24 @@ export async function fetchCandidatesBatch(
            ) AS affinity
     FROM l
     JOIN LATERAL (
-      SELECT o.* FROM orders o
-      WHERE ${candidateFrag(sql, 'l')}
-      ORDER BY o.created_at DESC
+      -- The cap has to drop the weakest candidates, not the oldest: ordering
+      -- by created_at before ranking evicted exactly the case txnHitFrag
+      -- exists for, a months-old PO carrying the payment's identifier.
+      SELECT o.*, cand.txn_hit, COUNT(*) OVER () AS pool_total
+      FROM (
+        SELECT id, bool_or(txn) AS txn_hit FROM (
+          SELECT a.id, FALSE AS txn FROM orders a
+          WHERE a.archived_at IS NULL AND ${amountDateFrag(sql, 'l', 'a')}
+          UNION ALL
+          SELECT b.id, TRUE AS txn FROM orders b
+          WHERE b.archived_at IS NULL AND ${txnHitFrag(sql, 'l', 'b')}
+        ) u GROUP BY id
+      ) cand
+      JOIN orders o ON o.id = cand.id
+      ORDER BY cand.txn_hit DESC,
+               LEAST(ABS(o.total_cost - l.amount),
+                     ABS(o.total_cost + o.other_fees - l.amount)) ASC NULLS LAST,
+               o.created_at DESC
       LIMIT ${limit}
     ) o ON TRUE
     JOIN users u ON u.id = o.user_id`;
@@ -253,7 +339,7 @@ export async function fetchCandidatesBatch(
   }
   for (const leg of legs) {
     const pool = byLeg.get(leg.id);
-    if (pool) out.set(leg.id, rankCandidates(leg, pool));
+    if (pool) out.set(leg.id, { ranked: rankCandidates(leg, pool), total: Number(pool[0].pool_total) });
   }
   return out;
 }
@@ -261,8 +347,9 @@ export async function fetchCandidatesBatch(
 export async function fetchCandidates(
   sql: SqlClient,
   leg: MatchLeg,
-): Promise<RankedCandidate[]> {
-  return (await fetchCandidatesBatch(sql, [leg], CANDIDATE_CAP)).get(leg.id) ?? [];
+): Promise<CandidatePool> {
+  return (await fetchCandidatesBatch(sql, [leg], CANDIDATE_CAP)).get(leg.id)
+    ?? { ranked: [], total: 0 };
 }
 
 export async function matchSummaries(
@@ -271,11 +358,12 @@ export async function matchSummaries(
 ): Promise<Map<string, MatchSummary>> {
   const out = new Map<string, MatchSummary>();
   const batch = await fetchCandidatesBatch(sql, legs, CANDIDATE_CAP);
-  for (const [legId, ranked] of batch) {
+  for (const [legId, { ranked, total }] of batch) {
     if (ranked.length === 0) continue;
     const best = ranked[0];
     out.set(legId, {
-      count: ranked.length,
+      count: total,
+      shown: ranked.length,
       confidence: best.confidence,
       best: {
         id: best.id,

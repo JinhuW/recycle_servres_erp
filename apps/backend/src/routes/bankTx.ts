@@ -9,10 +9,10 @@
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
-import { fetchCandidates, hasMatchFrag, matchSummaries, type MatchLeg } from '../banktx/match';
+import { fetchCandidates, hasMatchFrag, matchSummaries, openRowFrag, type MatchLeg } from '../banktx/match';
 import { syncBankTransactions } from '../banktx/sync';
 import { getDb } from '../db';
-import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
+import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import type { Env, User } from '../types';
 
 const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
@@ -64,7 +64,8 @@ async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
            linked_by, linked_at, ignored, category
     FROM bank_transactions
     WHERE id = ${id}
-       OR pair_id = (SELECT pair_id FROM bank_transactions WHERE id = ${id} AND pair_id IS NOT NULL)`;
+       OR pair_id = (SELECT pair_id FROM bank_transactions WHERE id = ${id} AND pair_id IS NOT NULL)
+    ORDER BY source DESC, id`;
 }
 
 // ─── List ─────────────────────────────────────────────────────────────────────
@@ -80,7 +81,7 @@ bankTx.get('/', async (c) => {
   const cursor = decodeCursor(c.req.query('cursor'));
 
   const statusFrag =
-    status === 'unlinked' ? sql`bt.order_id IS NULL AND NOT bt.ignored AND bt.category = 'external'`
+    status === 'unlinked' ? openRowFrag(sql, 'bt')
     : status === 'linked' ? sql`bt.order_id IS NOT NULL`
     : status === 'ignored' ? sql`bt.ignored`
     : status === 'transfer' ? sql`bt.category = 'transfer'`
@@ -95,7 +96,7 @@ bankTx.get('/', async (c) => {
     direction === 'out' ? sql`bt.amount < 0`
     : direction === 'in' ? sql`bt.amount > 0`
     : sql`TRUE`;
-  const like = `%${q}%`;
+  const like = `%${escapeLike(q)}%`;
   const qFrag = q
     ? sql`(bt.order_id ILIKE ${like} OR EXISTS (
         SELECT 1 FROM bank_transactions ql
@@ -108,7 +109,9 @@ bankTx.get('/', async (c) => {
     : sql`AND TRUE`;
   // In the WHERE rather than applied to the page, so keyset pagination over
   // the filtered set doesn't return short pages.
-  const matchFrag = hasMatch ? hasMatchFrag(sql, 'bt') : sql`TRUE`;
+  const matchFrag = hasMatch
+    ? sql`${openRowFrag(sql, 'bt')} AND ${hasMatchFrag(sql, 'bt')}`
+    : sql`TRUE`;
 
   const rows = await sql`
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
@@ -194,7 +197,7 @@ bankTx.get('/stats', async (c) => {
     SELECT COUNT(*)::int AS count
     FROM bank_transactions bt
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
-      AND bt.order_id IS NULL AND NOT bt.ignored AND bt.category = 'external'
+      AND ${openRowFrag(sql, 'bt')}
       AND ${hasMatchFrag(sql, 'bt')}`;
   const sources = await sql`
     SELECT source, MAX(last_synced_at) AS last_synced_at FROM bank_accounts GROUP BY source`;
@@ -429,31 +432,43 @@ bankTx.get('/:id/suggestions', async (c) => {
   const q = c.req.query('q')?.trim() ?? '';
 
   if (!q) {
-    const ranked = await fetchCandidates(sql, {
+    const { ranked, total } = await fetchCandidates(sql, {
       id: leg.id,
       amount: Number(leg.amount),
       posted_at: leg.posted_at,
       counterparty: leg.counterparty,
       paypal_txn_id: leg.paypal_txn_id,
     });
-    return c.json({ suggestions: ranked });
+    // `total` is the uncapped pool: the list is truncated and saying so is the
+    // difference between "these are all of them" and "keep looking".
+    return c.json({ suggestions: ranked, total });
   }
 
   type OrderRow = {
     id: string; total_cost: number | null; created_at: Date; lifecycle: string;
-    created_by_name: string | null; seller_name: string | null;
+    created_by_name: string | null; seller_name: string | null; txn_hit: boolean;
   };
-  const like = `%${q}%`;
+  const like = `%${escapeLike(q)}%`;
+  // The identifier lookup is not a text search — pasting the txn id shown on
+  // the row has to find the PO carrying it even though nothing about it is
+  // "like" anything, and it outranks every fuzzy hit. Archived POs stay out,
+  // matching the no-q path; POST /:id/link would otherwise accept one.
+  const txnHit = sql`(UPPER(o.paypal_txn_id) = UPPER(${q})
+    OR EXISTS (SELECT 1 FROM packages pt
+               WHERE pt.order_id = o.id AND UPPER(pt.paypal_txn_id) = UPPER(${q})))`;
   const rows = await sql<OrderRow[]>`
     SELECT o.id, o.total_cost::float AS total_cost, o.created_at, o.lifecycle,
            u.name AS created_by_name,
+           ${txnHit} AS txn_hit,
            (SELECT p.seller_name FROM packages p
             WHERE p.order_id = o.id AND p.seller_name ILIKE ${like} LIMIT 1) AS seller_name
     FROM orders o JOIN users u ON u.id = o.user_id
-    WHERE o.id ILIKE ${like} OR u.name ILIKE ${like}
-       OR EXISTS (SELECT 1 FROM packages p2
-                  WHERE p2.order_id = o.id AND p2.seller_name ILIKE ${like})
-    ORDER BY o.created_at DESC LIMIT 10`;
+    WHERE o.archived_at IS NULL
+      AND (o.id ILIKE ${like} OR u.name ILIKE ${like}
+           OR EXISTS (SELECT 1 FROM packages p2
+                      WHERE p2.order_id = o.id AND p2.seller_name ILIKE ${like})
+           OR ${txnHit})
+    ORDER BY txn_hit DESC, o.created_at DESC LIMIT 10`;
   return c.json({
     suggestions: rows.map((r) => ({
       id: r.id,
@@ -461,7 +476,7 @@ bankTx.get('/:id/suggestions', async (c) => {
       createdAt: r.created_at,
       lifecycle: r.lifecycle,
       createdByName: r.created_by_name,
-      reason: 'search' as const,
+      reason: (r.txn_hit ? 'txn' : 'search') as 'txn' | 'search',
       dayGap: null,
       amountDiff: null,
       confidence: 'low' as const,
@@ -470,6 +485,7 @@ bankTx.get('/:id/suggestions', async (c) => {
       affinity: false,
       covered: false,
     })),
+    total: rows.length,
   });
 });
 

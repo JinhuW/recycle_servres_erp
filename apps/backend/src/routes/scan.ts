@@ -5,7 +5,7 @@ import { scanLabel } from '../ai';
 import { extractPaypalTxn } from '../ai/paypal';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
-import { appendErrorRecord } from '../lib/error-log';
+import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from '../lib/error-log';
 import { getUploadLimits } from '../lib/settings';
 import type { Env, LineCategory, User } from '../types';
 
@@ -28,25 +28,37 @@ function rateLimited(userId: string): number | null {
   return null;
 }
 
-// A scan the recognition service never answered. The user is told to try again
-// and then to escalate, so leave the operator something to find when they do:
-// one record in the same sink as the partial-fill warnings, carrying who hit it
-// and what the provider actually said.
+// A scan the pipeline never completed. The user is told to try again and then
+// to escalate, so leave the operator something to find when they do: one
+// record in the same sink as the partial-fill warnings, carrying who hit it
+// and what actually failed.
+//
+// `stage` matters more than it looks. Both failures reach the warehouse as the
+// same "scanning is unavailable" banner — nothing they can do differs — so the
+// record is the only place the two are told apart, and an operator who greps
+// this file after an R2 outage must not be sent to check OPENROUTER_API_KEY.
+type ScanStage = 'ocr' | 'upload';
 type ScanCtx = { var: { requestId?: string }; req: { method: string; url: string } };
-function logScanFailure(c: ScanCtx, u: User, kind: 'label' | 'payment', e: unknown): void {
-  console.error(`${kind} ocr error`, e);
+function logScanFailure(
+  c: ScanCtx, u: User, kind: 'label' | 'payment', stage: ScanStage, e: unknown,
+): void {
+  const what = stage === 'upload' ? 'image upload (R2)' : 'OCR';
+  console.error(`${kind} ${stage} error`, e);
   const dir = process.env.ERROR_LOG_DIR;
   if (!dir) return;
+  const url = new URL(c.req.url);
   void appendErrorRecord(dir, {
     ts: new Date().toISOString(),
     requestId: c.var.requestId ?? 'unknown',
     level: 'error',
     method: c.req.method,
-    path: new URL(c.req.url).pathname,
+    path: redactSensitivePath(url.pathname),
+    query: redactSensitiveQuery(url.search),
     userId: u.id,
     userEmail: u.email,
-    message: `${kind} OCR failed: ${e instanceof Error ? e.message : String(e)}`,
-    context: { kind },
+    message: `${kind} ${what} failed: ${e instanceof Error ? e.message : String(e)}`,
+    stack: e instanceof Error ? e.stack : undefined,
+    context: { kind, stage },
   });
 }
 
@@ -93,10 +105,14 @@ scan.post('/label', async (c) => {
   // Upload first, then OCR. If upload fails the user retries with the same
   // shot — no orphan rows in the DB.
   const uploaded = await uploadAttachment(c.env, file, 'label-scans').catch((e) => {
-    console.error('label image upload error', e);
+    logScanFailure(c, u, 'label', 'upload', e);
     return null;
   });
-  if (!uploaded) return c.json({ error: 'image upload failed' }, 502);
+  if (!uploaded) {
+    return c.json({
+      error: 'label image upload failed — the image store is unavailable; contact your system manager if it persists',
+    }, 502);
+  }
 
   // Without R2 configured the helper returns a usable-looking data: URL; keep
   // the frontend's placeholder filter working by normalising the stub to the
@@ -110,7 +126,7 @@ scan.post('/label', async (c) => {
   try {
     result = await scanLabel(c.env, category, bytes);
   } catch (e) {
-    logScanFailure(c, u, 'label', e);
+    logScanFailure(c, u, 'label', 'ocr', e);
     return c.json({
       error: 'label OCR failed — the AI recognition service is unavailable; contact your system manager if it persists',
     }, 502);
@@ -210,10 +226,14 @@ scan.post('/payment', async (c) => {
   }
 
   const uploaded = await uploadAttachment(c.env, file, 'payment-screens').catch((e) => {
-    console.error('payment screenshot upload error', e);
+    logScanFailure(c, u, 'payment', 'upload', e);
     return null;
   });
-  if (!uploaded) return c.json({ error: 'image upload failed' }, 502);
+  if (!uploaded) {
+    return c.json({
+      error: 'payment image upload failed — the image store is unavailable; contact your system manager if it persists',
+    }, 502);
+  }
   const deliveryUrl = uploaded.provider === 'stub'
     ? `data:image/placeholder;name=${uploaded.storageKey}`
     : uploaded.deliveryUrl;
@@ -222,7 +242,7 @@ scan.post('/payment', async (c) => {
   try {
     result = await extractPaypalTxn(c.env, await file.arrayBuffer());
   } catch (e) {
-    logScanFailure(c, u, 'payment', e);
+    logScanFailure(c, u, 'payment', 'ocr', e);
     return c.json({
       error: 'payment OCR failed — the AI recognition service is unavailable; contact your system manager if it persists',
     }, 502);

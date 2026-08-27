@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LangProvider } from './lib/i18n';
 import { vendorTokenFromPath } from './lib/vendor';
 
@@ -46,9 +47,11 @@ export default function App() {
   if (sellerToken) {
     return (
       <LangProvider>
-        <Suspense fallback={<div className="app-loading" />}>
-          <SellerShippingApp token={sellerToken} />
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<div className="app-loading" />}>
+            <SellerShippingApp token={sellerToken} />
+          </Suspense>
+        </ErrorBoundary>
       </LangProvider>
     );
   }
@@ -57,17 +60,21 @@ export default function App() {
   if (vendorToken) {
     return (
       <LangProvider>
-        <Suspense fallback={<div className="app-loading" />}>
-          <VendorApp token={vendorToken} isPhone={isPhone} />
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<div className="app-loading" />}>
+            <VendorApp token={vendorToken} isPhone={isPhone} />
+          </Suspense>
+        </ErrorBoundary>
       </LangProvider>
     );
   }
   return (
     <LangProvider>
-      <Suspense fallback={<div className="app-loading" />}>
-        {isPhone ? <MobileApp /> : <DesktopApp />}
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense fallback={<div className="app-loading" />}>
+          {isPhone ? <MobileApp /> : <DesktopApp />}
+        </Suspense>
+      </ErrorBoundary>
       {isPhone && (
         <Suspense fallback={null}>
           <PwaInstallPrompt />

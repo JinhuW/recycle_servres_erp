@@ -91,9 +91,11 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     lowConfVerify: 'Low confidence ({pct}%) — please verify every field below before saving.',
     unreadableLabel: "AI couldn't read this label clearly. Please retake the photo, or enter the details manually.",
     // Distinct from unreadableLabel: there the AI answered and the photo was
-    // the problem, so retaking it helps. Here the service never answered, and
-    // nothing the person in the warehouse does will change that.
-    aiUnavailable: 'AI recognition is unavailable. Please try again — if it keeps failing, contact your system manager. You can still enter the details by hand.',
+    // the problem, so retaking it helps. Here the scan pipeline never answered
+    // — recognition or the image store — and nothing the person in the
+    // warehouse does will change that, so don't name a subsystem they can't
+    // check. Which one failed is in the backend's error log.
+    aiUnavailable: 'Scanning is unavailable. Please try again — if it keeps failing, contact your system manager. You can still enter the details by hand.',
     retakePhoto: 'Retake photo',
     enterManually: 'Enter manually',
     stubScanWarn: 'Demo OCR — the values below are canned sample data, not a real reading. Set OPENROUTER_API_KEY on the backend to enable real label scanning.',
@@ -376,6 +378,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payFilterHasMatch: 'Has match',
     payMatchLikely: 'Likely {id} · {when}',
     payMatchCountOne: '1 possible PO',
+    // The pool is capped, so a count larger than the list has to say so —
+    // otherwise working all of them and finding nothing looks conclusive.
+    payMatchShowing: 'showing {shown} of {total}',
     payMatchCount: '{n} possible POs',
     payMatchNotIt: 'Not it',
     payMatchSuggested: 'Suggested purchase orders',
@@ -1676,6 +1681,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
 
     // Misc
     generalErrorMsg: 'Something went wrong. Please try again.',
+    errBoundaryTitle: 'This page stopped responding',
+    errBoundaryBody: 'Reloading usually fixes it. If it happens again, contact your system manager.',
+    errBoundaryReload: 'Reload',
 
     // InventoryProductTable
     iptProduct: 'Product',
