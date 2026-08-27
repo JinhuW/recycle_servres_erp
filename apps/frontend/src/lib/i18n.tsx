@@ -1526,6 +1526,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // LineFields
     selectPlaceholder: 'Select…',
     comboUseCustom: 'Use “{value}”',
+    comboSearching: 'Searching…',
+    pnSuggestHint: 'Keep typing to find existing parts',
     healthPct: 'Health (%)',
     lfItemDescription: 'Item description',
     lfItemType: 'Item type',
