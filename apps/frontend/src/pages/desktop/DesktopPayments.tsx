@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
@@ -73,6 +74,14 @@ type ActResult = {
 const FILTER_SELECT: CSSProperties = {
   width: 'auto', minWidth: 132, height: 32, fontSize: 12.5,
 };
+
+// PoPicker geometry (see the portal note on the component).
+type Place = { left: number; top?: number; bottom?: number; listMax: number };
+const PANEL_W = 320;
+const GAP = 4;
+const SEARCH_ROW_H = 49;
+const MIN_PANEL = 168;
+const MAX_PANEL = 312;
 
 const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
   mercury: 'Mercury',
@@ -366,6 +375,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
 }) {
   const { t } = useT();
   const [picking, setPicking] = useState(false);
+  const linkBtn = useRef<HTMLButtonElement | null>(null);
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
@@ -411,7 +421,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
             </button>
           ) : (
             <span style={{ display: 'inline-flex', gap: 6 }} onClick={stop}>
-              <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
+              <button type="button" className="btn sm" ref={linkBtn} onClick={() => setPicking(p => !p)}>
                 {t('payLink')}
               </button>
               <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
@@ -420,7 +430,13 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
             </span>
           )}
           {picking && !row.orderId && (
-            <PoPicker txnId={row.id} onPick={link} onClose={() => setPicking(false)} locale={locale} />
+            <PoPicker
+              anchor={linkBtn.current}
+              txnId={row.id}
+              onPick={link}
+              onClose={() => setPicking(false)}
+              locale={locale}
+            />
           )}
         </td>
       </tr>
@@ -512,7 +528,12 @@ function ExpandedDetail({ row, locale, act, onToast }: {
 // Searchable PO dropdown (CustomerPicker shape). Opens with the server's
 // ranked suggestions — txn-id match first, then same-amount orders — and
 // switches to free search as the manager types.
-function PoPicker({ txnId, onPick, onClose, locale }: {
+//
+// Rendered in a body portal with fixed coordinates: its trigger sits in a
+// `.table-scroll` cell, and that container's `overflow-y: hidden` would clip
+// an absolutely positioned panel to the last table row.
+function PoPicker({ anchor, txnId, onPick, onClose, locale }: {
+  anchor: HTMLElement | null;
   txnId: string;
   onPick: (orderId: string) => void;
   onClose: () => void;
@@ -521,16 +542,46 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
   const { t } = useT();
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<Suggestion[] | null>(null);
+  const [place, setPlace] = useState<Place | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const reqId = useRef(0);
 
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    const put = () => {
+      const r = anchor.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom - GAP * 2;
+      const above = r.top - GAP * 2;
+      const up = below < MIN_PANEL && above > below;
+      const panel = Math.min(MAX_PANEL, Math.max(MIN_PANEL, up ? above : below));
+      // Flipped up it is pinned by its bottom edge: anchoring by `top` would
+      // hold the panel at its max height and leave a gap above short lists.
+      setPlace({
+        left: Math.max(GAP, Math.min(r.right - PANEL_W, window.innerWidth - PANEL_W - GAP)),
+        top: up ? undefined : r.bottom + GAP,
+        bottom: up ? window.innerHeight - r.top + GAP : undefined,
+        listMax: panel - SEARCH_ROW_H,
+      });
+    };
+    put();
+    // Capture phase: the anchor scrolls with `.table-scroll` and the page both.
+    window.addEventListener('scroll', put, true);
+    window.addEventListener('resize', put);
+    return () => {
+      window.removeEventListener('scroll', put, true);
+      window.removeEventListener('resize', put);
+    };
+  }, [anchor]);
+
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || anchor?.contains(target)) return;
+      onClose();
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
-  }, [onClose]);
+  }, [anchor, onClose]);
 
   useEffect(() => {
     const id = ++reqId.current;
@@ -547,14 +598,16 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
     txn: 'payReasonTxn', amount: 'payReasonAmount', search: null,
   };
 
-  return (
+  if (!place) return null;
+
+  return createPortal(
     <div
       ref={ref}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'absolute', top: 'calc(100% + 4px)', right: 0, width: 320,
+        position: 'fixed', top: place.top, bottom: place.bottom, left: place.left, width: PANEL_W,
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
-        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 30, overflow: 'hidden',
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 41, overflow: 'hidden',
         cursor: 'default', textAlign: 'left',
       }}
     >
@@ -572,7 +625,7 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
           style={{ paddingLeft: 30, height: 32, fontSize: 13 }}
         />
       </div>
-      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+      <div style={{ maxHeight: place.listMax, overflowY: 'auto' }}>
         {rows === null ? (
           <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payMoreLoading')}</div>
         ) : rows.length === 0 ? (
@@ -602,6 +655,7 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
           );
         })}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
