@@ -219,6 +219,8 @@ describe('bank transaction sync', () => {
   it('classifies PayPal bank-transfer event codes as transfer', () => {
     expect(paypalTxnCategory('T0300')).toBe('transfer'); // bank deposit into PayPal
     expect(paypalTxnCategory('T0403')).toBe('transfer'); // withdrawal to bank
+    expect(paypalTxnCategory('T0700')).toBe('transfer'); // card-funded top-up
+    expect(paypalTxnCategory('T0701')).toBe('transfer'); // card deposit for negative balance
     expect(paypalTxnCategory('T0006')).toBe('external'); // regular payment
     expect(paypalTxnCategory(undefined)).toBe('external');
   });
@@ -294,10 +296,21 @@ describe('bank transaction sync', () => {
   });
 
   it('classifies Mercury internal-account moves as transfer', () => {
-    expect(mercuryTxnCategory('internalTransfer')).toBe('transfer'); // own accounts
-    expect(mercuryTxnCategory('treasuryTransfer')).toBe('transfer');
-    expect(mercuryTxnCategory('incomingDomesticWire')).toBe('external');
-    expect(mercuryTxnCategory(undefined)).toBe('external');
+    expect(mercuryTxnCategory('internalTransfer', null)).toBe('transfer'); // own accounts
+    expect(mercuryTxnCategory('treasuryTransfer', null)).toBe('transfer');
+    expect(mercuryTxnCategory('incomingDomesticWire', null)).toBe('external');
+    expect(mercuryTxnCategory(undefined, null)).toBe('external');
+  });
+
+  it('classifies Mercury PayPal ACH descriptor rows as transfer, card settlements as external', () => {
+    // ACH moves between our own PayPal and Mercury carry the "PAYPAL; …" descriptor.
+    expect(mercuryTxnCategory('other', 'PAYPAL; RETRY PYMT; RECYCLE SERVERS LLC')).toBe('transfer');
+    expect(mercuryTxnCategory('other', 'PAYPAL; TRANSFER; RECYCLE SERVERS LLC')).toBe('transfer');
+    expect(mercuryTxnCategory('other', 'PAYPAL; PURCHASE; RECYCLE SERVERS LLC')).toBe('transfer');
+    // Card purchases at PayPal merchants use "PAYPAL *name" — real payments,
+    // must stay pairable with the PayPal payment leg.
+    expect(mercuryTxnCategory('debitCardTransaction', 'PAYPAL *tywhitsett')).toBe('external');
+    expect(mercuryTxnCategory('other', 'ACME SUPPLY CO ACH')).toBe('external');
   });
 
   it('a counterparty rule classifies matching syncs, skipping linked and manual rows', async () => {
