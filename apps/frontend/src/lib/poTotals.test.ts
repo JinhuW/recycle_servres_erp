@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from './poTotals';
+import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from './poTotals';
 
 describe('poEffectiveCost', () => {
   it('uses the line subtotal when there is no override', () => {
@@ -96,5 +96,24 @@ describe('parseFeeInput', () => {
   it('reads a negative or zero amount as no fee', () => {
     expect(parseFeeInput('-20')).toBe(0);
     expect(parseFeeInput('0')).toBe(0);
+  });
+});
+
+describe('feeEq', () => {
+  // The exact shape the edit page hits: the input is seeded from
+  // `(250.30 - 12.10).toFixed(2)` while the dirty check compares against the
+  // raw subtraction, which is 238.20000000000002. Plain !== called every
+  // shipping-labelled order dirty the moment it opened — and past Draft that
+  // costs the purchaser the stage.
+  it('ignores float noise below a cent', () => {
+    expect(feeEq(Number('238.20'), 250.30 - 12.10)).toBe(true);
+    expect(feeEq(0.1 + 0.2, 0.3)).toBe(true);
+    expect(feeEq(238.2, 238.2)).toBe(true);
+  });
+
+  it('still sees a real change of one cent', () => {
+    expect(feeEq(238.20, 238.21)).toBe(false);
+    expect(feeEq(0, 0.01)).toBe(false);
+    expect(feeEq(250, 0)).toBe(false);
   });
 });

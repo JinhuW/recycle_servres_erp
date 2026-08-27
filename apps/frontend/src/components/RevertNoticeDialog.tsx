@@ -86,7 +86,7 @@ export function RevertNoticeDialog({ orderId, changes, onAcknowledged, onDismiss
           return (
             <div key={ch.id} style={{ display: 'grid', gap: 10 }}>
               <div style={{ fontSize: 12, color: 'var(--fg-subtle)', display: 'flex', gap: 8 }}>
-                <span>{relTime(ch.createdAt)}</span>
+                <span>{relTime(ch.createdAt, locale)}</span>
                 {d.from && <span className="chip" style={{ fontSize: 11 }}>
                   {LIFECYCLE_LABEL[d.from] ?? d.from} → {LIFECYCLE_LABEL.draft}
                 </span>}

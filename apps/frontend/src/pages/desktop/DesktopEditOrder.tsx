@@ -6,7 +6,7 @@ import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
-import { poEffectiveCost, parseFeeInput, readStoredGoodsTotal } from '../../lib/poTotals';
+import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
@@ -111,18 +111,22 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // send it back to Reviewing (the backend guards lines committed to open
   // sell orders). Everything else stays read-only until that reopen lands.
   const canReopen = !isPurchaser && orderLocked;
-  // Submitting is the one stage move a purchaser makes. Everything after it is
-  // the manager's, and a purchaser edit moves the stage on its own — so past
-  // Draft the stepper offers nothing to pick.
-  const allowedStatuses = isPurchaser
-    ? effectiveStatus === 'Draft' ? ['Draft', 'In Transit'] : [effectiveStatus]
-    : ORDER_STATUSES.slice();
-
   const [status, setStatus] = useState(effectiveStatus);
   // The stage as last written. Normally the one the page opened with, but a
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
+  // Submitting is the one stage move a purchaser makes. Everything after it is
+  // the manager's, and a purchaser edit moves the stage on its own — so past
+  // Draft the stepper offers nothing to pick.
+  //
+  // Keyed off `savedStatus`, not the `order` prop: an edit that sent the order
+  // back to Draft has already moved the stage, and the prop does not refetch
+  // while this page is open. Reading the prop leaves the purchaser told to
+  // "submit it again" with only the stage they just left on offer.
+  const allowedStatuses = isPurchaser
+    ? savedStatus === 'Draft' ? ['Draft', 'In Transit'] : [savedStatus]
+    : ORDER_STATUSES.slice();
   // Optional Done evidence (note + attachments). The dialog live-saves to the
   // backend; these mirror its latest confirmed state for the read-only block.
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -303,7 +307,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Archive: owner-or-manager, any non-Draft stage. Either flips to the other.
   // (Draft uses Delete instead; the backend enforces the same split.)
   const isArchived = !!order.archivedAt;
-  const canArchive = isOwnerOrManager && effectiveStatus !== 'Draft';
+  // Mirrors the backend: a reverted order is a Draft that HAS been submitted,
+  // and Delete refuses exactly those — so Archive has to take it, or the order
+  // offers neither. Unarchiving is always available once archived.
+  const canArchive = isOwnerOrManager
+    && (!!order.archivedAt || effectiveStatus !== 'Draft' || !!order.everSubmitted);
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
   // Filled when save() detects duplicate part numbers; the modal then drives a
@@ -507,9 +515,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const parsedOtherFees = parseFeeInput(otherFeesInput);
   // Compare against the user-only part once the split is known; before that
   // the inputs still hold the raw column values, so the raw baseline applies.
-  const otherFeesDirty = shipSplit
-    ? parsedOtherFees !== order.otherFees - shipSplit.fees
-    : parsedOtherFees !== order.otherFees;
+  // Compared in cents, not as raw floats: the input is seeded from
+  // `(order.otherFees - fees).toFixed(2)` while the baseline is the unrounded
+  // subtraction, so `250.30 - 12.10` is 238.20000000000002 against an input of
+  // "238.20" and a plain !== calls every labelled order dirty on mount — which
+  // now costs a purchaser the stage for opening the page. The column is
+  // NUMERIC(12,2); that is the precision a change has to show up at.
+  const otherFeesDirty = !feeEq(
+    parsedOtherFees,
+    shipSplit ? order.otherFees - shipSplit.fees : order.otherFees,
+  );
   const otherFeesNoteDirty = shipSplit
     ? otherFeesNote.trim() !== splitFeeNote(order.otherFeesNote).userNote
     : otherFeesNote.trim() !== (order.otherFeesNote ?? '');
@@ -571,9 +586,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
+  // Line readiness gates only the saves that actually write lines. A note-only
+  // save sends none, so an incomplete legacy line must not block it — the
+  // purchaser can't fix that line at this stage anyway.
   const canSave =
     dirty && !saving && (!orderLocked || (canReopen && statusDirty))
-    && (!canEditOrder || lines.every(lineReady));
+    && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
   // capture screen asks the same question, and used to name the same blank
@@ -693,11 +711,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
         await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
         setSavedStatus(status);
-      } else if (LIFECYCLE_STATUS[r.lifecycle] && LIFECYCLE_STATUS[r.lifecycle] !== savedStatus) {
-        // The edit moved the stage on its own (a purchaser's change sends the
-        // order back to Draft). Only matters when a photo retry keeps us here.
-        setStatus(LIFECYCLE_STATUS[r.lifecycle]);
-        setSavedStatus(LIFECYCLE_STATUS[r.lifecycle]);
+      } else {
+        applyLifecycle(r.lifecycle);
       }
       // The order is saved either way, but those Files exist nowhere else and
       // this page is the only thing holding them — leaving now would discard
@@ -715,6 +730,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     } finally {
       setSaving(false);
     }
+  };
+
+  // PATCH returns where the order ended up: a purchaser's material change sends
+  // it back to Draft. Every write path has to take this, or the page keeps
+  // showing the stage the order left and the stepper offers no way back.
+  const applyLifecycle = (lifecycle: string | undefined) => {
+    const next = lifecycle ? LIFECYCLE_STATUS[lifecycle] : undefined;
+    if (!next || next === savedStatus) return;
+    setStatus(next);
+    setSavedStatus(next);
   };
 
   // A purchaser's first write to a submitted order costs it the stage, so ask
@@ -758,20 +783,26 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     if (!lineReady(l)) throw new Error(t('subFillThisLine'));
     // Nothing to push for an untouched server line; skip the round trip.
     if (l._id && !l._dirty) return;
-    // Confirm writes straight through, so the stage warning belongs here too.
-    if (!(await askRevert())) throw new Error(t('revertWarnCancelled'));
     const issue = serialIssueFor(l);
     if (issue) {
       setSerialIssues([{ lineNo: i + 1, label: l.partNumber || itemType(l), issue }]);
       // Thrown so the drawer keeps itself open for the fix.
       throw new Error(t('serialCheckTitle'));
     }
-    const r = await api.patch<{ ok: true; addedLineIds: string[] }>(
+    // Confirm writes straight through, so the stage warning belongs here too —
+    // but after the checks that can still abort, or a save that never happens
+    // spends the once-per-visit acknowledgement.
+    if (!(await askRevert())) throw new Error(t('revertWarnCancelled'));
+    const r = await api.patch<{ ok: true; addedLineIds: string[]; lifecycle: string }>(
       `/api/orders/${order.id}`,
       l._id
         ? { lines: [editLineToPatch(l)] }
         : { addLines: [editLineToInsert(l, status)] },
     );
+    // A purchaser's confirm can send the order back to Draft. Without this the
+    // page keeps showing the old stage, the stepper still offers only that
+    // stage, and there is no way to re-submit short of a reload.
+    applyLifecycle(r.lifecycle);
     const newId = l._id ?? r.addedLineIds[0];
     setLines(ls => ls.map((x, j) => (j === i ? { ...x, _id: newId, _dirty: false } : x)));
     if (!l._id && newId) {

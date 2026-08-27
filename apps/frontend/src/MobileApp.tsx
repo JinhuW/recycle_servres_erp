@@ -510,8 +510,9 @@ function Shell() {
         await flushLinePhotos(line, orderId, line.id);
         if (backToDetail) doneToDetail();
       } catch (e) {
-        // The backend refuses line edits from a purchaser past Draft. The
-        // detail screen hides the affordance, but say why if one gets through.
+        // A purchaser may edit until Done; past Draft it costs the order its
+        // stage, and the detail screen warns before it sends anyone here. What
+        // still refuses is a line an open sell or transfer order has claimed.
         handleFetchError(e);
       }
       return;
