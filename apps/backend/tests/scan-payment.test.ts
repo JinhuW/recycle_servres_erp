@@ -152,7 +152,7 @@ describe('paypal txn id — package → PO carry-over and PATCH', () => {
     expect(row.paypal_txn_id).toBeNull();
   });
 
-  it('PATCH: the owner edits it in draft; after submission it is manager-only', async () => {
+  it('PATCH: the owner edits it in draft; after submission the edit sends the PO back to draft', async () => {
     const marcus = await loginAs(MARCUS);
     const priya = await loginAs(PRIYA);
     const pkg = await addPkg(marcus.token);
@@ -172,9 +172,14 @@ describe('paypal txn id — package → PO carry-over and PATCH', () => {
     expect(stranger.status).toBe(403);
 
     await sql`UPDATE orders SET lifecycle = 'in_transit' WHERE id = ${orderId}`;
-    const postSubmit = await api('PATCH', `/api/orders/${orderId}`, {
+    const postSubmit = await api<{ lifecycle: string }>('PATCH', `/api/orders/${orderId}`, {
       token: marcus.token, body: { paypalTxnId: '9ZZ98765XY432109Q' },
     });
-    expect(postSubmit.status).toBe(403);
+    expect(postSubmit.status).toBe(200);
+    expect(postSubmit.body.lifecycle).toBe('draft');
+    const after = (await sql`SELECT paypal_txn_id, lifecycle FROM orders WHERE id = ${orderId}`)[0] as
+      { paypal_txn_id: string | null; lifecycle: string };
+    expect(after.paypal_txn_id).toBe('9ZZ98765XY432109Q');
+    expect(after.lifecycle).toBe('draft');
   });
 });

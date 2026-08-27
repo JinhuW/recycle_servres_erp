@@ -27,6 +27,7 @@ import { serialIssue, isPricedSellPrice } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
+import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
 import { navigate } from '../../lib/route';
 import { listShipments } from '../../lib/api';
 
@@ -95,9 +96,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // derived status, so an owner is never locked out of their own draft.
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
   const orderLocked = isCompleted(effectiveStatus);
-  const purchaserCanEdit =
-    !isPurchaser || effectiveStatus === 'Draft' || effectiveStatus === 'In Transit';
+  // The purchaser keeps their order until it is Done. Editing it after
+  // submission is allowed and costs them the stage: the backend sends it back
+  // to Draft, so `revertOnSave` warns before the first such save.
+  const purchaserCanEdit = !isPurchaser || !orderLocked;
   const canEditOrder = purchaserCanEdit && !orderLocked;
+  const revertOnSave = isPurchaser && !orderLocked && effectiveStatus !== 'Draft';
   // Notes and submission evidence outlive the purchaser's edit window: the
   // manager owns pricing from Reviewing on, but whoever raised the PO can keep
   // documenting it until Done. Mirrors the backend's notes-only gate.
@@ -107,10 +111,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // send it back to Reviewing (the backend guards lines committed to open
   // sell orders). Everything else stays read-only until that reopen lands.
   const canReopen = !isPurchaser && orderLocked;
+  // Submitting is the one stage move a purchaser makes. Everything after it is
+  // the manager's, and a purchaser edit moves the stage on its own — so past
+  // Draft the stepper offers nothing to pick.
   const allowedStatuses = isPurchaser
-    ? effectiveStatus === 'Draft'      ? ['Draft', 'In Transit']
-    : effectiveStatus === 'In Transit' ? ['In Transit', 'Reviewing']
-    :                                    [effectiveStatus]
+    ? effectiveStatus === 'Draft' ? ['Draft', 'In Transit'] : [effectiveStatus]
     : ORDER_STATUSES.slice();
 
   const [status, setStatus] = useState(effectiveStatus);
@@ -291,7 +296,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const canDelete = canEditOrder && effectiveStatus === 'Draft';
+  // A reverted order is a Draft again, but it is not a fresh one: once it has
+  // been submitted the record stays, and archive is the way to hide it.
+  const canDelete = canEditOrder && effectiveStatus === 'Draft' && !order.everSubmitted;
 
   // Archive: owner-or-manager, any non-Draft stage. Either flips to the other.
   // (Draft uses Delete instead; the backend enforces the same split.)
@@ -305,6 +312,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Serial-rule violations (DDR5 requires serials; serial count must equal
   // qty) caught at save time — shown as a blocking dialog, nothing persists.
   const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
+  // Holds the answer callback while the "this returns the order to Draft"
+  // warning is up; acknowledging once covers the rest of the visit.
+  const [revertConfirm, setRevertConfirm] = useState<((ok: boolean) => void) | null>(null);
+  const [revertAcked, setRevertAcked] = useState(false);
+  // The purchaser's unreviewed changes, shown to a manager opening the order.
+  const [pendingRevert, setPendingRevert] = useState(order.pendingRevert ?? []);
 
   useEffect(() => {
     let alive = true;
@@ -549,6 +562,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const dirty =
     statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
     || commissionDirty || otherFeesDirty || otherFeesNoteDirty || paypalDirty || ownerDirty;
+  // What the backend reads as a change to the order itself — the set that
+  // sends a purchaser's submitted order back to Draft. A note is not one.
+  const materialDirty =
+    linesDirty || warehouseDirty || paymentDirty || otherFeesDirty
+    || otherFeesNoteDirty || paypalDirty;
 
   const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
@@ -627,7 +645,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       const addedLines = lines.filter(l => !l._id);
-      const r = await api.patch<{ ok: true; addedLineIds: string[] }>(`/api/orders/${order.id}`, {
+      const r = await api.patch<{ ok: true; addedLineIds: string[]; lifecycle: string }>(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
@@ -675,6 +693,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
         await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
         setSavedStatus(status);
+      } else if (LIFECYCLE_STATUS[r.lifecycle] && LIFECYCLE_STATUS[r.lifecycle] !== savedStatus) {
+        // The edit moved the stage on its own (a purchaser's change sends the
+        // order back to Draft). Only matters when a photo retry keeps us here.
+        setStatus(LIFECYCLE_STATUS[r.lifecycle]);
+        setSavedStatus(LIFECYCLE_STATUS[r.lifecycle]);
       }
       // The order is saved either way, but those Files exist nowhere else and
       // this page is the only thing holding them — leaving now would discard
@@ -694,6 +717,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     }
   };
 
+  // A purchaser's first write to a submitted order costs it the stage, so ask
+  // once per visit before any of the paths that write — Save, and the drawer's
+  // own Confirm. Answering resolves whichever call is waiting.
+  const askRevert = (material = true): Promise<boolean> => {
+    if (!revertOnSave || revertAcked || !material) return Promise.resolve(true);
+    return new Promise<boolean>(resolve => {
+      setRevertConfirm(() => (ok: boolean) => {
+        setRevertConfirm(null);
+        if (ok) setRevertAcked(true);
+        resolve(ok);
+      });
+    });
+  };
+
   const save = async () => {
     const issues = lines
       .map((l, idx) => ({ lineNo: idx + 1, label: l.partNumber || itemType(l), issue: serialIssueFor(l) }))
@@ -706,6 +743,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       setDupConfirm(dupGroups);
       return;
     }
+    if (!(await askRevert(materialDirty))) return;
     await doSave();
   };
 
@@ -720,6 +758,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     if (!lineReady(l)) throw new Error(t('subFillThisLine'));
     // Nothing to push for an untouched server line; skip the round trip.
     if (l._id && !l._dirty) return;
+    // Confirm writes straight through, so the stage warning belongs here too.
+    if (!(await askRevert())) throw new Error(t('revertWarnCancelled'));
     const issue = serialIssueFor(l);
     if (issue) {
       setSerialIssues([{ lineNo: i + 1, label: l.partNumber || itemType(l), issue }]);
@@ -1234,14 +1274,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               {t('oeHintDraftPre')}<strong>In Transit</strong>{t('oeHintDraftPost')}
             </div>
           )}
-          {isPurchaser && purchaserCanEdit && effectiveStatus === 'In Transit' && (
+          {revertOnSave && (
             <div style={{
               marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--accent-soft)', color: 'var(--accent-strong)',
+              background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
               fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              <Icon name="info" size={13} />
-              {t('oeHintInTransitPre')}<strong>Reviewing</strong>{t('oeHintInTransitPost')}
+              <Icon name="rotate" size={13} />
+              {t('revertHint')}
             </div>
           )}
           {statusDirty && !isPurchaser && (
@@ -1682,13 +1722,54 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               <button
                 className="btn primary"
                 disabled={saving}
-                onClick={async () => { setDupConfirm(null); await doSave(); }}
+                onClick={async () => {
+                  setDupConfirm(null);
+                  if (!(await askRevert(materialDirty))) return;
+                  await doSave();
+                }}
               >
                 {saving ? '…' : t('dupPartSaveAnyway')}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {revertConfirm && (
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) revertConfirm(false); }}>
+          <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
+                  display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}>
+                  <Icon name="rotate" size={18} />
+                </div>
+                <div>
+                  <div className="modal-title">{t('revertWarnTitle')}</div>
+                  <div className="modal-sub">{t('revertWarnBody')}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => revertConfirm(false)}>{t('cancel')}</button>
+              <button className="btn primary" onClick={() => revertConfirm(true)}>
+                {t('revertWarnConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingRevert.length > 0 && (
+        <RevertNoticeDialog
+          orderId={order.id}
+          changes={pendingRevert}
+          onAcknowledged={() => { setPendingRevert([]); setActivityKey(k => k + 1); }}
+          onDismiss={() => setPendingRevert([])}
+        />
       )}
 
       {lightboxUrl && (
