@@ -40,7 +40,7 @@ const PACKAGE_COLS = (sql: ReturnType<typeof getDb>) => sql`
   payment_screenshot_url, order_id, created_by, created_at
 `;
 
-function toApi(r: PackageRow) {
+function toApi(r: PackageRow, creatorName: string | null = null) {
   return {
     id: r.id,
     trackingNumber: r.tracking_number,
@@ -57,6 +57,9 @@ function toApi(r: PackageRow) {
     // Server-built like shipments.tracking_url, so the carrier→URL table
     // lives once (shipping/types.ts) instead of per client.
     trackingUrl: carrierTrackingUrl(r.carrier, r.tracking_number),
+    // Who tracked the box — the shipping table's answer to "whose is this?",
+    // the same question order.userName answers for a shipment row.
+    creatorName,
     createdAt: r.created_at,
   };
 }
@@ -76,11 +79,13 @@ packages.get('/', async (c) => {
   const mineOnly = c.req.query('mine') === 'true';
   const scopeFrag = effectiveRole(u) === 'manager' && !mineOnly ? sql`TRUE` : sql`created_by = ${u.id}`;
   const rows = (await sql`
-    SELECT ${PACKAGE_COLS(sql)} FROM packages
+    SELECT ${PACKAGE_COLS(sql)},
+           (SELECT name FROM users us WHERE us.id = created_by) AS creator_name
+    FROM packages
     WHERE ${scopeFrag}
     ORDER BY created_at DESC
-  `) as unknown as PackageRow[];
-  return c.json({ items: rows.map(toApi) });
+  `) as unknown as (PackageRow & { creator_name: string | null })[];
+  return c.json({ items: rows.map(r => toApi(r, r.creator_name)) });
 });
 
 // ── Lookup by scanned barcode ────────────────────────────────────────────────
@@ -112,7 +117,7 @@ packages.get('/lookup', async (c) => {
   // A miss is a normal outcome (a box nobody tracked yet), and a purchaser
   // must not learn that someone else's number exists — both come back null.
   return c.json({
-    package: rows.length ? { ...toApi(rows[0]), creatorName: rows[0].creator_name } : null,
+    package: rows.length ? toApi(rows[0], rows[0].creator_name) : null,
   });
 });
 
@@ -166,7 +171,7 @@ packages.post('/', async (c) => {
   if (!inserted.length) {
     return c.json({ error: 'This tracking number is already being tracked' }, 409);
   }
-  return c.json({ package: toApi(inserted[0]) }, 201);
+  return c.json({ package: toApi(inserted[0], u.name) }, 201);
 });
 
 // ── Create the PO the delivered box becomes ──────────────────────────────────

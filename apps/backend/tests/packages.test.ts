@@ -14,6 +14,7 @@ type Pkg = {
   sellerName: string | null;
   note: string | null;
   orderId: string | null;
+  creatorName: string | null;
 };
 
 const TN = '1Z999AA10123456784';
@@ -69,6 +70,19 @@ describe('packages — add and list', () => {
     expect(other.body.items).toHaveLength(0);
     const all = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: mgr.token });
     expect(all.body.items).toHaveLength(1);
+  });
+
+  it('names who submitted each row, on the add and on the list', async () => {
+    const marcus = await loginAs(MARCUS);
+    const mgr = await loginAs(ALEX);
+    const sql = getTestDb();
+    const { name } = (await sql`SELECT name FROM users WHERE id = ${marcus.user.id}`)[0] as { name: string };
+
+    const added = await addPackage(marcus.token);
+    expect(added.creatorName).toBe(name);
+
+    const all = await api<{ items: Pkg[] }>('GET', '/api/packages', { token: mgr.token });
+    expect(all.body.items[0].creatorName).toBe(name);
   });
 
   it('mine=true pins a manager to their own rows, mirroring GET /api/shipments', async () => {

@@ -412,7 +412,10 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
         ) : (
           <span className="chip muted" style={{ fontSize: 11 }}>{t('shipColNoPo')}</span>
         )}
-        <div className="ship-cell-sub">{fmtDateShort(pkg.createdAt, locale)}</div>
+        <div className="ship-cell-sub">
+          {fmtDateShort(pkg.createdAt, locale)}
+          {isManager && pkg.creatorName ? ` · ${pkg.creatorName}` : ''}
+        </div>
       </td>
       <td>
         {pkg.sellerName

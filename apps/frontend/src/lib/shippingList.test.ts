@@ -126,7 +126,7 @@ function pkg(over: Partial<TrackedPackage>): TrackedPackage {
     id: 'p1', trackingNumber: '1Z999AA10123456784', carrier: 'UPS', status: 'in_transit',
     trackingEta: null, lastTrackedAt: null, sellerName: null, note: null,
     paypalTxnId: null, paymentScreenshotUrl: null, orderId: null,
-    trackingUrl: null, createdAt: '2026-08-04T00:00:00Z',
+    trackingUrl: null, creatorName: null, createdAt: '2026-08-04T00:00:00Z',
     ...over,
   };
 }
@@ -158,6 +158,12 @@ describe('filterInbound', () => {
     const withNote = mergeInbound([], [pkg({ note: 'fragile RAM sticks' })]);
     expect(filterInbound(withNote, { ...all, search: 'fragile' })).toHaveLength(1);
     expect(filterInbound(withNote, { ...all, search: 'absent' })).toHaveLength(0);
+  });
+
+  it('searches who submitted the package — it renders on the row', () => {
+    const withCreator = mergeInbound([], [pkg({ creatorName: 'Bo Li' })]);
+    expect(filterInbound(withCreator, { ...all, search: 'bo l' })).toHaveLength(1);
+    expect(filterInbound(withCreator, { ...all, search: 'absent' })).toHaveLength(0);
   });
 
   it('searches the package PayPal transaction id — it renders on the row', () => {
@@ -193,6 +199,13 @@ describe('inboundToCsv', () => {
     expect(csv).toContain('"Trench Corp"');
     expect(csv).toContain('"1Z999AA10123456784"');
     expect(csv).toContain('"1Z999"');
+  });
+
+  it('names who submitted each row — the PO owner, the package creator', () => {
+    const csv = inboundToCsv(mergeInbound(rows, [pkg({ creatorName: 'Kai' })]));
+    expect(csv.split('\r\n')[0]).toContain('"Submitted by"');
+    expect(csv).toContain('"Ada"');
+    expect(csv).toContain('"Kai"');
   });
 
   it('carries the PayPal transaction id on both row kinds', () => {
