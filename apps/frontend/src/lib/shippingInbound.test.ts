@@ -29,7 +29,7 @@ function pkg(over: Partial<TrackedPackage>): TrackedPackage {
     id: 'p1', trackingNumber: '1Z999AA10123456784', carrier: 'UPS', status: 'in_transit',
     trackingEta: null, lastTrackedAt: null, sellerName: null, note: null,
     paypalTxnId: null, paymentScreenshotUrl: null, orderId: null,
-    trackingUrl: null, createdAt: '2026-08-01T00:00:00Z',
+    trackingUrl: null, creatorName: null, createdAt: '2026-08-01T00:00:00Z',
     ...over,
   };
 }

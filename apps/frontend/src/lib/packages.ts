@@ -26,6 +26,8 @@ export type TrackedPackage = {
   // Server-built carrier deep link, same as shipments.trackingUrl — the
   // carrier→URL table lives once, in the backend.
   trackingUrl: string | null;
+  /** Who tracked the box — null only for rows whose user has been removed. */
+  creatorName: string | null;
   createdAt: string;
 };
 
@@ -65,7 +67,7 @@ export async function scanPaymentScreenshot(file: File | Blob, filename = 'paypa
   return api.upload<PaymentScanResponse>('/api/scan/payment', form);
 }
 
-export type LookedUpPackage = TrackedPackage & { creatorName: string | null };
+export type LookedUpPackage = TrackedPackage;
 
 /**
  * Resolves a scanned label barcode to a tracked package. The server matches
