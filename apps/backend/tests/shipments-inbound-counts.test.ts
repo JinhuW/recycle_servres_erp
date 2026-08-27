@@ -46,7 +46,7 @@ async function createShipment(token: string, orderId: string, status?: string): 
 
 async function createPackage(token: string, trackingNumber: string, status?: string, orderId?: string): Promise<string> {
   const r = await api<{ package: { id: string } }>('POST', '/api/packages', {
-    token, body: { trackingNumber, carrier: 'UPS' },
+    token, body: { trackingNumber, carrier: 'UPS', source: 'other' },
   });
   expect(r.status).toBe(201);
   const id = r.body.package.id;

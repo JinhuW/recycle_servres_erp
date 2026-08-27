@@ -232,6 +232,7 @@ scan.post('/payment', async (c) => {
     storageKey: uploaded.storageKey,
     deliveryUrl,
     txnId: result.txnId,
+    sellerName: result.sellerName,
     confidence: result.confidence,
     provider: result.provider,
   });

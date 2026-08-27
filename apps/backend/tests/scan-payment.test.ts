@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
-import { normalizePaypalTxnId } from '../src/ai/paypal';
+import { normalizePaypalTxnId, normalizeSellerName } from '../src/ai/paypal';
 
 function png(): File {
   return new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'paypal.png', { type: 'image/png' });
@@ -20,6 +20,18 @@ describe('normalizePaypalTxnId', () => {
   });
 });
 
+describe('normalizeSellerName', () => {
+  it('collapses whitespace, sheds wrapping punctuation, rejects junk', () => {
+    expect(normalizeSellerName('  Jane   Doe \n')).toBe('Jane Doe');
+    expect(normalizeSellerName('"Acme Parts LLC."')).toBe('Acme Parts LLC');
+    expect(normalizeSellerName('   ')).toBeNull();
+    expect(normalizeSellerName('x'.repeat(81))).toBeNull();    // over the name cap
+    expect(normalizeSellerName('x'.repeat(80))).toHaveLength(80);
+    expect(normalizeSellerName(null)).toBeNull();
+    expect(normalizeSellerName(42)).toBeNull();
+  });
+});
+
 describe('POST /api/scan/payment', () => {
   beforeEach(async () => { await resetDb(); });
   afterEach(() => vi.unstubAllGlobals());
@@ -28,9 +40,10 @@ describe('POST /api/scan/payment', () => {
     const { token } = await loginAs(MARCUS);
     const r = await multipart('/api/scan/payment', { file: png() }, { token });
     expect(r.status).toBe(200);
-    const body = r.body as { storageKey: string; txnId: string; confidence: number; provider: string };
+    const body = r.body as { storageKey: string; txnId: string; sellerName: string; confidence: number; provider: string };
     expect(body.provider).toBe('stub');
     expect(body.txnId).toBe('7AB12345CD678901E');
+    expect(body.sellerName).toBe('Sample Seller');
     expect(body.storageKey).toBeTruthy();
     const sql = getTestDb();
     expect(await sql`SELECT id FROM label_scans`).toHaveLength(0);
@@ -41,7 +54,7 @@ describe('POST /api/scan/payment', () => {
       'fetch',
       vi.fn(async () =>
         new Response(
-          JSON.stringify({ choices: [{ message: { content: '{"txnId":" 8xy12345 ab678901c ","confidence":0.97}' } }] }),
+          JSON.stringify({ choices: [{ message: { content: '{"txnId":" 8xy12345 ab678901c ","sellerName":"  Jane   Doe ","confidence":0.97}' } }] }),
           { status: 200 },
         ),
       ),
@@ -49,9 +62,10 @@ describe('POST /api/scan/payment', () => {
     const { token } = await loginAs(MARCUS);
     const r = await multipart('/api/scan/payment', { file: png() }, { token, env: { OPENROUTER_API_KEY: 'test-key' } });
     expect(r.status).toBe(200);
-    const body = r.body as { txnId: string; confidence: number; provider: string };
+    const body = r.body as { txnId: string; sellerName: string; confidence: number; provider: string };
     expect(body.provider).toBe('openrouter');
     expect(body.txnId).toBe('8XY12345AB678901C');
+    expect(body.sellerName).toBe('Jane Doe');
     expect(body.confidence).toBeCloseTo(0.97);
   });
 
@@ -81,7 +95,7 @@ describe('paypal txn id — package → PO carry-over and PATCH', () => {
   async function addPkg(token: string, over: Record<string, unknown> = {}) {
     const r = await api<{ package: { id: string; paypalTxnId: string | null; paymentScreenshotUrl: string | null } }>(
       'POST', '/api/packages',
-      { token, body: { trackingNumber: TN, carrier: 'UPS', ...over } },
+      { token, body: { trackingNumber: TN, carrier: 'UPS', source: 'other', ...over } },
     );
     expect(r.status).toBe(201);
     return r.body.package;
@@ -120,7 +134,7 @@ describe('paypal txn id — package → PO carry-over and PATCH', () => {
   it('rejects an oversized txn id at the add-package boundary', async () => {
     const { token } = await loginAs(MARCUS);
     const r = await api('POST', '/api/packages', {
-      token, body: { trackingNumber: TN, carrier: 'UPS', paypalTxnId: 'A'.repeat(65) },
+      token, body: { trackingNumber: TN, carrier: 'UPS', source: 'other', paypalTxnId: 'A'.repeat(65) },
     });
     expect(r.status).toBe(400);
   });

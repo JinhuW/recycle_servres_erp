@@ -12,6 +12,7 @@ import {
   createPoFromPackage, listPackages, removePackage,
   type TrackedPackage,
 } from '../../lib/packages';
+import { packageSourceLabelKey } from '../../lib/packageSource';
 import {
   STATUS_CHIP, filterInbound, fmtEta, inboundCarriers, inboundCounts,
   inboundToCsv, mergeInbound, type ShipOrder, type ShipRow,
@@ -422,6 +423,9 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
           ? <span style={{ fontWeight: 600 }}>{pkg.sellerName}</span>
           : <span className="muted">—</span>}
         {pkg.note && <div className="ship-cell-sub">{pkg.note}</div>}
+        {pkg.source && (
+          <div className="ship-cell-sub" title={t('shipSource')}>{t(packageSourceLabelKey(pkg.source))}</div>
+        )}
         {pkg.paypalTxnId && (
           <div className="ship-cell-sub mono" title={t('shipPayTxnLabel')}>PayPal {pkg.paypalTxnId}</div>
         )}

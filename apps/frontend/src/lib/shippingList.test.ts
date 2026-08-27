@@ -125,7 +125,7 @@ function pkg(over: Partial<TrackedPackage>): TrackedPackage {
   return {
     id: 'p1', trackingNumber: '1Z999AA10123456784', carrier: 'UPS', status: 'in_transit',
     trackingEta: null, lastTrackedAt: null, sellerName: null, note: null,
-    paypalTxnId: null, paymentScreenshotUrl: null, orderId: null,
+    source: null, paypalTxnId: null, paymentScreenshotUrl: null, orderId: null,
     trackingUrl: null, creatorName: null, createdAt: '2026-08-04T00:00:00Z',
     ...over,
   };
@@ -170,6 +170,12 @@ describe('filterInbound', () => {
     const withTxn = mergeInbound([], [pkg({ paypalTxnId: '9XY87654ZW321001Q' })]);
     expect(filterInbound(withTxn, { ...all, search: '9xy876' })).toHaveLength(1);
     expect(filterInbound(withTxn, { ...all, search: 'absent' })).toHaveLength(0);
+  });
+
+  it('searches the package source', () => {
+    const withSource = mergeInbound([], [pkg({ source: 'reddit' })]);
+    expect(filterInbound(withSource, { ...all, search: 'reddit' })).toHaveLength(1);
+    expect(filterInbound(withSource, { ...all, search: 'facebook' })).toHaveLength(0);
   });
 });
 
@@ -217,6 +223,15 @@ describe('inboundToCsv', () => {
     expect(csv.split('\r\n')[0]).toContain('"PayPal txn"');
     expect(csv).toContain('"8AB12345CD678901E"');
     expect(csv).toContain('"9XY87654ZW321001Q"');
+  });
+
+  it('exports the package source, leaving the column empty for shipments', () => {
+    const shipRow: ShipRow = { order: order({ id: 'PO-8' }), shipment: shipment({ id: 's8' }) };
+    const csv = inboundToCsv(mergeInbound([shipRow], [pkg({ source: 'facebook' })]));
+    const [head, ...body] = csv.split('\r\n');
+    expect(head.endsWith('"Source"')).toBe(true);
+    expect(body.some(l => l.endsWith('"facebook"'))).toBe(true);
+    expect(body.some(l => l.endsWith('""'))).toBe(true);
   });
 
   it('neutralises formula-leading cells on both row kinds', () => {
