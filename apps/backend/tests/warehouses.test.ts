@@ -211,3 +211,126 @@ describe('Warehouse API no longer exposes cutoffLocal / sqft', () => {
     expect(created.body).not.toHaveProperty('sqft');
   });
 });
+
+// `address` is the display line on cards and pickers. It used to be a second,
+// hand-typed copy of the ship-to that drifted from it; it is now derived from
+// the structured columns, so the editor has one address field instead of two.
+describe('Warehouse address is derived from the ship-to', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  type WhAddr = {
+    id: string; address: string | null;
+    shipStreet1: string | null; shipCity: string | null;
+  };
+
+  const DENVER = {
+    shipStreet1: '4880 Ironton St', shipStreet2: null,
+    shipCity: 'Denver', shipState: 'CO', shipZip: '80239', shipCountry: 'US',
+  };
+
+  const readWh = async (token: string, id: string): Promise<WhAddr> => {
+    const r = await api<{ items: WhAddr[] }>('GET', '/api/warehouses', { token });
+    expect(r.status).toBe(200);
+    return r.body.items.find(w => w.id === id)!;
+  };
+
+  it('PATCH of the ship fields composes address', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', { token, body: DENVER });
+    expect(r.status).toBe(200);
+    expect(r.body.address).toBe('4880 Ironton St, Denver, CO 80239');
+    expect((await readWh(token, 'WH-LA1')).address).toBe('4880 Ironton St, Denver, CO 80239');
+  });
+
+  it('includes street line 2 when present', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
+      token, body: { ...DENVER, shipStreet2: 'Suite 400' },
+    });
+    expect(r.body.address).toBe('4880 Ironton St, Suite 400, Denver, CO 80239');
+  });
+
+  it('appends a non-US country but never US', async () => {
+    const { token } = await loginAs(ALEX);
+    const nl = await api<WhAddr>('PATCH', '/api/warehouses/WH-AMS', {
+      token,
+      body: {
+        shipStreet1: 'Schiphol Logistics Park', shipStreet2: null,
+        shipCity: 'Amsterdam', shipState: null, shipZip: '1118 BE', shipCountry: 'nl',
+      },
+    });
+    expect(nl.status).toBe(200);
+    // No state: city and ZIP join with a space, not a stray comma.
+    expect(nl.body.address).toBe('Schiphol Logistics Park, Amsterdam 1118 BE, NL');
+
+    const us = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', { token, body: DENVER });
+    expect(us.body.address).not.toMatch(/US$/);
+  });
+
+  it('treats a null country as US', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
+      token, body: { ...DENVER, shipCountry: null },
+    });
+    expect(r.body.address).toBe('4880 Ironton St, Denver, CO 80239');
+  });
+
+  it('clearing the ship fields clears address', async () => {
+    const { token } = await loginAs(ALEX);
+    await api('PATCH', '/api/warehouses/WH-LA1', { token, body: DENVER });
+    const cleared = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
+      token,
+      body: {
+        shipStreet1: null, shipStreet2: null, shipCity: null,
+        shipState: null, shipZip: null, shipCountry: null,
+      },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.address).toBeNull();
+  });
+
+  // The archive toggle PATCHes { active } alone; it must not touch the address.
+  it('a PATCH that does not name an address part leaves address alone', async () => {
+    const { token } = await loginAs(ALEX);
+    await api('PATCH', '/api/warehouses/WH-LA1', { token, body: DENVER });
+    const renamed = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
+      token, body: { name: 'LA One' },
+    });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.address).toBe('4880 Ironton St, Denver, CO 80239');
+  });
+
+  it('POST derives address from the ship fields it was created with', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<WhAddr>('POST', '/api/warehouses', {
+      token,
+      body: { id: 'WH-DEN', name: 'Denver', short: 'DEN', region: 'US-West', ...DENVER },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.address).toBe('4880 Ironton St, Denver, CO 80239');
+  });
+
+  // Warehouses that predate the ship-to columns have only their free text, and
+  // it cannot be parsed back into street/city/state/ZIP. Migration 0109 skips
+  // them and so must every write that doesn't name an address part.
+  it('leaves a warehouse with no ship-to holding its original free text', async () => {
+    const { token } = await loginAs(ALEX);
+    const before = await readWh(token, 'WH-HK');
+    expect(before.shipStreet1).toBeNull();
+    expect(before.address).toBeTruthy();
+
+    const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-HK', {
+      token, body: { name: 'Hong Kong' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.address).toBe(before.address);
+  });
+
+  it('ignores a client-sent address', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
+      token, body: { ...DENVER, address: 'typed by hand' },
+    });
+    expect(r.body.address).toBe('4880 Ironton St, Denver, CO 80239');
+  });
+});

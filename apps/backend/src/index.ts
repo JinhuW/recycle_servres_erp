@@ -191,12 +191,18 @@ app.use('*', (c, next) => {
 });
 
 // ── Cache headers on reference-data endpoints ────────────────────────────────
-// Read-only reference endpoints (lookups, categories, workspace, warehouses)
-// get a short private cache so browsers/CDN don't hammer the DB on every
-// navigation. User-specific endpoints (/api/me, /api/dashboard) are excluded.
-const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/warehouses'];
+// Read-only reference endpoints get a short private cache so browsers/CDN don't
+// hammer the DB on every navigation. User-specific endpoints (/api/me,
+// /api/dashboard) are excluded — and so is /api/warehouses: it is the one
+// reference list that gets edited and re-read inside a single user action, and
+// the browser serving its 60s-old copy back to Settings made a saved shipping
+// address look like it had never persisted.
+// Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
+// responses have no business advertising a cache lifetime.
+const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace'];
 app.use('*', async (c, next) => {
   await next();
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return;
   const path = c.req.path;
   if (CACHEABLE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) {
     c.header('Cache-Control', 'private, max-age=60');
