@@ -941,8 +941,16 @@ html.desktop, body.desktop, .desktop #root {
   padding: 14px 16px;
   cursor: pointer;
   transition: all 0.12s ease;
+  /* Rendered as a <button> at every call site, so the UA's centred, system-font
+     defaults have to be undone here rather than inline at each one. */
+  font-family: inherit;
+  text-align: left;
 }
 .so-stat:hover { border-color: var(--border-strong); }
+.so-stat.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .so-stat-head { margin-bottom: 8px; }
 .so-stat-num { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .so-stat-sub { font-size: 12px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; margin-top: 2px; }

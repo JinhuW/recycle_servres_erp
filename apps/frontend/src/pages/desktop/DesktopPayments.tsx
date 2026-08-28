@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
@@ -94,6 +94,11 @@ type Suggestion = {
 
 type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored' | 'transfer';
 
+type Direction = 'all' | 'out' | 'in';
+
+// The queue is money the company paid out; incoming refunds are a side view.
+const DEFAULT_DIRECTION: Direction = 'out';
+
 // Union of the mutation responses; only mark/unmark-transfer read past `ok`.
 type ActResult = {
   ok: boolean;
@@ -102,9 +107,19 @@ type ActResult = {
   ruleRemoved?: boolean;
 };
 
+// Vertical padding is zeroed because the 32px height is smaller than
+// `.select`'s own 9px-padded box: left alone it clips descenders ("Money out"
+// reads "Monev out").
 const FILTER_SELECT: CSSProperties = {
   width: 'auto', minWidth: 132, height: 32, fontSize: 12.5,
+  paddingTop: 0, paddingBottom: 0,
 };
+
+// PO picker box: 320 wide, and roughly its search field plus the capped list —
+// only used to decide whether it still fits below the row it belongs to.
+const PICKER_W = 320;
+const PICKER_H = 312;
+const GAP = 4;
 
 const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
   mercury: 'Mercury',
@@ -141,7 +156,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
 
   const [status, setStatus] = usePersisted<StatusFilter>('desktop.payments.status', 'unlinked');
   const [source, setSource] = usePersisted('desktop.payments.source', 'all');
-  const [direction, setDirection] = usePersisted('desktop.payments.direction', 'all');
+  const [direction, setDirection] = usePersisted<Direction>('desktop.payments.direction', DEFAULT_DIRECTION);
   const [q, setQ] = usePersisted('desktop.payments.q', '');
   const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -243,27 +258,29 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   }, [stats]);
 
   type TileKey = StatusFilter | 'refunds' | 'suggested';
-  const tiles: { key: TileKey; label: string; count: number; sub: string | null; tone: string }[] = stats ? [
+  const tiles: { key: TileKey; label: string; count: number; sub: string; tone: string }[] = stats ? [
     { key: 'unlinked', label: t('payTileUnlinked'), count: stats.unlinked.count, sub: fmtUSD(stats.unlinked.amount, locale), tone: 'warn' },
     { key: 'suggested', label: t('payTileSuggested'), count: stats.suggested?.count ?? 0, sub: t('payTileSuggestedSub'), tone: 'accent' },
-    { key: 'linked', label: t('payTileLinked'), count: stats.linked.count, sub: null, tone: 'pos' },
+    { key: 'linked', label: t('payTileLinked'), count: stats.linked.count, sub: t('payTileLinkedSub'), tone: 'pos' },
     { key: 'refunds', label: t('payTileRefunds'), count: stats.refunds.count, sub: fmtUSD(stats.refunds.amount, locale), tone: 'cool' },
-    { key: 'transfer', label: t('payTileTransfers'), count: stats.transfers.count, sub: null, tone: 'info' },
-    { key: 'ignored', label: t('payTileIgnored'), count: stats.ignored.count, sub: null, tone: 'muted' },
+    { key: 'transfer', label: t('payTileTransfers'), count: stats.transfers.count, sub: t('payTileTransfersSub'), tone: 'info' },
+    { key: 'ignored', label: t('payTileIgnored'), count: stats.ignored.count, sub: t('payTileIgnoredSub'), tone: 'muted' },
   ] : [];
 
+  // Every tile but Refunds sits at the page's default direction, so that — not
+  // 'all' — is what counts as "no direction lens" here.
   const tileActive = (key: TileKey) =>
     key === 'refunds' ? status === 'linked' && direction === 'in'
     : key === 'suggested' ? status === 'unlinked' && hasMatch
     // Unlinked and Suggested are nested, so only the narrower one lights up.
-    : status === key && direction === 'all' && !hasMatch;
+    : status === key && direction === DEFAULT_DIRECTION && !hasMatch;
 
   const clickTile = (key: TileKey) => {
-    if (tileActive(key)) { setStatus('all'); setDirection('all'); setHasMatch(false); return; }
+    if (tileActive(key)) { setStatus('all'); setDirection(DEFAULT_DIRECTION); setHasMatch(false); return; }
     if (key === 'refunds') { setStatus('linked'); setDirection('in'); setHasMatch(false); return; }
-    if (key === 'suggested') { setStatus('unlinked'); setDirection('all'); setHasMatch(true); return; }
+    if (key === 'suggested') { setStatus('unlinked'); setDirection(DEFAULT_DIRECTION); setHasMatch(true); return; }
     setStatus(key);
-    setDirection('all');
+    setDirection(DEFAULT_DIRECTION);
     setHasMatch(false);
   };
 
@@ -290,18 +307,15 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <button
             key={tile.key}
             type="button"
-            className="so-stat"
+            className={'so-stat' + (tileActive(tile.key) ? ' active' : '')}
+            aria-pressed={tileActive(tile.key)}
             onClick={() => clickTile(tile.key)}
-            style={{
-              ...(tileActive(tile.key) ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 3px var(--accent-soft)' } : {}),
-              fontFamily: 'inherit', textAlign: 'left',
-            }}
           >
             <div className="so-stat-head">
               <span className={'chip dot ' + tile.tone} style={{ fontSize: 10.5 }}>{tile.label}</span>
             </div>
             <div className="so-stat-num">{tile.count}</div>
-            <div className="so-stat-sub">{tile.sub ?? ' '}</div>
+            <div className="so-stat-sub">{tile.sub}</div>
           </button>
         ))}
       </div>
@@ -330,20 +344,31 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               <option value="mercury">Mercury</option>
               <option value="paypal">PayPal</option>
             </select>
-            <button
-              type="button"
-              className={'btn sm' + (hasMatch ? '' : ' ghost')}
-              aria-pressed={hasMatch}
-              onClick={() => setHasMatch(v => !v)}
+            <select
+              className="select"
+              value={direction}
+              onChange={e => setDirection(e.target.value as Direction)}
+              style={FILTER_SELECT}
             >
-              <Icon name="zap" size={12} />
-              {t('payFilterHasMatch')}
-            </button>
-            <select className="select" value={direction} onChange={e => setDirection(e.target.value)} style={FILTER_SELECT}>
               <option value="all">{t('payDirAll')}</option>
               <option value="out">{t('payDirOut')}</option>
               <option value="in">{t('payDirIn')}</option>
             </select>
+            <button
+              type="button"
+              className="btn sm"
+              aria-pressed={hasMatch}
+              onClick={() => setHasMatch(v => !v)}
+              style={{
+                height: 32, fontSize: 12.5,
+                ...(hasMatch
+                  ? { background: 'var(--accent-soft)', borderColor: 'var(--accent)', color: 'var(--accent-strong)' }
+                  : { color: 'var(--fg-muted)' }),
+              }}
+            >
+              <Icon name="zap" size={12} />
+              {t('payFilterHasMatch')}
+            </button>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
                 position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -354,7 +379,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                 value={q}
                 onChange={e => setQ(e.target.value)}
                 placeholder={t('paySearch')}
-                style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 230 }}
+                style={{ paddingLeft: 30, paddingTop: 0, paddingBottom: 0, height: 32, fontSize: 12.5, width: 230 }}
               />
             </div>
           </div>
@@ -364,7 +389,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <ListSkeleton rows={6} />
         ) : feed.rows.length === 0 ? (
           <div style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-            {status === 'unlinked' ? t('payEmptyUnlinked') : t('payEmpty')}
+            {/* An empty money-out queue IS the drained queue; only the
+                money-in lens makes "nothing left to reconcile" a lie. */}
+            {status === 'unlinked' && direction !== 'in' ? t('payEmptyUnlinked') : t('payEmpty')}
           </div>
         ) : (
           <div className="table-scroll">
@@ -436,6 +463,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   // Dismissal is per page load on purpose: suggestions are read-time only, so
   // persisting a "not it" would be the same mistake as persisting a match.
   const [dismissed, setDismissed] = useState(false);
+  const actionsRef = useRef<HTMLSpanElement>(null);
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
@@ -486,7 +514,13 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
               {t('payUnignore')}
             </button>
           ) : (
-            <span style={{ display: 'inline-grid', gap: 5, justifyItems: 'start' }} onClick={stop}>
+            // Badge and buttons share one line: stacked, a row carrying a match
+            // badge stood a line taller than its neighbours and the table stepped.
+            <span
+              ref={actionsRef}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+              onClick={stop}
+            >
               {likely && (
                 <span className="chip dot pos" style={{ fontSize: 10.5 }}>
                   {t('payMatchLikely', {
@@ -507,32 +541,36 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
                     : t('payMatchCount', { n: row.match!.count })}
                 </button>
               )}
-              <span style={{ display: 'inline-flex', gap: 6 }}>
-                {likely ? (
-                  <>
-                    <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
-                      {t('payLink')}
-                    </button>
-                    <button
-                      type="button" className="btn sm ghost"
-                      onClick={() => { setDismissed(true); setPicking(true); }}
-                    >
-                      {t('payMatchNotIt')}
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
+              {likely ? (
+                <>
+                  <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
                     {t('payLink')}
                   </button>
-                )}
-                <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
-                  {t('payIgnore')}
+                  <button
+                    type="button" className="btn sm ghost"
+                    onClick={() => { setDismissed(true); setPicking(true); }}
+                  >
+                    {t('payMatchNotIt')}
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
+                  {t('payLink')}
                 </button>
-              </span>
+              )}
+              <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
+                {t('payIgnore')}
+              </button>
             </span>
           )}
           {picking && !row.orderId && (
-            <PoPicker txnId={row.id} onPick={link} onClose={() => setPicking(false)} locale={locale} />
+            <PoPicker
+              txnId={row.id}
+              anchor={actionsRef}
+              onPick={link}
+              onClose={() => setPicking(false)}
+              locale={locale}
+            />
           )}
         </td>
       </tr>
@@ -717,8 +755,9 @@ function MatchList({ txnId, locale, onLink }: {
 // Searchable PO dropdown (CustomerPicker shape). Opens with the server's
 // ranked suggestions — txn-id match first, then same-amount orders — and
 // switches to free search as the manager types.
-function PoPicker({ txnId, onPick, onClose, locale }: {
+function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
   txnId: string;
+  anchor: React.RefObject<HTMLElement | null>;
   onPick: (orderId: string) => void;
   onClose: () => void;
   locale: string;
@@ -728,6 +767,32 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
   const [rows, setRows] = useState<Suggestion[] | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const reqId = useRef(0);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Fixed, not absolute: the row lives inside `.table-scroll`, whose
+  // `overflow-y: hidden` sheared the dropdown off at the table's bottom edge.
+  // `overflow-y: visible` can't fix it — next to `overflow-x: auto` it computes
+  // back to `auto` — so the popover has to leave the scroll container instead.
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = anchor.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const room = window.innerHeight - r.bottom;
+      setPos({
+        top: room < PICKER_H + GAP ? Math.max(GAP, r.top - PICKER_H - GAP) : r.bottom + GAP,
+        left: Math.max(GAP, Math.min(r.right - PICKER_W, window.innerWidth - PICKER_W - GAP)),
+      });
+    };
+    place();
+    // Capture phase so the inner table scroller is heard, not just the page.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -753,9 +818,10 @@ function PoPicker({ txnId, onPick, onClose, locale }: {
       ref={ref}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'absolute', top: 'calc(100% + 4px)', right: 0, width: 320,
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PICKER_W,
+        visibility: pos ? 'visible' : 'hidden',
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
-        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 30, overflow: 'hidden',
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, overflow: 'hidden',
         cursor: 'default', textAlign: 'left',
       }}
     >
