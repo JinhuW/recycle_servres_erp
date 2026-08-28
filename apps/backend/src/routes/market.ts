@@ -4,6 +4,7 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, marketValueSelect } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
 import { appendPriceEvent } from '../lib/refPriceEvents';
+import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
@@ -97,17 +98,17 @@ market.get('/', async (c) => {
 const SUGGEST_LIMIT = 12;
 const SUGGEST_MIN = 2;
 
-// The canonical form upper-cases and strips whitespace; it leaves LIKE
-// metacharacters alone, so a typed '%' would otherwise match the whole table.
-// Backslash is Postgres' default escape character, hence no ESCAPE clause.
-function escapeLike(s: string): string {
-  return s.replace(/[\\%_]/g, m => '\\' + m);
-}
-
 market.get('/parts', async (c) => {
   const sql = getDb(c.env);
-  const q = escapeLike(canonPartNumberJs(c.req.query('q') ?? ''));
-  if (q.length < SUGGEST_MIN) return c.json({ items: [] });
+  // Gated on the canonical form, then escaped — never the other way round.
+  // escapeLike doubles the length of a lone metacharacter, so escaping first
+  // would let '?q=_' pass a check that exists to require two typed characters,
+  // and the client's own gate (suggestQuery) measures the unescaped form.
+  const canon = canonPartNumberJs(c.req.query('q') ?? '');
+  if (canon.length < SUGGEST_MIN) return c.json({ items: [] });
+  // The canonical form leaves LIKE metacharacters alone, so a typed '%' would
+  // otherwise match the whole table.
+  const q = escapeLike(canon);
 
   const canonRef = canonPartCol(sql, sql`rp.part_number`);
   const canonLine = canonPartCol(sql, sql`l.part_number`);
@@ -138,7 +139,7 @@ market.get('/parts', async (c) => {
                AND ${canonLine} LIKE '%' || ${q} || '%'
           ) u
          WHERE canon <> ''
-         ORDER BY canon, src
+         ORDER BY canon, src, pn
       ) d
      ORDER BY (canon LIKE ${q} || '%') DESC, LENGTH(pn), pn
      LIMIT ${SUGGEST_LIMIT}

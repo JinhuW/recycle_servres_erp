@@ -530,6 +530,8 @@ describe('packages — webhook registration', () => {
 });
 
 describe('shipping — which tracking provider is in play', () => {
+  beforeEach(async () => { await resetDb(); });
+
   it('prefers Shippo, falls back to ShipSaving, then stubs', () => {
     expect(pickTrackingClient({ SHIPPO_API_TOKEN: 'x' } as never).provider).toBe('shippo');
     expect(pickTrackingClient({

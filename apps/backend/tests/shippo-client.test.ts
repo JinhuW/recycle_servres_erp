@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { carrierToken, normalizeShippoStatus, trackToInfo } from '../src/shipping/shippo';
+import { carrierToken, normalizeShippoStatus, shippoClient, trackToInfo } from '../src/shipping/shippo';
 import { parseEta } from '../src/shipping/types';
 
 describe('shippo — status normalization', () => {
@@ -60,9 +60,8 @@ describe('shippo — track payloads', () => {
     const info = trackToInfo(live);
     expect(info.normalized).toBe('delivered');
     expect(info.raw).toBe('Your shipment has been delivered.');
-    // A full ISO instant collapses to UTC midnight — the frontend renders it
-    // as a timezone-free calendar date.
-    expect(info.eta?.toISOString()).toBe('2026-08-27T00:00:00.000Z');
+    // A real instant is kept as one — see parseEta below.
+    expect(info.eta?.toISOString()).toBe('2026-08-27T20:42:29.622Z');
   });
 
   it('falls back to the bare status when there is no human detail', () => {
@@ -70,19 +69,45 @@ describe('shippo — track payloads', () => {
     expect(trackToInfo({ tracking_status: { status: 'TRANSIT' } }).raw).toBe('TRANSIT');
   });
 
-  it('treats a payload with no tracking_status as unknown, not a crash', () => {
+  it('treats a payload with no tracking_status as no news, not a crash', () => {
     const info = trackToInfo({ tracking_number: 'X' });
     expect(info.normalized).toBe('purchased');
-    expect(info.raw).toBe('UNKNOWN');
+    // '' rather than a placeholder: the writers COALESCE it away and keep
+    // whatever the carrier last actually said.
+    expect(info.raw).toBe('');
     expect(info.eta).toBeNull();
+  });
+
+  it('survives a payload whose fields are the wrong type', () => {
+    // The webhook hands this an unvalidated body. A number reaching
+    // .toUpperCase() / .trim() would 500, and Shippo retries 5XX.
+    const info = trackToInfo({
+      tracking_number: 1234,
+      eta: 99,
+      tracking_status: { status: 7, status_details: 8 },
+    });
+    expect(info.normalized).toBe('purchased');
+    expect(info.raw).toBe('');
+    expect(info.eta).toBeNull();
+    expect(trackToInfo({ tracking_status: 'DELIVERED' }).normalized).toBe('purchased');
   });
 });
 
 describe('parseEta', () => {
-  it('collapses every wire shape to UTC midnight on the same calendar day', () => {
-    expect(parseEta('2026-08-27T20:42:29.622Z')?.toISOString()).toBe('2026-08-27T00:00:00.000Z');
+  it('collapses an offset-free wire shape to UTC midnight on the same day', () => {
     expect(parseEta('2026-08-27')?.toISOString()).toBe('2026-08-27T00:00:00.000Z');
     expect(parseEta('2025-08-26 22:37:27')?.toISOString()).toBe('2025-08-26T00:00:00.000Z');
+  });
+
+  it('keeps an instant as an instant', () => {
+    // Truncating this would name the wrong day: an end-of-day ETA of Thu 21:00
+    // MT is wired as Fri 03:00 UTC, and fmtEta renders a non-midnight value in
+    // the reader's own timezone.
+    expect(parseEta('2026-08-28T03:00:00.000Z')?.toISOString()).toBe('2026-08-28T03:00:00.000Z');
+    expect(parseEta('2026-08-27T20:42:29.622Z')?.toISOString()).toBe('2026-08-27T20:42:29.622Z');
+    expect(parseEta('2026-08-27T21:00:00-06:00')?.toISOString()).toBe('2026-08-28T03:00:00.000Z');
+    // Midnight UTC still round-trips as the calendar-date shape fmtEta expects.
+    expect(parseEta('2026-08-27T00:00:00Z')?.toISOString()).toBe('2026-08-27T00:00:00.000Z');
   });
 
   it('answers null for nothing and for junk', () => {
@@ -90,5 +115,18 @@ describe('parseEta', () => {
     expect(parseEta(undefined)).toBeNull();
     expect(parseEta('')).toBeNull();
     expect(parseEta('not a date')).toBeNull();
+  });
+});
+
+describe('shippo — an unusable carrier fails loudly', () => {
+  // carrierToken stays pure (see above); the client is where an empty token has
+  // to stop, or the GET builds `/tracks//1Z…` and 404s on every tick forever
+  // behind the refresh loops' per-row catch.
+  const client = shippoClient({ SHIPPO_API_TOKEN: 'x' } as never);
+
+  it('rejects rather than calling a malformed URL', async () => {
+    await expect(client.getShipment('1Z999AA10123456784', null)).rejects.toThrow(/needs a carrier/);
+    await expect(client.getShipment('1Z999AA10123456784', '   ')).rejects.toThrow(/needs a carrier/);
+    await expect(client.registerTracking('1Z999AA10123456784', '', 'package x')).rejects.toThrow(/needs a carrier/);
   });
 });

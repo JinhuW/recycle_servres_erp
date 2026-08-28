@@ -79,8 +79,9 @@ describe('shippo webhook — applying track_updated', () => {
     `)[0] as { status: string; tracking_status: string; tracking_eta: Date; last_tracked_at: Date };
     expect(row.status).toBe('in_transit');
     expect(row.tracking_status).toBe('wire detail for TRANSIT');
-    // Full ISO instant in, UTC-midnight calendar date out.
-    expect(row.tracking_eta.toISOString()).toBe('2026-08-27T00:00:00.000Z');
+    // An instant is stored as one: truncating it names the wrong day for every
+    // end-of-day ETA west of UTC.
+    expect(row.tracking_eta.toISOString()).toBe('2026-08-27T20:42:29.622Z');
     expect(row.last_tracked_at).not.toBeNull();
   });
 
@@ -164,5 +165,79 @@ describe('shippo webhook — payloads we do not act on still answer 2XX', () => 
   it('ignores a body with no data and an unparseable body', async () => {
     expect((await api('POST', WEBHOOK, { body: { event: 'track_updated' }, env })).status).toBe(200);
     expect((await api('POST', WEBHOOK, { body: trackUpdated('TRANSIT', { tracking_number: '' }), env })).status).toBe(200);
+  });
+
+  it('answers 2XX rather than 500 on fields of the wrong type', async () => {
+    // A 500 is retried by Shippo, and each retry writes the URL secret into the
+    // error sink.
+    await addPackage();
+    const r = await api<{ applied: boolean }>('POST', WEBHOOK, {
+      body: { event: 'track_updated', data: { tracking_number: TN, eta: 7, tracking_status: 9 } },
+      env,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.applied).toBe(true);
+  });
+});
+
+describe('shippo webhook — matching the number back to a box', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('matches a payload rendered the carrier\'s way, not ours', async () => {
+    // POST /api/packages stores the normalized form; Shippo may echo the
+    // carrier's own spelling. A verbatim-only match would silently drop these
+    // and degrade the whole push path to the 45-minute poll.
+    const id = await addPackage();
+    const r = await api<{ applied: boolean }>('POST', WEBHOOK, {
+      body: trackUpdated('DELIVERED', { tracking_number: '1z999-aa10 123456784' }),
+      env,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.applied).toBe(true);
+
+    const sql = getTestDb();
+    const row = (await sql`SELECT status FROM packages WHERE id = ${id}`)[0] as { status: string };
+    expect(row.status).toBe('delivered');
+  });
+
+  it('still matches a stored number that predates boundary validation', async () => {
+    const id = await addPackage();
+    const sql = getTestDb();
+    // Rows added before the number was normalized on the way in, which is also
+    // the form Shippo would have been registered with and echoes back.
+    await sql`UPDATE packages SET tracking_number = '1Z999-AA1-0123456784' WHERE id = ${id}`;
+
+    const r = await api<{ applied: boolean }>('POST', WEBHOOK, {
+      body: trackUpdated('DELIVERED', { tracking_number: '1Z999-AA1-0123456784' }),
+      env,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.applied).toBe(true);
+
+    const row = (await sql`SELECT status FROM packages WHERE id = ${id}`)[0] as { status: string };
+    expect(row.status).toBe('delivered');
+  });
+
+  it('keeps the carrier metadata a sparse push says nothing about', async () => {
+    const id = await addPackage();
+    const sql = getTestDb();
+    await api('POST', WEBHOOK, { body: trackUpdated('TRANSIT'), env });
+
+    // Routine for USPS, and exactly what Shippo's "send test webhook" emits:
+    // a real number, no status, no eta. Writing it through would blank the
+    // "Arrives …" headline on the phone.
+    const r = await api<{ applied: boolean }>('POST', WEBHOOK, {
+      body: { event: 'track_updated', data: { tracking_number: TN, eta: null } },
+      env,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.applied).toBe(true);
+
+    const row = (await sql`
+      SELECT status, tracking_status, tracking_eta FROM packages WHERE id = ${id}
+    `)[0] as { status: string; tracking_status: string; tracking_eta: Date };
+    expect(row.status).toBe('in_transit');
+    expect(row.tracking_status).toBe('wire detail for TRANSIT');
+    expect(row.tracking_eta.toISOString()).toBe('2026-08-27T20:42:29.622Z');
   });
 });

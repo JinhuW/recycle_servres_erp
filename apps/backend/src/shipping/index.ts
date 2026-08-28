@@ -44,9 +44,28 @@ export type TrackingChoice =
   | { provider: 'shipsaving' | 'stub'; source: TrackingSourceT; register: null };
 
 let warnedAboutTrackingStub = false;
+let warnedAboutTrackingConfig = false;
 
 export function pickTrackingClient(env: Env): TrackingChoice {
   if (env.SHIPPO_API_TOKEN) {
+    // Both of these look healthy from the outside and are invisible in the UI:
+    // without the secret every push 404s while the rows claim to be subscribed,
+    // and a test token 400s every call (see
+    // docs/debug-notes/2026-08-27-shippo-test-token-only-tracks-test-carrier.md).
+    // Said once at boot so a deploy missing half the credentials is greppable.
+    if (!warnedAboutTrackingConfig) {
+      warnedAboutTrackingConfig = true;
+      if (!env.SHIPPO_WEBHOOK_SECRET) {
+        console.warn(
+          '[shipping] SHIPPO_API_TOKEN is set but SHIPPO_WEBHOOK_SECRET is not — numbers will be registered with Shippo and every push it sends will 404. Set the secret and point the Shippo dashboard at /api/public/shippo/<secret> on the public hostname.',
+        );
+      }
+      if (env.SHIPPO_API_TOKEN.startsWith('shippo_test_')) {
+        console.warn(
+          '[shipping] SHIPPO_API_TOKEN is a TEST token — it only tracks the `shippo` demo carrier and 400s every real UPS/FedEx/USPS number. Tracking will look configured and move nothing.',
+        );
+      }
+    }
     const c = shippoClient(env);
     return { provider: 'shippo', source: c, register: c };
   }

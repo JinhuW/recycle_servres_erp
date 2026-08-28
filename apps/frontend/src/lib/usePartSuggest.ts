@@ -52,8 +52,12 @@ export function usePartSuggest(value: string | null | undefined): PartSuggest {
     // suggestions it was cleared of come back.
     if (!q) { seqRef.current++; setItems([]); setLoading(false); return; }
     setLoading(true);
+    // Claimed here, not inside the timer: a number only bumped when a timer
+    // fires leaves the previous query's request still current, so it is
+    // accepted, rendered as the answer to the newer query, and clears `loading`
+    // while the newer request is still in the air.
+    const seq = ++seqRef.current;
     const timer = setTimeout(() => {
-      const seq = ++seqRef.current;
       api.get<{ items: PartSuggestion[] }>(`/api/market/parts?q=${encodeURIComponent(q)}`)
         .then(r => {
           if (seq !== seqRef.current) return;
