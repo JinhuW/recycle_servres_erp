@@ -986,7 +986,6 @@ const zh: Record<string, string> = {
   whShortCodePh: '例如:LA1',
   whFieldRegion: '区域',
   whRegionPh: '例如:US-West',
-  whAddressPh: '街道、城市、邮编…',
   whNoManager: '— 无管理员 —',
   whCurrentManager: '当前管理员',
   whManagerPhone: '管理员电话',

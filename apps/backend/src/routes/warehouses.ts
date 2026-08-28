@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
+import type { SqlLike } from '../services/orderAudit';
 import type { Env, User } from '../types';
 
 const warehouses = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -25,7 +26,6 @@ const optionalString = (raw: unknown): FieldUpdate<string> => {
 };
 
 type DetailInput = {
-  address?: FieldUpdate<string>;
   managerUserId?: FieldUpdate<string>;
   timezone?: FieldUpdate<string>;
   shipContactName?: FieldUpdate<string>;
@@ -40,7 +40,6 @@ type DetailInput = {
 
 function parseDetails(body: Record<string, unknown>): { input: DetailInput; error: string | null } {
   const input: DetailInput = {
-    address:       optionalString(body.address),
     managerUserId: optionalString(body.managerUserId),
     timezone:      optionalString(body.timezone),
     shipContactName: optionalString(body.shipContactName),
@@ -67,6 +66,29 @@ const val = <T,>(f?: FieldUpdate<T>): T | null => {
   if ('invalid' in f) return null; // shouldn't happen after parseDetails validates
   return f.value;
 };
+
+// The six ship-to columns that make up the display line. ship_contact_name and
+// ship_phone are deliberately absent — they are not part of an address.
+const ADDRESS_PART_KEYS = [
+  'shipStreet1', 'shipStreet2', 'shipCity', 'shipState', 'shipZip', 'shipCountry',
+] as const satisfies readonly (keyof DetailInput)[];
+
+// `address` is the human-facing display line on cards and pickers; it is derived
+// from the structured ship-to so a warehouse's address is typed in exactly one
+// place. Recomputed in SQL straight off the stored columns rather than from a
+// prior read, so concurrent writers can't compose a line that never existed.
+// A NULL country reads as US — the editor sends null for a blank field — and US
+// is left off, because "…, CO 80239, US" is noise. Mirrored by migration 0109.
+async function syncDerivedAddress(tx: SqlLike, id: string): Promise<void> {
+  await tx`
+    UPDATE warehouses SET address = NULLIF(concat_ws(', ',
+      NULLIF(concat_ws(', ', ship_street1, ship_street2), ''),
+      NULLIF(concat_ws(' ', NULLIF(concat_ws(', ', ship_city, ship_state), ''), ship_zip), ''),
+      CASE WHEN upper(coalesce(ship_country, 'US')) <> 'US' THEN upper(ship_country) END
+    ), '')
+    WHERE id = ${id}
+  `;
+}
 
 // True when managerUserId was supplied with a non-null value that does not
 // match an existing user (covers unknown ids and malformed uuids). Lets us
@@ -174,25 +196,30 @@ warehouses.post('/', async (c) => {
     return c.json({ error: 'managerUserId must reference an existing user' }, 400);
   }
   try {
-    const ins = await sql`
-      INSERT INTO warehouses (
-        id, name, short, region,
-        address, manager_user_id, timezone,
-        ship_contact_name, ship_phone, ship_street1, ship_street2,
-        ship_city, ship_state, ship_zip, ship_country
-      )
-      VALUES (
-        ${id}, ${name}, ${short}, ${region},
-        ${val(input.address)}, ${val(input.managerUserId)}::uuid,
-        ${val(input.timezone)},
-        ${val(input.shipContactName)}, ${val(input.shipPhone)},
-        ${val(input.shipStreet1)}, ${val(input.shipStreet2)},
-        ${val(input.shipCity)}, ${val(input.shipState)},
-        ${val(input.shipZip)}, ${val(input.shipCountry)}
-      )
-      RETURNING id
-    `;
-    const row = await fetchWarehouse(sql, (ins[0] as { id: string }).id);
+    const newId = await sql.begin(async (tx) => {
+      const ins = await tx`
+        INSERT INTO warehouses (
+          id, name, short, region,
+          manager_user_id, timezone,
+          ship_contact_name, ship_phone, ship_street1, ship_street2,
+          ship_city, ship_state, ship_zip, ship_country
+        )
+        VALUES (
+          ${id}, ${name}, ${short}, ${region},
+          ${val(input.managerUserId)}::uuid,
+          ${val(input.timezone)},
+          ${val(input.shipContactName)}, ${val(input.shipPhone)},
+          ${val(input.shipStreet1)}, ${val(input.shipStreet2)},
+          ${val(input.shipCity)}, ${val(input.shipState)},
+          ${val(input.shipZip)}, ${val(input.shipCountry)}
+        )
+        RETURNING id
+      `;
+      const created = (ins[0] as { id: string }).id;
+      await syncDerivedAddress(tx, created);
+      return created;
+    });
+    const row = await fetchWarehouse(sql, newId);
     return c.json(toApi(row as WhRow), 201);
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
@@ -228,27 +255,34 @@ warehouses.patch('/:id', async (c) => {
   }
 
   const flag = (f?: FieldUpdate<string | number>) => (f?.set ? 1 : 0);
-  const r = await sql`
-    UPDATE warehouses SET
-      name            = COALESCE(${name},   name),
-      short           = COALESCE(${short},  short),
-      region          = COALESCE(${region}, region),
-      address         = CASE WHEN ${flag(input.address)}::int       = 1 THEN ${val(input.address)}             ELSE address         END,
-      manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
-      timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
-      ship_contact_name = CASE WHEN ${flag(input.shipContactName)}::int = 1 THEN ${val(input.shipContactName)} ELSE ship_contact_name END,
-      ship_phone      = CASE WHEN ${flag(input.shipPhone)}::int     = 1 THEN ${val(input.shipPhone)}           ELSE ship_phone      END,
-      ship_street1    = CASE WHEN ${flag(input.shipStreet1)}::int   = 1 THEN ${val(input.shipStreet1)}         ELSE ship_street1    END,
-      ship_street2    = CASE WHEN ${flag(input.shipStreet2)}::int   = 1 THEN ${val(input.shipStreet2)}         ELSE ship_street2    END,
-      ship_city       = CASE WHEN ${flag(input.shipCity)}::int      = 1 THEN ${val(input.shipCity)}            ELSE ship_city       END,
-      ship_state      = CASE WHEN ${flag(input.shipState)}::int     = 1 THEN ${val(input.shipState)}           ELSE ship_state      END,
-      ship_zip        = CASE WHEN ${flag(input.shipZip)}::int       = 1 THEN ${val(input.shipZip)}             ELSE ship_zip        END,
-      ship_country    = CASE WHEN ${flag(input.shipCountry)}::int   = 1 THEN ${val(input.shipCountry)}         ELSE ship_country    END,
-      active          = COALESCE(${active}, active)
-    WHERE id = ${id}
-    RETURNING id
-  `;
-  if (r.length === 0) return c.json({ error: 'not found' }, 404);
+  // Only a body that moves one of the address parts may rewrite the derived
+  // display line; the archive toggle sends { active } alone and must not.
+  const touchesAddress = ADDRESS_PART_KEYS.some((k) => input[k]?.set);
+  let updated = 0;
+  await sql.begin(async (tx) => {
+    const r = await tx`
+      UPDATE warehouses SET
+        name            = COALESCE(${name},   name),
+        short           = COALESCE(${short},  short),
+        region          = COALESCE(${region}, region),
+        manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
+        timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
+        ship_contact_name = CASE WHEN ${flag(input.shipContactName)}::int = 1 THEN ${val(input.shipContactName)} ELSE ship_contact_name END,
+        ship_phone      = CASE WHEN ${flag(input.shipPhone)}::int     = 1 THEN ${val(input.shipPhone)}           ELSE ship_phone      END,
+        ship_street1    = CASE WHEN ${flag(input.shipStreet1)}::int   = 1 THEN ${val(input.shipStreet1)}         ELSE ship_street1    END,
+        ship_street2    = CASE WHEN ${flag(input.shipStreet2)}::int   = 1 THEN ${val(input.shipStreet2)}         ELSE ship_street2    END,
+        ship_city       = CASE WHEN ${flag(input.shipCity)}::int      = 1 THEN ${val(input.shipCity)}            ELSE ship_city       END,
+        ship_state      = CASE WHEN ${flag(input.shipState)}::int     = 1 THEN ${val(input.shipState)}           ELSE ship_state      END,
+        ship_zip        = CASE WHEN ${flag(input.shipZip)}::int       = 1 THEN ${val(input.shipZip)}             ELSE ship_zip        END,
+        ship_country    = CASE WHEN ${flag(input.shipCountry)}::int   = 1 THEN ${val(input.shipCountry)}         ELSE ship_country    END,
+        active          = COALESCE(${active}, active)
+      WHERE id = ${id}
+      RETURNING id
+    `;
+    updated = r.length;
+    if (updated > 0 && touchesAddress) await syncDerivedAddress(tx, id);
+  });
+  if (updated === 0) return c.json({ error: 'not found' }, 404);
   const row = await fetchWarehouse(sql, id);
   return c.json(toApi(row as WhRow));
 });
