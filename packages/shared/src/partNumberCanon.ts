@@ -1,7 +1,14 @@
 // The canonical form of a part number — the key that decides whether two lines
 // describe the same product. Strips a leading P/N | S/N | PART(NO|NUMBER)
-// label, drops whitespace, upper-cases, so "ABC-123", " abc-123 " and
+// label, drops the separators a part number is written with — whitespace, `_`
+// and `-` — and upper-cases, so "ABC-123", "abc_123", " abc 123 " and
 // "PN: ABC-123" collapse to one key.
+//
+// The separators fold because the same part reaches us spelled three ways: a
+// vendor sheet writes i5-10500t, a scan writes i5 10500t, the synthesiser writes
+// MIXED_256GB_SATA. Each spelling used to open its own ref_prices row and record
+// its own price for one product. Only `.` still separates — M.2, 2.5", 1.92TB
+// mean something.
 //
 // It lives here because both apps have to produce the *same* key or a lookup is
 // asked under one and answered under another: the frontend canonicalises the
@@ -18,7 +25,8 @@
 // number pasted out of a vendor PDF routinely carries a non-breaking space.
 
 /** ASCII whitespace: the subset Postgres' POSIX `[[:space:]]` also matches. */
-const ASCII_WS = '[ \\t\\n\\v\\f\\r]';
+const ASCII_WS_INNER = ' \\t\\n\\v\\f\\r';
+const ASCII_WS = `[${ASCII_WS_INNER}]`;
 
 /**
  * The leading-label prefix, parameterised by how the target engine spells a
@@ -36,7 +44,19 @@ export function partPrefixPattern(ws: string): string {
 }
 
 const PREFIX_RE = new RegExp(partPrefixPattern(ASCII_WS), 'i');
-const WS_RE = new RegExp(`${ASCII_WS}+`, 'g');
+
+/**
+ * The separators dropped from the key, parameterised by the *inside* of the
+ * engine's whitespace class — `[:space:]` for Postgres, the ASCII escapes above
+ * for JS. `-` sits last so it reads as a literal, not a range. The SQL twin
+ * inlines the Postgres spelling into a functional index (0085 → 0089 → 0111),
+ * so the two stay one template for the same reason the prefix does.
+ */
+export function partSepPattern(wsClassInner: string): string {
+  return `[${wsClassInner}_-]+`;
+}
+
+const SEP_RE = new RegExp(partSepPattern(ASCII_WS_INNER), 'g');
 
 /**
  * Drops a leading P/N | S/N | PART label and nothing else — for callers that
@@ -48,5 +68,5 @@ export function stripPartPrefix(pn: string): string {
 }
 
 export function canonicalPartNumber(pn: string | null | undefined): string {
-  return !pn ? '' : stripPartPrefix(pn).replace(WS_RE, '').toUpperCase();
+  return !pn ? '' : stripPartPrefix(pn).replace(SEP_RE, '').toUpperCase();
 }

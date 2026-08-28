@@ -1,6 +1,7 @@
 import type postgres from 'postgres';
 import { marketWritesTotal } from '../metrics';
 import { appendPriceEvent } from './refPriceEvents';
+import { canonPartArg, canonPartCol } from './part-number';
 
 export type WriteSelector = { id?: string; partNumber?: string };
 export type WriteValue = {
@@ -58,7 +59,7 @@ export async function applyMarketWrites(
         FROM ref_prices
         WHERE (${v.selector.id ?? null}::text IS NOT NULL AND id::text = ${v.selector.id ?? null})
            OR (${v.selector.partNumber ?? null}::text IS NOT NULL
-               AND LOWER(COALESCE(part_number,'')) = LOWER(${v.selector.partNumber ?? ''}))
+               AND ${canonPartCol(tx, tx`part_number`)} = ${canonPartArg(tx, v.selector.partNumber ?? '')})
         LIMIT 1
       `)[0];
       if (!idRow) {

@@ -2,6 +2,7 @@ import type postgres from 'postgres';
 import { formatRefPrice, marketValueSelect } from '../../lib/market';
 import { getWorkspaceSetting } from '../../lib/settings';
 import { appendPriceEvent } from '../../lib/refPriceEvents';
+import { canonPartArg, canonPartCol } from '../../lib/part-number';
 
 // Annotations are advisory, but ChatGPT applies the MCP defaults when they're
 // absent — readOnlyHint false, destructiveHint true, openWorldHint true — so
@@ -37,14 +38,14 @@ export const TOOL_DEFS = [
     name: 'get_market_value',
     description:
       'Read-only. Fetch a single reference-price record by id or by exact part number. Provide exactly one of ' +
-      'id or partNumber (supplying neither is an error; partNumber match is case-insensitive). Returns the same ' +
+      'id or partNumber (supplying neither is an error; partNumber matches on the canonical form, so case, spaces, hyphens and underscores do not matter). Returns the same ' +
       'record shape as list_market_values (lastPrice, avgSell, low/high/target, trend, maxBuy, samples, source, ' +
       'internalSales, recentPrices; money in USD), or null when nothing matches. Requires the market:read scope.',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string', description: 'ref_prices row id; provide this OR partNumber, not both' },
-        partNumber: { type: 'string', description: 'exact product part number (case-insensitive); provide this OR id' },
+        partNumber: { type: 'string', description: 'product part number; matched ignoring case, spaces, hyphens and underscores. Provide this OR id' },
       },
       additionalProperties: false,
     },
@@ -66,7 +67,7 @@ export const TOOL_DEFS = [
     inputSchema: {
       type: 'object',
       properties: {
-        partNumber: { type: 'string', description: 'exact part number of the product to price (case-insensitive)' },
+        partNumber: { type: 'string', description: 'part number of the product to price; matched ignoring case, spaces, hyphens and underscores' },
         price: { type: 'number', minimum: 0, description: 'new reference price in USD; must be >= 0' },
         note: { type: 'string', maxLength: 280, description: 'optional free-text note (<=280 chars) stored on the price event' },
       },
@@ -114,7 +115,7 @@ export async function callGetMarketValue(
   const where = sql`
     (${args.id ?? null}::text IS NOT NULL AND rp.id::text = ${args.id ?? null})
     OR (${args.partNumber ?? null}::text IS NOT NULL
-        AND LOWER(COALESCE(rp.part_number, '')) = LOWER(${args.partNumber ?? ''}))
+        AND ${canonPartCol(sql, sql`rp.part_number`)} = ${canonPartArg(sql, args.partNumber ?? '')})
   `;
   const rows = await marketValueSelect(sql, where, sql`LIMIT 1`);
   if (rows.length === 0) return null;
@@ -141,7 +142,7 @@ export async function callSetMarketPrice(
   const ev = await sql.begin(async (tx) => {
     const row = (await tx<{ id: string }[]>`
       SELECT id FROM ref_prices
-      WHERE LOWER(COALESCE(part_number, '')) = LOWER(${partNumber})
+      WHERE ${canonPartCol(tx, tx`part_number`)} = ${canonPartArg(tx, partNumber)}
       LIMIT 1
     `)[0];
     if (!row) return null;
