@@ -12,6 +12,7 @@
 
 import { Hono } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
+import { normalizeTracking } from '@recycle-erp/shared';
 import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { trackToInfo } from '../shipping/shippo';
@@ -50,13 +51,26 @@ shippoWebhook.post('/:secret', async (c) => {
   // Packages only. Shippo pushes for numbers we registered with it, and only
   // packages are registered — shipments carry ShipSaving's own labels and stay
   // on the poll.
+  //
+  // Matched both ways round. POST /api/packages stores the normalized form, so
+  // a payload echoing the carrier's own rendering (lowercase, hyphens intact)
+  // needs normalizing to hit it; but rows predating boundary validation are
+  // stored raw, and Shippo echoes back whatever was registered, so the verbatim
+  // form has to keep matching those.
+  const canon = normalizeTracking(trackingNumber);
   const row = (await sql`
     SELECT id, status, tracking_number, carrier, created_by
     FROM packages
-    WHERE tracking_number = ${trackingNumber}
+    WHERE tracking_number IN (${canon}, ${trackingNumber})
+    ORDER BY (tracking_number = ${canon}) DESC
     LIMIT 1
   `)[0] as TrackedPackageRow | undefined;
-  if (!row) return c.json({ ok: true, applied: false });
+  if (!row) {
+    // Silent otherwise: the push path degrades to the 45-minute poll with no
+    // symptom but latency.
+    console.warn(`[shippo] track_updated for a number no package matches: ${canon}`);
+    return c.json({ ok: true, applied: false });
+  }
 
   const next = await applyPackageTracking(sql, row, trackToInfo(body.data));
   return c.json({ ok: true, applied: true, status: next ?? row.status });

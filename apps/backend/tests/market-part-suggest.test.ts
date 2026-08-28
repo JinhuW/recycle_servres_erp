@@ -127,6 +127,18 @@ describe('GET /api/market/parts', () => {
     expect((await suggest('__', token)).body.items).toEqual([]);
   });
 
+  it('counts characters before escaping them, not after', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedRef('rp-zz-9', 'ZZGATE-1');
+
+    // escapeLike doubles a lone metacharacter, so escaping first would let a
+    // single typed character through a gate that exists to require two — and
+    // the client's own gate measures the unescaped form.
+    for (const q of ['_', '%', '\\']) {
+      expect((await suggest(q, token)).body.items).toEqual([]);
+    }
+  });
+
   it('requires a session', async () => {
     const r = await api('GET', '/api/market/parts?q=zzab1');
     expect(r.status).toBe(401);

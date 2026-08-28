@@ -60,8 +60,15 @@ export function Combobox({
     : options;
   const offerCustom = !!q && !exact;
 
-  // Keep the highlight in range as the filtered list shrinks/grows.
-  useEffect(() => { setActive(-1); }, [q, open]);
+  // Keep the highlight in range as the list shrinks/grows. Keyed on the list's
+  // CONTENT, not just on `q`: with filterOptions={false} the options are a
+  // server answer that swaps in asynchronously while `q` is unchanged, and a
+  // highlight left pointing at index 1 of the previous answer commits a part
+  // number the user never saw highlighted. `options` itself can't be the dep —
+  // it's a fresh array every render, which would reset on every keystroke and
+  // break arrow keys outright.
+  const optionsKey = filtered.join('\u0000');
+  useEffect(() => { setActive(-1); }, [q, open, optionsKey]);
 
   const choose = (v: string) => { onChange(v); setOpen(false); setActive(-1); };
 

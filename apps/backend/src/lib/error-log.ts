@@ -26,13 +26,17 @@ export interface ErrorRecord {
   context?: Record<string, unknown>;
 }
 
-// Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
-// and are bearer-equivalent secrets — the only gate to a vendor's data. A
-// record written about such a request must not carry a replayable token into
-// the durable log. Lives here rather than beside app.onError because every
-// writer into this sink needs it, not just the unhandled-500 path.
+// Two public routes carry a bearer-equivalent secret in the URL path: the
+// vendor portal's token (/api/public/vendor/<token>/…), the only gate to a
+// vendor's data, and the Shippo webhook's secret (/api/public/shippo/<secret>),
+// which is the whole credential — Shippo publishes no signature to verify
+// against. Neither may reach the durable log, where it would be replayable.
+//
+// Not anchored: this also runs over hono/logger's preformatted request lines,
+// where the path sits mid-string. Lives here rather than beside app.onError
+// because every writer into this sink needs it, not just the unhandled-500 path.
 export function redactSensitivePath(pathname: string): string {
-  return pathname.replace(/^(\/api\/public\/vendor\/)[^/]+/, '$1<redacted>');
+  return pathname.replace(/(\/api\/public\/(?:vendor|shippo)\/)[^/\s?]+/, '$1<redacted>');
 }
 
 const SENSITIVE_QUERY_KEYS = new Set([

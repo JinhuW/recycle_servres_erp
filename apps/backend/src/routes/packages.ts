@@ -13,7 +13,7 @@ import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import { carrierTrackingUrl, pickTrackingClient } from '../shipping';
-import { applyPackageTracking } from '../shipping/track';
+import { applyPackageTracking, registerPackageTracking } from '../shipping/track';
 
 const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -188,18 +188,15 @@ packages.post('/', async (c) => {
     return c.json({ error: 'This tracking number is already being tracked' }, 409);
   }
 
-  // Subscribe the number so the carrier's own scans push updates in. Best
-  // effort by design: a provider blip must not cost the user their entry, and
-  // the tracking loop's sweep registers whatever this misses.
+  // Subscribe the number so the carrier's own scans push updates in. Detached
+  // by design: the row is already committed, the call carries a 20s timeout,
+  // and a user left watching a spinner at the receiving bench re-submits — which
+  // hits the unique index and reads as "already tracked" for a box that was in
+  // fact created. The sweep registers whatever this misses.
   const row = inserted[0];
   const tracking = pickTrackingClient(c.env);
   if (tracking.register) {
-    try {
-      await tracking.register.registerTracking(row.tracking_number, row.carrier, `package ${row.id}`);
-      await sql`UPDATE packages SET tracking_registered_at = NOW() WHERE id = ${row.id}`;
-    } catch (err) {
-      console.warn(`[packages] tracking registration failed for ${row.id}; the sweep will retry`, err);
-    }
+    void registerPackageTracking(sql, tracking.register, row);
   }
   return c.json({ package: toApi(row, u.name) }, 201);
 });

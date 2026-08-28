@@ -61,7 +61,10 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-app.use('*', logger());
+// Redacted print: /api/public/{vendor,shippo}/<secret> carries a
+// bearer-equivalent credential in the path, and the default logger would put it
+// in the container's stdout stream verbatim.
+app.use('*', logger((str, ...rest) => console.log(redactSensitivePath(str), ...rest)));
 
 // ── Origin lockdown ──────────────────────────────────────────────────────────
 // When PROXY_SECRET is set, only requests carrying it in X-Proxy-Secret are

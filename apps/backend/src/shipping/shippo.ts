@@ -76,30 +76,27 @@ export function normalizeShippoStatus(raw: string): TrackingInfo['normalized'] {
   }
 }
 
-type WireTrackingStatus = {
-  status?: string;
-  substatus?: string | null;
-  status_details?: string | null;
-  status_date?: string | null;
-};
-
-type WireTrack = {
-  carrier?: string;
-  tracking_number?: string;
-  eta?: string | null;
-  tracking_status?: WireTrackingStatus | null;
-};
-
 // The status half of a Track object, wherever it came from — a GET here or a
 // track_updated webhook body. One reader, so the poll and the push can never
 // disagree about what a payload means.
-export function trackToInfo(track: WireTrack): TrackingInfo {
-  const st = track.tracking_status ?? {};
-  const status = st.status ?? 'UNKNOWN';
+//
+// Every field is narrowed at runtime rather than typed: the webhook hands this
+// an unvalidated body, and an optional-everything interface accepts any object
+// vacuously. A renamed Shippo field would compile clean and silently degrade
+// every push to "no movement"; a numeric status would throw inside .toUpperCase()
+// and turn into a 500 Shippo then retries forever.
+export function trackToInfo(track: Record<string, unknown>): TrackingInfo {
+  const st = (typeof track.tracking_status === 'object' && track.tracking_status !== null
+    ? track.tracking_status
+    : {}) as Record<string, unknown>;
+  const status = typeof st.status === 'string' ? st.status : '';
+  const details = typeof st.status_details === 'string' ? st.status_details.trim() : '';
   return {
-    raw: st.status_details?.trim() || status,
+    // '' means "this payload carried no status" — the apply* writers COALESCE
+    // it away rather than overwriting a good carrier string with a placeholder.
+    raw: details || status,
     normalized: normalizeShippoStatus(status),
-    eta: parseEta(track.eta),
+    eta: parseEta(typeof track.eta === 'string' ? track.eta : null),
   };
 }
 
@@ -107,19 +104,28 @@ export interface ShippoClient extends TrackingSource {
   registerTracking(trackingNumber: string, carrier: string, metadata: string): Promise<void>;
 }
 
+// An empty token would build `/tracks//1Z999…`, which 404s on every tick
+// forever behind the callers' per-row catch. Fail loudly instead — the same
+// contract the ShipSaving client states for the same input.
+function requireCarrier(carrier: string | null): string {
+  const token = carrierToken(carrier);
+  if (!token) throw new Error(`shippo tracking needs a carrier, got ${JSON.stringify(carrier)}`);
+  return token;
+}
+
 export function shippoClient(env: Env): ShippoClient {
   return {
     async getShipment(trackingNumber: string, carrier: string | null): Promise<TrackingInfo> {
-      const track = await call<WireTrack>(
+      const track = await call<Record<string, unknown>>(
         env, 'GET',
-        `/tracks/${encodeURIComponent(carrierToken(carrier))}/${encodeURIComponent(trackingNumber)}`,
+        `/tracks/${encodeURIComponent(requireCarrier(carrier))}/${encodeURIComponent(trackingNumber)}`,
       );
       return trackToInfo(track);
     },
 
     async registerTracking(trackingNumber: string, carrier: string, metadata: string): Promise<void> {
       await call(env, 'POST', '/tracks/', {
-        carrier: carrierToken(carrier),
+        carrier: requireCarrier(carrier),
         tracking_number: trackingNumber,
         metadata,
       });
