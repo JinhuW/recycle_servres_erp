@@ -41,12 +41,29 @@ type MatchSummary = {
   };
 };
 
+// A leg this one can be grouped with into a single logical payment. The server
+// sends it only when it is certain on both sides; anything less certain is left
+// to the picker.
+type PairCandidate = {
+  id: string;
+  source: string;
+  postedAt: string;
+  amount: number;
+  counterparty: string | null;
+  description: string | null;
+  paypalTxnId: string | null;
+  dayGap: number;
+};
+
 type PaymentRow = Omit<Leg, 'source'> & {
   source: 'mercury' | 'paypal' | 'paired';
   legs: Leg[];
   // Server-ranked PO candidates. Present only on rows still in the queue —
   // a linked, ignored or transfer row carries null.
   match: MatchSummary | null;
+  // Added in v1.103.0 — optional for the same deploy-skew reason as
+  // Stats.suggested below.
+  pairCandidate?: PairCandidate | null;
   orderId: string | null;
   linkKind: 'payment' | 'refund' | null;
   linkAuto: boolean;
@@ -464,6 +481,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   // persisting a "not it" would be the same mistake as persisting a match.
   const [dismissed, setDismissed] = useState(false);
   const actionsRef = useRef<HTMLSpanElement>(null);
+  const [pairDismissed, setPairDismissed] = useState(false);
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
@@ -478,6 +496,14 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   const likely = !dismissed && row.match?.count === 1 && row.match.confidence === 'high'
     ? row.match : null;
   const ambiguous = !likely && (row.match?.count ?? 0) > 0 ? row.match : null;
+
+  // Grouping outranks linking: while two rows may be one payment, linking
+  // either of them to a PO is premature — and linking both is how one PO ends
+  // up carrying the payment twice.
+  const grouping = !pairDismissed ? row.pairCandidate ?? null : null;
+  const group = async (otherId: string) => {
+    if (await act(`${row.id}/pair`, { otherId })) onToast(t('payGroupedToast'));
+  };
 
   return (
     <>
@@ -513,6 +539,26 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
             <button type="button" className="btn sm ghost" onClick={(e) => { stop(e); void act(`${row.id}/unignore`); }}>
               {t('payUnignore')}
             </button>
+          ) : grouping ? (
+            <span style={{ display: 'inline-grid', gap: 5, justifyItems: 'start' }} onClick={stop}>
+              <span className="chip dot accent" style={{ fontSize: 10.5 }}>
+                {t('paySamePaymentAs', {
+                  source: grouping.source === 'mercury' ? 'Mercury' : 'PayPal',
+                  when: fmtDateShort(grouping.postedAt, locale),
+                })}
+              </span>
+              <span style={{ display: 'inline-flex', gap: 6 }}>
+                <button type="button" className="btn sm primary" onClick={() => void group(grouping.id)}>
+                  {t('payGroup')}
+                </button>
+                <button type="button" className="btn sm ghost" onClick={() => setPairDismissed(true)}>
+                  {t('payNotSame')}
+                </button>
+                <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
+                  {t('payIgnore')}
+                </button>
+              </span>
+            </span>
           ) : (
             // Badge and buttons share one line: stacked, a row carrying a match
             // badge stood a line taller than its neighbours and the table stepped.
@@ -577,7 +623,10 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
       {open && (
         <tr>
           <td colSpan={7} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
-            <ExpandedDetail row={row} locale={locale} act={act} onToast={onToast} onLink={link} />
+            <ExpandedDetail
+              row={row} locale={locale} act={act} onToast={onToast}
+              onLink={link} onGroup={group}
+            />
           </td>
         </tr>
       )}
@@ -585,14 +634,16 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   );
 }
 
-function ExpandedDetail({ row, locale, act, onToast, onLink }: {
+function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
   row: PaymentRow;
   locale: string;
   act: (path: string, body?: unknown) => Promise<ActResult | null>;
   onToast: (msg: string) => void;
   onLink: (orderId: string) => void;
+  onGroup: (otherId: string) => void;
 }) {
   const { t } = useT();
+  const [pickingPair, setPickingPair] = useState(false);
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
       {row.match && !row.orderId && !row.ignored && (
@@ -628,10 +679,27 @@ function ExpandedDetail({ row, locale, act, onToast, onLink }: {
             </button>
           </>
         )}
-        {row.source === 'paired' && (
+        {row.source === 'paired' ? (
           <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unpair`)}>
             {t('payUnpair')}
           </button>
+        ) : !row.ignored && row.category === 'external' && (
+          // PoPicker anchors to its offset parent, and this row is a plain
+          // <td colSpan>, so the wrapper is what keeps the popover on the
+          // button instead of the page.
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <button type="button" className="btn sm ghost" onClick={() => setPickingPair(p => !p)}>
+              {t('payGroupWith')}
+            </button>
+            {pickingPair && (
+              <PairPicker
+                txnId={row.id}
+                locale={locale}
+                onPick={id => { onGroup(id); setPickingPair(false); }}
+                onClose={() => setPickingPair(false)}
+              />
+            )}
+          </span>
         )}
         {!row.orderId && (
           row.category === 'transfer' ? (
@@ -869,6 +937,89 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// The counterparts this transaction may be grouped with. Same popover shape as
+// PoPicker, without the search box: the server's rules — opposite source, the
+// same amount to the cent, neither leg already grouped — leave a set small
+// enough to read, and nothing about it is searchable anyway.
+function PairPicker({ txnId, locale, onPick, onClose }: {
+  txnId: string;
+  locale: string;
+  onPick: (otherId: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const [rows, setRows] = useState<PairCandidate[] | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [onClose]);
+
+  useEffect(() => {
+    let live = true;
+    api.get<{ candidates: PairCandidate[] }>(`/api/bank-transactions/${txnId}/pair-candidates`)
+      .then(r => { if (live) setRows(r.candidates); })
+      .catch(e => { if (live) setRows([]); handleFetchError(e); });
+    return () => { live = false; };
+  }, [txnId]);
+
+  return (
+    <div
+      ref={ref}
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'absolute', top: 'calc(100% + 4px)', left: 0, width: 380,
+        background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 30, overflow: 'hidden',
+        cursor: 'default', textAlign: 'left',
+      }}
+    >
+      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+        {rows === null ? (
+          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payMoreLoading')}</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payPairPickNone')}</div>
+        ) : rows.map(cand => (
+          <button
+            key={cand.id}
+            type="button"
+            onClick={() => onPick(cand.id)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '9px 12px',
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            <span className={'chip ' + (cand.source === 'mercury' ? 'info' : '')} style={{ fontSize: 10.5 }}>
+              {cand.source === 'mercury' ? 'Mercury' : 'PayPal'}
+            </span>
+            <span className="mono" style={{ whiteSpace: 'nowrap' }}>{fmtSigned(cand.amount, locale)}</span>
+            {/* The counterparty is the only elastic part, so it is the only
+                thing allowed to run out of room. */}
+            <span
+              className="muted"
+              style={{
+                fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              {fmtDateShort(cand.postedAt, locale)}
+              {cand.counterparty ? ` · ${cand.counterparty}` : ''}
+            </span>
+            <span className="chip" style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>
+              {gapLabel(cand.dayGap, t)}
+            </span>
+          </button>
+        ))}
       </div>
     </div>
   );
