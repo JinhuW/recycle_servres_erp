@@ -9,7 +9,7 @@ import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate, type ShippingRoute } from '../../lib/route';
 import {
-  createPoFromPackage, listPackages, removePackage,
+  createPoFromPackage, listPackages, refreshPackage, removePackage,
   type TrackedPackage,
 } from '../../lib/packages';
 import { packageSourceLabelKey } from '../../lib/packageSource';
@@ -403,6 +403,18 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
     }
   };
 
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await refreshPackage(pkg.id);
+      onMutated();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <tr>
       <td>
@@ -470,6 +482,16 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
           {canCreatePo(pkg, isManager) && (
             <button className="btn accent sm" disabled={busy} onClick={() => void createPo()}>
               {t('shipCreatePo')}
+            </button>
+          )}
+          {pkg.status !== 'delivered' && (
+            <button
+              className="btn ghost sm"
+              disabled={busy}
+              title={t('shipRefreshHint')}
+              onClick={() => void refresh()}
+            >
+              {t('shipRefresh')}
             </button>
           )}
           {!pkg.orderId && (

@@ -5,10 +5,11 @@ import type { PackageSource } from './packageSource';
 // ── Tracked packages: standalone inbound labels, no PO yet ───────────────────
 //
 // Server-side since v1.77.0 (migration 0094, apps/backend/routes/packages.ts).
-// Tracking is the ShipSaving poll loop's job (shipping/track.ts): it moves
-// these rows through the shared status guard and the dashboard re-reads them
-// on a slow tick. Statuses reuse the shipment vocabulary subset so the rail,
-// chips, and filters serve both row kinds.
+// Tracking moves these rows server-side (shipping/track.ts) through the shared
+// status guard: Shippo pushes carrier scans in by webhook, a slow poll sweeps
+// as the backstop, and refreshPackage asks on demand. Statuses reuse the
+// shipment vocabulary subset so the rail, chips, and filters serve both row
+// kinds.
 
 export type PackageStatus = 'purchased' | 'in_transit' | 'delivered' | 'exception';
 
@@ -84,6 +85,14 @@ export async function lookupPackage(code: string): Promise<{ package: LookedUpPa
   return api.get<{ package: LookedUpPackage | null }>(
     `/api/packages/lookup?code=${encodeURIComponent(code)}`,
   );
+}
+
+/**
+ * Asks the carrier right now instead of waiting for the webhook or the poll.
+ * 501 when no tracking provider is configured; 502 when the provider is down.
+ */
+export async function refreshPackage(id: string): Promise<{ package: TrackedPackage }> {
+  return api.post<{ package: TrackedPackage }>(`/api/packages/${id}/refresh`, {});
 }
 
 export async function removePackage(id: string): Promise<{ ok: true }> {

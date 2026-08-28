@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
-import { refreshPackageTracking } from '../src/shipping/track';
+import { refreshPackageTracking, registerUntrackedPackages, startShipmentTrackingLoop } from '../src/shipping/track';
+import { pickTrackingClient } from '../src/shipping';
 import { stubShippingClient } from '../src/shipping/stub';
 import type { ShippingClient } from '../src/shipping/types';
 
@@ -422,5 +423,136 @@ describe('packages — tracking refresh', () => {
     expect(notes).toHaveLength(1);
     expect(notes[0].user_id).toBe(user.id);
     expect(notes[0].title).toContain(TN);
+  });
+});
+
+describe('packages — ask the carrier now', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const shippoEnv = { SHIPPO_API_TOKEN: 'shippo_test_x', SHIPPO_API_URL: 'http://127.0.0.1:9' };
+
+  it('501s while no tracking provider is configured', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const r = await api<{ error: string }>('POST', `/api/packages/${pkg.id}/refresh`, { token });
+    expect(r.status).toBe(501);
+    expect(r.body.error).toContain('SHIPPO_API_TOKEN');
+  });
+
+  it('502s, and keeps the row as it was, when the provider cannot be reached', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const r = await api('POST', `/api/packages/${pkg.id}/refresh`, { token, env: shippoEnv });
+    expect(r.status).toBe(502);
+    const sql = getTestDb();
+    const row = (await sql`SELECT status, last_tracked_at FROM packages WHERE id = ${pkg.id}`)[0] as
+      { status: string; last_tracked_at: Date | null };
+    expect(row.status).toBe('purchased');
+    expect(row.last_tracked_at).toBeNull();
+  });
+
+  it('is the creator\'s and a manager\'s to call, nobody else\'s', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+
+    const other = await loginAs(PRIYA);
+    const denied = await api('POST', `/api/packages/${pkg.id}/refresh`, { token: other.token, env: shippoEnv });
+    expect(denied.status).toBe(403);
+
+    // Reaching 502 is the point: the guard let both through to the provider.
+    const manager = await loginAs(ALEX);
+    for (const t of [token, manager.token]) {
+      const r = await api('POST', `/api/packages/${pkg.id}/refresh`, { token: t, env: shippoEnv });
+      expect(r.status).toBe(502);
+    }
+  });
+
+  it('404s on a package that does not exist', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api('POST', '/api/packages/00000000-0000-0000-0000-000000000000/refresh', {
+      token, env: shippoEnv,
+    });
+    expect(r.status).toBe(404);
+  });
+});
+
+describe('packages — webhook registration', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('leaves the add unregistered when no provider can register', async () => {
+    const { token } = await loginAs(MARCUS);
+    const pkg = await addPackage(token);
+    const sql = getTestDb();
+    const row = (await sql`SELECT tracking_registered_at FROM packages WHERE id = ${pkg.id}`)[0] as
+      { tracking_registered_at: Date | null };
+    expect(row.tracking_registered_at).toBeNull();
+  });
+
+  it('sweeps active unregistered rows and stamps only the ones that took', async () => {
+    const { token } = await loginAs(MARCUS);
+    const a = await addPackage(token);
+    const b = await addPackage(token, { trackingNumber: '1Z999AA10123456799' });
+    const sql = getTestDb();
+    // Delivered rows have nothing left to push, so the sweep skips them.
+    await sql`UPDATE packages SET status = 'delivered' WHERE id = ${b.id}`;
+
+    const seen: string[] = [];
+    const done = await registerUntrackedPackages(sql, {
+      registerTracking: async (tn) => { seen.push(tn); },
+    });
+    expect(done).toBe(1);
+    expect(seen).toEqual([TN]);
+
+    const rows = await sql<{ id: string; tracking_registered_at: Date | null }[]>`
+      SELECT id, tracking_registered_at FROM packages ORDER BY created_at
+    `;
+    expect(rows.find(r => r.id === a.id)!.tracking_registered_at).not.toBeNull();
+    expect(rows.find(r => r.id === b.id)!.tracking_registered_at).toBeNull();
+  });
+
+  it('does not re-register a number, and does not stamp one that threw', async () => {
+    const { token } = await loginAs(MARCUS);
+    await addPackage(token);
+    const sql = getTestDb();
+
+    // A registration Shippo refused leaves the stamp NULL so the next tick retries:
+    // registering twice would push two update streams for one box.
+    const failed = await registerUntrackedPackages(sql, {
+      registerTracking: async () => { throw new Error('shippo POST /tracks/ failed: HTTP 400'); },
+    });
+    expect(failed).toBe(0);
+
+    let calls = 0;
+    expect(await registerUntrackedPackages(sql, { registerTracking: async () => { calls++; } })).toBe(1);
+    expect(await registerUntrackedPackages(sql, { registerTracking: async () => { calls++; } })).toBe(0);
+    expect(calls).toBe(1);
+  });
+});
+
+describe('shipping — which tracking provider is in play', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('prefers Shippo, falls back to ShipSaving, then stubs', () => {
+    expect(pickTrackingClient({ SHIPPO_API_TOKEN: 'x' } as never).provider).toBe('shippo');
+    expect(pickTrackingClient({
+      SHIPSAVING_APP_KEY: 'k', SHIPSAVING_APP_SECRET: 's',
+    } as never).provider).toBe('shipsaving');
+    // Shippo wins even with ShipSaving present: it tracks any carrier's number.
+    expect(pickTrackingClient({
+      SHIPPO_API_TOKEN: 'x', SHIPSAVING_APP_KEY: 'k', SHIPSAVING_APP_SECRET: 's',
+    } as never).provider).toBe('shippo');
+    expect(pickTrackingClient({} as never).provider).toBe('stub');
+  });
+
+  it('ticks on a Shippo token with ShipSaving absent, and stays dark with neither', () => {
+    const sql = getTestDb();
+    // The regression this whole change exists to prevent: labels on the stub
+    // used to mean tracking never ran at all.
+    const live = startShipmentTrackingLoop(sql, { SHIPPO_API_TOKEN: 'x', SHIPPO_API_URL: 'http://127.0.0.1:9' } as never);
+    expect(live.stop).toBeTypeOf('function');
+    live.stop();
+
+    const dark = startShipmentTrackingLoop(sql, {} as never);
+    dark.stop();
   });
 });

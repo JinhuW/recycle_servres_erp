@@ -4,6 +4,7 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, marketValueSelect } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
 import { appendPriceEvent } from '../lib/refPriceEvents';
+import { escapeLike } from '../lib/pagination';
 import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
@@ -80,6 +81,72 @@ market.get('/', async (c) => {
     targetMargin: TARGET_MARGIN,
     total,
     items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
+  });
+});
+
+// Part numbers already on record, for the typeahead on the capture screens.
+//
+// POST /lookup answers "what is this part worth" for an EXACT canonical match,
+// which is no help to someone half-way through typing: a spacing variant or a
+// transposed character reads as a part nobody has ever seen, and autoTrackParts
+// then writes that variant into ref_prices on submit. Offering the existing
+// spellings while the field is still open is what stops the drift.
+//
+// Both catalogues count as "existing". ref_prices is very nearly a superset
+// (autoTrackParts adds every purchased part), but order_lines still carries the
+// rows that pre-date auto-tracking.
+const SUGGEST_LIMIT = 12;
+const SUGGEST_MIN = 2;
+
+market.get('/parts', async (c) => {
+  const sql = getDb(c.env);
+  // Gated on the canonical form, then escaped — never the other way round.
+  // escapeLike doubles the length of a lone metacharacter, so escaping first
+  // would let '?q=_' pass a check that exists to require two typed characters,
+  // and the client's own gate (suggestQuery) measures the unescaped form.
+  const canon = canonPartNumberJs(c.req.query('q') ?? '');
+  if (canon.length < SUGGEST_MIN) return c.json({ items: [] });
+  // The canonical form leaves LIKE metacharacters alone, so a typed '%' would
+  // otherwise match the whole table.
+  const q = escapeLike(canon);
+
+  const canonRef = canonPartCol(sql, sql`rp.part_number`);
+  const canonLine = canonPartCol(sql, sql`l.part_number`);
+
+  // Three levels, because DISTINCT ON must lead its own ORDER BY: the union
+  // gathers, the middle picks one row per part (ref_prices first — it is the
+  // side with a real label, and two of its rows can share a canonical key), and
+  // only the outer SELECT is free to rank.
+  const rows = await sql<{ pn: string; label: string | null; category: string | null }[]>`
+    SELECT pn, label, category
+      FROM (
+        SELECT DISTINCT ON (canon) canon, pn, label, category
+          FROM (
+            SELECT ${canonRef} AS canon, rp.part_number AS pn,
+                   NULLIF(rp.label, '') AS label, rp.category AS category, 0 AS src
+              FROM ref_prices rp
+             WHERE rp.part_number IS NOT NULL
+               AND ${canonRef} LIKE '%' || ${q} || '%'
+            UNION ALL
+            SELECT ${canonLine}, l.part_number,
+                   COALESCE(
+                     NULLIF(CONCAT_WS(' ', l.brand, l.capacity, l.generation), ''),
+                     NULLIF(l.description, '')
+                   ),
+                   l.category, 1
+              FROM order_lines l
+             WHERE l.part_number IS NOT NULL
+               AND ${canonLine} LIKE '%' || ${q} || '%'
+          ) u
+         WHERE canon <> ''
+         ORDER BY canon, src, pn
+      ) d
+     ORDER BY (canon LIKE ${q} || '%') DESC, LENGTH(pn), pn
+     LIMIT ${SUGGEST_LIMIT}
+  `;
+
+  return c.json({
+    items: rows.map(r => ({ partNumber: r.pn, label: r.label, category: r.category })),
   });
 });
 

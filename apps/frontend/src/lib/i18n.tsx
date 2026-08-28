@@ -1184,6 +1184,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipCreatePo: 'Create PO',
     shipPoCreated: 'Draft {id} created from the delivered package',
     shipPkgRemove: 'Remove',
+    shipRefresh: 'Refresh',
+    shipRefreshHint: 'Ask the carrier now instead of waiting for the next update',
     shipEstDelivery: 'Est. {eta}',
     shipEmptyPageTitle: 'No labels yet',
     shipEmptyPageBody: 'Create a prepaid label for a seller — a draft purchase order is created with it, and moves to In Transit when the package starts moving.',
@@ -1526,6 +1528,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // LineFields
     selectPlaceholder: 'Select…',
     comboUseCustom: 'Use “{value}”',
+    comboSearching: 'Searching…',
+    pnSuggestHint: 'Keep typing to find existing parts',
     healthPct: 'Health (%)',
     lfItemDescription: 'Item description',
     lfItemType: 'Item type',

@@ -23,6 +23,7 @@ import shipmentsRoutes from './routes/shipments';
 import { shipmentsList as shipmentsListRoutes, shippingContacts as shippingContactsRoutes } from './routes/shipmentsGlobal';
 import packagesRoutes from './routes/packages';
 import shippingPublicRoutes from './routes/shippingPublic';
+import shippoWebhookRoutes from './routes/shippoWebhook';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
@@ -60,7 +61,10 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-app.use('*', logger());
+// Redacted print: /api/public/{vendor,shippo}/<secret> carries a
+// bearer-equivalent credential in the path, and the default logger would put it
+// in the container's stdout stream verbatim.
+app.use('*', logger((str, ...rest) => console.log(redactSensitivePath(str), ...rest)));
 
 // ── Origin lockdown ──────────────────────────────────────────────────────────
 // When PROXY_SECRET is set, only requests carrying it in X-Proxy-Secret are
@@ -203,6 +207,7 @@ app.use('*', async (c, next) => {
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
 app.route('/api/public/shipping', shippingPublicRoutes);
+app.route('/api/public/shippo', shippoWebhookRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
 

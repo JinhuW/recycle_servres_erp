@@ -9,6 +9,7 @@ import { chipNumberRequired } from '../../../lib/ramRequired';
 import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../../../lib/lineRequirements';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from '../../../components/Combobox';
+import { PartNumberField } from '../../../components/PartNumberField';
 import { ItemTypePicker } from '../../../components/ItemTypePicker';
 import type { Line } from '../DesktopSubmit';
 
@@ -104,11 +105,10 @@ export function RamFields({ line, set, missing }: FieldsProps) {
       </div>
       <div className={cls('partNumber')} style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')} <span className="req">*</span></label>
-        <input
-          className="input mono"
-          value={line.partNumber ?? ''}
-          aria-invalid={bad('partNumber')}
-          onChange={e => set({ partNumber: e.target.value })}
+        <PartNumberField
+          value={line.partNumber}
+          invalid={bad('partNumber')}
+          onChange={v => set({ partNumber: v })}
           placeholder="M393A4K40DB3-CWE"
         />
       </div>
@@ -149,11 +149,10 @@ export function SsdFields({ line, set }: FieldsProps) {
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')}</label>
-        <input
-          className="input mono"
-          value={line.partNumber ?? ''}
+        <PartNumberField
+          value={line.partNumber}
           placeholder={synthesizePartNumber('SSD', line) ?? undefined}
-          onChange={e => set({ partNumber: e.target.value })}
+          onChange={v => set({ partNumber: v })}
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
@@ -203,10 +202,9 @@ export function HddFields({ line, set }: FieldsProps) {
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
         <label className="label">{t('partNumber')}</label>
-        <input
-          className="input mono"
-          value={line.partNumber ?? ''}
-          onChange={e => set({ partNumber: e.target.value })}
+        <PartNumberField
+          value={line.partNumber}
+          onChange={v => set({ partNumber: v })}
         />
       </div>
       <div className="field" style={{ gridColumn: 'span 2' }}>
@@ -239,10 +237,9 @@ export function OtherFields({ line, set }: FieldsProps) {
       </div>
       <div className="field">
         <label className="label">{t('lfPartSku')} <span className="req">*</span></label>
-        <input
-          className="input mono"
-          value={line.partNumber ?? ''}
-          onChange={e => set({ partNumber: e.target.value })}
+        <PartNumberField
+          value={line.partNumber}
+          onChange={v => set({ partNumber: v })}
         />
       </div>
       <div className="field">
