@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
-import { PART_PREFIX_RE, canonPartNumberJs } from '../src/lib/part-number';
+import { PART_PREFIX_RE, PART_SEP_RE } from '../src/lib/part-number';
 
 // The PO screens need a recorded value for a known set of part numbers in one
 // round trip. GET /api/market only offers a substring search, which returns the
@@ -45,8 +45,35 @@ describe('POST /api/market/lookup', () => {
       token, body: { partNumbers: ['P/N: HMA84GR7 CJR4N-WM'] },
     });
     expect(r.status).toBe(200);
-    // Keyed canonically, so the caller looks it up the same way.
-    expect(r.body.items[canonPartNumberJs('P/N: HMA84GR7 CJR4N-WM')].avgSell).toBe(42);
+    // Answered under the string the caller asked with, whatever rule produced it.
+    expect(r.body.items['P/N: HMA84GR7 CJR4N-WM'].avgSell).toBe(42);
+  });
+
+  it('matches a stored part number through any separator', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedRef('rp-lookup-sep', 'M393A4K40DB3-CWE', { avgSell: 55 });
+
+    for (const asked of ['M393A4K40DB3 CWE', 'M393A4K40DB3_CWE', 'm393a4k40db3cwe']) {
+      const r = await api<LookupBody>('POST', '/api/market/lookup', {
+        token, body: { partNumbers: [asked] },
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.items[asked]?.avgSell, asked).toBe(55);
+    }
+  });
+
+  // The Worker and Railway deploy apart, and a PWA tab outlives both. A client
+  // bundled with the older rule asks under a key this server would never emit,
+  // so the answer is keyed by what was asked, not by what this canonicalises to.
+  it('answers under the key it was asked with, not its own', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedRef('rp-lookup-skew', 'SKEW-1', { avgSell: 12 });
+
+    const r = await api<LookupBody>('POST', '/api/market/lookup', {
+      token, body: { partNumbers: ['SKEW-1'] },   // what a pre-release client sends
+    });
+    expect(Object.keys(r.body.items)).toEqual(['SKEW-1']);
+    expect(r.body.items['SKEW-1'].avgSell).toBe(12);
   });
 
   it('omits part numbers it has never recorded', async () => {
@@ -116,6 +143,7 @@ describe('ref_prices canonical part-number index', () => {
     // Postgres normalises whitespace in the stored definition, so compare on
     // the regex literal itself — the part that actually has to match.
     expect(row.def).toContain(PART_PREFIX_RE);
+    expect(row.def).toContain(PART_SEP_RE);
     expect(row.def.toLowerCase()).toContain('upper');
   });
 });

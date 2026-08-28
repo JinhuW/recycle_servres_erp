@@ -63,7 +63,7 @@ describe('header detection', () => {
     expect(res.summary).toMatchObject({ matched: 2, notInOrder: 0, noPrice: 0 });
     const ram = res.rows.find(r => r.canonPart === 'ABC123');
     expect(ram).toMatchObject({ status: 'matched', price: 100, oldPrice: 90, label: 'RAM 16GB', qty: 4 });
-    const ssd = res.rows.find(r => r.canonPart === 'XYZ-9');
+    const ssd = res.rows.find(r => r.canonPart === 'XYZ9');
     expect(ssd).toMatchObject({ status: 'matched', price: 55.5, lineCount: 2 });
     expect(res.unmatchedProducts).toEqual([]);
     expect(res.manualProducts).toEqual([]);
@@ -107,7 +107,7 @@ describe('header detection', () => {
     const res = parsePriceWorkbook(wb, products);
     expect(res.summary.matched).toBe(2);
     expect(res.rows.find(r => r.canonPart === 'ABC123')).toMatchObject({ sheet: 'RAM', price: 100 });
-    expect(res.rows.find(r => r.canonPart === 'XYZ-9')).toMatchObject({ sheet: 'SSD', price: 55.5 });
+    expect(res.rows.find(r => r.canonPart === 'XYZ9')).toMatchObject({ sheet: 'SSD', price: 55.5 });
     expect(res.unmatchedProducts).toEqual([]);
   });
 
@@ -158,7 +158,7 @@ describe('part-number matching', () => {
       ['P/N c-abc 123', 75],
     ]);
     const res = parsePriceWorkbook(wb, [product({ partNumber: 'C-ABC123' })]);
-    expect(res.rows[0]).toMatchObject({ status: 'matched', canonPart: 'C-ABC123', price: 75 });
+    expect(res.rows[0]).toMatchObject({ status: 'matched', canonPart: 'CABC123', price: 75 });
   });
 
   it('flags parts that are not in the order', () => {
@@ -321,7 +321,7 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     const body = res.body as PriceImportPreview & { currency: string };
     expect(body.currency).toBe('USD');
     expect(body.summary.matched).toBe(2);
-    const first = body.rows.find(r => r.canonPart === 'IMP-A1');
+    const first = body.rows.find(r => r.canonPart === 'IMPA1');
     expect(first).toMatchObject({ status: 'matched', price: 55, oldPrice: 40, qty: 2 });
 
     const detail = await api<{ order: { lines: { unitPrice: number }[] } }>(
@@ -375,8 +375,8 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     const body = res.body as PriceImportPreview;
     expect(body.summary.matched).toBe(2);
     expect(body.summary.duplicate).toBe(0);
-    expect(body.rows.find(r => r.canonPart === 'IMP-A1')).toMatchObject({ sheet: 'RAM', price: 45 });
-    expect(body.rows.find(r => r.canonPart === 'IMP-B2')).toMatchObject({ sheet: 'SSD', price: 111 });
+    expect(body.rows.find(r => r.canonPart === 'IMPA1')).toMatchObject({ sheet: 'RAM', price: 45 });
+    expect(body.rows.find(r => r.canonPart === 'IMPB2')).toMatchObject({ sheet: 'SSD', price: 111 });
     expect(body.rows.every(r => ['RAM', 'SSD'].includes(r.sheet))).toBe(true);
     expect(body.unmatchedProducts).toEqual([]);
   });

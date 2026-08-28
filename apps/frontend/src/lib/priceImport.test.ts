@@ -22,14 +22,14 @@ describe('applyPriceRows', () => {
       line({ warehouse: 'NJ' }),
       line({ partNumber: 'OTHER-9', unitPrice: 7 }),
     ];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC-123', condition: null, price: 55 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 55 }]);
     expect(out.map(l => l.unitPrice)).toEqual([55, 55, 7]);
     expect(out[0].warehouse).toBe('LA');
   });
 
-  it('matches through prefixes, whitespace, and case in the draft line', () => {
-    const lines = [line({ partNumber: 'pn: abc-123' })];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC-123', condition: null, price: 10 }]);
+  it('matches through prefixes, separators, and case in the draft line', () => {
+    const lines = [line({ partNumber: 'pn: abc_123' })];
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 10 }]);
     expect(out[0].unitPrice).toBe(10);
   });
 
@@ -38,13 +38,13 @@ describe('applyPriceRows', () => {
       line({ condition: 'New', unitPrice: 1 }),
       line({ condition: 'Used', unitPrice: 2 }),
     ];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC-123', condition: 'new', price: 100 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: 'new', price: 100 }]);
     expect(out.map(l => l.unitPrice)).toEqual([100, 2]);
   });
 
   it('a row without a condition applies to any condition', () => {
     const lines = [line({ condition: 'New' }), line({ condition: 'Used' })];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC-123', condition: null, price: 9 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 9 }]);
     expect(out.map(l => l.unitPrice)).toEqual([9, 9]);
   });
 
@@ -56,7 +56,7 @@ describe('applyPriceRows', () => {
 
   it('returns a new array and leaves the input untouched', () => {
     const lines = [line({})];
-    const out = applyPriceRows(lines, [{ canonPart: 'ABC-123', condition: null, price: 42 }]);
+    const out = applyPriceRows(lines, [{ canonPart: 'ABC123', condition: null, price: 42 }]);
     expect(out).not.toBe(lines);
     expect(lines[0].unitPrice).toBe(0);
     expect(out[0].unitPrice).toBe(42);

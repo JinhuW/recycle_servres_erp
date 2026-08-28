@@ -19,12 +19,13 @@ const EN_SPACE = '\u2002';
 
 const VARIANTS = [
   'ABC-123', ' abc-123 ', 'PN: ABC-123', 'p/n abc-123', 'PART NO: ABC-123', 'S/N ABC-123',
+  'ABC_123', 'abc 123', 'ABC123',
 ];
 
 describe('canonPartArg — canonical part-number parity', () => {
-  it('collapses case / whitespace / P-N / S-N / PART prefixes to one key', async () => {
+  it('collapses case / separators / P-N / S-N / PART prefixes to one key', async () => {
     const canons = await Promise.all(VARIANTS.map(canon));
-    for (const c of canons) expect(c).toBe('ABC-123');
+    for (const c of canons) expect(c).toBe('ABC123');
     expect(new Set(canons).size).toBe(1);
   });
 
@@ -55,25 +56,40 @@ describe('canonPartArg — canonical part-number parity', () => {
 });
 
 describe('canonPartNumberJs', () => {
-  it('strips a P/N prefix, drops whitespace, upper-cases', () => {
-    expect(canonPartNumberJs('P/N: hma 84gr7 afr4n-uh')).toBe('HMA84GR7AFR4N-UH');
+  it('strips a P/N prefix, drops separators, upper-cases', () => {
+    expect(canonPartNumberJs('P/N: hma 84gr7 afr4n-uh')).toBe('HMA84GR7AFR4NUH');
   });
   it('strips an S/N prefix', () => {
-    expect(canonPartNumberJs('S/N abc-123')).toBe('ABC-123');
+    expect(canonPartNumberJs('S/N abc-123')).toBe('ABC123');
+  });
+
+  // The reason the rule folds them: one part reaches us spelled three ways —
+  // a vendor sheet writes i5-10500t, a scan writes i5 10500t, the synthesiser
+  // writes MIXED_256GB_SATA. Each spelling used to open its own ref_prices row.
+  it('folds hyphen / underscore / space into one key', () => {
+    const keys = ['i5-10500t', 'i5 10500t', 'i5_10500t', 'I5 10500T'].map(canonPartNumberJs);
+    expect(new Set(keys).size).toBe(1);
+    expect(keys[0]).toBe('I510500T');
+    expect(canonPartNumberJs('Mixed 256gb sata')).toBe(canonPartNumberJs('MIXED_256GB_SATA'));
+  });
+
+  // A dot is not a separator: M.2, 2.5" and 1.92TB say something.
+  it('keeps a dot', () => {
+    expect(canonPartNumberJs('MIXED_512GB_SATA_M.2-2280')).toBe('MIXED512GBSATAM.22280');
   });
   it('treats spacing/case variants of the same PN as equal', () => {
     expect(canonPartNumberJs('  m393a2k43bb1-ctd ')).toBe(canonPartNumberJs('M393A2K43BB1-CTD'));
   });
-  it('leaves a bare part number untouched except case', () => {
-    expect(canonPartNumberJs('720-ct')).toBe('720-CT');
+  it('leaves a bare part number untouched except case and separators', () => {
+    expect(canonPartNumberJs('720-ct')).toBe('720CT');
   });
 
   // The label needs its separator. Without one it also ate the opening letters
   // of part numbers that simply start that way — and this trade stocks them.
   it('keeps a part number that merely begins with a label', () => {
-    expect(canonPartNumberJs('SNK-P0048AP4')).toBe('SNK-P0048AP4');   // Supermicro heatsink
+    expect(canonPartNumberJs('SNK-P0048AP4')).toBe('SNKP0048AP4');   // Supermicro heatsink
     expect(canonPartNumberJs('SNP112P/8G')).toBe('SNP112P/8G');       // Dell memory
-    expect(canonPartNumberJs('PARTS-100')).toBe('PARTS-100');
+    expect(canonPartNumberJs('PARTS-100')).toBe('PARTS100');
   });
 
   it('keeps two such part numbers apart', () => {

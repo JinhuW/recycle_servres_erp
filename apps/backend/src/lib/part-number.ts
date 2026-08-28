@@ -1,16 +1,18 @@
 // SQL half of the canonical-part-number rule used to decide whether two lines
 // describe the same product. The JS half is canonicalPartNumber in
 // @recycle-erp/shared — both apps import it, so the key a client asks under is
-// the key this keys its answers with. Both halves come off the same prefix
-// template; only the whitespace class differs.
+// the key this keys its answers with. Both halves come off the same prefix and
+// separator templates; only the whitespace class differs.
 //
 // POSIX bracket classes ([[:space:]]) are used instead of \s so the pattern
-// survives as plain SQL text inside REGEXP_REPLACE, and because migration 0085
-// builds a functional index on ref_prices from this exact string — change its
-// bytes and the index silently stops being used.
+// survives as plain SQL text inside REGEXP_REPLACE, and because ref_prices
+// carries a functional index built from these exact strings (0085, rebuilt by
+// 0089 and 0111) — change their bytes and the index silently stops being used.
+// tests/market-batch-lookup.test.ts compares pg_get_indexdef against both
+// constants for that reason.
 
 import postgres, { type TransactionSql } from 'postgres';
-import { canonicalPartNumber, partPrefixPattern } from '@recycle-erp/shared';
+import { canonicalPartNumber, partPrefixPattern, partSepPattern } from '@recycle-erp/shared';
 
 type Sql = ReturnType<typeof postgres>;
 // Either the top-level pool or a `tx` inside a sql.begin block — both are
@@ -18,16 +20,17 @@ type Sql = ReturnType<typeof postgres>;
 type SqlLike = Sql | TransactionSql;
 
 export const PART_PREFIX_RE = partPrefixPattern('[[:space:]]');
+export const PART_SEP_RE = partSepPattern('[:space:]');
 
 // Canonical form of a part_number COLUMN expression.
 // Pass the column as a fragment, e.g. canonPartCol(sql, sql`l.part_number`).
 export function canonPartCol(sql: SqlLike, col: postgres.Fragment) {
-  return sql`UPPER(REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(${col}, ''), ${PART_PREFIX_RE}, '', 'i'), '[[:space:]]+', '', 'g'))`;
+  return sql`UPPER(REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(${col}, ''), ${PART_PREFIX_RE}, '', 'i'), ${PART_SEP_RE}, '', 'g'))`;
 }
 
 // Canonical form of a literal string argument.
-export function canonPartArg(sql: Sql, raw: string) {
-  return sql`UPPER(REGEXP_REPLACE(REGEXP_REPLACE(${raw}, ${PART_PREFIX_RE}, '', 'i'), '[[:space:]]+', '', 'g'))`;
+export function canonPartArg(sql: SqlLike, raw: string) {
+  return sql`UPPER(REGEXP_REPLACE(REGEXP_REPLACE(${raw}, ${PART_PREFIX_RE}, '', 'i'), ${PART_SEP_RE}, '', 'g'))`;
 }
 
 // JS twin of the SQL canonicaliser above, for grouping rows in application code
