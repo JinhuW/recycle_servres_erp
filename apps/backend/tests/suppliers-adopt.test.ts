@@ -111,11 +111,11 @@ describe('adopt', () => {
     expect(r.status).toBe(201);
     expect(r.body.linked).toBe(2);
 
-    const d = await api<{ poCount: number; spendTotal: number; notes: { body: string }[] }>(
+    const d = await api<{ poCount: number; spendTotal: number; timeline: { body: string }[] }>(
       'GET', `/api/suppliers/${r.body.id}`, { token: marcus.token });
     expect(d.body.poCount).toBe(2);
     expect(d.body.spendTotal).toBe(12000);
-    expect(d.body.notes[0].body).toMatch(/2 past purchase orders linked/);
+    expect(d.body.timeline[0].body).toMatch(/2 past purchase orders linked/);
   });
 
   it('links a package-only seller by name, since a package carries no address', async () => {

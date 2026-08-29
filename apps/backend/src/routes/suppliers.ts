@@ -47,6 +47,7 @@ type Row = {
   po_count: number; spend_total: number; spend_recent: number; score: number;
   last_po_at: string | null; days_since_po: number | null; raw_gap: number | null;
   pr: number | null; item_types: string[]; days_late: number | null;
+  rhythm: number[] | null;
 };
 
 /** A DATE column arrives from postgres.js as a JS Date at UTC midnight. Sent
@@ -90,6 +91,7 @@ function toApi(r: Row, s: CrmSettings) {
     poCount: r.po_count, spendTotal: r.spend_total, spendRecent: r.spend_recent,
     lastPoAt: r.last_po_at, daysSinceLastPo: r.days_since_po,
     itemTypes: r.item_types ?? [],
+    rhythm: r.rhythm ?? [],
     nextFollowUpAt: isoDate(r.next_follow_up_at), lastContactedAt: r.last_contacted_at,
     daysUntilDue, dueState: dueStateFor(daysUntilDue),
     createdAt: r.created_at,
@@ -118,7 +120,12 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
              COALESCE(SUM(o.total_cost) FILTER (
                WHERE o.created_at > NOW() - INTERVAL '365 days'), 0)::float AS spend_recent,
              ${sql.unsafe(SCORE_SQL)} AS score,
-             MAX(o.created_at) AS last_po_at
+             MAX(o.created_at) AS last_po_at,
+             -- Days-ago per order, newest first: the marks the rhythm strip
+             -- draws on every row. Capped so a very old client cannot bloat
+             -- the list payload.
+             (array_agg((NOW()::date - o.created_at::date)
+                        ORDER BY o.created_at DESC))[1:60] AS rhythm
       FROM orders o
       WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL
       GROUP BY o.supplier_id
@@ -136,8 +143,12 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
       GROUP BY supplier_id
     ), items AS (
       SELECT o.supplier_id,
-             array_agg(DISTINCT ol.item_type)
-               FILTER (WHERE ol.item_type IS NOT NULL AND btrim(ol.item_type) <> '') AS item_types
+             -- item_type arrived in 0082 and is null on everything older, so
+             -- fall back to the line's category, which is NOT NULL. Keying on
+             -- item_type alone leaves this empty for most real history.
+             array_agg(DISTINCT COALESCE(NULLIF(btrim(ol.item_type), ''), ol.category))
+               FILTER (WHERE COALESCE(NULLIF(btrim(ol.item_type), ''), ol.category) IS NOT NULL)
+               AS item_types
       FROM orders o
       JOIN order_lines ol ON ol.order_id = o.id
       WHERE o.supplier_id IS NOT NULL AND o.archived_at IS NULL
@@ -160,7 +171,7 @@ function rollup(sql: ReturnType<typeof getDb>, floor: number) {
            COALESCE(po.spend_total, 0)::float AS spend_total,
            COALESCE(po.spend_recent, 0)::float AS spend_recent,
            COALESCE(po.score, 0)::float AS score,
-           po.last_po_at,
+           po.last_po_at, po.rhythm,
            (NOW()::date - po.last_po_at::date) AS days_since_po,
            gap.raw_gap, tierrank.pr,
            COALESCE(items.item_types, '{}') AS item_types,
@@ -468,7 +479,7 @@ suppliers.get('/:id', async (c) => {
   `) as unknown as Row[];
   if (!rows[0]) return c.json({ error: 'Not found' }, 404);
 
-  const [notes, orders, sold] = await Promise.all([
+  const [timeline, orders, sold] = await Promise.all([
     sql`SELECT n.id, n.kind, n.body, n.created_at, u2.name AS author
         FROM supplier_notes n LEFT JOIN users u2 ON u2.id = n.author_id
         WHERE n.supplier_id = ${id} ORDER BY n.created_at DESC LIMIT 100`,
@@ -476,22 +487,20 @@ suppliers.get('/:id', async (c) => {
         FROM orders o WHERE o.supplier_id = ${id} ORDER BY o.created_at DESC LIMIT 50`,
     // What they have actually sold us, straight off the lines. Never typed, so
     // it cannot go stale.
-    sql`SELECT COALESCE(NULLIF(btrim(ol.item_type), ''), 'Other') AS item_type,
+    sql`SELECT COALESCE(NULLIF(btrim(ol.item_type), ''), ol.category, 'Other') AS item_type,
                SUM(ol.qty)::int AS qty,
                SUM(ol.qty * COALESCE(ol.unit_cost, 0))::float AS spend
         FROM order_lines ol JOIN orders o ON o.id = ol.order_id
         WHERE o.supplier_id = ${id} AND o.archived_at IS NULL
         GROUP BY 1 ORDER BY qty DESC LIMIT 12`,
     ]);
-  // The purchase-order marks the rhythm strip draws, newest first.
-  const rhythm = (orders as unknown as { created_at: string }[])
-    .map((o) => Math.max(0, Math.round(
-      (Date.now() - new Date(o.created_at).getTime()) / 86_400_000)));
-
+  // The contact log is `timeline`, NOT `notes`: suppliers.notes is the client's
+  // own free-text note and toApi already returns it under that name. Spreading
+  // a `notes` array over it silently replaced a string with rows.
   return c.json({
     ...toApi(rows[0], s),
     canEdit: canWrite(u, rows[0].owner_id),
-    notes, orders, sold, rhythm,
+    timeline, orders, sold,
   });
 });
 

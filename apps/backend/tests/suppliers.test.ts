@@ -162,12 +162,12 @@ describe('clients — the follow-up loop', () => {
     const expected = new Date(Date.now() + cadence * 86_400_000).toISOString().slice(0, 10);
     expect(r.body.nextFollowUpAt).toBe(expected);
 
-    const after = await api<Client & { notes: { kind: string; body: string; author: string }[] }>(
+    const after = await api<Client & { timeline: { kind: string; body: string; author: string }[] }>(
       'GET', `/api/suppliers/${id}`, { token: marcus.token });
     expect(after.body.lastContactedAt).not.toBeNull();
     expect(after.body.nextFollowUpAt).toBe(expected);
-    expect(after.body.notes[0].kind).toBe('call');
-    expect(after.body.notes[0].body).toMatch(/R740/);
+    expect(after.body.timeline[0].kind).toBe('call');
+    expect(after.body.timeline[0].body).toMatch(/R740/);
   });
 
   it('an explicit date beats the automatic one', async () => {
@@ -182,9 +182,9 @@ describe('clients — the follow-up loop', () => {
     const marcus = await loginAs(MARCUS);
     const id = await mkClient(marcus.token, 'Westside Computer Recycling');
     await api('POST', `/api/suppliers/${id}/notes`, { token: marcus.token, body: { kind: 'call' } });
-    const d = await api<{ notes: { body: string }[] }>('GET', `/api/suppliers/${id}`,
+    const d = await api<{ timeline: { body: string }[] }>('GET', `/api/suppliers/${id}`,
       { token: marcus.token });
-    expect(d.body.notes[0].body).toBe('Called');
+    expect(d.body.timeline[0].body).toBe('Called');
   });
 
   it('rejects a contact kind nobody defined', async () => {
@@ -218,12 +218,31 @@ describe('clients — the follow-up loop', () => {
     const marcus = await loginAs(MARCUS);
     const id = await mkClient(marcus.token, 'Typo Co');
     await api('POST', `/api/suppliers/${id}/notes`, { token: marcus.token, body: { kind: 'note', body: 'oops' } });
-    const d = await api<{ notes: { id: string }[] }>('GET', `/api/suppliers/${id}`, { token: marcus.token });
-    const noteId = d.body.notes[0].id;
+    const d = await api<{ timeline: { id: string }[] }>('GET', `/api/suppliers/${id}`, { token: marcus.token });
+    const noteId = d.body.timeline[0].id;
 
     const priya = await loginAs(PRIYA);
     expect((await api('DELETE', `/api/suppliers/${id}/notes/${noteId}`, { token: priya.token })).status).toBe(404);
     expect((await api('DELETE', `/api/suppliers/${id}/notes/${noteId}`, { token: marcus.token })).status).toBe(200);
+  });
+});
+
+describe('clients — the detail payload', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it("keeps the client's own note separate from the contact log", async () => {
+    const marcus = await loginAs(MARCUS);
+    const id = await mkClient(marcus.token, 'Two Notes Co', { notes: 'Gate code 4417' });
+    await api('POST', `/api/suppliers/${id}/notes`, {
+      token: marcus.token, body: { kind: 'call', body: 'Spoke about a pallet' } });
+
+    const d = await api<{ notes: unknown; timeline: { body: string }[] }>(
+      'GET', `/api/suppliers/${id}`, { token: marcus.token });
+    // `notes` must stay the free-text string the purchaser typed. It was being
+    // overwritten by the log array, which then crashed the drawer's render.
+    expect(d.body.notes).toBe('Gate code 4417');
+    expect(Array.isArray(d.body.timeline)).toBe(true);
+    expect(d.body.timeline[0].body).toBe('Spoke about a pallet');
   });
 });
 
@@ -292,11 +311,11 @@ describe('clients — reassignment', () => {
       token: boss.token, body: { ownerId: priya.user.id } })).status).toBe(200);
 
     expect((await api('GET', `/api/suppliers/${id}`, { token: marcus.token })).status).toBe(404);
-    const now = await api<Client & { notes: { kind: string; body: string }[] }>(
+    const now = await api<Client & { timeline: { kind: string; body: string }[] }>(
       'GET', `/api/suppliers/${id}`, { token: priya.token });
     expect(now.status).toBe(200);
-    expect(now.body.notes[0].kind).toBe('owner_changed');
-    expect(now.body.notes[0].body).toMatch(/to Priya/i);
+    expect(now.body.timeline[0].kind).toBe('owner_changed');
+    expect(now.body.timeline[0].body).toMatch(/to Priya/i);
   });
 
   it('sends a departing purchaser\'s client to house accounts, not nowhere', async () => {

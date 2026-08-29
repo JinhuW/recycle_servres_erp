@@ -110,6 +110,7 @@ export const DESKTOP_VIEW_TO_PATH = {
   submit:     '/submit',
   history:    '/purchase-orders',
   shipping:   '/shipping',
+  clients:    '/clients',
   market:     '/market',
   inventory:  '/inventory',
   analysis:   '/inventory/analysis',
@@ -130,6 +131,7 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/submit') return 'submit';
   if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
+  if (path === '/clients' || match('/clients/:id', path)) return 'clients';
   if (path === '/market') return 'market';
   // Analysis is a tab under Inventory — match it before the /inventory/:id edit
   // route so it isn't read as an item id.
