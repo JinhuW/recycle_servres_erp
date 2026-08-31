@@ -1719,7 +1719,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     ieUnsavedChangesPre: 'You have unsaved changes to',
     ieUnsavedChangesPost: '.',
     ieSpecsTitle: '{cat} specifications',
-    ieSpecsSub: 'Captured by the submitter when this item entered the warehouse. Spec fields are immutable — adjust qty, cost or status on the Pricing tab.',
+    ieSpecsSub: 'Captured by the submitter when this item entered the warehouse. Correct them here — adjust qty, cost or status on the Pricing tab.',
     ieSpeed: 'Speed',
     ieStockAcrossWh: 'Stock across warehouses',
     ieStockAggregatedBy: 'Aggregated by part number across {n} line(s).',

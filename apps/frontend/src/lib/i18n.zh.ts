@@ -1425,7 +1425,7 @@ const zh: Record<string, string> = {
   ieUnsavedChangesPre: '您对',
   ieUnsavedChangesPost: '有未保存的更改。',
   ieSpecsTitle: '{cat} 规格',
-  ieSpecsSub: '提交人在物品入库时记录。规格字段不可变 —— 数量、成本或状态请在「定价」选项卡调整。',
+  ieSpecsSub: '提交人在物品入库时记录。可在此更正 —— 数量、成本或状态请在「定价」选项卡调整。',
   ieSpeed: '速度',
   ieStockAcrossWh: '跨仓库库存',
   ieStockAggregatedBy: '按零件号在 {n} 条明细中汇总。',

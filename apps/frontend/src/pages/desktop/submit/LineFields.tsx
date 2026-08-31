@@ -35,7 +35,7 @@ function gapMarks(missing: ReadonlySet<string> | undefined) {
 // catalog hasn't finished loading yet, or the value pre-dates a catalog
 // edit (renamed/removed option), include it as a one-off option so the
 // user still sees what was actually saved instead of an empty select.
-function CatSelect({ value, options, onChange, invalid }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void; invalid?: boolean }) {
+export function CatSelect({ value, options, onChange, invalid }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void; invalid?: boolean }) {
   const { t } = useT();
   const hasValue = value != null && value !== '';
   const orphan = hasValue && !options.includes(value);
@@ -51,7 +51,7 @@ function CatSelect({ value, options, onChange, invalid }: { value: string | unde
 // Catalog field that also accepts a custom value (drive capacity / brand —
 // their real-world set outruns the catalog). Single field: type anything, or
 // pick a preset. Styled like the sell-order Customer picker.
-function CatCombo({ value, options, onChange, invalid }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void; invalid?: boolean }) {
+export function CatCombo({ value, options, onChange, invalid }: { value: string | undefined; options: readonly string[]; onChange: (v: string) => void; invalid?: boolean }) {
   const { t } = useT();
   return <Combobox value={value} options={options} onChange={onChange} invalid={invalid} placeholder={t('selectPlaceholder')} />;
 }
