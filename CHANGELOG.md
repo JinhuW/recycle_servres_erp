@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.112.0] - 2026-08-31
+
+### Features
+- feat(banktx): **two transactions can be grouped into one payment by hand.**
+  `autoPair` builds its amount bucket over the whole unpaired set with no date
+  bound, so a single stale same-amount leg suppresses a pairing forever — and
+  the manual endpoint for exactly that case (`POST /:id/pair`, shipped in
+  v1.91.0) had never been reachable from the UI. Unpaired rows now carry a
+  `pairCandidate` when the match is unique from both sides, and a
+  "Group with…" picker (`GET /:id/pair-candidates`) covers the case where no
+  single candidate stood out.
+
+### Fixes
+- fix(banktx): the group suggestion now **outranks the PO suggestion**. Two
+  ungrouped legs of one payment each showed their own "Likely PO-xxxx", and
+  `/link` has no double-claim guard, so working the queue could put twice the
+  money against one order. Until the manager has decided whether the legs are
+  one payment, linking either is premature.
+
 ## [1.111.0] - 2026-08-31
 
 ### Features
