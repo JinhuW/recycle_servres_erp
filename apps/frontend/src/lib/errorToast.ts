@@ -19,6 +19,8 @@
  * error doesn't carry its own message.
  */
 
+import { ApiError, rawFetch } from './api';
+
 declare global {
   interface Window {
     __showToast?: (msg: string, tone?: 'success' | 'error' | 'warn') => void;
@@ -45,12 +47,83 @@ export function showWarnToast(msg: string): void {
   }
 }
 
+// Reporting budget for one page load. A component that throws on every render
+// would otherwise post as fast as it can paint, and the code that would throttle
+// it is the code that just proved it was broken.
+const REPORT_CAP = 5;
+let reported = 0;
+const seen = new Set<string>();
+
+export function _resetErrorReportingForTests(): void {
+  reported = 0;
+  seen.clear();
+}
+
+/**
+ * Send a browser-side failure to the backend so it lands in the operator's log.
+ *
+ * Fire-and-forget by construction: `rawFetch` returns the raw Response and never
+ * throws on a non-2xx, so this cannot re-enter handleFetchError and loop. The
+ * only rejection left is the network itself, and that is swallowed — a failure
+ * to report a failure is not worth a second dialog.
+ */
+export function reportClientError(report: {
+  message: string;
+  kind: 'fetch' | 'render';
+  stack?: string;
+  componentStack?: string;
+  path?: string;
+  method?: string;
+  status?: number;
+  requestId?: string;
+}): void {
+  if (typeof window === 'undefined') return;
+  if (reported >= REPORT_CAP) return;
+
+  // One report per distinct problem — a retry loop on one broken endpoint is
+  // one fact, not fifty.
+  const key = `${report.kind}:${report.message}:${report.path ?? ''}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  reported++;
+
+  void rawFetch('POST', '/api/client-errors', {
+    ...report,
+    href: window.location.href,
+    userAgent: navigator.userAgent,
+  }).catch(() => { /* the network is already the problem */ });
+}
+
 export function handleFetchError(err: unknown): void {
   console.error(err);
 
+  const api = err instanceof ApiError ? err : null;
+  const raw = err instanceof Error ? err.message : '';
+
+  reportClientError({
+    kind: 'fetch',
+    message: raw || String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+    path: api?.path,
+    method: api?.method,
+    status: api?.status,
+    requestId: api?.requestId,
+  });
+
   const fallback = (typeof window !== 'undefined' && window.__genericErrorMessage)
     || 'Something went wrong. Please try again.';
-  const msg = err instanceof Error ? err.message : fallback;
+  // The dialog's title is already "Something went wrong", so falling back to
+  // the generic sentence printed the same thing twice and told the user
+  // nothing. Anything we actually know beats repeating the headline.
+  const msg = raw || fallback;
 
-  showErrorDialog(msg);
+  // The reference the user can quote and we can grep. Only shown when the
+  // backend answered — a request that never landed has no id to give.
+  const details: string[] = [];
+  if (api?.requestId) {
+    const where = api.path ? `${api.method ?? 'GET'} ${api.path}` : 'request';
+    details.push(`${where} · ${api.status} · ${api.requestId}`);
+  }
+
+  showErrorDialog(msg, details.length ? details : undefined);
 }

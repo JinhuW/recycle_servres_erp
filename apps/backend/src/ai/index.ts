@@ -29,6 +29,14 @@ export function pickProvider(env: Env): OcrProvider {
   return 'stub';
 }
 
+// Mode for /api/health. Same conditions as pickProvider, but without its
+// one-shot warning — a probe must not have side effects. The silent fallback is
+// exactly what makes this worth reporting: a prod missing the key scans fine and
+// returns canned data.
+export function describeOcr(env: Env): OcrProvider {
+  return env.OPENROUTER_API_KEY ? 'openrouter' : 'stub';
+}
+
 export async function scanLabel(
   env: Env,
   category: LineCategory,

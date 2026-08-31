@@ -31,7 +31,10 @@ type Event = {
   detail: Record<string, unknown>;
   actor: Actor | null;
 };
-type Feed = { events: Event[]; counts: Record<string, number>; nextCursor: string | null };
+// `counts` only rides the first page — the backend skips the (cursor-blind,
+// unfiltered-by-cursor) count query on scroll pages, so loadMore keeps the
+// numbers it already has rather than blanking the pills.
+type Feed = { events: Event[]; counts?: Record<string, number>; nextCursor: string | null };
 type Member = { id: string; name: string };
 
 const AREAS: { id: 'all' | ActivityArea; tKey: string }[] = [
@@ -216,7 +219,11 @@ export function DesktopActivity() {
       // A filter change mid-flight bumps reqId and resets the feed; dropping
       // the response here stops an older page appending under new filters.
       .then(r => { if (id === reqId.current) setFeed(prev => prev && ({
-        ...r, events: [...prev.events, ...r.events],
+        ...r,
+        events: [...prev.events, ...r.events],
+        // Spreading `r` would clobber the pills with undefined — scroll pages
+        // deliberately carry no counts.
+        counts: r.counts ?? prev.counts,
       })); })
       .catch(handleFetchError)
       .finally(() => setLoadingMore(false));
@@ -285,7 +292,7 @@ export function DesktopActivity() {
             >
               <span className="ac-bar" />
               {t(a.tKey)}
-              <span className="ac-n">{feed?.counts[a.id] ?? '—'}</span>
+              <span className="ac-n">{feed?.counts?.[a.id] ?? '—'}</span>
             </button>
           ))}
         </div>
@@ -469,7 +476,7 @@ export function DesktopActivity() {
           <Icon name="shield" size={11} />
           <span>
             {feed
-              ? `${feed.events.length} / ${feed.counts.all} ${t('acEvents')}`
+              ? `${feed.events.length} / ${feed.counts?.all ?? feed.events.length} ${t('acEvents')}`
               : t('acLoading')}
           </span>
           <span style={{ marginLeft: 'auto' }}>{t('acAppendOnly')}</span>

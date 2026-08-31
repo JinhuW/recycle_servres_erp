@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { reportClientError } from '../lib/errorToast';
 import { useT } from '../lib/i18n';
 
 // The SPA and the API deploy on independent pipelines (Cloudflare Workers vs
@@ -39,6 +40,15 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // Whoever gets called still needs the stack, and nothing else captures it.
     console.error('[render]', error, info.componentStack);
+    // A crash here is invisible server-side — the render never made a request,
+    // so no backend log records it. Ship it, or the only evidence is a console
+    // the user has already closed.
+    reportClientError({
+      kind: 'render',
+      message: error.message || String(error),
+      stack: error.stack,
+      componentStack: info.componentStack ?? undefined,
+    });
   }
 
   render(): ReactNode {

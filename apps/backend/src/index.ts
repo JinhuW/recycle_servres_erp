@@ -10,8 +10,10 @@ import { bodyLimit } from 'hono/body-limit';
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
 
+import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
+import { describeShipping } from './shipping';
 import { dbScope, getDb } from './db';
 import { readBuildTime, readRootVersion } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
@@ -44,6 +46,7 @@ import { fxRates as fxRatesRoutes } from './routes/fxRates';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
 import activityRoutes from './routes/activity';
+import clientErrorRoutes from './routes/clientErrors';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -149,12 +152,18 @@ app.get('/api/health', async (c) => {
   // ISO-8601 UTC or null; the frontend shows this instead of the sha, which
   // means nothing to the people reading the footer.
   const builtAt = process.env.BUILD_TIME || readBuildTime();
+  // Which providers this deployment actually has credentials for. Every one of
+  // these falls back silently, so a release that shipped without a secret looks
+  // identical to a healthy one until someone notices packages never move. Modes
+  // only — no key values, no more than set/unset.
+  const ship = describeShipping(c.env as Env);
+  const providers = { ...ship, ocr: describeOcr(c.env as Env) };
   try {
     await getDb(c.env)`SELECT 1`;
-    return c.json({ status: 'ok', version, commit, builtAt });
+    return c.json({ status: 'ok', version, commit, builtAt, providers });
   } catch (e) {
     console.error('health check failed', e);
-    return c.json({ status: 'error', error: 'database unreachable', version, commit, builtAt }, 503);
+    return c.json({ status: 'error', error: 'database unreachable', version, commit, builtAt, providers }, 503);
   }
 });
 
@@ -254,6 +263,10 @@ app.use('/api/vendor-bids/*', authMiddleware);
 // The feed lives at the bare /api/activity, which `/*` alone doesn't cover.
 app.use('/api/activity', authMiddleware);
 app.use('/api/activity/*', authMiddleware);
+// Same bare-path shape — the report POSTs to the prefix root, so a `/*`-only
+// registration would leave it unauthenticated.
+app.use('/api/client-errors', authMiddleware);
+app.use('/api/client-errors/*', authMiddleware);
 // Bare paths matter here too: the shipments list and packages list live at
 // the prefix root. /api/public/shipping stays public — /api/shipping/* does
 // not match it.
@@ -287,6 +300,7 @@ app.route('/api/workspace', workspaceRoutes);
 app.route('/api/workspace', fxRatesRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
 app.route('/api/activity', activityRoutes);
+app.route('/api/client-errors', clientErrorRoutes);
 // /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
 // list above. csrfGuard still runs from the global stack.

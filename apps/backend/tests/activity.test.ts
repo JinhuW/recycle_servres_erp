@@ -19,7 +19,7 @@ type Ev = {
   detail: Record<string, unknown>;
   actor: { id: string; name: string; initials: string } | null;
 };
-type Feed = { events: Ev[]; counts: Record<string, number>; nextCursor: string | null };
+type Feed = { events: Ev[]; counts?: Record<string, number>; nextCursor: string | null };
 
 const get = (token: string, qs = '') =>
   api<Feed>('GET', `/api/activity${qs}`, { token });
@@ -128,7 +128,7 @@ describe('global activity feed', () => {
     expect(so.body.events.every(e => e.area === 'so')).toBe(true);
     // Counts ignore the area filter — that's the axis the pills switch.
     expect(so.body.counts).toEqual(all.body.counts);
-    expect(so.body.counts.all).toBeGreaterThan(so.body.events.length);
+    expect(so.body.counts!.all).toBeGreaterThan(so.body.events.length);
   });
 
   it('excludes a whole ledger when the action cannot occur in it', async () => {
@@ -140,9 +140,9 @@ describe('global activity feed', () => {
     const r = await get(token, '?action=moved&limit=200');
     expect(r.status).toBe(200);
     expect(r.body.events.every(e => e.area === 'inv')).toBe(true);
-    expect(r.body.counts.po).toBe(0);
-    expect(r.body.counts.so).toBe(0);
-    expect(r.body.counts.price).toBe(0);
+    expect(r.body.counts!.po).toBe(0);
+    expect(r.body.counts!.so).toBe(0);
+    expect(r.body.counts!.price).toBe(0);
   });
 
   it('reaches a line-photo event under an action filter', async () => {
@@ -192,6 +192,30 @@ describe('global activity feed', () => {
     // And the merged run must still be in strict reverse-chronological order.
     const times = [...first.body.events, ...second.body.events].map(e => Date.parse(e.createdAt));
     expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+
+  // The counts deliberately ignore the cursor, so re-running that four-ledger
+  // COUNT on every infinite-scroll page bought the same answer at full price.
+  // First page carries them; scroll pages don't, and the client keeps what it has.
+  it('counts only on the first page, not on every scroll page', async () => {
+    const sql = getTestDb();
+    const [order] = await sql<{ id: string }[]>`SELECT id FROM orders LIMIT 1`;
+    const [alex] = await sql<{ id: string }[]>`SELECT id FROM users WHERE email = ${ALEX}`;
+    for (let i = 0; i < 8; i++) {
+      await sql`INSERT INTO order_events (order_id, actor_id, kind, detail)
+                VALUES (${order.id}, ${alex.id}, 'meta_changed', ${sql.json({ i })})`;
+    }
+    const { token } = await loginAs(ALEX);
+
+    const first = await get(token, '?area=po&limit=3');
+    expect(first.body.counts, 'first page must carry the pill counts').toBeDefined();
+    expect(first.body.counts!.all).toBeGreaterThan(first.body.events.length);
+    expect(first.body.nextCursor).toBeTruthy();
+
+    const next = await get(token, `?area=po&limit=3&cursor=${encodeURIComponent(first.body.nextCursor!)}`);
+    expect(next.status).toBe(200);
+    expect(next.body.events.length).toBeGreaterThan(0);
+    expect(next.body.counts, 'scroll pages must omit the counts').toBeUndefined();
   });
 
   it('searches across the differently-shaped ledgers', async () => {

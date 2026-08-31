@@ -10,11 +10,32 @@ import type { OrderSummary, Shipment, ShipmentRate } from './types';
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
 
+// `status` alone can't say what broke. The dialog these end up in only ever had
+// a message, so a failure read as "Something went wrong" with nothing to grep.
+// `requestId` is the backend's own X-Request-Id for the failed call — it joins
+// straight to that request's line in the server log.
+export interface ApiErrorMeta {
+  path?: string;
+  method?: string;
+  requestId?: string;
+}
+
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  path?: string;
+  method?: string;
+  requestId?: string;
+
+  constructor(public status: number, message: string, meta?: ApiErrorMeta) {
     super(message);
+    this.path = meta?.path;
+    this.method = meta?.method;
+    this.requestId = meta?.requestId;
   }
 }
+
+// Set on every response and CORS-exposed by the backend for exactly this.
+const reqId = (res: Response): string | undefined =>
+  res.headers.get('X-Request-Id') ?? undefined;
 
 // Single-flight refresh: while a refresh is in flight, concurrent 401s await
 // the same promise instead of stampeding the refresh endpoint.
@@ -86,7 +107,7 @@ async function request<T>(
       }
       const text = await res.text();
       const json = text ? safeJson(text) : null;
-      throw new ApiError(401, errMsg(json, 401));
+      throw new ApiError(401, errMsg(json, 401), { path, method, requestId: reqId(res) });
     }
   }
 
@@ -94,7 +115,7 @@ async function request<T>(
   const json = text ? safeJson(text) : null;
 
   if (!res.ok) {
-    throw new ApiError(res.status, errMsg(json, res.status));
+    throw new ApiError(res.status, errMsg(json, res.status), { path, method, requestId: reqId(res) });
   }
   return json as T;
 }
@@ -132,12 +153,14 @@ async function download(path: string, fallbackName: string): Promise<void> {
     if (refreshed) res = await fetch(path, { method: 'GET', credentials: 'include' });
     if (res.status === 401) {
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:unauthorized'));
-      throw new ApiError(401, errMsg(null, 401));
+      throw new ApiError(401, errMsg(null, 401), { path, method: 'GET', requestId: reqId(res) });
     }
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status));
+    throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status), {
+      path, method: 'GET', requestId: reqId(res),
+    });
   }
   const blob = await res.blob();
   const name = filenameFromContentDisposition(res.headers.get('Content-Disposition'));
