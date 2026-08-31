@@ -80,3 +80,22 @@ export function pickTrackingClient(env: Env): TrackingChoice {
   }
   return { provider: 'stub', source: stubShippingClient, register: null };
 }
+
+// What /api/health reports. A stubbed deployment looks entirely healthy from
+// outside — labels are "bought", rows are written, nothing errors — and packages
+// simply never move, which is only discoverable by reading boot logs nobody
+// reads. This makes the mode answerable over HTTP.
+//
+// Mirrors the conditions above without constructing a client or tripping their
+// one-shot warnings; a probe must stay side-effect free. Change one, change both.
+// Modes only — never credential values, and never more than set/unset.
+export function describeShipping(env: Env): {
+  labels: 'shipsaving' | 'stub';
+  tracking: 'shippo' | 'shipsaving' | 'stub';
+} {
+  const shipSaving = Boolean(env.SHIPSAVING_APP_KEY && env.SHIPSAVING_APP_SECRET);
+  return {
+    labels: shipSaving ? 'shipsaving' : 'stub',
+    tracking: env.SHIPPO_API_TOKEN ? 'shippo' : shipSaving ? 'shipsaving' : 'stub',
+  };
+}

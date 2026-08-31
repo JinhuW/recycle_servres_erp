@@ -167,19 +167,27 @@ activity.get('/', async (c) => {
   // These ignore the area filter — that's the axis they let you switch — but
   // respect every other one, so the number tells you whether the click is
   // worth making. No cursor and no limit: it counts the whole filtered set.
-  const countRows = await sql<{ area: ActivityArea; n: number }[]>`
-    SELECT area, COUNT(*)::int AS n FROM (
-      SELECT 'po'    AS area ${FROM.po}    WHERE ${WHERE.po}
-      UNION ALL SELECT 'so'  ${FROM.so}    WHERE ${WHERE.so}
-      UNION ALL SELECT 'inv' ${FROM.inv}   WHERE ${WHERE.inv}
-      UNION ALL SELECT 'price' ${FROM.price} WHERE ${WHERE.price}
-    ) t GROUP BY area
-  `;
+  //
+  // Which is exactly why it only runs on the first page. The count deliberately
+  // ignores the cursor, so every infinite-scroll page used to re-run the same
+  // full four-ledger COUNT and get the same answer. Omitted on cursored pages;
+  // the client keeps the numbers it already has.
+  let counts: Record<string, number> | undefined;
+  if (!cursor) {
+    const countRows = await sql<{ area: ActivityArea; n: number }[]>`
+      SELECT area, COUNT(*)::int AS n FROM (
+        SELECT 'po'    AS area ${FROM.po}    WHERE ${WHERE.po}
+        UNION ALL SELECT 'so'  ${FROM.so}    WHERE ${WHERE.so}
+        UNION ALL SELECT 'inv' ${FROM.inv}   WHERE ${WHERE.inv}
+        UNION ALL SELECT 'price' ${FROM.price} WHERE ${WHERE.price}
+      ) t GROUP BY area
+    `;
 
-  const counts: Record<string, number> = { all: 0, po: 0, so: 0, inv: 0, price: 0 };
-  for (const r of countRows) {
-    counts[r.area] = r.n;
-    counts.all += r.n;
+    counts = { all: 0, po: 0, so: 0, inv: 0, price: 0 };
+    for (const r of countRows) {
+      counts[r.area] = r.n;
+      counts.all += r.n;
+    }
   }
 
   return c.json({
