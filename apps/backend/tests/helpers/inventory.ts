@@ -1,6 +1,30 @@
+import { expect } from 'vitest';
+import { categoryRank } from '@recycle-erp/shared';
+import { compareSpecValue } from '../../src/lib/categoryColumns';
 import { api } from './app';
 
 export type SellableLine = { id: string; qty: number; unit_cost: number; sell_price: number };
+
+export type SheetOrdered = {
+  category: string; brand?: string | null; capacity?: string | null; speed?: string | null;
+};
+
+// Both inventory screens read like the workbook: category rank first, then
+// brand, capacity, speed. Asserts the ordering PROPERTY, never literal values —
+// seed.mjs picks brands and capacities at random, so pinned strings are flaky.
+export function expectSheetOrder(rows: readonly SheetOrdered[]): void {
+  expect(rows.length).toBeGreaterThan(1);
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1];
+    const b = rows[i];
+    let d = categoryRank(a.category) - categoryRank(b.category);
+    for (const k of ['brand', 'capacity', 'speed'] as const) {
+      if (d !== 0) break;
+      d = compareSpecValue(String(a[k] ?? ''), String(b[k] ?? ''));
+    }
+    expect(d).toBeLessThanOrEqual(0);
+  }
+}
 
 // Find a Reviewing inventory line that is sellable AND not already committed to
 // an open (non-Done) sell order. The seed legitimately attaches its first 36

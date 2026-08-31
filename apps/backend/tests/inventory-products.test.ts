@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { expectSheetOrder, type SheetOrdered } from './helpers/inventory';
 
 type Lot = { id: string; unit_cost?: number; qty: number; status: string };
 type Group = {
@@ -97,6 +98,15 @@ describe('GET /api/inventory/products', () => {
     const g = r.body.products[0];
     expect(g.unit_cost_avg).toBeUndefined();
     expect(g.lines[0].unit_cost).toBeUndefined();
+  });
+
+  // The grouped table is the screen the Export button sits on, so it has to
+  // read in the same sequence as the workbook it downloads.
+  it('ships products in the workbook order - category, then brand, capacity, speed', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ products: SheetOrdered[] }>('GET', '/api/inventory/products', { token });
+    expect(r.status).toBe(200);
+    expectSheetOrder(r.body.products);
   });
 
   it('scopes purchasers to their own lines', async () => {

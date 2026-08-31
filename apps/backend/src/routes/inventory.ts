@@ -157,16 +157,26 @@ inventory.get('/', async (c) => {
     ORDER BY l.created_at DESC
     LIMIT 200
   `;
+  // Ship the list in the workbook's order — category, then brand, capacity,
+  // speed — so a screen and an export of the same stock read alike. The cap
+  // above stays recency-based on purpose: reordering the 200 newest rows keeps
+  // *which* rows appear as it was, where sorting in SQL would hand back the
+  // alphabetically-first 200 instead and hide everything recent.
+  const items = sortSheetRows(
+    rows as unknown as Record<string, unknown>[],
+    (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
+  );
+
   // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
   // returning. Sell price stays visible — it is not sensitive.
   if (!isManager) {
-    const filtered = (rows as Record<string, unknown>[]).map(r => {
+    const filtered = items.map(r => {
       const { unit_cost: _uc, profit: _p, margin: _m, ...rest } = r;
       return rest;
     });
     return c.json({ items: filtered });
   }
-  return c.json({ items: rows });
+  return c.json({ items });
 });
 
 // Excel export of the inventory list. Manager-only — the workbook carries
@@ -862,7 +872,7 @@ inventory.get('/products', async (c) => {
 
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
-  const products = filteredOrder.slice(0, GROUP_CAP).map((key) => {
+  const capped = filteredOrder.slice(0, GROUP_CAP).map((key) => {
     const lots = groups.get(key)!;
     const head = lots[0];
     const isSingleton = !(head.canon && head.canon.length > 0);
@@ -926,6 +936,15 @@ inventory.get('/products', async (c) => {
       unit_cost_avg: qty > 0 ? costWeighted / qty : 0,
     };
   });
+
+  // Same order as the workbook — category, then brand, capacity, speed — so the
+  // grouped table and an export of the same stock read alike. Sorted after the
+  // cap, which stays recency-based (see the flat list above for why).
+  const products = sortSheetRows(capped, (p) => ({
+    category: p.category,
+    specs: p as unknown as Record<string, unknown>,
+    label: invLabel(p as unknown as Record<string, unknown>),
+  }));
 
   // Warehouse pill counts: drop-self warehouse facet — every warehouse shows
   // its count assuming the warehouse filter is cleared, with all attribute

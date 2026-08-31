@@ -224,7 +224,10 @@ describe('inventory search by serial number', () => {
     const { token } = await loginAs(ALEX);
     await seedLine(token);
     // Generate an inventory event on the line (condition edit → 'edited').
-    const list = await api<{ items: { id: string }[] }>('GET', '/api/inventory', { token });
+    // Reach it through the serial search — the list is sheet-ordered, so the
+    // seeded line is nowhere in particular.
+    const list = await api<{ items: { id: string }[] }>(
+      'GET', `/api/inventory?q=${encodeURIComponent(SERIAL)}`, { token });
     const p = await api('PATCH', `/api/inventory/${list.body.items[0].id}`, {
       token, body: { condition: 'Pulled — Untested' },
     });

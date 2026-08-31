@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { expectSheetOrder, type SheetOrdered } from './helpers/inventory';
 
 describe('GET /api/inventory — role-based field visibility', () => {
   beforeEach(async () => { await resetDb(); });
@@ -314,5 +315,23 @@ describe('PATCH /api/inventory/:id — spec fields', () => {
     const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { brand: 'Micron' } });
     expect(r.status).toBe(200);
     expect((await specOf(id)).brand).toBe('Micron');
+  });
+});
+
+describe('GET /api/inventory — row order', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('ships the list in the workbook order — category, then brand, capacity, speed', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ items: SheetOrdered[] }>('GET', '/api/inventory', { token });
+    expect(r.status).toBe(200);
+    expectSheetOrder(r.body.items);
+  });
+
+  it('orders a scoped purchaser list the same way', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ items: SheetOrdered[] }>('GET', '/api/inventory', { token });
+    expect(r.status).toBe(200);
+    expectSheetOrder(r.body.items);
   });
 });
