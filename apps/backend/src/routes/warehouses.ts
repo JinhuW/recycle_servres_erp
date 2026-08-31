@@ -28,6 +28,8 @@ const optionalString = (raw: unknown): FieldUpdate<string> => {
 type DetailInput = {
   managerUserId?: FieldUpdate<string>;
   timezone?: FieldUpdate<string>;
+  // Legacy free text. Not an address *part* — see syncDerivedAddress.
+  address?: FieldUpdate<string>;
   shipContactName?: FieldUpdate<string>;
   shipPhone?: FieldUpdate<string>;
   shipStreet1?: FieldUpdate<string>;
@@ -42,6 +44,7 @@ function parseDetails(body: Record<string, unknown>): { input: DetailInput; erro
   const input: DetailInput = {
     managerUserId: optionalString(body.managerUserId),
     timezone:      optionalString(body.timezone),
+    address:       optionalString(body.address),
     shipContactName: optionalString(body.shipContactName),
     shipPhone:       optionalString(body.shipPhone),
     shipStreet1:     optionalString(body.shipStreet1),
@@ -79,13 +82,23 @@ const ADDRESS_PART_KEYS = [
 // prior read, so concurrent writers can't compose a line that never existed.
 // A NULL country reads as US — the editor sends null for a blank field — and US
 // is left off, because "…, CO 80239, US" is noise. Mirrored by migration 0109.
-async function syncDerivedAddress(tx: SqlLike, id: string): Promise<void> {
+//
+// `legacy` is the free text a pre-derivation client still sends in `address`.
+// It is a fallback, never a part: the derived line wins whenever the structured
+// columns compose one, and the free text is kept only when they compose
+// nothing. That client sends all six ship fields on every save, so it always
+// counts as touching the address — dropping its `address` outright recomputed
+// a warehouse that only ever had free text down to NULL, and a long-lived PWA
+// tab saving an unrelated field was enough to erase it.
+async function syncDerivedAddress(
+  tx: SqlLike, id: string, legacy: string | null,
+): Promise<void> {
   await tx`
-    UPDATE warehouses SET address = NULLIF(concat_ws(', ',
+    UPDATE warehouses SET address = COALESCE(NULLIF(concat_ws(', ',
       NULLIF(concat_ws(', ', ship_street1, ship_street2), ''),
       NULLIF(concat_ws(' ', NULLIF(concat_ws(', ', ship_city, ship_state), ''), ship_zip), ''),
       CASE WHEN upper(coalesce(ship_country, 'US')) <> 'US' THEN upper(ship_country) END
-    ), '')
+    ), ''), ${legacy})
     WHERE id = ${id}
   `;
 }
@@ -216,7 +229,7 @@ warehouses.post('/', async (c) => {
         RETURNING id
       `;
       const created = (ins[0] as { id: string }).id;
-      await syncDerivedAddress(tx, created);
+      await syncDerivedAddress(tx, created, val(input.address));
       return created;
     });
     const row = await fetchWarehouse(sql, newId);
@@ -255,9 +268,11 @@ warehouses.patch('/:id', async (c) => {
   }
 
   const flag = (f?: FieldUpdate<string | number>) => (f?.set ? 1 : 0);
-  // Only a body that moves one of the address parts may rewrite the derived
-  // display line; the archive toggle sends { active } alone and must not.
-  const touchesAddress = ADDRESS_PART_KEYS.some((k) => input[k]?.set);
+  // Only a body that moves one of the address parts — or that carries the
+  // legacy free-text `address` — may rewrite the derived display line; the
+  // archive toggle sends { active } alone and must not.
+  const touchesAddress =
+    ADDRESS_PART_KEYS.some((k) => input[k]?.set) || Boolean(input.address?.set);
   let updated = 0;
   await sql.begin(async (tx) => {
     const r = await tx`
@@ -280,7 +295,9 @@ warehouses.patch('/:id', async (c) => {
       RETURNING id
     `;
     updated = r.length;
-    if (updated > 0 && touchesAddress) await syncDerivedAddress(tx, id);
+    if (updated > 0 && touchesAddress) {
+      await syncDerivedAddress(tx, id, val(input.address));
+    }
   });
   if (updated === 0) return c.json({ error: 'not found' }, 404);
   const row = await fetchWarehouse(sql, id);

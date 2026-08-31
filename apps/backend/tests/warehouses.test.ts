@@ -326,11 +326,43 @@ describe('Warehouse address is derived from the ship-to', () => {
     expect(r.body.address).toBe(before.address);
   });
 
-  it('ignores a client-sent address', async () => {
+  it('prefers the derived line over a client-sent address', async () => {
     const { token } = await loginAs(ALEX);
     const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
       token, body: { ...DENVER, address: 'typed by hand' },
     });
     expect(r.body.address).toBe('4880 Ironton St, Denver, CO 80239');
+  });
+
+  // A client that predates the derivation sends its free-text `address`
+  // alongside all six ship fields on every save, so it always counts as
+  // touching the address. Dropping that text outright recomputed a warehouse
+  // that only ever had free text down to NULL — a stale tab saving anything at
+  // all was enough to erase the only address it had.
+  it('keeps a legacy free-text address when the ship-to composes nothing', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<WhAddr>('PATCH', '/api/warehouses/WH-LA1', {
+      token,
+      body: {
+        address: 'Unit 7, Kwai Chung', shipStreet1: null, shipStreet2: null,
+        shipCity: null, shipState: null, shipZip: null, shipCountry: null,
+      },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.address).toBe('Unit 7, Kwai Chung');
+    expect((await readWh(token, 'WH-LA1')).address).toBe('Unit 7, Kwai Chung');
+  });
+
+  it('POST keeps a legacy address when it was created with no ship-to', async () => {
+    const { token } = await loginAs(ALEX);
+    const created = await api<WhAddr>('POST', '/api/warehouses', {
+      token,
+      body: {
+        id: 'WH-LEG', name: 'Legacy', short: 'LEG', region: 'APAC',
+        address: 'Unit 7, Kwai Chung',
+      },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.address).toBe('Unit 7, Kwai Chung');
   });
 });
