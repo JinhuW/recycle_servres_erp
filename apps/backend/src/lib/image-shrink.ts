@@ -5,6 +5,8 @@
 // returns the original file and the route's existing size check decides.
 import sharp from 'sharp';
 
+import { log } from './log';
+
 const SHRINKABLE = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 
 // Each pass scales dimensions down and (for lossy formats) lowers quality;
@@ -41,7 +43,10 @@ export async function shrinkImageToFit(file: File, maxBytes: number): Promise<Fi
       scale *= SCALE_STEP;
       quality = Math.max(40, quality - 10);
     }
-  } catch {
+  } catch (e) {
+    log.warn('image shrink failed; passing the original through', {
+      type: file.type, bytes: file.size, error: e instanceof Error ? e.message : String(e),
+    });
     return file;
   }
   return file;

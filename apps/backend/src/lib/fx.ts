@@ -11,6 +11,10 @@
 
 import type { Sql, TransactionSql } from 'postgres';
 
+import { log } from './log';
+
+const fxLog = log.child({ module: 'fx' });
+
 type SqlLike = Sql<{}> | TransactionSql<{}>;
 
 export const SUPPORTED_CURRENCIES = ['USD', 'CNY'] as const;
@@ -139,7 +143,7 @@ export function startFxRefreshLoop(sql: Sql<{}>): { stop: () => void } {
     try {
       await fetchAndStoreLatest(sql, 'CNY');
     } catch (err) {
-      console.warn('[fx] refresh failed; keeping previous row', err);
+      fxLog.warn('refresh failed; keeping previous row', err);
     }
   };
   void tick();

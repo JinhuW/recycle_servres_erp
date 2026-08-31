@@ -9,6 +9,7 @@ import app from './index';
 import { buildEnv } from './env';
 import { getDb } from './db';
 import { startFxRefreshLoop } from './lib/fx';
+import { log } from './lib/log';
 import { startShipmentTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
 
@@ -20,5 +21,5 @@ startShipmentTrackingLoop(getDb(env), env);
 startBankSyncLoop(env);
 
 serve({ fetch: (request) => app.fetch(request, env), port }, (info) => {
-  console.log(`recycle-erp-backend listening on :${info.port}`);
+  log.info('recycle-erp-backend listening', { port: info.port });
 });

@@ -26,6 +26,7 @@ import {
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
+import { log } from '../lib/log';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -1826,7 +1827,7 @@ orders.patch('/:id', async (c) => {
   // no-ops; a missing object delete is idempotent). Batched: this runs with the
   // response still open, and a wide removal used to mean one round trip per key.
   const unswept = await deleteAttachments(c.env, removedScanKeys);
-  if (unswept.length) console.error('r2 delete (line removed)', unswept);
+  if (unswept.length) log.error('r2 delete (line removed)', unswept);
 
   return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter });
 });
@@ -1955,7 +1956,7 @@ orders.delete('/:id', async (c) => {
   // carry a scan plus six photos per line, so this is batched rather than a
   // round trip each.
   const orphaned = await deleteAttachments(c.env, outcome.scanned.map(r => r.k));
-  if (orphaned.length) console.error('r2 delete (order deleted)', orphaned);
+  if (orphaned.length) log.error('r2 delete (order deleted)', orphaned);
 
   return c.json({ ok: true });
 });
@@ -2124,7 +2125,7 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
   // a separate concern.
   const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
-    .catch(e => { console.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   const row = await sql.begin(async (tx) => {
@@ -2188,7 +2189,7 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   if (!removed) return c.json({ error: 'Not found' }, 404);
   // R2 delete outside the tx — slow side effect, kept out of the lock window.
   // Best-effort.
-  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
   return c.json({ ok: true });
 });
 
@@ -2258,7 +2259,7 @@ orders.post('/:id/lines/:lineId/photos', async (c) => {
   // No maybeRenameReceipt — that AI rename reads payment receipts, and these
   // are pictures of hardware.
   const uploaded = await uploadAttachment(c.env, fitted, `orders/${id}/lines/${lineId}`)
-    .catch(e => { console.error('line photo upload', e); return null; });
+    .catch(e => { log.error('line photo upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   try {
@@ -2359,7 +2360,7 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   });
 
   if (!removed) return c.json({ error: 'Not found' }, 404);
-  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete (line photo)', e));
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete (line photo)', e));
   return c.json({ ok: true });
 });
 

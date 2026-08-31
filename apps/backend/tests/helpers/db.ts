@@ -61,6 +61,10 @@ function templateUrl(): string {
   return u.toString();
 }
 
+// Same key as scripts/migrate.mjs, for grep-ability. The scopes differ:
+// migrate.mjs locks in its target database, this locks in the maintenance one.
+const MIGRATE_LOCK_KEY = 778423;
+
 // Build this worker's seeded TEMPLATE database once, then per-test resetDb just
 // clones a fresh working DB from it (a ~30ms file copy) instead of replaying
 // every migration + running the seed subprocess (~850ms). The template is
@@ -71,23 +75,39 @@ let templateReady = false;
 export async function ensureWorkerDb(): Promise<void> {
   if (templateReady || !process.env.VITEST_POOL_ID) return;
   templateReady = true;
+  const turl = templateUrl();
   const admin = postgres(adminUrl(TEST_DATABASE_URL), { max: 1, onnotice: () => {} });
   try {
     const exists = await admin`SELECT 1 FROM pg_database WHERE datname = ${templateDbName}`;
     if (exists.length > 0) return;
     await admin.unsafe(`CREATE DATABASE "${templateDbName}"`); // nosec — internal sanitised identifier
+
+    // Workers migrate their OWN databases, but migration 0042 creates the
+    // cluster-wide `metrics` role behind an IF NOT EXISTS — a check-then-act,
+    // not an atomic one. Two workers both see it absent, both CREATE ROLE, and
+    // the loser dies on pg_authid's unique index with its template
+    // half-migrated: the later files never run, the seed lands in a database
+    // with no users, and every login test 401s.
+    //
+    // The lock has to be held HERE, on the shared `postgres` maintenance
+    // database: advisory locks are scoped to the database they're taken in, so
+    // locking inside each worker's own template serialises nothing. (This is
+    // also why scripts/migrate.mjs's lock doesn't cover us — it locks in the
+    // target database, which is the right scope for its one-database job.)
+    //
+    // Only bites a FRESH cluster. Locally the role survives from an earlier
+    // run, so the race is invisible until CI runs against a new container.
+    await admin`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
+    const tsql = postgres(turl, { max: 1, onnotice: () => {} });
+    try {
+      const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+      for (const f of files) await tsql.unsafe(readFileSync(join(migrationsDir, f), 'utf8')); // nosec — trusted migration SQL from the repo's migrations dir
+    } finally {
+      await tsql.end({ timeout: 5 });
+      await admin`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`;
+    }
   } finally {
     await admin.end({ timeout: 5 });
-  }
-  // Migrate the template, then seed it (subprocess, exactly as before — but ONCE
-  // per worker rather than once per test).
-  const turl = templateUrl();
-  const tsql = postgres(turl, { max: 1, onnotice: () => {} });
-  try {
-    const files = readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
-    for (const f of files) await tsql.unsafe(readFileSync(join(migrationsDir, f), 'utf8')); // nosec — trusted migration SQL from the repo's migrations dir
-  } finally {
-    await tsql.end({ timeout: 5 });
   }
   const r = spawnSync('node', [seedScript], {
     env: { ...process.env, DATABASE_URL: turl, SEED_POOL_MAX: '2' },

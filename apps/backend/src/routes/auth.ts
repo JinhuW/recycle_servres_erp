@@ -11,6 +11,7 @@ import {
   setAuthCookies,
   clearAuthCookies,
 } from '../auth';
+import { log } from '../lib/log';
 import type { Env } from '../types';
 
 const auth = new Hono<{ Bindings: Env }>();
@@ -51,7 +52,7 @@ auth.post('/login', async (c) => {
 
   const recordAttempt = (success: boolean) =>
     sql`INSERT INTO login_attempts (email, ip, success) VALUES (${email}, ${ip}, ${success})`
-      .catch((e) => console.error('login_attempts write failed', e));
+      .catch((e) => log.error('login_attempts write failed', e));
 
   const rows = await sql<
     {

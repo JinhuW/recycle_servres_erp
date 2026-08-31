@@ -8,9 +8,16 @@
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 
+import { log, releaseCommit, releaseVersion } from './log';
+
 export interface ErrorRecord {
   ts: string;
   requestId: string;
+  // Stamped by appendErrorRecord from the running build — callers never set
+  // these. Weeks of 500s in one file are only diagnosable if each line says
+  // which release produced it.
+  version?: string;
+  commit?: string;
   // 'error' for unhandled 500s (default); 'warn' for non-fatal events worth
   // grepping later (e.g. scans where the AI didn't fill the form).
   level?: 'error' | 'warn';
@@ -73,14 +80,14 @@ export function appendErrorRecord(
   record: ErrorRecord,
   options: AppendOptions = {},
 ): Promise<void> {
-  const next = chain.then(() => writeOne(dir, record, options)).catch((err) => {
+  const stamped: ErrorRecord = {
+    ...record,
+    version: record.version ?? releaseVersion(),
+    commit: record.commit ?? releaseCommit(),
+  };
+  const next = chain.then(() => writeOne(dir, stamped, options)).catch((err) => {
     // Last-resort surface: the sink must never throw out of app.onError.
-    // eslint-disable-next-line no-console
-    console.error(JSON.stringify({
-      level: 'error',
-      message: 'error-log sink failed',
-      error: err instanceof Error ? err.message : String(err),
-    }));
+    log.error('error-log sink failed', err);
   });
   chain = next;
   return next;
@@ -136,7 +143,8 @@ async function pruneOldest(dir: string, maxFiles: number): Promise<void> {
   );
   withMtime.sort((a, b) => a.mtime - b.mtime);
   const toDelete = withMtime.slice(0, withMtime.length - maxFiles);
-  await Promise.all(toDelete.map((e) => fs.unlink(e.path).catch(() => {})));
+  await Promise.all(toDelete.map((e) =>
+    fs.unlink(e.path).catch((err) => log.warn('error-log prune failed', err))));
 }
 
 function timestamp(): string {

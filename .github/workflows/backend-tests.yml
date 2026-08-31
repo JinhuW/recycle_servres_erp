@@ -1,0 +1,78 @@
+# Typecheck the workspace and run the backend suite against a real Postgres.
+#
+# The backend tests are integration tests by design — they exercise the actual
+# SQL, migrations, FK rules and status guards — so CI has to provide a database.
+# Until this workflow existed, no backend test ran in CI at all: the only gates
+# were a developer remembering to run vitest, and scripts/release.sh, which
+# SKIPS the suite when 127.0.0.1:5432 doesn't answer. That made every guard in
+# the suite advisory, including the one that keeps the container's boot scripts
+# importable (tests/log-import-purity.test.ts).
+name: backend-tests
+
+on:
+  push:
+    # Branch-limited so a PR doesn't run the suite twice — the pull_request
+    # trigger below already covers every topic branch.
+    branches: [dev, main]
+    paths:
+      - "apps/backend/**"
+      - "packages/shared/**"
+      - ".github/workflows/backend-tests.yml"
+  pull_request:
+    paths:
+      - "apps/backend/**"
+      - "packages/shared/**"
+      - ".github/workflows/backend-tests.yml"
+
+concurrency:
+  group: backend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: recycle
+        ports:
+          - 5432:5432
+        # Without this the suite can start before the cluster accepts
+        # connections and globalSetup fails on the first CREATE DATABASE.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # tests/helpers/global-setup.ts falls back to reading the repo-root .env
+      # and throws when neither it nor this variable exists — CI has no .env.
+      # The named database never has to exist: every run creates its own
+      # `<base>_<pid>_<t>_w<id>` databases from the `postgres` maintenance DB.
+      TEST_DATABASE_URL: postgres://postgres:recycle@127.0.0.1:5432/recycle_erp_test
+      # vitest.config.ts defaults to 8 forks, each holding its own pool. The
+      # standard runner has far fewer cores than that and Postgres ships with
+      # max_connections=100.
+      VITEST_MAX_FORKS: 4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm --filter recycle-erp-backend test

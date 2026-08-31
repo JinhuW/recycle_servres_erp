@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.114.0] - 2026-08-31
+
+### Features
+- feat(backend): **one log module, every line stamped with the release version**
+  and correlated to the request that caused it. An `AsyncLocalStorage` context
+  opened by the outermost middleware carries a `requestId` (also returned as
+  `X-Request-Id`) into every `log.*` call downstream — including calls inside a
+  `.catch()` a route registered and never awaited — without threading anything
+  through. One structured line per completed request replaces Hono's default
+  logger, with the URL redacted the same way the error sink redacts it, because
+  vendor portal tokens travel in the path.
+- feat(backend): the silent failure paths got a log line. `/api/health` now
+  resolves its version and commit through the same helpers the logs use, so the
+  health payload and the logs can never disagree about which build is running.
+- feat(ci): `backend-tests.yml` runs typecheck and the backend suite against a
+  real Postgres on every push.
+
+### Fixes
+- fix(mcp): a tool call that ran and failed is logged. Since the reply became a
+  tool *result* rather than a JSON-RPC error it carries no error code and rides
+  an HTTP 200, so without this a broken write tool left no trace anywhere.
+- fix(tests): the template migration is serialised behind an advisory lock. On
+  a fresh cluster — exactly what CI brings up — parallel workers raced
+  check-then-act on `0042 CREATE ROLE metrics` and could hand a test a
+  half-migrated template.
+
 ## [1.113.0] - 2026-08-31
 
 ### Features

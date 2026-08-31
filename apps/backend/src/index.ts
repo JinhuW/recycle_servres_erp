@@ -4,18 +4,18 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import { bodyLimit } from 'hono/body-limit';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
+import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
 
 import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { describeShipping } from './shipping';
 import { dbScope, getDb } from './db';
-import { readBuildTime, readRootVersion } from './lib/version';
+import { readBuildTime } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
@@ -58,17 +58,51 @@ const app = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string
 // ── Request ID ───────────────────────────────────────────────────────────────
 // Attach a per-request UUID so every log line and error can be correlated.
 // Returned in X-Request-Id so clients can surface it in bug reports.
-app.use('*', async (c, next) => {
+//
+// Everything downstream runs inside the log context, so any log.* call in a
+// route — or in a .catch() that route registers and never awaits — carries this
+// id without being handed anything. Must stay the OUTERMOST middleware: the
+// request-log middleware below has to run inside the store.
+app.use('*', (c, next) => {
   const id = crypto.randomUUID();
   c.set('requestId', id);
   c.header('X-Request-Id', id);
-  await next();
+  return runWithLogContext({ requestId: id }, () => next());
 });
 
-// Redacted print: /api/public/{vendor,shippo}/<secret> carries a
-// bearer-equivalent credential in the path, and the default logger would put it
-// in the container's stdout stream verbatim.
-app.use('*', logger((str, ...rest) => console.log(redactSensitivePath(str), ...rest)));
+// One structured line per completed request. requestId (and userId, once auth
+// runs) arrive from the log context opened above. The path is redacted the same
+// way the error sink redacts it — vendor portal tokens travel in the URL and
+// must not land in stdout.
+//
+// This deliberately overlaps metricsMiddleware on status and duration: the
+// histogram labels by c.req.routePath to bound cardinality, while this carries
+// the real path plus a requestId — neither of which can ever be a Prometheus
+// label. Aggregate view vs. forensic view; don't merge them.
+//
+// try/finally because a throw from bodyLimit, the CORS origin callback, or
+// app.onError itself escapes past this middleware, and a request that blew up
+// is exactly the one you want a line for.
+app.use('*', async (c, next) => {
+  const startedAt = performance.now();
+  let failed = false;
+  try {
+    await next();
+  } catch (e) {
+    failed = true;
+    throw e;
+  } finally {
+    log.info('request', {
+      method: c.req.method,
+      path: redactSensitivePath(c.req.path),
+      // On the thrown path this can still read 200 — the error response hasn't
+      // been installed yet, which is what `failed` disambiguates.
+      status: c.res.status,
+      ms: Math.round(performance.now() - startedAt),
+      ...(failed && { failed: true }),
+    });
+  }
+});
 
 // ── Origin lockdown ──────────────────────────────────────────────────────────
 // When PROXY_SECRET is set, only requests carrying it in X-Proxy-Secret are
@@ -142,14 +176,13 @@ app.get('/', (c) =>
 // catch-all, which 200s every path even when the backend is dead and so
 // hides outages from the load balancer. Unauthenticated by design.
 app.get('/api/health', async (c) => {
-  // Build provenance. APP_VERSION/GIT_SHA are release-time Docker build args
-  // (scripts/release.sh) — Railway never passes them and the Dockerfile bakes
-  // them as EMPTY env strings, so use || (not ??) to fall back to the root
-  // package.json version (bumped on every dev push, present in the image)
-  // and Railway's injected commit sha. Read from process.env, not c.env:
-  // these are image/runtime-scoped, not per-request.
-  const version = process.env.APP_VERSION || readRootVersion();
-  const commit = process.env.GIT_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
+  // Build provenance — resolved through the same helpers every log line uses,
+  // so the health payload and the logs can never disagree about which build is
+  // running. They carry the APP_VERSION/GIT_SHA handling: those are
+  // release-time Docker build args (scripts/release.sh), Railway never passes
+  // them and the Dockerfile bakes them as EMPTY env strings, hence || not ??.
+  const version = releaseVersion();
+  const commit = releaseCommit();
   // ISO-8601 UTC or null; the frontend shows this instead of the sha, which
   // means nothing to the people reading the footer.
   const builtAt = process.env.BUILD_TIME || readBuildTime();
@@ -163,7 +196,7 @@ app.get('/api/health', async (c) => {
     await getDb(c.env)`SELECT 1`;
     return c.json({ status: 'ok', version, commit, builtAt, providers });
   } catch (e) {
-    console.error('health check failed', e);
+    log.error('health check failed', e);
     return c.json({ status: 'error', error: 'database unreachable', version, commit, builtAt, providers }, 503);
   }
 });
@@ -329,13 +362,7 @@ app.onError((err, c) => {
   const requestId = c.var.requestId ?? 'unknown';
   const message = err instanceof Error ? err.message : String(err);
   const stack = err instanceof Error ? err.stack : undefined;
-  console.error(JSON.stringify({
-    level: 'error',
-    requestId,
-    message: 'Unhandled error',
-    error: message,
-    stack,
-  }));
+  log.error('Unhandled error', { error: message, stack });
 
   // Also persist to the dedicated error-log file (separate from Docker's
   // stdout stream). Mounted via ERROR_LOG_DIR so an operator can grep

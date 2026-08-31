@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { verifyAccessToken } from './tokens';
 import { resolvePublicOrigin } from './metadata';
+import { addLogContext } from '../lib/log';
 import type { Env, OAuthCtx, OAuthScope } from '../types';
 
 // RFC 6750 bearer-token middleware. 401 (with WWW-Authenticate pointing at
@@ -32,6 +33,7 @@ export function bearerGuard(opts: { scopes: OAuthScope[] }): MiddlewareHandler<{
     c.set('oauthCtx', {
       clientId: claims.cid, userId: claims.sub, scopes: claims.scopes, jti: claims.jti,
     });
+    addLogContext({ userId: claims.sub, oauthClientId: claims.cid });
     await next();
   };
 }
