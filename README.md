@@ -290,6 +290,12 @@ See `infra/terraform/environments/prod/` for the prod composition.
 
 ## Documentation
 
+Start with [`docs/FEATURES.md`](docs/FEATURES.md) — what the system does today,
+by area, with the version each behaviour arrived in.
+[`CHANGELOG.md`](CHANGELOG.md) has one section per released version, and
+[`docs/tickets/`](docs/tickets/) holds the request behind each change in the
+requester's own words.
+
 Per-feature design and implementation docs live under
 `docs/superpowers/`.  Specs (`specs/YYYY-MM-DD-*-design.md`) capture intent
 at design time; plans (`plans/YYYY-MM-DD-*.md`) track the build.  Finished

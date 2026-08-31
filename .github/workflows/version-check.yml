@@ -1,18 +1,25 @@
-# Enforce the versioning rule: every push to dev that changes code must bump
-# the root package.json version past the latest v* tag. Passing pushes get
-# their version tagged automatically, which is what arms the check for the
-# next push. Docs/CI-only pushes are exempt — "code" is the deployable
-# surface (apps/, packages/, deploy/, compose).
+# Enforce the versioning rule: a push that changes code must bump the root
+# package.json version past the newest v* tag the branch can reach, and add the
+# matching CHANGELOG.md section. Passing pushes to dev get their version tagged
+# automatically, which is what arms the check for the next push. Docs/CI-only
+# pushes are exempt — "code" is the deployable surface (apps/, packages/,
+# deploy/, compose).
+#
+# Runs on dev and main. main takes release merges from dev, so it normally
+# exits at the "no code changes" check; the point of running there is the
+# hotfix pushed straight to main, which used to bypass this entirely. Tagging
+# happens only on dev — see the guard below.
 #
 # To satisfy the check: bump the version in the same push as the code, e.g.
 #   npm version patch --no-git-tag-version   # or minor/major
+# and add the release's section — scripts/changelog.sh draft prints a start.
 name: version-check
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   pull_request:
-    branches: [dev]
+    branches: [dev, main]
 
 permissions:
   contents: write
@@ -32,7 +39,12 @@ jobs:
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           TAG="v$VERSION"
-          LAST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+          # --merged HEAD, not the global newest tag: main runs several releases
+          # behind dev, so comparing it against dev's newest tag would fail every
+          # push to main — including docs-only ones — with "version is lower than
+          # the latest tag". On dev the two are identical, since every tag is an
+          # ancestor of dev.
+          LAST_TAG="$(git tag -l 'v*' --merged HEAD --sort=-v:refname | head -1)"
 
           if [ -n "$LAST_TAG" ]; then
             LAST_VERSION="${LAST_TAG#v}"
@@ -48,6 +60,24 @@ jobs:
               echo "::error::package.json version $VERSION is lower than the latest tag $LAST_TAG."
               exit 1
             fi
+
+            # A release with no changelog entry is how the last one rotted: the
+            # only gate was an opt-in git hook nobody enabled, and CHANGELOG.md
+            # went 159 tagged releases without a section. Reached only when a bump was
+            # actually required, so docs-only pushes stay exempt.
+            if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+              echo "::error::package.json is $VERSION but CHANGELOG.md has no '## [$VERSION]' section. Add the release entry in the same push — scripts/changelog.sh draft prints a starting point."
+              exit 1
+            fi
+
+            # Advisory only. Whether a change altered user-visible behaviour is
+            # not machine-decidable, and a check that produces false blocks gets
+            # cleared by touching the file for no reason — which is how a check
+            # stops meaning anything.
+            if git log --no-merges --format='%s' "$LAST_TAG"..HEAD | grep -Eq '^feat(\(.+\))?!?:' \
+               && ! git diff --name-only "$LAST_TAG"..HEAD -- docs/FEATURES.md | grep -q .; then
+              echo "::warning::This release adds feat() commits but does not touch docs/FEATURES.md. If user-visible behaviour changed, edit the bullet and cite v$VERSION."
+            fi
           else
             echo "No previous v* tag — accepting $TAG as the baseline."
           fi
@@ -62,6 +92,11 @@ jobs:
             echo "Tag $TAG already present — ok."
           elif [ "$IS_PR" = "true" ]; then
             echo "PR check passed — $TAG will be created when this lands on dev."
+          elif [ "$GITHUB_REF_NAME" != "dev" ]; then
+            # Tagging is dev's job. A main hotfix tagged on a main commit would
+            # make the later back-port to dev fail "tag exists on an unrelated
+            # commit" — the gap this trigger closes would become a worse trap.
+            echo "On $GITHUB_REF_NAME — checks passed; $TAG is created when the version lands on dev."
           else
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"

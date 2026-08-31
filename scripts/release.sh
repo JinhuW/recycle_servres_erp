@@ -2,6 +2,11 @@
 # release.sh — cut a versioned release: bump SemVer, regenerate the changelog,
 # tag, and build version-stamped Docker images.
 #
+# NOTE: this is the retired Docker/`main` release path — releases now happen by
+# pushing to `dev`, where version-check.yml demands the bump plus a matching
+# CHANGELOG.md section and tags on green. Its changelog generator below is
+# superseded by scripts/changelog.sh; extend that one, not this.
+#
 # Usage:
 #   scripts/release.sh <patch|minor|major> [--allow-dirty] [--no-build] [--deploy] [--dry-run]
 #
@@ -42,7 +47,7 @@ while [[ $# -gt 0 ]]; do
     --deploy)          DEPLOY=1; shift ;;
     --dry-run)         DRY_RUN=1; shift ;;
     -h|--help)
-      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "error: unknown argument '$1'" >&2; exit 2 ;;
   esac
