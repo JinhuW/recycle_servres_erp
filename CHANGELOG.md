@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.111.0] - 2026-08-31
+
+### Features
+- feat(payments): the reconciliation queue **defaults to money out**. Every tile
+  but Refunds sits at that direction, so "no direction lens" now means money
+  out rather than all — an empty unlinked queue reads as drained, which is only
+  a lie under the money-in lens. Tiles gained subtitles and a real `active`
+  class instead of inline border styling.
+- feat(payments): the **PO picker is no longer clipped** by the table. Its
+  trigger sits in a `.table-scroll` cell whose `overflow-y: hidden` sheared the
+  dropdown off at the last row; it now positions itself against the viewport
+  and flips above the row when there is no room below.
+
+### Fixes
+- fix(payments): the filter selects zero their vertical padding — at 32px the
+  `.select` box clipped descenders, so "Money out" read as "Monev out".
+
 ## [1.110.0] - 2026-08-31
 
 ### Features
