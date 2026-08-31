@@ -8,7 +8,9 @@ import { scanErrorMessage } from '../../../lib/scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
 import type { Category, ScanResponse } from '../../../lib/types';
 import type { Line } from '../DesktopSubmit';
-import { scanToLinePatch } from '../DesktopSubmit';
+import { scanToLinePatch, brandConfirmPending } from '../DesktopSubmit';
+import { BrandConfirmDialog } from '../../../components/BrandConfirmDialog';
+import { RAM_BRANDS } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
 import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../../../lib/lineCategorySwitch';
@@ -107,6 +109,8 @@ export function LineDrawer({
   const [aiDragOver, setAiDragOver] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  // Open while the purchaser is being asked to name the brand off the photo.
+  const [brandDialog, setBrandDialog] = useState(false);
   const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
 
   // Single-file scan: the drawer represents one line, so a drop with multiple
@@ -128,7 +132,7 @@ export function LineDrawer({
       form.append('file', file, file.name);
       form.append('category', cat);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
-      onChange(scanToLinePatch(scan));
+      onChange(scanToLinePatch(scan, cat));
       const conf = scan.confidence ?? 0;
       const noFields = Object.keys(scan.extracted ?? {}).length === 0;
       if (scan.provider === 'stub') {
@@ -649,6 +653,10 @@ export function LineDrawer({
                     disabled={confirming || line._confirmed}
                     onClick={async () => {
                       if (line._confirmed) { onClose(); return; }
+                      // Brand before the gap list: confirming "Other" adds
+                      // Chip # to what the line owes, so the gaps named below
+                      // are only final once the brand is settled.
+                      if (brandConfirmPending(line)) { setBrandDialog(true); return; }
                       // Name the gaps here rather than letting the round-trip
                       // fail into a dialog: the fields are on screen and the
                       // drawer stays open on top of them.
@@ -676,6 +684,20 @@ export function LineDrawer({
           </div>
         </div>
       </div>
+      {brandDialog && (
+        <BrandConfirmDialog
+          photoUrl={scanUrl && !scanUrl.startsWith('data:image/placeholder') ? scanUrl : null}
+          // Only an off-catalog value can be quoted back as the AI's reading:
+          // the brand field is a <select>, so anything not in the catalog got
+          // there from the scan. A catalog value might be the purchaser's own
+          // pick, and attributing it to the model would be a lie.
+          aiRead={RAM_BRANDS.includes((line.brand ?? '').trim()) ? null : ((line.brand ?? '').trim() || null)}
+          brand={line.brand}
+          onConfirm={b => { set({ brand: b, _brandNeedsConfirm: false }); setBrandDialog(false); }}
+          onRetake={showDropzone ? () => { setBrandDialog(false); onAiUpload(); } : undefined}
+          onCancel={() => setBrandDialog(false)}
+        />
+      )}
       {lightbox && scanUrl && (
         <ImageLightbox url={scanUrl} alt={t('aiPhotoLabel')} onClose={() => setLightbox(false)} />
       )}

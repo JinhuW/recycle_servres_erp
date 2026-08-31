@@ -4,7 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../lib/status';
-import { validateScan, stripUnmatched } from '../lib/scanValidation';
+import { validateScan, stripUnmatched, ramBrandNeedsConfirm } from '../lib/scanValidation';
 import { aiCaptureEnabled } from '../lib/lookups';
 import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
@@ -18,6 +18,7 @@ import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
 import { SnScanner } from '../components/SnScanner';
+import { BrandConfirmDialog } from '../components/BrandConfirmDialog';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
 
@@ -171,6 +172,11 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
   // Full-screen QR scanner for the serial field.
   const [snScanOpen, setSnScanOpen] = useState(false);
+  // Brand re-confirm: the AI put no name to this module (omitted the brand,
+  // read "Other", or read something off our catalog), so the purchaser has to
+  // look at the photo again and say what it is before the line can be saved.
+  const [brandConfirmed, setBrandConfirmed] = useState(false);
+  const [brandDialog, setBrandDialog] = useState(false);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -179,6 +185,13 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !!scanUrl &&
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
+
+  const aiBrandRead = (detected?.extracted?.brand ?? '').trim();
+  // Reads the raw extraction, not cleanDetected: an off-catalog brand is
+  // stripped before it reaches the form, and that is exactly the case that
+  // most needs a second look.
+  const brandNeedsConfirm =
+    category === 'RAM' && !!detected && !brandConfirmed && ramBrandNeedsConfirm(detected.extracted);
 
   const snCount = parseSerials(line.serialNumber).length;
   const marketFor = useMarketLookup([line.partNumber]);
@@ -223,6 +236,10 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // a hard stop. RAM lines additionally require every spec field — the toast
   // names the blanks (which include Part #, so the synth path never fires).
   const attemptSave = () => {
+    // Brand first, ahead of the missing-field check: what they pick here can
+    // change what else the line owes (an Other module has to carry a chip #),
+    // so asking afterwards would name a set of gaps that's about to move.
+    if (brandNeedsConfirm) { setBrandDialog(true); return; }
     // The same rule the desktop screens ask, so a line this form accepts is
     // never one the editor then refuses to save — which used to lock the whole
     // order until someone reopened that line and filled in a brand.
@@ -656,6 +673,17 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
             const cur = (line.serialNumber ?? '').replace(/\s+$/, '');
             set('serialNumber', cur ? cur + '\n' + scannedSns.join('\n') : scannedSns.join('\n'));
           }}
+        />
+      )}
+      {brandDialog && (
+        <BrandConfirmDialog
+          photoUrl={showThumb ? scanUrl : null}
+          aiRead={aiBrandRead || null}
+          brand={line.brand}
+          onConfirm={b => { set('brand', b); setBrandConfirmed(true); setBrandDialog(false); }}
+          onRetake={() => { setBrandDialog(false); onRescan(line); }}
+          retakeLabel={t('retakePhoto')}
+          onCancel={() => setBrandDialog(false)}
         />
       )}
       {pnGen && (
