@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.113.0] - 2026-08-31
+
+### Features
+- feat(inventory): the Inventory **screens read in the same order as the workbook
+  they download**. The export moved to the vendor bid sheet's sequence in
+  v1.107.0 — brand, then capacity, speed — and the screens stayed on recency, so
+  the page and the file disagreed. Both list routes now ship category rank first
+  (RAM, SSD, HDD, Other), then brand, capacity, speed: a workbook gets the
+  category grouping free from its tabs, a screen is one flat table and has to
+  earn it. Sorted after the routes' caps, deliberately — *which* rows appear is
+  unchanged, only their arrangement. The phone list drops its 30-row window,
+  which under the new order would have been RAM-only and would never have shown
+  a line you just submitted. (RS-004)
+
 ## [1.112.0] - 2026-08-31
 
 ### Features
