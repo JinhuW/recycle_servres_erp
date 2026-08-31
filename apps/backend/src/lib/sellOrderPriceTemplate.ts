@@ -31,6 +31,8 @@
 // findHeaders() requires BOTH, so the import skips them. Never add a header
 // containing price/unitprice/单价/价格 here.
 
+import { sortSheetRows } from './categoryColumns';
+
 export type PriceTemplateProduct = {
   category: string;
   label: string;
@@ -96,32 +98,10 @@ const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7
 
 const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 
-// Rows ship pre-sorted the way the desk reads a bid sheet (user-decided
-// 2026-08-09, superseding the 2026-08-06 capacity-first order): brand, then
-// capacity, speed — one brand's parts stay together on the page. Rank is
-// deliberately not a key. Categories without those specs just fall through to
-// the label tie-break. Every sheet in the workbook uses this, bid tabs and
-// packing tabs alike, so a picker and a bidder read the same sequence.
-const DEFAULT_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
-
-// Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
-// 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
-// sink so manual lines (no specs at all) never head the tab.
-function compareSpec(a: string, b: string): number {
-  if (!a) return b ? 1 : 0;
-  if (!b) return -1;
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-}
-
-// Label breaks ties so the same order always exports byte-identically.
+// Row order lives in lib/categoryColumns so the inventory export ships the same
+// sequence — brand, then capacity, speed — and the two can't drift apart.
 function sortForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] {
-  return [...products].sort((x, y) => {
-    for (const key of DEFAULT_SORT_KEYS) {
-      const d = compareSpec(String(x.specs[key] ?? ''), String(y.specs[key] ?? ''));
-      if (d !== 0) return d;
-    }
-    return compareSpec(x.label, y.label);
-  });
+  return sortSheetRows(products, (p) => ({ specs: p.specs, label: p.label }));
 }
 
 // Fold products into CATEGORY_ORDER buckets; unknown categories go to Other
