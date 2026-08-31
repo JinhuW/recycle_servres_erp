@@ -7,7 +7,7 @@ priority: P2
 created: 2026-08-31
 reporter: jinhu
 branch: feat/changelog-and-tickets
-pr:
+pr: "#223"
 version:
 related: []
 ---
