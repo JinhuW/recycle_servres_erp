@@ -54,9 +54,18 @@ Three things worth knowing:
   session takes the version you bumped to, the fix is a fresh bump *and* a
   renamed `## [X.Y.Z]` heading — the CI gate matches the header against
   `package.json` exactly.
-- **`version-check.yml` runs on `dev` only.**  A hotfix pushed straight to
-  `main` bypasses the changelog gate entirely; its section appears only when
-  the fix is back-ported.
+- **`version-check.yml` runs on `dev` and `main`, but only `dev` creates
+  tags.**  A hotfix pushed straight to `main` gets the same bump + changelog
+  demand; the tag is created when the version reaches `dev`, because a tag
+  minted on a `main` commit would make the back-port fail "tag exists on an
+  unrelated commit".  `LAST_TAG` is the newest tag *reachable from HEAD*
+  (`--merged HEAD`) — on `main`, which runs several releases behind, the global
+  newest tag would fail every push including docs-only ones.
+- **The `docs/FEATURES.md` check is a `::warning::`, never a failure.**  A
+  release carrying `feat()` commits that doesn't touch it gets an annotation.
+  Whether a change altered user-visible behaviour isn't machine-decidable, and
+  a gate that produces false blocks gets cleared by touching the file for no
+  reason.
 - `scripts/changelog.sh backfill` rebuilds the whole file from the tag list and
   is idempotent.  It preserves hand-written sections verbatim, so running it
   is safe — but it is a repair tool, not part of the release flow.

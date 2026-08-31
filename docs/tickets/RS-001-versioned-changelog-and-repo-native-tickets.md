@@ -62,8 +62,6 @@ verbatim, nor its status.
   mobile About sheet keep showing version and build date only.
 - Retiring `scripts/release.sh` and its `package.json` entry points. Its
   changelog generator is superseded, but the rest of it is a separate decision.
-- Closing the `main`-hotfix gap: `version-check.yml` triggers only on `dev`, so
-  a hotfix pushed straight to `main` still bypasses the gate.
 
 ## Notes
 
@@ -71,10 +69,19 @@ verbatim, nor its status.
   subjects carry no `(#NNN)`, so those bullets have no PR link; the early
   post-`release.sh` ranges hold up to 8 commits, so not every section is a
   one-liner.
-- `1.52.0`, `1.53.0` and `1.58.1` passed through `package.json` on `dev`
-  without ever being tagged — their commits fold into the next tagged section.
-  `1.9.0` is the mirror image: a section with no tag. Both are recorded in the
-  changelog preamble rather than papered over.
+- The untagged-release gap was **closed rather than documented**: `0.1.0`,
+  `1.9.0`, `1.52.0` and `1.53.0` shipped without a tag and were tagged
+  retroactively at the last commit carrying each version, so
+  `scripts/changelog.sh check` is now an unqualified statement. An earlier
+  draft of this ticket also named `1.58.1` — that version never existed
+  (1.58.0 → 1.58.2); it came from a plan review and was repeated without
+  checking.
+- The `main`-hotfix gap was closed too: `version-check.yml` now runs on `main`
+  as well, with `LAST_TAG` scoped to `--merged HEAD` (the global newest tag
+  would fail every push to a `main` that runs behind `dev`) and tag creation
+  still confined to `dev`.
+- `docs/FEATURES.md` gets a `::warning::`, not a gate — see the reasoning in
+  `CLAUDE.md`.
 - This work was deliberately cut onto its own branch off `origin/dev`. The
   session branch it started on carried an unpushed clients/suppliers feature
   labelled v1.105.0 — a version `dev` had already tagged for a different PR.
