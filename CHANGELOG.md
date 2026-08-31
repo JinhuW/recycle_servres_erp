@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.110.0] - 2026-08-31
+
+### Features
+- feat(inventory): an item's **specs are editable from the item itself**. The
+  Details tab rendered brand, capacity, generation and the rest through a helper
+  that wore the `.input` class with `pointerEvents: none` — seven boxes that
+  looked like text fields and swallowed every click, so a mislabelled brand
+  could only be fixed from the order that brought it in. `PATCH
+  /api/inventory/:id` now accepts the spec columns, mirroring what `PATCH
+  /api/orders/:id` already does rather than inventing a second mechanism.
+  Category stays fixed here, which is what lets the stale-column clear and the
+  synthetic part-number rebuild be skipped.
+
 ## [1.109.0] - 2026-08-31
 
 ### Features
