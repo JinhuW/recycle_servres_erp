@@ -5,5 +5,6 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-003](./RS-003-mobile-po-add-item-buttons-require-scrolling-past-th.md) | in-review | story | P2 | Mobile PO add-item buttons require scrolling past the whole line list | 1.109.0 |
 | [RS-002](./RS-002-clients-the-people-we-buy-from-are-a-record.md) | done | story | P2 | Clients: the people we buy from are a record | 1.108.0 |
 | [RS-001](./RS-001-versioned-changelog-and-repo-native-tickets.md) | done | story | P2 | Versioned changelog and repo-native tickets | n/a — docs and CI only, no release |
