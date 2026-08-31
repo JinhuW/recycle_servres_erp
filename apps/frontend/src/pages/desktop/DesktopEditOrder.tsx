@@ -10,7 +10,7 @@ import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../
 import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
-  LineDrawer, blankLine, findDuplicatePartNumbers,
+  LineDrawer, blankLine, findDuplicatePartNumbers, brandConfirmPending,
   type Line, type DuplicatePartGroup,
 } from './DesktopSubmit';
 import { AddLineMenu } from './submit/AddLineMenu';
@@ -624,6 +624,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
   : lines.flatMap((l, i) => {
+      if (brandConfirmPending(l)) {
+        return [lines.length === 1
+          ? t('subConfirmBrandThis')
+          : t('subConfirmBrandLine', { n: i + 1 })];
+      }
       if (lineReady(l)) return [];
       const fields = missingNamesFor(l);
       if (fields) {
@@ -780,6 +785,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const confirmLine = async (i: number): Promise<void> => {
     const l = lines[i];
     if (!l) return;
+    // Backstop for the drawer's own gate — this is the funnel every confirm
+    // goes through, so the rule can't be routed around here.
+    if (brandConfirmPending(l)) throw new Error(t('subConfirmBrandThis'));
     if (!lineReady(l)) throw new Error(t('subFillThisLine'));
     // Nothing to push for an untouched server line; skip the round trip.
     if (l._id && !l._dirty) return;

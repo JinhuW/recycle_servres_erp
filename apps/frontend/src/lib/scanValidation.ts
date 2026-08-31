@@ -109,3 +109,28 @@ export function stripUnmatched(
   }
   return out;
 }
+
+/**
+ * Whether a RAM scan's brand has to be re-confirmed against the photo before
+ * the line can be saved. Brand is the field the model reads worst and the one
+ * a wrong value costs the most on, and all three of its failure modes look
+ * alike on the form: the prompt tells the model to omit what it can't read, an
+ * off-catalog near-miss ("Nanya") is dropped by stripUnmatched, and a literal
+ * "Other" prefills as if it were a reading. Only a named catalog brand counts
+ * as identified.
+ */
+export function ramBrandNeedsConfirm(
+  extracted?: Record<string, string> | null,
+): boolean {
+  // No scan at all — the purchaser typed the line, there is nothing the AI
+  // claimed for them to check.
+  if (!extracted) return false;
+  const brand = (extracted.brand ?? '').trim();
+  if (!brand) return true;
+  if (brand.toLowerCase() === 'other') return true;
+  const options = catalog.RAM_BRAND ?? [];
+  // Catalog not loaded yet: same rule as validateScan — we can't call a value
+  // off-catalog when we don't know the catalog.
+  if (options.length === 0) return false;
+  return !options.includes(brand);
+}
