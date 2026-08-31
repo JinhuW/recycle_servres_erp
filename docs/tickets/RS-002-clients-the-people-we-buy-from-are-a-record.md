@@ -2,12 +2,12 @@
 id: RS-002
 title: "Clients: the people we buy from are a record"
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-08-31
 reporter: jinhu
 branch: session/20260828-175116
-pr:
+pr: "#224"
 version: 1.108.0
 related: [RS-001]
 ---
