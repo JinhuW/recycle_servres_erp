@@ -10,9 +10,17 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, normSellPrice } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
+
+// Spec fields PATCH /:id accepts. Category stays fixed on the inventory editor,
+// so unlike the PO route this never has to clear the columns a switched-away
+// category owned — every line here keeps the category it was filed under.
+const SPEC_PATCH_FIELDS = [
+  'brand', 'capacity', 'generation', 'type', 'classification',
+  'rank', 'speed', 'interface', 'formFactor', 'description',
+] as const;
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -1027,9 +1035,23 @@ inventory.patch('/:id', async (c) => {
         partNumber?: string;
         health?: number | null;
         rpm?: number | null;
+        brand?: string | null;
+        capacity?: string | null;
+        generation?: string | null;
+        type?: string | null;
+        classification?: string | null;
+        rank?: string | null;
+        speed?: string | null;
+        interface?: string | null;
+        formFactor?: string | null;
+        description?: string | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  // Was the key present at all? `undefined` means "leave alone"; an explicit
+  // null or '' means "clear it".
+  const has = (f: string) => ((body as Record<string, unknown>)[f] !== undefined ? 1 : 0);
+  const specVal = (v: string | null | undefined) => (v == null || v.trim() === '' ? null : v.trim());
   if (body.health !== undefined && body.health !== null && (body.health < 0 || body.health > 100)) {
     return c.json({ error: 'health must be between 0 and 100' }, 400);
   }
@@ -1133,18 +1155,42 @@ inventory.patch('/:id', async (c) => {
         condition   = COALESCE(${body.condition ?? null}, condition),
         part_number = COALESCE(${body.partNumber ?? null}, part_number),
         health      = COALESCE(${body.health ?? null}, health),
-        rpm         = COALESCE(${body.rpm ?? null}, rpm)
+        rpm         = COALESCE(${body.rpm ?? null}, rpm),
+        -- Spec columns take the sell_price sentinel, not COALESCE: a blanked
+        -- dropdown has to be able to clear the column, and COALESCE would read
+        -- that as "no change". specVal folds '' into NULL — an empty string is
+        -- not the same as NULL to the brand facet or the top-brands rollup,
+        -- which would gain a ghost value.
+        brand          = CASE WHEN ${has('brand')}::int = 1          THEN ${specVal(body.brand)}          ELSE brand END,
+        capacity       = CASE WHEN ${has('capacity')}::int = 1       THEN ${specVal(body.capacity)}       ELSE capacity END,
+        generation     = CASE WHEN ${has('generation')}::int = 1     THEN ${specVal(body.generation)}     ELSE generation END,
+        type           = CASE WHEN ${has('type')}::int = 1           THEN ${specVal(body.type)}           ELSE type END,
+        classification = CASE WHEN ${has('classification')}::int = 1 THEN ${specVal(body.classification)} ELSE classification END,
+        rank           = CASE WHEN ${has('rank')}::int = 1           THEN ${specVal(body.rank)}           ELSE rank END,
+        speed          = CASE WHEN ${has('speed')}::int = 1          THEN ${specVal(body.speed)}          ELSE speed END,
+        interface      = CASE WHEN ${has('interface')}::int = 1      THEN ${specVal(body.interface)}      ELSE interface END,
+        form_factor    = CASE WHEN ${has('formFactor')}::int = 1     THEN ${specVal(body.formFactor)}     ELSE form_factor END,
+        description    = CASE WHEN ${has('description')}::int = 1    THEN ${specVal(body.description)}    ELSE description END
       WHERE id = ${id}
     `;
     // One event per changed field — keeps the timeline easy to skim.
-    const fields = ['status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm'] as const;
+    const fields = [
+      'status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm',
+      ...SPEC_PATCH_FIELDS,
+    ] as const;
+    const isSpec = new Set<string>(SPEC_PATCH_FIELDS);
     for (const f of fields) {
-      const newVal = (body as Record<string, unknown>)[f];
-      if (newVal === undefined) continue;
+      const raw = (body as Record<string, unknown>)[f];
+      if (raw === undefined) continue;
+      // Compare and record what actually landed in the column, not what the
+      // client sent — otherwise clearing a field that was already NULL logs a
+      // phantom `null → ''` edit.
+      const newVal = isSpec.has(f) ? specVal(raw as string | null) : raw;
       const beforeKey: Record<string, string> = {
         status: 'status', sellPrice: 'sell_price', unitCost: 'unit_cost',
         qty: 'qty', condition: 'condition', partNumber: 'part_number',
         health: 'health', rpm: 'rpm',
+        ...SPEC_FIELD_TO_DB_COL,
       };
       const oldVal = before[beforeKey[f]];
       if (String(oldVal) === String(newVal)) continue;
