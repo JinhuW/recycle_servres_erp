@@ -8,7 +8,7 @@ import { committedSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
-  type ExportCategory,
+  sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
 import { UNTYPED_ITEM, normSellPrice } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -228,11 +228,18 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
 // folded into Other (same recipe as the sell-order download). The split itself
 // lives in lib/categoryColumns so the PO workbook — which now also spans
 // categories — uses the same one.
+//
+// Rows go out in the vendor bid sheet's order (brand, capacity, speed), not the
+// query's recency order, so the export and a price template for the same parts
+// read alike. Sorting before the split is enough — categoryTabSheets buckets in
+// input order. The PO spreadsheet deliberately keeps its own line sequence, so
+// this sort lives here rather than in categoryTabSheets.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
   colsFor: (cat: ExportCategory) => XlsxColumn[],
 ): Promise<Buffer> {
-  return buildXlsxWorkbook(categoryTabSheets(rows, colsFor, { emptySheetName: 'Inventory' }));
+  const sorted = sortSheetRows(rows, (r) => ({ specs: r, label: String(r.item ?? '') }));
+  return buildXlsxWorkbook(categoryTabSheets(sorted, colsFor, { emptySheetName: 'Inventory' }));
 }
 
 inventory.get('/export', async (c) => {
