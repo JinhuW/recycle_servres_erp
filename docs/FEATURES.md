@@ -259,6 +259,10 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   share target, scoped to mobile only (v0.1.1).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed
   hues (v0.1.3).
+- On mobile, the PO edit screen **docks the four category add-targets above the
+  action bar** (v1.109.0), so adding a second item no longer means scrolling
+  past every item already on the order — the screen reopens at the top after
+  each line, which made the in-flow row recede a little further with every use.
 - All strings go through `useT()`; the app ships English and Chinese.
 - User preferences (theme, list-view modes) flow through `lib/preferences.tsx`
   and persist server-side.

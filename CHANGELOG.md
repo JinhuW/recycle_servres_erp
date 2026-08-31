@@ -17,6 +17,20 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.109.0] - 2026-08-31
+
+### Features
+- feat(orders): on mobile, the four add-an-item targets are **docked above the
+  action bar** on the PO edit screen instead of sitting at the end of the line
+  list. Saving a line leaves the screen and comes back, which remounts it at
+  the top of the scroll, so the row a purchaser needed next receded by one line
+  every time they used it — the feature got harder to use the more it was used.
+  Each category keeps its own direct target: a single "Add another" button
+  would put the old category mode back in the user's head. The bar became a
+  two-row stack rather than growing a second floating strip, because a strip
+  would have had to hard-code a bar height that changes with whether the order
+  can be deleted, archived or saved (RS-003)
+
 ## [1.108.0] - 2026-08-31
 
 ### Features
