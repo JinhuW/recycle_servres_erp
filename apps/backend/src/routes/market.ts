@@ -173,14 +173,21 @@ market.post('/lookup', async (c) => {
     return c.json({ error: `at most ${LOOKUP_MAX} part numbers per lookup` }, 413);
   }
 
-  // Canonicalised here so the caller can key its own map and get a hit: the
-  // rule is @recycle-erp/shared's canonicalPartNumber, which is the same
-  // function the frontend canonicalised the request with.
-  const canon = [...new Set(
-    raw.filter((p): p is string => typeof p === 'string')
-      .map(p => canonPartNumberJs(p))
-      .filter(Boolean),
-  )];
+  // Answers are keyed by the exact strings the caller asked with, not by this
+  // server's canon: the Worker and Railway deploy independently and this is a
+  // PWA whose tabs live for days, so a client bundled with an older rule asks
+  // under a key a newer rule would never emit. Echoing what was asked survives
+  // any rule change; keying by the server's canon blanked every price on an
+  // open tab the day the rule widened.
+  const asked = new Map<string, string[]>();
+  for (const p of raw) {
+    if (typeof p !== 'string') continue;
+    const key = canonPartNumberJs(p);
+    if (!key) continue;
+    const under = asked.get(key);
+    if (under) under.push(p); else asked.set(key, [p]);
+  }
+  const canon = [...asked.keys()];
   const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
   if (canon.length === 0) return c.json({ targetMargin: TARGET_MARGIN, items: {} });
 
@@ -197,12 +204,13 @@ market.post('/lookup', async (c) => {
   const freshness = new Map<string, number>();
   for (const r of rows) {
     const key = canonPartNumberJs(r.part_number ?? '');
-    if (!key) continue;
+    const under = asked.get(key);
+    if (!under) continue;
     const at = r.last_price_at ? new Date(r.last_price_at).getTime() : 0;
-    if (!(key in items) || at > (freshness.get(key) ?? -1)) {
-      items[key] = formatRefPrice(r, TARGET_MARGIN);
-      freshness.set(key, at);
-    }
+    if (at <= (freshness.get(key) ?? -1)) continue;
+    freshness.set(key, at);
+    const value = formatRefPrice(r, TARGET_MARGIN);
+    for (const spelling of under) items[spelling] = value;
   }
   return c.json({ targetMargin: TARGET_MARGIN, items });
 });

@@ -1254,7 +1254,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     whShortCodePh: 'e.g. LA1',
     whFieldRegion: 'Region',
     whRegionPh: 'e.g. US-West',
-    whAddressPh: 'Street, city, postal code…',
     whNoManager: '— No manager —',
     whCurrentManager: 'Current manager',
     whManagerPhone: 'Manager phone',

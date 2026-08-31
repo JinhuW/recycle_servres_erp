@@ -22,12 +22,13 @@ const EN_SPACE = '\u2002';
 describe('lookupKeys', () => {
   it('dedupes, drops blanks, and canonicalises', () => {
     expect(lookupKeys(['A-1', 'A-1', '', null, undefined, 'b-2']))
-      .toEqual(['A-1', 'B-2']);
+      .toEqual(['A1', 'B2']);
   });
 
   it('collapses the label spellings of one part to a single request key', () => {
-    expect(lookupKeys(['M393A4K40DB3-CWE', 'P/N: M393A4K40DB3-CWE', 'm393a4k40db3-cwe']))
-      .toEqual(['M393A4K40DB3-CWE']);
+    expect(lookupKeys(['M393A4K40DB3-CWE', 'P/N: M393A4K40DB3-CWE', 'm393a4k40db3 cwe',
+                       'M393A4K40DB3_CWE']))
+      .toEqual(['M393A4K40DB3CWE']);
   });
 
   it('is order-independent so an unchanged set does not refetch', () => {
@@ -44,13 +45,13 @@ describe('lookupKeys', () => {
   // that dropped it means the answer comes back under a key nothing looks up.
   it('leaves the spaces the server keeps, so the request key is the answer key', () => {
     expect(lookupKeys([`p/n: m393a4k40db3${NBSP}-cwe`]))
-      .toEqual([`M393A4K40DB3${NBSP}-CWE`]);
+      .toEqual([`M393A4K40DB3${NBSP}CWE`]);
     expect(lookupKeys([`a${EN_SPACE}1`])).toEqual([`A${EN_SPACE}1`]);
   });
 });
 
 describe('resolveMarket', () => {
-  const values = new Map([['M393A4K40DB3-CWE', VALUE]]);
+  const values = new Map([['M393A4K40DB3CWE', VALUE]]);
 
   it('resolves the exact part number', () => {
     expect(resolveMarket(values, 'M393A4K40DB3-CWE', 0.3)?.maxBuy).toBe(63);
@@ -59,6 +60,8 @@ describe('resolveMarket', () => {
   it('resolves the same part written the way a label prints it', () => {
     expect(resolveMarket(values, 'P/N: M393A4K40DB3-CWE', 0.3)?.maxBuy).toBe(63);
     expect(resolveMarket(values, ' m393a4k40db3-cwe ', 0.3)?.maxBuy).toBe(63);
+    expect(resolveMarket(values, 'M393A4K40DB3_CWE', 0.3)?.maxBuy).toBe(63);
+    expect(resolveMarket(values, 'm393a4k40db3 cwe', 0.3)?.maxBuy).toBe(63);
   });
 
   it('returns null for an unknown or blank part', () => {
@@ -68,7 +71,7 @@ describe('resolveMarket', () => {
   });
 
   it('resolves a row the server keyed under a non-ASCII space', () => {
-    const served = new Map([[`M393A4K40DB3${NBSP}-CWE`, VALUE]]);
+    const served = new Map([[`M393A4K40DB3${NBSP}CWE`, VALUE]]);
     expect(resolveMarket(served, `p/n: m393a4k40db3${NBSP}-cwe`, 0.3)?.maxBuy).toBe(63);
   });
 

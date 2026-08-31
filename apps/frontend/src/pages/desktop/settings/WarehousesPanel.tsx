@@ -132,12 +132,9 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
                     <span className="wh-row-val mono" style={{ fontSize: 12.5 }}>{w.timezone}</span>
                   </div>
                 )}
-                {w.shipStreet1 ? (
-                  <div className="wh-row">
-                    <span className="wh-row-label">{t('whShipAddrTitle')}</span>
-                    <span className="wh-row-val">{[w.shipCity, w.shipState].filter(Boolean).join(', ')}</span>
-                  </div>
-                ) : (
+                {/* The Address row above already prints the ship-to it is
+                    derived from, so only the missing-address warning is left. */}
+                {!w.shipStreet1 && (
                   <div className="wh-row">
                     <span className="wh-row-val" style={{ color: 'var(--warn-strong)', fontSize: 12 }}>
                       {t('whShipAddrMissing')}
@@ -199,7 +196,7 @@ function WarehouseEditModal({
   const isNew = !warehouse;
   type Draft = {
     name: string; short: string; region: string;
-    address: string; managerUserId: string;
+    managerUserId: string;
     timezone: string;
     shipContactName: string; shipPhone: string;
     shipStreet1: string; shipStreet2: string;
@@ -209,7 +206,6 @@ function WarehouseEditModal({
     name: warehouse?.name ?? '',
     short: warehouse?.short ?? '',
     region: warehouse?.region ?? '',
-    address: warehouse?.address ?? '',
     managerUserId: warehouse?.managerUserId ?? '',
     timezone: warehouse?.timezone ?? '',
     shipContactName: warehouse?.shipContactName ?? '',
@@ -251,7 +247,6 @@ function WarehouseEditModal({
         name: draft.name.trim(),
         short: draft.short.trim(),
         region: draft.region.trim(),
-        address: clean(draft.address),
         managerUserId: draft.managerUserId || null,
         timezone: clean(draft.timezone),
         shipContactName: clean(draft.shipContactName),
@@ -316,20 +311,8 @@ function WarehouseEditModal({
               <input className="input" value={draft.region} onChange={e => set('region', e.target.value)} placeholder={t('whRegionPh')} />
             </div>
           </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="label">{t('whAddress')}</label>
-              <textarea
-                className="input"
-                rows={3}
-                value={draft.address}
-                onChange={e => set('address', e.target.value)}
-                placeholder={t('whAddressPh')}
-              />
-            </div>
-          </div>
-          {/* Structured ship-to for prepaid labels; the free-text address
-              above stays the display line. */}
+          {/* The only address on a warehouse. Carriers read these fields, and
+              the display line shown on cards is derived from them server-side. */}
           <div style={{ margin: '14px 0 4px', fontSize: 12, fontWeight: 650, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             {t('whShipAddrTitle')}
           </div>
