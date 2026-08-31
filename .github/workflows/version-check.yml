@@ -48,6 +48,15 @@ jobs:
               echo "::error::package.json version $VERSION is lower than the latest tag $LAST_TAG."
               exit 1
             fi
+
+            # A release with no changelog entry is how the last one rotted: the
+            # only gate was an opt-in git hook nobody enabled, and CHANGELOG.md
+            # went 159 tagged releases without a section. Reached only when a bump was
+            # actually required, so docs-only pushes stay exempt.
+            if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+              echo "::error::package.json is $VERSION but CHANGELOG.md has no '## [$VERSION]' section. Add the release entry in the same push — scripts/changelog.sh draft prints a starting point."
+              exit 1
+            fi
           else
             echo "No previous v* tag — accepting $TAG as the baseline."
           fi

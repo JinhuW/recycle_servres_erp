@@ -23,6 +23,46 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - The `@recycle-erp/shared` package is imported as a workspace dep (`main:
   "./src/index.ts"`) — there's no build step.  Don't add one.
 
+## Tickets, changelog & features
+
+Three documents carry the project's memory.  `docs/tickets/` says what was
+asked, `CHANGELOG.md` says when it shipped, `docs/FEATURES.md` says what the
+system does today.  Read `docs/FEATURES.md` first when you don't know this
+codebase.
+
+1. **A change request becomes a ticket** in `docs/tickets/` —
+   `scripts/ticket.sh new "<title>"`.  Because `plan-first` governs this repo,
+   the ticket is *drafted inside plan mode* and shown as part of the plan, then
+   written as the first step of implementation.  The `## Ask` block is the
+   requester's own words, **verbatim** — that field is the only thing in the
+   file that can't be reconstructed from the code later.  The `ticket-workflow`
+   skill in `.claude/skills/` covers the rest; `/ticket` is the manual path.
+2. **The version bump that ships it adds a `## [X.Y.Z]` section to
+   `CHANGELOG.md` in the same push.**  `version-check.yml` fails the push
+   otherwise.  `scripts/changelog.sh draft` prints a starting point from the
+   branch's commits; rewrite it into prose — what changed and why it mattered,
+   not the commit subject again.
+3. **If user-visible behaviour changed, edit `docs/FEATURES.md`** and cite the
+   new version.  Nothing enforces this one, which is exactly why it needs
+   saying: it is the document that rots first.
+4. **Close the ticket** — `scripts/ticket.sh status RS-nnn done`, and fill its
+   `pr:` and `version:` fields.  `version:` is the join back to the changelog.
+
+Three things worth knowing:
+
+- **A version collision renumbers the changelog header too.**  When another
+  session takes the version you bumped to, the fix is a fresh bump *and* a
+  renamed `## [X.Y.Z]` heading — the CI gate matches the header against
+  `package.json` exactly.
+- **`version-check.yml` runs on `dev` only.**  A hotfix pushed straight to
+  `main` bypasses the changelog gate entirely; its section appears only when
+  the fix is back-ported.
+- `scripts/changelog.sh backfill` rebuilds the whole file from the tag list and
+  is idempotent.  It preserves hand-written sections verbatim, so running it
+  is safe — but it is a repair tool, not part of the release flow.
+  `scripts/release.sh` has its own, older generator for the retired
+  Docker/`main` flow; don't extend that one.
+
 ## Session isolation (one branch per Claude Code session)
 
 Several Claude Code sessions run against this repo at once, so **every session
@@ -315,6 +355,9 @@ switches the branch out from under the first.
 
 ## Pointers
 
+- What the system does today, by area: `docs/FEATURES.md`.
+- What was asked, and by whom: `docs/tickets/` (index in `INDEX.md`).
+- What shipped when: `CHANGELOG.md` — one section per `v*` tag.
 - Per-feature design docs: `docs/superpowers/specs/`.
 - Implementation plans (in-flight and finished): `docs/superpowers/plans/`.
 - Auto-memory referenced above lives under
