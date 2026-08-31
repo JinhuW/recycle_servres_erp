@@ -2,13 +2,13 @@
 id: RS-001
 title: Versioned changelog and repo-native tickets
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-08-31
 reporter: jinhu
 branch: feat/changelog-and-tickets
 pr: "#223"
-version:
+version: n/a — docs and CI only, no release
 related: []
 ---
 

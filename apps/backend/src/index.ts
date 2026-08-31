@@ -32,6 +32,7 @@ import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
 import coordinatorRoutes from './routes/coordinator';
 import bankTxRoutes from './routes/bankTx';
+import suppliersRoutes from './routes/suppliers';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
@@ -275,6 +276,10 @@ app.use('/api/shipments/*', authMiddleware);
 app.use('/api/shipping/*', authMiddleware);
 app.use('/api/packages', authMiddleware);
 app.use('/api/packages/*', authMiddleware);
+// Both spellings: GET /api/suppliers has no trailing segment to match the
+// wildcard, so registering only `/*` would leave the list route unauthenticated.
+app.use('/api/suppliers', authMiddleware);
+app.use('/api/suppliers/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
@@ -311,6 +316,10 @@ app.route('/api/tracker', trackerRoutes);
 app.route('/api/coordinator', coordinatorRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
+// Clients (buy-side counterparties). Deliberately NOT in CACHEABLE_PREFIXES:
+// like /api/warehouses this list is edited and re-read inside one user action,
+// and a 60s browser copy is what made a saved warehouse address look unsaved.
+app.route('/api/suppliers', suppliersRoutes);
 
 app.onError((err, c) => {
   // Log the full error server-side with the request ID for correlation, but
