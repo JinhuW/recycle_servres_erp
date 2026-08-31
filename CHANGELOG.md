@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.108.0] - 2026-08-31
+
+### Features
+- feat(clients): the people we buy from are a record, not free text. Purchase orders had no counterparty at all — who we bought from survived only as `shipments.from_name`, `packages.seller_name` and a blob in `orders.notes`, which is why `banktx/match.ts` fuzzy-matches strings to reconcile a payment. New `suppliers` table (UI: **Clients**; 供货商, since 客户 is already the sell-side customers) with an owner, structured preferences, a contact log and `orders.supplier_id`. Standing (prospect/active/archived) is stored because a human decides it; **tier, health and the follow-up date are derived per read** from order history, the same discipline `orders.category` and `total_cost` follow — a stored status is one that goes stale
+- feat(clients): a client is judged against **their own rhythm**, not a company-wide threshold. Silent past twice the median gap between their POs reads as "gone quiet", past four times as "lost touch". A weekly seller quiet for three weeks is in trouble; a twice-a-year seller quiet for three weeks is fine, and one fixed threshold would nag about the second while saying nothing about the first
+- feat(clients): desktop **Clients** page at `/clients` for both roles, opening on "Needs a call" rather than everything — a list of four is a task, a list of sixty-seven is a chore someone closes. No system vocabulary reaches the screen: tier A/B/C renders as Top seller / Regular / Occasional, health as On track / Gone quiet / Lost touch, a prospect as a New lead. The mapping lives in `lib/clients.ts` so a future field can't leak `dormant` or `adopt` into the UI. The rhythm strip draws each PO as a mark across a year with the silence since the last one as a bar — the rule stays sophisticated while the screen stays simple
+- feat(clients): logging a call is two taps and no typing — kind pre-selected, outcomes as chips, and the next call already scheduled from the client's tier cadence, so **doing nothing is the correct action**. If logging cost more than that, purchasers would make calls and not log them, and the follow-up list would start lying
+- feat(clients): migration `0114` seeds the book from shipping history so it is useful on day one, grouping on the compressed name the generated `match_key` derives from — not the punctuation-sensitive key `/api/shipping/contacts` uses, or two spellings form separate groups and then collide on insert. Display name is the spelling used most often, contact details come from the newest row, and follow-ups spread over two weeks so day one isn't sixty calls
+- feat(clients): buying a shipping label deliberately creates **nothing** — sellers surface in a suggestion rail instead. This business buys from plenty of people once, and auto-creating would bury the twenty relationships that matter
+- feat(clients): naming a client is bookkeeping, like a note — `supplier_id` is in `META_FIELDS` for the audit trail but **not** in `materialEdit`, so attributing a submitted PO does not bounce it back to Draft (v1.97.0's revert rule). `orderDraft.ts`, the second `INSERT INTO orders`, carries it too, or the package→PO path stays unattributed
+
 ## [1.107.0] - 2026-08-31
 
 ### Features

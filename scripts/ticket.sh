@@ -35,7 +35,13 @@ field() {
   awk -v k="$2" '
     NR == 1 && $0 == "---" { inf = 1; next }
     inf && $0 == "---"     { exit }
-    inf && index($0, k ":") == 1 { sub(/^[^:]*: */, ""); print; exit }
+    # A title containing a colon has to be quoted in YAML; strip the quotes
+    # back off so the index reads as prose.
+    inf && index($0, k ":") == 1 {
+      sub(/^[^:]*: */, "")
+      sub(/^"/, ""); sub(/"$/, "")
+      print; exit
+    }
   ' "$1"
 }
 

@@ -224,9 +224,12 @@ check() {
   tag_versions | sort -u > "$tmp/tags"
   section_versions | sort -u > "$tmp/sections"
 
-  local missing extra
+  local missing extra pending
   missing="$(comm -23 "$tmp/tags" "$tmp/sections")"
-  extra="$(comm -13 "$tmp/tags" "$tmp/sections")"
+  # The version in package.json has its section written before CI tags it, so
+  # an in-flight release is the normal state, not a finding.
+  pending="$(node -p "require('./package.json').version" 2>/dev/null || true)"
+  extra="$(comm -13 "$tmp/tags" "$tmp/sections" | grep -vFx "$pending" || true)"
 
   if [[ -n "$extra" ]]; then
     warn "sections with no tag — tag the release, or fix the header:"

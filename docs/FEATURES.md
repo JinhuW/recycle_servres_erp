@@ -20,7 +20,7 @@ Three roles: **manager**, **purchaser**, and unauthenticated **vendors** who
 reach a portal through a URL token.
 
 - Managers see everything. Purchasers see the buying side — dashboard, submit,
-  history, shipping, market, settings — and their own POs.
+  history, shipping, clients, market, settings — and their own POs.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
   invisible rather than forbidden.
@@ -72,6 +72,39 @@ moves Draft → Submitted → In Transit → Reviewing → Done.
 - Excel export carries the category's full spec set per line, one tab per
   category (v1.40.0). There is no PDF invoice — it was removed in v1.40.0
   because it had fallen behind the spreadsheet.
+
+## Clients (the people we buy from)
+
+Purchase orders had no counterparty until v1.108.0 — who we bought from
+survived only as free text on `shipments.from_name`, `packages.seller_name` and
+a blob in `orders.notes`, which is why payment reconciliation fuzzy-matches
+strings. Now `suppliers` (**Clients** in the UI; 供货商, because 客户 is already
+the sell-side customers) carries an owner, structured preferences, a contact
+log and `orders.supplier_id`.
+
+- **Standing is stored; tier, health and the follow-up date are derived** per
+  read from order history — the same discipline `orders.category` and
+  `total_cost` follow, because a stored status goes stale (v1.108.0).
+- **Each client is judged against their own rhythm**: silent past twice the
+  median gap between their POs is "gone quiet", past four times is "lost
+  touch". A weekly seller quiet for three weeks is in trouble; a twice-a-year
+  seller quiet for three weeks is fine (v1.108.0).
+- Desktop page at `/clients`, both roles, opening on **Needs a call** rather
+  than everything. No system vocabulary reaches the screen — tier A/B/C shows
+  as Top seller / Regular / Occasional, health as On track / Gone quiet / Lost
+  touch, a prospect as a New lead; the mapping lives in `lib/clients.ts`
+  (v1.108.0).
+- The **rhythm strip** draws each PO as a mark across a year, with the silence
+  since the last one as a bar that goes amber past twice their own gap.
+- **Logging a call is two taps and no typing**, and schedules the next one from
+  the client's tier cadence — doing nothing is the correct action. A logging
+  flow that costs more produces calls nobody logs, and a follow-up list that
+  lies.
+- Buying a shipping label **creates nothing**; sellers surface in a suggestion
+  rail. This business buys from plenty of people once, and auto-creating would
+  bury the twenty relationships that matter.
+- Attributing a PO to a client is bookkeeping, not a material edit: it is
+  audited but does **not** bounce a submitted PO back to Draft.
 
 ## Inventory
 

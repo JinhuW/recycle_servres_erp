@@ -5,4 +5,5 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-002](./RS-002-clients-the-people-we-buy-from-are-a-record.md) | in-review | story | P2 | Clients: the people we buy from are a record | 1.108.0 |
 | [RS-001](./RS-001-versioned-changelog-and-repo-native-tickets.md) | in-review | story | P2 | Versioned changelog and repo-native tickets | — |

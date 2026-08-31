@@ -32,7 +32,7 @@ const SCORE_SQL = `COALESCE(SUM(o.total_cost * CASE
   ELSE 0 END), 0)::float`;
 
 /** The compressed-name expression suppliers.match_key is generated from. Kept
- *  as SQL text, never re-implemented in TypeScript — see the note in 0112. */
+ *  as SQL text, never re-implemented in TypeScript — see the note in 0113. */
 const COMPRESS = (col: string) => `regexp_replace(upper(${col}), '[^A-Z0-9]', '', 'g')`;
 
 type Row = {
@@ -358,7 +358,7 @@ suppliers.post('/adopt', async (c) => {
       `;
       const id = ins[0].id as string;
 
-      // Same two-pass match as the 0113 backfill: shipments by name+zip, then
+      // Same two-pass match as the 0114 backfill: shipments by name+zip, then
       // packages by name alone (a package carries no address to match on).
       const byShip = await tx`
         UPDATE orders o SET supplier_id = ${id}

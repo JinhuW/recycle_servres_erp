@@ -1,4 +1,4 @@
-// Migration 0113 turns shipping history into a client book. It runs before the
+// Migration 0114 turns shipping history into a client book. It runs before the
 // seed when a worker builds its template database, so by the time fixtures
 // exist it has already executed against an empty schema — a silent no-op in the
 // normal suite. Rather than duplicate the SQL here, the test replays the real
@@ -12,7 +12,7 @@ import { resetDb, getTestDb } from './helpers/db';
 
 // `migrationsDir` is module-private in helpers/db.ts, so resolve it the same way.
 const BACKFILL = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '../migrations/0113_suppliers_backfill.sql'),
+  join(dirname(fileURLToPath(import.meta.url)), '../migrations/0114_suppliers_backfill.sql'),
   'utf8',
 );
 
@@ -63,7 +63,7 @@ async function seed() {
   return { marcus: marcus.id, priya: priya.id };
 }
 
-describe('0113 — seeding the book from history', () => {
+describe('0114 — seeding the book from history', () => {
   beforeEach(async () => { await resetDb(); });
 
   it('builds one client per seller per purchaser and attaches their orders', async () => {
