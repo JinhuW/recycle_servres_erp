@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
@@ -145,5 +148,17 @@ describe('ref_prices canonical part-number index', () => {
     expect(row.def).toContain(PART_PREFIX_RE);
     expect(row.def).toContain(PART_SEP_RE);
     expect(row.def.toLowerCase()).toContain('upper');
+  });
+
+  // 0112 groups rows by an inlined copy of the same canon. The index assertion
+  // above doesn't cover it, and a merge keyed on a stale rule would fold rows
+  // runtime considers distinct — the one mistake in that file that cannot be
+  // undone, since it deletes the losers.
+  it('the per-category merge migration inlines the same canonicaliser', () => {
+    const sqlText = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations',
+           '0112_merge_duplicate_parts_per_category.sql'), 'utf8');
+    expect(sqlText).toContain(PART_PREFIX_RE);
+    expect(sqlText).toContain(PART_SEP_RE);
   });
 });
