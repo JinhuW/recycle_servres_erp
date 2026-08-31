@@ -66,6 +66,11 @@ describe('normalizeFields — RAM', () => {
     expect(normalizeFields('HDD', { partNumber: 'ST4000NM0023-1MA107' }).partNumber).toBe('ST4000NM0023-1MA107');
   });
 
+  it('upper-cases the chip number — die codes are printed upper-case', () => {
+    expect(normalizeFields('RAM', { chipNumber: 'd9xpf' }).chipNumber).toBe('D9XPF');
+    expect(normalizeFields('RAM', { chipNumber: 'K4a8g045wc-Bcwe' }).chipNumber).toBe('K4A8G045WC-BCWE');
+  });
+
   it('drops blank/whitespace-only fields', () => {
     const f = normalizeFields('RAM', { brand: '  ', capacity: '32 GB' });
     expect(f.brand).toBeUndefined();
@@ -86,6 +91,8 @@ describe('normalizeFields — SSD/HDD', () => {
     const f = normalizeFields('SSD', { capacity: '1.92 TB', interface: 'nvme' });
     expect(f.capacity).toBe('1.92TB');
     expect(f.interface).toBe('NVMe');
+    expect(normalizeFields('SSD', { interface: 'sata' }).interface).toBe('SATA');
+    expect(normalizeFields('SSD', { capacity: '960 GB' }).capacity).toBe('960GB');
   });
   it('reduces rpm to digits', () => {
     expect(normalizeFields('HDD', { rpm: '7200 RPM' }).rpm).toBe('7200');

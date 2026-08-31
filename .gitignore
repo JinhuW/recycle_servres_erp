@@ -11,6 +11,8 @@ build/
 # git will not descend into an excluded directory to re-include a child.
 .claude/*
 !.claude/settings.json
+!.claude/skills/
+!.claude/commands/
 .claude/settings.local.json
 *.tsbuildinfo
 

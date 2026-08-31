@@ -2,10 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { api, ApiError } from '../../lib/api';
-import { handleFetchError, showErrorToast } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
 import { ORDER_STATUSES, statusTone } from '../../lib/status';
-import { CONDITIONS } from '../../lib/catalog';
+import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
+import { PartNumberField } from '../../components/PartNumberField';
+import { CatSelect, CatCombo } from './submit/LineFields';
+import {
+  CONDITIONS,
+  RAM_BRANDS, RAM_CAP, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK,
+  SSD_BRANDS, SSD_CAP, SSD_INTERFACE, SSD_FORM,
+  HDD_BRANDS, HDD_CAP, HDD_INTERFACE, HDD_FORM, HDD_RPM,
+} from '../../lib/catalog';
 import { FormSkeleton } from '../../components/Skeleton';
 
 type DetailRow = {
@@ -56,7 +64,21 @@ type Draft = {
   status: string;
   health: string;
   rpm: string;
-};
+} & Record<SpecField, string>;
+
+// Spec fields the Details tab edits. Held as '' rather than null in the draft —
+// a <select>'s clear option is value="", so a nullable column round-tripping
+// through the form is a string either way. `specOf` re-applies that convention
+// to the loaded row so the dirty check compares like with like; without it a
+// NULL column reads as changed on every save.
+const SPEC_FIELDS = [
+  'brand', 'capacity', 'generation', 'type', 'classification',
+  'rank', 'speed', 'interface', 'formFactor', 'description',
+] as const;
+type SpecField = typeof SPEC_FIELDS[number];
+
+const specOf = (item: DetailRow, f: SpecField): string =>
+  (f === 'formFactor' ? item.form_factor : item[f]) ?? '';
 
 // Peer inventory row (other lines sharing the same part_number). The /api/inventory
 // list endpoint returns more fields than this — pick only what the stock card uses.
@@ -93,19 +115,7 @@ type LinkedSellOrder = {
 
 // Subset of the /api/market row (RefPrice). Just what we render in the
 // Market reference card.
-type RefMatch = {
-  partNumber: string | null;
-  label: string;
-  sub: string | null;
-  source: string | null;
-  target: number | null;
-  low: number | null;
-  high: number | null;
-  avgSell: number | null;
-  samples: number;
-  demand: 'high' | 'medium' | 'low';
-  updatedAt: string;
-};
+type RefMatch = ResolvedMarketValue;
 
 export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const { t, lang } = useT();
@@ -118,7 +128,6 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
 
   const [peers, setPeers] = useState<PeerRow[]>([]);
-  const [refMatch, setRefMatch] = useState<RefMatch | null>(null);
   const [linkedSellOrders, setLinkedSellOrders] = useState<LinkedSellOrder[]>([]);
   const [internalNotes, setInternalNotes] = useState('');
   // When the backend rejects a qty/status change because the line is committed
@@ -142,6 +151,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           status: r.item.status,
           health: r.item.health != null ? String(r.item.health) : '',
           rpm: r.item.rpm != null ? String(r.item.rpm) : '',
+          ...Object.fromEntries(SPEC_FIELDS.map(f => [f, specOf(r.item, f)])) as Record<SpecField, string>,
         };
         setDraft(d);
         initialRef.current = JSON.stringify(d);
@@ -166,23 +176,12 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     return () => { alive = false; };
   }, [item?.part_number]);
 
-  // Market reference match: same part number wins; fall back to first row.
-  useEffect(() => {
-    const pn = item?.part_number;
-    if (!pn) { setRefMatch(null); return; }
-    let alive = true;
-    api.get<{ items: RefMatch[] }>(`/api/market?q=${encodeURIComponent(pn)}`)
-      .then(r => {
-        if (!alive) return;
-        const match = r.items.find(x => x.partNumber === pn) ?? r.items[0] ?? null;
-        setRefMatch(match);
-      })
-      .catch(err => {
-        if (alive) setRefMatch(null);
-        handleFetchError(err);
-      });
-    return () => { alive = false; };
-  }, [item?.part_number]);
+  // Market reference for this part, through the shared lookup. The old `?q=`
+  // call was a SUBSTRING search narrowed client-side, and its `?? items[0]`
+  // fallback rendered a DIFFERENT part's prices whenever the exact match was
+  // not on the page — editing `720-CT` quietly showed `M720-CTX`.
+  const resolveMarketValue = useMarketLookup([item?.part_number]);
+  const refMatch = resolveMarketValue(item?.part_number);
 
   // Sell orders that drew from this inventory line.
   useEffect(() => {
@@ -252,7 +251,15 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
     setSaving(true);
     setBlocked(null);
     try {
+      // Specs go up only when they actually moved. A key that is absent means
+      // "leave alone" and a present null means "clear" — sending all ten every
+      // time would make those two indistinguishable and log an edit per save.
+      const specPatch: Record<string, string | null> = {};
+      for (const f of SPEC_FIELDS) {
+        if (draft[f] !== specOf(item, f)) specPatch[f] = draft[f] === '' ? null : draft[f];
+      }
       await api.patch(`/api/inventory/${itemId}`, {
+        ...specPatch,
         status: draft.status,
         sellPrice: draft.sellPrice === '' ? null : Number(draft.sellPrice),
         unitCost: Number(draft.unitCost) || 0,
@@ -274,7 +281,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         if (draft.status !== item.status) fields.push('status');
         setBlocked({ orders: openOrders, fields });
       } else {
-        showErrorToast(err instanceof Error ? err.message : 'Save failed');
+        showErrorDialog(err instanceof Error ? err.message : 'Save failed');
       }
     } finally {
       setSaving(false);
@@ -450,34 +457,38 @@ function DetailsPanel({
         <div className="card-body">
           {cat === 'RAM' && (
             <div className="grid-2">
-              <Row label={t('brand')}     value={item.brand} />
-              <Row label={t('capacity')}  value={item.capacity} />
-              <Row label={t('generation')} value={item.generation} />
-              <Row label={t('type')}      value={item.type} />
-              <Row label={t('klass')}     value={item.classification} />
-              <Row label={t('rank')}      value={item.rank} />
-              <Row label={t('ieSpeed')}   value={item.speed ? `${item.speed} MHz` : null} />
+              <Spec label={t('brand')}       ><CatSelect value={draft.brand}          options={RAM_BRANDS}      onChange={v => set({ brand: v })} /></Spec>
+              <Spec label={t('capacity')}    ><CatSelect value={draft.capacity}       options={RAM_CAP}         onChange={v => set({ capacity: v })} /></Spec>
+              <Spec label={t('generation')}  ><CatSelect value={draft.generation}     options={RAM_GENERATIONS} onChange={v => set({ generation: v })} /></Spec>
+              <Spec label={t('type')}        ><CatSelect value={draft.type}           options={RAM_DEVICE_TYPES} onChange={v => set({ type: v })} /></Spec>
+              <Spec label={t('klass')}       ><CatSelect value={draft.classification} options={RAM_CLASS}       onChange={v => set({ classification: v })} /></Spec>
+              <Spec label={t('rank')}        ><CatSelect value={draft.rank}           options={RAM_RANK}        onChange={v => set({ rank: v })} /></Spec>
+              <Spec label={t('speedMhz')}    >
+                <input className="input" value={draft.speed} onChange={e => set({ speed: e.target.value })} />
+              </Spec>
             </div>
           )}
           {cat === 'SSD' && (
             <div className="grid-2">
-              <Row label={t('brand')}      value={item.brand} />
-              <Row label={t('capacity')}   value={item.capacity} />
-              <Row label={t('interfaceLbl')} value={item.interface} />
-              <Row label={t('formFactor')} value={item.form_factor} />
+              <Spec label={t('brand')}        ><CatCombo  value={draft.brand}      options={SSD_BRANDS}    onChange={v => set({ brand: v })} /></Spec>
+              <Spec label={t('capacity')}     ><CatSelect value={draft.capacity}   options={SSD_CAP}       onChange={v => set({ capacity: v })} /></Spec>
+              <Spec label={t('interfaceLbl')} ><CatSelect value={draft.interface}  options={SSD_INTERFACE} onChange={v => set({ interface: v })} /></Spec>
+              <Spec label={t('formFactor')}   ><CatSelect value={draft.formFactor} options={SSD_FORM}      onChange={v => set({ formFactor: v })} /></Spec>
             </div>
           )}
           {cat === 'HDD' && (
             <div className="grid-2">
-              <Row label={t('brand')}      value={item.brand} />
-              <Row label={t('capacity')}   value={item.capacity} />
-              <Row label={t('interfaceLbl')} value={item.interface} />
-              <Row label={t('formFactor')} value={item.form_factor} />
-              <Row label={t('rpm')}        value={item.rpm != null ? String(item.rpm) : null} />
+              <Spec label={t('brand')}        ><CatCombo  value={draft.brand}      options={HDD_BRANDS}    onChange={v => set({ brand: v })} /></Spec>
+              <Spec label={t('capacity')}     ><CatCombo  value={draft.capacity}   options={HDD_CAP}       onChange={v => set({ capacity: v })} /></Spec>
+              <Spec label={t('interfaceLbl')} ><CatSelect value={draft.interface}  options={HDD_INTERFACE} onChange={v => set({ interface: v })} /></Spec>
+              <Spec label={t('formFactor')}   ><CatSelect value={draft.formFactor} options={HDD_FORM}      onChange={v => set({ formFactor: v })} /></Spec>
+              <Spec label={t('rpm')}          ><CatSelect value={draft.rpm}        options={HDD_RPM}       onChange={v => set({ rpm: v })} /></Spec>
             </div>
           )}
           {cat === 'Other' && (
-            <Row label={t('description')} value={item.description} />
+            <Spec label={t('description')}>
+              <input className="input" value={draft.description} onChange={e => set({ description: e.target.value })} />
+            </Spec>
           )}
 
           <div className="divider" />
@@ -485,10 +496,9 @@ function DetailsPanel({
           <div className="grid-2">
             <div className="field">
               <label className="label">{t('partNumber')}</label>
-              <input
-                className="input mono"
+              <PartNumberField
                 value={draft.partNumber}
-                onChange={e => set({ partNumber: e.target.value })}
+                onChange={v => set({ partNumber: v })}
                 placeholder="—"
               />
             </div>
@@ -693,15 +703,28 @@ function StockTotal({ label, value, tone, icon }: {
   );
 }
 
+function Spec({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="field">
+      <label className="label">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+// Genuinely read-only value (warehouse, order id — neither has a write path).
+// Deliberately NOT dressed as an `.input`: a box that looks like a text field
+// but ignores every click reads as a broken form, which is exactly what sent
+// the spec fields above down that road.
 function Row({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="field">
       <label className="label">{label}</label>
       <div
-        className="input"
         style={{
-          background: 'var(--bg-soft)', color: value ? 'var(--fg)' : 'var(--fg-subtle)',
-          pointerEvents: 'none', userSelect: 'text',
+          padding: '7px 0', fontSize: 13,
+          color: value ? 'var(--fg)' : 'var(--fg-subtle)',
+          userSelect: 'text',
         }}
       >
         {value ?? '—'}
@@ -1010,7 +1033,7 @@ function SummaryColumn({
             <button
               className="btn"
               style={{ color: 'var(--neg)', borderColor: 'color-mix(in oklch, var(--neg) 30%, var(--border))' }}
-              onClick={() => showErrorToast(t('ieArchiveNotImpl'))}
+              onClick={() => showErrorDialog(t('ieArchiveNotImpl'))}
             >
               {t('archive')}
             </button>
@@ -1051,7 +1074,7 @@ function BlockedByOpenOrdersBanner({
   onDismiss: () => void;
 }) {
   const { t } = useT();
-  const ALL_FIELDS = ['qty', 'status', 'price', 'cost', 'condition', 'part number', 'health', 'rpm'];
+  const ALL_FIELDS = ['qty', 'status', 'price', 'cost', 'condition', 'part number', 'specs', 'health', 'rpm'];
   const lockedSet = new Set(fields.length ? fields : ['qty', 'status']);
   const allowed = ALL_FIELDS.filter(f => f !== 'qty' && f !== 'status').join(' · ');
 

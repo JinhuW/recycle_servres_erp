@@ -38,6 +38,7 @@ export type ProductGroup = {
   interface: string | null;
   form_factor: string | null;
   description: string | null;
+  item_type: string | null;
   rpm: number | null;
   mixed_spec: boolean;
   qty: number;
@@ -102,6 +103,8 @@ function productSpec(g: ProductGroup): string {
     return [g.type, g.classification, g.rank, g.speed ? `${g.speed} MHz` : null]
       .filter(Boolean).join(' · ');
   }
+  // `Other` carries no spec columns — its item type is the whole subtitle.
+  if (g.category === 'Other') return g.item_type ?? '';
   return [g.interface, g.form_factor, g.speed, g.rpm ? `${g.rpm} RPM` : null]
     .filter(Boolean).join(' · ');
 }

@@ -4,6 +4,8 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { formatRefPrice, marketValueSelect } from '../lib/market';
 import { applyMarketWrites, type WriteValue } from '../lib/marketWrite';
 import { appendPriceEvent } from '../lib/refPriceEvents';
+import { escapeLike } from '../lib/pagination';
+import { canonPartCol, canonPartNumberJs } from '../lib/part-number';
 import { bearerGuard } from '../oauth/guard';
 import type { Env, User } from '../types';
 
@@ -26,12 +28,27 @@ market.get('/', async (c) => {
 
   // Whitelisted sort → fragment; the default mirrors the old updated_at order.
   // rp.id is appended as a stable tiebreaker so OFFSET paging is deterministic.
+  // The -asc/-desc / -high/-low pairs back the clickable column headers on the
+  // desktop table; the un-suffixed values are the curated dropdown sorts.
   const sortParam = c.req.query('sort');
   const orderBy =
     sortParam === 'sell-high' ? sql`rp.avg_sell DESC NULLS LAST`
     : sortParam === 'rising'  ? sql`rp.trend DESC NULLS LAST`
     : sortParam === 'falling' ? sql`rp.trend ASC NULLS LAST`
     : sortParam === 'samples' ? sql`rp.samples DESC NULLS LAST`
+    : sortParam === 'label-asc'  ? sql`LOWER(rp.label) ASC`
+    : sortParam === 'label-desc' ? sql`LOWER(rp.label) DESC`
+    : sortParam === 'part-asc'  ? sql`LOWER(rp.part_number) ASC NULLS LAST`
+    : sortParam === 'part-desc' ? sql`LOWER(rp.part_number) DESC NULLS LAST`
+    : sortParam === 'lastsell-high' ? sql`rp.last_price DESC NULLS LAST`
+    : sortParam === 'lastsell-low'  ? sql`rp.last_price ASC NULLS LAST`
+    // maxBuy = COALESCE(last_price, avg_sell) × (1 - margin); the constant
+    // factor doesn't change the order, so sort on the basis directly.
+    : sortParam === 'maxbuy-high' ? sql`COALESCE(rp.last_price, rp.avg_sell) DESC NULLS LAST`
+    : sortParam === 'maxbuy-low'  ? sql`COALESCE(rp.last_price, rp.avg_sell) ASC NULLS LAST`
+    : sortParam === 'paid-high' ? sql`rp.target DESC NULLS LAST`
+    : sortParam === 'paid-low'  ? sql`rp.target ASC NULLS LAST`
+    : sortParam === 'oldest' ? sql`rp.updated_at ASC`
     : sql`rp.updated_at DESC`;
 
   // Filters shared by the page query and the count, so `total` always reflects
@@ -65,6 +82,137 @@ market.get('/', async (c) => {
     total,
     items: rows.map(r => formatRefPrice(r, TARGET_MARGIN)),
   });
+});
+
+// Part numbers already on record, for the typeahead on the capture screens.
+//
+// POST /lookup answers "what is this part worth" for an EXACT canonical match,
+// which is no help to someone half-way through typing: a spacing variant or a
+// transposed character reads as a part nobody has ever seen, and autoTrackParts
+// then writes that variant into ref_prices on submit. Offering the existing
+// spellings while the field is still open is what stops the drift.
+//
+// Both catalogues count as "existing". ref_prices is very nearly a superset
+// (autoTrackParts adds every purchased part), but order_lines still carries the
+// rows that pre-date auto-tracking.
+const SUGGEST_LIMIT = 12;
+const SUGGEST_MIN = 2;
+
+market.get('/parts', async (c) => {
+  const sql = getDb(c.env);
+  // Gated on the canonical form, then escaped — never the other way round.
+  // escapeLike doubles the length of a lone metacharacter, so escaping first
+  // would let '?q=_' pass a check that exists to require two typed characters,
+  // and the client's own gate (suggestQuery) measures the unescaped form.
+  const canon = canonPartNumberJs(c.req.query('q') ?? '');
+  if (canon.length < SUGGEST_MIN) return c.json({ items: [] });
+  // The canonical form leaves LIKE metacharacters alone, so a typed '%' would
+  // otherwise match the whole table.
+  const q = escapeLike(canon);
+
+  const canonRef = canonPartCol(sql, sql`rp.part_number`);
+  const canonLine = canonPartCol(sql, sql`l.part_number`);
+
+  // Three levels, because DISTINCT ON must lead its own ORDER BY: the union
+  // gathers, the middle picks one row per part (ref_prices first — it is the
+  // side with a real label, and two of its rows can share a canonical key), and
+  // only the outer SELECT is free to rank.
+  const rows = await sql<{ pn: string; label: string | null; category: string | null }[]>`
+    SELECT pn, label, category
+      FROM (
+        SELECT DISTINCT ON (canon) canon, pn, label, category
+          FROM (
+            SELECT ${canonRef} AS canon, rp.part_number AS pn,
+                   NULLIF(rp.label, '') AS label, rp.category AS category, 0 AS src
+              FROM ref_prices rp
+             WHERE rp.part_number IS NOT NULL
+               AND ${canonRef} LIKE '%' || ${q} || '%'
+            UNION ALL
+            SELECT ${canonLine}, l.part_number,
+                   COALESCE(
+                     NULLIF(CONCAT_WS(' ', l.brand, l.capacity, l.generation), ''),
+                     NULLIF(l.description, '')
+                   ),
+                   l.category, 1
+              FROM order_lines l
+             WHERE l.part_number IS NOT NULL
+               AND ${canonLine} LIKE '%' || ${q} || '%'
+          ) u
+         WHERE canon <> ''
+         ORDER BY canon, src, pn
+      ) d
+     ORDER BY (canon LIKE ${q} || '%') DESC, LENGTH(pn), pn
+     LIMIT ${SUGGEST_LIMIT}
+  `;
+
+  return c.json({
+    items: rows.map(r => ({ partNumber: r.pn, label: r.label, category: r.category })),
+  });
+});
+
+// Recorded value for a known set of part numbers, in one round trip.
+//
+// The PO screens need this: a purchaser typing a part number at intake wants to
+// see what it sells for and what the recorded max buy is BEFORE committing to
+// the cost. Doing that through GET / would mean one substring search per line
+// and a client-side exact match (which is what DesktopInventoryEdit does today,
+// and which returns the wrong row whenever the PN is a prefix of another).
+//
+// POST, not GET: a 50-line PO's part numbers overflow a sane query string, and
+// they would land in every access log along the way.
+const LOOKUP_MAX = 100;
+
+market.post('/lookup', async (c) => {
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as
+    | { partNumbers?: unknown }
+    | null;
+  const raw = Array.isArray(body?.partNumbers) ? body!.partNumbers : null;
+  if (!raw) return c.json({ error: 'partNumbers must be an array' }, 400);
+  if (raw.length > LOOKUP_MAX) {
+    return c.json({ error: `at most ${LOOKUP_MAX} part numbers per lookup` }, 413);
+  }
+
+  // Answers are keyed by the exact strings the caller asked with, not by this
+  // server's canon: the Worker and Railway deploy independently and this is a
+  // PWA whose tabs live for days, so a client bundled with an older rule asks
+  // under a key a newer rule would never emit. Echoing what was asked survives
+  // any rule change; keying by the server's canon blanked every price on an
+  // open tab the day the rule widened.
+  const asked = new Map<string, string[]>();
+  for (const p of raw) {
+    if (typeof p !== 'string') continue;
+    const key = canonPartNumberJs(p);
+    if (!key) continue;
+    const under = asked.get(key);
+    if (under) under.push(p); else asked.set(key, [p]);
+  }
+  const canon = [...asked.keys()];
+  const TARGET_MARGIN = await getWorkspaceSetting(sql, 'target_margin', 0.30);
+  if (canon.length === 0) return c.json({ targetMargin: TARGET_MARGIN, items: {} });
+
+  const rows = await marketValueSelect(
+    sql,
+    sql`${canonPartCol(sql, sql`rp.part_number`)} = ANY(${canon})`,
+    sql``,
+    sql`${canonPartCol(sql, sql`l.part_number`)} = ANY(${canon})`,
+  );
+
+  // Two ref_prices rows can canonicalise to the same key (the column has no
+  // unique constraint). Keep the freshest reading rather than an arbitrary one.
+  const items: Record<string, ReturnType<typeof formatRefPrice>> = {};
+  const freshness = new Map<string, number>();
+  for (const r of rows) {
+    const key = canonPartNumberJs(r.part_number ?? '');
+    const under = asked.get(key);
+    if (!under) continue;
+    const at = r.last_price_at ? new Date(r.last_price_at).getTime() : 0;
+    if (at <= (freshness.get(key) ?? -1)) continue;
+    freshness.set(key, at);
+    const value = formatRefPrice(r, TARGET_MARGIN);
+    for (const spelling of under) items[spelling] = value;
+  }
+  return c.json({ targetMargin: TARGET_MARGIN, items });
 });
 
 // Manual price entry from the Market page. Manager-only; auth + CSRF are

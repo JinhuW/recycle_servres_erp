@@ -5,6 +5,7 @@
 import type { Sql } from 'postgres';
 import { hashPassword, generateTempPassword, revokeUserRefreshTokens } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
+import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 
 export type MemberRole = 'manager' | 'purchaser';
 
@@ -20,6 +21,7 @@ export interface MemberSummary {
   active: boolean;
   created_at: Date;
   last_seen_at: Date | null;
+  defaultWarehouseId: string | null;
   order_count: number;
   lifetime_profit: number;
 }
@@ -70,13 +72,15 @@ export async function listMembers(
     SELECT u.id, u.email, u.name, u.initials, u.role, u.team, u.phone, u.title,
            u.active, u.created_at,
            u.last_seen_at,
+           u.default_warehouse_id AS "defaultWarehouseId",
            COUNT(DISTINCT o.id)::int AS order_count,
            COALESCE((
-             SELECT SUM((sol.unit_price - ol.unit_cost) * sol.qty)
+             SELECT SUM((sol.unit_price - ${effUnitCost(sql)}) * sol.qty)
              FROM orders po
              JOIN order_lines ol ON ol.order_id = po.id
              JOIN sell_order_lines sol ON sol.inventory_id = ol.id
              JOIN sell_orders so ON so.id = sol.sell_order_id AND so.status = 'Done'
+             ${poFeeBasis(sql)}
              WHERE po.user_id = u.id
            ), 0)::float AS lifetime_profit
     FROM users u

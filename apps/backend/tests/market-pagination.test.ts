@@ -3,7 +3,11 @@ import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
 
-type Item = { id: string; samples: number; lastPriceAt: string | null };
+type Item = {
+  id: string; samples: number; lastPriceAt: string | null;
+  label: string; partNumber: string | null; lastPrice: number | null;
+  target: number | null; updatedAt: string;
+};
 type Body = { total: number; items: Item[]; targetMargin: number };
 
 describe('GET /api/market — pagination, sort & stale filter', () => {
@@ -37,6 +41,38 @@ describe('GET /api/market — pagination, sort & stale filter', () => {
     const samples = r.body.items.map(i => i.samples);
     const sorted = [...samples].sort((a, b) => b - a);
     expect(samples).toEqual(sorted);
+  });
+
+  it('sorts by the clickable-header columns, both directions', async () => {
+    const { token } = await loginAs(ALEX);
+    // One representative per shape: text asc, text desc with NULLS LAST,
+    // numeric high-first with NULLS LAST, and updated_at ascending.
+    // Text order comes from Postgres' collation, which no JS comparator
+    // faithfully reproduces (glibc ignores punctuation where ICU doesn't). So
+    // assert the property that matters: -desc is the exact reverse of -asc,
+    // with NULL part numbers trailing in both directions.
+    const labelAsc = await api<Body>('GET', '/api/market?sort=label-asc', { token });
+    const labelDesc = await api<Body>('GET', '/api/market?sort=label-desc', { token });
+    expect(labelAsc.body.items.map(i => i.label))
+      .toEqual(labelDesc.body.items.map(i => i.label).reverse());
+
+    const partAsc = await api<Body>('GET', '/api/market?sort=part-asc', { token });
+    const partDesc = await api<Body>('GET', '/api/market?sort=part-desc', { token });
+    const pa = partAsc.body.items.map(i => i.partNumber);
+    const pd = partDesc.body.items.map(i => i.partNumber);
+    const paNN = pa.filter((p): p is string => p !== null);
+    const pdNN = pd.filter((p): p is string => p !== null);
+    expect(pa.slice(0, paNN.length)).toEqual(paNN);
+    expect(pd.slice(0, pdNN.length)).toEqual(pdNN);
+    expect(paNN).toEqual([...pdNN].reverse());
+
+    const paid = await api<Body>('GET', '/api/market?sort=paid-high', { token });
+    const targets = paid.body.items.map(i => i.target).filter((v): v is number => v !== null);
+    expect(targets).toEqual([...targets].sort((a, b) => b - a));
+
+    const oldest = await api<Body>('GET', '/api/market?sort=oldest', { token });
+    const updated = oldest.body.items.map(i => +new Date(i.updatedAt));
+    expect(updated).toEqual([...updated].sort((a, b) => a - b));
   });
 
   it('staleOnly returns a subset of only-stale rows', async () => {

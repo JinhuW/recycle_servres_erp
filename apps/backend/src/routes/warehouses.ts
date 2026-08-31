@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getDb } from '../db';
 import { clampLimit } from '../lib/pagination';
+import type { SqlLike } from '../services/orderAudit';
 import type { Env, User } from '../types';
 
 const warehouses = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -25,16 +26,33 @@ const optionalString = (raw: unknown): FieldUpdate<string> => {
 };
 
 type DetailInput = {
-  address?: FieldUpdate<string>;
   managerUserId?: FieldUpdate<string>;
   timezone?: FieldUpdate<string>;
+  // Legacy free text. Not an address *part* — see syncDerivedAddress.
+  address?: FieldUpdate<string>;
+  shipContactName?: FieldUpdate<string>;
+  shipPhone?: FieldUpdate<string>;
+  shipStreet1?: FieldUpdate<string>;
+  shipStreet2?: FieldUpdate<string>;
+  shipCity?: FieldUpdate<string>;
+  shipState?: FieldUpdate<string>;
+  shipZip?: FieldUpdate<string>;
+  shipCountry?: FieldUpdate<string>;
 };
 
 function parseDetails(body: Record<string, unknown>): { input: DetailInput; error: string | null } {
   const input: DetailInput = {
-    address:       optionalString(body.address),
     managerUserId: optionalString(body.managerUserId),
     timezone:      optionalString(body.timezone),
+    address:       optionalString(body.address),
+    shipContactName: optionalString(body.shipContactName),
+    shipPhone:       optionalString(body.shipPhone),
+    shipStreet1:     optionalString(body.shipStreet1),
+    shipStreet2:     optionalString(body.shipStreet2),
+    shipCity:        optionalString(body.shipCity),
+    shipState:       optionalString(body.shipState),
+    shipZip:         optionalString(body.shipZip),
+    shipCountry:     optionalString(body.shipCountry),
   };
 
   for (const [key, f] of Object.entries(input) as [string, FieldUpdate<unknown>][]) {
@@ -51,6 +69,39 @@ const val = <T,>(f?: FieldUpdate<T>): T | null => {
   if ('invalid' in f) return null; // shouldn't happen after parseDetails validates
   return f.value;
 };
+
+// The six ship-to columns that make up the display line. ship_contact_name and
+// ship_phone are deliberately absent — they are not part of an address.
+const ADDRESS_PART_KEYS = [
+  'shipStreet1', 'shipStreet2', 'shipCity', 'shipState', 'shipZip', 'shipCountry',
+] as const satisfies readonly (keyof DetailInput)[];
+
+// `address` is the human-facing display line on cards and pickers; it is derived
+// from the structured ship-to so a warehouse's address is typed in exactly one
+// place. Recomputed in SQL straight off the stored columns rather than from a
+// prior read, so concurrent writers can't compose a line that never existed.
+// A NULL country reads as US — the editor sends null for a blank field — and US
+// is left off, because "…, CO 80239, US" is noise. Mirrored by migration 0109.
+//
+// `legacy` is the free text a pre-derivation client still sends in `address`.
+// It is a fallback, never a part: the derived line wins whenever the structured
+// columns compose one, and the free text is kept only when they compose
+// nothing. That client sends all six ship fields on every save, so it always
+// counts as touching the address — dropping its `address` outright recomputed
+// a warehouse that only ever had free text down to NULL, and a long-lived PWA
+// tab saving an unrelated field was enough to erase it.
+async function syncDerivedAddress(
+  tx: SqlLike, id: string, legacy: string | null,
+): Promise<void> {
+  await tx`
+    UPDATE warehouses SET address = COALESCE(NULLIF(concat_ws(', ',
+      NULLIF(concat_ws(', ', ship_street1, ship_street2), ''),
+      NULLIF(concat_ws(' ', NULLIF(concat_ws(', ', ship_city, ship_state), ''), ship_zip), ''),
+      CASE WHEN upper(coalesce(ship_country, 'US')) <> 'US' THEN upper(ship_country) END
+    ), ''), ${legacy})
+    WHERE id = ${id}
+  `;
+}
 
 // True when managerUserId was supplied with a non-null value that does not
 // match an existing user (covers unknown ids and malformed uuids). Lets us
@@ -88,6 +139,14 @@ const toApi = (r: WhRow) => ({
   managerEmail:  r.manager_email   ?? null, // users.email (derived)
   timezone:      r.timezone        ?? null,
   active:        (r.active ?? true) as boolean,
+  shipContactName: r.ship_contact_name ?? null,
+  shipPhone:       r.ship_phone        ?? null,
+  shipStreet1:     r.ship_street1      ?? null,
+  shipStreet2:     r.ship_street2      ?? null,
+  shipCity:        r.ship_city         ?? null,
+  shipState:       r.ship_state        ?? null,
+  shipZip:         r.ship_zip          ?? null,
+  shipCountry:     r.ship_country      ?? null,
 });
 
 // Single source for the warehouse projection: manager name/phone/email are
@@ -98,6 +157,8 @@ async function fetchWarehouse(
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
            w.timezone, w.active, w.manager_user_id,
+           w.ship_contact_name, w.ship_phone, w.ship_street1, w.ship_street2,
+           w.ship_city, w.ship_state, w.ship_zip, w.ship_country,
            mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
     FROM warehouses w
     LEFT JOIN users mu ON mu.id = w.manager_user_id
@@ -115,6 +176,8 @@ warehouses.get('/', async (c) => {
   const rows = await sql`
     SELECT w.id, w.name, w.short, w.region, w.address,
            w.timezone, w.active, w.manager_user_id,
+           w.ship_contact_name, w.ship_phone, w.ship_street1, w.ship_street2,
+           w.ship_city, w.ship_state, w.ship_zip, w.ship_country,
            mu.name AS manager, mu.phone AS manager_phone, mu.email AS manager_email
     FROM warehouses w
     LEFT JOIN users mu ON mu.id = w.manager_user_id
@@ -155,19 +218,30 @@ warehouses.post('/', async (c) => {
     return c.json({ error: 'managerUserId must reference an existing user' }, 400);
   }
   try {
-    const ins = await sql`
-      INSERT INTO warehouses (
-        id, name, short, region,
-        address, manager_user_id, timezone
-      )
-      VALUES (
-        ${id}, ${name}, ${short}, ${region},
-        ${val(input.address)}, ${val(input.managerUserId)}::uuid,
-        ${val(input.timezone)}
-      )
-      RETURNING id
-    `;
-    const row = await fetchWarehouse(sql, (ins[0] as { id: string }).id);
+    const newId = await sql.begin(async (tx) => {
+      const ins = await tx`
+        INSERT INTO warehouses (
+          id, name, short, region,
+          manager_user_id, timezone,
+          ship_contact_name, ship_phone, ship_street1, ship_street2,
+          ship_city, ship_state, ship_zip, ship_country
+        )
+        VALUES (
+          ${id}, ${name}, ${short}, ${region},
+          ${val(input.managerUserId)}::uuid,
+          ${val(input.timezone)},
+          ${val(input.shipContactName)}, ${val(input.shipPhone)},
+          ${val(input.shipStreet1)}, ${val(input.shipStreet2)},
+          ${val(input.shipCity)}, ${val(input.shipState)},
+          ${val(input.shipZip)}, ${val(input.shipCountry)}
+        )
+        RETURNING id
+      `;
+      const created = (ins[0] as { id: string }).id;
+      await syncDerivedAddress(tx, created, val(input.address));
+      return created;
+    });
+    const row = await fetchWarehouse(sql, newId);
     return c.json(toApi(row as WhRow), 201);
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
@@ -203,19 +277,38 @@ warehouses.patch('/:id', async (c) => {
   }
 
   const flag = (f?: FieldUpdate<string | number>) => (f?.set ? 1 : 0);
-  const r = await sql`
-    UPDATE warehouses SET
-      name            = COALESCE(${name},   name),
-      short           = COALESCE(${short},  short),
-      region          = COALESCE(${region}, region),
-      address         = CASE WHEN ${flag(input.address)}::int       = 1 THEN ${val(input.address)}             ELSE address         END,
-      manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
-      timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
-      active          = COALESCE(${active}, active)
-    WHERE id = ${id}
-    RETURNING id
-  `;
-  if (r.length === 0) return c.json({ error: 'not found' }, 404);
+  // Only a body that moves one of the address parts — or that carries the
+  // legacy free-text `address` — may rewrite the derived display line; the
+  // archive toggle sends { active } alone and must not.
+  const touchesAddress =
+    ADDRESS_PART_KEYS.some((k) => input[k]?.set) || Boolean(input.address?.set);
+  let updated = 0;
+  await sql.begin(async (tx) => {
+    const r = await tx`
+      UPDATE warehouses SET
+        name            = COALESCE(${name},   name),
+        short           = COALESCE(${short},  short),
+        region          = COALESCE(${region}, region),
+        manager_user_id = CASE WHEN ${flag(input.managerUserId)}::int = 1 THEN ${val(input.managerUserId)}::uuid ELSE manager_user_id END,
+        timezone        = CASE WHEN ${flag(input.timezone)}::int      = 1 THEN ${val(input.timezone)}            ELSE timezone        END,
+        ship_contact_name = CASE WHEN ${flag(input.shipContactName)}::int = 1 THEN ${val(input.shipContactName)} ELSE ship_contact_name END,
+        ship_phone      = CASE WHEN ${flag(input.shipPhone)}::int     = 1 THEN ${val(input.shipPhone)}           ELSE ship_phone      END,
+        ship_street1    = CASE WHEN ${flag(input.shipStreet1)}::int   = 1 THEN ${val(input.shipStreet1)}         ELSE ship_street1    END,
+        ship_street2    = CASE WHEN ${flag(input.shipStreet2)}::int   = 1 THEN ${val(input.shipStreet2)}         ELSE ship_street2    END,
+        ship_city       = CASE WHEN ${flag(input.shipCity)}::int      = 1 THEN ${val(input.shipCity)}            ELSE ship_city       END,
+        ship_state      = CASE WHEN ${flag(input.shipState)}::int     = 1 THEN ${val(input.shipState)}           ELSE ship_state      END,
+        ship_zip        = CASE WHEN ${flag(input.shipZip)}::int       = 1 THEN ${val(input.shipZip)}             ELSE ship_zip        END,
+        ship_country    = CASE WHEN ${flag(input.shipCountry)}::int   = 1 THEN ${val(input.shipCountry)}         ELSE ship_country    END,
+        active          = COALESCE(${active}, active)
+      WHERE id = ${id}
+      RETURNING id
+    `;
+    updated = r.length;
+    if (updated > 0 && touchesAddress) {
+      await syncDerivedAddress(tx, id, val(input.address));
+    }
+  });
+  if (updated === 0) return c.json({ error: 'not found' }, 404);
   const row = await fetchWarehouse(sql, id);
   return c.json(toApi(row as WhRow));
 });

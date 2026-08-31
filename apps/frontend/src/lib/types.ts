@@ -1,5 +1,10 @@
 // Types shared across the frontend, mirroring the backend Hono routes.
 
+// LinePhoto is declared next to the accessor that reads it, and re-exported
+// here because OrderLine carries one.
+import type { LinePhoto } from './linePhotos';
+export type { LinePhoto };
+
 export type Role = 'manager' | 'purchaser';
 export type Lang = 'en' | 'zh';
 export type Category = 'RAM' | 'SSD' | 'HDD' | 'Other';
@@ -12,6 +17,7 @@ export type User = {
   role: Role;
   team: string | null;
   language: Lang;
+  defaultWarehouseId?: string | null;
   preferences?: Record<string, unknown>;
 };
 
@@ -27,9 +33,68 @@ export type Warehouse = {
   managerEmail?: string | null;   // derived: users.email (read-only)
   timezone?: string | null;
   active?: boolean; // false = archived: hidden from every UI surface (DB row kept)
+  // Structured ship-to address for prepaid labels. `address` stays the
+  // human-facing display line; carriers read these.
+  shipContactName?: string | null;
+  shipPhone?: string | null;
+  shipStreet1?: string | null;
+  shipStreet2?: string | null;
+  shipCity?: string | null;
+  shipState?: string | null;
+  shipZip?: string | null;
+  shipCountry?: string | null;
+};
+
+export type ShipmentStatus =
+  | 'draft' | 'quoted' | 'purchased' | 'in_transit'
+  | 'delivered' | 'voided' | 'exception';
+
+export type Shipment = {
+  id: string;
+  orderId: string;
+  status: ShipmentStatus;
+  // Nullable: a seller-fill shell starts empty until the seller submits.
+  from: {
+    name: string | null; phone: string | null;
+    street1: string | null; street2: string | null;
+    city: string | null; state: string | null; zip: string | null; country: string | null;
+  };
+  package: {
+    weightOz: number | null; lengthIn: number | null;
+    widthIn: number | null; heightIn: number | null;
+  };
+  carrier: string | null;
+  service: string | null;
+  rateAmount: number | null;
+  rateCurrency: string;
+  deliveryDays: number | null;
+  provider: 'shipsaving' | 'stub';
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+  labelCost: number | null;
+  trackingStatus: string | null;
+  trackingEta: string | null;
+  lastTrackedAt: string | null;
+  sellerToken: string | null;
+  complete: boolean;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export type ShipmentRate = {
+  rateId: string;
+  carrier: string;
+  service: string;
+  amount: number;
+  currency: string;
+  deliveryDays: number | null;
 };
 
 export type OrderLine = {
+  // Merged AI-scan + uploaded photos. Read it through lib/linePhotos, which
+  // also synthesizes the scan entry for payloads that predate this field.
+  photos?: LinePhoto[];
   id: string;
   category: Category;
   brand: string | null;
@@ -42,6 +107,7 @@ export type OrderLine = {
   interface: string | null;
   formFactor: string | null;
   description: string | null;
+  itemType: string | null;
   partNumber: string | null;
   serialNumber: string | null;
   chipNumber: string | null;
@@ -64,18 +130,36 @@ export type OrderSummary = {
   userName: string;
   userInitials: string;
   commissionRate: number | null;
-  category: Category;
+  // Derived from the lines: the sole category when they agree, 'Mixed' when
+  // they don't. Widened from `Category` for that reason — render chips from
+  // `categories` rather than switching on this.
+  category: string;
+  // Every category the order's lines hold, in display order. Empty on a draft
+  // with no lines yet.
+  categories: Category[];
   payment: 'company' | 'self';
   notes: string | null;
   lifecycle: string;
   archivedAt: string | null;
   createdAt: string;
+  // The goods cost — a negotiated override of the line subtotal, or null for
+  // none. `otherFees` is charged on top of it, never folded into it.
   totalCost: number | null;
+  otherFees: number;
+  otherFeesNote: string | null;
+  // PayPal payment reference, seeded from the tracked package's screenshot
+  // scan when the PO is minted from one; manager-editable after submission.
+  paypalTxnId: string | null;
   warehouse: Warehouse | null;
   qty: number;
+  // Priced lines only — an unpriced line contributes no revenue and no margin,
+  // while `otherFees` is subtracted whole. Profit can therefore be negative on
+  // a PO nobody has priced yet; `unpricedLineCount` is what explains it.
   revenue: number;
   profit: number;
   lineCount: number;
+  // Only the list endpoint reports it; absent on an order read on its own.
+  unpricedLineCount?: number;
   status: string;
 };
 
@@ -89,19 +173,67 @@ export type OrderStatusMeta = Record<string, {
   }[];
 }>;
 
-export type Order = OrderSummary & { lines: OrderLine[]; statusMeta?: OrderStatusMeta };
+// The per-order aggregates are computed by the list query's GROUP BY; reading
+// one order on its own returns the lines themselves and none of the rollups,
+// so they are dropped here rather than left declared and absent at runtime.
+export type Order =
+  Omit<OrderSummary, 'lineCount' | 'qty' | 'revenue' | 'profit'>
+  & {
+    lines: OrderLine[]; statusMeta?: OrderStatusMeta; shipmentCount: number;
+    // Managers only, and null for everyone else: the purchaser's changes since
+    // the last time a manager acknowledged them.
+    pendingRevert?: PendingRevert[] | null;
+    // An order sent back to Draft by an edit is a draft that has already been
+    // submitted — deletable only while this is false.
+    everSubmitted?: boolean;
+  };
+
+export type RevertLineSnapshot = {
+  lineId: string;
+  category?: string | null;
+  partNumber: string | null;
+  qty: number;
+  unitCost: number;
+};
+
+export type RevertChangeSet = {
+  from: string;
+  to: string;
+  fields: OrderEventChange[];
+  lines: {
+    added: RevertLineSnapshot[];
+    removed: RevertLineSnapshot[];
+    edited: { lineId: string; partNumber: string | null; changes: OrderEventChange[] }[];
+  };
+};
+
+export type PendingRevert = {
+  id: string;
+  createdAt: string;
+  actor: { id: string; name: string; initials: string } | null;
+  detail: RevertChangeSet;
+};
 
 export type OrderEventKind =
   | 'created'
   | 'submitted'
   | 'advanced'
+  | 'reverted'
+  | 'revert_ack'
   | 'line_added'
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'owner_changed'
   | 'status_meta_changed'
+  | 'line_photo_added'
+  | 'line_photo_removed'
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'shipment_created'
+  | 'shipment_purchased'
+  | 'shipment_voided'
+  | 'shipment_seller_filled';
 
 export type OrderEventChange = { field: string; from: unknown; to: unknown };
 
@@ -150,6 +282,7 @@ export type DraftLine = {
   interface?: string | null;
   formFactor?: string | null;
   description?: string | null;
+  itemType?: string | null;
   partNumber?: string | null;
   serialNumber?: string | null;
   chipNumber?: string | null;
@@ -251,7 +384,10 @@ export type DashboardData = {
     qty: number;
     unit_cost?: number;
     sell_price: number | null;
-    profit: number;
+    // null, not 0, on a line nobody has priced — the KPI tiles above the strip
+    // never counted it, so a row stating $0 margin would answer one question
+    // two ways. Render it as an em-dash.
+    profit: number | null;
     created_at: string;
     user_name: string;
     user_initials: string;

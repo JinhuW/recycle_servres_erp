@@ -6,6 +6,7 @@ import { useAuth } from '../../lib/auth';
 import { usePreference } from '../../lib/preferences';
 import { usePersisted, useScrollMemory } from '../../lib/listMemory';
 import { api } from '../../lib/api';
+import { UNTYPED_ITEM } from '@recycle-erp/shared';
 import { handleFetchError } from '../../lib/errorToast';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtUSD, fmtUSD0, fmtDateShort, relTime, canonicalPartNumber } from '../../lib/format';
@@ -32,6 +33,7 @@ type InventoryRow = {
   interface: string | null;
   form_factor: string | null;
   description: string | null;
+  item_type: string | null;
   part_number: string | null;
   serial_number: string | null;
   condition: string;
@@ -101,9 +103,13 @@ function sortAttrValues(key: string, values: string[]): string[] {
   if (NUMERIC_ATTRS.has(key)) {
     return [...values].sort((a, b) => Number(a) - Number(b));
   }
-  return [...values].sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
-  );
+  return [...values].sort((a, b) => {
+    // Untyped is a backlog bucket, not a type — it sits after the real ones
+    // rather than wherever its sentinel happens to collate.
+    if (a === UNTYPED_ITEM) return 1;
+    if (b === UNTYPED_ITEM) return -1;
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  });
 }
 
 export function DesktopInventory({ onEditItem, showToast }: Props) {
@@ -175,10 +181,22 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     useState<Record<string, number>>({});
   const [whProductTotal, setWhProductTotal] = useState<number>(0);
 
-  const attrSchema: AttrSpec[] =
-    filter === 'RAM' || filter === 'SSD' || filter === 'HDD'
+  // `Other` carries no spec columns, so its item type is the only facet — and
+  // the only one whose chips are localized, hence built here rather than in
+  // the module-level table.
+  const attrSchema: AttrSpec[] = useMemo(() => {
+    if (filter === 'Other') {
+      return [{
+        key: 'item_type',
+        param: 'itemType',
+        label: t('itPanelTitle'),
+        format: (v: string) => (v === UNTYPED_ITEM ? t('itUntyped') : v),
+      }];
+    }
+    return filter === 'RAM' || filter === 'SSD' || filter === 'HDD'
       ? ATTR_SCHEMA[filter as 'RAM' | 'SSD' | 'HDD']
       : [];
+  }, [filter, t]);
   const activeAttrCount = Object.values(attrFilters).reduce(
     (n, vs) => n + (vs?.length ?? 0), 0,
   );
@@ -338,7 +356,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
           brand: g.brand, capacity: g.capacity, generation: g.generation,
           type: g.type, classification: g.classification, rank: g.rank,
           speed: g.speed, interface: g.interface, form_factor: g.form_factor,
-          description: g.description, part_number: g.part_number,
+          description: g.description, item_type: g.item_type, part_number: g.part_number,
           serial_number: lot.serial_number,
           condition: lot.condition, qty: lot.qty,
           unit_cost: lot.unit_cost ?? 0, sell_price: lot.sell_price,
@@ -415,7 +433,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
       r.category === 'RAM' ? [r.classification, r.rank, r.speed && `${r.speed}MHz`].filter(Boolean).join(' · ')
     : r.category === 'SSD' ? [r.interface, r.form_factor, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
     : r.category === 'HDD' ? [r.interface, r.form_factor, r.rpm && `${r.rpm}rpm`, r.health != null && `${r.health}%`].filter(Boolean).join(' · ')
-    : (r.condition ?? '');
+    : [r.item_type, r.condition].filter(Boolean).join(' · ');
 
   // Draft-modal state: holds the items we hand off to the modal. Snapshotted
   // when the user clicks "Create sell order" so further selection changes on

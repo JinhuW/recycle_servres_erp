@@ -12,6 +12,41 @@ export type Env = {
   STUB_LOW_CONF?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
+  // Reddit tracker admin proxy (/api/tracker/*). Both unset → proxy answers
+  // 501 so the UI can show a "not configured" state instead of erroring.
+  TRACKER_API_URL?: string;
+  TRACKER_API_TOKEN?: string;
+  // Facebook fleet console facade (/api/coordinator/*). Both unset → proxy
+  // answers 501, same "not configured" contract as the tracker proxy.
+  COORDINATOR_API_URL?: string;
+  COORDINATOR_API_TOKEN?: string;
+  // Cloudflare Access service token guarding the facade's tunnel hostname.
+  // Optional: without them the proxy still works against an unguarded URL.
+  COORDINATOR_ACCESS_CLIENT_ID?: string;
+  COORDINATOR_ACCESS_CLIENT_SECRET?: string;
+  // ShipSaving prepaid-label API. Either unset → deterministic stub provider
+  // (demo rates/labels, no real purchases) and the tracking poll stays off.
+  // ShipSaving v2 (docs.shipsaving.com/v2): OAuth client credentials.
+  // API_URL overrides the default https://x-api.shipsaving.com.
+  SHIPSAVING_API_URL?: string;
+  SHIPSAVING_APP_KEY?: string;
+  SHIPSAVING_APP_SECRET?: string;
+  // Shippo tracking (tracking only — never buys labels). Unset means tracking
+  // falls back to ShipSaving, and then to a stub that never ticks.
+  SHIPPO_API_URL?: string;
+  SHIPPO_API_TOKEN?: string;
+  // The credential in the webhook URL. Unset makes the receiver answer 404.
+  SHIPPO_WEBHOOK_SECRET?: string;
+  // Bank-transaction sync (manager Payments page). A source with no keys is
+  // reported as "not configured" — there is NO silent stub fallback here.
+  // BANKTX_STUB=1 explicitly opts into deterministic canned data for dev.
+  // API_URL overrides exist for tests; defaults are the live endpoints.
+  MERCURY_API_URL?: string;
+  MERCURY_API_TOKEN?: string;
+  PAYPAL_API_URL?: string;
+  PAYPAL_CLIENT_ID?: string;
+  PAYPAL_CLIENT_SECRET?: string;
+  BANKTX_STUB?: string;
   // Cloudflare R2 via its S3-compatible API. When any of endpoint / key /
   // secret / bucket is missing, uploadAttachment returns a stub (dev/tests).
   R2_S3_ENDPOINT?: string;
@@ -52,6 +87,7 @@ export type User = {
   role: Role;
   team: string | null;
   language: 'en' | 'zh';
+  defaultWarehouseId: string | null;
   preferences: Record<string, unknown>;
 };
 

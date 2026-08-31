@@ -3,7 +3,6 @@ import { Icon } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
-import { handleFetchError } from '../lib/errorToast';
 import type { Lang } from '../lib/types';
 
 type DemoAccount = { id: string; email: string; name: string; initials: string; role: 'manager' | 'purchaser'; team: string | null };
@@ -120,10 +119,11 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [accounts, setAccounts] = useState<DemoAccount[]>([]);
 
-  // Load demo accounts when the user lands on the picker (so the avatars are
-  // accurate to the real seed, not a hard-coded list).
+  // Probe on mount rather than on entering the picker: the endpoint 404s
+  // wherever demo accounts are off (prod), and that verdict is what gates the
+  // "continue as" entry point — offering it there dead-ends on an empty list.
+  // Avatars come from the real seed, not a hard-coded list.
   useEffect(() => {
-    if (!picking || accounts.length > 0) return;
     api.get<{ users: DemoAccount[] }>('/api/auth/demo-accounts')
       .then(r => {
         // Desktop picker mirrors the design: one manager + one purchaser
@@ -136,8 +136,8 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
           setAccounts(r.users.filter(u => u.role === 'purchaser').slice(0, 4));
         }
       })
-      .catch(handleFetchError);
-  }, [picking, accounts.length, variant]);
+      .catch(() => setAccounts([]));
+  }, [variant]);
 
   const submitEmail = async () => {
     setError(null);
@@ -225,16 +225,18 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
                 </button>
               </div>
 
-              <button
-                onClick={() => setPicking(true)}
-                style={{
-                  marginTop: 14, fontSize: 12.5, color: 'var(--accent-strong)',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  fontWeight: 500, display: 'block', marginLeft: 'auto', marginRight: 'auto',
-                }}
-              >
-                {t('continueAs')} →
-              </button>
+              {accounts.length > 0 && (
+                <button
+                  onClick={() => setPicking(true)}
+                  style={{
+                    marginTop: 14, fontSize: 12.5, color: 'var(--accent-strong)',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    fontWeight: 500, display: 'block', marginLeft: 'auto', marginRight: 'auto',
+                  }}
+                >
+                  {t('continueAs')} →
+                </button>
+              )}
 
               <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--fg-subtle)', marginTop: 18 }}>
                 {t('ssoNote')}
@@ -338,12 +340,14 @@ export function Login({ initialPicking = false, variant = 'mobile' }: Props) {
                 {submitting ? '…' : t('continue')} <Icon name="arrow" size={13} />
               </button>
 
-              <button
-                onClick={() => setPicking(true)}
-                style={{ marginTop: 14, fontSize: 12.5, color: 'var(--accent-strong)', background: 'none', border: 'none', alignSelf: 'center', fontWeight: 500 }}
-              >
-                {t('continueAs')} →
-              </button>
+              {accounts.length > 0 && (
+                <button
+                  onClick={() => setPicking(true)}
+                  style={{ marginTop: 14, fontSize: 12.5, color: 'var(--accent-strong)', background: 'none', border: 'none', alignSelf: 'center', fontWeight: 500 }}
+                >
+                  {t('continueAs')} →
+                </button>
+              )}
 
               <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--fg-subtle)', marginTop: 18 }}>
                 {t('ssoNote')}

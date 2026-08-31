@@ -69,13 +69,15 @@ describe('MCP search_sellable_inventory', () => {
     expect(typeof rows[0].availableQty).toBe('number');
   });
 
-  it('flags lines on a rival draft, excludes them once committed', async () => {
+  it('flags lines on a rival draft, excludes them once fully committed', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
     const customerId = (await api<{ items: { id: string }[] }>('GET', '/api/customers', { token })).body.items[0].id;
+    // The whole lot — a commitment reserves only the qty it names, so a partial
+    // one would leave the line listed with its remainder.
     const created = await api<{ id: string }>('POST', '/api/sell-orders', {
       token,
-      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x', qty: 1, unitPrice: line.sell_price }] },
+      body: { customerId, lines: [{ inventoryId: line.id, category: 'RAM', label: 'x', qty: line.qty, unitPrice: line.sell_price }] },
     });
     expect(created.status).toBe(201);
 
@@ -177,14 +179,22 @@ describe('MCP create_sell_order_draft', () => {
     expect(body.error.message).toMatch(/insufficient_scope/);
   });
 
-  it('rejects an unknown inventoryId', async () => {
+  // Validation failures are tool results, not protocol errors — see the same
+  // assertion in mcp-server.test.ts for why that distinction matters.
+  it('rejects an unknown inventoryId as a tool result', async () => {
     const r = await create(bearerWrite, { lines: [{ inventoryId: '00000000-0000-0000-0000-000000000000', qty: 1, unitPrice: 10 }] });
-    expect((r.body as any).error.message).toMatch(/not found/);
+    const body = r.body as any;
+    expect(body.error).toBeUndefined();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/not found/);
   });
 
-  it('rejects oversell beyond available qty', async () => {
+  it('rejects oversell beyond available qty as a tool result', async () => {
     const { id: invId } = await aFreeLineId();
     const r = await create(bearerWrite, { lines: [{ inventoryId: invId, qty: 999999, unitPrice: 10 }] });
-    expect((r.body as any).error.message).toMatch(/exceeds inventory available/);
+    const body = r.body as any;
+    expect(body.error).toBeUndefined();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/exceeds inventory available/);
   });
 });

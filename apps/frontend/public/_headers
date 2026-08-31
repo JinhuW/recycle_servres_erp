@@ -1,0 +1,33 @@
+# Cloudflare parses this file and applies the rules to static-asset responses;
+# it is never served itself. Without it every asset gets the Workers Static
+# Assets default of `public, max-age=0, must-revalidate` — including the
+# content-hashed ones — so a repeat visit revalidates the whole bundle.
+
+# The Worker 308s plain http to https; HSTS makes repeat visitors skip even
+# that first insecure hop, so the Secure auth cookies are never in play on
+# http. Host-only on purpose — other subdomains are not ours to pin.
+/*
+  Strict-Transport-Security: max-age=31536000
+
+# Content-hashed by the build: the filename changes whenever the bytes do.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# NOT content-hashed. A day is the cost of shipping a new icon, and the
+# manifest/apple-touch slots are re-read rarely enough that it doesn't matter.
+/icons/*
+  Cache-Control: public, max-age=86400
+
+# These three are how a deploy reaches an already-installed client. Cache any
+# of them and the update can never arrive.
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache

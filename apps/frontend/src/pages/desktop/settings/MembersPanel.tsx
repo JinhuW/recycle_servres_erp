@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { useAuth } from '../../../lib/auth';
 import { api } from '../../../lib/api';
-import { handleFetchError } from '../../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../../lib/errorToast';
 import { useEscapeKey } from '../../../lib/useEscapeKey';
 import { relTime } from '../../../lib/format';
 import { TableSkeleton } from '../../../components/Skeleton';
@@ -474,7 +474,6 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [tab, setTab] = useState<'profile' | 'role' | 'security'>('profile');
 
   const v = <K extends keyof Member>(k: K): Member[K] =>
@@ -484,7 +483,6 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
 
   const save = async () => {
     setSaving(true);
-    setSaveError(null);
     try {
       await api.patch(`/api/members/${member.id}`, {
         name: draft.name, team: draft.team, phone: draft.phone, title: draft.title,
@@ -495,7 +493,7 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
     } catch (e) {
       // Keep the modal open and surface the failure instead of silently
       // resetting the button as if the save succeeded.
-      setSaveError(e instanceof Error ? e.message : t('memSaveFailed'));
+      showErrorDialog(e instanceof Error ? e.message : t('memSaveFailed'));
     } finally { setSaving(false); }
   };
 
@@ -634,11 +632,6 @@ function MemberEditModal({ member, onClose, onSaved }: { member: Member; onClose
         </div>
 
         <div className="modal-foot member-edit-foot">
-          {saveError && (
-            <span style={{ color: 'var(--danger, #c0392b)', fontSize: 12, marginRight: 'auto' }}>
-              {saveError}
-            </span>
-          )}
           <button className="btn" onClick={onClose}>{t('cancel')}</button>
           <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : t('save')}</button>
         </div>

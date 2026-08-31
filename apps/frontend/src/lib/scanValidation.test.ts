@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { validateScan, stripUnmatched, catalogGroupFor } from './scanValidation';
+import { validateScan, stripUnmatched, catalogGroupFor, ramBrandNeedsConfirm } from './scanValidation';
 import { catalog } from './lookups';
 
 // The validator reads `catalog` directly from module state (it's populated by
@@ -96,5 +96,47 @@ describe('catalogGroupFor', () => {
   });
   it('returns null for the Other category', () => {
     expect(catalogGroupFor('Other', 'description')).toBeNull();
+  });
+});
+
+describe('ramBrandNeedsConfirm', () => {
+  beforeEach(() => {
+    for (const arr of Object.values(catalog)) arr.length = 0;
+    setCatalog('RAM_BRAND', ['Samsung', 'SK Hynix', 'Micron', 'Kingston', 'Other']);
+  });
+
+  it('is false for a named catalog brand', () => {
+    expect(ramBrandNeedsConfirm({ brand: 'Samsung' })).toBe(false);
+  });
+
+  it('is true when the model omitted the brand', () => {
+    expect(ramBrandNeedsConfirm({ capacity: '32GB' })).toBe(true);
+  });
+
+  it('is true for a blank brand', () => {
+    expect(ramBrandNeedsConfirm({ brand: '   ' })).toBe(true);
+  });
+
+  it('is true for Other, whatever its casing', () => {
+    expect(ramBrandNeedsConfirm({ brand: 'Other' })).toBe(true);
+    expect(ramBrandNeedsConfirm({ brand: 'other' })).toBe(true);
+  });
+
+  it('is true for an off-catalog brand the model read anyway', () => {
+    expect(ramBrandNeedsConfirm({ brand: 'Nanya' })).toBe(true);
+    expect(ramBrandNeedsConfirm({ brand: 'Hynix' })).toBe(true);
+  });
+
+  it('is false when there was no scan at all', () => {
+    expect(ramBrandNeedsConfirm(null)).toBe(false);
+    expect(ramBrandNeedsConfirm(undefined)).toBe(false);
+  });
+
+  it('does not call a brand off-catalog before the catalog loads', () => {
+    setCatalog('RAM_BRAND', []);
+    expect(ramBrandNeedsConfirm({ brand: 'Nanya' })).toBe(false);
+    // Blank and Other need no catalog to judge.
+    expect(ramBrandNeedsConfirm({ brand: '' })).toBe(true);
+    expect(ramBrandNeedsConfirm({ brand: 'Other' })).toBe(true);
   });
 });

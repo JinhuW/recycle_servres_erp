@@ -8,7 +8,7 @@ import {
 } from '../../components/CloseSellOrderDialog';
 import { useT } from '../../lib/i18n';
 import { api, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
-import { handleFetchError } from '../../lib/errorToast';
+import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
@@ -536,7 +536,6 @@ function SellOrderDetail({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   // Per-status evidence — loaded from the order, mutated live by the dialog,
   // and used to render paperclip badges on each step.
   const [statusMeta, setStatusMeta] = useState<StatusMetaMap | null>(null);
@@ -789,7 +788,6 @@ function SellOrderDetail({
     if (!order || !draft) return;
     if (draft.lines.length === 0) return;
     setSaving(true);
-    setSaveError(null);
     try {
       // Structural / notes edits go through PATCH. Skip the call entirely if
       // only status changed — saves a round trip and avoids touching
@@ -850,7 +848,7 @@ function SellOrderDetail({
     } catch (e) {
       // Keep the editor open with the user's edits intact — calling onSaved
       // here would navigate away and discard unsaved work.
-      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      showErrorDialog(e instanceof Error ? e.message : t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -1416,11 +1414,6 @@ function SellOrderDetail({
             <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
               {editable && (dirty ? 'Unsaved changes' : 'No changes')}
             </span>
-            {saveError && (
-              <div role="alert" style={{ marginRight: 'auto', alignSelf: 'center', color: 'var(--neg, #c0392b)', fontSize: 13 }}>
-                {saveError}
-              </div>
-            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <DownloadMenu orderId={order.id} />
               {editable && order.status !== 'Draft' && order.archivedAt === null && (

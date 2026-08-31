@@ -4,15 +4,23 @@ import { PhHeader } from '../components/PhHeader';
 import { PhCategoryFields } from '../components/PhCategoryFields';
 import { useT } from '../lib/i18n';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../lib/status';
-import { validateScan, stripUnmatched } from '../lib/scanValidation';
+import { validateScan, stripUnmatched, ramBrandNeedsConfirm } from '../lib/scanValidation';
+import { aiCaptureEnabled } from '../lib/lookups';
 import { CONDITIONS } from '../lib/catalog';
 import { fmtUSD } from '../lib/format';
 import type { Category, DraftLine, ScanResponse } from '../lib/types';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { LinePhotoStrip, type PendingPhoto } from '../components/LinePhotoStrip';
+import type { LinePhoto } from '../lib/linePhotos';
 import { parseSerials } from '../components/SerialNumbers';
-import { showErrorToast } from '../lib/errorToast';
-import { synthesizePartNumber } from '@recycle-erp/shared';
-import { missingRamFields } from '../lib/ramRequired';
+import { showErrorDialog, showWarnToast } from '../lib/errorToast';
+import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
+import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
+import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
+import { SnScanner } from '../components/SnScanner';
+import { BrandConfirmDialog } from '../components/BrandConfirmDialog';
+import { MarketAssist } from '../components/MarketAssist';
+import { useMarketLookup } from '../lib/useMarketLookup';
 
 type Props = {
   category: Category;
@@ -28,6 +36,18 @@ type Props = {
   onRescan: (draft: DraftLine) => void;
   // In-progress draft carried across a rescan trip through the Camera page.
   rescanDraft?: DraftLine | null;
+  // Where this line's photos live. A line that has no server id yet has nowhere
+  // to put a picture, so the shell buffers the picks and uploads them once the
+  // save returns an id; they show here as local previews meanwhile. The shell
+  // owns the state because this screen unmounts the moment the line is saved.
+  photoCtx: {
+    photosFor: (line: DraftLine) => LinePhoto[];
+    pendingFor: (line: DraftLine) => PendingPhoto[];
+    busy: boolean;
+    onAddFiles: (line: DraftLine, files: FileList | null) => void;
+    onRemovePending: (line: DraftLine, p: PendingPhoto) => void;
+    onRemoveSaved: (line: DraftLine, p: LinePhoto) => void;
+  };
 };
 
 const blankDefaults = (category: Category): DraftLine => ({
@@ -65,6 +85,7 @@ const aiPatch = (scan: ScanResponse): Partial<DraftLine> => {
   if (f.interface)      out.interface      = f.interface as string;
   if (f.formFactor)     out.formFactor     = f.formFactor as string;
   if (f.description)    out.description    = f.description as string;
+  if (f.rpm)            out.rpm            = Number(f.rpm);
   if (f.partNumber)     out.partNumber     = f.partNumber as string;
   out.scanImageId = scan.imageId ?? null;
   out.scanConfidence = scan.confidence ?? null;
@@ -86,6 +107,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
     interface:      (f.interface as string)      ?? null,
     formFactor:     (f.formFactor as string)     ?? null,
     description:    (f.description as string)    ?? null,
+    rpm:            f.rpm ? Number(f.rpm) : null,
     partNumber:     (f.partNumber as string)     ?? '',
     qty: 0,
     unitCost: 0,
@@ -96,7 +118,7 @@ const aiDefaults = (category: Category, scan: ScanResponse): DraftLine => {
   };
 };
 
-export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft }: Props) {
+export function SubmitForm({ category, detected, lineCount, editingLineIdx, existingLine, onSaveLine, onCancel, onBack, onRescan, rescanDraft, photoCtx }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const isEditing = editingLineIdx != null;
@@ -128,6 +150,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     : (cleanDetected ? aiDefaults(category, cleanDetected) : blankDefaults(category));
 
   const [line, setLine] = useState<DraftLine>(initial);
+  // Qty and unit cost are typed as raw text so a new line starts blank instead
+  // of a literal 0 the user has to select and delete before typing. The number
+  // the form works with is parsed off these, so a half-typed value never
+  // rewrites what's on screen.
+  const [qtyRaw, setQtyRaw] = useState(() => (initial.qty ? String(initial.qty) : ''));
+  const [costRaw, setCostRaw] = useState(() => (initial.unitCost ? String(initial.unitCost) : ''));
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   // Tracks which fields the user has touched since the AI populated them.
@@ -139,6 +167,16 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   const [unreadableDismissed, setUnreadableDismissed] = useState(false);
   // Holds the auto-generated part # awaiting the user's confirm (blank-PN save).
   const [pnGen, setPnGen] = useState<string | null>(null);
+  // Serial-rule violation (DDR5 requires serials; serial count must equal
+  // qty) caught at save time — shown as a blocking dialog, nothing persists.
+  const [serialIssues, setSerialIssues] = useState<SerialLineIssue[] | null>(null);
+  // Full-screen QR scanner for the serial field.
+  const [snScanOpen, setSnScanOpen] = useState(false);
+  // Brand re-confirm: the AI put no name to this module (omitted the brand,
+  // read "Other", or read something off our catalog), so the purchaser has to
+  // look at the photo again and say what it is before the line can be saved.
+  const [brandConfirmed, setBrandConfirmed] = useState(false);
+  const [brandDialog, setBrandDialog] = useState(false);
 
   // Prefer the freshest scan (a new/re-scan's delivery URL) over the existing
   // line's stored image. Stub/dev placeholders are not real images.
@@ -148,7 +186,15 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
 
+  const aiBrandRead = (detected?.extracted?.brand ?? '').trim();
+  // Reads the raw extraction, not cleanDetected: an off-catalog brand is
+  // stripped before it reaches the form, and that is exactly the case that
+  // most needs a second look.
+  const brandNeedsConfirm =
+    category === 'RAM' && !!detected && !brandConfirmed && ramBrandNeedsConfirm(detected.extracted);
+
   const snCount = parseSerials(line.serialNumber).length;
+  const marketFor = useMarketLookup([line.partNumber]);
 
   const set = <K extends keyof DraftLine>(k: K, v: DraftLine[K]) => {
     setLine(prev => ({ ...prev, [k]: v }));
@@ -178,7 +224,9 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
     if (line.category === 'RAM') return [line.brand, line.capacity, line.generation].filter(Boolean).join(' ');
     if (line.category === 'SSD') return [line.brand, line.capacity, line.interface].filter(Boolean).join(' ');
     if (line.category === 'HDD') return [line.brand, line.capacity, line.rpm ? line.rpm + 'rpm' : null].filter(Boolean).join(' ');
-    return line.description ?? 'Item';
+    // Description is optional on an Other line, so the part number — which
+    // isn't — carries the name when nobody wrote one.
+    return (line.description ?? '').trim() || (line.partNumber ?? '').trim() || 'Item';
   };
 
   const persist = (partNumber: string) => onSaveLine({ ...line, label: buildLabel(), partNumber });
@@ -188,30 +236,44 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // a hard stop. RAM lines additionally require every spec field — the toast
   // names the blanks (which include Part #, so the synth path never fires).
   const attemptSave = () => {
-    if (line.category === 'RAM') {
-      const missing = missingRamFields(line);
-      if (missing.length) {
-        const fields = missing.map(k => t(k)).join(lang === 'zh' ? '、' : ', ');
-        showErrorToast(t('fillRequiredFields', { fields }));
-        return;
-      }
+    // Brand first, ahead of the missing-field check: what they pick here can
+    // change what else the line owes (an Other module has to carry a chip #),
+    // so asking afterwards would name a set of gaps that's about to move.
+    if (brandNeedsConfirm) { setBrandDialog(true); return; }
+    // The same rule the desktop screens ask, so a line this form accepts is
+    // never one the editor then refuses to save — which used to lock the whole
+    // order until someone reopened that line and filled in a brand.
+    const { missingKeys } = lineRequirements(line);
+    const fields = missingFieldNames(missingKeys, t, lang);
+    if (fields) {
+      showWarnToast(t('drawerStillNeeded', { fields }));
+      return;
+    }
+    const issue = serialIssue(line);
+    if (issue) {
+      setSerialIssues([{
+        lineNo: (editingLineIdx ?? lineCount) + 1,
+        label: buildLabel(),
+        issue,
+      }]);
+      return;
     }
     const typed = (line.partNumber ?? '').trim();
     if (typed) { persist(typed); return; }
     const gen = synthesizePartNumber(line.category, line);
     if (gen) { setPnGen(gen); return; }
-    showErrorToast(t('pnRequiredThis'));
+    showErrorDialog(t('pnRequiredThis'));
   };
 
   // Header text:
   //   - Edit mode:  "Edit RAM item" / sub = existing label
   //   - First-item new order: "New RAM order" / sub = AI-review or fill-in
   //   - Nth-item new order:  "Add RAM item" / sub = "Item N · adding..."
+  // The first line no longer names the order — a PO holds whatever kinds the
+  // purchaser adds — so it is titled like every other line.
   const title = isEditing
     ? (category === 'RAM' ? t('editRamItem') : category === 'SSD' ? t('editSsdItem') : category === 'HDD' ? t('editHddItem') : t('editOtherItem'))
-    : isFirst
-      ? (category === 'RAM' ? t('newRamOrder') : category === 'SSD' ? t('newSsdOrder') : category === 'HDD' ? t('newHddOrder') : t('newOtherOrder'))
-      : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
+    : (category === 'RAM' ? t('addRamItem')  : category === 'SSD' ? t('addSsdItem')  : category === 'HDD' ? t('addHddItem')  : t('addOtherItem'));
 
   const sub = isEditing
     ? buildLabel()
@@ -231,7 +293,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
         }
       />
       <div className="ph-scroll" style={{ paddingBottom: 110 }}>
-        {category === 'RAM' && (
+        {aiCaptureEnabled(category) && (
           <button
             type="button"
             className="ph-ai-capture"
@@ -397,12 +459,46 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </div>
         )}
 
+        {/* The capture above is the AI's reading of a label; these are pictures
+            of the goods themselves. The scan keeps its own thumbnail, so only
+            uploads are listed here and no image appears twice. On ai_capture
+            categories the capture button sits directly above and supplies this
+            line's photo, so an empty "add a photo" slot would ask for something
+            the flow already covers — same rule as the desktop drawer. Once a
+            picture exists (scanned or uploaded) the strip earns its place. */}
+        {(() => {
+          const uploads = photoCtx.photosFor(line).filter(p => p.source === 'upload');
+          const queued = photoCtx.pendingFor(line);
+          if (aiCaptureEnabled(category) && !showThumb && uploads.length === 0 && queued.length === 0) return null;
+          return (
+            <LinePhotoStrip
+              photos={uploads}
+              pending={queued}
+              busy={photoCtx.busy}
+              onAdd={files => photoCtx.onAddFiles(line, files)}
+              onRemove={p => photoCtx.onRemoveSaved(line, p)}
+              onRemovePending={p => photoCtx.onRemovePending(line, p)}
+            />
+          );
+        })()}
+
         <PhCategoryFields category={category} value={line} onChange={set} aiFilled={aiFilled} aiLowConfFields={aiLowConfFields} />
 
         <div className="ph-field-row">
           <div className="ph-field">
             <label>{t('quantity')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input className="input" type="number" min={1} value={line.qty} onChange={e => set('qty', parseInt(e.target.value, 10) || 0)} />
+            <input
+              className="input"
+              type="number"
+              min={1}
+              inputMode="numeric"
+              placeholder="1"
+              value={qtyRaw}
+              onChange={e => {
+                setQtyRaw(e.target.value);
+                set('qty', parseInt(e.target.value, 10) || 0);
+              }}
+            />
           </div>
           <div className="ph-field">
             <label>{t('condition')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
@@ -418,34 +514,73 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           </div>
         </div>
 
+        {/* SSDs are received as anonymous bulk lots — nobody keys in per-drive
+            serials at purchase, so the field only invited count-mismatch
+            errors. A line that already carries serials (pre-rule data, scan
+            fill) keeps the field: the shared count-vs-qty validator still
+            checks them, and a hidden field would make its 400 unfixable.
+            String-typed (not non-blank) so clearing the textarea to retype
+            doesn't unmount it mid-edit — a fresh line starts undefined. */}
+        {(line.category !== 'SSD' || typeof line.serialNumber === 'string') && (
         <div className="ph-field">
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
             {t('serialNumbers')}
-            <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>· {t('optional')}</span>
+            {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5' ? (
+              <span style={{ color: 'var(--neg)', fontWeight: 400 }}>* {t('serialRequiredDdr5')}</span>
+            ) : (
+              <span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>· {t('optional')}</span>
+            )}
             {snCount > 0 && (
               <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>{t('serialCount', { n: snCount })}</span>
             )}
           </label>
-          <textarea
-            className="input mono"
-            rows={Math.min(Math.max(snCount, 2), 5)}
-            value={line.serialNumber ?? ''}
-            onChange={e => set('serialNumber', e.target.value)}
-            placeholder={t('serialNumbersPh')}
-            style={{ resize: 'vertical', lineHeight: 1.6 }}
-          />
-          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>{t('serialNumbersHint')}</div>
+          <div style={{ position: 'relative' }}>
+            <textarea
+              className="input mono"
+              rows={Math.min(Math.max(snCount, 2), 5)}
+              value={line.serialNumber ?? ''}
+              onChange={e => set('serialNumber', e.target.value)}
+              placeholder={t('serialNumbersPh')}
+              style={{ resize: 'vertical', lineHeight: 1.6, paddingRight: 50 }}
+            />
+            <button
+              type="button"
+              className="ph-sn-scan"
+              aria-label={t('snScan')}
+              onClick={() => setSnScanOpen(true)}
+            >
+              <Icon name="scan" size={17} />
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
+            {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
+              ? t('serialNumbersHintDdr5')
+              : t('serialNumbersHint')}
+          </div>
         </div>
+        )}
 
         {/* Pricing row mirrors desktop LineDrawer: qty → unit → total
             (always shown so a purchaser can enter the negotiated bulk total
             instead of computing per-unit). Sell price only appears in edit
             mode, matching the desktop drawer. */}
-        <div className="ph-field-row" style={{ gridTemplateColumns: isEditing ? '1fr 1fr 1fr' : '1fr 1fr' }}>
+        <div className="ph-field-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
           <div className="ph-field">
             <label>{t('unitCost')}<span style={{ color: 'var(--neg)', marginLeft: 2 }}>*</span></label>
-            <input className="input mono" type="number" step="0.01" min={0} value={line.unitCost} onChange={e => set('unitCost', parseFloat(e.target.value) || 0)} />
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              placeholder="0.00"
+              value={costRaw}
+              onChange={e => {
+                setCostRaw(e.target.value);
+                set('unitCost', parseFloat(e.target.value) || 0);
+              }}
+            />
           </div>
           <div className="ph-field">
             <label>{t('totalCost')}</label>
@@ -455,31 +590,46 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               step="0.01"
               min={0}
               inputMode="decimal"
-              value={(line.qty * line.unitCost).toFixed(2)}
+              placeholder="0.00"
+              value={line.qty * line.unitCost ? (line.qty * line.unitCost).toFixed(2) : ''}
               onChange={e => {
                 const newTotal = parseFloat(e.target.value);
                 if (!Number.isFinite(newTotal) || line.qty <= 0) return;
-                set('unitCost', +(newTotal / line.qty).toFixed(2));
+                const unit = +(newTotal / line.qty).toFixed(2);
+                set('unitCost', unit);
+                setCostRaw(String(unit));
               }}
             />
           </div>
-          {isEditing && (
-            <div className="ph-field">
-              <label>{t('sellPrice')}</label>
-              <input
-                className="input mono"
-                type="number"
-                step="0.01"
-                min={0}
-                value={line.sellPrice ?? ''}
-                placeholder="—"
-                onChange={e => set('sellPrice', e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
-              />
-            </div>
-          )}
+          <div className="ph-field">
+            <label>{t('sellPrice')}</label>
+            <input
+              className="input mono"
+              type="number"
+              step="0.01"
+              min={0}
+              inputMode="decimal"
+              value={line.sellPrice ?? ''}
+              placeholder="—"
+              onChange={e => set('sellPrice', e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+            />
+          </div>
         </div>
 
-        {isEditing && (() => {
+        {/* Same recorded-market panel the desktop drawer shows — the phone is
+            where most capture actually happens, so it needs the buy guidance
+            more, not less. */}
+        <MarketAssist
+          market={marketFor(line.partNumber)}
+          unitCost={line.unitCost || 0}
+          locale={locale}
+          // costRaw is what the input actually renders, so applying a price has
+          // to move both — same pairing the total-cost field does above.
+          onUseMaxBuy={v => { set('unitCost', v); setCostRaw(String(v)); }}
+          onUseSellPrice={v => set('sellPrice', v)}
+        />
+
+        {(isEditing || line.sellPrice != null) && (() => {
           const qty = line.qty || 0;
           const cost = line.unitCost || 0;
           const sell = line.sellPrice ?? 0;
@@ -511,6 +661,31 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           <Icon name="check" size={16} /> {isEditing ? t('saveChanges') : (isFirst ? t('addToOrder') : t('addItem'))}
         </button>
       </div>
+      {serialIssues && (
+        <SerialCheckDialog issues={serialIssues} onClose={() => setSerialIssues(null)} />
+      )}
+      {snScanOpen && (
+        <SnScanner
+          existing={parseSerials(line.serialNumber)}
+          onDone={scannedSns => {
+            setSnScanOpen(false);
+            if (!scannedSns.length) return;
+            const cur = (line.serialNumber ?? '').replace(/\s+$/, '');
+            set('serialNumber', cur ? cur + '\n' + scannedSns.join('\n') : scannedSns.join('\n'));
+          }}
+        />
+      )}
+      {brandDialog && (
+        <BrandConfirmDialog
+          photoUrl={showThumb ? scanUrl : null}
+          aiRead={aiBrandRead || null}
+          brand={line.brand}
+          onConfirm={b => { set('brand', b); setBrandConfirmed(true); setBrandDialog(false); }}
+          onRetake={() => { setBrandDialog(false); onRescan(line); }}
+          retakeLabel={t('retakePhoto')}
+          onCancel={() => setBrandDialog(false)}
+        />
+      )}
       {pnGen && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setPnGen(null); }}>
           <div className="modal-shell" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>

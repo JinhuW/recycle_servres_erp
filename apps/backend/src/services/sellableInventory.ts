@@ -3,10 +3,14 @@ import { inventoryLabel, inventorySpec, type InventoryAttrs } from '../lib/inven
 import { committedSellStatuses } from '../lib/sellCommitment';
 
 // Inventory lines that can currently be placed on a sell order: status
-// Reviewing or Done and not committed to another sell order
-// (COMMITTED_SELL_STATUSES). Lines merely sitting on a rival *draft* are still
-// listed — drafts are proposals, several may name the same line — with
-// `draftCount` reporting the contention so the caller can flag it. Shared by
+// Reviewing or Done with units left over after every committed sell order
+// (COMMITTED_SELL_STATUSES) takes the quantity it named. A commitment reserves
+// units, not the lot: 20 sold out of 100 leaves 80 here, and `availableQty`
+// reports the remainder rather than the purchased quantity.
+// Lines merely sitting on a rival *draft* are still
+// listed at full remaining qty — drafts are proposals, several may name the
+// same line — with `draftCount` reporting the contention so the caller can
+// flag it. Shared by
 // the search_sellable_inventory MCP tool and the GET /sell-orders/sellable
 // REST endpoint (the desktop "add inventory to an order" picker) so both run
 // the exact same sellability rule — keep the predicate here, not duplicated.
@@ -45,7 +49,8 @@ export async function searchSellableInventory(
   const rows = await sql<SellableRow[]>`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type,
            l.classification, l.rank, l.speed, l.interface, l.form_factor,
-           l.description, l.part_number, l.condition, l.qty,
+           l.description, l.part_number, l.condition,
+           (l.qty - committed.qty) AS qty,
            l.sell_price::float AS sell_price,
            l.health::float AS health, l.rpm,
            COALESCE(l.warehouse_id, o.warehouse_id) AS warehouse_id,
@@ -57,13 +62,15 @@ export async function searchSellableInventory(
     FROM order_lines l
     JOIN orders o ON o.id = l.order_id
     LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
-    WHERE l.status IN ('Reviewing', 'Done')
-      AND NOT EXISTS (
-        SELECT 1 FROM sell_order_lines sol
+    CROSS JOIN LATERAL (
+      SELECT COALESCE(SUM(sol.qty), 0)::int AS qty
+        FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
-        WHERE sol.inventory_id = l.id
-          AND so.status = ANY(${committedSellStatuses()}::text[])
-      )
+       WHERE sol.inventory_id = l.id
+         AND so.status = ANY(${committedSellStatuses()}::text[])
+    ) committed
+    WHERE l.status IN ('Reviewing', 'Done')
+      AND l.qty > committed.qty
       AND (${q}::text IS NULL
            OR LOWER(COALESCE(l.brand,'')) LIKE '%' || ${q ?? ''} || '%'
            OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${q ?? ''} || '%'

@@ -37,7 +37,7 @@ describe('GET /api/sell-orders/sellable', () => {
     expect(item.availableQty).toBeGreaterThan(0);
   });
 
-  it('keeps a line on a rival draft listed, then drops it once committed', async () => {
+  it('keeps a line on a rival draft listed, then drops it once fully committed', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);
 
@@ -50,9 +50,10 @@ describe('GET /api/sell-orders/sellable', () => {
       token,
       body: {
         customerId,
+        // The whole lot — a partial claim would leave the remainder listed.
         lines: [{
           inventoryId: line.id, category: 'RAM', label: 'Sample',
-          partNumber: 'PN-1', qty: 1, unitPrice: line.sell_price,
+          partNumber: 'PN-1', qty: line.qty, unitPrice: line.sell_price,
           warehouseId: 'WH-LA1', condition: 'Pulled — Tested',
         }],
       },

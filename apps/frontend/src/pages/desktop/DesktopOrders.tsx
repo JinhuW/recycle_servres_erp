@@ -10,10 +10,12 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
+import { profitTone } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
 import { TableSkeleton } from '../../components/Skeleton';
+import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 
 // Map a stage tone keyword to a usable CSS variable. Same lookup as the
 // design's lifecycleTone helper.
@@ -119,6 +121,10 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const [stageFilter, setStageFilter] = usePersisted<'all' | string>('desktop.orders.stageFilter', 'all');
   const [search, setSearch] = usePersisted<string>('desktop.orders.search', '');
   const [showArchived, setShowArchived] = usePersisted<boolean>('desktop.orders.showArchived', false);
+  // Off by default: the list opens on active POs only. A specific stage pick
+  // (including Done itself) is an explicit request, so the prune only applies
+  // to the all-stages view — same contract as the sell-order list.
+  const [showDone, setShowDone] = usePersisted<boolean>('desktop.orders.showDone', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -192,10 +198,18 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
     return orders.filter(o => o.id.toLowerCase().includes(q) || o.userName.toLowerCase().includes(q));
   }, [orders, search]);
 
+  // The all-stages view hides Done POs unless the toggle is on; the stage
+  // rail's own Done chip still shows them because a stage pick bypasses the
+  // prune — same contract as the sell-order list.
+  const activeVisible = useMemo(
+    () => showDone ? visible : visible.filter(o => !isCompleted(o.status)),
+    [visible, showDone],
+  );
+
   // Apply stage filter on top of scope/search.
   const stageFiltered = useMemo(
-    () => stageFilter === 'all' ? visible : visible.filter(o => o.lifecycle === stageFilter),
-    [visible, stageFilter],
+    () => stageFilter === 'all' ? activeVisible : visible.filter(o => o.lifecycle === stageFilter),
+    [visible, activeVisible, stageFilter],
   );
 
   // Sort comes last — after all filters.
@@ -219,9 +233,10 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       acc.profit  += o.profit;
       acc.commission += commissionFor(o);
       acc.lines   += o.lineCount;
+      acc.unpriced += o.unpricedLineCount ?? 0;
       return acc;
     },
-    { orders: 0, revenue: 0, profit: 0, commission: 0, lines: 0 },
+    { orders: 0, revenue: 0, profit: 0, commission: 0, lines: 0, unpriced: 0 },
   ), [stageFiltered]);
 
   // Aggregate count + revenue per workflow stage for the pipeline cards.
@@ -259,10 +274,23 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
         <div className="kpi">
           <div className="kpi-label">{t('totalRevenue')}</div>
           <div className="kpi-value mono">{fmtUSD0(totals.revenue, locale)}</div>
+          {totals.unpriced > 0 && (
+            <div
+              className="kpi-trend"
+              style={{ color: 'var(--warn)' }}
+              title={t('unpricedRevenueHint', { n: totals.unpriced, total: totals.lines })}
+            >
+              <Icon name="info" size={11} />
+              {t('grpUnpriced', { n: totals.unpriced })}
+            </div>
+          )}
         </div>
         <div className="kpi">
           <div className="kpi-label">{t('grossProfit')}</div>
-          <div className="kpi-value mono" style={{ color: 'var(--pos)' }}>{fmtUSD0(totals.profit, locale)}</div>
+          <div
+            className="kpi-value mono"
+            style={{ color: totals.profit < 0 ? 'var(--neg)' : 'var(--pos)' }}
+          >{fmtUSD0(totals.profit, locale)}</div>
         </div>
         <div className="kpi">
           <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
@@ -284,6 +312,24 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn"
+              onClick={() => setShowDone(v => !v)}
+              aria-pressed={showDone}
+              disabled={stageFilter !== 'all'}
+              title={stageFilter !== 'all'
+                ? t('closedDoneToggleAllOnly')
+                : showDone ? t('hideDonePOs') : t('showDonePOs')}
+              style={{
+                height: 32, fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: showDone ? 'var(--bg-soft)' : undefined,
+                borderColor: showDone ? 'var(--border-strong)' : undefined,
+                color: showDone ? 'var(--fg)' : 'var(--fg-muted)',
+              }}
+            >
+              <Icon name="check2" size={12} />
+              {showDone ? t('hideDoneBtn') : t('showDoneBtn')}
+            </button>
             <button
               className="btn"
               onClick={() => setShowArchived(v => !v)}
@@ -404,7 +450,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
               onClick={() => setStageFilter('all')}
             >
               {t('all')}
-              <span className="mono sc-n">{visible.length}</span>
+              <span className="mono sc-n">{activeVisible.length}</span>
             </button>
             {stages.map(s => {
               const agg = stageAgg[s.id] ?? { count: 0, revenue: 0 };
@@ -461,6 +507,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
               )}
               {sorted.map(o => {
                 const commission = commissionFor(o);
+                const unpriced = o.unpricedLineCount ?? 0;
                 const isOpen = openId === o.id;
                 return (
                   <Fragment key={o.id}>
@@ -517,7 +564,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                         </div>
                       </td>
                       <td style={{ display: isVis('category') ? undefined : 'none' }}>
-                        <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')}>{o.category}</span>
+                        <OrderCategoryChips categories={o.categories} max={2} />
                       </td>
                       <td className="muted" style={{ display: isVis('warehouse') ? undefined : 'none' }}>
                         {o.warehouse ? (
@@ -532,8 +579,21 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                       </td>
                       <td className="num mono" style={{ display: isVis('lines') ? undefined : 'none' }}>{o.lineCount}</td>
                       <td className="num mono" style={{ display: isVis('qty') ? undefined : 'none' }}>{o.qty}</td>
-                      <td className="num mono" style={{ display: isVis('revenue') ? undefined : 'none' }}>{fmtUSD0(o.revenue, locale)}</td>
-                      <td className="num mono pos" style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
+                      <td className="num mono" style={{ display: isVis('revenue') ? undefined : 'none' }}>
+                        {fmtUSD0(o.revenue, locale)}
+                        {/* Revenue counts priced lines only, so a PO nobody has
+                            priced reads $0 against a real cost. Say why. */}
+                        {unpriced > 0 && (
+                          <div
+                            className="grp-unpriced"
+                            style={{ fontSize: 10.5, fontWeight: 500 }}
+                            title={t('unpricedRevenueHint', { n: unpriced, total: o.lineCount })}
+                          >
+                            {t('grpUnpriced', { n: unpriced })}
+                          </div>
+                        )}
+                      </td>
+                      <td className={'num mono ' + profitTone(o.profit)} style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         <span className="chip">{o.payment === 'company' ? 'Company' : 'Self'}</span>
@@ -619,7 +679,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                                     <td className="num mono">{fmtUSD0(l.unitCost, locale)}</td>
                                     <td className="num mono">{l.sellPrice != null ? fmtUSD0(l.sellPrice, locale) : '—'}</td>
                                     <td className="num mono">{revenue != null ? fmtUSD0(revenue, locale) : '—'}</td>
-                                    <td className={'num mono' + (profit != null && profit >= 0 ? ' pos' : profit != null ? ' neg' : '')}>
+                                    <td className={'num mono' + (profit != null ? ' ' + profitTone(profit) : '')}>
                                       {profit != null ? fmtUSD0(profit, locale) : '—'}
                                     </td>
                                   </tr>

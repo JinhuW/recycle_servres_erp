@@ -25,25 +25,36 @@ const nonLoopbackExplicit = (explicit: string | undefined): string | undefined =
 // The OAuth issuer identifier — the public origin MCP clients are handed for
 // discovery (authorize/token/register endpoints + the protected resource).
 //
-// Never emit a host taken straight from request headers: that would let a
-// caller poison their own discovery document (or, with a trusted-proxy misstep,
-// others') via Host / X-Forwarded-Host injection. CORS_ALLOWED_ORIGINS is
-// required in production and already enumerates the origins this server answers
-// for, so it doubles as the issuer allowlist — when set, we only ever return an
-// origin from it (preferring the one the request targeted, for multi-domain
-// deploys). The request-derived path is reachable only in dev, where no
-// allowlist is configured and the loopback .env.example issuer would otherwise
-// mis-advertise localhost.
+// Never emit a host taken straight from request headers on trust alone: that
+// would let a caller poison their own discovery document (or, with a
+// trusted-proxy misstep, others') via Host / X-Forwarded-Host injection.
+// CORS_ALLOWED_ORIGINS is required in production and already enumerates the
+// origins this server answers for, so it doubles as the issuer allowlist — when
+// set, we only ever return an origin from it (preferring the one the request
+// targeted, for multi-domain deploys). The request-derived path is reachable
+// only in dev, where no allowlist is configured and the loopback .env.example
+// issuer would otherwise mis-advertise localhost.
+//
+// In production X-Forwarded-Host arrives from the Cloudflare Worker, which
+// `set`s it from the public URL (clobbering any client value) and is the only
+// peer that can reach us at all — everything else is 403'd by the PROXY_SECRET
+// gate in index.ts. Adding a hostname to wrangler.toml WITHOUT adding it to
+// CORS_ALLOWED_ORIGINS makes it fall through to allow[0] here and silently
+// advertise a different domain.
 export function resolvePublicOrigin(c: OriginCtx): string {
   const explicit = stripSlash(c.env.OAUTH_ISSUER_URL?.trim() ?? '') || undefined;
   const explicitOk = nonLoopbackExplicit(explicit);
   const allow = parseOrigins(c.env.CORS_ALLOWED_ORIGINS);
 
-  const fwdHost = c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
+  // X-Public-Host first: Railway's edge overwrites X-Forwarded-Host with its
+  // own hostname, so the Worker's value only survives in a private header.
+  const fwdHost = c.req.header('x-public-host')?.split(',')[0]?.trim()
+    || c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
   const host = fwdHost || c.req.header('host');
   let candidate: string | undefined;
   if (host) {
-    const fwdProto = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
+    const fwdProto = c.req.header('x-public-proto')?.split(',')[0]?.trim()
+      || c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
     const proto = fwdProto || (isLoopback(host) ? 'http' : 'https');
     candidate = `${proto}://${host}`;
   }
@@ -60,12 +71,24 @@ export function resolvePublicOrigin(c: OriginCtx): string {
   return explicitOk ?? candidate ?? explicit ?? 'http://localhost:8787';
 }
 
-export function authorizationServerMetadata(iss: string) {
+// Open registration is the default: RFC 7591 is how Claude and ChatGPT mint a
+// client for a custom connector, and registering on its own grants nothing —
+// a token still requires an interactive login plus consent, and anything past
+// market:read survives only a manager's (see restrictScopesToRole). Set OAUTH_DCR_OPEN=false to
+// shut it off; /oauth/register then 403s and the discovery document below stops
+// advertising the endpoint, so clients fall back to a manually-issued client_id
+// instead of failing hard.
+export const dcrEnabled = (env: Env): boolean => env.OAUTH_DCR_OPEN !== 'false';
+
+export function authorizationServerMetadata(iss: string, opts: { dcr: boolean }) {
   return {
     issuer: iss,
     authorization_endpoint: `${iss}/oauth/authorize`,
     token_endpoint: `${iss}/oauth/token`,
-    registration_endpoint: `${iss}/oauth/register`,
+    // Advertising an endpoint that 403s makes clients fail with "couldn't
+    // register with the sign-in service" rather than offering the manual
+    // client-ID path, so the two must never disagree.
+    ...(opts.dcr ? { registration_endpoint: `${iss}/oauth/register` } : {}),
     revocation_endpoint: `${iss}/oauth/revoke`,
     response_types_supported: ['code'],
     response_modes_supported: ['query'],
@@ -80,6 +103,7 @@ export function authorizationServerMetadata(iss: string) {
 export function protectedResourceMetadata(iss: string) {
   return {
     resource: `${iss}/api/mcp`,
+    resource_name: 'Recycle Servers ERP',
     authorization_servers: [iss],
     scopes_supported: [...SCOPES],
     bearer_methods_supported: ['header'],

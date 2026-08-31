@@ -1,18 +1,22 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
 import { useAuth } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { useAppVersion } from '../../lib/useAppVersion';
+import { fmtDate } from '../../lib/format';
 // The settings panels + their modals/dialogs/shared primitives were extracted
 // verbatim into ./settings/* — pure code-motion, no logic or JSX changes.
-import { MembersPanel } from './settings/MembersPanel';
-import { WarehousesPanel } from './settings/WarehousesPanel';
-import { CustomersPanel } from './settings/CustomersPanel';
-import { CategoriesPanel } from './settings/CategoriesPanel';
-import { GeneralPanel } from './settings/GeneralPanel';
+// AccountPanel is the section Settings opens on, so it stays in this chunk;
+// the rest load when their tab is picked.
 import { AccountPanel } from './settings/AccountPanel';
-import { FxRatesPanel } from '../../components/FxRatesPanel';
-import { DesktopSettingsConnectors } from './DesktopSettingsConnectors';
+
+const MembersPanel = lazy(() => import('./settings/MembersPanel').then(m => ({ default: m.MembersPanel })));
+const WarehousesPanel = lazy(() => import('./settings/WarehousesPanel').then(m => ({ default: m.WarehousesPanel })));
+const CustomersPanel = lazy(() => import('./settings/CustomersPanel').then(m => ({ default: m.CustomersPanel })));
+const CategoriesPanel = lazy(() => import('./settings/CategoriesPanel').then(m => ({ default: m.CategoriesPanel })));
+const GeneralPanel = lazy(() => import('./settings/GeneralPanel').then(m => ({ default: m.GeneralPanel })));
+const FxRatesPanel = lazy(() => import('../../components/FxRatesPanel').then(m => ({ default: m.FxRatesPanel })));
+const DesktopSettingsConnectors = lazy(() => import('./DesktopSettingsConnectors').then(m => ({ default: m.DesktopSettingsConnectors })));
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'fx' | 'connectors';
@@ -20,19 +24,24 @@ type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categorie
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
 // dictionary.
+// Purchasers reach Settings too (the desktop shell no longer bounces them),
+// but only for the self-service sections: Account and Connectors — the MCP
+// connect page, where their OAuth consent yields read-only market access.
+// Everything else drives manager-only APIs.
 const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconName; managerOnly?: boolean }[] = [
   { id: 'account',    labelKey: 'settingsNavAccount',    subKey: 'settingsNavAccountSub',    icon: 'lock' },
-  { id: 'members',    labelKey: 'settingsNavMembers',    subKey: 'settingsNavMembersSub',    icon: 'user' },
-  { id: 'warehouses', labelKey: 'settingsNavWarehouses', subKey: 'settingsNavWarehousesSub', icon: 'warehouse' },
-  { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield' },
-  { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box' },
-  { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings' },
+  { id: 'members',    labelKey: 'settingsNavMembers',    subKey: 'settingsNavMembersSub',    icon: 'user', managerOnly: true },
+  { id: 'warehouses', labelKey: 'settingsNavWarehouses', subKey: 'settingsNavWarehousesSub', icon: 'warehouse', managerOnly: true },
+  { id: 'customers',  labelKey: 'settingsNavCustomers',  subKey: 'settingsNavCustomersSub',  icon: 'shield', managerOnly: true },
+  { id: 'categories', labelKey: 'settingsNavCategories', subKey: 'settingsNavCategoriesSub', icon: 'box', managerOnly: true },
+  { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings', managerOnly: true },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
-  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip', managerOnly: true },
+  { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
 
 export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?: 'success' | 'error') => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const [section, setSection] = useState<SectionId>('account');
   const sections = SECTIONS.filter(s => !s.managerOnly || user?.role === 'manager');
@@ -63,21 +72,26 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             </button>
           ))}
           {build && (
+            // The sha stays reachable on hover — it's what a deploy check needs
+            // and what the date can't tell you.
             <div className="settings-nav-version mono" title={build.commit}>
-              v{build.version} · {build.commit}
+              v{build.version}
+              {build.builtAt && ` · ${fmtDate(build.builtAt, locale)}`}
             </div>
           )}
         </nav>
 
         <div className="settings-body">
-          {section === 'account'    && <AccountPanel    showToast={showToast} />}
-          {section === 'members'    && <MembersPanel    showToast={showToast} />}
-          {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
-          {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
-          {section === 'categories' && <CategoriesPanel />}
-          {section === 'general'    && <GeneralPanel />}
-          {section === 'fx'         && <FxRatesPanel />}
-          {section === 'connectors' && <DesktopSettingsConnectors />}
+          <Suspense fallback={<div className="settings-panel-loading" />}>
+            {section === 'account'    && <AccountPanel    showToast={showToast} />}
+            {section === 'members'    && <MembersPanel    showToast={showToast} />}
+            {section === 'warehouses' && <WarehousesPanel showToast={showToast} />}
+            {section === 'customers'  && <CustomersPanel  showToast={showToast} />}
+            {section === 'categories' && <CategoriesPanel />}
+            {section === 'general'    && <GeneralPanel />}
+            {section === 'fx'         && <FxRatesPanel />}
+            {section === 'connectors' && <DesktopSettingsConnectors />}
+          </Suspense>
         </div>
       </div>
     </>

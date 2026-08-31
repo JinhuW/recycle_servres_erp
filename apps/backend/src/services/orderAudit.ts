@@ -17,13 +17,25 @@ export type EventKind =
   | 'created'
   | 'submitted'
   | 'advanced'
+  // A purchaser edited the order after submitting it, sending it back to
+  // Draft. Carries the whole change set so the manager review dialog can
+  // render it from one row.
+  | 'reverted'
+  | 'revert_ack'
   | 'line_added'
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'owner_changed'
   | 'status_meta_changed'
+  | 'line_photo_added'
+  | 'line_photo_removed'
   | 'archived'
-  | 'unarchived';
+  | 'unarchived'
+  | 'shipment_created'
+  | 'shipment_purchased'
+  | 'shipment_voided'
+  | 'shipment_seller_filled';
 
 // Order-level fields whose mutation we surface as `meta_changed`. These are
 // exactly the fields PATCH /api/orders/:id may touch on the orders row.
@@ -33,12 +45,22 @@ export const META_FIELDS = [
   'payment',
   'total_cost',
   'commission_rate',
+  'other_fees',
+  'other_fees_note',
+  'paypal_txn_id',
+  'supplier_id',
 ] as const;
 
 // Line-level fields PATCH may update. Excludes ids/positions/scan refs and the
 // status column (which is driven by advance events, not free edits) — every
 // other column PATCH can write is listed here, so no edit goes unrecorded.
+//
+// `category` is deliberately here and deliberately absent from META_FIELDS: a
+// line moving between categories is a real edit worth recording, while the
+// order's own category is derived from its lines and would otherwise emit a
+// meta_changed on every add and remove.
 export const LINE_FIELDS = [
+  'category',
   'sell_price',
   'qty',
   'unit_cost',
@@ -52,6 +74,7 @@ export const LINE_FIELDS = [
   'interface',
   'form_factor',
   'description',
+  'item_type',
   'part_number',
   'serial_number',
   'chip_number',

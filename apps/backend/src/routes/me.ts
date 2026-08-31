@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword } from '../auth';
 import { revokeUserOAuthTokens } from '../oauth/tokens';
 import { validatePreferencePatch } from '../preferences';
 import { log } from '../lib/log';
+import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Env, User } from '../types';
 
 const me = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -24,13 +25,14 @@ me.get('/', async (c) => {
     SELECT
       COUNT(*)::int                                                                AS count,
       COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                            AS revenue,
-      COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float           AS profit,
-      COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+      COALESCE(SUM((sol.unit_price - ${effUnitCost(sql)}) * sol.qty), 0)::float    AS profit,
+      COALESCE(SUM((sol.unit_price - ${effUnitCost(sql)}) * sol.qty
                    * COALESCE(po.commission_rate, 0)), 0)::float                   AS commission
     FROM sell_order_lines sol
     JOIN sell_orders so ON so.id = sol.sell_order_id
     JOIN order_lines ol ON ol.id = sol.inventory_id
     JOIN orders po      ON po.id = ol.order_id
+    ${poFeeBasis(sql)}
     WHERE so.status = 'Done' AND po.user_id = ${u.id}
   `)[0] as { count: number; revenue: number; profit: number; commission: number };
 
@@ -47,13 +49,30 @@ me.get('/', async (c) => {
 });
 
 me.patch('/', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { language?: 'en' | 'zh' } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    | { language?: 'en' | 'zh'; defaultWarehouseId?: string | null }
+    | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
 
   const u = c.var.user;
   const sql = getDb(c.env);
   if (body.language && (body.language === 'en' || body.language === 'zh')) {
     await sql`UPDATE users SET language = ${body.language} WHERE id = ${u.id}`;
+  }
+  // null clears the default; a non-null value must name a real warehouse so a
+  // stale client can't wedge an id the FK would 500 on.
+  if (body.defaultWarehouseId !== undefined) {
+    const whId = body.defaultWarehouseId;
+    if (whId !== null) {
+      if (typeof whId !== 'string') {
+        return c.json({ error: 'defaultWarehouseId must be a warehouse id or null' }, 400);
+      }
+      const wh = await sql<{ id: string }[]>`
+        SELECT id FROM warehouses WHERE id = ${whId} LIMIT 1
+      `;
+      if (!wh.length) return c.json({ error: 'Unknown warehouse' }, 400);
+    }
+    await sql`UPDATE users SET default_warehouse_id = ${whId} WHERE id = ${u.id}`;
   }
   return c.json({ ok: true });
 });

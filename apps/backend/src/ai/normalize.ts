@@ -14,6 +14,7 @@
 // the canonical form rather than fuzzy-matching against a fetched catalog,
 // so it is safe to run on every scan with no extra query.
 
+import { stripPartPrefix } from '@recycle-erp/shared';
 import type { LineCategory } from '../types';
 
 const DEVICE_TYPES = new Set(['Desktop', 'Server', 'Laptop']);
@@ -71,9 +72,12 @@ function normRank(v: string): string {
   return m ? `${m[1]}Rx${m[2]}` : v.trim();
 }
 
-// "PN: ABC", "P/N ABC", "S/N: ABC" → "ABC".
-function stripPartPrefix(v: string): string {
-  return v.replace(/^\s*(?:P\s*\/?\s*N|S\s*\/?\s*N|PART\s*(?:NO|NUMBER)?)\s*[:#]?\s*/i, '').trim();
+// "PN: ABC", "P/N ABC", "S/N: ABC" → "ABC". Through the shared rule: this hand
+// rolled the same alternation with JS \s, which also matches the non-breaking
+// spaces a vendor label carries and Postgres' POSIX class does not — so a
+// scanned part number could be stored in a form no lookup would ever find.
+function stripLabel(v: string): string {
+  return stripPartPrefix(v).trim();
 }
 
 // Keep the part number token but drop anything after the first space
@@ -99,7 +103,7 @@ export function normalizeFields(
   }
 
   if (f.capacity) f.capacity = normCapacity(f.capacity);
-  if (f.partNumber) f.partNumber = firstToken(stripPartPrefix(f.partNumber));
+  if (f.partNumber) f.partNumber = firstToken(stripLabel(f.partNumber));
 
   if (category === 'RAM') {
     // The model frequently puts "DDR5" in `type` and leaves `generation`
@@ -113,6 +117,9 @@ export function normalizeFields(
       if (g) f.generation = g; else delete f.generation;
     }
     if (f.classification) f.classification = f.classification.toUpperCase();
+    // Chip markings are die codes (Micron D9XPF, Samsung K4A8G045WC…) — always
+    // printed upper-case; OCR case noise would fork one chip into two spellings.
+    if (f.chipNumber) f.chipNumber = f.chipNumber.toUpperCase();
     if (f.rank) f.rank = normRank(f.rank);
     if (f.speed) {
       const s = normSpeed(f.speed);

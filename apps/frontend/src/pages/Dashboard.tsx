@@ -4,10 +4,12 @@ import { usePhScrolled } from '../lib/usePhScrolled';
 import { PhSparkline } from '../components/PhSparkline';
 import { useT } from '../lib/i18n';
 import { useEffectiveUser } from '../lib/tweaks';
+import { isPricedSellPrice } from '@recycle-erp/shared';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
+import { navigate } from '../lib/route';
 import type { DashboardData } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
@@ -31,6 +33,18 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
   useEffect(() => {
     let alive = true;
     api.get<DashboardData>('/api/dashboard').then(r => { if (alive) setData(r); }).catch(handleFetchError);
+    return () => { alive = false; };
+  }, [effRole]);
+
+  // Inbound counts for the shipping card — the card is also the manager's only
+  // tab-bar-free entry to /shipping, so both roles load it. Silent on failure:
+  // a nav card that can't count just doesn't show.
+  const [inbound, setInbound] = useState<{ moving: number; needs: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.get<{ moving: number; needs: number }>('/api/shipments/inbound-counts?mine=true')
+      .then(r => { if (alive) setInbound(r); })
+      .catch(() => {});
     return () => { alive = false; };
   }, [effRole]);
 
@@ -150,6 +164,68 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
           <Icon name="chevronRight" size={16} />
         </button>
 
+        {/* Everyone has the Shipping tab; this row is the glanceable count.
+            Managers always see it — they receive the boxes — while for
+            purchasers it appears once there's something to glance at. */}
+        {inbound && (isManager || inbound.moving + inbound.needs > 0) && (
+          <button
+            className="ph-row"
+            onClick={() => navigate('/shipping')}
+            style={{ width: '100%', marginTop: 10, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-cat-icon" style={{ width: 36, height: 36, borderRadius: 10 }}>
+              <Icon name="truck" size={17} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{t('shipMobInboundTitle')}</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+                {[
+                  inbound.moving > 0 ? t('shipMobMovingN', { n: inbound.moving }) : null,
+                  inbound.needs > 0 ? t('shipMobNeedsN', { n: inbound.needs }) : null,
+                ].filter(Boolean).join(' · ') || t('shipMobEmptyTitle')}
+              </div>
+            </div>
+            {inbound.needs > 0 && (
+              <span className="mono" style={{
+                minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
+                background: 'var(--warn)', color: 'white', fontSize: 10.5, fontWeight: 700,
+                lineHeight: '18px', textAlign: 'center',
+              }}>{inbound.needs}</span>
+            )}
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
+
+        {!isManager && (
+          <button
+            className="ph-row"
+            onClick={() => navigate('/market')}
+            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
+              <Icon name="tag" size={16} />
+            </div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeMarketLink')}</div>
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
+
+        {/* Inventory left the manager tab bar when Shipping took its slot;
+            this row is its home now, mirroring the Market link above. */}
+        {isManager && (
+          <button
+            className="ph-row"
+            onClick={() => navigate('/inventory')}
+            style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+          >
+            <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
+              <Icon name="inventory" size={16} />
+            </div>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeInventoryLink')}</div>
+            <Icon name="chevronRight" size={15} className="arrow" />
+          </button>
+        )}
+
         {!isManager && myRank >= 0 && (
           <>
             <div className="ph-section-h"><span>{t('yourRank')}</span></div>
@@ -200,7 +276,10 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                       : r.category === 'SSD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD'   ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()
                       : (r.description ?? 'Item');
-          const profit = r.profit ?? 0;
+          // An unpriced line has no projected margin — the profit tile above
+          // doesn't count it, so this row can't state one. Em-dash, the same as
+          // the orders list's line rows.
+          const priced = isPricedSellPrice(r.sell_price);
           return (
             <div key={r.id} className="ph-row">
               <div className="ph-mini-avatar">{r.user_initials}</div>
@@ -210,7 +289,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{r.user_name.split(' ')[0]} · {relTime(r.created_at, locale)} · {t('qtyShort', { n: r.qty })}</div>
               </div>
-              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(profit, locale)}</div>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: priced ? 'var(--pos)' : 'var(--fg-subtle)' }}>
+                {priced ? '+' + fmtUSD0(r.profit ?? 0, locale) : '—'}
+              </div>
             </div>
           );
         })}

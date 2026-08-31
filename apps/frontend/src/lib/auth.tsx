@@ -35,6 +35,7 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   setLanguage: (lang: Lang) => Promise<void>;
+  setDefaultWarehouse: (warehouseId: string | null) => Promise<void>;
   // Set to true after a successful login() when the freshly-authenticated user
   // is a manager — the app shell renders the RolePicker gate so they can pick
   // whether to enter as Manager or as Purchaser. NOT set when the session is
@@ -144,8 +145,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     catch { /* keep optimistic update; revisit if it gets noisy */ }
   };
 
+  // Not optimistic like setLanguage: an unknown warehouse is a 400 the caller
+  // must surface, so the local user only updates once the server accepts it.
+  const setDefaultWarehouse = async (warehouseId: string | null) => {
+    if (!user) return;
+    await api.patch('/api/me', { defaultWarehouseId: warehouseId });
+    setUser({ ...user, defaultWarehouseId: warehouseId });
+  };
+
   return (
-    <Ctx.Provider value={{ user, loading, login, logout, setLanguage, pendingRoleChoice, confirmRoleChoice }}>
+    <Ctx.Provider value={{ user, loading, login, logout, setLanguage, setDefaultWarehouse, pendingRoleChoice, confirmRoleChoice }}>
       {children}
     </Ctx.Provider>
   );

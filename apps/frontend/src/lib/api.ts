@@ -5,16 +5,37 @@
 // on :8787 (see vite.config.ts); in prod Caddy proxies /api/* to the backend.
 // Either way paths stay relative (same-origin), so cookies ride along.
 
-import type { Category, OrderSummary } from './types';
+import type { OrderSummary, Shipment, ShipmentRate } from './types';
 
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
 
+// `status` alone can't say what broke. The dialog these end up in only ever had
+// a message, so a failure read as "Something went wrong" with nothing to grep.
+// `requestId` is the backend's own X-Request-Id for the failed call — it joins
+// straight to that request's line in the server log.
+export interface ApiErrorMeta {
+  path?: string;
+  method?: string;
+  requestId?: string;
+}
+
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  path?: string;
+  method?: string;
+  requestId?: string;
+
+  constructor(public status: number, message: string, meta?: ApiErrorMeta) {
     super(message);
+    this.path = meta?.path;
+    this.method = meta?.method;
+    this.requestId = meta?.requestId;
   }
 }
+
+// Set on every response and CORS-exposed by the backend for exactly this.
+const reqId = (res: Response): string | undefined =>
+  res.headers.get('X-Request-Id') ?? undefined;
 
 // Single-flight refresh: while a refresh is in flight, concurrent 401s await
 // the same promise instead of stampeding the refresh endpoint.
@@ -86,7 +107,7 @@ async function request<T>(
       }
       const text = await res.text();
       const json = text ? safeJson(text) : null;
-      throw new ApiError(401, errMsg(json, 401));
+      throw new ApiError(401, errMsg(json, 401), { path, method, requestId: reqId(res) });
     }
   }
 
@@ -94,7 +115,7 @@ async function request<T>(
   const json = text ? safeJson(text) : null;
 
   if (!res.ok) {
-    throw new ApiError(res.status, errMsg(json, res.status));
+    throw new ApiError(res.status, errMsg(json, res.status), { path, method, requestId: reqId(res) });
   }
   return json as T;
 }
@@ -132,12 +153,14 @@ async function download(path: string, fallbackName: string): Promise<void> {
     if (refreshed) res = await fetch(path, { method: 'GET', credentials: 'include' });
     if (res.status === 401) {
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:unauthorized'));
-      throw new ApiError(401, errMsg(null, 401));
+      throw new ApiError(401, errMsg(null, 401), { path, method: 'GET', requestId: reqId(res) });
     }
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status));
+    throw new ApiError(res.status, errMsg(text ? safeJson(text) : null, res.status), {
+      path, method: 'GET', requestId: reqId(res),
+    });
   }
   const blob = await res.blob();
   const name = filenameFromContentDisposition(res.headers.get('Content-Disposition'));
@@ -186,21 +209,33 @@ export async function rawFetch(
   });
 }
 
+// No category: an empty draft has no lines to derive one from, and each line
+// carries its own once they arrive.
 export const createDraftOrder = (
-  category: Category,
-  meta?: { warehouseId?: string; payment?: OrderSummary['payment']; notes?: string },
-) => api.post<{ id: string }>('/api/orders/draft', { category, ...meta });
+  meta?: {
+    warehouseId?: string; payment?: OrderSummary['payment']; notes?: string;
+    // Manager-only: file the draft for a purchaser (they become the owner).
+    onBehalfOfUserId?: string;
+  },
+) => api.post<{ id: string }>('/api/orders/draft', { ...meta });
 
 // Create a PO already carrying its first line(s). The desktop submit form uses
 // this so a draft is never written empty — the order is born with content.
+//
+// No `category` and no `totalCost`: the backend derives both from the lines on
+// every write that moves them. A total sent from here would be read as a
+// negotiated lot price and pin the column against the lines from then on.
 export const createOrder = (body: {
-  category: Category;
   warehouseId?: string;
   payment?: OrderSummary['payment'];
   notes?: string | null;
-  totalCost?: number;
+  // Manager-only: the purchaser who owns the order. PATCH accepts the same
+  // key to reassign ownership later, up until the order is Done.
+  onBehalfOfUserId?: string;
   lines: unknown[];
-}) => api.post<{ id: string }>('/api/orders', body);
+  // lineIds comes back aligned 1:1 with `lines`, so the caller can attach
+  // per-line photos that were buffered while the lines had no id yet.
+}) => api.post<{ id: string; lineIds: string[] }>('/api/orders', body);
 
 export const deleteOrder = (orderId: string) =>
   api.delete<{ ok: true }>(`/api/orders/${orderId}`);
@@ -219,3 +254,55 @@ export const archiveSellOrder = (id: string) =>
 
 export const unarchiveSellOrder = (id: string) =>
   api.post<{ ok: true }>(`/api/sell-orders/${id}/unarchive`, {});
+
+// ── Shipments (prepaid labels on a PO) ──────────────────────────────────────
+
+export type ShipmentAddressInput = {
+  name: string; phone?: string | null;
+  street1: string; street2?: string | null;
+  city: string; state: string; zip: string; country?: string | null;
+};
+export type ShipmentPackageInput = {
+  weightOz: number; lengthIn: number; widthIn: number; heightIn: number;
+};
+
+export const listShipments = (orderId: string) =>
+  api.get<{ items: Shipment[] }>(`/api/orders/${orderId}/shipments`);
+
+export const createShipment = (
+  orderId: string,
+  body: { from: ShipmentAddressInput; package: ShipmentPackageInput } | { sellerFill: true },
+) => api.post<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments`, body);
+
+export const issueSellerLink = (orderId: string, sid: string) =>
+  api.post<{ sellerToken: string }>(`/api/orders/${orderId}/shipments/${sid}/seller-link`, {});
+
+// Public seller-fill endpoints (/s/<token> page). Token in the URL is the
+// credential; CSRF-exempt server-side, the header just rides along.
+export const getSellerFill = (token: string) =>
+  api.get<{
+    destination: string | null;
+    submitted: boolean;
+    from: Partial<ShipmentAddressInput>;
+    package: Partial<Record<keyof ShipmentPackageInput, number | null>>;
+  }>(`/api/public/shipping/${encodeURIComponent(token)}`);
+
+export const postSellerFill = (
+  token: string,
+  body: { from: ShipmentAddressInput; package: ShipmentPackageInput },
+) => api.post<{ ok: true }>(`/api/public/shipping/${encodeURIComponent(token)}`, body);
+
+export const updateShipment = (orderId: string, sid: string, body: { from: ShipmentAddressInput; package: ShipmentPackageInput }) =>
+  api.patch<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments/${sid}`, body);
+
+export const fetchShipmentRates = (orderId: string, sid: string) =>
+  api.post<{ rates: ShipmentRate[] }>(`/api/orders/${orderId}/shipments/${sid}/rates`, {});
+
+export const buyShipmentLabel = (orderId: string, sid: string, body: { rateId: string; expectedAmount?: number }) =>
+  api.post<{ shipment: Shipment; amountChanged: boolean }>(`/api/orders/${orderId}/shipments/${sid}/buy`, body);
+
+export const voidShipment = (orderId: string, sid: string) =>
+  api.post<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments/${sid}/void`, {});
+
+export const deleteShipment = (orderId: string, sid: string) =>
+  api.delete<{ ok: true }>(`/api/orders/${orderId}/shipments/${sid}`);

@@ -146,7 +146,10 @@ describe('Tier 1 #4 — order_lines committed to a sell order are locked', () =>
   });
 });
 
-describe('Tier 1 #1 — one committed sell order per inventory line (oversell guard)', () => {
+// A commitment reserves the units it names, so these all sell the WHOLE lot —
+// that is what makes a second order an oversell. Partial claims leaving a
+// sellable remainder are covered in sell-order-partial-commit.test.ts.
+describe('Tier 1 #1 — committed sell orders reserve inventory qty (oversell guard)', () => {
   beforeEach(async () => { await resetDb(); });
 
   async function newSellOrder(token: string, lineId: string, price: number, qty = 1) {
@@ -162,10 +165,10 @@ describe('Tier 1 #1 — one committed sell order per inventory line (oversell gu
     const { token } = await loginAs(ALEX);
     const line = await sellableLine(token, 2);
 
-    // Drafts are proposals — two may name the same line.
-    const first = await newSellOrder(token, line.id, line.price);
+    // Drafts are proposals — two may name the same line, each for the whole lot.
+    const first = await newSellOrder(token, line.id, line.price, line.qty);
     expect(first.status).toBe(201);
-    const second = await newSellOrder(token, line.id, line.price);
+    const second = await newSellOrder(token, line.id, line.price, line.qty);
     expect(second.status).toBe(201);
 
     // The first to leave Draft claims the line.
@@ -181,18 +184,18 @@ describe('Tier 1 #1 — one committed sell order per inventory line (oversell gu
     // The message names the product and the order that won — not a raw
     // inventory UUID — so the user can act on it.
     const msg = (promoteSecond.body as { error?: string }).error ?? JSON.stringify(promoteSecond.body);
-    expect(msg).toContain('x (pn) is already on sell order');
+    expect(msg).toContain('x (pn)');
     expect(msg).toContain(first.body.id);
   });
 
-  it('POST rejects a line already committed to another sell order', async () => {
+  it('POST rejects a line whose stock is already committed to another sell order', async () => {
     const { token } = await loginAs(ALEX);
     const line = await sellableLine(token, 2);
 
-    const first = await newSellOrder(token, line.id, line.price);
+    const first = await newSellOrder(token, line.id, line.price, line.qty);
     await api('POST', `/api/sell-orders/${first.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
 
-    const second = await newSellOrder(token, line.id, line.price);
+    const second = await newSellOrder(token, line.id, line.price, line.qty);
     expect(second.status).toBe(400);
     expect(JSON.stringify(second.body)).toContain(first.body.id);
   });
@@ -200,8 +203,8 @@ describe('Tier 1 #1 — one committed sell order per inventory line (oversell gu
   it('losing the race still leaves the draft closable, and reopening re-checks', async () => {
     const { token } = await loginAs(ALEX);
     const line = await sellableLine(token, 2);
-    const winner = await newSellOrder(token, line.id, line.price);
-    const loser = await newSellOrder(token, line.id, line.price);
+    const winner = await newSellOrder(token, line.id, line.price, line.qty);
+    const loser = await newSellOrder(token, line.id, line.price, line.qty);
     await api('POST', `/api/sell-orders/${winner.body.id}/status`, { token, body: { to: 'Shipped', note: 's' } });
 
     // Closing claims nothing, so it must stay available to the loser.

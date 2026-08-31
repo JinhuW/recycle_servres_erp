@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import type { Warehouse } from '../../lib/types';
 import { useT } from '../../lib/i18n';
+import { showErrorDialog } from '../../lib/errorToast';
 
 // Bulk warehouse-to-warehouse transfer modal. Manager picks a single
 // destination, optionally trims the qty per line, and POSTs to
@@ -38,7 +39,6 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   );
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Esc closes the modal (ignored mid-submit).
   useEscapeKey(onClose, !submitting);
@@ -62,12 +62,23 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   });
   const canSubmit = !!toWarehouseId && !anyInvalidQty && !submitting;
 
-  const submitDisabledReason: string | null =
-    submitting             ? null
-  : destinations.length === 0 ? null  // dedicated banner above already explains
-  : !toWarehouseId       ? t('transferPickDestinationHint')
-  : anyInvalidQty        ? t('transferQtyOutOfRangeHint')
-  : null;
+  // What Transfer is waiting on. The button stays live so clicking it explains
+  // itself in a dialog instead of doing nothing.
+  const submitBlockers: string[] =
+    submitting                  ? []
+  : destinations.length === 0   ? []  // dedicated banner above already explains
+  : [
+      ...(!toWarehouseId ? [t('transferPickDestinationHint')] : []),
+      ...(anyInvalidQty ? [t('transferQtyOutOfRangeHint')] : []),
+    ];
+
+  const onSubmitClick = () => {
+    if (submitBlockers.length) {
+      showErrorDialog(t('errCantSubmitMsg'), submitBlockers, t('errCantSubmitTitle'));
+      return;
+    }
+    void submit();
+  };
 
   const setLineQty = (id: string, raw: string) => {
     const n = Number(raw);
@@ -77,7 +88,6 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
-    setError(null);
     try {
       const res = await api.post<{ ok: true; lines: { sourceId: string; destId: string; qty: number }[] }>(
         '/api/inventory/transfer',
@@ -89,8 +99,7 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
       );
       onSaved(res.lines.length, destShort);
     } catch (e) {
-      const msg = (e as { message?: string })?.message ?? 'Transfer failed';
-      setError(msg);
+      showErrorDialog((e as { message?: string })?.message ?? t('transferFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -256,15 +265,6 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
             />
           </div>
 
-          {error && (
-            <div style={{
-              padding: '10px 12px', borderRadius: 8,
-              background: 'var(--neg-soft)', border: '1px solid color-mix(in oklch, var(--neg) 25%, transparent)',
-              color: 'var(--neg-strong)', fontSize: 12.5,
-            }}>
-              {error}
-            </div>
-          )}
         </div>
 
         {/* Footer */}
@@ -273,19 +273,14 @@ export function DesktopInventoryTransfer({ items, warehouses, onClose, onSaved }
           background: 'var(--bg-soft)', display: 'flex', justifyContent: 'flex-end',
           alignItems: 'center', gap: 12,
         }}>
-          {submitDisabledReason && (
-            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginRight: 'auto' }}>
-              {submitDisabledReason}
-            </div>
-          )}
           <button className="btn" onClick={onClose} disabled={submitting}>
             {t('cancel')}
           </button>
           <button
             className="btn accent"
-            onClick={submit}
-            disabled={!canSubmit}
-            title={submitDisabledReason ?? undefined}
+            onClick={onSubmitClick}
+            disabled={submitting}
+            title={submitBlockers[0]}
           >
             <Icon name="truck" size={13} />
             {submitting ? t('transferring') : t('transferSubmit')}

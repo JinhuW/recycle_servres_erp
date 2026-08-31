@@ -33,6 +33,33 @@ export interface ErrorRecord {
   context?: Record<string, unknown>;
 }
 
+// Two public routes carry a bearer-equivalent secret in the URL path: the
+// vendor portal's token (/api/public/vendor/<token>/…), the only gate to a
+// vendor's data, and the Shippo webhook's secret (/api/public/shippo/<secret>),
+// which is the whole credential — Shippo publishes no signature to verify
+// against. Neither may reach the durable log, where it would be replayable.
+//
+// Not anchored: this also runs over hono/logger's preformatted request lines,
+// where the path sits mid-string. Lives here rather than beside app.onError
+// because every writer into this sink needs it, not just the unhandled-500 path.
+export function redactSensitivePath(pathname: string): string {
+  return pathname.replace(/(\/api\/public\/(?:vendor|shippo)\/)[^/\s?]+/, '$1<redacted>');
+}
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  'token', 'code', 'access_token', 'refresh_token', 'client_secret', 'at', 'rt',
+]);
+
+export function redactSensitiveQuery(search: string): string | undefined {
+  if (!search) return undefined;
+  const params = new URLSearchParams(search);
+  let changed = false;
+  for (const k of [...params.keys()]) {
+    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) { params.set(k, '<redacted>'); changed = true; }
+  }
+  return changed ? `?${params.toString()}` : search;
+}
+
 export interface AppendOptions {
   maxBytes?: number;
   maxFiles?: number;

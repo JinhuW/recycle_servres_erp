@@ -4,25 +4,41 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD } from '../lib/format';
 import { useT } from '../lib/i18n';
+import {
+  createdEventParts, linePhotoEventDetail, ownerChangedLine, changeLine, renderValue,
+  LIFECYCLE_LABEL, type Translate,
+} from '../lib/orderPresentation';
 import type { OrderEvent, OrderEventChange } from '../lib/types';
 
 type Props = {
   orderId: string;
   // Bump this to force a refresh after a save commits new events.
   refreshKey?: number;
+  // The phone opens it closed: it is the longest block on a screen that is
+  // already tall, and the header carries the event count either way.
+  defaultOpen?: boolean;
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   created:      'file',
   submitted:    'inventory',
   advanced:     'flag',
+  reverted:     'rotate',
+  revert_ack:   'check',
   line_added:   'plus',
   line_removed: 'trash',
   line_edited:  'edit',
   meta_changed: 'settings',
+  owner_changed: 'user',
   status_meta_changed: 'paperclip',
+  line_photo_added:   'image',
+  line_photo_removed: 'image',
   archived:     'box',
   unarchived:   'rotate',
+  shipment_created:   'truck',
+  shipment_purchased: 'truck',
+  shipment_voided:    'truck',
+  shipment_seller_filled: 'truck',
 };
 
 type Tone = 'pos' | 'info' | 'warn' | 'muted';
@@ -30,13 +46,26 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   created:      'muted',
   submitted:    'pos',
   advanced:     'info',
+  // A submitted order moved backwards under whoever was reviewing it.
+  reverted:     'warn',
+  revert_ack:   'muted',
   line_added:   'pos',
   line_removed: 'warn',
   line_edited:  'info',
   meta_changed: 'muted',
+  owner_changed: 'info',
   status_meta_changed: 'muted',
+  // A photo is evidence hung off a line, so it tones like the attachment
+  // events rather than like the line itself; losing one still warns.
+  line_photo_added:   'muted',
+  line_photo_removed: 'warn',
   archived:     'muted',
   unarchived:   'info',
+  shipment_created:   'muted',
+  // Money moved: buying tones positive-action, voiding warns.
+  shipment_purchased: 'pos',
+  shipment_voided:    'warn',
+  shipment_seller_filled: 'info',
 };
 
 // Tone palette mirrors the .chip rules in tokens.css so the bubbles read as
@@ -55,70 +84,13 @@ const TONE_FG: Record<Tone, string> = {
   muted: 'var(--fg-subtle)',
 };
 
-const LIFECYCLE_LABEL: Record<string, string> = {
-  draft:      'Draft',
-  in_transit: 'In Transit',
-  reviewing:  'Reviewing',
-  done:       'Done',
-};
-
-// Friendly labels for the fields we surface on line_edited / meta_changed
-// events. Anything not listed falls back to the raw db column name.
-const FIELD_LABEL: Record<string, string> = {
-  sell_price:      'Sell price',
-  qty:             'Qty',
-  unit_cost:       'Unit cost',
-  brand:           'Brand',
-  capacity:        'Capacity',
-  type:            'Type',
-  generation:      'Generation',
-  classification:  'Classification',
-  rank:            'Rank',
-  speed:           'Speed',
-  interface:       'Interface',
-  form_factor:     'Form factor',
-  description:     'Description',
-  part_number:     'Part number',
-  serial_number:   'Serial number',
-  chip_number:     'Chip number',
-  condition:       'Condition',
-  health:          'Health',
-  rpm:             'RPM',
-  notes:           'Notes',
-  warehouse_id:    'Warehouse',
-  payment:         'Payment',
-  total_cost:      'Total cost',
-  commission_rate: 'Commission rate',
-};
-
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost']);
-
-function renderValue(field: string, v: unknown, locale: string): string {
-  if (v === null || v === undefined || v === '') return '—';
-  if (field === 'commission_rate' && typeof v === 'number') return (v * 100).toFixed(2) + '%';
-  if (MONEY_FIELDS.has(field) && typeof v === 'number') return fmtUSD(v, locale);
-  return String(v);
-}
-
-function changeLine(c: OrderEventChange, locale: string): string {
-  const label = FIELD_LABEL[c.field] ?? c.field;
-  return `${label}: ${renderValue(c.field, c.from, locale)} → ${renderValue(c.field, c.to, locale)}`;
-}
-
-function summary(ev: OrderEvent, locale: string): { title: string; lines: string[] } {
+function summary(ev: OrderEvent, locale: string, t: Translate): { title: string; lines: string[] } {
   const d = ev.detail as Record<string, unknown>;
   switch (ev.kind) {
     case 'created': {
-      // Rows synthesised by migration 0076 counted the lines as they stood at
-      // backfill time, not at creation, so the numbers would contradict the
-      // line_added/line_removed events below them. Show the category only.
-      if (d.backfilled) return { title: 'Order created', lines: [String(d.category)] };
-      const lineCount = (d.lineCount as number) ?? 0;
-      const qty = (d.qty as number) ?? 0;
-      return {
-        title: 'Order created',
-        lines: [`${String(d.category)} · ${lineCount} line${lineCount === 1 ? '' : 's'} · ${qty} units`],
-      };
+      // Shared with DesktopActivity so the same event doesn't read two ways.
+      const parts = createdEventParts(d, t);
+      return { title: 'Order created', lines: parts.length ? [parts.join(' · ')] : [] };
     }
     case 'submitted': {
       const lineCount = (d.lineCount as number) ?? 0;
@@ -133,6 +105,15 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
       const from = LIFECYCLE_LABEL[(d.from as string) ?? ''] ?? (d.from as string);
       const to = LIFECYCLE_LABEL[(d.to as string) ?? ''] ?? (d.to as string);
       return { title: `Advanced ${from} → ${to}`, lines: [] };
+    }
+    case 'reverted': {
+      // The change set itself is written out by the sibling meta/line events
+      // sitting right beside this one — here it only needs to say what moved.
+      const from = LIFECYCLE_LABEL[(d.from as string) ?? ''] ?? (d.from as string);
+      return { title: t('acReverted'), lines: from ? [t('acRevertFrom', { stage: from })] : [] };
+    }
+    case 'revert_ack': {
+      return { title: t('acRevertAck'), lines: [] };
     }
     case 'line_added': {
       const pn = (d.partNumber as string) ?? '(no part number)';
@@ -155,6 +136,9 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
       const changes = (d.changes as OrderEventChange[]) ?? [];
       return { title: 'Updated order details', lines: changes.map(c => changeLine(c, locale)) };
     }
+    case 'owner_changed': {
+      return { title: t('acOwnerChanged'), lines: [ownerChangedLine(d)] };
+    }
     case 'status_meta_changed': {
       const status = String(d.status ?? '');
       const field = String(d.field);
@@ -164,11 +148,43 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
       const verb = field === 'attachment_removed' ? 'removed' : 'added';
       return { title: `Attachment ${verb} on ${status}`, lines: [String(d.filename ?? '')] };
     }
+    case 'line_photo_added':
+    case 'line_photo_removed': {
+      const detail = linePhotoEventDetail(d);
+      return {
+        title: t(ev.kind === 'line_photo_added' ? 'acPhotoAdded' : 'acPhotoRemoved'),
+        lines: detail ? [detail] : [],
+      };
+    }
     case 'archived': {
       return { title: 'Archived', lines: ['Hidden from the default order list'] };
     }
     case 'unarchived': {
       return { title: 'Unarchived', lines: ['Restored to the active list'] };
+    }
+    case 'shipment_created': {
+      return { title: t('acShipmentCreated'), lines: [] };
+    }
+    case 'shipment_purchased': {
+      const line = [d.carrier, d.service].filter(Boolean).join(' ');
+      const amount = typeof d.amount === 'number' ? fmtUSD(d.amount, locale) : null;
+      return {
+        title: t('acShipmentPurchased'),
+        lines: [[line, amount, d.trackingNumber].filter(Boolean).join(' · ')].filter(Boolean),
+      };
+    }
+    case 'shipment_voided': {
+      const amount = typeof d.amount === 'number' ? fmtUSD(d.amount, locale) : null;
+      return {
+        title: t('acShipmentVoided'),
+        lines: [[d.trackingNumber, amount].filter(Boolean).join(' · ')].filter(Boolean),
+      };
+    }
+    case 'shipment_seller_filled': {
+      return {
+        title: t('acShipmentSellerFilled'),
+        lines: [[d.sellerName, [d.city, d.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')].filter(Boolean),
+      };
     }
     // The backend and this bundle deploy independently, so a browser holding
     // an older build can be handed a kind it has never heard of. Returning
@@ -179,12 +195,12 @@ function summary(ev: OrderEvent, locale: string): { title: string; lines: string
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
+export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<OrderEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
     let alive = true;
@@ -250,8 +266,10 @@ export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
           )}
 
           {ordered.map(ev => {
-            const s = summary(ev, locale);
-            const tone = KIND_TONE[ev.kind];
+            const s = summary(ev, locale, t);
+            // Same reason `summary` has a default branch: a kind this build
+            // has never heard of otherwise lands in an untinted, empty bubble.
+            const tone = KIND_TONE[ev.kind] ?? 'muted';
             return (
               <div key={ev.id} style={{
                 display: 'grid', gridTemplateColumns: '24px 1fr auto',
@@ -270,7 +288,7 @@ export function OrderActivityLog({ orderId, refreshKey = 0 }: Props) {
                     color: TONE_FG[tone],
                   }}
                 >
-                  <Icon name={KIND_ICON[ev.kind]} size={11} />
+                  <Icon name={KIND_ICON[ev.kind] ?? 'file'} size={11} />
                 </span>
                 <div style={{ minWidth: 0, paddingTop: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.35 }}>

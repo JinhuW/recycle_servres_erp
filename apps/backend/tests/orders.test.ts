@@ -34,19 +34,28 @@ describe('POST /api/orders defaults', () => {
     expect(got.body.order.lines[0].status).toBe('Draft');
   });
 
-  it('rejects mixed-category lines with 400', async () => {
+  // Deriving `category` from the lines — sole category, 'Mixed', and the
+  // `categories` array — lives in orders-mixed-category.test.ts.
+
+  it('lets lines inherit a body-level category', async () => {
     const { token } = await loginAs(MARCUS);
-    const r = await api('POST', '/api/orders', {
+    const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: {
-        category: 'RAM',
-        lines: [
-          { category: 'RAM', qty: 1, unitCost: 10, condition: 'New' },
-          { category: 'SSD', qty: 1, unitCost: 10, condition: 'New' },
-        ],
-      },
+      body: { category: 'HDD', lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    expect(r.status).toBe(201);
+    const got = await api<{ order: { category: string } }>('GET', '/api/orders/' + r.body.id, { token });
+    expect(got.body.order.category).toBe('HDD');
+  });
+
+  it('rejects a line with no category anywhere', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token,
+      body: { lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
     });
     expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/category is required/);
   });
 });
 
@@ -345,6 +354,28 @@ describe('PATCH /api/orders/:id — Done is read-only', () => {
     expect(after.body.order.lines[0].qty).toBe(1);
   });
 
+  // Fees are money on a closed-book record, so both the amount and the note
+  // that explains it are frozen — unlike `notes`, which stays appendable.
+  it('rejects other-fee edits with 409, amount and note alike', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { id } = await makeDoneOrder(mgr);
+
+    const feeEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { otherFees: 12.5 },
+    });
+    expect(feeEdit.status).toBe(409);
+
+    const noteEdit = await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { otherFeesNote: 'PayPal processing fee' },
+    });
+    expect(noteEdit.status).toBe(409);
+
+    const after = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token: mgr });
+    expect(after.body.order.otherFees).toBe(0);
+    expect(after.body.order.otherFeesNote).toBeNull();
+  });
+
   it('allows notes-only PATCH on a Done order', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const { id } = await makeDoneOrder(mgr);
@@ -355,6 +386,131 @@ describe('PATCH /api/orders/:id — Done is read-only', () => {
     const after = await api<{ order: { notes: string | null } }>(
       'GET', `/api/orders/${id}`, { token: mgr });
     expect(after.body.order.notes).toBe('archive: case closed');
+  });
+});
+
+describe('other fees on a purchase order', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function draftPO(token: string): Promise<string> {
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New' }] },
+    });
+    expect(r.status).toBe(201);
+    return r.body.id;
+  }
+
+  it('round-trips an amount and note set by the owner on their draft', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+
+    const patched = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 7.5, otherFeesNote: 'PayPal processing fee' },
+    });
+    expect(patched.status).toBe(200);
+
+    const detail = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(detail.body.order.otherFees).toBe(7.5);
+    expect(detail.body.order.otherFeesNote).toBe('PayPal processing fee');
+  });
+
+  it('accepts them at create time', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1', otherFees: 3.25, otherFeesNote: 'wire fee',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    expect(created.status).toBe(201);
+    const detail = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${created.body.id}`, { token });
+    expect(detail.body.order.otherFees).toBe(3.25);
+    expect(detail.body.order.otherFeesNote).toBe('wire fee');
+  });
+
+  // other_fees is NOT NULL — a client clearing the box sends null and means 0.
+  it('clears to 0 (not null) when sent null', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 9, otherFeesNote: 'x' } });
+
+    const cleared = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: null, otherFeesNote: null },
+    });
+    expect(cleared.status).toBe(200);
+
+    const detail = await api<{ order: { otherFees: number; otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(detail.body.order.otherFees).toBe(0);
+    expect(detail.body.order.otherFeesNote).toBeNull();
+  });
+
+  it('stores a whitespace-only note as null', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFeesNote: '   ' } });
+    const detail = await api<{ order: { otherFeesNote: string | null } }>(
+      'GET', `/api/orders/${id}`, { token });
+    expect(detail.body.order.otherFeesNote).toBeNull();
+  });
+
+  // The whole fee nets against the margin whatever share of the lines is
+  // priced. That makes the list read as a loss on a PO nobody has priced yet,
+  // which is deliberate — the fee is money already spent — and deliberately
+  // more conservative than the edit screen's tape, which leaves fees out.
+  const listRow = async (token: string, id: string) => {
+    const list = await api<{ orders: { id: string; otherFees: number; profit: number; revenue: number }[] }>(
+      'GET', '/api/orders?limit=100', { token });
+    return list.body.orders.find(o => o.id === id)!;
+  };
+
+  it('charges the whole fee while nothing is priced yet', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 20 } });
+
+    const row = await listRow(token, id);
+    expect(row.otherFees).toBe(20);
+    expect(row.revenue).toBeCloseTo(0, 2);
+    // No margin to offset it yet, so the row stands at the fee, negative.
+    expect(row.profit).toBeCloseTo(-20, 2);
+  });
+
+  it('nets the fee against the margin once every line is priced', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    const [lineId] = (await api<{ order: { lines: { id: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token })).body.order.lines.map(l => l.id);
+    await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 20, lines: [{ id: lineId, sellPrice: 80 }] },
+    });
+
+    const row = await listRow(token, id);
+    // 2 × (80 − 50) = 60 of margin, less the full fee.
+    expect(row.profit).toBeCloseTo(40, 2);
+  });
+
+  it('charges the whole fee even when only some lines are priced', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await draftPO(token);
+    // A second line of equal goods value, left unpriced: it contributes no
+    // margin and buys no discount on the fee.
+    await api('PATCH', `/api/orders/${id}`, {
+      token,
+      body: { addLines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New' }] },
+    });
+    const lines = (await api<{ order: { lines: { id: string }[] } }>(
+      'GET', `/api/orders/${id}`, { token })).body.order.lines;
+    await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 20, lines: [{ id: lines[0].id, sellPrice: 80 }] },
+    });
+
+    const row = await listRow(token, id);
+    // 60 of margin on the priced line, less the whole 20 — not half of it.
+    expect(row.profit).toBeCloseTo(40, 2);
   });
 });
 
@@ -532,6 +688,39 @@ describe('order line serial numbers', () => {
     expect(after.body.order.lines[0].chipNumber).toBeNull();
   });
 
+  it('upper-cases chip_number on create and edit — die codes have one spelling', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        payment: 'company',
+        lines: [{
+          category: 'RAM', brand: 'Micron', capacity: '32GB', type: 'DDR4',
+          partNumber: 'CHIP-CASE-1', condition: 'Pulled — Tested',
+          chipNumber: ' d9xpf ', qty: 1, unitCost: 10,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const before = await api<{ order: { lines: { id: string; chipNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    expect(before.body.order.lines[0].chipNumber).toBe('D9XPF');
+
+    const patched = await api('PATCH', '/api/orders/' + created.body.id, {
+      token, body: { lines: [{ id: before.body.order.lines[0].id, chipNumber: 'k4a8g045wc-bcwe' }] },
+    });
+    expect(patched.status).toBe(200);
+
+    const after = await api<{ order: { lines: { chipNumber: string | null }[] } }>(
+      'GET', '/api/orders/' + created.body.id, { token },
+    );
+    expect(after.body.order.lines[0].chipNumber).toBe('K4A8G045WC-BCWE');
+  });
+
   it('defaults serial_number to null when omitted, and surfaces it in inventory', async () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
@@ -614,7 +803,56 @@ describe('PATCH /api/orders/:id line status is not client-settable', () => {
   });
 });
 
-describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
+describe('PATCH /api/orders/:id — AI scan fields persist', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The desktop edit page lets a RAM line be filled from an AI label scan.
+  // The scan's image key and confidence must survive both write paths —
+  // adding a new line and patching an existing hand-entered one — or the
+  // saved order silently loses the label photo the fill came from.
+  it('persists scanImageId/scanConfidence through addLines and a line patch', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    const added = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: {
+        addLines: [{
+          category: 'RAM', brand: 'SK Hynix', qty: 2, unitCost: 20,
+          condition: 'New', scanImageId: 'scan-added-1', scanConfidence: 0.91,
+        }],
+      },
+    });
+    expect(added.status).toBe(200);
+
+    type ScanLine = { id: string; scanImageId: string | null; scanConfidence: number | null };
+    const mid = await api<{ order: { lines: ScanLine[] } }>('GET', '/api/orders/' + id, { token });
+    const newLine = mid.body.order.lines.find(l => l.scanImageId === 'scan-added-1');
+    expect(newLine?.scanConfidence).toBeCloseTo(0.91);
+
+    const handEntered = mid.body.order.lines.find(l => l.scanImageId == null)!;
+    const patched = await api('PATCH', '/api/orders/' + id, {
+      token,
+      body: { lines: [{ id: handEntered.id, brand: 'Samsung', scanImageId: 'scan-patched-1', scanConfidence: 0.87 }] },
+    });
+    expect(patched.status).toBe(200);
+
+    const after = await api<{ order: { lines: ScanLine[] } }>('GET', '/api/orders/' + id, { token });
+    const patchedLine = after.body.order.lines.find(l => l.id === handEntered.id)!;
+    expect(patchedLine.scanImageId).toBe('scan-patched-1');
+    expect(patchedLine.scanConfidence).toBeCloseTo(0.87);
+  });
+});
+
+describe('PATCH /api/orders/:id — purchaser edits revert the PO to Draft', () => {
   beforeEach(async () => { await resetDb(); });
 
   async function createDraft(token: string): Promise<string> {
@@ -633,26 +871,106 @@ describe('PATCH /api/orders/:id — purchaser edits are draft-only', () => {
     return created.body.id;
   }
 
-  it('owner edits a draft, loses edit access after submission; manager keeps it', async () => {
+  type Detail = { order: { lifecycle: string; lines: { id: string; status: string }[] } };
+  const detail = (id: string, token: string) =>
+    api<Detail>('GET', `/api/orders/${id}`, { token });
+
+  it('sends an In Transit order back to Draft when the owner edits a line', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const id = await createDraft(pur);
-
-    // Draft: owner can edit.
-    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'draft note' } })).status).toBe(200);
-
-    // Submit → in_transit: owner is frozen out, including cost/line rewrites.
     await api('POST', `/api/orders/${id}/advance`, { token: pur });
-    const denied = await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'late edit' } });
-    expect(denied.status).toBe(403);
-    const lines = await api<{ order: { lines: { id: string }[] } }>('GET', `/api/orders/${id}`, { token: pur });
-    const deniedLines = await api('PATCH', `/api/orders/${id}`, {
-      token: pur,
-      body: { lines: [{ id: lines.body.order.lines[0].id, unitCost: 0.01 }] },
-    });
-    expect(deniedLines.status).toBe(403);
 
-    // Manager still edits post-submission.
+    const before = await detail(id, pur);
+    expect(before.body.order.lifecycle).toBe('in_transit');
+    const lineId = before.body.order.lines[0].id;
+
+    const patched = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { lines: [{ id: lineId, unitCost: 0.01 }] },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.lifecycle).toBe('draft');
+
+    const after = await detail(id, pur);
+    expect(after.body.order.lifecycle).toBe('draft');
+    expect(after.body.order.lines[0].status).toBe('Draft');
+  });
+
+  it('reverts from Reviewing too, and records a `reverted` event', async () => {
+    const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
-    expect((await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { notes: 'manager note' } })).status).toBe(200);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+    await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'reviewing' } });
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { otherFees: 250 },
+    })).status).toBe(200);
+    expect((await detail(id, pur)).body.order.lifecycle).toBe('draft');
+
+    const events = await api<{ events: { kind: string; detail: Record<string, unknown> }[] }>(
+      'GET', `/api/orders/${id}/events`, { token: mgr });
+    const reverted = events.body.events.filter(e => e.kind === 'reverted');
+    expect(reverted).toHaveLength(1);
+    expect(reverted[0].detail.from).toBe('reviewing');
+    expect(reverted[0].detail.to).toBe('draft');
+  });
+
+  it('leaves the stage alone for a notes-only edit', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+
+    const patched = await api<{ lifecycle: string }>('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { notes: 'receipt arrived late' },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.lifecycle).toBe('in_transit');
+    expect((await detail(id, pur)).body.order.lifecycle).toBe('in_transit');
+
+    const events = await api<{ events: { kind: string }[] }>(
+      'GET', `/api/orders/${id}/events`, { token: mgr });
+    expect(events.body.events.some(e => e.kind === 'reverted')).toBe(false);
+  });
+
+  it('does not revert when the editor is a manager', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: mgr, body: { otherFees: 120 },
+    })).status).toBe(200);
+    expect((await detail(id, mgr)).body.order.lifecycle).toBe('in_transit');
+  });
+
+  it('keeps a Done order closed to the owner, note included', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+    expect((await api('POST', `/api/orders/${id}/advance`, {
+      token: mgr, body: { toStage: 'done' },
+    })).status).toBe(200);
+
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { notes: 'too late' } })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, { token: pur, body: { payment: 'self' } })).status).toBe(403);
+    expect((await detail(id, mgr)).body.order.lifecycle).toBe('done');
+  });
+
+  it('still refuses the manager-only fields at every stage', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const id = await createDraft(pur);
+    await api('POST', `/api/orders/${id}/advance`, { token: pur });
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { commissionRate: 0.5 },
+    })).status).toBe(403);
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pur, body: { onBehalfOfUserId: null },
+    })).status).toBe(403);
+    const after = await api<Detail>('GET', `/api/orders/${id}`, { token: pur });
+    expect(after.body.order.lifecycle).toBe('in_transit');
   });
 });

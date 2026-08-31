@@ -1,9 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
-import { NetworkOnly, StaleWhileRevalidate, CacheFirst } from 'workbox-strategies';
-import { BackgroundSyncPlugin } from 'workbox-background-sync';
-import { ExpirationPlugin } from 'workbox-expiration';
+import { NetworkOnly } from 'workbox-strategies';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -19,36 +17,13 @@ const navRoute = new NavigationRoute(createHandlerBoundToURL('/index.html'), {
 });
 registerRoute(navRoute);
 
-// Background-sync only for attachment uploads; the queue retries when
-// connectivity returns. Other mutations (status changes, etc.) must NOT be
-// auto-replayed — they could race with what the user did since.
-const attachmentQueue = new BackgroundSyncPlugin('recycle-erp-attachments', {
-  maxRetentionTime: 24 * 60,
-});
-registerRoute(
-  ({ url, request }) => url.pathname === '/api/attachments' && request.method === 'POST',
-  new NetworkOnly({ plugins: [attachmentQueue] }),
-  'POST',
-);
-
 // API / OAuth / well-known: never cache — auth is cookie-based and data changes.
 registerRoute(({ url }) => url.pathname.startsWith('/api/'), new NetworkOnly());
 registerRoute(({ url }) => url.pathname.startsWith('/oauth/'), new NetworkOnly());
 registerRoute(({ url }) => url.pathname.startsWith('/.well-known/'), new NetworkOnly());
 
-// Google Fonts CSS stale-while-revalidate keeps the app readable offline;
-// the font files themselves are immutable so cache-first for a year.
-registerRoute(
-  ({ url }) => url.origin === 'https://fonts.googleapis.com',
-  new StaleWhileRevalidate({ cacheName: 'google-fonts-stylesheets' }),
-);
-registerRoute(
-  ({ url }) => url.origin === 'https://fonts.gstatic.com',
-  new CacheFirst({
-    cacheName: 'google-fonts-webfonts',
-    plugins: [new ExpirationPlugin({ maxEntries: 16, maxAgeSeconds: 60 * 60 * 24 * 365 })],
-  }),
-);
+// Fonts are self-hosted under /fonts and precached by the woff2 glob in
+// vite.config.ts, so there is no third-party font origin left to route.
 
 // Web Share Target: intercept POST /share-target, stash the file in SW
 // memory, redirect to the SPA page which then asks for the file via

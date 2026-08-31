@@ -12,7 +12,7 @@ const lookups = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 lookups.get('/', async (c) => {
   const sql = getDb(c.env);
 
-  const [catalogRows, sourceRows, statusRows, categoryRows] = await Promise.all([
+  const [catalogRows, sourceRows, statusRows, categoryRows, itemTypeRows] = await Promise.all([
     sql`
       SELECT "group", value
       FROM catalog_options
@@ -31,9 +31,15 @@ lookups.get('/', async (c) => {
       ORDER BY position
     `,
     sql`
-      SELECT id, label, icon, enabled, default_margin::float AS default_margin, position
+      SELECT id, label, icon, enabled, ai_capture, default_margin::float AS default_margin, position
       FROM categories
       ORDER BY position
+    `,
+    sql`
+      SELECT id, name
+      FROM item_types
+      WHERE active = TRUE
+      ORDER BY lower(name)
     `,
   ]);
 
@@ -58,9 +64,11 @@ lookups.get('/', async (c) => {
       label: r.label as string,
       icon: r.icon as string,
       enabled: r.enabled as boolean,
+      aiCapture: r.ai_capture as boolean,
       defaultMargin: r.default_margin as number,
       position: r.position as number,
     })),
+    itemTypes: itemTypeRows.map(r => ({ id: r.id as string, name: r.name as string })),
   });
 });
 

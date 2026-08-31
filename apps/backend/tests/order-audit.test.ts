@@ -129,12 +129,14 @@ describe('PO audit log — lifecycle events', () => {
   });
 
   // Nothing is filtered out of a draft's timeline — including the running
-  // total_cost the submit form re-sends with every line it appends.
+  // total_cost the submit form re-sends with every line it appends. The create
+  // derives the opening figure from its own lines (4×80 + 2×50 = 420), so each
+  // append below states the total that append actually produces.
   it('logs every total_cost move on a draft, one event per append', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createDraftWithLines(token);
 
-    for (const [i, total] of [420, 500, 580].entries()) {
+    for (const [i, total] of [500, 580, 660].entries()) {
       const r = await api('PATCH', `/api/orders/${id}`, {
         token,
         body: {
@@ -149,7 +151,48 @@ describe('PO audit log — lifecycle events', () => {
     expect(events.filter(e => e.kind === 'line_added')).toHaveLength(3);
     const meta = events.filter(e => e.kind === 'meta_changed');
     expect(meta).toHaveLength(3);
-    expect(meta.map(e => (e.detail.changes as { to: unknown }[])[0].to)).toEqual([420, 500, 580]);
+    expect(meta.map(e => (e.detail.changes as { to: unknown }[])[0].to)).toEqual([500, 580, 660]);
+  });
+
+  it('logs an other_fees change as meta_changed, with numeric from/to', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+
+    const r = await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 25, otherFeesNote: 'PayPal processing fee' },
+    });
+    expect(r.status).toBe(200);
+
+    const meta = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
+    expect(meta).toHaveLength(1);
+    const changes = meta[0].detail.changes as { field: string; from: unknown; to: unknown }[];
+    const fee = changes.find(c => c.field === 'other_fees')!;
+    // Numbers, not "0.00"/"25.00" — a missing ::float in the before/after
+    // snapshots shows up here first.
+    expect(typeof fee.from).toBe('number');
+    expect(typeof fee.to).toBe('number');
+    expect(fee.from).toBe(0);
+    expect(fee.to).toBe(25);
+    expect(changes.find(c => c.field === 'other_fees_note')).toMatchObject({
+      from: null, to: 'PayPal processing fee',
+    });
+  });
+
+  // Regression guard for the NUMERIC-as-string trap: postgres.js returns
+  // NUMERIC as a string, so an uncast other_fees would diff "25.00" against a
+  // JS 25 and report a phantom change on every unrelated PATCH.
+  it('does not report a phantom fee change on a notes-only PATCH', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createDraftWithLines(token);
+    await api('PATCH', `/api/orders/${id}`, { token, body: { otherFees: 25 } });
+
+    const r = await api('PATCH', `/api/orders/${id}`, { token, body: { notes: 'just a note' } });
+    expect(r.status).toBe(200);
+
+    const meta = (await getEvents(id, token)).body.events.filter(e => e.kind === 'meta_changed');
+    const latest = meta[meta.length - 1];
+    const changes = latest.detail.changes as { field: string }[];
+    expect(changes.map(c => c.field)).toEqual(['notes']);
   });
 
   it('writes a created event for the empty-draft endpoint too', async () => {
@@ -172,8 +215,10 @@ describe('PO audit log — lifecycle events', () => {
       'GET', `/api/orders/${id}`, { token });
     const lineId = detail.body.order.lines.find(l => l.partNumber === 'AUD-1')!.id;
 
+    // AUD-1 is a qty-4 line, so the serial rules demand exactly four serials.
+    const serials = 'SN-99812\nSN-99813\nSN-99814\nSN-99815';
     const r = await api('PATCH', `/api/orders/${id}`, {
-      token, body: { lines: [{ id: lineId, serialNumber: 'SN-99812' }] },
+      token, body: { lines: [{ id: lineId, serialNumber: serials }] },
     });
     expect(r.status).toBe(200);
 
@@ -181,7 +226,7 @@ describe('PO audit log — lifecycle events', () => {
     expect(edits).toHaveLength(1);
     const changes = edits[0].detail.changes as { field: string; to: unknown }[];
     expect(changes.map(c => c.field)).toEqual(['serial_number']);
-    expect(changes[0].to).toBe('SN-99812');
+    expect(changes[0].to).toBe(serials);
   });
 
   // Auditing drafts means the draft-only hard delete now cascades into rows
@@ -342,5 +387,37 @@ describe('PO audit log — access control', () => {
     const db = getTestDb();
     await expect(db`DELETE FROM order_events WHERE order_id = ${id}`).rejects.toThrow();
     await expect(db`UPDATE order_events SET kind = 'tampered' WHERE order_id = ${id}`).rejects.toThrow();
+  });
+});
+
+// total_cost is a META_FIELD, but it is now DERIVED from the lines at the end
+// of the transaction. Diffing the order before that ran left every goods-total
+// move off the timeline — which is every move there is, since no client sends
+// the figure any more.
+describe('a derived goods-total move reaches the timeline', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('logs the move when a line is appended', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { lines: [{ category: 'RAM', brand: 'Samsung', partNumber: 'AUD-1',
+                        condition: 'Pulled — Tested', qty: 1, unitCost: 100 }] },
+    });
+    expect(r.status).toBe(201);
+
+    await api('PATCH', '/api/orders/' + r.body.id, {
+      token,
+      body: { addLines: [{ category: 'RAM', brand: 'Crucial', partNumber: 'AUD-2',
+                           condition: 'Pulled — Tested', qty: 2, unitCost: 50 }] },
+    });
+
+    const ev = (await getEvents(r.body.id, token)).body.events;
+    const meta = ev.filter(e => e.kind === 'meta_changed');
+    const move = meta.flatMap(e => (e.detail as { changes?: { field: string; from: unknown; to: unknown }[] }).changes ?? [])
+      .find(ch => ch.field === 'total_cost');
+    expect(move, 'a goods-total move must be audited').toBeDefined();
+    expect(Number(move!.from)).toBeCloseTo(100, 2);
+    expect(Number(move!.to)).toBeCloseTo(200, 2);
   });
 });

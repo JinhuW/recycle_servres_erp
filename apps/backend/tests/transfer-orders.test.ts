@@ -8,10 +8,22 @@ const WAREHOUSES = ['WH-LA1', 'WH-DAL', 'WH-NJ2', 'WH-HK', 'WH-AMS'];
 
 async function transferOne(token: string): Promise<{ id: string; from: string; to: string; orderId: string }> {
   const inv = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
-  const line = inv.body.items.find(
-    (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id,
+  // The seed already commits some lines to Shipped sell orders, and transfer
+  // reopen/discard correctly 409 on those. Seed ids are random, so which line
+  // sorts first varies per run — without this the suite passed or failed by
+  // luck of the draw.
+  const committed = new Set(
+    (await getTestDb()`
+      SELECT sl.inventory_id AS id
+        FROM sell_order_lines sl
+        JOIN sell_orders so ON so.id = sl.sell_order_id
+       WHERE so.status = ANY(${['Shipped', 'Awaiting payment']}::text[])
+    ` as unknown as Array<{ id: string }>).map((r) => r.id),
   );
-  if (!line) throw new Error('no sellable line in seed');
+  const line = inv.body.items.find(
+    (i) => (i.status === 'Reviewing' || i.status === 'Done') && i.warehouse_id && !committed.has(i.id),
+  );
+  if (!line) throw new Error('no uncommitted sellable line in seed');
   const to = WAREHOUSES.find((w) => w !== line.warehouse_id)!;
   const r = await api<{ ok: true; transferOrderId: string }>(
     'POST', '/api/inventory/transfer',
@@ -528,5 +540,59 @@ describe('DELETE /api/inventory/transfer-orders/:id — discard', () => {
              VALUES (${so.id}, ${moved.id}, 'RAM', 'x', 1, 1)`;
     const r = await api('DELETE', `/api/inventory/transfer-orders/${moved.orderId}`, { token });
     expect(r.status).toBe(200);
+  });
+});
+
+// A partial transfer clones the line, and photos live on the clone. Discarding
+// the transfer merges that clone back into its peer and deletes it — the FK
+// cascades the photo rows away, and once they are gone nothing in the database
+// can name their R2 objects, so they leak forever.
+describe('discarding a partial transfer keeps the clone\'s photos', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('reparents them onto the line that absorbs it', async () => {
+    const { token } = await loginAs(ALEX);
+    const db = getTestDb();
+
+    const src = (await db`
+      SELECT l.id, l.qty, COALESCE(l.warehouse_id, o.warehouse_id) AS wh
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.status IN ('Reviewing','Done') AND l.qty >= 2
+        AND COALESCE(l.warehouse_id, o.warehouse_id) IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sell_order_lines sl WHERE sl.inventory_id = l.id)
+      LIMIT 1
+    `)[0] as { id: string; qty: number; wh: string };
+    const to = WAREHOUSES.find(w => w !== src.wh)!;
+
+    // Partial: move less than the whole quantity, so a clone is minted.
+    const tr = await api<{ ok: true; transferOrderId: string; lines: { destId: string }[] }>(
+      'POST', '/api/inventory/transfer',
+      { token, body: { toWarehouseId: to, lines: [{ id: src.id, qty: 1 }] } },
+    );
+    expect(tr.status).toBe(200);
+    const destId = tr.body.lines[0].destId;
+    expect(destId).not.toBe(src.id);
+
+    const [{ order_id }] = await db<{ order_id: string }[]>`
+      SELECT order_id FROM order_lines WHERE id = ${destId}::uuid
+    `;
+    await db`
+      INSERT INTO order_line_photos
+        (order_line_id, order_id, filename, size_bytes, mime_type, storage_key, delivery_url, position)
+      VALUES (${destId}::uuid, ${order_id}, 'goods.png', 1234, 'image/png',
+              'photos/clone-key.png', 'https://cdn.test/photos/clone-key.png', 0)
+    `;
+
+    const r = await api('DELETE', `/api/inventory/transfer-orders/${tr.body.transferOrderId}`, { token });
+    expect(r.status).toBe(200);
+
+    // The clone is gone (merged back), and its photo went with the quantity.
+    const clone = await db`SELECT id FROM order_lines WHERE id = ${destId}::uuid`;
+    expect(clone).toHaveLength(0);
+    const [photo] = await db<{ order_line_id: string }[]>`
+      SELECT order_line_id FROM order_line_photos WHERE storage_key = 'photos/clone-key.png'
+    `;
+    expect(photo, 'the photo must survive the merge, not cascade away').toBeDefined();
+    expect(photo.order_line_id).toBe(src.id);
   });
 });

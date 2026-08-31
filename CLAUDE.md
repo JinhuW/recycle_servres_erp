@@ -23,6 +23,55 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - The `@recycle-erp/shared` package is imported as a workspace dep (`main:
   "./src/index.ts"`) — there's no build step.  Don't add one.
 
+## Tickets, changelog & features
+
+Three documents carry the project's memory.  `docs/tickets/` says what was
+asked, `CHANGELOG.md` says when it shipped, `docs/FEATURES.md` says what the
+system does today.  Read `docs/FEATURES.md` first when you don't know this
+codebase.
+
+1. **A change request becomes a ticket** in `docs/tickets/` —
+   `scripts/ticket.sh new "<title>"`.  Because `plan-first` governs this repo,
+   the ticket is *drafted inside plan mode* and shown as part of the plan, then
+   written as the first step of implementation.  The `## Ask` block is the
+   requester's own words, **verbatim** — that field is the only thing in the
+   file that can't be reconstructed from the code later.  The `ticket-workflow`
+   skill in `.claude/skills/` covers the rest; `/ticket` is the manual path.
+2. **The version bump that ships it adds a `## [X.Y.Z]` section to
+   `CHANGELOG.md` in the same push.**  `version-check.yml` fails the push
+   otherwise.  `scripts/changelog.sh draft` prints a starting point from the
+   branch's commits; rewrite it into prose — what changed and why it mattered,
+   not the commit subject again.
+3. **If user-visible behaviour changed, edit `docs/FEATURES.md`** and cite the
+   new version.  Nothing enforces this one, which is exactly why it needs
+   saying: it is the document that rots first.
+4. **Close the ticket** — `scripts/ticket.sh status RS-nnn done`, and fill its
+   `pr:` and `version:` fields.  `version:` is the join back to the changelog.
+
+Three things worth knowing:
+
+- **A version collision renumbers the changelog header too.**  When another
+  session takes the version you bumped to, the fix is a fresh bump *and* a
+  renamed `## [X.Y.Z]` heading — the CI gate matches the header against
+  `package.json` exactly.
+- **`version-check.yml` runs on `dev` and `main`, but only `dev` creates
+  tags.**  A hotfix pushed straight to `main` gets the same bump + changelog
+  demand; the tag is created when the version reaches `dev`, because a tag
+  minted on a `main` commit would make the back-port fail "tag exists on an
+  unrelated commit".  `LAST_TAG` is the newest tag *reachable from HEAD*
+  (`--merged HEAD`) — on `main`, which runs several releases behind, the global
+  newest tag would fail every push including docs-only ones.
+- **The `docs/FEATURES.md` check is a `::warning::`, never a failure.**  A
+  release carrying `feat()` commits that doesn't touch it gets an annotation.
+  Whether a change altered user-visible behaviour isn't machine-decidable, and
+  a gate that produces false blocks gets cleared by touching the file for no
+  reason.
+- `scripts/changelog.sh backfill` rebuilds the whole file from the tag list and
+  is idempotent.  It preserves hand-written sections verbatim, so running it
+  is safe — but it is a repair tool, not part of the release flow.
+  `scripts/release.sh` has its own, older generator for the retired
+  Docker/`main` flow; don't extend that one.
+
 ## Session isolation (one branch per Claude Code session)
 
 Several Claude Code sessions run against this repo at once, so **every session
@@ -34,6 +83,14 @@ switches the branch out from under the first.
   `origin/dev`, creates a worktree under `.claude/worktrees/`, copies `.env`,
   runs `pnpm install`, and launches `claude` inside it.  Optional branch name:
   `scripts/new-session.sh feat/<topic>` (default `session/<timestamp>`).
+- **To pick work back up, `scripts/new-session.sh --checkout <branch>`.**  It
+  puts an *existing* branch in a worktree instead of cutting a new one — local
+  or remote-only (`origin/<branch>` is fetched and tracked, and either spelling
+  is accepted).  The branch is taken as it stands: never rebased, never reset
+  onto `origin/dev`.  If a session worktree already holds that branch, that
+  worktree is handed back with its uncommitted work intact, unless a live
+  session is still in it.  Because git allows a branch in only one worktree,
+  a branch checked out in the main checkout is refused rather than stolen.
 - **Every session in this repo runs with permission prompts off.**
   `.claude/settings.json` sets `permissions.defaultMode: "bypassPermissions"`,
   which covers all entry points; `scripts/new-session.sh` also passes
@@ -74,11 +131,18 @@ switches the branch out from under the first.
   remove a clean, fully-merged, unlocked worktree, so a session that was
   created outside the launcher should be given a lock file if you want it
   protected.
-- **Prune compares file content, not commit ancestry.**  PRs land on `dev` as
-  squash commits, so a session branch's own commits are never ancestors of
-  `origin/dev`; an ancestry test (`git log origin/dev..HEAD`) would report
-  every worktree as unmerged forever and reclaim nothing.  See
-  [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md).
+- **Prune compares file content against `origin/dev`'s history, not commit
+  ancestry and not dev's tip.**  PRs land on `dev` as squash commits, so a
+  session branch's own commits are never ancestors of `origin/dev`; an
+  ancestry test (`git log origin/dev..HEAD`) would report every worktree as
+  unmerged forever.  Comparing against dev's *tip* rots almost as fast:
+  every PR bumps `package.json`, so any later merge makes an already-merged
+  worktree mismatch permanently.  The check therefore looks for the branch's
+  final blobs anywhere in `merge-base..origin/dev` (the squash commit carries
+  them verbatim).  See
+  [docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md](./docs/debug-notes/2026-07-26-prune-ancestry-vs-squash-merge.md)
+  and
+  [docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md](./docs/debug-notes/2026-08-23-prune-content-check-rots-as-dev-advances.md).
 - `.claude/` is gitignored **except** `settings.json`, so the hook config is
   shared but worktrees and `settings.local.json` are not.
 
@@ -148,6 +212,14 @@ switches the branch out from under the first.
 - **Order ID counters** are per-type sequences in `id_counters` (see
   `migrations/0029`).  Use `lib/id-seq.ts`; never compute an ID by counting
   rows.
+- **`orders.category` and `orders.total_cost` are derived from the lines**, by
+  `services/orderCategory.ts` and `services/orderGoodsTotal.ts`, at the end of
+  every transaction that writes lines.  **Clients must not send `totalCost`** —
+  the API still accepts it, but a value there is read as a *negotiated lot
+  price* and pins the column against the lines from then on.  The mirror /
+  negotiated verdict has to be read *before* the line writes
+  (`goodsTotalIsMirror`); afterwards a stale mirror and a real override are
+  indistinguishable.
 - **Upload validation** — `routes/attachments.ts` enforces both
   `maxBytes` and `allowedMime` from `lib/settings.ts → getUploadLimits()`.
   The allowed set is intersected with `SAFE_UPLOAD_MIME` so a misconfigured
@@ -167,10 +239,42 @@ switches the branch out from under the first.
   — they use URL tokens, not cookies, so CSRF doesn't apply).
 - Refresh-token reuse revokes the whole family.  Don't relax that.
 
+## MCP & OAuth (connectors)
+
+- `/api/mcp` is **Bearer-only and CSRF-exempt**, mounted with
+  `bearerGuard({ scopes: [] })` — it requires a *valid* token, nothing more.
+  Per-tool gating lives in `TOOL_SCOPES` (`src/mcp/server.ts`) and filters both
+  `tools/list` and `tools/call`.  A connector that seems to be missing tools is
+  a scope problem, not a missing-tool one.
+- **The public origin in every OAuth document comes from `resolvePublicOrigin`**
+  (`src/oauth/metadata.ts`), which needs the Cloudflare Worker to forward
+  `X-Public-Host` **and** the hostname to be in `CORS_ALLOWED_ORIGINS`.
+  It must be `X-Public-Host`, not `X-Forwarded-Host` — **Railway's edge rewrites
+  the standard `X-Forwarded-*` headers to its own hostname**, so a value the
+  Worker sets there never reaches the backend.  Add
+  a hostname to `wrangler.toml` without adding it to `CORS_ALLOWED_ORIGINS` and
+  discovery silently advertises `allow[0]` instead — which breaks the RFC 9728
+  `resource` match and every MCP client with it.  Canonical host goes first.
+- **DCR is open by default** (`OAUTH_DCR_OPEN !== 'false'`), rate-limited per IP
+  and globally.  `registration_endpoint` is advertised only when it's on — an
+  endpoint that 403s makes clients fail hard instead of falling back to a
+  manual client ID.
+- Interactive consent is role-ceilinged (`restrictScopesToRole`): a **manager**
+  can grant any scope; every other role keeps only `market:read` — sell-order
+  reads included in the drop, not just `:write`.  Re-derived on every refresh
+  rotation.  Manager-minted service clients are exempt.
+- Loopback redirect URIs match **ignoring the port** (RFC 8252 §7.3) so Claude
+  Code's ephemeral port works.  That applies to the `/authorize` allowlist only —
+  the token endpoint stays an exact match against the URI recorded on the code.
+- `/oauth/authorize` accepts only the 15-min `at` cookie and bounces to
+  `/login?next=…`.  The SPA **must** honour `next` (`readSafeNext` in
+  `lib/route.ts`, consumed in `DesktopApp.tsx`/`MobileApp.tsx`) or the connector
+  popup dead-ends on the dashboard.
+
 ## Database & migrations
 
-- Postgres 16.  41 migrations as of writing — the highest-numbered file in
-  `apps/backend/migrations/` is the head.
+- Postgres 16.  The highest-numbered file in `apps/backend/migrations/` is
+  the head.
 - FKs use `ON DELETE` rules added in `0041_fk_on_delete.sql`.  When adding
   a new child table, declare the rule explicitly; don't rely on default
   `NO ACTION`.
@@ -295,6 +399,9 @@ switches the branch out from under the first.
 
 ## Pointers
 
+- What the system does today, by area: `docs/FEATURES.md`.
+- What was asked, and by whom: `docs/tickets/` (index in `INDEX.md`).
+- What shipped when: `CHANGELOG.md` — one section per `v*` tag.
 - Per-feature design docs: `docs/superpowers/specs/`.
 - Implementation plans (in-flight and finished): `docs/superpowers/plans/`.
 - Auto-memory referenced above lives under

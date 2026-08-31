@@ -117,12 +117,12 @@ describe('oauth tokens', () => {
     expect((await rotateRefreshToken(db, env(), r1.raw)).ok).toBe(false);
   });
 
-  it('rotation drops :write scopes for a demoted manager', async () => {
+  it('rotation narrows a demoted manager to market:read (sellorder reads included)', async () => {
     const db = getTestDb();
     const c = await aClient();
     const u = await freshUser('manager');
     const r1 = await issueRefreshToken(db, env(), {
-      clientId: c.clientId, userId: u, scopes: ['market:read', 'market:write'],
+      clientId: c.clientId, userId: u, scopes: ['market:read', 'market:write', 'sellorder:read'],
     });
     await db`UPDATE users SET role = 'purchaser' WHERE id = ${u}`;
     const res = await rotateRefreshToken(db, env(), r1.raw);

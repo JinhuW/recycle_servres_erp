@@ -252,7 +252,7 @@
   font-weight: 600;
 }
 
-/* Submit category selector */
+/* Row card in a bottom sheet (draft picker) */
 .ph-cat-card {
   display: flex;
   align-items: center;
@@ -277,9 +277,6 @@
   place-items: center;
   flex-shrink: 0;
 }
-.ph-cat-icon.ssd { background: var(--info-soft); color: oklch(0.45 0.13 250); }
-.ph-cat-icon.hdd { background: oklch(0.96 0.04 295); color: oklch(0.45 0.16 295); }
-.ph-cat-icon.other { background: var(--warn-soft); color: oklch(0.45 0.13 75); }
 
 /* Camera full-bleed */
 .ph-cam-screen {
@@ -363,6 +360,87 @@
   place-items: center;
   font-size: 11px;
   color: rgba(255,255,255,0.75);
+}
+
+/* ===== Serial QR scanner =====
+   Trigger docked inside the serial textarea's corner, and a batch-mode
+   viewfinder that reuses the Camera screen's shell (ph-cam-*) — same dark
+   stage, pills, and scan-line so both capture flows read as one family. */
+.ph-sn-scan {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--border-strong));
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  display: grid;
+  place-items: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.ph-sn-scan:active { transform: scale(0.92); }
+.ph-sn-scan:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.ph-snscan-frame {
+  /* Small centered square sized to a module's ~10 mm QR held close — it
+     mirrors (slightly under-covers) the decoder's center crop, so a code
+     that fits the box is a code that scans. */
+  position: absolute;
+  left: 50%; top: 42%;
+  transform: translate(-50%, -50%);
+  width: min(58vw, 240px);
+  aspect-ratio: 1;
+  border: 1.5px dashed rgba(255,255,255,0.55);
+  border-radius: 12px;
+  overflow: hidden;   /* clips .scan-line and the hit flash to the frame */
+}
+.ph-snscan-flash {
+  position: absolute; inset: 0;
+  background: color-mix(in oklch, var(--pos, #16a34a) 45%, transparent);
+  animation: snscan-flash 0.5s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes snscan-flash {
+  0%   { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.ph-snscan-toast {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: white;
+}
+.ph-snscan-toast .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60vw;
+}
+.ph-snscan-done {
+  flex: 1;
+  height: 52px;
+  border-radius: 16px;
+  background: white;
+  color: #111;
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.ph-snscan-done:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) {
+  .ph-snscan-flash { animation: none; opacity: 0; }
 }
 
 /* AI extracted card */
@@ -527,6 +605,12 @@
   gap: 10px;
   z-index: 25;
 }
+/* Two-row dock. The bar goes column so it keeps owning the gradient, safe-area
+   padding and z-index: a separately positioned strip above it would have to
+   hard-code the bar's height, which changes with the buttons an order shows. */
+.ph-action-bar.stacked { flex-direction: column; align-items: stretch; gap: 8px; }
+.ph-action-row { display: flex; align-items: center; gap: 10px; flex: 1; }
+.ph-add-dock { display: grid; gap: 7px; }
 .ph-btn {
   flex: 1;
   height: 50px;
@@ -747,6 +831,21 @@
   animation: toast-pop 0.2s ease-out;
 }
 .ph-toast.success { background: var(--accent); }
+/* A nudge, not a confirmation. Same solid amber the desktop toast uses —
+   loud on purpose: it fires over a full-screen form the user is mid-way
+   through. */
+.ph-toast.warn {
+  background: var(--warn-loud);
+  color: var(--warn-loud-fg);
+  font-weight: 550;
+  box-shadow:
+    0 0 0 4px var(--warn-loud-halo),
+    0 16px 38px var(--warn-loud-shadow);
+  animation: toast-pop 0.2s ease-out, toast-warn-pop 0.34s ease-out 0.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ph-toast.warn { animation: none; }
+}
 @keyframes toast-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── Real-device adjustments (lifting the prototype out of the iOS frame) ── */
@@ -828,4 +927,258 @@
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 14px;
+}
+
+/* ===== Mobile shipping =====
+   The desktop table's rows regrouped as glance cards. The journey strip is
+   the desktop timeline compressed to 4 segments; its tone carries the state
+   (info = moving, pos = arrived, warn = exception, subtle = voided). */
+.ph-ship-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 13px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ph-ship-card + .ph-ship-card { margin-top: 10px; }
+.ph-ship-card.tappable { cursor: pointer; }
+.ph-ship-card.tappable:active { background: var(--bg-soft); }
+
+.ph-ship-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+/* The headline is the biggest thing on the card on purpose: while a package
+   moves, the arrival day IS the answer the glance came for. */
+.ph-ship-headline {
+  font-size: 16.5px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  min-width: 0;
+}
+.ph-ship-headline.warn { color: var(--warn); }
+.ph-ship-head .chip { flex-shrink: 0; font-size: 10.5px; }
+
+.ph-ship-strip {
+  display: flex;
+  gap: 4px;
+  --strip-fill: var(--info);
+}
+.ph-ship-strip.done  { --strip-fill: var(--pos); }
+.ph-ship-strip.warn  { --strip-fill: var(--warn); }
+.ph-ship-strip.muted { --strip-fill: var(--fg-subtle); }
+.ph-ship-strip .seg {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 0.5px solid var(--border);
+}
+.ph-ship-strip .seg.fill {
+  background: var(--strip-fill);
+  border-color: transparent;
+}
+.ph-ship-strip.ok .seg.live { animation: ship-strip-breathe 1.8s ease-in-out infinite; }
+@keyframes ship-strip-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ph-ship-strip .seg.live { animation: none; }
+}
+
+.ph-ship-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.ph-ship-who {
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.ph-ship-when {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.ph-ship-sub .chip { font-size: 10px; flex-shrink: 0; }
+
+.ph-ship-exc {
+  font-size: 12px;
+  color: var(--warn);
+  background: color-mix(in oklch, var(--warn) 10%, transparent);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+/* Tracking number: one big tap target that copies; the ↗ opens the carrier. */
+.ph-ship-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ph-ship-tn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-soft);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+  overflow: hidden;
+  text-align: left;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+}
+.ph-ship-tn:active { background: var(--bg-elev); }
+.ph-ship-copy {
+  flex-shrink: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+.ph-ship-out {
+  width: 34px; height: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.ph-ship-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.ph-ship-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 42px;
+  border-radius: 11px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ph-ship-cta:active { background: var(--bg-soft); }
+.ph-ship-cta.accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 4px 12px color-mix(in oklch, var(--accent) 26%, transparent);
+}
+.ph-ship-hint {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  background: var(--bg-soft);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+.ph-ship-voided-toggle {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ph-ship-empty {
+  text-align: center;
+  padding: 56px 24px 24px;
+  color: var(--fg-subtle);
+}
+.ph-ship-empty-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--fg);
+  margin-top: 10px;
+}
+.ph-ship-empty-body {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+/* Add-package screen */
+.ph-ship-add-sub {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.ph-ship-carriers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.ph-ship-carrier {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 11px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-family: inherit;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.ph-ship-carrier.lit { border-color: var(--border-strong); color: var(--fg); }
+.ph-ship-carrier.selected {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev));
+  color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.ph-ship-carrier-name { font-size: 13px; font-weight: 650; }
+.ph-ship-carrier-fmt { font-size: 9.5px; color: var(--fg-subtle); }
+.ph-ship-add-hint {
+  min-height: 18px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
 }

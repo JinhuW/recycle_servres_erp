@@ -103,6 +103,43 @@ describe('qty / price range gates — must 400, never 500', () => {
     })).status).toBe(400);
   });
 
+  // other_fees carries a CHECK (>= 0). These must be caught at the door as a
+  // 400, not inside the transaction as a 500.
+  it('orders reject a negative, non-numeric, or over-long other fee', async () => {
+    const { token } = await loginAs(MARCUS);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: { category: 'RAM', warehouseId: 'WH-LA1',
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+    });
+    const id = created.body.id;
+
+    for (const body of [
+      { otherFees: -1 },
+      { otherFees: 'free' },
+      { otherFees: true },
+      { otherFeesNote: 'x'.repeat(281) },
+      { otherFeesNote: 42 },
+    ]) {
+      expect((await api('PATCH', `/api/orders/${id}`, { token, body })).status).toBe(400);
+    }
+
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token, body: { otherFees: 0, otherFeesNote: 'ok' },
+    })).status).toBe(200);
+  });
+
+  it('order creation rejects the same bad fee values', async () => {
+    const { token } = await loginAs(MARCUS);
+    const base = {
+      category: 'RAM', warehouseId: 'WH-LA1',
+      lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
+    };
+    for (const extra of [{ otherFees: -0.01 }, { otherFees: 'free' }, { otherFeesNote: 'x'.repeat(281) }]) {
+      expect((await api('POST', '/api/orders', { token, body: { ...base, ...extra } })).status).toBe(400);
+    }
+  });
+
   it('sell-orders POST rejects qty=0 / negative unitPrice', async () => {
     const { token } = await loginAs(ALEX);
     const line = await freeSellableLine(token);

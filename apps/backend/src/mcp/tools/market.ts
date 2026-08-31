@@ -2,6 +2,13 @@ import type postgres from 'postgres';
 import { formatRefPrice, marketValueSelect } from '../../lib/market';
 import { getWorkspaceSetting } from '../../lib/settings';
 import { appendPriceEvent } from '../../lib/refPriceEvents';
+import { canonPartArg, canonPartCol } from '../../lib/part-number';
+
+// Annotations are advisory, but ChatGPT applies the MCP defaults when they're
+// absent — readOnlyHint false, destructiveHint true, openWorldHint true — so
+// every tool showed up in its connector panel as a destructive open-world
+// write and the read tools were gated behind elevated-risk confirmations.
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
 
 export const TOOL_DEFS = [
   {
@@ -25,22 +32,24 @@ export const TOOL_DEFS = [
       },
       additionalProperties: false,
     },
+    annotations: { title: 'List market values', ...READ_ONLY },
   },
   {
     name: 'get_market_value',
     description:
       'Read-only. Fetch a single reference-price record by id or by exact part number. Provide exactly one of ' +
-      'id or partNumber (supplying neither is an error; partNumber match is case-insensitive). Returns the same ' +
+      'id or partNumber (supplying neither is an error; partNumber matches on the canonical form, so case, spaces, hyphens and underscores do not matter). Returns the same ' +
       'record shape as list_market_values (lastPrice, avgSell, low/high/target, trend, maxBuy, samples, source, ' +
       'internalSales, recentPrices; money in USD), or null when nothing matches. Requires the market:read scope.',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string', description: 'ref_prices row id; provide this OR partNumber, not both' },
-        partNumber: { type: 'string', description: 'exact product part number (case-insensitive); provide this OR id' },
+        partNumber: { type: 'string', description: 'product part number; matched ignoring case, spaces, hyphens and underscores. Provide this OR id' },
       },
       additionalProperties: false,
     },
+    annotations: { title: 'Get market value', ...READ_ONLY },
   },
   {
     name: 'set_market_price',
@@ -50,18 +59,29 @@ export const TOOL_DEFS = [
       'current value with get_market_value first. The match is case-insensitive; if several rows share the part ' +
       'number the most recently updated one is used. Records a price event (attributed to the calling MCP client) ' +
       'and updates lastPrice/lastPriceAt/lastPriceSource. price is in the workspace base currency (USD) and must ' +
-      'be >= 0. On success returns { id, lastPrice, lastPriceAt }. Errors: "not_found" when no product matches the ' +
-      'part number, "invalid_price" for a negative or non-numeric price. Requires the market:write scope (a ' +
-      'market:read-only token is rejected with insufficient_scope).',
+      'be >= 0. On success returns { id, lastPrice, lastPriceAt }. A failure comes back as a normal tool result ' +
+      'with isError set and a message explaining it — "not_found" means no product carries that part number, so ' +
+      'look the product up with list_market_values and retry with the exact part number rather than treating the ' +
+      'tool as unavailable; "invalid_price" means the price was negative or non-numeric. Requires the ' +
+      'market:write scope (a market:read-only token is rejected with insufficient_scope).',
     inputSchema: {
       type: 'object',
       properties: {
-        partNumber: { type: 'string', description: 'exact part number of the product to price (case-insensitive)' },
+        partNumber: { type: 'string', description: 'part number of the product to price; matched ignoring case, spaces, hyphens and underscores' },
         price: { type: 'number', minimum: 0, description: 'new reference price in USD; must be >= 0' },
         note: { type: 'string', maxLength: 280, description: 'optional free-text note (<=280 chars) stored on the price event' },
       },
       required: ['partNumber', 'price'],
       additionalProperties: false,
+    },
+    // Re-pricing the same part twice with the same price is a no-op beyond the
+    // event trail, and nothing is ever deleted — so idempotent, not destructive.
+    annotations: {
+      title: 'Set market price',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
     },
   },
 ] as const;
@@ -95,7 +115,7 @@ export async function callGetMarketValue(
   const where = sql`
     (${args.id ?? null}::text IS NOT NULL AND rp.id::text = ${args.id ?? null})
     OR (${args.partNumber ?? null}::text IS NOT NULL
-        AND LOWER(COALESCE(rp.part_number, '')) = LOWER(${args.partNumber ?? ''}))
+        AND ${canonPartCol(sql, sql`rp.part_number`)} = ${canonPartArg(sql, args.partNumber ?? '')})
   `;
   const rows = await marketValueSelect(sql, where, sql`LIMIT 1`);
   if (rows.length === 0) return null;
@@ -122,7 +142,7 @@ export async function callSetMarketPrice(
   const ev = await sql.begin(async (tx) => {
     const row = (await tx<{ id: string }[]>`
       SELECT id FROM ref_prices
-      WHERE LOWER(COALESCE(part_number, '')) = LOWER(${partNumber})
+      WHERE ${canonPartCol(tx, tx`part_number`)} = ${canonPartArg(tx, partNumber)}
       LIMIT 1
     `)[0];
     if (!row) return null;
@@ -134,6 +154,8 @@ export async function callSetMarketPrice(
       actorUserId: ctx.actorUserId,
     });
   });
-  if (!ev) throw new Error('not_found');
+  // Naming the part back is what lets a client tell "I mistyped the part
+  // number" apart from "the write endpoint is down".
+  if (!ev) throw new Error(`not_found: no product carries part number "${partNumber}"`);
   return { id: ev.id, lastPrice: ev.price, lastPriceAt: ev.createdAt.toISOString() };
 }

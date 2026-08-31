@@ -154,6 +154,7 @@ html.desktop, body.desktop, .desktop #root {
   gap: 8px;
 }
 
+
 /* ===== Tweaks floating panel ===== */
 .tweaks-fab {
   position: fixed;
@@ -649,6 +650,15 @@ html.desktop, body.desktop, .desktop #root {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   z-index: 100; display: flex; flex-direction: column; gap: 8px;
 }
+/* The line drawer is anchored right at 620px and the toast floats above it. A
+   centred toast clears the drawer only above 1520px (620 drawer + 280 toast +
+   620 of centring); narrower than that it lands on the drawer's cost fields and
+   Confirm button — the ones it is usually complaining about — so it moves to
+   the corner the drawer never reaches. Only while a drawer is actually open:
+   otherwise every toast in the app sits off-centre for the same reason. */
+@media (max-width: 1519px) {
+  body.has-drawer .toast-wrap { left: 20px; transform: none; }
+}
 .toast {
   background: var(--fg);
   color: white;
@@ -663,6 +673,24 @@ html.desktop, body.desktop, .desktop #root {
 .toast.info    { background: oklch(0.30 0.012 250); }
 .toast.success { background: var(--accent); }
 .toast.error   { background: var(--neg); }
+/* A nudge for something not yet attempted, so it stays a toast rather than
+   escalating to the blocking dialog every other error takes — but solid and
+   the loudest of the three, because it lands over a dimmed drawer where a
+   tinted panel washes out. */
+.toast.warn {
+  background: var(--warn-loud);
+  color: var(--warn-loud-fg);
+  padding: 14px 18px;
+  font-size: 13.5px;
+  font-weight: 550;
+  box-shadow:
+    0 0 0 4px var(--warn-loud-halo),
+    0 16px 38px var(--warn-loud-shadow);
+  animation: toast-in 0.22s ease-out, toast-warn-pop 0.34s ease-out 0.22s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast.warn { animation: none; }
+}
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ===== Stepper (used in EditOrder lifecycle) ===== */
@@ -913,8 +941,16 @@ html.desktop, body.desktop, .desktop #root {
   padding: 14px 16px;
   cursor: pointer;
   transition: all 0.12s ease;
+  /* Rendered as a <button> at every call site, so the UA's centred, system-font
+     defaults have to be undone here rather than inline at each one. */
+  font-family: inherit;
+  text-align: left;
 }
 .so-stat:hover { border-color: var(--border-strong); }
+.so-stat.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .so-stat-head { margin-bottom: 8px; }
 .so-stat-num { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .so-stat-sub { font-size: 12px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; margin-top: 2px; }
@@ -1466,6 +1502,19 @@ html.desktop, body.desktop, .desktop #root {
 .order-readonly .field .input,
 .order-readonly .field .select,
 .order-readonly .field .textarea { user-select: none; }
+
+/* The `$` sitting inside the fee input on the cost tape. Absolute against the
+   inline wrapper the page puts around the input, so the caret starts clear of
+   it. */
+.oe-ledger-currency {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  pointer-events: none;
+  font-size: 12px;
+}
 
 @media (max-width: 600px) {
   .role-picker { grid-template-columns: 1fr; }
@@ -2159,4 +2208,1060 @@ html.desktop, body.desktop, .desktop #root {
 
 @media (prefers-reduced-motion: reduce) {
   .ac-area, .ac-row { transition: none; }
+}
+
+/* ===== Add-line control (PO submit + edit) =====
+   Four equal category buttons rather than one primary that names a category —
+   a PO is not in a category mode, and a button labelled "Add RAM" reads as
+   though it were. */
+.add-line-bar {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 3px 3px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.add-line-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-right: 2px;
+}
+.add-line-cat { gap: 6px; font-weight: 600; }
+.add-line-cat:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+.add-line-swatch { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+
+/* Category selector at the top of the line drawer. */
+.dw-cat-switch { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.dw-cat-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; border-radius: 8px; font-size: 11.5px;
+  background: var(--warn-soft); color: var(--warn-strong);
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, transparent);
+}
+.dw-cat-note button {
+  margin-left: auto; flex-shrink: 0; background: none; border: none; padding: 0;
+  color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer;
+}
+
+/* ===== Category group headers (mixed purchase orders) =====
+   A PO spanning categories groups its lines, each group folding away with its
+   own subtotal. Rendered as a full-width row inside the existing table rather
+   than a nested list, so the money columns stay aligned across every group. */
+.grp-row > td { padding: 0 !important; background: var(--bg-soft); }
+.grp-hd {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 12px;
+  border: none; border-left: 3px solid var(--cat);
+  background: transparent; color: var(--fg);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.grp-hd:hover { background: var(--cat-soft); }
+.grp-tw { display: inline-flex; color: var(--fg-subtle); transition: transform 0.15s; }
+.grp-tw.closed { transform: rotate(-90deg); }
+.grp-chip {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--cat-strong); background: var(--cat-soft);
+  padding: 2px 8px; border-radius: 999px;
+}
+.grp-meta { font-size: 11.5px; color: var(--fg-subtle); }
+.grp-unpriced { color: var(--warn-strong); }
+
+/* Sits directly above Confirm, so the gap and the button that is refusing to
+   fire are read together. */
+.dw-still-needed {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 18px; font-size: 12px; line-height: 1.4;
+  color: var(--warn-strong); background: var(--warn-soft);
+  border-top: 1px solid var(--border);
+}
+.dw-still-needed svg { flex-shrink: 0; }
+.grp-amt { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.grp-pl { width: 104px; text-align: right; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* "Change category" — a quiet link beside the chip that already states the
+   category. The four ADD buttons decide it at creation, so the switch exists
+   only to correct a mis-filed line and shouldn't occupy a form row. */
+.dw-cat-link {
+  background: none; border: none; padding: 0;
+  color: var(--accent-strong); font: inherit; font-size: 11.5px;
+  text-decoration: underline; cursor: pointer;
+}
+.dw-cat-link:hover { color: var(--fg); }
+
+
+/* ===== Cost tape =====
+   The PO's money laid out as a receipt: one figure per line, dot leaders to a
+   right-aligned column, rules where the arithmetic changes gear. Replaces a
+   horizontal strip that stood goods, fees and cost beside each other as peers
+   — they aren't; the first two add up to the third. */
+.tape-wrap {
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.06)) drop-shadow(0 4px 12px rgba(15, 23, 42, 0.05));
+}
+.tape {
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  padding: 16px 20px 26px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  /* Torn bottom edge — this is a receipt you check against a supplier's
+     invoice, not a summary panel. Two mask layers that union: the body, plus a
+     row of half-discs hanging off the bottom. */
+  --tooth: 8px;
+  /* The editable fee is an input, and its digits sit inside its own border and
+     padding. Every other figure carries the same inset so the money column is
+     where the digits end, not where each box happens to end. */
+  --fig-inset: 10px;
+  -webkit-mask:
+    radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
+    linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
+  mask:
+    radial-gradient(circle at 50% 0, #000 var(--tooth), #0000 var(--tooth)) 0 100% / calc(var(--tooth) * 2) var(--tooth) repeat-x,
+    linear-gradient(#000 0 0) 0 0 / 100% calc(100% - var(--tooth)) no-repeat;
+}
+.tape-cap {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 12px;
+}
+.tape-cap-r { text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
+
+.tape-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+.tape-k { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-muted); white-space: nowrap; }
+.tape-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--cat); }
+.tape-lead { flex: 1; border-bottom: 1px dotted var(--border-strong); transform: translateY(-4px); min-width: 12px; }
+.tape-v { font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: var(--fig-inset); }
+
+.tape-row.sum { border-top: 1px solid var(--border); margin-top: 9px; padding-top: 10px; font-weight: 600; }
+.tape-row.sum .tape-k { color: var(--fg); }
+.tape-row.total {
+  border-top: 2px solid var(--fg); margin-top: 10px; padding-top: 12px;
+  font-weight: 700;
+}
+.tape-row.total .tape-k {
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg);
+}
+.tape-row.total .tape-v { font-size: 21px; letter-spacing: -0.02em; }
+
+.tape-edit { display: inline-flex; align-items: center; gap: 8px; }
+/* 1px of the inset is the input's own border. */
+.tape-edit .input { font-size: 12.5px; padding: 5px calc(var(--fig-inset) - 1px); }
+.tape-edit .tape-money { width: 110px; text-align: right; font-variant-numeric: tabular-nums; }
+.tape-edit .tape-note { width: 190px; }
+.tape-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
+.tape-block-cap {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 10px;
+}
+.tape-row.profit {
+  border-top: 1px solid var(--border); margin-top: 9px; padding-top: 11px;
+  font-weight: 700; font-size: 13px;
+}
+.tape-row.profit .tape-k {
+  font-family: 'Inter', system-ui, sans-serif; font-size: 12px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg);
+}
+.tape-row.profit .tape-v { font-size: 18px; letter-spacing: -0.02em; }
+.tape-foot {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11.5px; color: var(--fg-subtle); margin-top: 10px; line-height: 1.5;
+}
+
+/* The tape's torn edge only reads if there is something behind it to reveal.
+   Inside the items card it was cutting white out of white, so the strip below
+   the teeth carries the page ground — the receipt then looks like it is lying
+   on the card rather than being part of it. */
+.oe-items-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
+/* Same ground for the submit screen's tape. */
+.oe-submit-foot { background: var(--bg); border-radius: 0 0 var(--radius) var(--radius); }
+
+/* ===== PO submit — commit bar =====
+   The stub that hangs under the torn tape: where the order lands, who pays,
+   what is attached, and the button that files it. The tape directly above
+   owns the money breakdown, so this band quotes the total once — as the
+   figure the button is about to commit — instead of restating lines, units
+   and cost as three peer statistics. In normal flow (not sticky) so it can
+   never cover the items card; the jump-to-bottom fab is the shortcut down. */
+.sub-commit {
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.sub-commit > * + * { border-top: 1px solid var(--border); }
+
+/* Cap the line table at the pinned header + 10 rows, then scroll — same
+   64px-per-row budget the order-edit page uses (--oe-row-h). */
+.sub-lines-scroll {
+  max-height: calc(40px + 64px * 10);
+  overflow-y: auto;
+}
+.sub-lines-scroll .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Shortcut down to the commit bar once it has scrolled out of view. Sits to
+   the left of the tweaks fab, which owns the corner. */
+.jump-bottom-fab {
+  position: fixed;
+  bottom: 18px;
+  right: 64px;
+  z-index: 90;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+}
+.jump-bottom-fab:hover { color: var(--fg); border-color: var(--fg-muted); }
+
+.sub-commit-meta {
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) auto minmax(240px, 1fr);
+  gap: 14px;
+  align-items: end;
+  flex-shrink: 0;
+}
+/* Managers get a leading purchaser picker, so their grid grows a column. */
+.sub-commit-meta--behalf {
+  grid-template-columns: minmax(150px, 210px) minmax(180px, 260px) auto minmax(220px, 1fr);
+}
+.sub-commit-attach { padding: 12px 16px; min-height: 0; overflow-y: auto; }
+.sub-commit-files {
+  margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 124px; overflow-y: auto;
+}
+
+.sub-commit-foot {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.sub-commit-total { margin-left: auto; text-align: right; }
+.sub-commit-cap {
+  font-size: 10px; font-weight: 650; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--fg-subtle);
+}
+.sub-commit-amt {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 20px; font-weight: 700; line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.sub-commit-fees { font-size: 11px; color: var(--accent-strong); margin-top: 1px; }
+/* The rule is the tear line: the figure on one side, the act on the other. */
+.sub-commit-actions {
+  display: flex; align-items: center; gap: 8px;
+  align-self: stretch;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 1000px) {
+  .sub-commit-meta { grid-template-columns: minmax(0, 1fr) auto; }
+  .sub-commit-meta > :nth-child(3) { grid-column: 1 / -1; }
+  /* Four fields: purchaser + warehouse share the first row, payment keeps its
+     own slot, notes takes the full-width row instead. */
+  .sub-commit-meta--behalf { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .sub-commit-meta--behalf > :nth-child(3) { grid-column: auto; }
+  .sub-commit-meta--behalf > :nth-child(4) { grid-column: 1 / -1; }
+  .sub-commit-total { margin-left: 0; }
+  .sub-commit-actions { margin-left: auto; }
+}
+
+/* ===== Shipping =====
+   Dashboard table + full-page label wizard + the per-PO panel. The table
+   borrows the orders-page skeleton; the wizard is a single centered column
+   because it is a form, not a workspace. */
+
+/* Shipments dashboard variant — head, toolbar and status rail stay put; only
+   the table body scrolls (same treatment as .page-history). */
+.page.page-shipping {
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+.page.page-shipping > .page-head { flex-shrink: 0; }
+.page.page-shipping > .ship-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page.page-shipping > .ship-card > .card-head,
+.page.page-shipping > .ship-card > .status-rail { flex-shrink: 0; }
+.page.page-shipping > .ship-card > .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.page.page-shipping > .ship-card .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Toolbar buttons must not wrap ("Export CSV" is the widest). */
+.ship-card .card-head .btn { white-space: nowrap; }
+
+/* Search input with the icon set inside it — the two-tier toolbar pattern. */
+.toolbar-search { position: relative; }
+.toolbar-search > svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  pointer-events: none;
+}
+.toolbar-search > .input {
+  padding-left: 30px;
+  height: 32px;
+  font-size: 12.5px;
+  width: 220px;
+}
+
+/* No logo assets — the carrier reads as a typed stamp instead. */
+.ship-carrier-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+.ship-cell-sub { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; }
+
+/* Tracking cell — the status owns a coloured edge so a scan down the column
+   reads like the reference's tracking rail. */
+.ship-track {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 11px;
+}
+.ship-track.pos    { border-left-color: var(--pos); }
+.ship-track.info   { border-left-color: var(--info); }
+.ship-track.warn   { border-left-color: var(--warn); }
+.ship-track.neg    { border-left-color: var(--neg); }
+.ship-track.accent { border-left-color: var(--accent); }
+
+/* Click-to-copy tracking number. */
+.ship-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ship-copy-btn .ship-copy-hint { color: var(--fg-subtle); font-size: 11px; }
+.ship-copy-btn .ship-copy-hint.done { color: var(--accent-strong); }
+
+/* PO id as a pressable mono pill (dashboard + panel headers). */
+.ship-po-pill {
+  font: inherit;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 650;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: var(--fg);
+}
+.ship-po-pill:hover { border-color: var(--border-strong); }
+
+
+/* ── Label wizard ─────────────────────────────────────────────────────────── */
+.ship-wizard {
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.ship-wizard-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ship-wizard-head .ship-wizard-step {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+.ship-wizard-title {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.ship-wizard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ship-sec-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+/* Selectable warehouse (ship-to) cards. */
+.ship-addr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.ship-addr-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.ship-addr-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ship-addr-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ship-addr-name { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.ship-addr-line { display: block; font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+.ship-addr-warn { display: block; font-size: 12px; color: var(--warn-strong); margin-top: 4px; }
+
+/* Focused per-PO view. */
+.ship-focus { max-width: 760px; }
+.ship-focus-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.ship-focus-title { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.ship-focus-missing { font-size: 13px; color: var(--fg-muted); padding: 16px 0; }
+
+/* The no-typing path: hand the seller a link instead of transcribing chat. */
+.ship-seller-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px dashed color-mix(in oklch, var(--accent) 45%, transparent);
+}
+.ship-seller-card .ship-seller-title { font-size: 13px; font-weight: 650; color: var(--accent-strong); }
+.ship-seller-card .ship-seller-hint { font-size: 12px; color: var(--fg-muted); margin-top: 1px; }
+
+/* Wizard column + contacts rail. The rail fills the otherwise-dead width with
+   the seller address book — a scrollable, searchable list holds far more
+   entries than inline cards could. */
+.ship-wizard-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 800px) minmax(240px, 320px);
+  gap: 24px;
+  align-items: start;
+}
+.ship-contacts {
+  position: sticky;
+  top: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 180px);
+}
+.ship-contacts > .card-head { flex-shrink: 0; justify-content: flex-start; gap: 8px; }
+.ship-contacts-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  min-height: 0;
+}
+.ship-contacts-search > .input { width: 100%; }
+.ship-contacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.ship-contact-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.ship-contact-row:hover { background: var(--bg-soft); }
+.ship-contact-row.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ship-contact-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ship-contact-row > svg { margin-top: 2px; flex-shrink: 0; color: var(--fg-subtle); }
+.ship-contact-main { min-width: 0; }
+.ship-contact-name { display: block; font-size: 12.5px; font-weight: 600; }
+.ship-contact-addr {
+  display: block;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ship-contact-count { margin-left: 6px; font-size: 10.5px; font-weight: 600; color: var(--fg-subtle); }
+.ship-contact-meta { display: block; font-size: 11px; color: var(--fg-subtle); margin-top: 2px; }
+.ship-contacts-empty { font-size: 12px; color: var(--fg-subtle); line-height: 1.5; }
+/* Narrow windows: hide the rail — the seller-name typeahead still reaches
+   every contact, and a card stranded below the form helps nobody. */
+@media (max-width: 1180px) {
+  .ship-wizard-layout { grid-template-columns: 1fr; }
+  .ship-contacts { display: none; }
+}
+
+/* Seller-name typeahead. */
+.ship-name-field { position: relative; }
+.ship-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+  padding: 4px;
+}
+.ship-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.ship-suggest-row.active { background: var(--bg-soft); }
+.ship-suggest-sub { margin-left: auto; color: var(--fg-subtle); font-size: 11.5px; }
+
+.ship-or-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+.ship-or-divider::before,
+.ship-or-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* L × W × H + weight with fixed units — the backend model is inches/ounces. */
+.ship-dims-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+/* Rate cards (step 2). */
+.ship-rate-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 11px 14px;
+  background: var(--bg-elev);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.ship-rate-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ship-rate-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ship-rate-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-strong);
+  display: grid;
+  place-items: center;
+}
+.ship-rate-card.selected .ship-rate-radio { border-color: var(--accent); }
+.ship-rate-radio::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.ship-rate-card.selected .ship-rate-radio::after { background: var(--accent); }
+.ship-rate-days { margin-left: auto; font-size: 12px; color: var(--fg-subtle); }
+.ship-rate-price {
+  font-weight: 600;
+  font-size: 14px;
+  width: 72px;
+  text-align: right;
+}
+.ship-rate-card.selected .ship-rate-price { color: var(--accent-strong); }
+
+/* Money-consequence callout before Buy. */
+.ship-callout-warn {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+  border: 1px solid color-mix(in oklch, var(--warn-strong) 25%, transparent);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ship-confirm-rows { display: flex; flex-direction: column; gap: 10px; }
+.ship-confirm-row { display: flex; justify-content: space-between; font-size: 13px; }
+.ship-confirm-row > :first-child { color: var(--fg-muted); }
+.ship-confirm-row > :last-child { font-weight: 600; }
+.ship-confirm-row.strong { border-top: 1px solid var(--border); padding-top: 10px; }
+
+.ship-wizard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.ship-wizard-foot .ship-foot-right { display: flex; gap: 8px; margin-left: auto; }
+.ship-wizard-err { font-size: 12.5px; color: var(--neg); }
+
+/* ── Add an existing label ────────────────────────────────────────────────── */
+.ship-add { max-width: 620px; }
+.ship-add-sub { font-size: 13px; color: var(--fg-muted); margin-top: -12px; }
+
+/* The tracking number is the whole point of the page — set it like one. */
+.ship-tn-input {
+  height: 52px;
+  font-size: 19px;
+  letter-spacing: 0.12em;
+  padding: 0 16px;
+}
+.ship-tn-input::placeholder { letter-spacing: 0.12em; color: var(--fg-subtle); opacity: 0.6; }
+
+.ship-carrier-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.ship-carrier-tile {
+  --tile: var(--fg-subtle);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.ship-carrier-tile[data-carrier='UPS'] { --tile: #b8860b; }
+.ship-carrier-tile[data-carrier='FedEx'] { --tile: #7b3fd4; }
+.ship-carrier-tile[data-carrier='USPS'] { --tile: #2f6fb5; }
+.ship-carrier-tile.lit {
+  border-color: color-mix(in srgb, var(--tile) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 14%, transparent);
+}
+.ship-carrier-tile.selected {
+  border-color: var(--tile);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 22%, transparent);
+}
+.ship-carrier-tile.selected .ship-carrier-name { color: var(--tile); }
+.ship-carrier-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ship-carrier-name { font-size: 13.5px; font-weight: 700; letter-spacing: 0.01em; }
+.ship-carrier-fmt { margin-left: auto; font-size: 10.5px; color: var(--fg-subtle); }
+.ship-carrier-tile .icon { color: var(--tile); flex-shrink: 0; }
+
+.ship-add-hint { min-height: 18px; font-size: 12px; color: var(--fg-muted); }
+
+/* PayPal payment screenshot preview (add-package, both shells) */
+.ship-pay-shot { display: flex; align-items: flex-start; gap: 12px; }
+.ship-pay-shot img {
+  max-width: 220px; max-height: 160px; border-radius: 10px;
+  border: 1px solid var(--border-strong); object-fit: contain; background: var(--bg-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ship-carrier-tile { transition: none; }
+}
+
+/* ── Per-PO panel ─────────────────────────────────────────────────────────── */
+.ship-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.ship-panel-head.bare { border-bottom: none; }
+.ship-panel-title { font-size: 14px; font-weight: 650; }
+.ship-panel-count {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.ship-block {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ship-block:last-child { border-bottom: none; }
+.ship-block.voided { opacity: 0.72; }
+.ship-block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ship-block-carrier { font-weight: 600; font-size: 13.5px; }
+.ship-block-service { color: var(--fg-muted); font-size: 13px; }
+.ship-block-cost { margin-left: auto; font-weight: 600; font-size: 13px; }
+.ship-block-cost.voided { text-decoration: line-through; color: var(--fg-subtle); }
+
+/* Created → purchased → in transit → delivered. Voided/exception stay badge
+   states — a failure is not a step on the way. */
+.ship-timeline { display: flex; align-items: center; }
+.ship-tl-seg { display: flex; align-items: center; flex: 1; min-width: 0; }
+.ship-tl-seg.last { flex: 0 0 auto; }
+.ship-tl-node {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  border: 2px solid var(--border-strong);
+  background: var(--bg-elev);
+  color: var(--fg-subtle);
+}
+.ship-tl-node.done {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.ship-tl-node.now {
+  border-color: var(--info);
+  background: var(--info-soft);
+  color: var(--info);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--info) 15%, transparent);
+}
+.ship-tl-bar {
+  flex: 1;
+  height: 2px;
+  margin: 0 6px;
+  min-width: 14px;
+  background: var(--border-strong);
+}
+.ship-tl-bar.done { background: var(--accent); }
+.ship-tl-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+  margin-top: 5px;
+}
+.ship-tl-labels .now { color: var(--info); font-weight: 600; }
+.ship-tl-labels .done { color: var(--accent-strong); font-weight: 600; }
+
+.ship-exception-note { font-size: 12.5px; color: var(--warn-strong); }
+
+.ship-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.ship-meta .ship-eta-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  margin-right: 6px;
+}
+.ship-meta .ship-eta-value { font-weight: 600; color: var(--fg); }
+.ship-meta a { color: var(--info); }
+
+.ship-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ship-actions .ship-from-note {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
+/* Delivered → the goods are here; the PO is the next thing to finish. */
+.ship-delivered-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  font-size: 12.5px;
+  color: var(--accent-strong);
+}
+.ship-delivered-cta .btn { margin-left: auto; }
+
+/* ── Clients: the rhythm strip ──────────────────────────────────────────────
+   Purchase orders as marks across a year; the bar is the silence since the
+   last one. Positions are inline (they are data), everything else is here. */
+.rhythm { position: relative; height: 22px; width: 150px; min-width: 150px; }
+.rhythm-base { position: absolute; left: 0; right: 0; top: 14px; height: 1px;
+  background: var(--border); }
+.rhythm-po { position: absolute; bottom: 8px; width: 2px; height: 9px; border-radius: 1px;
+  background: var(--accent); opacity: .75; }
+.rhythm-gap { position: absolute; top: 11px; right: 0; height: 7px; border-radius: 3px;
+  background: var(--bg-soft); }
+.rhythm-gap-quiet { background: var(--warn); opacity: .85; }
+.rhythm-gap-lost  { background: var(--fg-subtle); opacity: .45; }
+.rhythm-now { position: absolute; right: 0; top: 6px; bottom: 2px; width: 1.5px;
+  background: var(--fg); opacity: .5; }
+.rhythm-none { position: absolute; left: 0; top: 3px; font-size: 10.5px;
+  color: var(--fg-subtle); font-style: italic; }
+.rhythm-detail { width: 100%; height: 62px; }
+.rhythm-detail .rhythm-base { top: 44px; }
+.rhythm-detail .rhythm-po { bottom: 19px; width: 3px; height: 16px; }
+.rhythm-detail .rhythm-gap { top: 38px; height: 11px; border-radius: 5px; }
+.rhythm-detail .rhythm-now { top: 12px; bottom: 6px; width: 2px; }
+.rhythm-detail .rhythm-none { top: 18px; }
+/* What normal looks like for this client — when the bar outruns it, something
+   changed. Detail view only; on a row it would be noise. */
+.rhythm-typical { position: absolute; top: 52px; height: 6px;
+  border-top: 1px dashed var(--fg-subtle); border-left: 1px solid var(--fg-subtle);
+  border-right: 1px solid var(--fg-subtle); }
+.rhythm-cap { display: flex; justify-content: space-between; margin-top: 3px;
+  font-size: 10px; color: var(--fg-subtle); }
+
+/* ── Clients ────────────────────────────────────────────────────────────────
+   Scanned, not read. Overdue is the only thing allowed to be red, and the
+   accent never doubles as a status — otherwise "green" means both clickable
+   and healthy, and neither reads. */
+.clients-page .cli-rail { display: grid; gap: 10px; margin: 14px 0 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.cli-tile { position: relative; overflow: hidden; text-align: left; }
+.cli-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--border-strong); }
+.cli-tile-neg::before  { background: var(--neg); }
+.cli-tile-warn::before { background: var(--warn); }
+.cli-tile-info::before { background: var(--info); }
+.cli-tile-neg .so-stat-num  { color: var(--neg); }
+.cli-tile-warn .so-stat-num { color: var(--warn-strong); }
+
+/* Suggestions */
+.cli-sugg { background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+.cli-sugg-head { display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 10px 13px; background: var(--bg-soft); border: 0; border-bottom: 1px solid var(--border);
+  text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.cli-sugg.closed .cli-sugg-head { border-bottom: 0; }
+.cli-sugg-title { font-weight: 600; font-size: 13px; }
+.cli-sugg-why { color: var(--fg-muted); font-size: 12px; }
+.cli-chev { margin-left: auto; color: var(--fg-subtle); transition: transform .15s; }
+.cli-sugg.closed .cli-chev { transform: rotate(-90deg); }
+.cli-sugg-row { display: flex; align-items: center; gap: 12px; padding: 9px 13px;
+  border-bottom: 1px solid var(--border); }
+.cli-sugg-row:last-child { border-bottom: 0; }
+.cli-sugg-name { font-weight: 500; font-size: 13px; }
+.cli-sugg-meta { font-size: 11.5px; color: var(--fg-muted); margin-top: 1px; }
+.cli-sugg-acts { margin-left: auto; display: flex; gap: 6px; flex: none; }
+
+/* Table */
+.cli-table td { vertical-align: middle; }
+.cli-row { cursor: pointer; }
+.cli-row:hover td { background: var(--bg-soft); }
+.cli-cell-name { position: relative; }
+.cli-row-late .cli-cell-name::before,
+.cli-row-quiet .cli-cell-name::before { content: ""; position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px; }
+.cli-row-late .cli-cell-name::before  { background: var(--neg); }
+.cli-row-quiet .cli-cell-name::before { background: var(--warn); }
+.cli-name { font-weight: 600; font-size: 13px; letter-spacing: -.01em; }
+.cli-where { font-size: 11.5px; color: var(--fg-muted); margin-top: 1px;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.cli-owner { font-size: 12px; color: var(--fg-muted); }
+.cli-num { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--fg-muted); }
+.cli-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.cli-tag { font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
+  background: var(--bg-soft); border: 1px solid var(--border); color: var(--fg-muted);
+  white-space: nowrap; }
+.cli-act { text-align: right; white-space: nowrap; }
+.cli-nophone { font-size: 11.5px; color: var(--fg-subtle); }
+.cli-empty { padding: 40px 22px; text-align: center; }
+.cli-empty h4 { font-size: 15px; font-weight: 600; margin: 0 0 5px; }
+.cli-empty p { font-size: 12.5px; color: var(--fg-muted); margin: 0 auto 14px; max-width: 40ch; }
+
+/* Drawer */
+.cli-drawer { width: min(480px, 96vw); max-height: 92vh; display: flex;
+  flex-direction: column; padding: 0; }
+.cli-drawer-head { padding: 15px 17px 13px; border-bottom: 1px solid var(--border);
+  background: var(--bg-soft); }
+.cli-drawer-top { display: flex; align-items: flex-start; gap: 10px; }
+.cli-drawer-name { font-size: 17px; font-weight: 700; letter-spacing: -.02em; line-height: 1.25; }
+.cli-drawer-where { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+.cli-drawer-top .icon-btn { margin-left: auto; flex: none; }
+.cli-drawer-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px; }
+.cli-quick { display: flex; gap: 6px; margin-top: 11px; }
+/* Real targets: this gets used mid-call, sometimes one-handed. */
+.cli-quick-btn { flex: 1; height: 38px; justify-content: center; }
+.cli-drawer-body { overflow-y: auto; padding: 0 17px 20px; }
+.cli-sec { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.cli-sec:last-child { border-bottom: 0; }
+.cli-sec-h { font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--fg-muted); margin: 0 0 9px; font-weight: 500;
+  display: flex; align-items: center; gap: 7px; }
+.cli-sec-head-row { display: flex; align-items: center; justify-content: space-between; }
+.cli-derived { background: var(--accent-soft); color: var(--accent-strong);
+  border-radius: 3px; padding: 1px 5px; font-size: 8.5px; letter-spacing: .06em; }
+.cli-kv { display: grid; grid-template-columns: 96px 1fr; gap: 5px 10px;
+  font-size: 12.5px; margin: 0; }
+.cli-kv dt { color: var(--fg-muted); }
+.cli-kv dd { margin: 0; }
+.cli-muted { color: var(--fg-muted); font-size: 12.5px; margin: 0; }
+.cli-notes-text { font-size: 12.5px; margin: 8px 0 0; }
+.cli-quiet-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px;
+  background: var(--warn-soft); color: var(--warn-strong); border-radius: 8px;
+  padding: 9px 11px; font-size: 12.5px; line-height: 1.45; }
+.cli-sold { display: flex; flex-direction: column; gap: 6px; }
+.cli-sold-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.cli-sold-name { min-width: 120px; }
+.cli-sold-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--bg-soft);
+  overflow: hidden; }
+.cli-sold-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.cli-sold-qty { font-variant-numeric: tabular-nums; font-size: 11.5px;
+  color: var(--fg-muted); min-width: 56px; text-align: right; }
+.cli-sold-foot { font-size: 11.5px; color: var(--fg-muted); margin: 9px 0 0; }
+.cli-timeline { display: flex; flex-direction: column; gap: 11px; padding-left: 14px;
+  border-left: 1px solid var(--border); }
+.cli-tl-item { position: relative; }
+.cli-tl-item::before { content: ""; position: absolute; left: -18px; top: 4px;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--fg-subtle);
+  box-shadow: 0 0 0 2px var(--bg-elev); }
+.cli-tl-call::before, .cli-tl-text::before { background: var(--accent); }
+.cli-tl-offer::before { background: var(--pos); }
+.cli-tl-owner_changed::before { background: var(--warn); }
+.cli-tl-body { font-size: 12.5px; line-height: 1.45; }
+.cli-tl-meta { font-size: 10.5px; color: var(--fg-subtle); margin-top: 2px; }
+.cli-orders { display: flex; flex-direction: column; gap: 4px; }
+.cli-order { display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+  padding: 5px 8px; border-radius: 6px; text-decoration: none; color: inherit; }
+.cli-order:hover { background: var(--bg-soft); }
+.cli-order-id { font-weight: 500; }
+.cli-order-date { color: var(--fg-muted); }
+.cli-order-total { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* Log a contact — every control here is sized to be tapped, not aimed at. */
+.cli-log { background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 9px; padding: 11px; }
+.cli-seg { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 9px; }
+.cli-seg-btn { height: 36px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+.cli-seg-btn.on { background: var(--accent); border-color: var(--accent);
+  color: var(--accent-fg); }
+.cli-log-body { width: 100%; resize: vertical; }
+.cli-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.cli-chip-btn { font-size: 11.5px; padding: 5px 11px; border-radius: 16px;
+  border: 1px dashed var(--border-strong); background: none; color: var(--fg-muted);
+  cursor: pointer; font-family: inherit; }
+.cli-chip-btn:hover { border-style: solid; color: var(--fg); }
+.cli-when-label { font-size: 11.5px; color: var(--fg-muted); margin: 12px 0 6px; }
+.cli-when { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.cli-when-btn { height: 40px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  font: inherit; font-size: 12px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.cli-when-btn.on { border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent-strong); font-weight: 600; }
+.cli-when-date { font-size: 9.5px; opacity: .75; font-variant-numeric: tabular-nums; }
+.cli-date { height: 40px; }
+.cli-log-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.cli-log-hint { flex: 1; font-size: 11px; color: var(--fg-muted); font-style: italic; }
+
+/* Forms */
+.cli-modal { width: min(440px, 96vw); }
+.cli-modal-wide { width: min(560px, 96vw); max-height: 92vh; overflow-y: auto; }
+.cli-modal-title { font-size: 16px; font-weight: 700; margin: 0 0 14px; letter-spacing: -.02em; }
+.cli-form { padding: 17px; display: flex; flex-direction: column; gap: 11px; }
+.cli-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.cli-field > span { color: var(--fg-muted); }
+.cli-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.cli-form-hint { font-size: 11.5px; color: var(--fg-muted); margin: 0; }
+.cli-form-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.cli-pick { display: flex; gap: 5px; flex-wrap: wrap; }
+.cli-pick-btn { height: 34px; padding: 0 11px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  font: inherit; font-size: 12px; cursor: pointer; }
+.cli-pick-btn.on { border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent-strong); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .cli-field-row { grid-template-columns: 1fr; }
 }

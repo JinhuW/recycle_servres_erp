@@ -12,10 +12,10 @@ export type IconName =
   | 'filter' | 'search' | 'lock' | 'eye' | 'edit' | 'trash'
   | 'plus' | 'x' | 'arrow' | 'arrowUp' | 'arrowDown'
   | 'chip' | 'drive' | 'box' | 'warehouse' | 'medal' | 'flag'
-  | 'clock' | 'info' | 'alert' | 'flash' | 'hash'
+  | 'clock' | 'info' | 'alert' | 'flash' | 'hash' | 'scan'
   | 'settings' | 'bell' | 'tag' | 'trendDown' | 'minus'
   | 'book' | 'star' | 'zap' | 'globe' | 'mail' | 'grip'
-  | 'truck' | 'cash' | 'refresh'
+  | 'truck' | 'cash' | 'refresh' | 'label' | 'package'
   | 'paperclip' | 'file' | 'image' | 'invoice' | 'analytics';
 
 type Props = {
@@ -70,6 +70,7 @@ const PATHS: Record<IconName, JSX.Element> = {
   alert: <><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></>,
   flash: <><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></>,
   hash:  <><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></>,
+  scan:  <><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.36.15.68.41.91.74"/></>,
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></>,
   tag:  <><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.2"/></>,
@@ -82,6 +83,11 @@ const PATHS: Record<IconName, JSX.Element> = {
   mail:  <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></>,
   grip:  <><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></>,
   truck: <><path d="M2 17V6h11v11"/><path d="M13 9h5l3 4v4h-8"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></>,
+  // Shipping label with a barcode — distinct from `truck`, which Transfers owns.
+  label: <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9v6"/><path d="M10.5 9v6"/><path d="M14 9v3"/><path d="M17 9v6"/></>,
+  // Taped parcel — the backend's shipment/package notifications name this icon
+  // (stored per row, so the name must stay renderable forever).
+  package: <><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v9"/><path d="M7.5 5.5l9 5"/></>,
   cash:  <><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v.01M18 14v.01"/></>,
   refresh: <><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v5h-5"/><path d="M3 20v-5h5"/></>,
   paperclip: <><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></>,

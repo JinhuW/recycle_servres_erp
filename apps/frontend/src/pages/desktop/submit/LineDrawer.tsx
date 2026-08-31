@@ -1,14 +1,24 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../../../components/Icon';
 import { ImageLightbox } from '../../../components/ImageLightbox';
 import { api } from '../../../lib/api';
+import { showWarnToast } from '../../../lib/errorToast';
 import { fmtUSD } from '../../../lib/format';
+import { scanErrorMessage } from '../../../lib/scanError';
 import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from '../../../lib/status';
-import type { ScanResponse } from '../../../lib/types';
+import type { Category, ScanResponse } from '../../../lib/types';
 import type { Line } from '../DesktopSubmit';
-import { scanToLinePatch } from '../DesktopSubmit';
+import { scanToLinePatch, brandConfirmPending } from '../DesktopSubmit';
+import { BrandConfirmDialog } from '../../../components/BrandConfirmDialog';
+import { RAM_BRANDS } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
+import { switchLineCategory, clearedBySwitch, SPEC_FIELD_LABEL_KEY } from '../../../lib/lineCategorySwitch';
+import { LinePhotoStrip, type PendingPhoto } from '../../../components/LinePhotoStrip';
+import { linePhotos, type LinePhoto } from '../../../lib/linePhotos';
+import { MarketAssist } from '../../../components/MarketAssist';
+import { type ResolvedMarketValue } from '../../../lib/useMarketLookup';
+import { addableCategories, aiCaptureEnabled, categoryTone } from '../../../lib/lookups';
 import { parseSerials } from '../../../components/SerialNumbers';
 
 // ─── LineDrawer ──────────────────────────────────────────────────────────────
@@ -18,7 +28,8 @@ import { parseSerials } from '../../../components/SerialNumbers';
 // passes `editing={true}` to the shared OrderForm.
 export function LineDrawer({
   line, idx, onChange, onClose, onRemove, canRemove, editing = false,
-  onConfirmLine, onConfirmError, duplicateOnLines,
+  onConfirmLine, onConfirmError, duplicateOnLines, readOnly = false,
+  photoCtx, market, missingFields,
 }: {
   line: Line;
   idx: number;
@@ -31,11 +42,46 @@ export function LineDrawer({
   onConfirmError?: (msg: string) => void;
   // 1-based line numbers (excluding this one) that share this line's part #.
   duplicateOnLines?: number[];
+  // Locked order (Done, or a purchaser past their stage): the drawer still
+  // opens so the line's full spec stays lookup-able, but nothing can change.
+  readOnly?: boolean;
+  // Recorded market value for this line's part number, if the parent looked
+  // one up. Optional so surfaces that don't fetch it still render.
+  market?: ResolvedMarketValue | null;
+  // Localized "Brand, Capacity, …" list of required fields still blank. Shown
+  // above Confirm while the line is being filled, so the gap is named where
+  // it can be closed rather than on the submit bar three sections away.
+  missingFields?: string | null;
+  // Where this line's photos live. `lineId` is null until the line is
+  // persisted; while it is, the parent buffers picked files in `pending` and
+  // uploads them once the id exists — the same deferral the order-level
+  // evidence uses. Both callers do that, so the "+" never eats a file.
+  photoCtx?: {
+    orderId: string | null;
+    lineId: string | null;
+    pending: PendingPhoto[];
+    onAddFiles: (files: FileList | null) => void;
+    onRemovePending: (p: PendingPhoto) => void;
+    onRemoveSaved: (photo: LinePhoto) => void;
+    busy?: boolean;
+  };
 }) {
   const { lang, t } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [confirming, setConfirming] = useState(false);
+  // The toast is centred and this panel is anchored right, so below ~1520px
+  // they overlap. Marking the document lets the stylesheet move the toast only
+  // while there is something for it to land on.
+  useEffect(() => {
+    document.body.classList.add('has-drawer');
+    return () => document.body.classList.remove('has-drawer');
+  }, []);
   const cat = line.category;
+  // Pre-switch snapshot for the undo, held only until the next switch or save.
+  const [undo, setUndo] = useState<{ line: Line; cleared: string[] } | null>(null);
+  // The category was already chosen by the button that created this line, so
+  // the switch stays out of the way until someone says they filed it wrong.
+  const [catOpen, setCatOpen] = useState(false);
   const set = (patch: Partial<Line>) => onChange(patch);
   const [lightbox, setLightbox] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -46,15 +92,25 @@ export function LineDrawer({
     !scanUrl.startsWith('data:image/placeholder') &&
     !thumbBroken;
 
-  // AI label dropzone — RAM submit only. The editing variant already shows a
-  // captured-image thumb in the drawer header, so re-scanning there would be
-  // a confusing flow; keep the dropzone scoped to the new-order path.
-  const showDropzone = cat === 'RAM' && !editing;
+  // AI label dropzone — ai_capture categories (RAM, SSD) whose line doesn't
+  // already carry a scan. POs raised outside the submit flow (packages →
+  // create-PO) enter their lines on the edit page, so the editing variant
+  // offers the scan too — but only while the line arrived scanless: one that
+  // already had a scan shows the header thumb instead, and re-scanning over it
+  // would be a confusing flow. Frozen at mount so a scan performed here
+  // doesn't unmount the dropzone (and the confidence notice rendered inside
+  // it) the moment it succeeds.
+  // readOnly must gate it explicitly: the dropzone is a div, so the disabled
+  // fieldset wrapping the form doesn't inert it the way it does real inputs.
+  const [hadScanAtMount] = useState(!!scanUrl);
+  const showDropzone = aiCaptureEnabled(cat) && !readOnly && (!editing || !hadScanAtMount);
   const aiFileInputRef = useRef<HTMLInputElement | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiDragOver, setAiDragOver] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNotice, setAiNotice] = useState<string | null>(null);
+  // Open while the purchaser is being asked to name the brand off the photo.
+  const [brandDialog, setBrandDialog] = useState(false);
   const [aiNoticeSeverity, setAiNoticeSeverity] = useState<'info' | 'warn' | 'severe'>('info');
 
   // Single-file scan: the drawer represents one line, so a drop with multiple
@@ -76,7 +132,7 @@ export function LineDrawer({
       form.append('file', file, file.name);
       form.append('category', cat);
       const scan = await api.upload<ScanResponse>('/api/scan/label', form);
-      onChange(scanToLinePatch(scan));
+      onChange(scanToLinePatch(scan, cat));
       const conf = scan.confidence ?? 0;
       const noFields = Object.keys(scan.extracted ?? {}).length === 0;
       if (scan.provider === 'stub') {
@@ -90,7 +146,7 @@ export function LineDrawer({
         setAiNoticeSeverity('warn');
       }
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'AI scan failed');
+      setAiError(scanErrorMessage(err, t));
     } finally {
       setAiBusy(false);
     }
@@ -178,15 +234,23 @@ export function LineDrawer({
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className={'chip ' + (cat === 'RAM' ? 'info' : cat === 'SSD' ? 'pos' : cat === 'HDD' ? 'cool' : 'warn')}>{cat}</span>
+                <span className={'chip ' + categoryTone(cat).chip}>{cat}</span>
+                {!readOnly && !catOpen && (
+                  <button type="button" className="dw-cat-link" onClick={() => setCatOpen(true)}>
+                    {t('changeCategory')}
+                  </button>
+                )}
+                {cat === 'Other' && !!(line.itemType ?? '').trim() && (
+                  <span className="chip">{line.itemType}</span>
+                )}
                 <span>
                   {cat === 'RAM' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.generation ?? ''}`.trim()}
                   {cat === 'SSD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.interface ?? ''}`.trim()}
                   {cat === 'HDD' && `${line.brand ?? '—'} ${line.capacity ?? ''} ${line.rpm ? line.rpm + 'rpm' : ''}`.trim()}
-                  {cat === 'Other' && (line.description ?? t('drawerUntitledItem'))}
+                  {cat === 'Other' && ((line.description ?? '').trim() || (line.partNumber ?? '').trim() || t('drawerUntitledItem'))}
                 </span>
               </div>
-              {(line.brand || line.description) && (
+              {(line.brand || line.description || line.partNumber) && (
                 <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
                   {line.partNumber || '—'} · {t('qtyShort', { n: line.qty })} · {t('drawerCostSummary', { cost: fmtUSD(qty * cost, locale) })}
                 </div>
@@ -199,7 +263,29 @@ export function LineDrawer({
             </div>
           </div>
 
-          <div style={{ padding: 16, display: 'grid', gap: 14 }}>
+          {/* A disabled fieldset is what actually freezes the form: the
+              Combobox's chevron and menu rows are buttons sitting outside its
+              input, so a pointer-events rule on inputs alone leaves the
+              dropdown live. `order-readonly` only supplies the muted look. */}
+          <fieldset
+            disabled={readOnly}
+            className={readOnly ? 'order-readonly' : undefined}
+            style={{ padding: 16, display: 'grid', gap: 14, border: 'none', margin: 0, minInlineSize: 0 }}
+          >
+            {readOnly && (
+              <div
+                role="status"
+                style={{
+                  padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+                  background: 'var(--bg-soft)', border: '1px solid var(--border)',
+                  color: 'var(--fg-muted)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                <Icon name="lock" size={13} />
+                <span>{t('drawerReadOnly')}</span>
+              </div>
+            )}
             {showDropzone && (
               <>
                 <input
@@ -333,16 +419,95 @@ export function LineDrawer({
                 style={{ maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)', marginBottom: 12 }}
               />
             )}
+            {/* A line filed under the wrong category is corrected here rather
+                than deleted and retyped. Switching blanks the fields the old
+                category owned — announced with an undo, since the values are
+                gone from the form the moment the select changes. */}
+            <div className="dw-cat-switch">
+              {catOpen && (
+                <>
+                  <label className="label" htmlFor={`dw-cat-${idx}`}>{t('category')}</label>
+                  <select
+                    id={`dw-cat-${idx}`}
+                    className="select"
+                    value={cat}
+                    disabled={readOnly}
+                    autoFocus
+                    onChange={e => {
+                      const next = e.target.value as Category;
+                      setCatOpen(false);
+                      if (next === cat) return;
+                      const cleared = clearedBySwitch(line as unknown as Record<string, unknown>, next);
+                      setUndo(cleared.length ? { line, cleared } : null);
+                      onChange(switchLineCategory(line, next) as Partial<Line>);
+                    }}
+                  >
+                    {addableCategories().map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </>
+              )}
+              {undo && (
+                <div className="dw-cat-note" role="status">
+                  <Icon name="alert" size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                  <span>
+                    {t('drawerCatCleared', {
+                      fields: undo.cleared
+                        .map(f => t(SPEC_FIELD_LABEL_KEY[f] ?? f))
+                        .join(lang === 'zh' ? '、' : ', '),
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { onChange(undo.line); setUndo(null); }}
+                  >{t('undo')}</button>
+                </div>
+              )}
+            </div>
+
+            {photoCtx && (() => {
+              const shots = linePhotos(line as unknown as Parameters<typeof linePhotos>[0]);
+              // The AI capture dropzone sits directly above and produces this
+              // line's photo, so an empty "add a photo" slot underneath asks
+              // for something the flow is about to supply. Once a picture
+              // exists — scanned or uploaded — the strip earns its place: it
+              // shows what was captured and takes more.
+              if (showDropzone && shots.length === 0 && photoCtx.pending.length === 0) return null;
+              return (
+                <LinePhotoStrip
+                  photos={shots}
+                  pending={photoCtx.pending}
+                  onAdd={photoCtx.onAddFiles}
+                  onRemove={photoCtx.onRemoveSaved}
+                  onRemovePending={photoCtx.onRemovePending}
+                  readOnly={readOnly}
+                  busy={photoCtx.busy}
+                />
+              );
+            })()}
+
             {cat === 'RAM' && <RamFields line={line} set={set} />}
             {cat === 'SSD' && <SsdFields line={line} set={set} />}
             {cat === 'HDD' && <HddFields line={line} set={set} />}
             {cat === 'Other' && <OtherFields line={line} set={set} />}
 
+            {/* SSDs are received as anonymous bulk lots — nobody keys in
+                per-drive serials at purchase, so the field only invited
+                count-mismatch errors. A line that already carries serials
+                (pre-rule data, scan fill) keeps the field: the shared
+                count-vs-qty validator still checks them, and a hidden field
+                would make its 400 unfixable. String-typed (not non-blank) so
+                clearing the textarea to retype doesn't unmount it mid-edit —
+                a fresh line starts undefined. */}
+            {(cat !== 'SSD' || typeof line.serialNumber === 'string') && (
             <div className="field">
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Icon name="hash" size={12} style={{ color: 'var(--fg-subtle)' }} />
                 {t('serialNumbers')}
-                <span className="muted" style={{ fontWeight: 400 }}>· {t('optional')}</span>
+                {cat === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5' ? (
+                  <span style={{ color: 'var(--neg)', fontWeight: 400 }}>* {t('serialRequiredDdr5')}</span>
+                ) : (
+                  <span className="muted" style={{ fontWeight: 400 }}>· {t('optional')}</span>
+                )}
                 {snCount > 0 && (
                   <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>
                     {t('serialCount', { n: snCount })}
@@ -357,12 +522,17 @@ export function LineDrawer({
                 placeholder={t('serialNumbersPh')}
                 style={{ resize: 'vertical', lineHeight: 1.6 }}
               />
-              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t('serialNumbersHint')}</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                {cat === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
+                  ? t('serialNumbersHintDdr5')
+                  : t('serialNumbersHint')}
+              </div>
             </div>
+            )}
 
             <div style={{
               display: 'grid',
-              gridTemplateColumns: editing ? '90px 1fr 1fr 1fr' : '120px 1fr 1fr',
+              gridTemplateColumns: '90px 1fr 1fr 1fr',
               gap: 14, alignItems: 'end',
               padding: 14, background: 'var(--bg-soft)', borderRadius: 10,
             }}>
@@ -403,22 +573,33 @@ export function LineDrawer({
                   placeholder="0.00"
                 />
               </div>
-              {editing && (
-                <div className="field">
-                  <label className="label">{t('sellUnit')}</label>
-                  <input
-                    className="input mono"
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={line.sellPrice ?? ''}
-                    onChange={e => set({ sellPrice: e.target.value })}
-                    placeholder="0.00"
-                  />
-                </div>
-              )}
+              <div className="field">
+                <label className="label">{t('sellUnit')}</label>
+                <input
+                  className="input mono"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={line.sellPrice ?? ''}
+                  onChange={e => set({ sellPrice: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
             </div>
-            {editing && (
+
+            {/* What the recorded market says, while the buy can still change.
+                Rendered below the cost fields so the numbers it offers sit
+                next to the ones they'd replace. */}
+            <MarketAssist
+              market={market ?? null}
+              unitCost={cost}
+              locale={locale}
+              disabled={readOnly}
+              onUseMaxBuy={v => set({ unitCost: String(v), totalCost: undefined })}
+              onUseSellPrice={v => set({ sellPrice: String(v) })}
+            />
+
+            {(editing || line.sellPrice != null) && (
               <div style={{
                 display: 'flex', gap: 18, fontSize: 12, color: 'var(--fg-subtle)',
                 padding: '0 4px', flexWrap: 'wrap',
@@ -429,51 +610,94 @@ export function LineDrawer({
                 {lossy && <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⚠ {t('drawerLossyWarn')}</span>}
               </div>
             )}
-          </div>
+          </fieldset>
 
+          {/* Named where it can be closed, and for as long as it is true: a
+              toast that names eight fields and then clears itself leaves the
+              user hunting for them up the form. */}
+          {!readOnly && !line._confirmed && missingFields && (
+            <div className="dw-still-needed" role="status">
+              <Icon name="alert" size={12} />
+              <span>{t('drawerStillNeeded', { fields: missingFields })}</span>
+            </div>
+          )}
+
+          {/* Outside the fieldset — Close must stay live while the form is
+              disabled. */}
           <div style={{
-            display: 'flex', justifyContent: 'space-between', gap: 8,
+            display: 'flex', justifyContent: readOnly ? 'flex-end' : 'space-between', gap: 8,
             padding: '12px 18px',
             borderTop: '1px solid var(--border)', background: 'var(--bg-soft)',
           }}>
-            <button
-              className="btn"
-              onClick={() => { onRemove(); onClose(); }}
-              disabled={!canRemove}
-              style={canRemove ? { color: 'var(--neg)' } : undefined}
-            >
-              <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
-            </button>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {line._confirmed && (
-                <span className="chip pos" style={{ fontSize: 11 }}>
-                  <Icon name="check" size={10} /> {t('drawerConfirmed')}
-                </span>
-              )}
-              <button className="btn" onClick={onClose}>{t('cancel')}</button>
-              <button
-                className="btn accent"
-                disabled={confirming || line._confirmed}
-                onClick={async () => {
-                  if (line._confirmed) { onClose(); return; }
-                  if (!onConfirmLine) { onClose(); return; }
-                  setConfirming(true);
-                  try {
-                    await onConfirmLine();
-                    onClose();
-                  } catch (e) {
-                    onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
-                  } finally {
-                    setConfirming(false);
-                  }
-                }}
-              >
-                <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
-              </button>
-            </div>
+            {readOnly ? (
+              <button className="btn" onClick={onClose}>{t('close')}</button>
+            ) : (
+              <>
+                <button
+                  className="btn"
+                  onClick={() => { onRemove(); onClose(); }}
+                  disabled={!canRemove}
+                  style={canRemove ? { color: 'var(--neg)' } : undefined}
+                >
+                  <Icon name="trash" size={13} /> {t('soRemoveLineTooltip')}
+                </button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {line._confirmed && (
+                    <span className="chip pos" style={{ fontSize: 11 }}>
+                      <Icon name="check" size={10} /> {t('drawerConfirmed')}
+                    </span>
+                  )}
+                  <button className="btn" onClick={onClose}>{t('cancel')}</button>
+                  <button
+                    className="btn accent"
+                    disabled={confirming || line._confirmed}
+                    onClick={async () => {
+                      if (line._confirmed) { onClose(); return; }
+                      // Brand before the gap list: confirming "Other" adds
+                      // Chip # to what the line owes, so the gaps named below
+                      // are only final once the brand is settled.
+                      if (brandConfirmPending(line)) { setBrandDialog(true); return; }
+                      // Name the gaps here rather than letting the round-trip
+                      // fail into a dialog: the fields are on screen and the
+                      // drawer stays open on top of them.
+                      if (missingFields) {
+                        showWarnToast(t('drawerStillNeeded', { fields: missingFields }));
+                        return;
+                      }
+                      if (!onConfirmLine) { onClose(); return; }
+                      setConfirming(true);
+                      try {
+                        await onConfirmLine();
+                        onClose();
+                      } catch (e) {
+                        onConfirmError?.(e instanceof Error ? e.message : t('drawerConfirmFailed'));
+                      } finally {
+                        setConfirming(false);
+                      }
+                    }}
+                  >
+                    <Icon name="check" size={13} /> {confirming ? t('drawerConfirming') : t('drawerConfirmLine')}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
+      {brandDialog && (
+        <BrandConfirmDialog
+          photoUrl={scanUrl && !scanUrl.startsWith('data:image/placeholder') ? scanUrl : null}
+          // Only an off-catalog value can be quoted back as the AI's reading:
+          // the brand field is a <select>, so anything not in the catalog got
+          // there from the scan. A catalog value might be the purchaser's own
+          // pick, and attributing it to the model would be a lie.
+          aiRead={RAM_BRANDS.includes((line.brand ?? '').trim()) ? null : ((line.brand ?? '').trim() || null)}
+          brand={line.brand}
+          onConfirm={b => { set({ brand: b, _brandNeedsConfirm: false }); setBrandDialog(false); }}
+          onRetake={showDropzone ? () => { setBrandDialog(false); onAiUpload(); } : undefined}
+          onCancel={() => setBrandDialog(false)}
+        />
+      )}
       {lightbox && scanUrl && (
         <ImageLightbox url={scanUrl} alt={t('aiPhotoLabel')} onClose={() => setLightbox(false)} />
       )}

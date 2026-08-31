@@ -7,6 +7,8 @@ import { handleFetchError } from '../lib/errorToast';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
+import { profitTone, signedUSD0 } from '../lib/orderPresentation';
+import { isRealPhotoUrl } from '../lib/linePhotos';
 import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
@@ -14,9 +16,8 @@ import { useRoute, match, navigate } from '../lib/route';
 import type { OrderSummary, Order } from '../lib/types';
 import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { OrderCategoryChips } from '../components/OrderCategoryChips';
 
-const realScan = (u?: string | null): u is string =>
-  !!u && !u.startsWith('data:image/placeholder');
 
 // Stable hue (0–359) from an id, so a given warehouse/owner always paints the
 // same colour across the list. Feeds the `--h` custom prop on the meta tags.
@@ -56,11 +57,17 @@ export function Orders({ onEdit, onToast }: Props) {
   useEffect(() => {
     let alive = true;
     const params = new URLSearchParams();
-    // Mobile is a personal submission surface — always scope to my own POs,
-    // even for managers (who'd otherwise see the whole org's).
-    params.set('mine', 'true');
+    // Managers see the whole org's POs here, same as desktop; everyone else
+    // stays scoped to their own. The camera capture flow is unaffected — its
+    // draft picker pins mine=true itself (MobileApp.startSubmit), so scanned
+    // items always land on the manager's own PO.
+    const isManager = effRole === 'manager';
+    if (!isManager) params.set('mine', 'true');
     if (filter !== 'all') params.set('category', filter);
     if (statusFilter !== 'all') params.set('status', statusFilter);
+    // Org-wide, the default view would drown in finished POs — hide Done
+    // until the Done chip asks for them explicitly.
+    else if (isManager) params.set('excludeStatus', 'Done');
     if (showArchived) params.set('includeArchived', 'true');
     api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
       .then(r => { if (alive) setOrders(r.orders); })
@@ -78,6 +85,16 @@ export function Orders({ onEdit, onToast }: Props) {
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [openId]);
+
+  // The all-status view hides Done POs — the "Done" chip is the explicit way
+  // to see them. A deep-linked done order stays visible while expanded so
+  // /purchase-orders/:id links keep working.
+  const visibleOrders = useMemo(
+    () => statusFilter === 'all'
+      ? orders.filter(o => !isCompleted(o.status) || o.id === openId)
+      : orders,
+    [orders, statusFilter, openId],
+  );
 
   // CC-5: when the URL matches /purchase-orders/:id, expand that row and (if
   // editable) push to the review screen. Fires whenever route or the
@@ -110,7 +127,7 @@ export function Orders({ onEdit, onToast }: Props) {
     <>
       <PhHeader
         title={t('ordersHeading')}
-        sub={t('ordersSubmitted', { n: orders.length })}
+        sub={t('ordersSubmitted', { n: visibleOrders.length })}
         scrolled={scrolled}
         trailing={
           <button
@@ -162,7 +179,7 @@ export function Orders({ onEdit, onToast }: Props) {
           </button>
         </div>
         {!loadedOnce && <PhoneListSkeleton rows={5} variant="order" />}
-        {loadedOnce && orders.length === 0 && (
+        {loadedOnce && visibleOrders.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {t('noOrdersMatch')}
           </div>
@@ -171,21 +188,20 @@ export function Orders({ onEdit, onToast }: Props) {
         {loadedOnce && (() => {
           const q = searchQ.trim().toLowerCase();
           const filtered = q
-            ? orders.filter(o =>
+            ? visibleOrders.filter(o =>
                 o.id.toLowerCase().includes(q) ||
                 (o.warehouse?.short ?? '').toLowerCase().includes(q) ||
                 (o.warehouse?.region ?? '').toLowerCase().includes(q) ||
                 o.userName.toLowerCase().includes(q)
               )
-            : orders;
+            : visibleOrders;
           return filtered.slice(0, 30).map(o => {
           const isOpen = openId === o.id;
+          const unpriced = o.unpricedLineCount ?? 0;
           return (
             <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }} style={o.archivedAt ? { opacity: 0.6 } : undefined}>
               <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
-                <span className={'chip ' + (o.category === 'RAM' ? 'info' : o.category === 'SSD' ? 'pos' : o.category === 'HDD' ? 'cool' : 'warn')} style={{ minWidth: 42, justifyContent: 'center' }}>
-                  {o.category}
-                </span>
+                <OrderCategoryChips categories={o.categories} max={1} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>{o.id}</span>
@@ -235,8 +251,24 @@ export function Orders({ onEdit, onToast }: Props) {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>+{fmtUSD0(o.profit, locale)}</div>
+                  <div className="mono" style={{
+                    fontSize: 13, fontWeight: 600,
+                    // Through the shared rule, not a second `< 0`: the desktop
+                    // table reads it as a class, the phone as a variable, and
+                    // what counts as a loss has to be decided in one place.
+                    color: `var(--${profitTone(o.profit)})`,
+                  }}>{signedUSD0(o.profit, locale)}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{fmtUSD0(o.revenue, locale)}</div>
+                  {/* Revenue counts priced lines only, so a PO nobody has
+                      priced reads $0 against a real cost. Say why. */}
+                  {unpriced > 0 && (
+                    <div
+                      style={{ fontSize: 10, color: 'var(--warn)', marginTop: 1 }}
+                      title={t('unpricedRevenueHint', { n: unpriced, total: o.lineCount })}
+                    >
+                      {t('grpUnpriced', { n: unpriced })}
+                    </div>
+                  )}
                 </div>
                 <Icon name="chevronDown" size={16} style={{ color: 'var(--fg-subtle)', transition: 'transform 0.18s', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
               </div>
@@ -244,7 +276,7 @@ export function Orders({ onEdit, onToast }: Props) {
                 <div className="ph-order-body">
                   {openLines.lines.map(l => (
                     <div key={l.id} className="ph-line" style={{ display: 'flex', gap: 10 }}>
-                      {realScan(l.scanImageUrl) && (
+                      {isRealPhotoUrl(l.scanImageUrl) && (
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
@@ -268,7 +300,12 @@ export function Orders({ onEdit, onToast }: Props) {
                           {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`}
                           {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`}
                           {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`}
-                          {l.category === 'Other' && (l.description ?? '')}
+                          {l.category === 'Other' && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
+                              {l.description ?? ''}
+                            </span>
+                          )}
                         </div>
                         <span className={'chip ' + statusTone(l.status) + ' dot'} style={{ fontSize: 10 }}>{l.status}</span>
                       </div>
@@ -278,8 +315,11 @@ export function Orders({ onEdit, onToast }: Props) {
                           Qty {l.qty} · {fmtUSD(l.unitCost, locale)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice, locale)}</>}
                         </span>
                         {l.sellPrice != null && (
-                          <span className="mono pos" style={{ fontWeight: 600, color: 'var(--pos)' }}>
-                            +{fmtUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
+                          <span className="mono" style={{
+                            fontWeight: 600,
+                            color: `var(--${profitTone(l.sellPrice - l.unitCost)})`,
+                          }}>
+                            {signedUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
                           </span>
                         )}
                       </div>

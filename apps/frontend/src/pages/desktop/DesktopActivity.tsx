@@ -8,6 +8,8 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import { createdEventParts, linePhotoEventDetail } from '../../lib/orderPresentation';
+import { activityRecordHref } from '../../lib/route';
 
 // The global audit register — every change made across all four ledgers, in
 // one record. Read-only; the source tables are append-only by trigger.
@@ -29,7 +31,10 @@ type Event = {
   detail: Record<string, unknown>;
   actor: Actor | null;
 };
-type Feed = { events: Event[]; counts: Record<string, number>; nextCursor: string | null };
+// `counts` only rides the first page — the backend skips the (cursor-blind,
+// unfiltered-by-cursor) count query on scroll pages, so loadMore keeps the
+// numbers it already has rather than blanking the pills.
+type Feed = { events: Event[]; counts?: Record<string, number>; nextCursor: string | null };
 type Member = { id: string; name: string };
 
 const AREAS: { id: 'all' | ActivityArea; tKey: string }[] = [
@@ -68,11 +73,13 @@ const FIELD_LABEL: Record<string, string> = {
   form_factor: 'Form factor', description: 'Description', part_number: 'Part number',
   serial_number: 'Serial number', chip_number: 'Chip number', condition: 'Condition',
   health: 'Health', rpm: 'RPM', notes: 'Notes', warehouse_id: 'Warehouse',
-  payment: 'Payment', total_cost: 'Total cost', commission_rate: 'Commission rate',
+  payment: 'Payment', total_cost: 'Goods total', commission_rate: 'Commission rate',
+  other_fees: 'Other fees', other_fees_note: 'Other fees note',
+  paypal_txn_id: 'PayPal transaction ID',
   customer_id: 'Customer', currency_code: 'Currency', payment_received_by: 'Payment received by',
   label: 'Label', sub_label: 'Sub-label', inventory_id: 'Inventory item', status: 'Status',
 };
-const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'unit_price', 'total_cost', 'price']);
+const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'unit_price', 'total_cost', 'price', 'other_fees']);
 
 type Change = { field: string; from: unknown; to: unknown };
 
@@ -113,22 +120,23 @@ function summarise(e: Event, locale: string, t: T): { diff?: Change; note?: stri
       note: String(d.filename ?? ''),
     };
   }
+  // Same shape as an attachment — a filename with no from/to pair, which the
+  // generic branches below would render as a bare filename either way round.
+  if (e.kind === 'line_photo_added' || e.kind === 'line_photo_removed') {
+    return {
+      plain: t(e.kind === 'line_photo_added' ? 'acPhotoAdded' : 'acPhotoRemoved'),
+      note: linePhotoEventDetail(d) || undefined,
+    };
+  }
   if (d.field !== undefined && (d.from !== undefined || d.to !== undefined)) {
     return { diff: { field: String(d.field), from: d.from, to: d.to } };
   }
   if (d.from !== undefined && d.to !== undefined) {
     return { diff: { field: '', from: d.from, to: d.to } };
   }
-  // Rows synthesised by migration 0076 counted their lines at backfill time,
-  // not at creation, so those numbers contradict the line events beneath them.
-  // Show the category alone, exactly as OrderActivityLog does.
+  // Shared with OrderActivityLog so the same event doesn't read two ways.
   if (e.kind === 'created') {
-    if (d.backfilled) return { plain: String(d.category ?? '') };
-    return { plain: [
-      d.category,
-      t('acNLines', { n: (d.lineCount as number) ?? 0 }),
-      d.qty ? t('acNUnits', { n: d.qty as number }) : null,
-    ].filter(Boolean).join(' · ') };
+    return { plain: createdEventParts(d, t).join(' · ') };
   }
   if (e.kind === 'submitted') {
     return { plain: [
@@ -211,7 +219,11 @@ export function DesktopActivity() {
       // A filter change mid-flight bumps reqId and resets the feed; dropping
       // the response here stops an older page appending under new filters.
       .then(r => { if (id === reqId.current) setFeed(prev => prev && ({
-        ...r, events: [...prev.events, ...r.events],
+        ...r,
+        events: [...prev.events, ...r.events],
+        // Spreading `r` would clobber the pills with undefined — scroll pages
+        // deliberately carry no counts.
+        counts: r.counts ?? prev.counts,
       })); })
       .catch(handleFetchError)
       .finally(() => setLoadingMore(false));
@@ -280,7 +292,7 @@ export function DesktopActivity() {
             >
               <span className="ac-bar" />
               {t(a.tKey)}
-              <span className="ac-n">{feed?.counts[a.id] ?? '—'}</span>
+              <span className="ac-n">{feed?.counts?.[a.id] ?? '—'}</span>
             </button>
           ))}
         </div>
@@ -356,6 +368,7 @@ export function DesktopActivity() {
                 {g.events.map(e => {
                   const s = summarise(e, locale, t);
                   const isOpen = open.has(e.id);
+                  const recordHref = activityRecordHref(e.area, e.targetRef);
                   const time = new Date(e.createdAt)
                     .toLocaleTimeString(locale, { hour12: false });
                   return (
@@ -430,20 +443,14 @@ export function DesktopActivity() {
                                 ))}
                               </div>
                             )}
-                            <div>
-                              <a
-                                className="btn sm"
-                                href={
-                                  e.area === 'po'  ? `/purchase-orders/${e.targetRef}`
-                                  : e.area === 'so' ? `/sell-orders/${e.targetRef}`
-                                  : e.area === 'inv' ? `/inventory/${e.targetRef}`
-                                  : '/market'
-                                }
-                              >
-                                <Icon name={AREA_ICON[e.area]} size={12} />
-                                {t('acOpenRecord')}
-                              </a>
-                            </div>
+                            {recordHref && (
+                              <div>
+                                <a className="btn sm" href={recordHref}>
+                                  <Icon name={AREA_ICON[e.area]} size={12} />
+                                  {t('acOpenRecord')}
+                                </a>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -469,7 +476,7 @@ export function DesktopActivity() {
           <Icon name="shield" size={11} />
           <span>
             {feed
-              ? `${feed.events.length} / ${feed.counts.all} ${t('acEvents')}`
+              ? `${feed.events.length} / ${feed.counts?.all ?? feed.events.length} ${t('acEvents')}`
               : t('acLoading')}
           </span>
           <span style={{ marginLeft: 'auto' }}>{t('acAppendOnly')}</span>

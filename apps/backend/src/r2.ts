@@ -6,6 +6,7 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { SAFE_UPLOAD_MIME } from './lib/settings';
@@ -139,4 +140,47 @@ export async function deleteAttachment(env: Env, storageKey: string): Promise<vo
     new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: storageKey }),
     { abortSignal: AbortSignal.timeout(15_000) },
   );
+}
+
+/** S3 caps one DeleteObjects request at 1000 keys. */
+const DELETE_BATCH = 1000;
+
+/**
+ * Delete many objects in as few round trips as S3 allows.
+ *
+ * The per-key loop this replaces ran AFTER the transaction committed with the
+ * HTTP request still open, so a 50-line PO whose lines carried photos spent
+ * hundreds of sequential round trips there and one slow object stalled every
+ * one behind it.
+ *
+ * Best-effort, like the single-key form: callers are cleaning up storage for a
+ * change the database has already accepted, so a failure here must not turn a
+ * committed write into an error. Returns the keys that could not be deleted.
+ */
+export async function deleteAttachments(env: Env, storageKeys: readonly string[]): Promise<string[]> {
+  const keys = [...new Set(storageKeys.filter(k => k && !k.startsWith('stub-')))];
+  if (keys.length === 0) return [];
+  const s3 = client(env);
+  if (!s3) return [];
+
+  const batches: string[][] = [];
+  for (let i = 0; i < keys.length; i += DELETE_BATCH) batches.push(keys.slice(i, i + DELETE_BATCH));
+
+  const failed = await Promise.all(batches.map(async batch => {
+    try {
+      const out = await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: env.R2_BUCKET,
+          Delete: { Objects: batch.map(Key => ({ Key })), Quiet: true },
+        }),
+        { abortSignal: AbortSignal.timeout(30_000) },
+      );
+      // Quiet mode reports only failures, so an empty Errors list means the
+      // whole batch went.
+      return (out.Errors ?? []).map(e => e.Key).filter((k): k is string => !!k);
+    } catch {
+      return batch;
+    }
+  }));
+  return failed.flat();
 }

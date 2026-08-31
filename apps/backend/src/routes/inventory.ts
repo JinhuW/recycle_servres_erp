@@ -7,10 +7,20 @@ import { canonPartCol, canonPartArg } from '../lib/part-number';
 import { committedSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
-  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields,
-  type ExportCategory,
+  CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
+  sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
+import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
+
+// Spec fields PATCH /:id accepts. Category stays fixed on the inventory editor,
+// so unlike the PO route this never has to clear the columns a switched-away
+// category owned — every line here keeps the category it was filed under.
+const SPEC_PATCH_FIELDS = [
+  'brand', 'capacity', 'generation', 'type', 'classification',
+  'rank', 'speed', 'interface', 'formFactor', 'description',
+] as const;
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -24,6 +34,8 @@ type AttrFilters = {
   brand: string[]; capacity: string[]; generation: string[]; type: string[];
   classification: string[]; rank: string[]; speed: string[];
   interface: string[]; form_factor: string[]; rpm: number[];
+  // `Other` lines have no spec columns to facet on — the label is their one.
+  item_type: string[];
 };
 function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
   const list = (k: string) => (q(k) ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -33,9 +45,20 @@ function parseAttrFilters(q: (k: string) => string | undefined): AttrFilters {
     brand: list('brand'), capacity: list('capacity'), generation: list('generation'),
     type: list('type'), classification: list('classification'), rank: list('rank'),
     speed: numericStrings('speed'), interface: list('interface'), form_factor: list('form'),
-    rpm: ints('rpm'),
+    rpm: ints('rpm'), item_type: list('itemType'),
   };
 }
+// `Untyped` is a real chip in the item-type facet, but it means IS NULL rather
+// than a value — every line that predates item types, plus anything nobody has
+// classified yet. Split it out so it can OR alongside the named types.
+function itemTypeFrag(sql: ReturnType<typeof getDb>, selected: string[]) {
+  const named = selected.filter(v => v !== UNTYPED_ITEM);
+  const untyped = selected.length !== named.length;
+  if (!named.length) return sql`l.item_type IS NULL`;
+  if (!untyped) return sql`l.item_type = ANY(${named}::text[])`;
+  return sql`(l.item_type = ANY(${named}::text[]) OR l.item_type IS NULL)`;
+}
+
 function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
   return sql`
     ${a.brand.length          ? sql`l.brand = ANY(${a.brand}::text[])`                   : sql`TRUE`} AND
@@ -47,24 +70,28 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
     ${a.speed.length          ? sql`l.speed = ANY(${a.speed}::text[])`                   : sql`TRUE`} AND
     ${a.interface.length      ? sql`l.interface = ANY(${a.interface}::text[])`           : sql`TRUE`} AND
     ${a.form_factor.length    ? sql`l.form_factor = ANY(${a.form_factor}::text[])`       : sql`TRUE`} AND
-    ${a.rpm.length            ? sql`l.rpm = ANY(${a.rpm}::int[])`                        : sql`TRUE`}
+    ${a.rpm.length            ? sql`l.rpm = ANY(${a.rpm}::int[])`                        : sql`TRUE`} AND
+    ${a.item_type.length      ? itemTypeFrag(sql, a.item_type)                          : sql`TRUE`}
   `;
 }
 
-// "Hide items already spoken for" — a line is in a pending sell order when some
-// sell_order_line points at it under a non-terminal order (Draft/Shipped/
-// Awaiting payment). Done/Closed are excluded: Done flips the line to 'Sold'
-// (filtered elsewhere) and Closed releases the commitment. Used to keep a new
-// sell order from re-selecting stock another in-flight order already claims.
+// "Hide items already spoken for" — pending sell orders (Draft/Shipped/Awaiting
+// payment) claim the quantity they name, so a line is spoken for only once
+// those claims cover the whole lot. A 100-piece lot with 20 on a pending order
+// still has 80 to offer and stays listed. Done/Closed are excluded: Done flips
+// the line to 'Sold' (filtered elsewhere) and Closed releases the commitment.
+// Used to keep a new sell order from re-picking stock another in-flight order
+// already claims.
 const PENDING_SO_STATUSES = ['Draft', 'Shipped', 'Awaiting payment'];
 function pendingSellOrderFrag(sql: ReturnType<typeof getDb>, hide: boolean) {
   return hide
-    ? sql`NOT EXISTS (
-        SELECT 1 FROM sell_order_lines sol
+    ? sql`l.qty > COALESCE((
+        SELECT SUM(sol.qty)
+        FROM sell_order_lines sol
         JOIN sell_orders so ON so.id = sol.sell_order_id
         WHERE sol.inventory_id = l.id
           AND so.status = ANY(${PENDING_SO_STATUSES}::text[])
-      )`
+      ), 0)`
     : sql`TRUE`;
 }
 
@@ -97,7 +124,7 @@ function inventoryWhereFrag(
   // without rewriting the order.
   const whFrag       = warehouse ? sql`COALESCE(l.warehouse_id, o.warehouse_id) = ${warehouse}` : sql`TRUE`;
   const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
@@ -114,7 +141,7 @@ inventory.get('/', async (c) => {
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.part_number, l.serial_number, l.condition,
+           l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.serial_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.position,
            l.health::float AS health, l.rpm,
@@ -188,8 +215,9 @@ export function invLabel(r: Record<string, unknown>): string {
 }
 // Grouped export (?view=grouped): one row per product — lines sharing a
 // canonical part number collapse together, mirroring the desktop grouped view.
-// Aggregates qty by status, counts POs/lots, and spreads cost min/avg/max.
-// Manager-only like the flat export, so cost columns are always present.
+// Aggregates qty by status and counts POs/lots. Carries no money and no
+// submitter (user-confirmed 2026-08-05): the grouped sheet is the one that
+// gets shared outward, so cost/price stay in the flat export.
 //
 // One worksheet per category, each leading with that category's granular
 // attribute columns (one per submit-form field). The aggregate tail is
@@ -202,33 +230,24 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
   { header: 'Reviewing',    key: 'reviewing',  width: 10, numFmt: '#,##0' },
   { header: 'POs',          key: 'poCount',    width: 7,  numFmt: '#,##0' },
   { header: 'Lots',         key: 'lotCount',   width: 7,  numFmt: '#,##0' },
-  { header: 'Cost min',     key: 'costMin',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Cost avg',     key: 'costAvg',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Cost max',     key: 'costMax',    width: 11, numFmt: '#,##0.00' },
-  { header: 'Sell price',   key: 'sellPrice',  width: 12, numFmt: '#,##0.00' },
-  { header: 'Submitted by', key: 'submitter',  width: 22 },
 ];
 
 // One plain worksheet per category present, fixed order, unknown categories
-// folded into Other (same recipe as the sell-order download). An empty result
-// still needs a valid file — fall back to a single header-only sheet.
+// folded into Other (same recipe as the sell-order download). The split itself
+// lives in lib/categoryColumns so the PO workbook — which now also spans
+// categories — uses the same one.
+//
+// Rows go out in the vendor bid sheet's order (brand, capacity, speed), not the
+// query's recency order, so the export and a price template for the same parts
+// read alike. Sorting before the split is enough — categoryTabSheets buckets in
+// input order. The PO spreadsheet deliberately keeps its own line sequence, so
+// this sort lives here rather than in categoryTabSheets.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
   colsFor: (cat: ExportCategory) => XlsxColumn[],
 ): Promise<Buffer> {
-  const byCategory = new Map<string, Record<string, unknown>[]>();
-  for (const r of rows) {
-    const cat = exportCategory(r.category);
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat)!.push(r);
-  }
-  const sheets = CATEGORY_ORDER.filter((cat) => byCategory.has(cat)).map((cat) => ({
-    name: cat as string,
-    columns: colsFor(cat),
-    rows: byCategory.get(cat)!,
-  }));
-  if (sheets.length === 0) sheets.push({ name: 'Inventory', columns: colsFor('Other'), rows: [] });
-  return buildXlsxWorkbook(sheets);
+  const sorted = sortSheetRows(rows, (r) => ({ specs: r, label: String(r.item ?? '') }));
+  return buildXlsxWorkbook(categoryTabSheets(sorted, colsFor, { emptySheetName: 'Inventory' }));
 }
 
 inventory.get('/export', async (c) => {
@@ -263,13 +282,11 @@ inventory.get('/export', async (c) => {
     const rows = (await sql`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type,
              l.classification, l.rank, l.speed, l.interface, l.form_factor, l.description,
-             l.part_number, l.chip_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
-             l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
+             l.item_type, l.part_number, l.chip_number, ${canonCol} AS canon, l.rpm, l.condition, l.qty,
              l.status, l.health::float AS health, l.created_at,
-             w.short AS warehouse_short, u.name AS user_name
+             w.short AS warehouse_short
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
-      JOIN users  u ON u.id = o.user_id
       LEFT JOIN warehouses w ON w.id = COALESCE(l.warehouse_id, o.warehouse_id)
       WHERE ${whereFrag}
       ORDER BY l.created_at DESC
@@ -289,9 +306,7 @@ inventory.get('/export', async (c) => {
       const lots = groups.get(key)!;
       const head = lots[0];
       let qty = 0, inTransit = 0, inStock = 0, reviewing = 0;
-      let costMin = Infinity, costMax = -Infinity, costWeighted = 0;
       const whs = new Set<string>();
-      const submitters = new Set<string>();
       const pos = new Set<string>();
       // Lots of the same part can arrive in different conditions (New vs
       // Used), so condition aggregates to a distinct join like Warehouses.
@@ -300,16 +315,11 @@ inventory.get('/export', async (c) => {
       let repChip: string | null = null;
       for (const l of lots) {
         const lqty = Number(l.qty ?? 0);
-        const cost = Number(l.unit_cost ?? 0);
         qty += lqty;
         if (l.status === 'In Transit') inTransit += lqty;
         else if (l.status === 'Done') inStock += lqty;
         else if (l.status === 'Reviewing') reviewing += lqty;
-        costMin = Math.min(costMin, cost);
-        costMax = Math.max(costMax, cost);
-        costWeighted += cost * lqty;
         if (l.warehouse_short) whs.add(String(l.warehouse_short));
-        if (l.user_name) submitters.add(String(l.user_name));
         if (l.condition) conds.add(String(l.condition));
         pos.add(String(l.order_id));
         if (repPn === null && l.part_number) repPn = String(l.part_number);
@@ -333,11 +343,6 @@ inventory.get('/export', async (c) => {
         reviewing,
         poCount: pos.size,
         lotCount: lots.length,
-        costMin: costMin === Infinity ? 0 : costMin,
-        costAvg: qty > 0 ? costWeighted / qty : 0,
-        costMax: costMax === -Infinity ? 0 : costMax,
-        sellPrice: head.sell_price == null ? null : Number(head.sell_price),
-        submitter: [...submitters].join(', '),
       };
     });
 
@@ -353,7 +358,7 @@ inventory.get('/export', async (c) => {
 
   const rows = await sql`
     SELECT l.id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification, l.rank, l.speed,
-           l.interface, l.form_factor, l.description, l.part_number, l.chip_number, l.condition,
+           l.interface, l.form_factor, l.description, l.item_type, l.part_number, l.chip_number, l.condition,
            l.qty, l.unit_cost::float AS unit_cost, l.sell_price::float AS sell_price,
            l.status, l.created_at, l.health::float AS health, l.rpm,
            u.name AS user_name, w.short AS warehouse_short,
@@ -417,10 +422,11 @@ inventory.get('/events/all', async (c) => {
   const kindFrag   = kind ? sql`e.kind = ${kind}` : sql`TRUE`;
   const searchFrag = search
     ? sql`(
-        LOWER(COALESCE(l.part_number, '')) LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.brand, ''))       LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(l.description, '')) LIKE '%' || ${search} || '%' OR
-        LOWER(COALESCE(act.name, ''))      LIKE '%' || ${search} || '%'
+        LOWER(COALESCE(l.part_number, ''))   LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(l.brand, ''))         LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(l.serial_number, '')) LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(l.description, ''))   LIKE '%' || ${search} || '%' OR
+        LOWER(COALESCE(act.name, ''))        LIKE '%' || ${search} || '%'
       )`
     : sql`TRUE`;
 
@@ -439,26 +445,6 @@ inventory.get('/events/all', async (c) => {
     LIMIT 200
   `;
   return c.json({ events: rows });
-});
-
-// Workspace-wide aggregate by part number (PRD §5.10) — powers QuickView.
-// Not scoped to purchaser-own-lines: any authenticated user gets the
-// workspace totals. Does NOT return cost fields.
-inventory.get('/aggregate/by-part', async (c) => {
-  const pn = c.req.query('partNumber');
-  if (!pn) return c.json({ error: 'partNumber is required' }, 400);
-  const sql = getDb(c.env);
-  const rows = (await sql<{ status: string; qty: number }[]>`
-    SELECT status, COALESCE(SUM(qty), 0)::int AS qty
-    FROM order_lines WHERE part_number = ${pn} GROUP BY status
-  `);
-  let inTransit = 0, inStock = 0;
-  for (const r of rows) {
-    if (r.status === 'In Transit') inTransit += r.qty;
-    else if (r.status === 'Done' || r.status === 'Reviewing') inStock += r.qty;
-  }
-  const lineCount = (await sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM order_lines WHERE part_number = ${pn}`)[0].n;
-  return c.json({ partNumber: pn, inTransit, inStock, lines: lineCount });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -759,7 +745,7 @@ inventory.get('/products', async (c) => {
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
   const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%')`
+    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%')`
     : sql`TRUE`;
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
 
@@ -770,7 +756,7 @@ inventory.get('/products', async (c) => {
     category: string; brand: string | null; capacity: string | null;
     generation: string | null; type: string | null; classification: string | null;
     rank: string | null; speed: string | null; interface: string | null;
-    form_factor: string | null; description: string | null;
+    form_factor: string | null; description: string | null; item_type: string | null;
     part_number: string | null; serial_number: string | null; canon: string; rpm: number | null;
     condition: string; qty: number; unit_cost: number; sell_price: number | null;
     status: string; health: number | null; created_at: string;
@@ -781,7 +767,7 @@ inventory.get('/products', async (c) => {
   const rows = (await sql`
     SELECT l.id, l.order_id, o.user_id,
            l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
-           l.rank, l.speed, l.interface, l.form_factor, l.description,
+           l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type,
            l.part_number, l.serial_number, ${canonCol} AS canon, l.rpm,
            l.condition, l.qty, l.unit_cost::float AS unit_cost,
            l.sell_price::float AS sell_price, l.status, l.health::float AS health,
@@ -821,7 +807,7 @@ inventory.get('/products', async (c) => {
   // are computed with that facet's OWN filter dropped (drop-self) so picking
   // DDR4 doesn't make DDR5 vanish from the bar — same applies to warehouses.
   type FacetKey = keyof AttrFilters;
-  const FACET_KEYS: FacetKey[] = ['brand','capacity','generation','type','classification','rank','speed','interface','form_factor','rpm'];
+  const FACET_KEYS: FacetKey[] = ['brand','capacity','generation','type','classification','rank','speed','interface','form_factor','rpm','item_type'];
   const groupMatchesWarehouse = (lots: Row[]): boolean => {
     if (!warehouse) return true;
     return lots.some((l) => l.warehouse_id === warehouse);
@@ -833,7 +819,10 @@ inventory.get('/products', async (c) => {
       if (!sel.length) continue;
       const ok = lots.some((l) => {
         const v = (l as unknown as Record<string, unknown>)[fk];
-        if (v == null) return false;
+        // A missing value matches only the Untyped chip, never a named one.
+        if (v == null || v === '') {
+          return fk === 'item_type' && sel.includes(UNTYPED_ITEM);
+        }
         return (sel as Array<string | number>).some((s) => String(s) === String(v));
       });
       if (!ok) return false;
@@ -842,7 +831,7 @@ inventory.get('/products', async (c) => {
   };
   const facets: Record<FacetKey, Record<string, number>> = {
     brand: {}, capacity: {}, generation: {}, type: {}, classification: {},
-    rank: {}, speed: {}, interface: {}, form_factor: {}, rpm: {},
+    rank: {}, speed: {}, interface: {}, form_factor: {}, rpm: {}, item_type: {},
   };
   for (const key of order) {
     const lots = groups.get(key)!;
@@ -852,8 +841,12 @@ inventory.get('/products', async (c) => {
       const seen = new Set<string>();
       for (const l of lots) {
         const v = (l as unknown as Record<string, unknown>)[fk];
-        if (v == null || v === '') continue;
-        const sv = String(v);
+        // Absent values are noise on a spec facet, but on item type they are
+        // the backlog worth surfacing — count them under the Untyped chip.
+        if (v == null || v === '') {
+          if (fk !== 'item_type') continue;
+        }
+        const sv = v == null || v === '' ? UNTYPED_ITEM : String(v);
         if (seen.has(sv)) continue;
         seen.add(sv);
         facets[fk][sv] = (facets[fk][sv] ?? 0) + 1;
@@ -867,7 +860,7 @@ inventory.get('/products', async (c) => {
     groupMatchesWarehouse(lots) && groupMatchesAttr(lots, null);
   const filteredOrder = order.filter((k) => applyAll(groups.get(k)!));
 
-  const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','rpm'] as const;
+  const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
   const products = filteredOrder.slice(0, GROUP_CAP).map((key) => {
     const lots = groups.get(key)!;
@@ -903,7 +896,8 @@ inventory.get('/products', async (c) => {
       category: head.category, brand: head.brand, capacity: head.capacity,
       generation: head.generation, type: head.type, classification: head.classification,
       rank: head.rank, speed: head.speed, interface: head.interface,
-      form_factor: head.form_factor, description: head.description, rpm: head.rpm,
+      form_factor: head.form_factor, description: head.description,
+      item_type: head.item_type, rpm: head.rpm,
       mixed_spec: isSingleton ? false : mixed,
       qty,
       qty_in_transit: inTransit, qty_in_stock: inStock, qty_reviewing: reviewing,
@@ -1041,9 +1035,23 @@ inventory.patch('/:id', async (c) => {
         partNumber?: string;
         health?: number | null;
         rpm?: number | null;
+        brand?: string | null;
+        capacity?: string | null;
+        generation?: string | null;
+        type?: string | null;
+        classification?: string | null;
+        rank?: string | null;
+        speed?: string | null;
+        interface?: string | null;
+        formFactor?: string | null;
+        description?: string | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  // Was the key present at all? `undefined` means "leave alone"; an explicit
+  // null or '' means "clear it".
+  const has = (f: string) => ((body as Record<string, unknown>)[f] !== undefined ? 1 : 0);
+  const specVal = (v: string | null | undefined) => (v == null || v.trim() === '' ? null : v.trim());
   if (body.health !== undefined && body.health !== null && (body.health < 0 || body.health > 100)) {
     return c.json({ error: 'health must be between 0 and 100' }, 400);
   }
@@ -1089,6 +1097,7 @@ inventory.patch('/:id', async (c) => {
   type Outcome =
     | { kind: 'notFound' }
     | { kind: 'committed' }
+    | { kind: 'doneLocked' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const before = (await tx<Record<string, unknown>[]>`
@@ -1113,27 +1122,75 @@ inventory.patch('/:id', async (c) => {
       if (open.n > 0) return { kind: 'committed' };
     }
 
+    const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
+    const orderId = before.order_id as string;
+
+    // A Done PO's costs are closed-book, and PATCH /api/orders refuses exactly
+    // this edit with 409 — reaching the same line through the inventory editor
+    // rewrote the header total anyway. Status, sell price and the spec fields
+    // stay editable: that is the ordinary post-Done inventory workflow, and
+    // none of them feed the goods total.
+    if (touchesGoods) {
+      const [parent] = await tx<{ lifecycle: string }[]>`
+        SELECT lifecycle FROM orders WHERE id = ${orderId} LIMIT 1
+      `;
+      if (parent?.lifecycle === 'done') return { kind: 'doneLocked' };
+    }
+
+    // The mirror verdict has to be taken before qty/unit_cost move — afterwards
+    // a stale mirror and a real negotiated price are indistinguishable and the
+    // column pins itself against the lines forever.
+    const goodsFollowsLines = touchesGoods ? await goodsTotalIsMirror(tx, orderId) : false;
+
     await tx`
       UPDATE order_lines SET
         status      = COALESCE(${body.status ?? null}, status),
-        sell_price  = COALESCE(${body.sellPrice ?? null}, sell_price),
+        -- Sentinel rather than COALESCE: 0 means "unprice this line" (the same
+        -- rule the PO drawer writes by), and a bare COALESCE would read it as
+        -- "no change" and silently keep the old price. See shared/sellPrice.
+        sell_price  = CASE WHEN ${body.sellPrice !== undefined ? 1 : 0}::int = 1
+                           THEN ${normSellPrice(body.sellPrice)} ELSE sell_price END,
         unit_cost   = COALESCE(${body.unitCost ?? null}, unit_cost),
         qty         = COALESCE(${body.qty ?? null}, qty),
         condition   = COALESCE(${body.condition ?? null}, condition),
         part_number = COALESCE(${body.partNumber ?? null}, part_number),
         health      = COALESCE(${body.health ?? null}, health),
-        rpm         = COALESCE(${body.rpm ?? null}, rpm)
+        rpm         = COALESCE(${body.rpm ?? null}, rpm),
+        -- Spec columns take the sell_price sentinel, not COALESCE: a blanked
+        -- dropdown has to be able to clear the column, and COALESCE would read
+        -- that as "no change". specVal folds '' into NULL — an empty string is
+        -- not the same as NULL to the brand facet or the top-brands rollup,
+        -- which would gain a ghost value.
+        brand          = CASE WHEN ${has('brand')}::int = 1          THEN ${specVal(body.brand)}          ELSE brand END,
+        capacity       = CASE WHEN ${has('capacity')}::int = 1       THEN ${specVal(body.capacity)}       ELSE capacity END,
+        generation     = CASE WHEN ${has('generation')}::int = 1     THEN ${specVal(body.generation)}     ELSE generation END,
+        type           = CASE WHEN ${has('type')}::int = 1           THEN ${specVal(body.type)}           ELSE type END,
+        classification = CASE WHEN ${has('classification')}::int = 1 THEN ${specVal(body.classification)} ELSE classification END,
+        rank           = CASE WHEN ${has('rank')}::int = 1           THEN ${specVal(body.rank)}           ELSE rank END,
+        speed          = CASE WHEN ${has('speed')}::int = 1          THEN ${specVal(body.speed)}          ELSE speed END,
+        interface      = CASE WHEN ${has('interface')}::int = 1      THEN ${specVal(body.interface)}      ELSE interface END,
+        form_factor    = CASE WHEN ${has('formFactor')}::int = 1     THEN ${specVal(body.formFactor)}     ELSE form_factor END,
+        description    = CASE WHEN ${has('description')}::int = 1    THEN ${specVal(body.description)}    ELSE description END
       WHERE id = ${id}
     `;
     // One event per changed field — keeps the timeline easy to skim.
-    const fields = ['status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm'] as const;
+    const fields = [
+      'status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm',
+      ...SPEC_PATCH_FIELDS,
+    ] as const;
+    const isSpec = new Set<string>(SPEC_PATCH_FIELDS);
     for (const f of fields) {
-      const newVal = (body as Record<string, unknown>)[f];
-      if (newVal === undefined) continue;
+      const raw = (body as Record<string, unknown>)[f];
+      if (raw === undefined) continue;
+      // Compare and record what actually landed in the column, not what the
+      // client sent — otherwise clearing a field that was already NULL logs a
+      // phantom `null → ''` edit.
+      const newVal = isSpec.has(f) ? specVal(raw as string | null) : raw;
       const beforeKey: Record<string, string> = {
         status: 'status', sellPrice: 'sell_price', unitCost: 'unit_cost',
         qty: 'qty', condition: 'condition', partNumber: 'part_number',
         health: 'health', rpm: 'rpm',
+        ...SPEC_FIELD_TO_DB_COL,
       };
       const oldVal = before[beforeKey[f]];
       if (String(oldVal) === String(newVal)) continue;
@@ -1145,6 +1202,7 @@ inventory.patch('/:id', async (c) => {
         VALUES (${id}, ${u.id}, ${kind}, ${tx.json({ field: f, from: fromStr, to: toStr })})
       `;
     }
+    if (touchesGoods) await syncOrderGoodsTotal(tx, orderId, goodsFollowsLines);
     return { kind: 'ok', before };
   });
 
@@ -1152,16 +1210,22 @@ inventory.patch('/:id', async (c) => {
   if (outcome.kind === 'committed') {
     return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
   }
+  if (outcome.kind === 'doneLocked') {
+    return c.json({ error: 'the purchase order is Done; reopen it before changing qty or unit cost' }, 409);
+  }
   const before = outcome.before;
 
   // Margin guard rails (PRD §10): warn the manager — and drop a notification —
   // when a sell price puts the line below cost or below the 15% margin floor.
   // Computed against either the newly submitted unitCost or the row-as-loaded
   // value, so a price-only edit still uses the correct cost basis.
+  // Nothing to warn about when the edit CLEARS the price: an unpriced line is
+  // not a line sold below cost.
   const warnings: string[] = [];
-  if (body.sellPrice !== undefined) {
+  const pricedTo = normSellPrice(body.sellPrice);
+  if (pricedTo !== null) {
     const cost = Number(body.unitCost ?? before.unit_cost);
-    const sp = body.sellPrice;
+    const sp = pricedTo;
     if (sp < cost) warnings.push('sub_cost_sell');
     const margin = sp > 0 ? ((sp - cost) / sp) : 0;
     const floor = await getWorkspaceSetting(sql, 'low_margin_floor', 0.15);
@@ -1250,6 +1314,7 @@ inventory.post('/transfer', async (c) => {
     interface: string | null;
     form_factor: string | null;
     description: string | null;
+    item_type: string | null;
     part_number: string | null;
     condition: string;
     qty: number;
@@ -1282,7 +1347,7 @@ inventory.post('/transfer', async (c) => {
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const sources = (await tx`
       SELECT l.id, l.order_id, l.category, l.brand, l.capacity, l.generation, l.type, l.classification,
-             l.rank, l.speed, l.interface, l.form_factor, l.description, l.part_number,
+             l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
              l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
              COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh
@@ -1343,13 +1408,21 @@ inventory.post('/transfer', async (c) => {
         // Partial — decrement source, clone the rest at destination.
         // Source line stays put (not moved) — intentionally NOT stamped with
         // transfer_order_id; only the moved clone belongs to this order.
+        // The clone carries away units nothing has sold, so its own qty speaks
+        // for what it cost and it needs no qty_purchased of its own — but the
+        // source must hand over that share, or the two halves together would
+        // claim more than the order ever bought.
         await tx`
-          UPDATE order_lines SET qty = qty - ${r.qty} WHERE id = ${r.id}
+          UPDATE order_lines
+             SET qty = qty - ${r.qty},
+                 qty_purchased = CASE WHEN qty_purchased IS NULL THEN NULL
+                                      ELSE qty_purchased - ${r.qty} END
+           WHERE id = ${r.id}
         `;
         const inserted = (await tx`
           INSERT INTO order_lines (
             order_id, category, brand, capacity, generation, type, classification, rank, speed,
-            interface, form_factor, description, part_number, condition,
+            interface, form_factor, description, item_type, part_number, condition,
             qty, unit_cost, sell_price, status,
             scan_image_id, scan_confidence, position,
             health, rpm, warehouse_id, transfer_order_id
@@ -1357,7 +1430,7 @@ inventory.post('/transfer', async (c) => {
           VALUES (
             ${s.order_id}, ${s.category}, ${s.brand}, ${s.capacity}, ${s.generation}, ${s.type},
             ${s.classification}, ${s.rank}, ${s.speed}, ${s.interface},
-            ${s.form_factor}, ${s.description}, ${s.part_number}, ${s.condition},
+            ${s.form_factor}, ${s.description}, ${s.item_type}, ${s.part_number}, ${s.condition},
             ${r.qty}, ${s.unit_cost}, ${s.sell_price}, 'In Transit',
             ${s.scan_image_id}, ${s.scan_confidence}, ${s.position},
             ${s.health}, ${s.rpm}, ${toWarehouseId}, ${transferOrderId}
@@ -1595,7 +1668,27 @@ inventory.delete('/transfer-orders/:id', async (c) => {
           FOR UPDATE
         `)[0] as { id: string } | undefined;
         if (peer) {
-          await tx`UPDATE order_lines SET qty = qty + ${l.qty} WHERE id = ${peer.id}`;
+          // Give back the share the split handed over. A clone can't have been
+          // sold from (discard refuses one that has), so its qty is all it cost.
+          await tx`
+            UPDATE order_lines
+               SET qty = qty + ${l.qty},
+                   qty_purchased = CASE WHEN qty_purchased IS NULL THEN NULL
+                                        ELSE qty_purchased + ${l.qty} END
+             WHERE id = ${peer.id}
+          `;
+          // Hand the clone's photos to the line absorbing it. The FK cascades
+          // on the DELETE below, and once the rows are gone nothing in the
+          // database can name their R2 objects — they would be unreclaimable.
+          // Positions continue after the peer's so the merged strip keeps a
+          // stable order.
+          await tx`
+            UPDATE order_line_photos p
+               SET order_line_id = ${peer.id},
+                   position = p.position + 1 + COALESCE(
+                     (SELECT MAX(position) FROM order_line_photos WHERE order_line_id = ${peer.id}), -1)
+             WHERE p.order_line_id = ${l.id}
+          `;
           await tx`
             INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
             VALUES (${peer.id}, ${u.id}, 'transfer_discarded',

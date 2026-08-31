@@ -43,6 +43,40 @@ function headerRow(ws: ExcelJS.Worksheet): string[] {
   return (ws.getRow(1).values as unknown[]).filter((v) => v != null).map(String);
 }
 
+// Row order: the export ships the vendor bid sheet's sequence — brand, then
+// capacity, speed, label — numerically collated, blanks last. These assert the
+// ordering PROPERTY, never literal values: seed.mjs picks brands and capacities
+// at random, so pinned strings would be flaky.
+function compareSpecValue(a: string, b: string): number {
+  if (!a) return b ? 1 : 0;
+  if (!b) return -1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function sortKeyRows(ws: ExcelJS.Worksheet, headers: string[]): string[][] {
+  const head = ws.getRow(1).values as unknown[];
+  const cols = headers.map((h) => head.findIndex((v) => v === h));
+  for (const c of cols) expect(c).toBeGreaterThan(0);
+  const keys: string[][] = [];
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    keys.push(cols.map((c) => String(row.getCell(c).value ?? '')));
+  }
+  return keys;
+}
+
+function expectSortedLikeBidSheet(ws: ExcelJS.Worksheet, headers: string[]): void {
+  const keys = sortKeyRows(ws, headers);
+  expect(keys.length).toBeGreaterThan(1);
+  for (let i = 1; i < keys.length; i++) {
+    let d = 0;
+    for (let k = 0; k < headers.length && d === 0; k++) {
+      d = compareSpecValue(keys[i - 1][k], keys[i][k]);
+    }
+    expect(d).toBeLessThanOrEqual(0);
+  }
+}
+
 describe('GET /api/inventory/export', () => {
   beforeEach(async () => { await resetDb(); });
 
@@ -145,6 +179,16 @@ describe('GET /api/inventory/export', () => {
     expect(striped?.fgColor?.argb).toBe('FFF3F4F6');
   });
 
+  it('orders rows like the vendor bid sheet, not by recency', async () => {
+    const { token } = await loginAs(ALEX);
+    const res = await getRaw('/api/inventory/export', token);
+    const wb = await loadWorkbook(res);
+    expectSortedLikeBidSheet(
+      wb.worksheets.find(w => w.name === 'RAM')!,
+      ['Brand', 'Capacity', 'Speed', 'Item'],
+    );
+  });
+
   it('forbids purchasers (the workbook carries cost columns)', async () => {
     const { token } = await loginAs(MARCUS);
     const res = await getRaw('/api/inventory/export', token);
@@ -173,8 +217,12 @@ describe('GET /api/inventory/export?view=grouped', () => {
       expect(headers).not.toContain('Category');
       expect(headers).not.toContain('Item');
       expect(headers).not.toContain('Spec');
-      for (const h of ['Part #', 'Condition', 'Warehouses', 'Qty', 'Cost avg', 'Submitted by']) {
+      for (const h of ['Part #', 'Condition', 'Warehouses', 'Qty', 'Lots']) {
         expect(headers).toContain(h);
+      }
+      // The grouped sheet is the shareable one — no money, no submitter.
+      for (const h of ['Cost min', 'Cost avg', 'Cost max', 'Sell price', 'Submitted by']) {
+        expect(headers).not.toContain(h);
       }
     }
     expect(headerRow(wb.worksheets.find(w => w.name === 'RAM')!)).toContain('Gen');
@@ -191,10 +239,10 @@ describe('GET /api/inventory/export?view=grouped', () => {
     expect(wb.worksheets.map(w => w.name)).toEqual(['RAM']);
     const ws = wb.worksheets[0];
     const headers = headerRow(ws);
-    for (const h of ['Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Condition', 'Cost avg', 'Submitted by']) {
+    for (const h of ['Part #', 'Chip #', 'Brand', 'Capacity', 'Gen', 'Type', 'Class', 'Rank', 'Speed', 'Condition', 'Lots']) {
       expect(headers).toContain(h);
     }
-    for (const h of ['Item', 'Spec', 'Category', 'Interface']) {
+    for (const h of ['Item', 'Spec', 'Category', 'Interface', 'Cost avg', 'Sell price', 'Submitted by']) {
       expect(headers).not.toContain(h);
     }
 
@@ -204,6 +252,19 @@ describe('GET /api/inventory/export?view=grouped', () => {
     const brandCol = ws.getRow(1).values as unknown[];
     const brandIdx = brandCol.findIndex((v) => v === 'Brand');
     expect(String(ws.getRow(2).getCell(brandIdx).value ?? '')).not.toBe('');
+  });
+
+  // The grouped view is what the Inventory page's Export button downloads, so
+  // this is the path that has to match a price template for the same parts.
+  // No Item column on these tabs — the label tie-break isn't observable here.
+  it('orders rows like the vendor bid sheet, not by recency', async () => {
+    const { token } = await loginAs(ALEX);
+    const res = await getRaw('/api/inventory/export?view=grouped', token);
+    const wb = await loadWorkbook(res);
+    expectSortedLikeBidSheet(
+      wb.worksheets.find(w => w.name === 'RAM')!,
+      ['Brand', 'Capacity', 'Speed'],
+    );
   });
 
   it('uses granular SSD columns when category=SSD', async () => {

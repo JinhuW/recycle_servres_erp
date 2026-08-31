@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { isPricedSellPrice } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
+import { effUnitCost, poFeeBasis } from '../lib/po-cost';
 import type { Env, User } from '../types';
 
 const dashboard = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -22,10 +24,12 @@ dashboard.get('/', async (c) => {
   //  - Managers see REALIZED sales: revenue/profit/commission from
   //    sell_order_lines of Done sell orders, priced at sol.unit_price, team-wide.
   //  - Purchasers see PROJECTED profit from their OWN Done purchase orders — the
-  //    margin "set" on each line, (sell_price - unit_cost) * qty (the same
-  //    formula the orders list and recent-activity feed use). It lands on the
-  //    dashboard the moment the PO's lifecycle flips to 'done'; sell_price NULL
-  //    falls back to unit_cost (zero margin), matching the orders list.
+  //    margin "set" on each line, (sell_price - unit_cost) * qty. It lands on the
+  //    dashboard the moment the PO's lifecycle flips to 'done'.
+  // A line nobody has priced is not a sale at cost. Its NULL sell_price drops
+  // out of every SUM below, and the recent-activity rows state no profit rather
+  // than $0 — the strip sits directly under the KPI tiles, so a row claiming a
+  // margin the tiles never counted would answer one question two ways.
   const saleDateWin = sql`so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval`;
   // Previous equal-length window, immediately before the current one — used for
   // KPI trend deltas. Half-open: [-2d, -d) so the boundary day isn't counted twice.
@@ -44,6 +48,12 @@ dashboard.get('/', async (c) => {
   // Weekly chart spans the selected range, in weekly buckets.
   const chartWeeksBack = Math.max(1, Math.ceil(days / 7)) - 1;
 
+  // A PO's order-level other_fees, pushed down to the line so the cost/profit/
+  // commission formulas below stay line-level. Revenue is never touched — a fee
+  // is a cost. See lib/po-cost.ts for the allocation rule.
+  const feeBasis = poFeeBasis(sql);
+  const eff = effUnitCost(sql);
+
   const [totals, prevTotals, cntRows, weeks, leaderboardRaw, byCatRows, recentRows] =
     await Promise.all([
       // KPI totals — realized (manager) or projected from Done POs (purchaser).
@@ -51,45 +61,55 @@ dashboard.get('/', async (c) => {
         ? sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
             SELECT
               COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                              AS revenue,
-              COALESCE(SUM(ol.unit_cost   * sol.qty), 0)::float                              AS cost,
-              COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float             AS profit,
-              COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty
+              COALESCE(SUM(${eff}         * sol.qty), 0)::float                              AS cost,
+              COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float                   AS profit,
+              COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty
                            * COALESCE(po.commission_rate, 0)), 0)::float                     AS commission
             FROM sell_order_lines sol
             JOIN sell_orders so ON so.id = sol.sell_order_id
             JOIN order_lines ol ON ol.id = sol.inventory_id
             JOIN orders po      ON po.id = ol.order_id
+            ${feeBasis}
             WHERE ${saleDateWin}
           `
         : sql<{ revenue: number; cost: number; profit: number; commission: number }[]>`
             SELECT
-              COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
-              COALESCE(SUM(ol.unit_cost * ol.qty), 0)::float                                           AS cost,
-              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit,
-              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty
+              COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
+              -- Filtered to the SAME lines revenue and profit are drawn from.
+              -- An unpriced line's NULL drops out of those two SUMs on its own;
+              -- cost summing every line regardless would leave the KPI row
+              -- stating a revenue and a cost that don't reconcile to its own
+              -- profit. Cost here is the cost OF the priced lines.
+              COALESCE(SUM(${eff} * ol.qty)
+                       FILTER (WHERE ol.sell_price IS NOT NULL), 0)::float                             AS cost,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float       AS profit,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
                            * COALESCE(po.commission_rate, 0)), 0)::float                               AS commission
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
+            ${feeBasis}
             WHERE ${projDateWin}
           `,
       // Previous-period revenue/profit — only what the KPI trend chips need.
       isManager
         ? sql<{ revenue: number; profit: number }[]>`
             SELECT
-              COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
-              COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+              COALESCE(SUM(sol.unit_price * sol.qty), 0)::float             AS revenue,
+              COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float  AS profit
             FROM sell_order_lines sol
             JOIN sell_orders so ON so.id = sol.sell_order_id
             JOIN order_lines ol ON ol.id = sol.inventory_id
             JOIN orders po      ON po.id = ol.order_id
+            ${feeBasis}
             WHERE ${salePrevWin}
           `
         : sql<{ revenue: number; profit: number }[]>`
             SELECT
-              COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
-              COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit
+              COALESCE(SUM(ol.sell_price * ol.qty), 0)::float            AS revenue,
+              COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
+            ${feeBasis}
             WHERE ${projPrevWin}
           `,
       // Count — distinct Done sell orders (manager) or distinct Done POs (purchaser).
@@ -119,7 +139,7 @@ dashboard.get('/', async (c) => {
               ) AS week_start
             )
             SELECT to_char(s.week_start,'IW') AS label,
-                   COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+                   COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float AS profit
             FROM series s
             LEFT JOIN sell_orders so
               ON so.status = 'Done'
@@ -127,6 +147,8 @@ dashboard.get('/', async (c) => {
              AND so.updated_at <  s.week_start + INTERVAL '1 week'
             LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
             LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+            LEFT JOIN orders po ON po.id = ol.order_id
+            ${feeBasis}
             GROUP BY s.week_start ORDER BY s.week_start
           `
         : sql<{ label: string; profit: number }[]>`
@@ -138,13 +160,14 @@ dashboard.get('/', async (c) => {
               ) AS week_start
             )
             SELECT to_char(s.week_start,'IW') AS label,
-                   COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit
+                   COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM series s
             LEFT JOIN orders po
               ON po.lifecycle = 'done'
              AND po.user_id = ${u.id}
              AND po.created_at >= s.week_start
              AND po.created_at <  s.week_start + INTERVAL '1 week'
+            ${feeBasis}
             LEFT JOIN order_lines ol ON ol.order_id = po.id
             GROUP BY s.week_start ORDER BY s.week_start
           `,
@@ -159,12 +182,13 @@ dashboard.get('/', async (c) => {
         WITH per_user AS (
           SELECT po.user_id,
                  COUNT(*)::int                                                                          AS count,
-                 COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                AS revenue,
-                 COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit,
-                 COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty
+                 COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                AS revenue,
+                 COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float     AS profit,
+                 COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
                               * COALESCE(po.commission_rate, 0)), 0)::float                             AS commission
           FROM order_lines ol
           JOIN orders po ON po.id = ol.order_id
+          ${feeBasis}
           WHERE po.lifecycle = 'done' AND po.created_at >= NOW() - (${days} || ' days')::interval
           GROUP BY po.user_id
         )
@@ -184,20 +208,22 @@ dashboard.get('/', async (c) => {
         ? sql<{ category: string; count: number; revenue: number; profit: number }[]>`
             SELECT sol.category, COUNT(*)::int AS count,
                    COALESCE(SUM(sol.unit_price * sol.qty), 0)::float                  AS revenue,
-                   COALESCE(SUM((sol.unit_price - ol.unit_cost) * sol.qty), 0)::float AS profit
+                   COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float AS profit
             FROM sell_order_lines sol
             JOIN sell_orders so ON so.id = sol.sell_order_id
             JOIN order_lines ol ON ol.id = sol.inventory_id
             JOIN orders po      ON po.id = ol.order_id
+            ${feeBasis}
             WHERE ${saleDateWin}
             GROUP BY sol.category
           `
         : sql<{ category: string; count: number; revenue: number; profit: number }[]>`
             SELECT ol.category, COUNT(*)::int AS count,
-                   COALESCE(SUM(COALESCE(ol.sell_price, ol.unit_cost) * ol.qty), 0)::float                  AS revenue,
-                   COALESCE(SUM((COALESCE(ol.sell_price, ol.unit_cost) - ol.unit_cost) * ol.qty), 0)::float AS profit
+                   COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                  AS revenue,
+                   COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM order_lines ol
             JOIN orders po ON po.id = ol.order_id
+            ${feeBasis}
             WHERE ${projDateWin}
             GROUP BY ol.category
           `,
@@ -245,11 +271,13 @@ dashboard.get('/', async (c) => {
   // before the cost-strip (purchasers don't see unit_cost per PRD §6.8).
   const recent = recentRows.map(r => {
     const unitCost = Number(r.unit_cost) || 0;
-    const sellPrice = r.sell_price == null ? unitCost : Number(r.sell_price);
     const qty = Number(r.qty) || 0;
-    const projectedProfit = (sellPrice - unitCost) * qty;
+    // null, not 0 — the same figure the spreadsheet's per-line profit reports
+    // for an unpriced line, and the clients render it as an em-dash.
+    const sellPrice = r.sell_price as number | null;
+    const profit = isPricedSellPrice(sellPrice) ? (Number(sellPrice) - unitCost) * qty : null;
     const { unit_cost, ...rest } = r;
-    return isManager ? { ...rest, unit_cost, profit: projectedProfit } : { ...rest, profit: projectedProfit };
+    return isManager ? { ...rest, unit_cost, profit } : { ...rest, profit };
   });
 
   return c.json({

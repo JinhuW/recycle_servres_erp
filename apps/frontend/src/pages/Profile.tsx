@@ -3,11 +3,13 @@ import { Icon, type IconName } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
+import { useTweaks, type RolePreview } from '../lib/tweaks';
 import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { Skeleton } from '../components/Skeleton';
+import type { Warehouse } from '../lib/types';
 
 type Stats = { count: number; profit: number; commission: number };
 
@@ -21,14 +23,19 @@ type Props = {
 export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOpenSecurity }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
-  const { user, logout } = useAuth();
+  const { user, logout, setDefaultWarehouse } = useAuth();
+  const { rolePreview, setRolePreview } = useTweaks();
   const [stats, setStats] = useState<Stats | null>(null);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
 
   useEffect(() => {
     let alive = true;
     api.get<{ stats: Stats }>('/api/me').then(r => { if (alive) setStats(r.stats); }).catch(handleFetchError);
+    api.get<{ items: Warehouse[] }>('/api/warehouses')
+      .then(r => { if (alive) setWarehouses(r.items); })
+      .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
 
@@ -47,8 +54,43 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
       ),
       onClick: onOpenLanguage,
     },
+    {
+      id: 'wh', icon: 'warehouse', label: t('defaultWarehouse'), sub: t('defaultWarehouseSub'),
+      trailing: (
+        <select
+          className="select"
+          value={user.defaultWarehouseId ?? ''}
+          onChange={e => setDefaultWarehouse(e.target.value || null).catch(handleFetchError)}
+          style={{ maxWidth: 130, fontSize: 12, padding: '6px 8px' }}
+        >
+          <option value="">{t('defaultWarehouseNone')}</option>
+          {warehouses.map(w => (
+            <option key={w.id} value={w.id}>{w.short}</option>
+          ))}
+        </select>
+      ),
+    },
     { id: 'about', icon: 'info', label: t('about'),         sub: t('aboutSub'),         onClick: onOpenAbout },
   ];
+  // Managers only: the RolePicker gate shows on login, but a restored session
+  // never re-asks — without this row a mobile manager who once picked
+  // Purchaser has no way back until their next fresh login.
+  if (user.role === 'manager') {
+    items.splice(items.length - 1, 0, {
+      id: 'role', icon: 'shield', label: t('roleViewLabel'), sub: t('roleViewSub'),
+      trailing: (
+        <select
+          className="select"
+          value={rolePreview}
+          onChange={e => setRolePreview(e.target.value as RolePreview)}
+          style={{ maxWidth: 130, fontSize: 12, padding: '6px 8px' }}
+        >
+          <option value="actual">{t('role_admin')}</option>
+          <option value="as_purchaser">{t('role_purchaser')}</option>
+        </select>
+      ),
+    });
+  }
 
   return (
     <>
@@ -99,7 +141,7 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
                 <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{it.sub}</div>
               </div>
               {it.trailing}
-              <Icon name="chevronRight" size={14} style={{ color: 'var(--fg-subtle)' }} />
+              {it.onClick && <Icon name="chevronRight" size={14} style={{ color: 'var(--fg-subtle)' }} />}
             </div>
           ))}
         </div>

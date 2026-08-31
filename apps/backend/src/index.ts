@@ -7,20 +7,32 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 
 import { UPLOAD_HARD_CAP_BYTES } from './lib/settings';
-import { appendErrorRecord } from './lib/error-log';
+import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from './lib/error-log';
 import { log, releaseCommit, releaseVersion, runWithLogContext } from './lib/log';
 
+import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
+import { describeShipping } from './shipping';
 import { dbScope, getDb } from './db';
+import { readBuildTime } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
 import meRoutes from './routes/me';
 import dashboardRoutes from './routes/dashboard';
 import ordersRoutes from './routes/orders';
+import shipmentsRoutes from './routes/shipments';
+import { shipmentsList as shipmentsListRoutes, shippingContacts as shippingContactsRoutes } from './routes/shipmentsGlobal';
+import packagesRoutes from './routes/packages';
+import shippingPublicRoutes from './routes/shippingPublic';
+import shippoWebhookRoutes from './routes/shippoWebhook';
 import marketRoutes from './routes/market';
 import scanRoutes from './routes/scan';
 import notificationsRoutes from './routes/notifications';
+import trackerRoutes from './routes/tracker';
+import coordinatorRoutes from './routes/coordinator';
+import bankTxRoutes from './routes/bankTx';
+import suppliersRoutes from './routes/suppliers';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
 import sellOrdersRoutes from './routes/sellOrders';
@@ -28,12 +40,14 @@ import inventoryRoutes from './routes/inventory';
 import membersRoutes from './routes/members';
 import lookupsRoutes from './routes/lookups';
 import categoriesRoutes from './routes/categories';
+import itemTypesRoutes from './routes/itemTypes';
 import attachmentsRoutes from './routes/attachments';
 import workspaceRoutes from './routes/workspace';
 import { fxRates as fxRatesRoutes } from './routes/fxRates';
 import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
 import activityRoutes from './routes/activity';
+import clientErrorRoutes from './routes/clientErrors';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -129,7 +143,16 @@ app.use(
       return null;
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-By'],
+    allowHeaders: [
+      'Content-Type', 'Authorization', 'X-Requested-By',
+      // Streamable HTTP transport headers, for browser-hosted MCP clients and
+      // the MCP Inspector. claude.ai and chatgpt.com call server-to-server and
+      // never preflight, so these matter only for the in-browser case.
+      'MCP-Protocol-Version', 'Mcp-Session-Id', 'Last-Event-ID',
+    ],
+    // Without this an in-browser client can't read the WWW-Authenticate
+    // challenge and so can't discover where to start the OAuth flow.
+    exposeHeaders: ['WWW-Authenticate', 'X-Request-Id'],
     credentials: true,
   }),
 );
@@ -153,16 +176,28 @@ app.get('/', (c) =>
 // catch-all, which 200s every path even when the backend is dead and so
 // hides outages from the load balancer. Unauthenticated by design.
 app.get('/api/health', async (c) => {
-  // Build provenance — the same resolution every log line uses, so the health
-  // payload and the logs can never disagree about which build is running.
+  // Build provenance — resolved through the same helpers every log line uses,
+  // so the health payload and the logs can never disagree about which build is
+  // running. They carry the APP_VERSION/GIT_SHA handling: those are
+  // release-time Docker build args (scripts/release.sh), Railway never passes
+  // them and the Dockerfile bakes them as EMPTY env strings, hence || not ??.
   const version = releaseVersion();
   const commit = releaseCommit();
+  // ISO-8601 UTC or null; the frontend shows this instead of the sha, which
+  // means nothing to the people reading the footer.
+  const builtAt = process.env.BUILD_TIME || readBuildTime();
+  // Which providers this deployment actually has credentials for. Every one of
+  // these falls back silently, so a release that shipped without a secret looks
+  // identical to a healthy one until someone notices packages never move. Modes
+  // only — no key values, no more than set/unset.
+  const ship = describeShipping(c.env as Env);
+  const providers = { ...ship, ocr: describeOcr(c.env as Env) };
   try {
     await getDb(c.env)`SELECT 1`;
-    return c.json({ status: 'ok', version, commit });
+    return c.json({ status: 'ok', version, commit, builtAt, providers });
   } catch (e) {
     log.error('health check failed', e);
-    return c.json({ status: 'error', error: 'database unreachable', version, commit }, 503);
+    return c.json({ status: 'error', error: 'database unreachable', version, commit, builtAt, providers }, 503);
   }
 });
 
@@ -177,8 +212,13 @@ const uploadBodyLimit = bodyLimit({ maxSize: UPLOAD_HARD_CAP_BYTES });
 // under it buffer 50 MiB bodies.
 const isUploadPath = (path: string): boolean =>
   path === '/api/scan/label' ||
+  path === '/api/scan/payment' ||
   path === '/api/attachments' ||
   /^\/api\/(orders|sell-orders)\/[^/]+\/status-meta\/[^/]+\/attachments$/.test(path) ||
+  // A line photo comes straight off a phone camera at several MB, uncompressed.
+  // Left under the JSON cap it 413s before the handler that would have checked
+  // it against the upload limits ever runs.
+  /^\/api\/orders\/[^/]+\/lines\/[^/]+\/photos$/.test(path) ||
   // Vendor bid sheets round-trip our own template, which embeds item photos —
   // they routinely exceed the JSON cap. The route enforces its own 8 MB limit.
   /^\/api\/sell-orders\/[^/]+\/price-import\/preview$/.test(path);
@@ -194,12 +234,18 @@ app.use('*', (c, next) => {
 });
 
 // ── Cache headers on reference-data endpoints ────────────────────────────────
-// Read-only reference endpoints (lookups, categories, workspace, warehouses)
-// get a short private cache so browsers/CDN don't hammer the DB on every
-// navigation. User-specific endpoints (/api/me, /api/dashboard) are excluded.
-const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace', '/api/warehouses'];
+// Read-only reference endpoints get a short private cache so browsers/CDN don't
+// hammer the DB on every navigation. User-specific endpoints (/api/me,
+// /api/dashboard) are excluded — and so is /api/warehouses: it is the one
+// reference list that gets edited and re-read inside a single user action, and
+// the browser serving its 60s-old copy back to Settings made a saved shipping
+// address look like it had never persisted.
+// Safe methods only: these prefixes also carry POST/PATCH endpoints, whose
+// responses have no business advertising a cache lifetime.
+const CACHEABLE_PREFIXES = ['/api/lookups', '/api/categories', '/api/workspace'];
 app.use('*', async (c, next) => {
   await next();
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return;
   const path = c.req.path;
   if (CACHEABLE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))) {
     c.header('Cache-Control', 'private, max-age=60');
@@ -209,6 +255,8 @@ app.use('*', async (c, next) => {
 // ── Public ──────────────────────────────────────────────────────────────────
 app.route('/api/auth', authRoutes);
 app.route('/api/public/vendor', vendorPublicRoutes);
+app.route('/api/public/shipping', shippingPublicRoutes);
+app.route('/api/public/shippo', shippoWebhookRoutes);
 app.route('/.well-known', wellKnown);
 app.route('/oauth', oauthRoutes);
 
@@ -241,16 +289,39 @@ app.use('/api/inventory/*', authMiddleware);
 app.use('/api/members/*', authMiddleware);
 app.use('/api/lookups/*', authMiddleware);
 app.use('/api/categories/*', authMiddleware);
+app.use('/api/item-types', authMiddleware);
+app.use('/api/item-types/*', authMiddleware);
 app.use('/api/attachments/*', authMiddleware);
 app.use('/api/workspace/*', authMiddleware);
 app.use('/api/vendor-bids/*', authMiddleware);
 // The feed lives at the bare /api/activity, which `/*` alone doesn't cover.
 app.use('/api/activity', authMiddleware);
 app.use('/api/activity/*', authMiddleware);
+// Same bare-path shape — the report POSTs to the prefix root, so a `/*`-only
+// registration would leave it unauthenticated.
+app.use('/api/client-errors', authMiddleware);
+app.use('/api/client-errors/*', authMiddleware);
+// Bare paths matter here too: the shipments list and packages list live at
+// the prefix root. /api/public/shipping stays public — /api/shipping/* does
+// not match it.
+app.use('/api/shipments', authMiddleware);
+app.use('/api/shipments/*', authMiddleware);
+app.use('/api/shipping/*', authMiddleware);
+app.use('/api/packages', authMiddleware);
+app.use('/api/packages/*', authMiddleware);
+// Both spellings: GET /api/suppliers has no trailing segment to match the
+// wildcard, so registering only `/*` would leave the list route unauthenticated.
+app.use('/api/suppliers', authMiddleware);
+app.use('/api/suppliers/*', authMiddleware);
 
 app.route('/api/me', meRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/orders', ordersRoutes);
+// Second sub-app on the same prefix: /api/orders/:orderId/shipments/*.
+app.route('/api/orders', shipmentsRoutes);
+app.route('/api/shipments', shipmentsListRoutes);
+app.route('/api/shipping', shippingContactsRoutes);
+app.route('/api/packages', packagesRoutes);
 app.route('/api/market', marketRoutes);
 app.route('/api/scan', scanRoutes);
 app.route('/api/notifications', notificationsRoutes);
@@ -261,36 +332,27 @@ app.route('/api/inventory', inventoryRoutes);
 app.route('/api/members', membersRoutes);
 app.route('/api/lookups', lookupsRoutes);
 app.route('/api/categories', categoriesRoutes);
+app.route('/api/item-types', itemTypesRoutes);
 app.route('/api/attachments', attachmentsRoutes);
 app.route('/api/workspace', workspaceRoutes);
 app.route('/api/workspace', fxRatesRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
 app.route('/api/activity', activityRoutes);
+app.route('/api/client-errors', clientErrorRoutes);
 // /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
 // list above. csrfGuard still runs from the global stack.
 app.route('/api/oauth/clients', oauthAdmin);
-
-// Vendor portal tokens travel in the URL path (/api/public/vendor/<token>/…)
-// and are bearer-equivalent secrets — the only gate to a vendor's data. A
-// transient 500 on such a request must not write a replayable token into the
-// durable error log. Strip the token segment (and sensitive query values)
-// before anything reaches the sink.
-function redactSensitivePath(pathname: string): string {
-  return pathname.replace(/^(\/api\/public\/vendor\/)[^/]+/, '$1<redacted>');
-}
-const SENSITIVE_QUERY_KEYS = new Set([
-  'token', 'code', 'access_token', 'refresh_token', 'client_secret', 'at', 'rt',
-]);
-function redactSensitiveQuery(search: string): string | undefined {
-  if (!search) return undefined;
-  const params = new URLSearchParams(search);
-  let changed = false;
-  for (const k of [...params.keys()]) {
-    if (SENSITIVE_QUERY_KEYS.has(k.toLowerCase())) { params.set(k, '<redacted>'); changed = true; }
-  }
-  return changed ? `?${params.toString()}` : search;
-}
+// Self-applies authMiddleware + manager gate (oauthAdmin pattern).
+app.route('/api/tracker', trackerRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/coordinator', coordinatorRoutes);
+// Same shape: self-applied authMiddleware + manager gate.
+app.route('/api/bank-transactions', bankTxRoutes);
+// Clients (buy-side counterparties). Deliberately NOT in CACHEABLE_PREFIXES:
+// like /api/warehouses this list is edited and re-read inside one user action,
+// and a 60s browser copy is what made a saved warehouse address look unsaved.
+app.route('/api/suppliers', suppliersRoutes);
 
 app.onError((err, c) => {
   // Log the full error server-side with the request ID for correlation, but

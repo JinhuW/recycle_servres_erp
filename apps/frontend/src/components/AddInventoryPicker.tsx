@@ -1,7 +1,8 @@
 // Picker for adding more inventory to an existing sell order. Layered over the
 // edit modal: lists currently-sellable lots (GET /api/sell-orders/sellable —
-// status Reviewing/Done, not on an open order), grouped by product number, and
-// returns the checked lots to the caller, which appends them as new lines.
+// status Reviewing/Done, with units left after committed orders take theirs),
+// grouped by product number, and returns the checked lots to the caller, which
+// appends them as new lines.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from './Icon';
@@ -29,7 +30,7 @@ export type SellableItem = {
 
 type Props = {
   // Inventory ids already on the in-progress draft (saved or just-added). The
-  // server only excludes lots committed to a shipped/awaiting-payment order, so
+  // server only nets out lots committed to a shipped/awaiting-payment order, so
   // this order's own lots must be filtered client-side to avoid duplicates —
   // which also means a listed lot's draftCount never counts this order.
   excludeIds: Set<string>;

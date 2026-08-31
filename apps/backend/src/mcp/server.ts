@@ -20,6 +20,12 @@ type JsonRpcReq = { jsonrpc: '2.0'; id: number | string; method: string; params?
 const SERVER_INFO = { name: 'recycle-erp-mcp', version: readPackageVersion() };
 const CAPABILITIES = { tools: { listChanged: false } };
 
+// Newest first. `initialize` echoes the client's version when we speak it and
+// otherwise answers with our newest, letting the client decide whether to go
+// on. Echoing back an unrecognised version instead would claim support we
+// don't have.
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+
 const ALL_TOOLS = [...TOOL_DEFS, ...SELL_ORDER_TOOL_DEFS];
 
 // Single source of truth for which scope each tool requires. Drives both
@@ -41,8 +47,8 @@ function rpcErr(id: number | string | null, code: number, message: string, data?
 }
 
 export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): Promise<Response> {
-  let req: JsonRpcReq;
-  try { req = await c.req.json() as JsonRpcReq; }
+  let parsed: unknown;
+  try { parsed = await c.req.json(); }
   catch {
     // Body deliberately not logged. Safe to log at all only because
     // bearerGuard fronts this route, so volume is bounded by issued tokens.
@@ -50,17 +56,35 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
     return c.json(rpcErr(null, -32700, 'parse error'));
   }
 
+  // Batching was dropped in MCP 2025-06-18 and we never implemented it; saying
+  // so beats letting an array fall through and fail as an unknown method.
+  if (Array.isArray(parsed)) return c.json(rpcErr(null, -32600, 'batching is not supported'));
+  const req = parsed as JsonRpcReq;
+  if (typeof req?.method !== 'string') return c.json(rpcErr(null, -32600, 'invalid request'));
+
+  // A message with no `id` is a notification — every client sends
+  // notifications/initialized straight after initialize. Streamable HTTP wants
+  // 202 and an empty body; the old fallthrough emitted an error object with an
+  // undefined id, which isn't a valid JSON-RPC response at all.
+  if (req.id === undefined || req.id === null) return c.body(null, 202);
+
   const sql = getDb(c.env);
   const ctx = c.get('oauthCtx') as OAuthCtx | undefined;
   const granted = new Set(ctx?.scopes ?? []);
 
   switch (req.method) {
-    case 'initialize':
+    case 'initialize': {
+      const asked = (req.params as any)?.protocolVersion;
       return c.json(rpcOk(req.id, {
-        protocolVersion: (req.params as any)?.protocolVersion ?? '2024-11-05',
+        protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(asked)
+          ? asked
+          : SUPPORTED_PROTOCOL_VERSIONS[0],
         serverInfo: SERVER_INFO,
         capabilities: CAPABILITIES,
       }));
+    }
+    case 'ping':
+      return c.json(rpcOk(req.id, {}));
     case 'tools/list':
       return c.json(rpcOk(req.id, {
         tools: ALL_TOOLS.filter(t => granted.has(TOOL_SCOPES[t.name])),
@@ -98,11 +122,20 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
         }));
       } catch (e) {
         mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
-        // The wire reply says "invalid params" for every failure, including a
-        // DB outage, and rides an HTTP 200 — without this line a broken write
-        // tool leaves no trace anywhere.
+        // The reply rides an HTTP 200 and, since the isError change below,
+        // does not even carry a JSON-RPC error code — without this line a
+        // broken write tool leaves no trace anywhere.
         mcpLog.child({ tool: toolLabel, clientId: ctx?.clientId }).error('tool call failed', e);
-        return c.json(rpcErr(req.id, -32602, e instanceof Error ? e.message : 'invalid params'));
+        // A tool that ran and failed is a tool *result*, not a protocol error
+        // (MCP spec, Tools → Error handling): the model has to see the message
+        // to correct itself. ChatGPT hands a JSON-RPC error to the model as
+        // `{"type":"json_rpc_error",…}`, which reads as a dead endpoint — one
+        // mistyped part number made it declare set_market_price disabled and
+        // stop writing altogether.
+        return c.json(rpcOk(req.id, {
+          content: [{ type: 'text', text: e instanceof Error ? e.message : 'tool call failed' }],
+          isError: true,
+        }));
       }
     }
     default:

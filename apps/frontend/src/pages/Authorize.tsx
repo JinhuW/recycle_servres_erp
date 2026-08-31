@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Icon } from '../components/Icon';
 import { useT } from '../lib/i18n';
 import { ApiError, rawFetch } from '../lib/api';
 
@@ -17,6 +16,15 @@ import { ApiError, rawFetch } from '../lib/api';
  *      the OAuth client receives a normal browser request (with its `code`
  *      query param) and completes the flow.
  */
+
+// Friendly label per scope, shared wording with Settings → Connectors. An
+// unrecognised scope falls back to its raw id rather than rendering blank.
+const SCOPE_LABEL_KEYS: Record<string, string> = {
+  'market:read': 'connectorsScopeMarketRead',
+  'market:write': 'connectorsScopeMarketWrite',
+  'sellorder:read': 'connectorsScopeSellOrderRead',
+  'sellorder:write': 'connectorsScopeSellOrderWrite',
+};
 
 type Pending = {
   clientId: string;
@@ -45,7 +53,14 @@ function readReqParam(): string | null {
 export function Authorize() {
   const { t } = useT();
   const [state, setState] = useState<State>({ kind: 'loading' });
+  // Which of the requested scopes the user is actually granting. Starts as
+  // everything requested, so approving without touching anything behaves the
+  // way it always did.
+  const [granted, setGranted] = useState<string[]>([]);
   const req = readReqParam();
+
+  const toggleScope = (scope: string) =>
+    setGranted(prev => prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]);
 
   useEffect(() => {
     if (!req) {
@@ -71,6 +86,7 @@ export function Authorize() {
         }
         const pending = (await res.json()) as Pending;
         if (!alive) return;
+        setGranted(pending.scopes);
         setState({ kind: 'ready', pending });
       } catch (e) {
         if (!alive) return;
@@ -86,7 +102,7 @@ export function Authorize() {
     const clientName = state.pending.clientName;
     setState({ kind: 'approving' });
     try {
-      const res = await rawFetch('POST', '/oauth/authorize/consent', { req }, {
+      const res = await rawFetch('POST', '/oauth/authorize/consent', { req, scopes: granted }, {
         Accept: 'application/json',
       });
       if (res.ok) {
@@ -180,17 +196,34 @@ export function Authorize() {
               <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 6 }}>
                 {t('oauthConsentScopesLabel')}
               </div>
-              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {state.kind === 'ready' && state.pending.scopes.length === 0 && (
                   <li style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>{t('oauthConsentScopesNone')}</li>
                 )}
                 {state.kind === 'ready' && state.pending.scopes.map((s) => (
-                  <li key={s} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <Icon name="check2" size={14} />
-                    <code style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12 }}>{s}</code>
+                  <li key={s}>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={granted.includes(s)}
+                        onChange={() => toggleScope(s)}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span>
+                        {SCOPE_LABEL_KEYS[s] ? t(SCOPE_LABEL_KEYS[s]) : s}
+                        <code style={{ display: 'block', fontFamily: 'var(--mono, monospace)', fontSize: 11, color: 'var(--fg-subtle)' }}>
+                          {s}
+                        </code>
+                      </span>
+                    </label>
                   </li>
                 ))}
               </ul>
+              {state.kind === 'ready' && state.pending.scopes.length > 0 && granted.length === 0 && (
+                <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginTop: 10 }}>
+                  {t('oauthConsentScopesNoneChosen')}
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
@@ -207,7 +240,9 @@ export function Authorize() {
                 type="button"
                 className="btn primary"
                 onClick={approve}
-                disabled={state.kind !== 'ready'}
+                // Nothing ticked is a deny, not an approve — the backend would
+                // reject the empty grant anyway.
+                disabled={state.kind !== 'ready' || granted.length === 0}
                 style={{ flex: 1 }}
               >
                 {state.kind === 'approving' ? t('oauthConsentApproving') : t('oauthConsentApprove')}

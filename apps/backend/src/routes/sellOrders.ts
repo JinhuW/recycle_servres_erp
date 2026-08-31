@@ -21,7 +21,9 @@ import {
   buildPriceTemplateWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
+import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { searchSellableInventory } from '../services/sellableInventory';
+import { committedSellStatuses } from '../lib/sellCommitment';
 import {
   buildXlsxBuffer, xlsxResponse, datedFilename, type XlsxColumn,
 } from '../lib/xlsx';
@@ -240,10 +242,21 @@ sellOrders.get('/:id', async (c) => {
            sol.condition, sol.position,
            sol.inventory_id, sol.warehouse_id,
            w.short AS warehouse_short,
-           ol.qty AS inventory_qty
+           -- What this order may still grow its line to: the lot less the units
+           -- other committed orders hold. Its own claim is excluded, so editing
+           -- a line down and back up is not blocked by itself.
+           (ol.qty - elsewhere.qty) AS inventory_qty
     FROM sell_order_lines sol
     LEFT JOIN warehouses w ON w.id = sol.warehouse_id
     LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(rival.qty), 0)::int AS qty
+        FROM sell_order_lines rival
+        JOIN sell_orders rso ON rso.id = rival.sell_order_id
+       WHERE rival.inventory_id = sol.inventory_id
+         AND rso.id <> ${id}
+         AND rso.status = ANY(${committedSellStatuses()}::text[])
+    ) elsewhere ON TRUE
     WHERE sol.sell_order_id = ${id}
     ORDER BY sol.position
   `;
@@ -1260,10 +1273,32 @@ sellOrders.post('/:id/status', async (c) => {
       // regardless of its retained qty. Partially-sold lines lose qty and
       // stay sellable. Aggregated by inventory_id so multiple lines hitting
       // the same source net out.
+      //
+      // Consuming stock moves qty, which is an input to each source PO's
+      // derived goods total. The mirror verdict has to be taken before the
+      // decrement — afterwards a stale mirror reads as a negotiated lot price
+      // and that PO's total_cost pins itself against its lines for good.
+      const sourceOrders = await tx<{ order_id: string }[]>`
+        SELECT DISTINCT l.order_id
+        FROM sell_order_lines sol
+        JOIN order_lines l ON l.id = sol.inventory_id
+        WHERE sol.sell_order_id = ${id} AND sol.inventory_id IS NOT NULL
+      `;
+      const goodsFollowsLines = new Map<string, boolean>();
+      for (const o of sourceOrders) {
+        goodsFollowsLines.set(o.order_id, await goodsTotalIsMirror(tx, o.order_id));
+      }
+
       const sold = await tx<{ line_id: string; remaining: number; sold: number }[]>`
         UPDATE order_lines ol
            SET qty    = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty ELSE ol.qty - s.q END,
-               status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END
+               status = CASE WHEN ol.qty - s.q <= 0 THEN 'Sold' ELSE ol.status END,
+               -- A partial sale is the moment qty stops meaning "how many were
+               -- bought", so the PO's goods total needs that number kept here
+               -- before the decrement below overwrites it. Selling a line out
+               -- leaves qty alone, so it still speaks for both.
+               qty_purchased = CASE WHEN ol.qty - s.q <= 0 THEN ol.qty_purchased
+                                    ELSE COALESCE(ol.qty_purchased, ol.qty) END
           FROM (
             SELECT inventory_id, SUM(qty)::int AS q
             FROM sell_order_lines
@@ -1281,6 +1316,9 @@ sellOrders.post('/:id/status', async (c) => {
           VALUES (${r.line_id}, ${u.id}, 'sold',
                   ${tx.json({ soldQty: r.sold, remainingQty: r.remaining, sellOrder: id })})
         `;
+      }
+      for (const [orderId, isMirror] of goodsFollowsLines) {
+        await syncOrderGoodsTotal(tx, orderId, isMirror);
       }
       const submitters = await tx<{ user_id: string }[]>`
         SELECT DISTINCT o.user_id

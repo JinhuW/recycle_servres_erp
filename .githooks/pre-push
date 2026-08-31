@@ -32,7 +32,7 @@ while read -r local_ref local_oid remote_ref remote_oid; do
       c_grn "✓ changelog updated for feat/fix changes"
     else
       c_red "✗ push has feat/fix commits but CHANGELOG.md was not updated."
-      c_yel "  Cut a release: scripts/release.sh <patch|minor|major>"
+      c_yel "  Add the release section: scripts/changelog.sh draft"
       c_yel "  or add an entry under '## [Unreleased]' in CHANGELOG.md."
       fail=1
     fi

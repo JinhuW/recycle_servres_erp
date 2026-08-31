@@ -2,7 +2,10 @@ import type { Category, DraftLine } from '../lib/types';
 import { useT } from '../lib/i18n';
 import { synthesizePartNumber } from '@recycle-erp/shared';
 import { Combobox } from './Combobox';
+import { PartNumberField } from './PartNumberField';
+import { ItemTypePicker } from './ItemTypePicker';
 import { chipNumberRequired } from '../lib/ramRequired';
+import { ssdBrandRequired, SSD_BRAND_REQUIRED_OVER_GB } from '../lib/lineRequirements';
 import {
   RAM_BRANDS, RAM_GENERATIONS, RAM_DEVICE_TYPES, RAM_CLASS, RAM_RANK, RAM_CAP,
   SSD_BRANDS, SSD_INTERFACE, SSD_FORM, SSD_CAP,
@@ -122,23 +125,30 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('chipNumber')}{chipNumberRequired(value.brand) && <Req />}</label>
-          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value)} />
+          <input className={inputClsFor('chipNumber') + ' mono'} value={value.chipNumber ?? ''} onChange={e => onChange('chipNumber', e.target.value.toUpperCase())} />
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}<Req /></label>
-          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
         </div>
       </>
     );
   }
 
   if (category === 'SSD') {
+    const brandRequired = ssdBrandRequired(value.capacity);
+    const brandMissing = brandRequired && !(value.brand ?? '').trim();
     return (
       <>
         <div className="ph-field-row">
           <div className="ph-field">
-            <label>{t('brand')}<Req /></label>
+            <label>{t('brand')}{brandRequired && <Req />}</label>
             <PhCatCombo className={inputClsFor('brand')} value={value.brand} options={SSD_BRANDS} onChange={v => onChange('brand', v)} />
+            {brandMissing && (
+              <div style={{ fontSize: 11, color: 'var(--neg)', marginTop: 4 }}>
+                {t('ssdBrandNeededOverGb', { gb: SSD_BRAND_REQUIRED_OVER_GB })}
+              </div>
+            )}
           </div>
           <div className="ph-field">
             <label>{t('capacity')}<Req /></label>
@@ -155,23 +165,9 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
             <PhCatSelect className={selectClsFor('formFactor')} value={value.formFactor} options={SSD_FORM} onChange={v => onChange('formFactor', v)} />
           </div>
         </div>
-        <div className="ph-field-row">
-          <div className="ph-field">
-            <label>{t('partNumber')}</label>
-            <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={e => onChange('partNumber', e.target.value)} />
-          </div>
-          <div className="ph-field">
-            <label>{t('health')} (%)</label>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={0.1}
-              className={inputClsFor('health')}
-              value={value.health ?? ''}
-              onChange={e => onChange('health', e.target.value === '' ? null : Number(e.target.value))}
-            />
-          </div>
+        <div className="ph-field">
+          <label>{t('partNumber')}</label>
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} placeholder={synthesizePartNumber('SSD', value) ?? undefined} onChange={v => onChange('partNumber', v)} />
         </div>
       </>
     );
@@ -225,7 +221,7 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
         </div>
         <div className="ph-field">
           <label>{t('partNumber')}</label>
-          <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+          <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
         </div>
       </>
     );
@@ -235,12 +231,18 @@ export function PhCategoryFields({ category, value, onChange, aiFilled, aiLowCon
   return (
     <>
       <div className="ph-field">
-        <label>{t('description')}<Req /></label>
+        <label>{t('lfItemType')}<Req /></label>
+        <ItemTypePicker value={value.itemType} onChange={v => onChange('itemType', v)} />
+      </div>
+      <div className="ph-field">
+        <label>{t('description')}</label>
         <input className={inputClsFor('description')} value={value.description ?? ''} onChange={e => onChange('description', e.target.value)} />
       </div>
       <div className="ph-field">
-        <label>{t('partNumber')}</label>
-        <input className={inputClsFor('partNumber') + ' mono'} value={value.partNumber ?? ''} onChange={e => onChange('partNumber', e.target.value)} />
+        {/* Named as the drawer names it, since it's the field the "still
+            needed" toast lists for an Other line. */}
+        <label>{t('lfPartSku')}<Req /></label>
+        <PartNumberField className={inputClsFor('partNumber') + ' mono'} value={value.partNumber} onChange={v => onChange('partNumber', v)} />
       </div>
     </>
   );

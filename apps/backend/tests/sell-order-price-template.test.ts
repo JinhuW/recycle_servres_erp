@@ -119,7 +119,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(Number(ws.getRow(dataRows[0]).getCell(qtyCol).value)).toBe(5);
   });
 
-  it('leaves Unit Price blank and unlocked, locks every sheet, formulas Line Total', async () => {
+  it('leaves Unit Price blank on an unprotected sheet, formulas Line Total', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
@@ -131,7 +131,9 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       const totalCol = cols.get('Line Total (USD)')!;
       expect(priceCol).toBeGreaterThan(0);
       expect(totalCol).toBeGreaterThan(0);
-      expect(ws.sheetProtection).toBeTruthy();
+      // The workbook ships with no sheet protection at all — a manager can
+      // reshape a bid tab without lifting a lock first.
+      expect(ws.sheetProtection).toBeFalsy();
 
       for (let r = headerRow + 1; r <= ws.rowCount; r++) {
         const row = ws.getRow(r);
@@ -139,11 +141,62 @@ describe('GET /api/sell-orders/:id/price-template', () => {
         const priceCell = row.getCell(priceCol);
         // Blank bid sheet: existing order prices must not leak to the vendor.
         expect(priceCell.value).toBeNull();
-        expect(priceCell.protection?.locked).toBe(false);
         const totalCell = row.getCell(totalCol);
         expect(totalCell.formula).toBeTruthy();
       }
     }
+  });
+
+  it('sorts and filters from the header row on every category tab', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token);
+    const res = await getRaw(`/api/sell-orders/${id}/price-template`, token);
+    const wb = await loadWorkbook(res);
+    expect(categoryTabs(wb).length).toBeGreaterThan(1);
+    for (const ws of categoryTabs(wb)) {
+      const { row: headerRow, cols } = findHeaderRow(ws);
+      const lastCol = Math.max(...cols.values());
+      // The dropdowns must span the whole header, '#' through 'Note / 备注',
+      // and reach the one product row this order puts on each tab.
+      const first = `${ws.getColumn(1).letter}${headerRow}`;
+      const last = `${ws.getColumn(lastCol).letter}${headerRow + 1}`;
+      expect(ws.autoFilter).toBe(`${first}:${last}`);
+      // No protection to grey the dropdowns out or to refuse a sort — that is
+      // what makes the filter usable without a trip through Review > Unprotect.
+      expect(ws.sheetProtection).toBeFalsy();
+    }
+  });
+
+  it('ships rows in the default order — brand, then capacity, speed', async () => {
+    const ram = (label: string, specs: Record<string, string | number>) => ({
+      category: 'RAM', label, partNumber: label, condition: null,
+      qty: 1, imageUrl: null, specs,
+    });
+    // Deliberately scrambled on the way in, including a manual line with no
+    // specs at all.
+    const buf = await buildPriceTemplateWorkbook(
+      { id: 'SL-SORT', customerName: 'Acme', currencyCode: 'USD' },
+      [
+        ram('d', { capacity: '16GB', rank: '2Rx4', speed: '2400', brand: 'Micron' }),
+        ram('manual', {}),
+        ram('f', { capacity: '128GB', rank: '2Rx4', speed: '3200', brand: 'Samsung' }),
+        ram('b', { capacity: '16GB', rank: '1Rx8', speed: '3200', brand: 'Hynix' }),
+        ram('e', { capacity: '8GB', rank: '2Rx4', speed: '3200', brand: 'Samsung' }),
+        ram('c', { capacity: '16GB', rank: '2Rx4', speed: '2400', brand: 'Hynix' }),
+      ],
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const ws = wb.worksheets[0];
+    const { row: headerRow, cols } = findHeaderRow(ws);
+    const labels: string[] = [];
+    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+      labels.push(String(ws.getRow(r).getCell(cols.get('Item')!).value ?? ''));
+    }
+    // Hynix, Micron, Samsung — then within a brand, capacity numerically
+    // (8GB before 128GB, not lexically) and speed last. Rank does not sort:
+    // the Hynix pair splits on speed alone. The spec-less manual line sinks.
+    expect(labels).toEqual(['c', 'b', 'd', 'e', 'f', 'manual']);
   });
 
   it('labels the price columns CNY on a CNY order', async () => {
@@ -212,7 +265,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     }
   });
 
-  it('every tab carries a blank, unlocked Note column for vendor remarks', async () => {
+  it('every tab carries a blank Note column for vendor remarks', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token);
     const wb = await loadWorkbook(
@@ -234,7 +287,6 @@ describe('GET /api/sell-orders/:id/price-template', () => {
         const noteCell = row.getCell(noteCol);
         // Nothing pre-filled from the DB — the vendor/manager types remarks.
         expect(noteCell.value).toBeNull();
-        expect(noteCell.protection?.locked).toBe(false);
       }
     }
   });
@@ -305,10 +357,18 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(la1Cells).toContain('Warehouse total');
     expect(la1Cells).toContain('WH-R1');
     expect(la1Cells).toContain('WH-S1');
+    // A picker packs by part number and spec, so the columns that only help a
+    // bidder are off these tabs — headers and the values under them.
+    for (const dropped of ['Item', 'Class', 'Chip #', 'Condition', 'Image URL']) {
+      expect(la1Cells).not.toContain(dropped);
+    }
+    expect(la1Cells).not.toContain('DIMM A');
+    expect(la1Cells).not.toContain('Drive B');
     // Price-free by design: nothing on a packing tab may look like a price —
     // that's also what keeps the import parser away from these tabs.
     expect(la1Cells.some(v => /price|单价|价格/i.test(v))).toBe(false);
-    expect(la1.sheetProtection).toBeTruthy();
+    // Packing tabs ship unprotected too — a picker types into the tick boxes.
+    expect(la1.sheetProtection).toBeFalsy();
 
     const rowQty = (ws: ExcelJS.Worksheet, firstCell: string): number[] => {
       const out: number[] = [];
