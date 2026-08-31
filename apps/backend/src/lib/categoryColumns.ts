@@ -1,4 +1,4 @@
-import { CATEGORY_ORDER, type ExportCategory } from '@recycle-erp/shared';
+import { CATEGORY_ORDER, categoryRank, type ExportCategory } from '@recycle-erp/shared';
 import type { XlsxColumn } from './xlsx';
 
 export { CATEGORY_ORDER };
@@ -83,13 +83,22 @@ export function compareSpecValue(a: string, b: string): number {
 // Label breaks ties so the same data always exports byte-identically. `read`
 // adapts the row shape: the bid sheet holds specs in a sub-object, the
 // inventory export carries them flat on the row.
+//
+// `category` ranks first when given — that's the inventory *screens*, which are
+// one flat table and have to earn the grouping a workbook gets free from its
+// tabs. The workbook callers split by category before sorting, so they leave it
+// off; don't "fix" the optionality away.
 export function sortSheetRows<T>(
   rows: readonly T[],
-  read: (row: T) => { specs: Record<string, unknown>; label: string },
+  read: (row: T) => { specs: Record<string, unknown>; label: string; category?: string },
 ): T[] {
   return [...rows].sort((x, y) => {
     const a = read(x);
     const b = read(y);
+    if (a.category !== undefined && b.category !== undefined) {
+      const d = categoryRank(a.category) - categoryRank(b.category);
+      if (d !== 0) return d;
+    }
     for (const key of SHEET_SORT_KEYS) {
       const d = compareSpecValue(String(a.specs[key] ?? ''), String(b.specs[key] ?? ''));
       if (d !== 0) return d;

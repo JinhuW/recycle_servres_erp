@@ -118,6 +118,12 @@ Transit, and a line's qty can never be 0.
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
   filter (v1.19.0).
+- **The export and both screens read in the vendor bid sheet's order** — brand,
+  then capacity, speed, numerically collated with blanks last (v1.107.0), and
+  category rank ahead of it on the screens, which have no tabs to group by
+  (v1.111.0). One implementation serves the workbooks and the lists. The screens
+  still take the newest 200 rows from the database; only their arrangement
+  changed.
 - Other-type stock can be filtered by Untyped (v1.49.0).
 - Spec fields on an inventory line are editable in place on desktop.
 - **Committed sell orders reserve the units they name**, not the whole lot.
