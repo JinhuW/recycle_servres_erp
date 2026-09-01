@@ -1051,6 +1051,7 @@ const zh: Record<string, string> = {
   shipPayTxnLabel: 'PayPal 交易号',
   shipPayTxnPh: '8XY12345AB678901C',
   shipPayTxnFormatHint: '通常为 17 位字母和数字——请再核对一下。',
+  shipPayTxnRequired: 'PayPal 交易号——如果没有，请向付款的经理索取。',
   shipPayRemoveShot: '移除截图',
   shipPayScanFailed: '无法识别截图——请手动输入交易号。',
   shipPayNoTxnFound: '截图中未找到交易号——请手动输入。',

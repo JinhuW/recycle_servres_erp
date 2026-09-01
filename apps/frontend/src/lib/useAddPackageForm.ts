@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from './carrierDetect';
-import { handleFetchError } from './errorToast';
+import { handleFetchError, showErrorDialog } from './errorToast';
+import { useT } from './i18n';
 import { blobToDataUrl, compressForUpload } from './image-compress';
 import { addPackage, scanPaymentScreenshot } from './packages';
 import type { PackageSource } from './packageSource';
@@ -22,6 +23,7 @@ export const FMT_HINT_KEY: Record<Carrier, string> = {
 export type PaymentShot = { key: string; url: string; preview: string };
 
 export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: string }) => void) {
+  const { t } = useT();
   const [raw, setRawState] = useState('');
   const [pick, setPick] = useState<Carrier | null>(null);
   const [sellerName, setSellerName] = useState('');
@@ -120,6 +122,15 @@ export function useAddPackageForm(onAdded: (added: { carrier: Carrier; tn: strin
   const submitting = useRef(false);
   const submit = async () => {
     if (!canSubmit || carrier == null || source == null || submitting.current) return;
+    // The id is what reconciles this box's payment to its PO later — it carries
+    // onto the order and banktx auto-links on it. The Payments page is
+    // manager-only, so a purchaser who doesn't have it has to ask, not skip.
+    // Held before the double-submit latch: an early return past it would swallow
+    // every later attempt in silence.
+    if (!paypalTxnId) {
+      showErrorDialog(t('errCantSubmitMsg'), [t('shipPayTxnRequired')], t('errCantSubmitTitle'));
+      return;
+    }
     submitting.current = true;
     setBusy(true);
     try {

@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.116.0] - 2026-08-31
+
+### Features
+- feat(shipping): **adding a tracked package now requires the PayPal transaction
+  ID.** The field had been optional on the Add-package form since it landed in
+  v1.87.0, which quietly cost more than a blank column: `routes/packages.ts`
+  copies a package's `paypal_txn_id` onto the PO minted from the delivered box,
+  and `banktx/sync.ts` auto-links a Mercury/PayPal row to a PO on exactly that
+  value. A package added without one therefore became a PO that could only be
+  reconciled by a manager guessing from amount and date. Submitting without the
+  ID now opens the same blocking dialog every other blocked submit uses, and —
+  because the Payments page is manager-only and a purchaser has no way to look
+  the ID up — the dialog names the one route they do have: ask the manager who
+  paid for the order. The gate lives in the shared `useAddPackageForm` hook, so
+  the phone and the desktop page cannot drift on it, and it sits ahead of the
+  double-submit latch rather than behind it, where an early return would have
+  swallowed every later attempt in silence. This is the shipping-side twin of
+  v1.115.0's PO rule: a package added with an ID mints a PO that already
+  satisfies the advance guard, so nobody is asked twice
+  ([RS-008](docs/tickets/RS-008-adding-a-tracked-package-requires-a-transaction-id.md))
+
 ## [1.115.0] - 2026-08-31
 
 ### Features
