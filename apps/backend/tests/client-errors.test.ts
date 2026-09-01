@@ -79,6 +79,27 @@ describe('POST /api/client-errors', () => {
     expect(JSON.parse(line).path).toBe('/api/public/vendor/<redacted>/bids');
   });
 
+  // The likelier leak of the two: a purchaser checking what a counterparty sees
+  // sits on /v/<token>, so the token is in the address bar of every report the
+  // page sends — and unlike `path`, `href` went in raw.
+  it('redacts a portal token carried in the reported href', async () => {
+    const { token } = await loginAs(ALEX);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await post(token, {
+      message: 'render crash',
+      kind: 'render',
+      href: 'https://inventory.recycleservers.com/v/super-secret-token#/bids/7',
+    });
+
+    const line = spy.mock.calls.map(c => String(c[0])).find(s => s.includes('client-error'))!;
+    expect(line).not.toContain('super-secret-token');
+    // The hash route survives: it is the only part that says what the user was
+    // looking at, and the SPA carries its whole route there.
+    expect(JSON.parse(line).href)
+      .toBe('https://inventory.recycleservers.com/v/<redacted>#/bids/7');
+  });
+
   it('truncates an oversized stack instead of appending it whole', async () => {
     const { token } = await loginAs(ALEX);
     vi.spyOn(console, 'error').mockImplementation(() => {});
