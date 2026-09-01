@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.6] - 2026-09-13
+
+### Fixed
+
+- **The "Group with…" picker on Payments is no longer clipped off the bottom
+  of the table.**  The candidate list rendered `position: absolute` inside
+  the expanded row's `<td colSpan>`, which sits in `.table-scroll`
+  (`overflow-x: auto; overflow-y: hidden`) — so for any row in the lower part
+  of the list the candidates were drawn somewhere unclickable and manual
+  grouping could not be completed at all.  It had been that way since the
+  feature shipped in v1.103.0, and it was live on production.  The PO picker
+  hit the same trap in the same release and was moved to `position: fixed`
+  then; the pair picker was written from its shape and did not inherit the
+  fix, and the record picker later copied the arithmetic a third time.  All
+  three pickers now place themselves against the viewport through one pure
+  helper, `placePopover` — below the button when it fits, flipped above when
+  it does not, clamped to the viewport — tracking their anchor on scroll and
+  resize, at the z-index the PO picker already used.  Covered by unit tests
+  that fail if a flip or clamp clause is removed
+  ([RS-046](docs/tickets/RS-046-group-with-popover-is-clipped-off-the-bottom-of-the.md)).
+
 ## [1.138.5] - 2026-09-13
 
 ### Fixed
