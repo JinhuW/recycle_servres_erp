@@ -1235,7 +1235,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         {/* PO audit log — lives under Payment detail in the side column, fully
             foldable. The component hides its own card chrome before load and
             handles the empty-state copy for drafts. */}
-        <OrderActivityLog orderId={order.id} refreshKey={activityKey} />
+        <OrderActivityLog orderId={order.id} refreshKey={activityKey} className="oe-side-activity" />
       </aside>
 
       <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>

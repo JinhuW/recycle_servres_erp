@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.114.2] - 2026-08-31
+
+### Fixes
+- fix(orders): **a long activity history no longer opens a dead band above
+  "Order status" on the desktop PO page.** The side column's "scroll inside your
+  own card" rule was addressed by position — `:nth-child(2)` — but the aside has
+  a conditional middle child: the manager-only payments ledger, which appears
+  once a bank transaction is linked to the PO. On those orders the cap landed on
+  the ledger and the activity log ran to its full natural height, roughly a
+  screen and a half for 47 events. The log is now addressed by class
+  (`.oe-side-activity`), which is the only thing that holds: the component
+  renders nothing until its own fetch lands, so the child count moves 1 → 3
+  during load and no positional selector is right throughout. The grid rows
+  changed with it (`1fr auto` → `auto 1fr`, with the action card pinned to the
+  top of its row) so that if the side column is ever the taller of the two, the
+  surplus is trailing space *under* the status bar instead of a gap above it.
+
 ## [1.114.1] - 2026-08-31
 
 ### Fixes
