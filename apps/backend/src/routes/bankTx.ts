@@ -127,11 +127,21 @@ bankTx.get('/', async (c) => {
     ? sql`${openRowFrag(sql, 'bt')} AND ${hasMatchFrag(sql, 'bt')}`
     : sql`TRUE`;
 
+  // `order_cost` is what the bank was asked to pay for the linked PO, so a row
+  // can be read against its own amount: goods (a line mirror or a negotiated lot
+  // price) plus the fees charged on top. Goods alone reads short of the payment
+  // on any PO carrying a fee, which is most of them — `amountDateFrag` in
+  // banktx/match.ts matches on both for that reason. NULL when there is no
+  // stored goods total, since a fees-only figure would read as the PO's cost.
+  //
+  // The join is aliased `po`, not `o`: `hasMatchFrag` lands in this WHERE
+  // carrying its own `EXISTS (SELECT 1 FROM orders o …)`.
   const rows = await sql`
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            u.name AS linked_by_name,
+           (po.total_cost + po.other_fees)::float AS order_cost,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
@@ -141,6 +151,7 @@ bankTx.get('/', async (c) => {
             WHERE bt.pair_id IS NOT NULL AND l.pair_id = bt.pair_id) AS pair_legs
     FROM bank_transactions bt
     LEFT JOIN users u ON u.id = bt.linked_by
+    LEFT JOIN orders po ON po.id = bt.order_id
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
       AND ${matchFrag} ${cursorFrag}
@@ -200,6 +211,7 @@ bankTx.get('/', async (c) => {
       paypalTxnId: r.paypal_txn_id,
       legs: (r.pair_legs as ReturnType<typeof shapeLeg>[] | null) ?? [shapeLeg(r as unknown as LegRow)],
       orderId: r.order_id,
+      orderCost: r.order_cost,
       linkKind: r.link_kind,
       linkAuto: r.link_auto,
       linkedAt: r.linked_at,

@@ -65,6 +65,10 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // Stats.suggested below.
   pairCandidate?: PairCandidate | null;
   orderId: string | null;
+  // The linked PO's cost — goods plus other fees, what the bank was asked to
+  // pay. Added in v1.117.0, so optional for the same deploy-skew reason as
+  // Stats.suggested below.
+  orderCost?: number | null;
   linkKind: 'payment' | 'refund' | null;
   linkAuto: boolean;
   linkedAt: string | null;
@@ -537,9 +541,18 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
         <td><StatusChip row={row} t={t} /></td>
         <td style={{ whiteSpace: 'nowrap', position: 'relative' }}>
           {row.orderId ? (
-            <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
-              {row.orderId}
-            </button>
+            <>
+              <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
+                {row.orderId}
+              </button>
+              {/* What the PO cost, beside what was paid for it — the row is
+                  otherwise unreadable against its own amount. */}
+              {row.orderCost != null && (
+                <span className="mono muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                  {fmtUSD(row.orderCost, locale)}
+                </span>
+              )}
+            </>
           ) : row.ignored ? (
             <button type="button" className="btn sm ghost" onClick={(e) => { stop(e); void act(`${row.id}/unignore`); }}>
               {t('payUnignore')}

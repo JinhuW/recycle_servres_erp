@@ -17,6 +17,22 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.117.0] - 2026-08-31
+
+### Features
+- feat(payments): **a linked payment now shows what the PO cost, beside the PO
+  it paid.** The Linked tab ended each row with a bare `PO-1400` pill while the
+  money that moved sat two columns to its left, so the only question worth
+  asking of that list — did this payment cover that PO? — could not be answered
+  without opening the PO. One screenshot had `PO-1412` on two separate $2,800
+  rows with no way to tell whether it was now settled, short, or paid twice.
+  The figure shown is the PO's cost as its own page states it: goods plus
+  `other_fees`, not the goods total alone. Fees are a separate column the bank
+  very much did charge — it is why the matcher already scores a payment against
+  both — so a goods-only number would have read as a shortfall on most
+  fee-carrying POs and manufactured the confusion it was added to remove.
+  ([RS-009](docs/tickets/RS-009-linked-payments-do-not-show-the-po-s-cost.md))
+
 ## [1.116.0] - 2026-08-31
 
 ### Features
