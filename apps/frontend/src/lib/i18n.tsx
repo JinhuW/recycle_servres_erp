@@ -363,7 +363,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payKindPayment: 'Payment',
     payKindRefund: 'Refund',
     payAuto: 'auto',
+    // The ellipsis is the promise of a picker: payLink opens one, payLinkNow
+    // links the purchase order it is sitting next to.
     payLink: 'Link…',
+    payLinkNow: 'Link',
     payUnlink: 'Unlink',
     payIgnore: 'Ignore',
     payUnignore: 'Unignore',
@@ -392,13 +395,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payTileTransfersSub: 'between our accounts',
     payTileIgnoredSub: 'not seller payments',
     payFilterHasMatch: 'Has match',
-    payMatchLikely: 'Likely {id} · {when}',
-    payMatchCountOne: '1 possible PO',
     // The pool is capped, so a count larger than the list has to say so —
     // otherwise working all of them and finding nothing looks conclusive.
     payMatchShowing: 'showing {shown} of {total}',
-    payMatchCount: '{n} possible POs',
-    payMatchNotIt: 'Not it',
+    // The queue row shows a star, not a claim; these name what it found.
+    payStarSure: 'Likely {id} · {when} — open to link',
+    payStarMaybe: '{n} possible purchase orders — open to review',
+    payStarPair: 'May be the same payment as another row — open to review',
     payMatchSuggested: 'Suggested purchase orders',
     payMatchBest: 'best match',
     payMatchDayGap: '{n}d apart',

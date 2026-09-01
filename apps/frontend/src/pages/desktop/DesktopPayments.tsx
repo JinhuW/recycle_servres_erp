@@ -472,6 +472,36 @@ function StatusChip({ row, t }: { row: PaymentRow; t: (k: string) => string }) {
   );
 }
 
+// The queue row says only whether there is something to look at; what it is,
+// and every button that acts on it, lives in the expanded row.  A marker sized
+// by its content would put Ignore at a different x on every row.
+function SuggestionStar({ row, onOpen }: { row: PaymentRow; onOpen: () => void }) {
+  const { t } = useT();
+  const sure = row.match?.count === 1 && row.match.confidence === 'high';
+  const label = sure
+    ? t('payStarSure', { id: row.match!.best.id, when: gapLabel(row.match!.best.dayGap, t) })
+    : row.match
+      ? t('payStarMaybe', { n: row.match.count })
+      : row.pairCandidate
+        ? t('payStarPair')
+        : null;
+
+  // An ignored row keeps its match but has nothing to decide, and the expanded
+  // row shows it none of it — a star there would point at an empty folder.
+  if (!label || row.ignored) return <span />;
+  return (
+    <button
+      type="button"
+      className={'pay-po-star' + (sure ? ' sure' : '')}
+      title={label}
+      aria-label={label}
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}
+    >
+      <Icon name="star" size={15} />
+    </button>
+  );
+}
+
 function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   row: PaymentRow;
   open: boolean;
@@ -481,31 +511,11 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   onToast: (msg: string) => void;
 }) {
   const { t } = useT();
-  const [picking, setPicking] = useState(false);
-  // Dismissal is per page load on purpose: suggestions are read-time only, so
-  // persisting a "not it" would be the same mistake as persisting a match.
-  const [dismissed, setDismissed] = useState(false);
-  const actionsRef = useRef<HTMLSpanElement>(null);
-  const [pairDismissed, setPairDismissed] = useState(false);
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
-    if (await act(`${row.id}/link`, { orderId })) {
-      onToast(t('payLinkedToast', { id: orderId }));
-      setPicking(false);
-    }
+    if (await act(`${row.id}/link`, { orderId })) onToast(t('payLinkedToast', { id: orderId }));
   };
-
-  // One-click only when the server found exactly one candidate and is sure of
-  // it; anything else has to be looked at before it is linked.
-  const likely = !dismissed && row.match?.count === 1 && row.match.confidence === 'high'
-    ? row.match : null;
-  const ambiguous = !likely && (row.match?.count ?? 0) > 0 ? row.match : null;
-
-  // Grouping outranks linking: while two rows may be one payment, linking
-  // either of them to a PO is premature — and linking both is how one PO ends
-  // up carrying the payment twice.
-  const grouping = !pairDismissed ? row.pairCandidate ?? null : null;
   const group = async (otherId: string) => {
     if (await act(`${row.id}/pair`, { otherId })) onToast(t('payGroupedToast'));
   };
@@ -535,94 +545,24 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
           {fmtSigned(row.amount, locale)}
         </td>
         <td><StatusChip row={row} t={t} /></td>
-        <td style={{ whiteSpace: 'nowrap', position: 'relative' }}>
-          {row.orderId ? (
-            <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
-              {row.orderId}
-            </button>
-          ) : row.ignored ? (
-            <button type="button" className="btn sm ghost" onClick={(e) => { stop(e); void act(`${row.id}/unignore`); }}>
-              {t('payUnignore')}
-            </button>
-          ) : grouping ? (
-            <span style={{ display: 'inline-grid', gap: 5, justifyItems: 'start' }} onClick={stop}>
-              <span className="chip dot accent" style={{ fontSize: 10.5 }}>
-                {t('paySamePaymentAs', {
-                  source: grouping.source === 'mercury' ? 'Mercury' : 'PayPal',
-                  when: fmtDateShort(grouping.postedAt, locale),
-                })}
-              </span>
-              <span style={{ display: 'inline-flex', gap: 6 }}>
-                <button type="button" className="btn sm primary" onClick={() => void group(grouping.id)}>
-                  {t('payGroup')}
-                </button>
-                <button type="button" className="btn sm ghost" onClick={() => setPairDismissed(true)}>
-                  {t('payNotSame')}
-                </button>
-                <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
-                  {t('payIgnore')}
-                </button>
-              </span>
-            </span>
-          ) : (
-            // Badge and buttons share one line: stacked, a row carrying a match
-            // badge stood a line taller than its neighbours and the table stepped.
-            <span
-              ref={actionsRef}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
-              onClick={stop}
-            >
-              {likely && (
-                <span className="chip dot pos" style={{ fontSize: 10.5 }}>
-                  {t('payMatchLikely', {
-                    id: likely.best.id,
-                    when: gapLabel(likely.best.dayGap, t),
-                  })}
-                </span>
-              )}
-              {ambiguous && (
-                <button
-                  type="button"
-                  className="chip warn"
-                  style={{ fontSize: 10.5, border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
-                  onClick={onToggle}
-                >
-                  {row.match!.count === 1
-                    ? t('payMatchCountOne')
-                    : t('payMatchCount', { n: row.match!.count })}
-                </button>
-              )}
-              {likely ? (
-                <>
-                  <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
-                    {t('payLink')}
-                  </button>
-                  <button
-                    type="button" className="btn sm ghost"
-                    onClick={() => { setDismissed(true); setPicking(true); }}
-                  >
-                    {t('payMatchNotIt')}
-                  </button>
-                </>
-              ) : (
-                <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
-                  {t('payLink')}
-                </button>
-              )}
-              <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
-                {t('payIgnore')}
+        <td style={{ whiteSpace: 'nowrap' }}>
+          <span className="pay-po">
+            {row.orderId ? (
+              <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
+                {row.orderId}
               </button>
-            </span>
-          )}
-          {picking && !row.orderId && (
-            <PoPicker
-              txnId={row.id}
-              anchor={actionsRef}
-              onPick={link}
-              onClose={() => setPicking(false)}
-              locale={locale}
-            />
-          )}
+            ) : (
+              <>
+                <SuggestionStar row={row} onOpen={onToggle} />
+                <button
+                  type="button" className="btn sm ghost"
+                  onClick={(e) => { stop(e); void act(`${row.id}/${row.ignored ? 'unignore' : 'ignore'}`); }}
+                >
+                  {t(row.ignored ? 'payUnignore' : 'payIgnore')}
+                </button>
+              </>
+            )}
+          </span>
         </td>
       </tr>
       {open && (
@@ -649,9 +589,36 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
 }) {
   const { t } = useT();
   const [pickingPair, setPickingPair] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const pickRef = useRef<HTMLSpanElement>(null);
+  // Dismissal is per page load on purpose: suggestions are read-time only, so
+  // persisting a "not the same" would be the same mistake as persisting a match.
+  const [pairDismissed, setPairDismissed] = useState(false);
+  const grouping = !pairDismissed ? row.pairCandidate ?? null : null;
+  const decidable = !row.orderId && !row.ignored;
+
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
-      {row.match && !row.orderId && !row.ignored && (
+      {/* Grouping outranks linking, so it is read first: while two rows may be
+          one payment, linking either of them to a PO is premature — and linking
+          both is how one PO ends up carrying the payment twice. */}
+      {grouping && decidable && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="chip dot accent" style={{ fontSize: 10.5 }}>
+            {t('paySamePaymentAs', {
+              source: grouping.source === 'mercury' ? 'Mercury' : 'PayPal',
+              when: fmtDateShort(grouping.postedAt, locale),
+            })}
+          </span>
+          <button type="button" className="btn sm primary" onClick={() => void onGroup(grouping.id)}>
+            {t('payGroup')}
+          </button>
+          <button type="button" className="btn sm ghost" onClick={() => setPairDismissed(true)}>
+            {t('payNotSame')}
+          </button>
+        </div>
+      )}
+      {row.match && decidable && (
         <MatchList txnId={row.id} locale={locale} onLink={onLink} />
       )}
       <div style={{ display: 'grid', gap: 4 }}>
@@ -668,6 +635,24 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {decidable && (
+          // Same offset-parent reason as the pair picker below: the popover has
+          // to hang off the button, not the page.
+          <span ref={pickRef} style={{ position: 'relative', display: 'inline-flex' }}>
+            <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
+              {t('payLink')}
+            </button>
+            {picking && (
+              <PoPicker
+                txnId={row.id}
+                anchor={pickRef}
+                onPick={id => { onLink(id); setPicking(false); }}
+                onClose={() => setPicking(false)}
+                locale={locale}
+              />
+            )}
+          </span>
+        )}
         {row.orderId && (
           <>
             <span className="muted">
@@ -817,7 +802,7 @@ function MatchList({ txnId, locale, onLink }: {
             type="button" className="btn sm" style={{ marginLeft: 'auto' }}
             onClick={() => onLink(s.id)}
           >
-            {t('payLink')}
+            {t('payLinkNow')}
           </button>
         </div>
       ))}
@@ -854,7 +839,10 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
       const room = window.innerHeight - r.bottom;
       setPos({
         top: room < PICKER_H + GAP ? Math.max(GAP, r.top - PICKER_H - GAP) : r.bottom + GAP,
-        left: Math.max(GAP, Math.min(r.right - PICKER_W, window.innerWidth - PICKER_W - GAP)),
+        // Left-aligned to the button: the anchor sits at the start of the
+        // expanded row now, so hanging the panel off its right edge put it
+        // most of a panel-width away from the control that opened it.
+        left: Math.max(GAP, Math.min(r.left, window.innerWidth - PICKER_W - GAP)),
       });
     };
     place();

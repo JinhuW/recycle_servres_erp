@@ -2604,6 +2604,34 @@ html.desktop, body.desktop, .desktop #root {
 .ship-po-pill:hover { border-color: var(--border-strong); }
 
 
+/* ── Payments · the purchase-order cell ───────────────────────────────────── */
+
+/* A fixed star track is the only reason this is a grid: the queue is scanned
+   down the Ignore column, and an intrinsically-sized marker put that button at
+   a different x on every row.  inline-grid, not grid, so the rest of the cell
+   stays whitespace that still toggles the row open. */
+.pay-po {
+  display: inline-grid;
+  grid-template-columns: 18px auto;
+  align-items: center;
+  column-gap: 10px;
+}
+.pay-po > .ship-po-pill { grid-column: 1 / -1; justify-self: start; }
+
+.pay-po-star {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--warn-strong);
+  border-radius: 4px;
+}
+/* Filled, and in the linked-state green: the server named one PO and is sure. */
+.pay-po-star.sure { color: var(--accent-strong); }
+.pay-po-star.sure .icon { fill: currentColor; }
+.pay-po-star:hover { opacity: 0.7; }
+
+
 /* ── Label wizard ─────────────────────────────────────────────────────────── */
 .ship-wizard {
   max-width: 800px;

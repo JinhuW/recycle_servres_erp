@@ -190,7 +190,12 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   loop behind a manager-only API (v1.91.0), and a Payments page (v1.92.0).
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
-- Unlinked transactions get **suggested matching POs** (v1.99.0).
+- Unlinked transactions get **suggested matching POs** (v1.99.0).  Since
+  v1.116.0 the queue row carries only a **star** — filled when the server is
+  sure of one PO, outline when there is something to weigh — and every control
+  that acts on the match (`Link…`, `Group`, the ranked candidate list) lives in
+  the expanded row.  The row is a queue entry again: one line tall, with
+  `Ignore` in the same place on every row.
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
   can never disagree (v1.114.1).

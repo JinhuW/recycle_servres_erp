@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.116.0] - 2026-08-31
+
+### Features
+- feat(payments): **the PO decision moves out of the queue row and into the
+  expanded row.** The `PURCHASE ORDER` cell used to carry the whole thing — a
+  match badge, `Link…`, sometimes `Not it`, and `Ignore` — inside a wrapping
+  flex box, so every control was positioned by the width of the badge to its
+  left and no two rows agreed on where the buttons were. The widest badge
+  (`Likely PO-1389 · 4d apart`) pushed `Ignore` onto a second line and made that
+  row taller than its neighbours. Gap tuning cannot fix a layout whose origin is
+  the previous element's text; only taking the variable-width content out of the
+  cell can. The row now shows a star — filled and green when the server is sure
+  of exactly one PO, outline and amber when there are candidates or a possible
+  pairing, absent when there is nothing — plus `Ignore`. Clicking the star opens
+  the row, where the ranked candidate list already lived and where `Link…`,
+  `Group` and `Not the same` now live too. Every row is one line tall and
+  `Ignore` starts at the same x on all of them.
+- feat(payments): the buttons say what they do. The per-candidate button links
+  the PO it sits beside and reads `Link`; `Link…` keeps its ellipsis because it
+  is the one button that opens a picker. That picker is also left-aligned to its
+  button now, rather than hung off its right edge from when its anchor was the
+  table's last column. `Not it` is gone — it dismissed an inline claim about a
+  specific PO, and the row no longer makes one.
+
 ## [1.115.0] - 2026-08-31
 
 ### Features

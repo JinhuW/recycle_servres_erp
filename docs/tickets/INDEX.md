@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-009](./RS-009-payments-row-carries-the-whole-po-decision-inline.md) | in-review | story | P3 | Payments row carries the whole PO decision inline | 1.116.0 |
 | [RS-007](./RS-007-long-activity-log-leaves-a-dead-gap-above-order-stat.md) | in-review | bug | P2 | Long activity log leaves a dead gap above Order status | 1.114.2 |
 | [RS-006](./RS-006-company-paid-pos-must-carry-a-payment-transaction-id.md) | done | story | P2 | Company-paid POs must carry a payment transaction ID | 1.115.0 |
 | [RS-005](./RS-005-release-review-findings-before-the-prod-cut.md) | done | bug | P1 | Release-review findings before the prod cut | 1.114.1 |
