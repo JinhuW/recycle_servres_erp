@@ -19,6 +19,7 @@ import { CostTape } from '../../components/CostTape';
 import { useAuth } from '../../lib/auth';
 import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
+import { ramBrandNeedsConfirm } from '../../lib/scanValidation';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import {
   deleteLinePhoto, planPhotoCarry, photoSourceFile, uploadLinePhoto,
@@ -86,6 +87,10 @@ export type Line = {
   scanConfidence?: number | null;
   scanImageUrl?: string | null;
   _confirmed?: boolean;
+  // Set by a scan whose brand the AI couldn't name; cleared when the purchaser
+  // confirms it against the photo. Lives on the line, not in drawer state, so
+  // closing and reopening the drawer can't shake the question off.
+  _brandNeedsConfirm?: boolean;
   _cid: string;                  // stable client id for React keys (never sent to the API)
   // DB id, once the line has been persisted. Null before that — which is why
   // photos are buffered rather than uploaded as they're picked.
@@ -149,10 +154,11 @@ export function findDuplicatePartNumbers(
 // it through onChange() (live edit in the drawer).
 // Low-confidence extractions are still prefilled (a rough draft beats an empty
 // form); scanConfidence rides along so the drawer can flag it for review.
-export function scanToLinePatch(scan: ScanResponse): Partial<Line> {
+export function scanToLinePatch(scan: ScanResponse, category?: Category): Partial<Line> {
   const f = scan.extracted ?? {};
   return {
     scanImageId: scan.imageId ?? null,
+    _brandNeedsConfirm: category === 'RAM' && ramBrandNeedsConfirm(f),
     scanConfidence: scan.confidence ?? null,
     scanImageUrl: scan.deliveryUrl ?? null,
     ...(f.brand        ? { brand: f.brand }               : {}),
@@ -169,6 +175,16 @@ export function scanToLinePatch(scan: ScanResponse): Partial<Line> {
     ...(f.partNumber   ? { partNumber: f.partNumber }     : {}),
   };
 }
+
+/**
+ * Whether this line still owes a brand the purchaser has checked against the
+ * scan photo. Every path that persists a line asks this — the drawer's confirm
+ * button is only one of four. The category test matters: switching a scanned
+ * RAM line to another category leaves the flag behind, and an SSD line must
+ * not be asked a RAM question.
+ */
+export const brandConfirmPending = (l: Line): boolean =>
+  l.category === 'RAM' && !!l._brandNeedsConfirm;
 
 function OrderForm({
   onDone,
@@ -414,6 +430,10 @@ function OrderForm({
     if (activeIdx != null) {
       const cur = lines[activeIdx];
       if (cur && !cur._confirmed) {
+        if (brandConfirmPending(cur)) {
+          showWarnToast(t('subConfirmBrandThis'));
+          return;
+        }
         if (!lineReady(cur)) {
           const fields = missingNamesFor(cur);
           showWarnToast(fields ? t('drawerStillNeeded', { fields }) : t('subFillThisLine'));
@@ -540,6 +560,14 @@ function OrderForm({
   const handleConfirmLine = async (idx: number): Promise<void> => {
     const l = lines[idx];
     if (l._confirmed) return;
+    // Backstop: the drawer opens the confirm dialog before it gets here, and
+    // addLine bails earlier still. Nothing should reach this — but this is the
+    // single funnel every confirm goes through, so it is where the rule can't
+    // be routed around.
+    if (brandConfirmPending(l)) {
+      showErrorDialog(t('subConfirmBrandThis'));
+      throw new Error(t('brandConfirmTitle'));
+    }
     if (!lineReady(l)) {
       const fields = missingNamesFor(l);
       showErrorDialog(fields ? t('subMissingFieldsThis', { fields }) : t('subFillThisLine'));
@@ -563,8 +591,13 @@ function OrderForm({
     }
   };
 
-  // Escape closes the drawer.
-  useEscapeKey(useCallback(() => setActiveIdx(null), []), activeIdx !== null);
+  // Escape closes the drawer — unless a dialog is stacked on top of it, which
+  // gets the key first. Both listen on the window, so without this one press
+  // would dismiss the dialog and the drawer under it.
+  useEscapeKey(useCallback(() => {
+    if (document.querySelector('.modal-backdrop')) return;
+    setActiveIdx(null);
+  }, []), activeIdx !== null);
 
   // `submitLines` defaults to state, but the part-number confirm flow passes a
   // freshly-patched array: setLines() is async, so submitting from state right
@@ -765,6 +798,11 @@ function OrderForm({
   : warehouses.length === 0 ? [t('subWarehousesNotLoaded')]
   : !meta.warehouseId       ? [t('reviewPickWarehouseHint')]
   : lines.flatMap((l, i) => {
+      if (brandConfirmPending(l)) {
+        return [lines.length === 1
+          ? t('subConfirmBrandThis')
+          : t('subConfirmBrandLine', { n: i + 1 })];
+      }
       if (lineReady(l)) return [];
       const fields = missingNamesFor(l);
       if (fields) {

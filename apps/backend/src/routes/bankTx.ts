@@ -9,7 +9,11 @@
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
-import { fetchCandidates, hasMatchFrag, matchSummaries, openRowFrag, type MatchLeg } from '../banktx/match';
+import {
+  fetchCandidates, hasMatchFrag, matchSummaries, openRowFrag, pairCandidatesBatch,
+  PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
+  type MatchLeg, type PairCandidate, type PairLeg,
+} from '../banktx/match';
 import { syncBankTransactions } from '../banktx/sync';
 import { getDb } from '../db';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
@@ -54,6 +58,16 @@ function shapeLeg(l: LegRow) {
     description: l.description,
     paypalTxnId: l.paypal_txn_id,
   };
+}
+
+// The one-click grouping suggestion, or nothing. Certainty has to hold on both
+// sides — exactly one counterpart for this leg, and this leg the only one for
+// that counterpart. Eligibility is symmetric, so a reverse count of 1 can only
+// be this leg. Anything less certain belongs in the picker, not on a button.
+function soleCandidate(list: PairCandidate[] | undefined) {
+  if (!list || list.length !== 1 || list[0].reverseCount !== 1) return null;
+  const { reverseCount: _ignored, orderId: _unused, externalId: _unread, ...shown } = list[0];
+  return shown;
 }
 
 // All legs of the logical payment `id` belongs to (1 row when unpaired).
@@ -155,10 +169,29 @@ bankTx.get('/', async (c) => {
     }));
   const matches = await matchSummaries(sql, openLegs);
 
+  // Grouping candidates for the rows that can still be grouped — unpaired, and
+  // open, because only an open row renders the suggestion. limit 2 is all the
+  // decision needs: one is a suggestion, two is ambiguity the picker handles.
+  const pairLegs: PairLeg[] = slice
+    .filter((r) => !r.pair_id && !r.order_id && !r.ignored && r.category === 'external')
+    .map((r) => ({
+      id: r.id as string,
+      source: r.source as string,
+      amount: Number(r.amount),
+      posted_at: r.posted_at as Date,
+      order_id: null,
+    }));
+  const pairs = await pairCandidatesBatch(sql, pairLegs, {
+    windowDays: PAIR_AUTO_WINDOW_DAYS,
+    limit: 2,
+    skipTombstoned: true,
+  });
+
   return c.json({
     rows: slice.map((r) => ({
       id: r.id,
       match: matches.get(r.id as string) ?? null,
+      pairCandidate: soleCandidate(pairs.get(r.id as string)),
       source: r.pair_id ? 'paired' : r.source,
       postedAt: r.posted_at,
       amount: Number(r.amount),
@@ -182,10 +215,25 @@ bankTx.get('/', async (c) => {
 
 bankTx.get('/stats', async (c) => {
   const sql = getDb(c.env);
+  // The two tiles the queue actually filters on take the same direction lens the
+  // list does. The page defaults to money OUT, so a direction-blind unlinked
+  // count reported rows the list below it was hiding — and once the money-out
+  // queue was drained the page said "nothing left to reconcile" while unlinked
+  // incoming payments sat there unseen. Linked / refunds / ignored / transfers
+  // stay direction-blind: those are not what the queue filters on.
+  const direction = c.req.query('direction') ?? 'all';
+  const dirFrag =
+    direction === 'out' ? sql`AND amount < 0`
+    : direction === 'in' ? sql`AND amount > 0`
+    : sql``;
+  const dirFragBt =
+    direction === 'out' ? sql`AND bt.amount < 0`
+    : direction === 'in' ? sql`AND bt.amount > 0`
+    : sql``;
   const [agg] = await sql`
     SELECT
-      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external')::int AS unlinked_count,
-      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external'), 0)::float AS unlinked_amount,
+      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external' ${dirFrag})::int AS unlinked_count,
+      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external' ${dirFrag}), 0)::float AS unlinked_amount,
       COUNT(*) FILTER (WHERE category = 'transfer')::int                               AS transfer_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL)::int                                AS linked_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund')::int       AS refund_count,
@@ -198,7 +246,8 @@ bankTx.get('/stats', async (c) => {
     FROM bank_transactions bt
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${openRowFrag(sql, 'bt')}
-      AND ${hasMatchFrag(sql, 'bt')}`;
+      AND ${hasMatchFrag(sql, 'bt')}
+      ${dirFragBt}`;
   const sources = await sql`
     SELECT source, MAX(last_synced_at) AS last_synced_at FROM bank_accounts GROUP BY source`;
   return c.json({
@@ -283,6 +332,34 @@ bankTx.post('/:id/unlink', async (c) => {
 });
 
 // ─── Pair / unpair ───────────────────────────────────────────────────────────
+
+// ─── Pair-picker candidates ──────────────────────────────────────────────────
+// The manual counterpart to autoPair: the legs this one may be grouped with,
+// on the rules POST /:id/pair enforces. Two deliberate differences from the
+// automatic matcher — a wider window, because a human is reading the list
+// rather than a job acting unattended, and no tombstone filter, because
+// no_auto_pair gates "auto" only (see migrations/0100) and a human regrouping
+// on purpose should not be blocked by their own earlier Ungroup.
+
+bankTx.get('/:id/pair-candidates', async (c) => {
+  const sql = getDb(c.env);
+  const [leg] = await groupOf(sql, c.req.param('id'));
+  if (!leg) return c.json({ error: 'Not found' }, 404);
+  if (leg.pair_id) return c.json({ candidates: [] });
+
+  const found = await pairCandidatesBatch(
+    sql,
+    [{
+      id: leg.id,
+      source: leg.source,
+      amount: Number(leg.amount),
+      posted_at: leg.posted_at,
+      order_id: leg.order_id,
+    }],
+    { windowDays: PAIR_PICK_WINDOW_DAYS, limit: 20, skipTombstoned: false },
+  );
+  return c.json({ candidates: found.get(leg.id) ?? [] });
+});
 
 bankTx.post('/:id/pair', async (c) => {
   const sql = getDb(c.env);

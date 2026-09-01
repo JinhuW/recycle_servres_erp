@@ -98,6 +98,18 @@ describe('Warehouse manager linked to a DB user (manager_user_id FK)', () => {
     });
     expect(r.status).toBe(400);
   });
+
+  it('rejects a malformed managerUserId with 400, not a 500', async () => {
+    // The uuid cast raises 22P02, the one database error that really is the
+    // caller's fault. The lookup narrowed its catch to that code — any other
+    // fault (a dead pool) now surfaces as a 500 instead of masquerading as
+    // "manager not found".
+    const { token } = await loginAs(ALEX);
+    const r = await api('PATCH', '/api/warehouses/WH-HK', {
+      token, body: { managerUserId: 'not-a-uuid' },
+    });
+    expect(r.status).toBe(400);
+  });
 });
 
 describe('Warehouse PII: purchasers cannot see manager email/phone', () => {

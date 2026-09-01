@@ -285,12 +285,27 @@ packages.post('/:id/create-po', async (c) => {
     const warehouseId = ownerId !== u.id
       ? ownerRow?.defaultWarehouseId ?? null
       : u.defaultWarehouseId;
+    // Attribute the PO if this seller is already one of the owner's clients.
+    // Matched on the compressed name — a package carries no address to match
+    // on. No match just means the seller shows up in the Clients suggestion
+    // rail instead; we never auto-create a client from a single box.
+    const client = row.seller_name
+      ? (await tx`
+          SELECT id FROM suppliers
+          WHERE owner_id IS NOT DISTINCT FROM ${ownerId}
+            AND regexp_replace(upper(name), '[^A-Z0-9]', '', 'g')
+              = regexp_replace(upper(${row.seller_name}), '[^A-Z0-9]', '', 'g')
+          ORDER BY created_at
+          LIMIT 1
+        `)[0] as { id: string } | undefined
+      : undefined;
     const orderId = await insertDraftOrderTx(tx, {
       ownerId,
       actorId: u.id,
       warehouseId,
       notes,
       paypalTxnId: row.paypal_txn_id,
+      supplierId: client?.id ?? null,
       onBehalfOfName: ownerRow?.name ?? null,
     });
     await tx`UPDATE packages SET order_id = ${orderId} WHERE id = ${id}`;

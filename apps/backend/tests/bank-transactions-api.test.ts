@@ -39,6 +39,7 @@ type PaymentRow = {
   amount: number;
   counterparty: string | null;
   legs: { source: string; externalId: string }[];
+  pairCandidate: { id: string; source: string; dayGap: number } | null;
   orderId: string | null;
   linkKind: string | null;
   linkAuto: boolean;
@@ -92,6 +93,7 @@ describe('bank transactions API', () => {
       ['POST', '/api/bank-transactions/x/mark-transfer'],
       ['POST', '/api/bank-transactions/x/unmark-transfer'],
       ['GET', '/api/bank-transactions/x/suggestions'],
+      ['GET', '/api/bank-transactions/x/pair-candidates'],
     ] as const) {
       const r = await api(method, path, { token });
       expect(r.status, `${method} ${path}`).toBe(403);
@@ -343,6 +345,97 @@ describe('bank transactions API', () => {
     expect(unpaired.every((l) => l.pair_id === null && l.no_auto_pair === true)).toBe(true);
   });
 
+  it('pair-candidates offers only legs POST /pair would accept', async () => {
+    // Three same-amount Mercury legs against two PayPal ones: the bucket is
+    // nowhere near 1:1, so autoPair abstains and everything stays unpaired.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: '9CK42345CD678901G', amount: -300, postedAt: new Date(NOW - DAY) },
+        { externalId: '9CK42345CD678901H', amount: -300, postedAt: new Date(NOW - DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'c-ok', amount: -300, postedAt: new Date(NOW - 2 * DAY) },
+        { externalId: 'c-ignored', amount: -300, postedAt: new Date(NOW - 2 * DAY) },
+        { externalId: 'c-far', amount: -300, postedAt: new Date(NOW - 60 * DAY) },
+        { externalId: 'c-amount', amount: -301, postedAt: new Date(NOW - DAY) },
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    const subject = await idOf('9CK42345CD678901G');
+    const ok = await idOf('c-ok');
+    expect((await api('POST', `/api/bank-transactions/${await idOf('c-ignored')}/ignore`, { token })).status).toBe(200);
+
+    const ids = async (): Promise<string[]> => {
+      const r = await api<{ candidates: { id: string }[] }>(
+        'GET', `/api/bank-transactions/${subject}/pair-candidates`, { token });
+      expect(r.status).toBe(200);
+      return r.body.candidates.map((c) => c.id);
+    };
+
+    // Excluded: the other PayPal leg (same source), c-amount (a cent off),
+    // c-ignored, and c-far (outside the picker's window).
+    expect(await ids()).toEqual([ok]);
+
+    // A counterpart already linked to a PO stays on offer — the endpoint
+    // accepts that pair and propagates the link. Only two legs linked to
+    // *different* orders are refused.
+    const poA = await createPO(token);
+    expect((await api('POST', `/api/bank-transactions/${ok}/link`, { token, body: { orderId: poA } })).status).toBe(200);
+    expect(await ids()).toEqual([ok]);
+
+    const poB = await createPO(token);
+    expect((await api('POST', `/api/bank-transactions/${subject}/link`, { token, body: { orderId: poB } })).status).toBe(200);
+    expect(await ids()).toEqual([]);
+  });
+
+  it('the list suggests a grouping only when it is certain on both sides', async () => {
+    // The real shape of the miss: one stale same-amount leg makes autoPair's
+    // globally-scoped bucket ambiguous, even though inside its 3-day window
+    // the pairing is obvious.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: '1DK42345CD678901J', amount: -500, postedAt: new Date(NOW - DAY) },
+        { externalId: '2DK42345CD678901K', amount: -700, postedAt: new Date(NOW - DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'g-near', amount: -500, postedAt: new Date(NOW - 2 * DAY) },
+        { externalId: 'g-stale', amount: -500, postedAt: new Date(NOW - 60 * DAY) },
+        { externalId: 'g-two-a', amount: -700, postedAt: new Date(NOW - DAY) },
+        { externalId: 'g-two-b', amount: -700, postedAt: new Date(NOW - 2 * DAY) },
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    const rows = async (): Promise<Map<string, PaymentRow>> => {
+      const r = await api<{ rows: PaymentRow[] }>('GET', '/api/bank-transactions', { token });
+      expect(r.status).toBe(200);
+      return new Map(r.body.rows.map((x) => [x.id, x]));
+    };
+
+    const sole = await idOf('1DK42345CD678901J');
+    const near = await idOf('g-near');
+    let feed = await rows();
+    // Mutually unique inside the window, from either side.
+    expect(feed.get(sole)?.pairCandidate?.id).toBe(near);
+    expect(feed.get(near)?.pairCandidate?.id).toBe(sole);
+    // The stale leg has nothing within three days of it.
+    expect(feed.get(await idOf('g-stale'))?.pairCandidate).toBeNull();
+
+    // Two counterparts is ambiguity — and so is being one of two counterparts,
+    // which a one-sided test would have shown as a confident suggestion.
+    expect(feed.get(await idOf('2DK42345CD678901K'))?.pairCandidate).toBeNull();
+    expect(feed.get(await idOf('g-two-a'))?.pairCandidate).toBeNull();
+
+    // Ungroup tombstones both legs. The suggestion is the auto-matcher
+    // speaking, so it goes quiet; the picker is the human, so it does not.
+    expect((await api('POST', `/api/bank-transactions/${sole}/pair`, { token, body: { otherId: near } })).status).toBe(200);
+    expect((await api('POST', `/api/bank-transactions/${sole}/unpair`, { token })).status).toBe(200);
+    feed = await rows();
+    expect(feed.get(sole)?.pairCandidate).toBeNull();
+    const picker = await api<{ candidates: { id: string }[] }>(
+      'GET', `/api/bank-transactions/${sole}/pair-candidates`, { token });
+    expect(picker.body.candidates.map((c) => c.id)).toEqual([near]);
+  });
+
   it('ignore requires an unlinked row and unignore restores it', async () => {
     await seedPairedAndSingles();
     const { token } = await loginAs(ALEX);
@@ -419,5 +512,50 @@ describe('bank transactions API', () => {
     const searched = await api<{ suggestions: { id: string; reason: string }[] }>(
       'GET', `/api/bank-transactions/${id}/suggestions?q=${poAmount}`, { token });
     expect(searched.body.suggestions.some((s) => s.id === poAmount && s.reason === 'search')).toBe(true);
+  });
+});
+
+// The queue defaults to money OUT, so a direction-blind tile counted rows the
+// list underneath it was hiding — and once the out-queue was drained the page
+// claimed there was nothing left while unlinked incoming payments sat unseen.
+describe('GET /api/bank-transactions/stats — direction lens', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function seedBothDirections() {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'dir-out-1', amount: -250 },
+        { externalId: 'dir-out-2', amount: -20 },
+        { externalId: 'dir-in-1', amount: 180 },
+      ]),
+    ]);
+  }
+
+  it('scopes the unlinked tile to the same direction as the list', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedBothDirections();
+
+    const all = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats', { token });
+    const out = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats?direction=out', { token });
+    const inn = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats?direction=in', { token });
+
+    expect(out.body.unlinked.count).toBe(2);
+    expect(inn.body.unlinked.count).toBe(1);
+    // No lens still means the whole queue.
+    expect(all.body.unlinked.count).toBe(out.body.unlinked.count + inn.body.unlinked.count);
+  });
+
+  it('agrees with the list it sits above', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedBothDirections();
+
+    const stats = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats?direction=out', { token });
+    const list = await api<{ rows: unknown[] }>(
+      'GET', '/api/bank-transactions?status=unlinked&direction=out&limit=100', { token });
+    expect(stats.body.unlinked.count).toBe(list.body.rows.length);
   });
 });

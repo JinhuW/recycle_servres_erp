@@ -5,6 +5,7 @@ import { getDb } from '../db';
 import { uploadAttachment, deleteAttachment } from '../r2';
 import { notify } from '../lib/notify';
 import { getUploadLimits } from '../lib/settings';
+import { log } from '../lib/log';
 import { clampLimit, decodeCursor, encodeCursor } from '../lib/pagination';
 import {
   writeSellOrderEvent, diff, META_FIELDS_SO, type AuditChange,
@@ -906,7 +907,7 @@ sellOrders.post('/:id/status-meta/:status/attachments', async (c) => {
   // below fails the uploaded object is orphaned in R2; r2.ts treats orphans
   // as a separate concern.
   const uploaded = await uploadAttachment(c.env, stored, `sell-orders/${id}/${status}`)
-    .catch(e => { console.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   const row = await sql.begin(async (tx) => {
@@ -968,7 +969,7 @@ sellOrders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c
   if (!removed) return c.json({ error: 'Not found' }, 404);
   // R2 delete happens outside the tx — same rationale as upload: slow side
   // effect, kept out of the lock window. Best-effort.
-  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
   return c.json({ ok: true });
 });
 

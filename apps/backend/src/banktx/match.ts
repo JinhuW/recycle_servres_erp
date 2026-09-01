@@ -201,6 +201,148 @@ export function hasMatchFrag(sql: SqlClient, legAlias: string) {
   )`;
 }
 
+// ─── Manual grouping ─────────────────────────────────────────────────────────
+// Which two legs may be joined into one logical payment. The rules mirror
+// POST /:id/pair exactly, so a picker built on them can never offer something
+// the endpoint then rejects.
+//
+// The leg side's own `pair_id IS NULL` is the caller's to guarantee: the batch
+// below feeds legs in as a record set, which has no such column.
+//
+// The order_id clause is NULL-safe on purpose. The endpoint refuses only two
+// legs linked to *different* orders, and propagates a lone link across the new
+// pair; a bare `c.order_id = l.order_id` is never true for an unlinked leg and
+// would hide the commonest manual case — link the PayPal leg to a PO, then
+// group the Mercury one onto it.
+export function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: string) {
+  const l = sql(legAlias);
+  const c = sql(candAlias);
+  return sql`
+    ${c}.pair_id IS NULL
+    AND NOT ${c}.ignored
+    AND ${c}.category = 'external'
+    AND ${c}.source <> ${l}.source
+    AND ${c}.amount = ${l}.amount
+    AND (${c}.order_id IS NULL OR ${l}.order_id IS NULL OR ${c}.order_id = ${l}.order_id)`;
+}
+
+// The suggestion mirrors autoPair's window because it is the same claim made
+// at read time; the picker is wider because a human is doing the choosing.
+export const PAIR_AUTO_WINDOW_DAYS = 3;
+export const PAIR_PICK_WINDOW_DAYS = 30;
+
+export type PairLeg = {
+  id: string;
+  source: string;
+  amount: number;
+  posted_at: Date;
+  order_id: string | null;
+};
+
+export type PairCandidate = {
+  id: string;
+  source: string;
+  externalId: string;
+  postedAt: Date;
+  amount: number;
+  counterparty: string | null;
+  description: string | null;
+  paypalTxnId: string | null;
+  orderId: string | null;
+  dayGap: number;
+  // How many legs this candidate is itself eligible for. The one-click
+  // suggestion needs 1: autoPair's safety test is two-sided (sync.ts), and a
+  // one-sided one would point two rows confidently at the same counterpart,
+  // where the second click 400s.
+  reverseCount: number;
+};
+
+type PairRow = {
+  leg_id: string;
+  id: string;
+  source: string;
+  external_id: string;
+  posted_at: Date;
+  amount: number;
+  counterparty: string | null;
+  description: string | null;
+  paypal_txn_id: string | null;
+  order_id: string | null;
+  reverse_count: number;
+};
+
+// One round trip for a page of legs, same shape as fetchCandidatesBatch.
+// `skipTombstoned` is what separates the two callers: the read-time suggestion
+// is the automatic matcher speaking, so it must honour a human's Ungroup
+// (no_auto_pair) or it re-proposes the grouping they just undid on every
+// refetch. The picker is the human speaking, and 0100's comment is explicit
+// that the tombstones gate "auto" only.
+export async function pairCandidatesBatch(
+  sql: SqlClient,
+  legs: PairLeg[],
+  opts: { windowDays: number; limit: number; skipTombstoned: boolean },
+): Promise<Map<string, PairCandidate[]>> {
+  const out = new Map<string, PairCandidate[]>();
+  if (legs.length === 0) return out;
+
+  const win = `${opts.windowDays} days`;
+  const liveFrag = (alias: string) =>
+    opts.skipTombstoned ? sql`NOT ${sql(alias)}.no_auto_pair` : sql`TRUE`;
+
+  const rows = await sql<PairRow[]>`
+    WITH l AS (
+      SELECT * FROM jsonb_to_recordset(${sql.json(legs.map((x) => ({
+        id: x.id,
+        source: x.source,
+        amount: x.amount,
+        posted_at: x.posted_at,
+        order_id: x.order_id,
+      })))}::jsonb)
+      AS t(id uuid, source text, amount numeric, posted_at timestamptz, order_id text)
+    )
+    SELECT l.id AS leg_id, c.id, c.source, c.external_id, c.posted_at,
+           c.amount::float AS amount, c.counterparty, c.description,
+           c.paypal_txn_id, c.order_id,
+           (SELECT COUNT(*) FROM bank_transactions r
+             WHERE r.id <> c.id AND ${liveFrag('r')}
+               AND ${pairEligibleFrag(sql, 'c', 'r')}
+               AND r.posted_at BETWEEN c.posted_at - ${win}::interval
+                                   AND c.posted_at + ${win}::interval
+           )::int AS reverse_count
+    FROM l
+    JOIN LATERAL (
+      SELECT c.* FROM bank_transactions c
+      WHERE c.id <> l.id AND ${liveFrag('c')}
+        AND ${pairEligibleFrag(sql, 'l', 'c')}
+        AND c.posted_at BETWEEN l.posted_at - ${win}::interval
+                            AND l.posted_at + ${win}::interval
+      ORDER BY ABS(EXTRACT(EPOCH FROM (c.posted_at - l.posted_at))) ASC, c.posted_at DESC
+      LIMIT ${opts.limit}
+    ) c ON TRUE`;
+
+  const byId = new Map(legs.map((l) => [l.id, l]));
+  for (const r of rows) {
+    const leg = byId.get(r.leg_id);
+    if (!leg) continue;
+    const list = out.get(r.leg_id) ?? [];
+    list.push({
+      id: r.id,
+      source: r.source,
+      externalId: r.external_id,
+      postedAt: r.posted_at,
+      amount: Number(r.amount),
+      counterparty: r.counterparty,
+      description: r.description,
+      paypalTxnId: r.paypal_txn_id,
+      orderId: r.order_id,
+      dayGap: dayGapOf(r.posted_at, leg.posted_at),
+      reverseCount: Number(r.reverse_count),
+    });
+    out.set(r.leg_id, list);
+  }
+  return out;
+}
+
 // Ranking, in order: a PO that already has its money last, then a txn-id hit,
 // exact amount over near, a matching seller name, the smaller day gap, a
 // counterparty this purchaser has been paid for before, newest.

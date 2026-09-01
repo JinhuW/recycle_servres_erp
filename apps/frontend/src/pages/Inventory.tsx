@@ -124,7 +124,7 @@ export function Inventory({ onNewEntry }: Props) {
         </div>
 
         {!loadedOnce && <PhoneListSkeleton rows={6} />}
-        {loadedOnce && items.slice(0, 30).map(r => {
+        {loadedOnce && items.map(r => {
           const label = r.category === 'RAM' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.generation ?? ''}`.trim()
                       : r.category === 'SSD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.interface ?? ''}`.trim()
                       : r.category === 'HDD' ? `${r.brand ?? ''} ${r.capacity ?? ''} ${r.rpm ? r.rpm + 'rpm' : ''}`.trim()

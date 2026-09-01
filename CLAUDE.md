@@ -23,6 +23,55 @@ the conventions, quirks, and tripwires that aren't obvious from the code.
 - The `@recycle-erp/shared` package is imported as a workspace dep (`main:
   "./src/index.ts"`) — there's no build step.  Don't add one.
 
+## Tickets, changelog & features
+
+Three documents carry the project's memory.  `docs/tickets/` says what was
+asked, `CHANGELOG.md` says when it shipped, `docs/FEATURES.md` says what the
+system does today.  Read `docs/FEATURES.md` first when you don't know this
+codebase.
+
+1. **A change request becomes a ticket** in `docs/tickets/` —
+   `scripts/ticket.sh new "<title>"`.  Because `plan-first` governs this repo,
+   the ticket is *drafted inside plan mode* and shown as part of the plan, then
+   written as the first step of implementation.  The `## Ask` block is the
+   requester's own words, **verbatim** — that field is the only thing in the
+   file that can't be reconstructed from the code later.  The `ticket-workflow`
+   skill in `.claude/skills/` covers the rest; `/ticket` is the manual path.
+2. **The version bump that ships it adds a `## [X.Y.Z]` section to
+   `CHANGELOG.md` in the same push.**  `version-check.yml` fails the push
+   otherwise.  `scripts/changelog.sh draft` prints a starting point from the
+   branch's commits; rewrite it into prose — what changed and why it mattered,
+   not the commit subject again.
+3. **If user-visible behaviour changed, edit `docs/FEATURES.md`** and cite the
+   new version.  Nothing enforces this one, which is exactly why it needs
+   saying: it is the document that rots first.
+4. **Close the ticket** — `scripts/ticket.sh status RS-nnn done`, and fill its
+   `pr:` and `version:` fields.  `version:` is the join back to the changelog.
+
+Three things worth knowing:
+
+- **A version collision renumbers the changelog header too.**  When another
+  session takes the version you bumped to, the fix is a fresh bump *and* a
+  renamed `## [X.Y.Z]` heading — the CI gate matches the header against
+  `package.json` exactly.
+- **`version-check.yml` runs on `dev` and `main`, but only `dev` creates
+  tags.**  A hotfix pushed straight to `main` gets the same bump + changelog
+  demand; the tag is created when the version reaches `dev`, because a tag
+  minted on a `main` commit would make the back-port fail "tag exists on an
+  unrelated commit".  `LAST_TAG` is the newest tag *reachable from HEAD*
+  (`--merged HEAD`) — on `main`, which runs several releases behind, the global
+  newest tag would fail every push including docs-only ones.
+- **The `docs/FEATURES.md` check is a `::warning::`, never a failure.**  A
+  release carrying `feat()` commits that doesn't touch it gets an annotation.
+  Whether a change altered user-visible behaviour isn't machine-decidable, and
+  a gate that produces false blocks gets cleared by touching the file for no
+  reason.
+- `scripts/changelog.sh backfill` rebuilds the whole file from the tag list and
+  is idempotent.  It preserves hand-written sections verbatim, so running it
+  is safe — but it is a repair tool, not part of the release flow.
+  `scripts/release.sh` has its own, older generator for the retired
+  Docker/`main` flow; don't extend that one.
+
 ## Session isolation (one branch per Claude Code session)
 
 Several Claude Code sessions run against this repo at once, so **every session
@@ -118,6 +167,36 @@ switches the branch out from under the first.
 
 - Hono on `@hono/node-server` (Node 24).  Entry: `apps/backend/src/server.ts`
   → `index.ts` mounts all routes under `/api/*`.
+- **All logging goes through `lib/log.ts`** — `log.info/warn/error/debug(msg,
+  detail)`, never `console.*`.  Every line is one JSON object stamped with the
+  release `version` and `commit`, so a log excerpt identifies its build without
+  cross-referencing the deploy history.  `detail` may be an `Error` (unwrapped
+  to `error`/`stack`) or any object (merged as fields); `log.child({…})` pins
+  fields like `module` or `requestId` onto a scope.  `LOG_LEVEL` (default
+  `info`) filters.  `releaseVersion()`/`releaseCommit()` from the same module
+  are the single source of build provenance — `/api/health` uses them too.
+- **`requestId` and `userId` are ambient, not passed.**  The outermost
+  middleware in `index.ts` opens an `AsyncLocalStorage` context
+  (`runWithLogContext`), so *every* line emitted during a request carries the
+  id — including from `r2.ts`, `image-shrink.ts` and the MCP tools, which never
+  see a Hono `Context`, and including a `.catch()` that settles after the
+  response (the context follows a promise reaction from where it was
+  *registered*).  `addLogContext({ userId })` fills in what auth learns later
+  (`auth.ts`, `oauth/guard.ts`).  Precedence is ambient < `log.child` < the
+  call's own fields.  Keep the store to scalars — a detached promise holds it
+  alive, so a `Context` or request body parked there pins the request's memory.
+- **Keep `log.ts` free of intra-repo imports** (`node:` builtins only):
+  `scripts/migrate.mjs` and `scripts/init-admin.mjs` are plain-`node` `.mjs`
+  that import it directly and lean on Node 24's TypeScript type-stripping,
+  which cannot resolve the extensionless specifiers the rest of `src/` uses —
+  breaking it fails *container boot*.  `tests/log-import-purity.test.ts`
+  enforces this.  (`scripts/seed.mjs` stays on `console` — it is a dev/test CLI
+  and never runs in a deployed container.)
+- **Don't log attacker-controlled parse failures** — cursor decode
+  (`lib/pagination.ts`), JWT verify (`auth.ts`), the `c.req.json().catch()`
+  body parses.  They are a free log-flood and, through the error sink, a
+  disk-fill; the 4xx is the record.  Same for OCR model output
+  (`ai/prompts.ts`): it is a transcription of a customer receipt.
 - **One shared Postgres pool**, lazily created (`apps/backend/src/db.ts`).
   Do not new-up `postgres()` clients inline; call `getDb(env)`.  The historical
   per-request pool design caused connection exhaustion under load — don't
@@ -147,7 +226,7 @@ switches the branch out from under the first.
   DB setting can't widen the surface.  Keep it that way.
 - **Migrations** are plain SQL under `apps/backend/migrations/`, numbered
   `NNNN_…sql`.  The backend runs them on startup via `scripts/migrate.mjs`,
-  recorded in `_migration_ledger`.  Always add the next number; never edit
+  recorded in `schema_migrations`.  Always add the next number; never edit
   a migration that's been deployed.
 
 ## Auth & CSRF
@@ -209,6 +288,10 @@ switches the branch out from under the first.
   most likely to break), so the DB dependency is intentional, not a smell.
   They need `127.0.0.1:5432` reachable — `docker-compose.override.yml` does
   that for local dev.  Production compose doesn't ship the override.
+  CI runs them against a `postgres:16` service container
+  (`.github/workflows/backend-tests.yml`), which must set `TEST_DATABASE_URL`
+  in the job env: `global-setup.ts` otherwise falls back to the repo-root
+  `.env`, which doesn't exist on a runner, and throws.
 - **Test files run in PARALLEL** (`vitest.config.ts`: `pool: 'forks'`, files
   parallel, `maxForks` 8 by default — override with `VITEST_MAX_FORKS`).  Each
   fork owns a **private database**: `global-setup.ts` hands every worker a
@@ -268,7 +351,8 @@ switches the branch out from under the first.
   Rotates at 10 MB, keeps last 10.  Pre-create the host dir with
   `mkdir -p data/errors && sudo chown 1000:1000 data/errors` — without it
   the backend (UID 1000) can't write and the sink silently degrades to
-  stdout-only.  See `apps/backend/src/lib/error-log.ts`.
+  stdout-only.  Records are version/commit-stamped by `appendErrorRecord`
+  itself — callers never pass them.  See `apps/backend/src/lib/error-log.ts`.
 
 ## Cloudflare Worker deploys
 
@@ -315,6 +399,9 @@ switches the branch out from under the first.
 
 ## Pointers
 
+- What the system does today, by area: `docs/FEATURES.md`.
+- What was asked, and by whom: `docs/tickets/` (index in `INDEX.md`).
+- What shipped when: `CHANGELOG.md` — one section per `v*` tag.
 - Per-feature design docs: `docs/superpowers/specs/`.
 - Implementation plans (in-flight and finished): `docs/superpowers/plans/`.
 - Auto-memory referenced above lives under

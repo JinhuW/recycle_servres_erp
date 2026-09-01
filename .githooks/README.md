@@ -29,5 +29,10 @@ Detection logic lives in `lib/scan.sh` — zero dependencies (git + grep).
 - Dev defaults / placeholders (`change-me`, `dev-…`, `process.env`, `${…}`,
   `<placeholder>`) are allowlisted automatically.
 
-The changelog gate is satisfied by `scripts/release.sh <patch|minor|major>`
-(regenerates `CHANGELOG.md`) or a manual `## [Unreleased]` entry.
+The changelog gate is satisfied by adding the release's `## [X.Y.Z]` section to
+`CHANGELOG.md` — `scripts/changelog.sh draft` prints a starting point — or by a
+manual `## [Unreleased]` entry.
+
+These hooks are opt-in per clone and, in practice, nobody has enabled them:
+`.github/workflows/version-check.yml` enforces the changelog on `dev` instead,
+where it can't be skipped.

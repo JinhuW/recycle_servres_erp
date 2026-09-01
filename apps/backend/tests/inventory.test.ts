@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { expectSheetOrder, type SheetOrdered } from './helpers/inventory';
 
 describe('GET /api/inventory — role-based field visibility', () => {
   beforeEach(async () => { await resetDb(); });
@@ -194,5 +195,215 @@ describe('PATCH /api/inventory/:id — unit cost is manager-only', () => {
     const { token: mgr } = await loginAs(ALEX);
     const ok = await api('PATCH', `/api/inventory/${id}`, { token: mgr, body: { unitCost: 42 } });
     expect(ok.status).toBe(200);
+  });
+});
+
+describe('PATCH /api/inventory/:id — spec fields', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function firstRamLine(token: string): Promise<string> {
+    const r = await api<{ items: { id: string; category: string }[] }>(
+      'GET', '/api/inventory', { token },
+    );
+    const line = r.body.items.find(i => i.category === 'RAM');
+    expect(line, 'seed has no RAM line').toBeDefined();
+    return line!.id;
+  }
+
+  async function specOf(id: string) {
+    const { getTestDb } = await import('./helpers/db');
+    const rows = await getTestDb()<{ brand: string | null; capacity: string | null }[]>`
+      SELECT brand, capacity FROM order_lines WHERE id = ${id}
+    `;
+    return rows[0];
+  }
+
+  it('manager edits brand + capacity and each change lands one audit event', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstRamLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    const before = await specOf(id);
+
+    const r = await api('PATCH', `/api/inventory/${id}`, {
+      token, body: { brand: 'Micron', capacity: '64GB' },
+    });
+    expect(r.status).toBe(200);
+    expect(await specOf(id)).toEqual({ brand: 'Micron', capacity: '64GB' });
+
+    const events = await sql<{ detail: { field: string; from: string | null; to: string } }[]>`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${id} AND kind = 'edited'
+      ORDER BY created_at
+    `;
+    const byField = new Map(events.map(e => [e.detail.field, e.detail]));
+    expect(byField.get('brand')).toMatchObject({ from: before.brand, to: 'Micron' });
+    expect(byField.get('capacity')).toMatchObject({ from: before.capacity, to: '64GB' });
+  });
+
+  it('an owner may correct specs on their own line; a stranger may not', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const mine = await api<{ items: { id: string }[] }>('GET', '/api/inventory', { token: pur });
+    const ownId = mine.body.items[0].id;
+    const ok = await api('PATCH', `/api/inventory/${ownId}`, { token: pur, body: { brand: 'Micron' } });
+    expect(ok.status).toBe(200);
+
+    // A line the purchaser does not own — the owner probe rejects before any write.
+    const { token: mgr } = await loginAs(ALEX);
+    const all = await api<{ items: { id: string; user_id: string }[] }>(
+      'GET', '/api/inventory', { token: mgr },
+    );
+    const mineSet = new Set(mine.body.items.map(i => i.id));
+    const foreign = all.body.items.find(i => !mineSet.has(i.id));
+    expect(foreign, 'seed has no line owned by someone else').toBeDefined();
+    const denied = await api('PATCH', `/api/inventory/${foreign!.id}`, {
+      token: pur, body: { brand: 'Micron' },
+    });
+    expect(denied.status).toBe(403);
+  });
+
+  it('an explicit null clears a spec column', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstRamLine(token);
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { brand: null } });
+    expect(r.status).toBe(200);
+    expect((await specOf(id)).brand).toBeNull();
+  });
+
+  // '' must land as NULL, not as an empty string: the brand facet matches on
+  // equality and the top-brands rollup treats '' separately from NULL, so a
+  // stored '' shows up as a ghost facet value.
+  it('an empty string clears to NULL rather than storing an empty string', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstRamLine(token);
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { brand: '' } });
+    expect(r.status).toBe(200);
+    expect((await specOf(id)).brand).toBeNull();
+  });
+
+  it('clearing an already-NULL spec writes no event', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstRamLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET brand = NULL WHERE id = ${id}`;
+    const countBefore = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}
+    `;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { brand: '' } });
+    expect(r.status).toBe(200);
+
+    const countAfter = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}
+    `;
+    expect(countAfter[0].n).toBe(countBefore[0].n);
+  });
+
+  // Spec corrections are not goods-touching, so the Done-PO lock (qty/unitCost)
+  // must not catch them — fixing a mislabelled brand is exactly the post-Done
+  // inventory workflow.
+  it('a spec edit is allowed on a line whose PO is Done', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstRamLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`
+      UPDATE orders SET lifecycle = 'done'
+      WHERE id = (SELECT order_id FROM order_lines WHERE id = ${id})
+    `;
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { brand: 'Micron' } });
+    expect(r.status).toBe(200);
+    expect((await specOf(id)).brand).toBe('Micron');
+  });
+});
+
+describe('GET /api/inventory — row order', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('ships the list in the workbook order — category, then brand, capacity, speed', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ items: SheetOrdered[] }>('GET', '/api/inventory', { token });
+    expect(r.status).toBe(200);
+    expectSheetOrder(r.body.items);
+  });
+
+  it('orders a scoped purchaser list the same way', async () => {
+    const { token } = await loginAs(MARCUS);
+    const r = await api<{ items: SheetOrdered[] }>('GET', '/api/inventory', { token });
+    expect(r.status).toBe(200);
+    expectSheetOrder(r.body.items);
+  });
+});
+
+// rpm and health became editable dropdowns, but their columns stayed on
+// COALESCE — so the blank option could not clear them, and the timeline claimed
+// it had. The two halves are one bug: the write silently did nothing and the
+// audit said otherwise.
+describe('PATCH /api/inventory/:id — clearing a numeric spec', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function firstHddLine(token: string): Promise<string> {
+    const r = await api<{ items: { id: string; category: string }[] }>(
+      'GET', '/api/inventory', { token });
+    const line = r.body.items.find(i => i.category === 'HDD') ?? r.body.items[0];
+    expect(line, 'seed has no inventory line').toBeDefined();
+    return line!.id;
+  }
+
+  it('clears rpm and logs exactly one true event', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstHddLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET rpm = 7200 WHERE id = ${id}`;
+    const before = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { rpm: null } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    const [row] = await sql<{ rpm: number | null }[]>`
+      SELECT rpm FROM order_lines WHERE id = ${id}`;
+    expect(row.rpm).toBeNull();
+
+    const after = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+    expect(after[0].n).toBe(before[0].n + 1);
+  });
+
+  it('clears health the same way', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstHddLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET health = 98 WHERE id = ${id}`;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { health: null } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    const [row] = await sql<{ health: number | null }[]>`
+      SELECT health FROM order_lines WHERE id = ${id}`;
+    expect(row.health).toBeNull();
+  });
+
+  it('leaves rpm alone when the field is omitted, and writes no event', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstHddLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET rpm = 7200 WHERE id = ${id}`;
+    const before = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+
+    await api('PATCH', `/api/inventory/${id}`, { token, body: { condition: 'Used' } });
+
+    const [row] = await sql<{ rpm: number | null }[]>`
+      SELECT rpm FROM order_lines WHERE id = ${id}`;
+    expect(row.rpm).toBe(7200);
+    const after = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+    // condition may or may not have changed; rpm must contribute nothing.
+    expect(after[0].n).toBeLessThanOrEqual(before[0].n + 1);
   });
 });

@@ -373,6 +373,10 @@ export function OrderDetail({
   const headerTitle = orderLocked ? t('viewOrder') : t('editOrderId', { id: order.id });
   const headerSub = `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
 
+  // The enabled set, not the fixed four: a fifth category has to reach the
+  // dock too, and a single docked row cannot wrap to hold it.
+  const cats = addableCategories();
+
   const currentIdx = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
   const purchaserCanReachIdx = isPurchaser
     ? (effectiveStatus === 'Draft' ? ORDER_STATUSES.indexOf('In Transit')
@@ -387,7 +391,7 @@ export function OrderDetail({
         sub={headerSub}
         leading={<button className="ph-icon-btn" onClick={onCancel}><Icon name="chevronLeft" size={16} /></button>}
       />
-      <div className="ph-scroll" style={{ paddingBottom: 110 }}>
+      <div className="ph-scroll" style={{ paddingBottom: canEditOrder ? 168 : 110 }}>
         {isArchived && (
           <div className="ph-card" style={{
             margin: '10px 12px 0', padding: '10px 12px',
@@ -651,40 +655,6 @@ export function OrderDetail({
           })}
         </div>
 
-        {/* One target per category, matching the capture screen. A single
-            "Add another" button would put the old category lock back in the
-            user's head — the PO is not in a mode. */}
-        {canEditOrder && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: '0.09em',
-              textTransform: 'uppercase', color: 'var(--fg-subtle)', marginBottom: 8,
-            }}>
-              {t('addToThisOrder')}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
-              {addableCategories().map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => { void addLine(cat as Category); }}
-                  aria-label={t('subAddCatLine', { cat })}
-                  style={{
-                    minHeight: 54, borderRadius: 13,
-                    border: '1.5px dashed ' + categoryTone(cat).tone,
-                    background: 'var(--bg-elev)', color: categoryTone(cat).strong,
-                    fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
-                    display: 'grid', placeItems: 'center', alignContent: 'center', gap: 1,
-                    padding: '6px 2px', cursor: 'pointer',
-                  }}
-                >
-                  <span style={{ fontSize: 15, lineHeight: 1, opacity: 0.75 }}>+</span>
-                  <span>{cat}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* The money sits directly under the lines it comes from: on a phone
             this is what the screen is for, and the order's warehouse and
             payment type were answered once and are rarely revisited. */}
@@ -866,85 +836,114 @@ export function OrderDetail({
 
       </div>
 
-      <div className="ph-action-bar">
-        {/* The total belongs where the decision is made, not 2,000px up the
-            scroll. It states the figure; it is never typed. */}
-        <div style={{ flex: '0 0 auto', paddingRight: 4, minWidth: 0 }}>
-          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--fg-subtle)' }}>
-            {t('totalCost')}
+      <div className={'ph-action-bar' + (canEditOrder ? ' stacked' : '')}>
+        {/* One target per category, matching the capture screen. A single
+            "Add another" button would put the old category lock back in the
+            user's head — the PO is not in a mode. Docked rather than in flow:
+            the list it appends to grows every time it is used, and the screen
+            reopens at the top after each line, so in flow it only ever got
+            further away. */}
+        {canEditOrder && (
+          <div className="ph-add-dock" style={{ gridTemplateColumns: `repeat(${cats.length}, 1fr)` }}>
+            {cats.map(cat => (
+              <button
+                key={cat}
+                onClick={() => { void addLine(cat as Category); }}
+                aria-label={t('subAddCatLine', { cat })}
+                style={{
+                  height: 44, borderRadius: 12, minWidth: 0,
+                  border: '1.5px dashed ' + categoryTone(cat).tone,
+                  background: 'var(--bg-elev)', color: categoryTone(cat).strong,
+                  fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
+                  padding: '0 6px', cursor: 'pointer',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}
+              >
+                + {cat}
+              </button>
+            ))}
           </div>
-          <div className="mono" style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
-            {fmtUSD(cost.total, locale)}
+        )}
+        <div className="ph-action-row">
+          {/* The total belongs where the decision is made, not 2,000px up the
+              scroll. It states the figure; it is never typed. */}
+          <div style={{ flex: '0 0 auto', paddingRight: 4, minWidth: 0 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--fg-subtle)' }}>
+              {t('totalCost')}
+            </div>
+            <div className="mono" style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtUSD(cost.total, locale)}
+            </div>
           </div>
-        </div>
-        <button
-          className="ph-icon-btn"
-          onClick={() => api.download(`/api/orders/${order.id}/spreadsheet`, `${order.id}.xlsx`).catch(handleFetchError)}
-          aria-label={t('downloadPoXlsx')}
-          style={{
-            width: 50, height: 50, borderRadius: 14,
-            border: '1px solid var(--border-strong)',
-            background: 'var(--bg-elev)', color: 'var(--fg-muted)',
-            flex: '0 0 auto',
-          }}
-        >
-          <Icon name="download" size={16} />
-        </button>
-        {canDelete && (
           <button
             className="ph-icon-btn"
-            onClick={() => { setTypedId(''); setShowDelete(true); }}
-            aria-label={t('deleteOrder')}
+            onClick={() => api.download(`/api/orders/${order.id}/spreadsheet`, `${order.id}.xlsx`).catch(handleFetchError)}
+            aria-label={t('downloadPoXlsx')}
             style={{
               width: 50, height: 50, borderRadius: 14,
               border: '1px solid var(--border-strong)',
-              background: 'var(--bg-elev)',
-              color: 'var(--neg)',
+              background: 'var(--bg-elev)', color: 'var(--fg-muted)',
               flex: '0 0 auto',
             }}
           >
-            <Icon name="trash" size={16} />
+            <Icon name="download" size={16} />
           </button>
-        )}
-        {canArchive && (
-          <button
-            className="ph-icon-btn"
-            onClick={async () => {
-              if (isArchived) {
-                setArchiving(true);
-                try {
-                  await unarchiveOrder(order.id);
-                  onSaved(t('orderRestoredToast'));
-                } catch (e) {
-                  handleFetchError(e);
-                  setArchiving(false);
+          {canDelete && (
+            <button
+              className="ph-icon-btn"
+              onClick={() => { setTypedId(''); setShowDelete(true); }}
+              aria-label={t('deleteOrder')}
+              style={{
+                width: 50, height: 50, borderRadius: 14,
+                border: '1px solid var(--border-strong)',
+                background: 'var(--bg-elev)',
+                color: 'var(--neg)',
+                flex: '0 0 auto',
+              }}
+            >
+              <Icon name="trash" size={16} />
+            </button>
+          )}
+          {canArchive && (
+            <button
+              className="ph-icon-btn"
+              onClick={async () => {
+                if (isArchived) {
+                  setArchiving(true);
+                  try {
+                    await unarchiveOrder(order.id);
+                    onSaved(t('orderRestoredToast'));
+                  } catch (e) {
+                    handleFetchError(e);
+                    setArchiving(false);
+                  }
+                } else {
+                  setShowArchive(true);
                 }
-              } else {
-                setShowArchive(true);
-              }
-            }}
-            disabled={archiving}
-            aria-label={isArchived ? t('unarchiveOrder') : t('archiveOrder')}
-            style={{
-              width: 50, height: 50, borderRadius: 14,
-              border: '1px solid var(--border-strong)',
-              background: isArchived ? 'oklch(0.96 0.04 295)' : 'var(--bg-elev)',
-              color: isArchived ? 'oklch(0.45 0.16 295)' : 'var(--fg-muted)',
-              flex: '0 0 auto',
-            }}
-          >
-            <Icon name={isArchived ? 'rotate' : 'box'} size={16} />
-          </button>
-        )}
-        {dirty && canAnnotate && (
-          <button
-            className="ph-btn dark"
-            onClick={save}
-            disabled={saving}
-          >
-            <Icon name="check" size={16} /> {saving ? '…' : t('save')}
-          </button>
-        )}
+              }}
+              disabled={archiving}
+              aria-label={isArchived ? t('unarchiveOrder') : t('archiveOrder')}
+              style={{
+                width: 50, height: 50, borderRadius: 14,
+                border: '1px solid var(--border-strong)',
+                background: isArchived ? 'oklch(0.96 0.04 295)' : 'var(--bg-elev)',
+                color: isArchived ? 'oklch(0.45 0.16 295)' : 'var(--fg-muted)',
+                flex: '0 0 auto',
+              }}
+            >
+              <Icon name={isArchived ? 'rotate' : 'box'} size={16} />
+            </button>
+          )}
+          {dirty && canAnnotate && (
+            <button
+              className="ph-btn dark"
+              onClick={save}
+              disabled={saving}
+            >
+              <Icon name="check" size={16} /> {saving ? '…' : t('save')}
+            </button>
+          )}
+        </div>
       </div>
 
       {revertConfirm && (

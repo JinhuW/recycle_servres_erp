@@ -9,7 +9,7 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 // log must therefore be the UNION of every peer line's inventory_events,
 // matched on a canonical part number.
 
-type Line = { id: string; part_number: string | null; qty: number };
+type Line = { id: string; order_id: string; part_number: string | null; qty: number };
 
 async function createPoLine(token: string, partNumber: string): Promise<string> {
   const r = await api<{ id: string }>('POST', '/api/orders', {
@@ -25,8 +25,13 @@ async function createPoLine(token: string, partNumber: string): Promise<string> 
   });
   expect(r.status).toBe(201);
   const list = await api<{ items: Line[] }>('GET', '/api/inventory', { token });
-  // The line just created is the newest (list is ORDER BY created_at DESC).
-  return list.body.items[0].id;
+  // Locate it by its own PO, not by position: the list ships in the workbook's
+  // order (category, brand, capacity, speed), so the newest line is nowhere in
+  // particular. Part number can't do the job here — the three lines under test
+  // are deliberately three spellings of one part.
+  const line = list.body.items.find((i) => i.order_id === r.body.id);
+  expect(line).toBeDefined();
+  return line!.id;
 }
 
 async function eventsByPart(token: string, pn: string) {

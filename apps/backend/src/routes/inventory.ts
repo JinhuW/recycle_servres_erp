@@ -8,11 +8,19 @@ import { committedSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
-  type ExportCategory,
+  sortSheetRows, type ExportCategory,
 } from '../lib/categoryColumns';
-import { UNTYPED_ITEM, normSellPrice } from '@recycle-erp/shared';
+import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
+
+// Spec fields PATCH /:id accepts. Category stays fixed on the inventory editor,
+// so unlike the PO route this never has to clear the columns a switched-away
+// category owned — every line here keeps the category it was filed under.
+const SPEC_PATCH_FIELDS = [
+  'brand', 'capacity', 'generation', 'type', 'classification',
+  'rank', 'speed', 'interface', 'formFactor', 'description',
+] as const;
 
 const inventory = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -149,16 +157,26 @@ inventory.get('/', async (c) => {
     ORDER BY l.created_at DESC
     LIMIT 200
   `;
+  // Ship the list in the workbook's order — category, then brand, capacity,
+  // speed — so a screen and an export of the same stock read alike. The cap
+  // above stays recency-based on purpose: reordering the 200 newest rows keeps
+  // *which* rows appear as it was, where sorting in SQL would hand back the
+  // alphabetically-first 200 instead and hide everything recent.
+  const items = sortSheetRows(
+    rows as unknown as Record<string, unknown>[],
+    (r) => ({ category: String(r.category ?? ''), specs: r, label: invLabel(r) }),
+  );
+
   // Purchasers MUST NOT see cost or profit fields (PRD §6.8). Strip them before
   // returning. Sell price stays visible — it is not sensitive.
   if (!isManager) {
-    const filtered = (rows as Record<string, unknown>[]).map(r => {
+    const filtered = items.map(r => {
       const { unit_cost: _uc, profit: _p, margin: _m, ...rest } = r;
       return rest;
     });
     return c.json({ items: filtered });
   }
-  return c.json({ items: rows });
+  return c.json({ items });
 });
 
 // Excel export of the inventory list. Manager-only — the workbook carries
@@ -228,11 +246,18 @@ const GROUPED_TAIL_COLS: XlsxColumn[] = [
 // folded into Other (same recipe as the sell-order download). The split itself
 // lives in lib/categoryColumns so the PO workbook — which now also spans
 // categories — uses the same one.
+//
+// Rows go out in the vendor bid sheet's order (brand, capacity, speed), not the
+// query's recency order, so the export and a price template for the same parts
+// read alike. Sorting before the split is enough — categoryTabSheets buckets in
+// input order. The PO spreadsheet deliberately keeps its own line sequence, so
+// this sort lives here rather than in categoryTabSheets.
 async function buildCategoryTabs(
   rows: Record<string, unknown>[],
   colsFor: (cat: ExportCategory) => XlsxColumn[],
 ): Promise<Buffer> {
-  return buildXlsxWorkbook(categoryTabSheets(rows, colsFor, { emptySheetName: 'Inventory' }));
+  const sorted = sortSheetRows(rows, (r) => ({ specs: r, label: String(r.item ?? '') }));
+  return buildXlsxWorkbook(categoryTabSheets(sorted, colsFor, { emptySheetName: 'Inventory' }));
 }
 
 inventory.get('/export', async (c) => {
@@ -847,7 +872,7 @@ inventory.get('/products', async (c) => {
 
   const SPEC_KEYS = ['category','brand','capacity','generation','type','classification','rank','speed','interface','form_factor','description','item_type','rpm'] as const;
 
-  const products = filteredOrder.slice(0, GROUP_CAP).map((key) => {
+  const capped = filteredOrder.slice(0, GROUP_CAP).map((key) => {
     const lots = groups.get(key)!;
     const head = lots[0];
     const isSingleton = !(head.canon && head.canon.length > 0);
@@ -911,6 +936,15 @@ inventory.get('/products', async (c) => {
       unit_cost_avg: qty > 0 ? costWeighted / qty : 0,
     };
   });
+
+  // Same order as the workbook — category, then brand, capacity, speed — so the
+  // grouped table and an export of the same stock read alike. Sorted after the
+  // cap, which stays recency-based (see the flat list above for why).
+  const products = sortSheetRows(capped, (p) => ({
+    category: p.category,
+    specs: p as unknown as Record<string, unknown>,
+    label: invLabel(p as unknown as Record<string, unknown>),
+  }));
 
   // Warehouse pill counts: drop-self warehouse facet — every warehouse shows
   // its count assuming the warehouse filter is cleared, with all attribute
@@ -1020,9 +1054,23 @@ inventory.patch('/:id', async (c) => {
         partNumber?: string;
         health?: number | null;
         rpm?: number | null;
+        brand?: string | null;
+        capacity?: string | null;
+        generation?: string | null;
+        type?: string | null;
+        classification?: string | null;
+        rank?: string | null;
+        speed?: string | null;
+        interface?: string | null;
+        formFactor?: string | null;
+        description?: string | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  // Was the key present at all? `undefined` means "leave alone"; an explicit
+  // null or '' means "clear it".
+  const has = (f: string) => ((body as Record<string, unknown>)[f] !== undefined ? 1 : 0);
+  const specVal = (v: string | null | undefined) => (v == null || v.trim() === '' ? null : v.trim());
   if (body.health !== undefined && body.health !== null && (body.health < 0 || body.health > 100)) {
     return c.json({ error: 'health must be between 0 and 100' }, 400);
   }
@@ -1125,19 +1173,47 @@ inventory.patch('/:id', async (c) => {
         qty         = COALESCE(${body.qty ?? null}, qty),
         condition   = COALESCE(${body.condition ?? null}, condition),
         part_number = COALESCE(${body.partNumber ?? null}, part_number),
-        health      = COALESCE(${body.health ?? null}, health),
-        rpm         = COALESCE(${body.rpm ?? null}, rpm)
+        -- Sentinel, not COALESCE: both became editable dropdowns whose blank
+        -- option sends null meaning "clear this", and COALESCE reads null as
+        -- "no change" — so the save reported success and the value snapped
+        -- back, while the audit loop below logged a change that never landed.
+        health      = CASE WHEN ${has('health')}::int = 1 THEN ${body.health ?? null} ELSE health END,
+        rpm         = CASE WHEN ${has('rpm')}::int = 1    THEN ${body.rpm ?? null}    ELSE rpm END,
+        -- Spec columns take the sell_price sentinel, not COALESCE: a blanked
+        -- dropdown has to be able to clear the column, and COALESCE would read
+        -- that as "no change". specVal folds '' into NULL — an empty string is
+        -- not the same as NULL to the brand facet or the top-brands rollup,
+        -- which would gain a ghost value.
+        brand          = CASE WHEN ${has('brand')}::int = 1          THEN ${specVal(body.brand)}          ELSE brand END,
+        capacity       = CASE WHEN ${has('capacity')}::int = 1       THEN ${specVal(body.capacity)}       ELSE capacity END,
+        generation     = CASE WHEN ${has('generation')}::int = 1     THEN ${specVal(body.generation)}     ELSE generation END,
+        type           = CASE WHEN ${has('type')}::int = 1           THEN ${specVal(body.type)}           ELSE type END,
+        classification = CASE WHEN ${has('classification')}::int = 1 THEN ${specVal(body.classification)} ELSE classification END,
+        rank           = CASE WHEN ${has('rank')}::int = 1           THEN ${specVal(body.rank)}           ELSE rank END,
+        speed          = CASE WHEN ${has('speed')}::int = 1          THEN ${specVal(body.speed)}          ELSE speed END,
+        interface      = CASE WHEN ${has('interface')}::int = 1      THEN ${specVal(body.interface)}      ELSE interface END,
+        form_factor    = CASE WHEN ${has('formFactor')}::int = 1     THEN ${specVal(body.formFactor)}     ELSE form_factor END,
+        description    = CASE WHEN ${has('description')}::int = 1    THEN ${specVal(body.description)}    ELSE description END
       WHERE id = ${id}
     `;
     // One event per changed field — keeps the timeline easy to skim.
-    const fields = ['status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm'] as const;
+    const fields = [
+      'status', 'sellPrice', 'unitCost', 'qty', 'condition', 'partNumber', 'health', 'rpm',
+      ...SPEC_PATCH_FIELDS,
+    ] as const;
+    const isSpec = new Set<string>(SPEC_PATCH_FIELDS);
     for (const f of fields) {
-      const newVal = (body as Record<string, unknown>)[f];
-      if (newVal === undefined) continue;
+      const raw = (body as Record<string, unknown>)[f];
+      if (raw === undefined) continue;
+      // Compare and record what actually landed in the column, not what the
+      // client sent — otherwise clearing a field that was already NULL logs a
+      // phantom `null → ''` edit.
+      const newVal = isSpec.has(f) ? specVal(raw as string | null) : raw;
       const beforeKey: Record<string, string> = {
         status: 'status', sellPrice: 'sell_price', unitCost: 'unit_cost',
         qty: 'qty', condition: 'condition', partNumber: 'part_number',
         health: 'health', rpm: 'rpm',
+        ...SPEC_FIELD_TO_DB_COL,
       };
       const oldVal = before[beforeKey[f]];
       if (String(oldVal) === String(newVal)) continue;

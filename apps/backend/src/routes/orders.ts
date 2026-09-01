@@ -26,6 +26,7 @@ import {
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
+import { log } from '../lib/log';
 
 const orders = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -133,6 +134,42 @@ async function warehouseErr(
   const wh = await sql<{ id: string }[]>`SELECT id FROM warehouses WHERE id = ${warehouseId} LIMIT 1`;
   return wh.length ? null : 'Unknown warehouse';
 }
+
+// Same boundary, for the client a PO was bought from. Without it a malformed
+// uuid reaches the FK inside the transaction and surfaces as a 500 instead of
+// the 400 the caller can act on — and a well-formed id belonging to someone
+// else's book was simply accepted, which is how a PO ends up naming a client
+// the purchaser was never allowed to see.
+//
+// Reads elsewhere are scoped with effectiveRole so a manager can preview as a
+// purchaser; this is a write, so it consults u.role directly (lib/role.ts: the
+// preview is a viewing convenience, not a permission demotion).
+async function supplierErr(
+  sql: ReturnType<typeof getDb>,
+  u: User,
+  supplierId: string | null,
+): Promise<string | null> {
+  if (supplierId === null) return null;
+  let rows: { owner_id: string | null }[];
+  try {
+    rows = await sql<{ owner_id: string | null }[]>`
+      SELECT owner_id FROM suppliers WHERE id = ${supplierId}::uuid LIMIT 1
+    `;
+  } catch (e) {
+    // Only 22P02 is the caller's fault. Swallowing everything else would turn a
+    // dead pool into "Unknown client" — see the same idiom in warehouses.ts.
+    if ((e as { code?: string }).code === PG_INVALID_TEXT_REPRESENTATION) return 'Unknown client';
+    throw e;
+  }
+  if (rows.length === 0) return 'Unknown client';
+  // A house-account client (owner_id null) is nobody's private book, so it stays
+  // attachable by anyone; the 0114 backfill never produces one.
+  const ownerId = rows[0]!.owner_id;
+  if (u.role !== 'manager' && ownerId !== null && ownerId !== u.id) return 'Unknown client';
+  return null;
+}
+
+const PG_INVALID_TEXT_REPRESENTATION = '22P02';
 
 // An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
@@ -326,6 +363,7 @@ orders.get('/', async (c) => {
       o.other_fees::float AS other_fees,
       o.other_fees_note,
       o.paypal_txn_id,
+      o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
@@ -354,9 +392,11 @@ orders.get('/', async (c) => {
     FROM orders o
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
+    LEFT JOIN suppliers sup ON sup.id = o.supplier_id
+                          AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region
+    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
   `;
@@ -390,6 +430,11 @@ orders.get('/', async (c) => {
       otherFees: r.other_fees,
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
+      // Optional and additive: a stale SPA that never reads it is unaffected.
+      // Keyed on the JOINED name, not the raw column: the join is scoped to the
+      // caller's book, so a PO carrying someone else's client reads as unset
+      // rather than leaking an id with a null name beside it.
+      supplier: r.supplier_name ? { id: r.supplier_id, name: r.supplier_name } : null,
       warehouse: r.warehouse_id ? { id: r.warehouse_id, short: r.warehouse_short, region: r.warehouse_region } : null,
       qty: r.qty,
       revenue: r.revenue,
@@ -418,6 +463,7 @@ orders.get('/:id', async (c) => {
            o.other_fees::float AS other_fees,
            o.other_fees_note,
            o.paypal_txn_id,
+           o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
@@ -425,6 +471,9 @@ orders.get('/:id', async (c) => {
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
+    LEFT JOIN suppliers sup ON sup.id = o.supplier_id
+                          AND (${effectiveRole(u) === 'manager'} OR sup.owner_id IS NULL
+                               OR sup.owner_id = ${u.id})
     WHERE o.id = ${id}
     LIMIT 1
   `)[0];
@@ -538,6 +587,9 @@ orders.get('/:id', async (c) => {
       otherFees: order.other_fees,
       otherFeesNote: order.other_fees_note,
       paypalTxnId: order.paypal_txn_id,
+      supplier: order.supplier_name
+        ? { id: order.supplier_id, name: order.supplier_name }
+        : null,
       commissionRate: order.commission_rate,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
@@ -833,6 +885,9 @@ orders.post('/', async (c) => {
         otherFees?: number;
         otherFeesNote?: string | null;
         onBehalfOfUserId?: string;
+        /** The client we bought from. Optional — a PO can be filed before
+         *  anyone says who it came from. */
+        supplierId?: string | null;
         lines: LineInput[];
       }
     | null;
@@ -843,6 +898,8 @@ orders.post('/', async (c) => {
   if ('error' in owner) return c.json({ error: owner.error }, owner.status);
   const whErr = await warehouseErr(sql, body.warehouseId ?? null);
   if (whErr) return c.json({ error: whErr }, 400);
+  const supErr = await supplierErr(sql, u, body.supplierId ?? null);
+  if (supErr) return c.json({ error: supErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
   // The owner's, not the actor's: a manager filing on behalf ships to the
   // purchaser's location.
@@ -883,13 +940,14 @@ orders.post('/', async (c) => {
     await tx`
       INSERT INTO orders (
         id, user_id, category, warehouse_id, payment, notes, total_cost,
-        other_fees, other_fees_note, lifecycle
+        other_fees, other_fees_note, lifecycle, supplier_id
       )
       VALUES (
         ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
         ${warehouseId}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
-        ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft'
+        ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft',
+        ${body.supplierId ?? null}
       )
     `;
     for (let i = 0; i < body.lines.length; i++) {
@@ -1096,6 +1154,7 @@ orders.patch('/:id', async (c) => {
         addLines?: (LineFields & { category?: string })[];
         removeLineIds?: string[];
         totalCost?: number | null;
+        supplierId?: string | null;
         otherFees?: number | null;
         otherFeesNote?: string | null;
         notes?: string | null;
@@ -1128,7 +1187,7 @@ orders.patch('/:id', async (c) => {
     if (existing.lifecycle === 'done') {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
-    if (!materialEdit && body.notes === undefined) {
+    if (!materialEdit && body.notes === undefined && body.supplierId === undefined) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
   }
@@ -1170,6 +1229,10 @@ orders.patch('/:id', async (c) => {
   if (body.warehouseId !== undefined) {
     const whErr = await warehouseErr(sql, body.warehouseId ?? null);
     if (whErr) return c.json({ error: whErr }, 400);
+  }
+  if (body.supplierId !== undefined) {
+    const supErr = await supplierErr(sql, u, body.supplierId ?? null);
+    if (supErr) return c.json({ error: supErr }, 400);
   }
 
   // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
@@ -1315,13 +1378,15 @@ orders.patch('/:id', async (c) => {
                commission_rate::float AS commission_rate,
                other_fees::float AS other_fees,
                other_fees_note,
-               paypal_txn_id
+               paypal_txn_id,
+               supplier_id
         FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
             payment: string; total_cost: number | null; commission_rate: number | null;
-            other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null }
+            other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null;
+            supplier_id: string | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
       lifecycleAfter = orderBefore.lifecycle;
@@ -1425,7 +1490,8 @@ orders.patch('/:id', async (c) => {
         body.warehouseId !== undefined ||
         body.payment !== undefined ||
         body.commissionRate !== undefined ||
-        body.paypalTxnId !== undefined;
+        body.paypalTxnId !== undefined ||
+        body.supplierId !== undefined;
       if (touchesOrder) {
         // Nullable fields use a CASE WHEN sentinel so the client can clear
         // them by sending `null`; bare COALESCE would treat null as "no
@@ -1438,6 +1504,7 @@ orders.patch('/:id', async (c) => {
         const setOtherFees = body.otherFees     !== undefined ? 1 : 0;
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         const setPaypal    = body.paypalTxnId   !== undefined ? 1 : 0;
+        const setSupplier  = body.supplierId    !== undefined ? 1 : 0;
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
         const normPaypal = typeof body.paypalTxnId === 'string'
@@ -1450,6 +1517,7 @@ orders.patch('/:id', async (c) => {
             warehouse_id = CASE WHEN ${setWarehouse}::int = 1 THEN ${body.warehouseId ?? null} ELSE warehouse_id END,
             commission_rate = CASE WHEN ${setCommission}::int = 1 THEN ${clampedRate ?? null} ELSE commission_rate END,
             paypal_txn_id = CASE WHEN ${setPaypal}::int = 1 THEN ${normPaypal} ELSE paypal_txn_id END,
+            supplier_id  = CASE WHEN ${setSupplier}::int = 1 THEN ${body.supplierId ?? null} ELSE supplier_id END,
             -- other_fees is NOT NULL: a client clearing the field sends null and
             -- means 0, so the sentinel writes 0 rather than passing the null
             -- through into the constraint. The note is nullable and follows the
@@ -1688,7 +1756,8 @@ orders.patch('/:id', async (c) => {
         const orderAfter = (await tx`
           SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
-                 other_fees::float AS other_fees, other_fees_note, paypal_txn_id
+                 other_fees::float AS other_fees, other_fees_note, paypal_txn_id,
+                 supplier_id
           FROM orders WHERE id = ${id} LIMIT 1
         `)[0] as Record<string, unknown>;
         const metaChanges = diff(
@@ -1808,7 +1877,7 @@ orders.patch('/:id', async (c) => {
   // no-ops; a missing object delete is idempotent). Batched: this runs with the
   // response still open, and a wide removal used to mean one round trip per key.
   const unswept = await deleteAttachments(c.env, removedScanKeys);
-  if (unswept.length) console.error('r2 delete (line removed)', unswept);
+  if (unswept.length) log.error('r2 delete (line removed)', unswept);
 
   return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter });
 });
@@ -1937,7 +2006,7 @@ orders.delete('/:id', async (c) => {
   // carry a scan plus six photos per line, so this is batched rather than a
   // round trip each.
   const orphaned = await deleteAttachments(c.env, outcome.scanned.map(r => r.k));
-  if (orphaned.length) console.error('r2 delete (order deleted)', orphaned);
+  if (orphaned.length) log.error('r2 delete (order deleted)', orphaned);
 
   return c.json({ ok: true });
 });
@@ -2106,7 +2175,7 @@ orders.post('/:id/status-meta/:status/attachments', async (c) => {
   // INSERT below fails the object is orphaned in R2; r2.ts treats orphans as
   // a separate concern.
   const uploaded = await uploadAttachment(c.env, stored, `orders/${id}/${status}`)
-    .catch(e => { console.error('attachment upload', e); return null; });
+    .catch(e => { log.error('attachment upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   const row = await sql.begin(async (tx) => {
@@ -2170,7 +2239,7 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
   if (!removed) return c.json({ error: 'Not found' }, 404);
   // R2 delete outside the tx — slow side effect, kept out of the lock window.
   // Best-effort.
-  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete', e));
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete', e));
   return c.json({ ok: true });
 });
 
@@ -2240,7 +2309,7 @@ orders.post('/:id/lines/:lineId/photos', async (c) => {
   // No maybeRenameReceipt — that AI rename reads payment receipts, and these
   // are pictures of hardware.
   const uploaded = await uploadAttachment(c.env, fitted, `orders/${id}/lines/${lineId}`)
-    .catch(e => { console.error('line photo upload', e); return null; });
+    .catch(e => { log.error('line photo upload', e); return null; });
   if (!uploaded) return c.json({ error: 'upload failed' }, 502);
 
   try {
@@ -2341,7 +2410,7 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   });
 
   if (!removed) return c.json({ error: 'Not found' }, 404);
-  await deleteAttachment(c.env, removed.storage_key).catch(e => console.error('r2 delete (line photo)', e));
+  await deleteAttachment(c.env, removed.storage_key).catch(e => log.error('r2 delete (line photo)', e));
   return c.json({ ok: true });
 });
 

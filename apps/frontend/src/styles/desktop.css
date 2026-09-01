@@ -941,8 +941,16 @@ html.desktop, body.desktop, .desktop #root {
   padding: 14px 16px;
   cursor: pointer;
   transition: all 0.12s ease;
+  /* Rendered as a <button> at every call site, so the UA's centred, system-font
+     defaults have to be undone here rather than inline at each one. */
+  font-family: inherit;
+  text-align: left;
 }
 .so-stat:hover { border-color: var(--border-strong); }
+.so-stat.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .so-stat-head { margin-bottom: 8px; }
 .so-stat-num { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .so-stat-sub { font-size: 12px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; margin-top: 2px; }
@@ -3061,3 +3069,199 @@ html.desktop, body.desktop, .desktop #root {
   color: var(--accent-strong);
 }
 .ship-delivered-cta .btn { margin-left: auto; }
+
+/* ── Clients: the rhythm strip ──────────────────────────────────────────────
+   Purchase orders as marks across a year; the bar is the silence since the
+   last one. Positions are inline (they are data), everything else is here. */
+.rhythm { position: relative; height: 22px; width: 150px; min-width: 150px; }
+.rhythm-base { position: absolute; left: 0; right: 0; top: 14px; height: 1px;
+  background: var(--border); }
+.rhythm-po { position: absolute; bottom: 8px; width: 2px; height: 9px; border-radius: 1px;
+  background: var(--accent); opacity: .75; }
+.rhythm-gap { position: absolute; top: 11px; right: 0; height: 7px; border-radius: 3px;
+  background: var(--bg-soft); }
+.rhythm-gap-quiet { background: var(--warn); opacity: .85; }
+.rhythm-gap-lost  { background: var(--fg-subtle); opacity: .45; }
+.rhythm-now { position: absolute; right: 0; top: 6px; bottom: 2px; width: 1.5px;
+  background: var(--fg); opacity: .5; }
+.rhythm-none { position: absolute; left: 0; top: 3px; font-size: 10.5px;
+  color: var(--fg-subtle); font-style: italic; }
+.rhythm-detail { width: 100%; height: 62px; }
+.rhythm-detail .rhythm-base { top: 44px; }
+.rhythm-detail .rhythm-po { bottom: 19px; width: 3px; height: 16px; }
+.rhythm-detail .rhythm-gap { top: 38px; height: 11px; border-radius: 5px; }
+.rhythm-detail .rhythm-now { top: 12px; bottom: 6px; width: 2px; }
+.rhythm-detail .rhythm-none { top: 18px; }
+/* What normal looks like for this client — when the bar outruns it, something
+   changed. Detail view only; on a row it would be noise. */
+.rhythm-typical { position: absolute; top: 52px; height: 6px;
+  border-top: 1px dashed var(--fg-subtle); border-left: 1px solid var(--fg-subtle);
+  border-right: 1px solid var(--fg-subtle); }
+.rhythm-cap { display: flex; justify-content: space-between; margin-top: 3px;
+  font-size: 10px; color: var(--fg-subtle); }
+
+/* ── Clients ────────────────────────────────────────────────────────────────
+   Scanned, not read. Overdue is the only thing allowed to be red, and the
+   accent never doubles as a status — otherwise "green" means both clickable
+   and healthy, and neither reads. */
+.clients-page .cli-rail { display: grid; gap: 10px; margin: 14px 0 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.cli-tile { position: relative; overflow: hidden; text-align: left; }
+.cli-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--border-strong); }
+.cli-tile-neg::before  { background: var(--neg); }
+.cli-tile-warn::before { background: var(--warn); }
+.cli-tile-info::before { background: var(--info); }
+.cli-tile-neg .so-stat-num  { color: var(--neg); }
+.cli-tile-warn .so-stat-num { color: var(--warn-strong); }
+
+/* Suggestions */
+.cli-sugg { background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+.cli-sugg-head { display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 10px 13px; background: var(--bg-soft); border: 0; border-bottom: 1px solid var(--border);
+  text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.cli-sugg.closed .cli-sugg-head { border-bottom: 0; }
+.cli-sugg-title { font-weight: 600; font-size: 13px; }
+.cli-sugg-why { color: var(--fg-muted); font-size: 12px; }
+.cli-chev { margin-left: auto; color: var(--fg-subtle); transition: transform .15s; }
+.cli-sugg.closed .cli-chev { transform: rotate(-90deg); }
+.cli-sugg-row { display: flex; align-items: center; gap: 12px; padding: 9px 13px;
+  border-bottom: 1px solid var(--border); }
+.cli-sugg-row:last-child { border-bottom: 0; }
+.cli-sugg-name { font-weight: 500; font-size: 13px; }
+.cli-sugg-meta { font-size: 11.5px; color: var(--fg-muted); margin-top: 1px; }
+.cli-sugg-acts { margin-left: auto; display: flex; gap: 6px; flex: none; }
+
+/* Table */
+.cli-table td { vertical-align: middle; }
+.cli-row { cursor: pointer; }
+.cli-row:hover td { background: var(--bg-soft); }
+.cli-cell-name { position: relative; }
+.cli-row-late .cli-cell-name::before,
+.cli-row-quiet .cli-cell-name::before { content: ""; position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px; }
+.cli-row-late .cli-cell-name::before  { background: var(--neg); }
+.cli-row-quiet .cli-cell-name::before { background: var(--warn); }
+.cli-name { font-weight: 600; font-size: 13px; letter-spacing: -.01em; }
+.cli-where { font-size: 11.5px; color: var(--fg-muted); margin-top: 1px;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.cli-owner { font-size: 12px; color: var(--fg-muted); }
+.cli-num { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--fg-muted); }
+.cli-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.cli-tag { font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
+  background: var(--bg-soft); border: 1px solid var(--border); color: var(--fg-muted);
+  white-space: nowrap; }
+.cli-act { text-align: right; white-space: nowrap; }
+.cli-nophone { font-size: 11.5px; color: var(--fg-subtle); }
+.cli-empty { padding: 40px 22px; text-align: center; }
+.cli-empty h4 { font-size: 15px; font-weight: 600; margin: 0 0 5px; }
+.cli-empty p { font-size: 12.5px; color: var(--fg-muted); margin: 0 auto 14px; max-width: 40ch; }
+
+/* Drawer */
+.cli-drawer { width: min(480px, 96vw); max-height: 92vh; display: flex;
+  flex-direction: column; padding: 0; }
+.cli-drawer-head { padding: 15px 17px 13px; border-bottom: 1px solid var(--border);
+  background: var(--bg-soft); }
+.cli-drawer-top { display: flex; align-items: flex-start; gap: 10px; }
+.cli-drawer-name { font-size: 17px; font-weight: 700; letter-spacing: -.02em; line-height: 1.25; }
+.cli-drawer-where { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+.cli-drawer-top .icon-btn { margin-left: auto; flex: none; }
+.cli-drawer-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px; }
+.cli-quick { display: flex; gap: 6px; margin-top: 11px; }
+/* Real targets: this gets used mid-call, sometimes one-handed. */
+.cli-quick-btn { flex: 1; height: 38px; justify-content: center; }
+.cli-drawer-body { overflow-y: auto; padding: 0 17px 20px; }
+.cli-sec { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.cli-sec:last-child { border-bottom: 0; }
+.cli-sec-h { font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--fg-muted); margin: 0 0 9px; font-weight: 500;
+  display: flex; align-items: center; gap: 7px; }
+.cli-sec-head-row { display: flex; align-items: center; justify-content: space-between; }
+.cli-derived { background: var(--accent-soft); color: var(--accent-strong);
+  border-radius: 3px; padding: 1px 5px; font-size: 8.5px; letter-spacing: .06em; }
+.cli-kv { display: grid; grid-template-columns: 96px 1fr; gap: 5px 10px;
+  font-size: 12.5px; margin: 0; }
+.cli-kv dt { color: var(--fg-muted); }
+.cli-kv dd { margin: 0; }
+.cli-muted { color: var(--fg-muted); font-size: 12.5px; margin: 0; }
+.cli-notes-text { font-size: 12.5px; margin: 8px 0 0; }
+.cli-quiet-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px;
+  background: var(--warn-soft); color: var(--warn-strong); border-radius: 8px;
+  padding: 9px 11px; font-size: 12.5px; line-height: 1.45; }
+.cli-sold { display: flex; flex-direction: column; gap: 6px; }
+.cli-sold-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.cli-sold-name { min-width: 120px; }
+.cli-sold-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--bg-soft);
+  overflow: hidden; }
+.cli-sold-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.cli-sold-qty { font-variant-numeric: tabular-nums; font-size: 11.5px;
+  color: var(--fg-muted); min-width: 56px; text-align: right; }
+.cli-sold-foot { font-size: 11.5px; color: var(--fg-muted); margin: 9px 0 0; }
+.cli-timeline { display: flex; flex-direction: column; gap: 11px; padding-left: 14px;
+  border-left: 1px solid var(--border); }
+.cli-tl-item { position: relative; }
+.cli-tl-item::before { content: ""; position: absolute; left: -18px; top: 4px;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--fg-subtle);
+  box-shadow: 0 0 0 2px var(--bg-elev); }
+.cli-tl-call::before, .cli-tl-text::before { background: var(--accent); }
+.cli-tl-offer::before { background: var(--pos); }
+.cli-tl-owner_changed::before { background: var(--warn); }
+.cli-tl-body { font-size: 12.5px; line-height: 1.45; }
+.cli-tl-meta { font-size: 10.5px; color: var(--fg-subtle); margin-top: 2px; }
+.cli-orders { display: flex; flex-direction: column; gap: 4px; }
+.cli-order { display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+  padding: 5px 8px; border-radius: 6px; text-decoration: none; color: inherit; }
+.cli-order:hover { background: var(--bg-soft); }
+.cli-order-id { font-weight: 500; }
+.cli-order-date { color: var(--fg-muted); }
+.cli-order-total { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* Log a contact — every control here is sized to be tapped, not aimed at. */
+.cli-log { background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 9px; padding: 11px; }
+.cli-seg { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 9px; }
+.cli-seg-btn { height: 36px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+.cli-seg-btn.on { background: var(--accent); border-color: var(--accent);
+  color: var(--accent-fg); }
+.cli-log-body { width: 100%; resize: vertical; }
+.cli-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.cli-chip-btn { font-size: 11.5px; padding: 5px 11px; border-radius: 16px;
+  border: 1px dashed var(--border-strong); background: none; color: var(--fg-muted);
+  cursor: pointer; font-family: inherit; }
+.cli-chip-btn:hover { border-style: solid; color: var(--fg); }
+.cli-when-label { font-size: 11.5px; color: var(--fg-muted); margin: 12px 0 6px; }
+.cli-when { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.cli-when-btn { height: 40px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  font: inherit; font-size: 12px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.cli-when-btn.on { border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent-strong); font-weight: 600; }
+.cli-when-date { font-size: 9.5px; opacity: .75; font-variant-numeric: tabular-nums; }
+.cli-date { height: 40px; }
+.cli-log-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.cli-log-hint { flex: 1; font-size: 11px; color: var(--fg-muted); font-style: italic; }
+
+/* Forms */
+.cli-modal { width: min(440px, 96vw); }
+.cli-modal-wide { width: min(560px, 96vw); max-height: 92vh; overflow-y: auto; }
+.cli-modal-title { font-size: 16px; font-weight: 700; margin: 0 0 14px; letter-spacing: -.02em; }
+.cli-form { padding: 17px; display: flex; flex-direction: column; gap: 11px; }
+.cli-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.cli-field > span { color: var(--fg-muted); }
+.cli-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.cli-form-hint { font-size: 11.5px; color: var(--fg-muted); margin: 0; }
+.cli-form-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.cli-pick { display: flex; gap: 5px; flex-wrap: wrap; }
+.cli-pick-btn { height: 34px; padding: 0 11px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg-muted);
+  font: inherit; font-size: 12px; cursor: pointer; }
+.cli-pick-btn.on { border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent-strong); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .cli-field-row { grid-template-columns: 1fr; }
+}

@@ -6,27 +6,15 @@ import { extractPaypalTxn } from '../ai/paypal';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from '../lib/error-log';
+import { createRateLimiter } from '../lib/rate-limit';
 import { getUploadLimits } from '../lib/settings';
 import type { Env, LineCategory, User } from '../types';
 
 const scan = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string } }>();
 
 // Per-user sliding-window rate limit: max 20 scans per 60-second window.
-// Keys are user IDs; values are arrays of timestamps (ms) for recent calls.
-const scanTimestamps = new Map<string, number[]>();
-const SCAN_WINDOW_MS = 60_000;
-const SCAN_MAX = 20;
-
-// Shared budget across both scan kinds — same user, same abuse surface.
-function rateLimited(userId: string): number | null {
-  const now = Date.now();
-  const cutoff = now - SCAN_WINDOW_MS;
-  const prev = (scanTimestamps.get(userId) ?? []).filter(t => t > cutoff);
-  if (prev.length >= SCAN_MAX) return Math.ceil((prev[0]! - cutoff) / 1000);
-  prev.push(now);
-  scanTimestamps.set(userId, prev);
-  return null;
-}
+// One limiter for both scan kinds — same user, same abuse surface.
+const rateLimited = createRateLimiter(60_000, 20);
 
 // A scan the pipeline never completed. The user is told to try again and then
 // to escalate, so leave the operator something to find when they do: one

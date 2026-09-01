@@ -4,6 +4,7 @@
 
 import type { Context } from 'hono';
 import { getDb } from '../db';
+import { log } from '../lib/log';
 import { readPackageVersion } from '../lib/version';
 import { TOOL_DEFS, callListMarketValues, callGetMarketValue, callSetMarketPrice } from './tools/market';
 import {
@@ -11,6 +12,8 @@ import {
 } from './tools/sellOrders';
 import type { OAuthCtx, OAuthScope, Env } from '../types';
 import { mcpToolCallsTotal } from '../metrics';
+
+const mcpLog = log.child({ module: 'mcp' });
 
 type JsonRpcReq = { jsonrpc: '2.0'; id: number | string; method: string; params?: Record<string, unknown> };
 
@@ -46,7 +49,12 @@ function rpcErr(id: number | string | null, code: number, message: string, data?
 export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): Promise<Response> {
   let parsed: unknown;
   try { parsed = await c.req.json(); }
-  catch { return c.json(rpcErr(null, -32700, 'parse error')); }
+  catch {
+    // Body deliberately not logged. Safe to log at all only because
+    // bearerGuard fronts this route, so volume is bounded by issued tokens.
+    mcpLog.warn('parse error');
+    return c.json(rpcErr(null, -32700, 'parse error'));
+  }
 
   // Batching was dropped in MCP 2025-06-18 and we never implemented it; saying
   // so beats letting an array fall through and fail as an unknown method.
@@ -114,6 +122,10 @@ export async function handleMcp(c: Context<{ Bindings: Env; Variables: any }>): 
         }));
       } catch (e) {
         mcpToolCallsTotal.inc({ tool: toolLabel, status: 'error' });
+        // The reply rides an HTTP 200 and, since the isError change below,
+        // does not even carry a JSON-RPC error code — without this line a
+        // broken write tool leaves no trace anywhere.
+        mcpLog.child({ tool: toolLabel, clientId: ctx?.clientId }).error('tool call failed', e);
         // A tool that ran and failed is a tool *result*, not a protocol error
         // (MCP spec, Tools → Error handling): the model has to see the message
         // to correct itself. ChatGPT hands a JSON-RPC error to the model as

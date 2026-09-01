@@ -40,6 +40,7 @@ const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
 const DesktopSubmit = lazy(() => import('./pages/desktop/DesktopSubmit').then(m => ({ default: m.DesktopSubmit })));
 const DesktopShipping = lazy(() => import('./pages/desktop/DesktopShipping').then(m => ({ default: m.DesktopShipping })));
+const DesktopClients = lazy(() => import('./pages/desktop/DesktopClients').then(m => ({ default: m.DesktopClients })));
 const Authorize = lazy(() => import('./pages/Authorize').then(m => ({ default: m.Authorize })));
 
 import type { Order } from './lib/types';
@@ -230,6 +231,7 @@ export function DesktopApp() {
             )}
             {view2 === 'history'    && ordersOrEdit}
             {view2 === 'shipping'   && shippingRoute && <DesktopShipping route={shippingRoute} showToast={showToast} />}
+            {view2 === 'clients'    && <DesktopClients showToast={showToast} />}
             {view2 === 'market'     && <DesktopMarket />}
             {view2 === 'inventory'  && inventoryOrEdit}
             {view2 === 'analysis'   && <DesktopAnalysis />}

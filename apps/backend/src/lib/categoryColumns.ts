@@ -1,4 +1,4 @@
-import { CATEGORY_ORDER, type ExportCategory } from '@recycle-erp/shared';
+import { CATEGORY_ORDER, categoryRank, type ExportCategory } from '@recycle-erp/shared';
 import type { XlsxColumn } from './xlsx';
 
 export { CATEGORY_ORDER };
@@ -11,7 +11,8 @@ export type { ExportCategory };
 //
 // This table is the one source of truth for those column sets. The vendor bid
 // sheet keeps its own copy on purpose — its header text is load-bearing for the
-// round-trip price import parser, so it must not move when this one does.
+// round-trip price import parser, so it must not move when this one does. Its
+// row *order* is shared, though — see sortSheetRows below.
 
 export const SPEC_COLS_BY_CATEGORY: Record<ExportCategory, XlsxColumn[]> = {
   RAM: [
@@ -59,6 +60,51 @@ export function exportCategory(v: unknown): ExportCategory {
   return (CATEGORY_ORDER as readonly string[]).includes(String(v))
     ? (String(v) as ExportCategory)
     : 'Other';
+}
+
+// Rows ship pre-sorted the way the desk reads a bid sheet (user-decided
+// 2026-08-09, superseding the 2026-08-06 capacity-first order): brand, then
+// capacity, speed — one brand's parts stay together on the page. Rank is
+// deliberately not a key. Categories without those specs just fall through to
+// the label tie-break. Every stock workbook uses this — bid tabs, packing tabs
+// and the inventory export alike — so a picker, a bidder and a manager read a
+// product in the same place.
+export const SHEET_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
+
+// Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below
+// 16GB and 3200 below 12800, which a plain lexical sort gets backwards. Blanks
+// sink so manual lines (no specs at all) never head the tab.
+export function compareSpecValue(a: string, b: string): number {
+  if (!a) return b ? 1 : 0;
+  if (!b) return -1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// Label breaks ties so the same data always exports byte-identically. `read`
+// adapts the row shape: the bid sheet holds specs in a sub-object, the
+// inventory export carries them flat on the row.
+//
+// `category` ranks first when given — that's the inventory *screens*, which are
+// one flat table and have to earn the grouping a workbook gets free from its
+// tabs. The workbook callers split by category before sorting, so they leave it
+// off; don't "fix" the optionality away.
+export function sortSheetRows<T>(
+  rows: readonly T[],
+  read: (row: T) => { specs: Record<string, unknown>; label: string; category?: string },
+): T[] {
+  return [...rows].sort((x, y) => {
+    const a = read(x);
+    const b = read(y);
+    if (a.category !== undefined && b.category !== undefined) {
+      const d = categoryRank(a.category) - categoryRank(b.category);
+      if (d !== 0) return d;
+    }
+    for (const key of SHEET_SORT_KEYS) {
+      const d = compareSpecValue(String(a.specs[key] ?? ''), String(b.specs[key] ?? ''));
+      if (d !== 0) return d;
+    }
+    return compareSpecValue(a.label, b.label);
+  });
 }
 
 export type CategorySheet = { name: string; columns: XlsxColumn[]; rows: Record<string, unknown>[] };

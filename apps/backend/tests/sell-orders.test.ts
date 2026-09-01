@@ -79,7 +79,10 @@ describe('POST /api/sell-orders/:id/status', () => {
 
   it('Done consumes stock: decrements the source line qty (status unchanged)', async () => {
     const { token } = await loginAs(ALEX);
-    const line = await findSellableLine(token);
+    // Needs two units: selling a line's last unit flips it to 'Sold' and leaves
+    // qty alone (order_lines carries CHECK (qty > 0)), which is a different
+    // assertion than the decrement under test here.
+    const line = await freeSellableLine(token, 2);
     const customerId = await firstCustomerId(token);
     const create = await api<{ id: string }>('POST', '/api/sell-orders', {
       token,

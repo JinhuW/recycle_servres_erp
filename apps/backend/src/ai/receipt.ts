@@ -7,6 +7,9 @@
 import type { Env } from '../types';
 import { openRouterImageJson } from './openrouter';
 import { ocrCallsTotal } from '../metrics';
+import { log } from '../lib/log';
+
+const aiLog = log.child({ module: 'ai' });
 
 export const RECEIPT_METHODS = [
   'alipay', 'weixinpay', 'bank', 'zelle', 'paypal', 'venmo', 'cash', 'other',
@@ -91,8 +94,9 @@ export async function maybeRenameReceipt(env: Env, file: File): Promise<File> {
   try {
     json = await openRouterImageJson(env, RECEIPT_PROMPT, bytes);
     ocrCallsTotal.inc({ provider: 'openrouter', outcome: 'ok' });
-  } catch {
+  } catch (e) {
     ocrCallsTotal.inc({ provider: 'openrouter', outcome: 'error' });
+    aiLog.warn('receipt auto-rename failed; keeping the original name', e);
     return file;
   }
 

@@ -14,10 +14,15 @@
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
 import './load-env.mjs';
+// Plain-node import of a .ts module: Node strips the types. log.ts is kept
+// free of intra-repo imports so this resolves without a transpiler.
+import { log as rootLog } from '../src/lib/log.ts';
+
+const log = rootLog.child({ module: 'init-admin' });
 
 const url = process.env.DATABASE_URL;
 if (!url) {
-  console.error('init-admin: DATABASE_URL is not set');
+  log.error('DATABASE_URL is not set');
   process.exit(1);
 }
 
@@ -27,7 +32,7 @@ const name = process.env.ADMIN_NAME ?? 'Admin';
 const role = process.env.ADMIN_ROLE ?? 'manager';
 
 if (!['manager', 'purchaser'].includes(role)) {
-  console.error(`init-admin: ADMIN_ROLE must be 'manager' or 'purchaser' (got: ${role})`);
+  log.error("ADMIN_ROLE must be 'manager' or 'purchaser'", { role });
   process.exit(1);
 }
 
@@ -44,13 +49,13 @@ const sql = postgres(url, { onnotice: () => {} });
 try {
   const existing = await sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`;
   if (existing.length > 0) {
-    console.log(`↻ init-admin: ${email} already exists, skipping`);
+    log.info('admin already exists, skipping', { email });
   } else {
     // Never provision a manager account with the published default password in
     // production — fail the boot so the misconfiguration is impossible to miss.
     if (process.env.NODE_ENV === 'production' && password === 'admin') {
-      console.error(
-        '✗ init-admin: refusing to create the default admin with password "admin" in production — set ADMIN_PASSWORD in .env',
+      log.error(
+        'refusing to create the default admin with password "admin" in production — set ADMIN_PASSWORD in .env',
       );
       await sql.end();
       process.exit(1);
@@ -60,15 +65,15 @@ try {
       INSERT INTO users (email, name, initials, role, password_hash, active)
       VALUES (${email}, ${name}, ${initials}, ${role}, ${hash}, TRUE)
     `;
-    console.log(`✓ init-admin: created ${role} ${email}`);
+    log.info('created admin', { role, email });
     if (password === 'admin') {
-      console.log(
-        '  ⚠ Using DEFAULT password "admin" — set ADMIN_PASSWORD in repo-root .env before exposing the service.',
+      log.warn(
+        'using DEFAULT password "admin" — set ADMIN_PASSWORD in repo-root .env before exposing the service.',
       );
     }
   }
 } catch (e) {
-  console.error('✗ init-admin failed:', e);
+  log.error('init-admin failed', e);
   process.exitCode = 1;
 } finally {
   await sql.end();

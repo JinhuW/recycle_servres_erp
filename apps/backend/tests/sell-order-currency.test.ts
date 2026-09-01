@@ -45,7 +45,8 @@ describe('sell orders — per-order currency', () => {
 
   it('creates a CNY order: line USD = native × rate, audit cols stamped', async () => {
     const { token } = await loginAs(ALEX);
-    const line = await freeSellableLine(token, 1);
+    // Two units are committed below, so the line has to carry two.
+    const line = await freeSellableLine(token, 2);
     const customerId = await firstCustomerId(token);
 
     const create = await api<{ id: string }>('POST', '/api/sell-orders', {
