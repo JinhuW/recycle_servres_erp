@@ -514,3 +514,48 @@ describe('bank transactions API', () => {
     expect(searched.body.suggestions.some((s) => s.id === poAmount && s.reason === 'search')).toBe(true);
   });
 });
+
+// The queue defaults to money OUT, so a direction-blind tile counted rows the
+// list underneath it was hiding — and once the out-queue was drained the page
+// claimed there was nothing left while unlinked incoming payments sat unseen.
+describe('GET /api/bank-transactions/stats — direction lens', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function seedBothDirections() {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'dir-out-1', amount: -250 },
+        { externalId: 'dir-out-2', amount: -20 },
+        { externalId: 'dir-in-1', amount: 180 },
+      ]),
+    ]);
+  }
+
+  it('scopes the unlinked tile to the same direction as the list', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedBothDirections();
+
+    const all = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats', { token });
+    const out = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats?direction=out', { token });
+    const inn = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats?direction=in', { token });
+
+    expect(out.body.unlinked.count).toBe(2);
+    expect(inn.body.unlinked.count).toBe(1);
+    // No lens still means the whole queue.
+    expect(all.body.unlinked.count).toBe(out.body.unlinked.count + inn.body.unlinked.count);
+  });
+
+  it('agrees with the list it sits above', async () => {
+    const { token } = await loginAs(ALEX);
+    await seedBothDirections();
+
+    const stats = await api<{ unlinked: { count: number } }>(
+      'GET', '/api/bank-transactions/stats?direction=out', { token });
+    const list = await api<{ rows: unknown[] }>(
+      'GET', '/api/bank-transactions?status=unlinked&direction=out&limit=100', { token });
+    expect(stats.body.unlinked.count).toBe(list.body.rows.length);
+  });
+});

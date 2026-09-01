@@ -215,10 +215,25 @@ bankTx.get('/', async (c) => {
 
 bankTx.get('/stats', async (c) => {
   const sql = getDb(c.env);
+  // The two tiles the queue actually filters on take the same direction lens the
+  // list does. The page defaults to money OUT, so a direction-blind unlinked
+  // count reported rows the list below it was hiding — and once the money-out
+  // queue was drained the page said "nothing left to reconcile" while unlinked
+  // incoming payments sat there unseen. Linked / refunds / ignored / transfers
+  // stay direction-blind: those are not what the queue filters on.
+  const direction = c.req.query('direction') ?? 'all';
+  const dirFrag =
+    direction === 'out' ? sql`AND amount < 0`
+    : direction === 'in' ? sql`AND amount > 0`
+    : sql``;
+  const dirFragBt =
+    direction === 'out' ? sql`AND bt.amount < 0`
+    : direction === 'in' ? sql`AND bt.amount > 0`
+    : sql``;
   const [agg] = await sql`
     SELECT
-      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external')::int AS unlinked_count,
-      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external'), 0)::float AS unlinked_amount,
+      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external' ${dirFrag})::int AS unlinked_count,
+      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external' ${dirFrag}), 0)::float AS unlinked_amount,
       COUNT(*) FILTER (WHERE category = 'transfer')::int                               AS transfer_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL)::int                                AS linked_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund')::int       AS refund_count,
@@ -231,7 +246,8 @@ bankTx.get('/stats', async (c) => {
     FROM bank_transactions bt
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${openRowFrag(sql, 'bt')}
-      AND ${hasMatchFrag(sql, 'bt')}`;
+      AND ${hasMatchFrag(sql, 'bt')}
+      ${dirFragBt}`;
   const sources = await sql`
     SELECT source, MAX(last_synced_at) AS last_synced_at FROM bank_accounts GROUP BY source`;
   return c.json({

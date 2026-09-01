@@ -101,10 +101,17 @@ log and `orders.supplier_id`.
   flow that costs more produces calls nobody logs, and a follow-up list that
   lies.
 - Buying a shipping label **creates nothing**; sellers surface in a suggestion
-  rail. This business buys from plenty of people once, and auto-creating would
-  bury the twenty relationships that matter.
+  rail, which counts purchase orders rather than parcels — `shipments` is one
+  row per box, so a PO shipped in three cartons is one PO, not three
+  (v1.114.1).
 - Attributing a PO to a client is bookkeeping, not a material edit: it is
-  audited but does **not** bounce a submitted PO back to Draft.
+  audited but does **not** bounce a submitted PO back to Draft. The client must
+  be one of yours — a purchaser cannot attach a PO to someone else's book, and a
+  client's name is scoped to the reader, so a book handed to another purchaser
+  stops appearing on the previous owner's orders (v1.114.1).
+- **Changing a client's owner goes through one endpoint only.** A handover has
+  to leave a trace on the same timeline as the calls, so it is a reassign, never
+  a field edit (v1.114.1).
 
 ## Inventory
 
@@ -178,6 +185,9 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
 - Unlinked transactions get **suggested matching POs** (v1.99.0).
+- The queue **opens on money out**, and the Unlinked and Suggested tiles take
+  the same direction lens as the rows beneath them, so the count and the list
+  can never disagree (v1.114.1).
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
@@ -249,6 +259,8 @@ inventory search, sell-order draft creation.
 - The scanner **says so when AI recognition is unavailable** and names the
   escalation (v1.97.2), and won't take a purchaser's name for a RAM brand the
   model couldn't read (v1.106.0).
+- An item's specs are editable from the item itself, and a **blanked dropdown
+  clears the field** — including the numeric ones, RPM and health (v1.114.1).
 - Receipt auto-rename runs only on images, never spreadsheets or PDFs.
 
 > Provider selection is silent: OpenRouter (Gemma 3 27B) when
