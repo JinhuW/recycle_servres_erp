@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-007](./RS-007-long-activity-log-leaves-a-dead-gap-above-order-stat.md) | in-progress | bug | P2 | Long activity log leaves a dead gap above Order status | — |
 | [RS-005](./RS-005-release-review-findings-before-the-prod-cut.md) | done | bug | P1 | Release-review findings before the prod cut | 1.114.1 |
 | [RS-004](./RS-004-inventory-export-and-screens-read-in-the-vendor-bid.md) | in-review | story | P2 | Inventory export and screens read in the vendor bid-sheet order | 1.113.0 |
 | [RS-003](./RS-003-mobile-po-add-item-buttons-require-scrolling-past-th.md) | in-review | story | P2 | Mobile PO add-item buttons require scrolling past the whole line list | 1.109.0 |
