@@ -2,7 +2,7 @@
 id: RS-005
 title: Release-review findings before the prod cut
 type: bug
-status: in-review
+status: done
 priority: P1
 created: 2026-08-31
 reporter: Jinhu
