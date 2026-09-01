@@ -11,6 +11,7 @@ describe('POST /api/orders defaults', () => {
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         warehouseId: 'WH-LA1',
         payment: 'company',
@@ -41,7 +42,8 @@ describe('POST /api/orders defaults', () => {
     const { token } = await loginAs(MARCUS);
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { category: 'HDD', lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'HDD', lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
     });
     expect(r.status).toBe(201);
     const got = await api<{ order: { category: string } }>('GET', '/api/orders/' + r.body.id, { token });
@@ -52,7 +54,8 @@ describe('POST /api/orders defaults', () => {
     const { token } = await loginAs(MARCUS);
     const r = await api<{ error: string }>('POST', '/api/orders', {
       token,
-      body: { lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', lines: [{ qty: 1, unitCost: 10, condition: 'New' }] },
     });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/category is required/);
@@ -67,6 +70,7 @@ describe('POST /api/orders — synthetic part number', () => {
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'SSD', warehouseId: 'WH-LA1',
         lines: [{
           category: 'SSD', brand: 'Mixed', capacity: '512GB',
@@ -86,6 +90,7 @@ describe('POST /api/orders — synthetic part number', () => {
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'SSD', warehouseId: 'WH-LA1',
         lines: [{
           category: 'SSD', brand: 'Mixed', capacity: '512GB',
@@ -104,6 +109,7 @@ describe('POST /api/orders — synthetic part number', () => {
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'SSD', warehouseId: 'WH-LA1',
         lines: [{
           category: 'SSD', brand: 'Samsung', capacity: '512GB',
@@ -125,7 +131,8 @@ describe('POST /api/orders/:id/advance', () => {
     const { token: pTok } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     const id = created.body.id;
@@ -142,7 +149,8 @@ describe('POST /api/orders/:id/advance', () => {
     const { token: otherTok } = await loginAs(PRIYA);
     const c = await api<{ id: string }>('POST', '/api/orders', {
       token: ownerTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     const r = await api('POST', `/api/orders/${c.body.id}/advance`, { token: otherTok });
@@ -157,7 +165,8 @@ describe('POST /api/orders/:id/advance', () => {
     const { token: otherTok } = await loginAs(PRIYA);
     const c = await api<{ id: string }>('POST', '/api/orders', {
       token: ownerTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     await api('POST', `/api/orders/${c.body.id}/advance`, { token: ownerTok });
@@ -169,7 +178,8 @@ describe('POST /api/orders/:id/advance', () => {
     const { token: pTok } = await loginAs(MARCUS);
     const c = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
@@ -182,7 +192,8 @@ describe('POST /api/orders/:id/advance', () => {
     const { token: mTok } = await loginAs(ALEX);
     const c = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
@@ -204,7 +215,8 @@ describe('notifications on order advance', () => {
 
     const c = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     await api('POST', `/api/orders/${c.body.id}/advance`, { token: pTok });
@@ -315,7 +327,8 @@ describe('PATCH /api/orders/:id — Done is read-only', () => {
     const { token: pTok } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     const id = created.body.id;
@@ -395,7 +408,8 @@ describe('other fees on a purchase order', () => {
   async function draftPO(token: string): Promise<string> {
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New' }] },
     });
     expect(r.status).toBe(201);
@@ -421,7 +435,8 @@ describe('other fees on a purchase order', () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { category: 'RAM', warehouseId: 'WH-LA1', otherFees: 3.25, otherFeesNote: 'wire fee',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1', otherFees: 3.25, otherFeesNote: 'wire fee',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     expect(created.status).toBe(201);
@@ -536,7 +551,8 @@ describe('POST /api/orders/:id/archive (+/unarchive)', () => {
   async function createInTransitOrder(token: string) {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     await api('POST', `/api/orders/${created.body.id}/advance`, { token });
@@ -581,7 +597,8 @@ describe('POST /api/orders/:id/archive (+/unarchive)', () => {
     const { token } = await loginAs(MARCUS);
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { category: 'RAM', warehouseId: 'WH-LA1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     const r = await api<{ error: string }>('POST', `/api/orders/${created.body.id}/archive`, { token });
@@ -634,6 +651,7 @@ describe('order line serial numbers', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         warehouseId: 'WH-LA1',
         payment: 'company',
@@ -659,6 +677,7 @@ describe('order line serial numbers', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         warehouseId: 'WH-LA1',
         payment: 'company',
@@ -693,6 +712,7 @@ describe('order line serial numbers', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         warehouseId: 'WH-LA1',
         payment: 'company',
@@ -726,6 +746,7 @@ describe('order line serial numbers', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         warehouseId: 'WH-LA1',
         payment: 'company',
@@ -774,6 +795,7 @@ describe('PATCH /api/orders/:id line status is not client-settable', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
         lines: [{
           category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
@@ -815,6 +837,7 @@ describe('PATCH /api/orders/:id — AI scan fields persist', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
       },
@@ -859,6 +882,7 @@ describe('PATCH /api/orders/:id — purchaser edits revert the PO to Draft', () 
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
         lines: [{
           category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',

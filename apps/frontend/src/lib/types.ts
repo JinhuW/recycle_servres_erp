@@ -150,6 +150,12 @@ export type OrderSummary = {
   // PayPal payment reference, seeded from the tracked package's screenshot
   // scan when the PO is minted from one; manager-editable after submission.
   paypalTxnId: string | null;
+  // Whether this PO must name its transaction before it can leave Draft — the
+  // server decides, because the rule's cutoff lives in the DB. Optional: the
+  // Worker and Railway deploy independently, so a frontend that ships first
+  // sees it undefined and must read that as "not required". The backend's 409
+  // is the real gate either way.
+  txnRequired?: boolean;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,

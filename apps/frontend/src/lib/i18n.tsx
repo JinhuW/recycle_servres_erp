@@ -1334,6 +1334,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipPayNoTxnFound: 'No transaction ID found in this screenshot — type it yourself.',
     shipPayVerifyTxn: 'Low-confidence read — check the ID against the screenshot.',
     poPaypalTxn: 'PayPal transaction',
+    poTxnRequired: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
     shipAddedLabelTag: 'Added label',
     shipColNoPo: 'No PO yet',
     shipCreatePo: 'Create PO',

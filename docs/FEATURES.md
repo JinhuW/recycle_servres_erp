@@ -45,6 +45,12 @@ moves Draft → Submitted → In Transit → Reviewing → Done.
   line diff (v1.97.0). Notes, photos and attachments don't trigger it. A
   reverted order is a Draft that was already submitted, so deleting it archives
   rather than wipes.
+- **A company-paid PO names the payment that funded it before it leaves
+  Draft** (v1.115.0) — the transaction ID is required, and the advance is
+  refused without it for every actor, a manager stage-jump and carrier movement
+  included. Self-pay POs are unaffected. The rule governs only orders created
+  after it reached the environment, so POs already on file stay exempt. Mobile
+  gained the field as an input; it used to be read-only there.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0).
 - **Costs split into a goods total and other fees** (v1.43.0); a goods overflow
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
@@ -188,6 +194,10 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
   can never disagree (v1.114.1).
+- Since v1.115.0 a company-paid PO cannot be submitted without its transaction
+  ID — which is the key auto-link matches on — so those POs arrive already able
+  to reconcile themselves, instead of landing in the unlinked queue for a
+  manager to match by amount and date.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`

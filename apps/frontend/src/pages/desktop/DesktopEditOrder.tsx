@@ -583,6 +583,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     linesDirty || warehouseDirty || paymentDirty || otherFeesDirty
     || otherFeesNoteDirty || paypalDirty;
 
+  // A company-paid PO names the payment that funded it before it leaves Draft.
+  // The server decides whether the rule governs this order (its cutoff lives in
+  // the DB), and refuses the advance regardless — this only saves the
+  // round-trip. `=== true` deliberately: an older backend omits the field.
+  const txnBlocked =
+    order.txnRequired === true && statusDirty && status !== 'Draft' && !paypalTxn.trim();
+
   const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
@@ -590,7 +597,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // save sends none, so an incomplete legacy line must not block it — the
   // purchaser can't fix that line at this stage anyway.
   const canSave =
-    dirty && !saving && (!orderLocked || (canReopen && statusDirty))
+    dirty && !saving && !txnBlocked && (!orderLocked || (canReopen && statusDirty))
     && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
@@ -623,6 +630,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     saving || canSave  ? []
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
+  : txnBlocked         ? [t('poTxnRequired')]
   : lines.flatMap((l, i) => {
       if (brandConfirmPending(l)) {
         return [lines.length === 1
@@ -1458,7 +1466,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('poPaypalTxn')}</label>
+              <label className="label">
+                {t('poPaypalTxn')}
+                {order.txnRequired === true && <span className="req">*</span>}
+              </label>
               <input
                 className="input mono"
                 value={paypalTxn}

@@ -32,6 +32,7 @@ async function makePo(token: string, category = 'RAM'): Promise<{ id: string; li
   const r = await api<{ id: string }>('POST', '/api/orders', {
     token,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       lines: [{
         category,
         ...(category === 'Other'

@@ -1056,6 +1056,7 @@ const zh: Record<string, string> = {
   shipPayNoTxnFound: '截图中未找到交易号——请手动输入。',
   shipPayVerifyTxn: '识别置信度较低——请对照截图核对交易号。',
   poPaypalTxn: 'PayPal 交易号',
+  poTxnRequired: '本采购单由公司付款——提交前请填写付款交易号。',
   shipAddedLabelTag: '外部运单',
   shipColNoPo: '暂无采购单',
   shipCreatePo: '创建采购单',

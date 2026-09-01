@@ -17,6 +17,7 @@ import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
+import { normalizePaypalTxnInput } from '../lib/paypalTxn';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, OrderLine, Warehouse } from '../lib/types';
@@ -45,6 +46,7 @@ export type OrderMetaDraft = {
   version: string;
   warehouseId: string;
   payment: 'company' | 'self';
+  paypalTxnId: string;
   notes: string;
   fees: { amount: string; note: string };
 };
@@ -102,6 +104,7 @@ export function OrderDetail({
     order.id,
     order.warehouse?.id ?? '',
     order.payment,
+    order.paypalTxnId ?? '',
     order.notes ?? '',
     order.otherFees,
     order.otherFeesNote ?? '',
@@ -113,13 +116,14 @@ export function OrderDetail({
     version: serverVersion,
     warehouseId: order.warehouse?.id ?? '',
     payment: order.payment,
+    paypalTxnId: order.paypalTxnId ?? '',
     notes: order.notes ?? '',
     fees: {
       amount: order.otherFees ? order.otherFees.toFixed(2) : '',
       note: order.otherFeesNote ?? '',
     },
   };
-  const { warehouseId, payment, notes, fees } = meta;
+  const { warehouseId, payment, paypalTxnId, notes, fees } = meta;
   const setMeta = (patch: Partial<OrderMetaDraft>) => onMetaChange({ ...meta, ...patch });
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Which lines have their whole photo row open. Collapsed, a line shows the
@@ -198,10 +202,11 @@ export function OrderDetail({
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
+  const paypalDirty = paypalTxnId !== (order.paypalTxnId ?? '');
   const feesDirty =
     feesValue !== (order.otherFees ?? 0) ||
     (fees.note.trim() || null) !== (order.otherFeesNote || null);
-  const dirty = notesDirty || warehouseDirty || paymentDirty || feesDirty;
+  const dirty = notesDirty || warehouseDirty || paymentDirty || paypalDirty || feesDirty;
 
   const refetchOrder = async () => {
     try {
@@ -243,7 +248,7 @@ export function OrderDetail({
   const save = async () => {
     if (!canAnnotate) return;
     // A note is not a change to the order itself and leaves the stage alone.
-    const material = warehouseDirty || paymentDirty || feesDirty;
+    const material = warehouseDirty || paymentDirty || paypalDirty || feesDirty;
     if (material && !(await askRevert())) return;
     setSaving(true);
     try {
@@ -256,6 +261,7 @@ export function OrderDetail({
         notes:         notesDirty     ? notes                       : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)       : undefined,
         payment:       paymentDirty   ? payment                     : undefined,
+        paypalTxnId:   paypalDirty    ? (paypalTxnId || null)       : undefined,
         otherFees:     feesDirty      ? feesValue                   : undefined,
         otherFeesNote: feesDirty      ? (fees.note.trim() || null)  : undefined,
       } : { notes });
@@ -311,6 +317,14 @@ export function OrderDetail({
 
   const advance = async () => {
     if (!canAdvance) return;
+    // A company-paid PO names the payment that funded it before it leaves
+    // Draft. Read against the *saved* order, not the field on screen: an id
+    // typed but not yet saved is not one the backend would accept either.
+    // `=== true` deliberately — an older backend omits the field entirely.
+    if (order.txnRequired === true && effectiveStatus === 'Draft' && !order.paypalTxnId) {
+      showErrorDialog(t('poTxnRequired'));
+      return;
+    }
     // Moving to Done first offers the optional evidence dialog (note +
     // attachments); confirming there fires the actual advance.
     if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
@@ -789,6 +803,22 @@ export function OrderDetail({
               disabled={!canEditOrder}
             >{t('paySelf')}</button>
           </div>
+        </div>
+
+        <div className="ph-field">
+          <label>
+            {t('poPaypalTxn')}
+            {order.txnRequired === true && <span className="req">*</span>}
+          </label>
+          <input
+            className="input mono"
+            value={paypalTxnId}
+            onChange={e => canEditOrder && setMeta({ paypalTxnId: normalizePaypalTxnInput(e.target.value) })}
+            placeholder={canEditOrder ? t('shipPayTxnPh') : '—'}
+            disabled={!canEditOrder}
+            autoComplete="off"
+            spellCheck={false}
+          />
         </div>
 
         <div className="ph-field">

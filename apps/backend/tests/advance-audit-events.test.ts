@@ -19,6 +19,7 @@ describe('POST /api/orders/:id/advance — writes status audit events', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         lines: [{
           category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',

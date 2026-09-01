@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.115.0] - 2026-08-31
+
+### Features
+- feat(orders): **a company-paid PO now names the payment that funded it.**
+  `orders.payment` and `orders.paypal_txn_id` had sat side by side since `0001`
+  and `0099` with nothing relating them, so a purchaser could file a company-paid
+  PO, move it to In Transit, and leave no record of which payment covered it —
+  reconciliation then happened backwards, a manager on the Payments page guessing
+  from amount and date. Leaving Draft now requires the transaction ID. The guard
+  lives in `advanceOrderTx`, not the route, so it holds for a manager stage-jump
+  and for carrier movement too; a rule the two commonest paths could route around
+  would not be one. Self-pay POs are untouched.
+
+  The field is also what auto-link matches on, so this does more than create a
+  paper trail: a company-paid PO now arrives able to reconcile itself the moment
+  Mercury/PayPal syncs.
+
+  Scoped to orders created after the rule reaches an environment — migration
+  `0115` stamps the cutoff as `NOW()`, so each environment grandfathers exactly
+  what it already had. The server decides and reports it as `txnRequired` on the
+  order, because a shell that judged for itself would block the very pre-cutoff
+  drafts the rule exempts. Mobile gained the field as an input; it had been
+  read-only there, which left a mobile purchaser no way to satisfy the rule at
+  all.
+
 ## [1.114.2] - 2026-08-31
 
 ### Fixes
