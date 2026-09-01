@@ -195,9 +195,14 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     return p.toString();
   }, [status, source, direction, q, hasMatch]);
 
+  // The unlinked and suggested tiles are scoped to the same direction as the
+  // list, so the number on the tile and the rows under it can never disagree —
+  // the page defaults to money out, and a direction-blind count claimed rows the
+  // list was hiding.
   const refreshStats = useCallback(() => {
-    api.get<Stats>('/api/bank-transactions/stats').then(setStats).catch(handleFetchError);
-  }, []);
+    const p = direction !== 'all' ? `?direction=${direction}` : '';
+    api.get<Stats>(`/api/bank-transactions/stats${p}`).then(setStats).catch(handleFetchError);
+  }, [direction]);
 
   const reload = useCallback(() => {
     const id = ++reqId.current;

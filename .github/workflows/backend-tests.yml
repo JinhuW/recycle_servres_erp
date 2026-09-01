@@ -7,6 +7,14 @@
 # SKIPS the suite when 127.0.0.1:5432 doesn't answer. That made every guard in
 # the suite advisory, including the one that keeps the container's boot scripts
 # importable (tests/log-import-purity.test.ts).
+#
+# The frontend rides along rather than getting its own workflow, because the
+# check NAME is what branch protection keys on and renaming this one would
+# silently drop the rule. So the name stays `backend-tests` while the job now
+# also typechecks and tests the frontend — apps/frontend/** was in neither path
+# filter, so a frontend-only change ran no typecheck and no test at all, while
+# deploy-frontend.yml happily shipped it to the production Worker on merge.
+# 350 frontend tests existed and none of them gated anything.
 name: backend-tests
 
 on:
@@ -16,11 +24,13 @@ on:
     branches: [dev, main]
     paths:
       - "apps/backend/**"
+      - "apps/frontend/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
   pull_request:
     paths:
       - "apps/backend/**"
+      - "apps/frontend/**"
       - "packages/shared/**"
       - ".github/workflows/backend-tests.yml"
 
@@ -76,3 +86,6 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm --filter recycle-erp-backend test
+
+      # No database needed — these are pure helpers and component-level tests.
+      - run: pnpm --filter recycle-erp-frontend test

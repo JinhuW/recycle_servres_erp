@@ -270,13 +270,27 @@ suppliers.get('/suggestions', async (c) => {
       FROM packages p
       JOIN orders o ON o.id = p.order_id
       WHERE ${scope} AND p.seller_name IS NOT NULL AND btrim(p.seller_name) <> ''
+    ), dedup AS (
+      -- One row per ORDER, not per box. "seen" emits a row per shipment and per
+      -- package, and shipments are one row per box, so a PO shipped in three
+      -- cartons counted three times and added its total_cost three times — the
+      -- rail advertised "3 POs · $36,000" for one $12,000 order and then ranked
+      -- it above genuinely bigger sellers, since ORDER BY spend decides which 25
+      -- suggestions survive. Postgres has no COUNT(DISTINCT ...) OVER (), hence a
+      -- CTE rather than a tweak to the window.
+      --
+      -- Keeps the newest row per order so the contact details and the name below
+      -- are chosen exactly as before.
+      SELECT DISTINCT ON (owner_id, ck, order_id) *
+      FROM seen
+      ORDER BY owner_id, ck, order_id, created_at DESC
     ), agg AS (
       SELECT DISTINCT ON (owner_id, ck)
         owner_id, ck, name, city, state, zip, phone, street1, street2, country,
         COUNT(*)          OVER (PARTITION BY owner_id, ck)::int  AS po_count,
         SUM(COALESCE(total_cost,0)) OVER (PARTITION BY owner_id, ck)::float AS spend,
         MAX(created_at)   OVER (PARTITION BY owner_id, ck)        AS last_seen
-      FROM seen
+      FROM dedup
       ORDER BY owner_id, ck, created_at DESC
     )
     SELECT a.* FROM agg a
@@ -524,8 +538,16 @@ suppliers.patch('/:id', async (c) => {
   if (body.tierOverride !== undefined && u.role !== 'manager') {
     return c.json({ error: 'Only managers can pin a tier' }, 403);
   }
-  if (body.ownerId !== undefined && u.role !== 'manager') {
-    return c.json({ error: 'Only managers can reassign a client' }, 403);
+  // Not "managers may do it here too": a handover has to leave a trace, and
+  // only POST /:id/reassign writes the `owner_changed` timeline row, checks the
+  // target purchaser exists, and turns a match_key collision into a 409. Writing
+  // owner_id through the generic setter skipped all three and changed a book's
+  // owner as a silent column update.
+  if (body.ownerId !== undefined) {
+    return c.json(
+      { error: 'Use POST /api/suppliers/:id/reassign to change the owner' },
+      400,
+    );
   }
 
   const set = (k: string, col: string) => body[k] !== undefined
@@ -541,7 +563,7 @@ suppliers.patch('/:id', async (c) => {
       ${set('prefContact', 'pref_contact')}${set('prefBestTime', 'pref_best_time')}
       ${set('prefPrice', 'pref_price')}${set('notes', 'notes')}
       ${set('cadenceDays', 'cadence_days')}${set('tierOverride', 'tier_override')}
-      ${set('nextFollowUpAt', 'next_follow_up_at')}${set('ownerId', 'owner_id')}
+      ${set('nextFollowUpAt', 'next_follow_up_at')}
     WHERE id = ${id}
   `;
   return c.json({ ok: true });

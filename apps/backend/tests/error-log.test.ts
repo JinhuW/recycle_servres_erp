@@ -3,7 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { appendErrorRecord, _resetForTests } from '../src/lib/error-log';
+import {
+  appendErrorRecord, redactSensitiveHref, redactSensitivePath, _resetForTests,
+} from '../src/lib/error-log';
 
 let dir: string;
 
@@ -136,5 +138,70 @@ describe('appendErrorRecord', () => {
     await expect(
       appendErrorRecord(bad, { ts: 't', requestId: 'r', method: 'GET', path: '/x', message: 'm' }),
     ).resolves.toBeUndefined();
+  });
+});
+
+// A token that reaches this sink is replayable: the sink is durable, rotates
+// slowly, and is read by whoever is debugging — which is not the same set of
+// people the token was issued to.
+describe('redactSensitivePath', () => {
+  it('redacts the three token-carrying public routes', () => {
+    expect(redactSensitivePath('/api/public/vendor/SEKRIT/catalog'))
+      .toBe('/api/public/vendor/<redacted>/catalog');
+    expect(redactSensitivePath('/api/public/shippo/SEKRIT'))
+      .toBe('/api/public/shippo/<redacted>');
+    // shipping was missing from the alternation while its own route header said
+    // "the token in the URL is the credential" — every seller-fill request put
+    // its credential in stdout.
+    expect(redactSensitivePath('/api/public/shipping/SEKRIT'))
+      .toBe('/api/public/shipping/<redacted>');
+  });
+
+  it('leaves ordinary paths alone', () => {
+    expect(redactSensitivePath('/api/orders/PO-1042')).toBe('/api/orders/PO-1042');
+  });
+});
+
+describe('redactSensitiveHref', () => {
+  it('redacts the SPA portal tokens, which live in the path', () => {
+    expect(redactSensitiveHref('https://x.com/v/VTOKEN'))
+      .toBe('https://x.com/v/<redacted>');
+    expect(redactSensitiveHref('https://x.com/s/STOKEN'))
+      .toBe('https://x.com/s/<redacted>');
+  });
+
+  // The SPA is hash-routed, so the fragment is the only part that says what the
+  // user was actually looking at. A redactor that drops it removes the reason
+  // the field is collected.
+  it('preserves the hash route', () => {
+    expect(redactSensitiveHref('https://x.com/#/orders/PO-1042'))
+      .toBe('https://x.com/#/orders/PO-1042');
+    expect(redactSensitiveHref('https://x.com/v/VTOKEN#/bids/7'))
+      .toBe('https://x.com/v/<redacted>#/bids/7');
+  });
+
+  // new URL() throws on these, so anything that parsed first would fall through
+  // to a fallback and leak the path-carried token.
+  it('redacts relative and malformed hrefs rather than passing them through', () => {
+    expect(redactSensitiveHref('/v/VTOKEN')).toBe('/v/<redacted>');
+    expect(redactSensitiveHref('not a url at all /s/STOKEN'))
+      .toBe('not a url at all /s/<redacted>');
+  });
+
+  it('redacts sensitive query keys, including inside the fragment', () => {
+    expect(redactSensitiveHref('https://x.com/login?token=SEKRIT'))
+      .toBe('https://x.com/login?token=<redacted>');
+    expect(redactSensitiveHref('https://x.com/#/cb?access_token=SEKRIT&keep=1'))
+      .toBe('https://x.com/#/cb?access_token=<redacted>&keep=1');
+  });
+
+  it('does not redact a key that merely starts with a sensitive one', () => {
+    expect(redactSensitiveHref('https://x.com/?attempts=3&rating=5'))
+      .toBe('https://x.com/?attempts=3&rating=5');
+  });
+
+  it('leaves an ordinary href intact', () => {
+    expect(redactSensitiveHref('https://x.com/#/inventory?cat=RAM'))
+      .toBe('https://x.com/#/inventory?cat=RAM');
   });
 });

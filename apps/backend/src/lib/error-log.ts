@@ -33,22 +33,50 @@ export interface ErrorRecord {
   context?: Record<string, unknown>;
 }
 
-// Two public routes carry a bearer-equivalent secret in the URL path: the
+// Three public routes carry a bearer-equivalent secret in the URL path: the
 // vendor portal's token (/api/public/vendor/<token>/…), the only gate to a
-// vendor's data, and the Shippo webhook's secret (/api/public/shippo/<secret>),
+// vendor's data; the Shippo webhook's secret (/api/public/shippo/<secret>),
 // which is the whole credential — Shippo publishes no signature to verify
-// against. Neither may reach the durable log, where it would be replayable.
+// against; and the seller-fill link (/api/public/shipping/<token>), whose own
+// header says outright that the token in the URL *is* the credential. None may
+// reach the durable log, where it would be replayable.
 //
-// Not anchored: this also runs over hono/logger's preformatted request lines,
-// where the path sits mid-string. Lives here rather than beside app.onError
-// because every writer into this sink needs it, not just the unhandled-500 path.
+// Not anchored: this also runs over preformatted request lines, where the path
+// sits mid-string. Lives here rather than beside app.onError because every
+// writer into this sink needs it, not just the unhandled-500 path.
 export function redactSensitivePath(pathname: string): string {
-  return pathname.replace(/(\/api\/public\/(?:vendor|shippo)\/)[^/\s?]+/, '$1<redacted>');
+  return pathname.replace(/(\/api\/public\/(?:vendor|shippo|shipping)\/)[^/\s?]+/, '$1<redacted>');
 }
 
 const SENSITIVE_QUERY_KEYS = new Set([
   'token', 'code', 'access_token', 'refresh_token', 'client_secret', 'at', 'rt',
 ]);
+
+// The same job for a whole browser URL, which is what a client error report
+// carries. Deliberately regexes over the raw string rather than parsing it:
+//
+//   - `new URL()` throws on a RELATIVE href, and this value is browser-supplied,
+//     so a parse-then-recompose design leaks exactly the case it must not — a
+//     posted "/v/<token>" would fall through unredacted.
+//   - The SPA is hash-routed, so the interesting part of an authenticated href
+//     is the fragment. Recomposing origin+pathname+search drops it and collapses
+//     every report to "https://host/", destroying the field's whole point.
+//
+// Redacts the portal tokens the SPA carries in its own path (/v/<t>, /s/<t> —
+// see App.tsx and lib/vendor.ts) as well as the API routes above, and sweeps
+// sensitive query keys anywhere in the string, including inside the fragment.
+const PORTAL_PATH_RE = /(\/[vs]\/)[^/?#\s]+/g;
+const SENSITIVE_QUERY_RE = new RegExp(
+  `([?&#](?:${[...SENSITIVE_QUERY_KEYS].join('|')})=)[^&#\\s]*`,
+  'gi',
+);
+
+export function redactSensitiveHref(raw: string): string {
+  return raw
+    .replace(/(\/api\/public\/(?:vendor|shippo|shipping)\/)[^/?#\s]+/g, '$1<redacted>')
+    .replace(PORTAL_PATH_RE, '$1<redacted>')
+    .replace(SENSITIVE_QUERY_RE, '$1<redacted>');
+}
 
 export function redactSensitiveQuery(search: string): string | undefined {
   if (!search) return undefined;

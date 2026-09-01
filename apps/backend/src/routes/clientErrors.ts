@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
-import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from '../lib/error-log';
+import {
+  appendErrorRecord, redactSensitiveHref, redactSensitivePath, redactSensitiveQuery,
+} from '../lib/error-log';
+import { log } from '../lib/log';
 import { createRateLimiter } from '../lib/rate-limit';
 import type { Env, User } from '../types';
 
@@ -33,6 +36,13 @@ const str = (v: unknown, cap: number): string | undefined => {
   if (typeof v !== 'string') return undefined;
   const t = v.trim();
   return t ? t.slice(0, cap) : undefined;
+};
+
+// Redact before the cap, never after: slicing first can cut a token in half and
+// leave the prefix — still enough to be worth stealing — sitting in the log.
+const hrefOf = (v: unknown): string | undefined => {
+  const t = str(v, MAX.href);
+  return t === undefined ? undefined : redactSensitiveHref(t).slice(0, MAX.href);
 };
 
 type Body = {
@@ -76,23 +86,19 @@ clientErrors.post('/', async (c) => {
     failureKind: str(body.kind, 32) ?? 'fetch',
     status: typeof body.status === 'number' ? body.status : undefined,
     method: str(body.method, 16),
-    href: str(body.href, MAX.href),
+    // Redacted for the same reason `path` is, and it is the likelier leak: a
+    // purchaser checking what a counterparty sees sits on /v/<token> or
+    // /s/<token>, so the token is in the address bar of every report they send.
+    href: hrefOf(body.href),
     userAgent: str(body.userAgent, MAX.ua),
     componentStack: str(body.componentStack, MAX.componentStack),
   };
 
-  // stdout first, and not as a nicety: ERROR_LOG_DIR is unset on Railway, so the
-  // JSONL sink below never runs there and this line is the only trace that
-  // reaches `railway logs`.
-  console.error(JSON.stringify({
-    level: 'warn',
-    kind: 'client-error',
-    requestId: c.var.requestId,
-    userEmail: u.email,
-    message,
-    path,
-    ...record,
-  }));
+  // The log stream first, and not as a nicety: ERROR_LOG_DIR is unset on Railway,
+  // so the JSONL sink below never runs there and this line is the only trace that
+  // reaches `railway logs`. log.warn keeps it on stderr and stamps it with the
+  // release version and the ambient requestId.
+  log.warn('client error', { kind: 'client-error', userEmail: u.email, message, path, ...record });
 
   const dir = process.env.ERROR_LOG_DIR;
   if (dir) {

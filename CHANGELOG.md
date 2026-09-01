@@ -17,6 +17,51 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.114.1] - 2026-08-31
+
+### Fixes
+- fix(logging): **portal tokens stopped reaching the log stream.**
+  `/api/public/shipping/<token>` was missing from the redaction list while its
+  own route header says the token in the URL *is* the credential, so every
+  seller-fill request wrote one to stdout — including through the new
+  one-line-per-request logger. And a client error report stored `href` raw
+  beside a `path` that was carefully redacted, which is the likelier leak of the
+  two: a purchaser checking what a counterparty sees sits on `/v/<token>`, so
+  the token is in the address bar of every report the page sends. The new
+  redactor works on the raw string rather than parsing it, because `new URL()`
+  throws on the relative hrefs a browser can post and recomposing the pieces
+  would drop the hash the SPA keeps its whole route in.
+- fix(orders): **`supplierId` is checked at the boundary, and a client's name is
+  scoped to the person reading it.** It was the one FK on `orders` with no
+  validation, so a malformed id 500ed instead of 400ing — and any well-formed id
+  was accepted, including another purchaser's, whose name the unscoped join then
+  handed back. Reads are owner-scoped precisely because seller addresses arrive
+  from shipments, which are already scoped to the ordering purchaser.
+- fix(clients): **owner changes have one door again.** `PATCH /:id` wrote
+  `owner_id` through the generic column setter, skipping the `owner_changed`
+  timeline row, the target-purchaser check and the collision 409 that
+  `POST /:id/reassign` exists to provide — a book could change hands as a silent
+  column update.
+- fix(clients): **the suggestion rail counts purchase orders, not boxes.**
+  `shipments` is one row per carton, so a PO shipped in three counted three
+  times and added its cost three times; the rail advertised "3 POs · $36,000"
+  for one $12,000 order and, since spend decides which suggestions survive,
+  ranked multi-parcel sellers above genuinely bigger ones.
+- fix(inventory): **a blanked RPM or health actually clears now.** Both became
+  editable dropdowns whose blank option sends `null`, but the columns stayed on
+  `COALESCE`, which reads `null` as "no change" — so the save reported success
+  and the value snapped back. The audit trail made it worse rather than catching
+  it, logging a `7200 → null` edit the database had refused.
+- fix(payments): **the unlinked and suggested tiles take the same direction lens
+  as the list.** The queue defaults to money out while the tiles counted both
+  directions, so the number disagreed with the rows beneath it — and a drained
+  money-out queue reported "nothing left to reconcile" while unlinked incoming
+  payments sat unseen.
+- fix(ci): the frontend is typechecked and tested. `apps/frontend/**` was in no
+  workflow's path filter, so a frontend-only change ran neither — while
+  `deploy-frontend.yml` shipped it to the production Worker on merge. 350
+  frontend tests existed and gated nothing.
+
 ## [1.114.0] - 2026-08-31
 
 ### Features

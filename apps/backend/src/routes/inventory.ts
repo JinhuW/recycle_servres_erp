@@ -1173,8 +1173,12 @@ inventory.patch('/:id', async (c) => {
         qty         = COALESCE(${body.qty ?? null}, qty),
         condition   = COALESCE(${body.condition ?? null}, condition),
         part_number = COALESCE(${body.partNumber ?? null}, part_number),
-        health      = COALESCE(${body.health ?? null}, health),
-        rpm         = COALESCE(${body.rpm ?? null}, rpm),
+        -- Sentinel, not COALESCE: both became editable dropdowns whose blank
+        -- option sends null meaning "clear this", and COALESCE reads null as
+        -- "no change" — so the save reported success and the value snapped
+        -- back, while the audit loop below logged a change that never landed.
+        health      = CASE WHEN ${has('health')}::int = 1 THEN ${body.health ?? null} ELSE health END,
+        rpm         = CASE WHEN ${has('rpm')}::int = 1    THEN ${body.rpm ?? null}    ELSE rpm END,
         -- Spec columns take the sell_price sentinel, not COALESCE: a blanked
         -- dropdown has to be able to clear the column, and COALESCE would read
         -- that as "no change". specVal folds '' into NULL — an empty string is
