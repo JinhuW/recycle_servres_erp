@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.118.0] - 2026-08-31
+
+### Features
+- feat(orders): **a PayPal transaction ID now links the PO and the payment the
+  moment a human types it, from whichever side they type it on.** v1.115.0 and
+  v1.116.0 both made the ID mandatory on the promise that it "is what auto-link
+  matches on" — but the only thing relating `orders.paypal_txn_id` to
+  `bank_transactions.paypal_txn_id` was `autoLink()` inside the bank sync, which
+  runs **every six hours**. So a purchaser could type the ID and leave a manager
+  reading an unlinked queue whose answer was already in the database; and a
+  manager who linked the payment on the Payments page wrote nothing back, so the
+  PO still read as unpaid and auto-link still had nothing to match on.
+
+  Both write points now close the loop. Saving a transaction ID on a PO —
+  through the edit form, on create, or on the draft PO minted from a delivered
+  package's screenshot scan — claims the matching transaction immediately, and
+  records it as a human link (`link_auto = FALSE`) rather than an automatic
+  guess. Linking on the Payments page fills the PO's transaction ID and writes
+  the fill into the order's activity log against the manager who did it.
+
+  Two collisions decide in favour of whoever spoke first. A PO that already
+  names a *different* transaction keeps what the purchaser typed — the payment
+  still links, the field is not overwritten. And a typed ID claims only *free*
+  transactions: one already linked to another PO, one a manager ignored, and one
+  a manager deliberately unlinked (the `no_auto_link` tombstone) are all left
+  where they are.
+
+  The write itself is one shared function, so the typed path and the sync path
+  cannot drift. It carries one tightening the six-hour cadence had made
+  unreachable and instant links do not: the free leg of a pair whose other leg
+  belongs to another PO is no longer claimable, because that splits one payment
+  across two orders — a state `POST /:id/pair` already refuses outright
+  ([RS-010](docs/tickets/RS-010-paypal-transaction-id-links-the-po-and-the-payment-i.md))
+
 ## [1.117.0] - 2026-08-31
 
 ### Features

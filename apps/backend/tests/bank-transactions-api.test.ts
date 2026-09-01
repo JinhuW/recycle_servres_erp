@@ -330,6 +330,166 @@ describe('bank transactions API', () => {
     expect(after.body.rows.find((x) => x.orderId === poId)?.orderCost).toBeNull();
   });
 
+  // ── A typed transaction id links the payment when the human types it, not
+  // when the six-hourly sync next runs.
+
+  it('a transaction id saved on a PO links the payment immediately', async () => {
+    await seedPairedAndSingles();
+    const { token, user } = await loginAs(ALEX);
+    const poId = await createPO(token);
+
+    const r = await api<{ paymentsLinked: number }>('PATCH', `/api/orders/${poId}`, {
+      token, body: { paypalTxnId: TXN_A },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.paymentsLinked).toBe(1);
+
+    const legs = await getTestDb()`
+      SELECT external_id, link_kind, link_auto, linked_by
+      FROM bank_transactions WHERE order_id = ${poId}`;
+    expect(legs.map((l) => l.external_id).sort()).toEqual(['7AB12345CD678901E', 'm-settle']);
+    // A typed id is a human decision, so it must not wear the auto badge.
+    expect(legs.every((l) => l.link_auto === false && l.linked_by === user.id)).toBe(true);
+    expect(legs.every((l) => l.link_kind === 'payment')).toBe(true);
+  });
+
+  it('a typed id links money in as a refund', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-credit', amount: 120, paypalTxnId: 'REFUND001' },
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    await api('PATCH', `/api/orders/${poId}`, { token, body: { paypalTxnId: 'refund001' } });
+
+    const rows = await getTestDb()`
+      SELECT link_kind FROM bank_transactions WHERE order_id = ${poId}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].link_kind).toBe('refund');
+  });
+
+  it('a typed id leaves a transaction that is linked, tombstoned, or ignored alone', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'm-taken', amount: -100, paypalTxnId: 'TAKEN0001' },
+        { externalId: 'm-tomb', amount: -200, paypalTxnId: 'TOMB00001' },
+        { externalId: 'm-ign', amount: -300, paypalTxnId: 'IGNORED01' },
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    const otherPo = await createPO(token);
+
+    await api('POST', `/api/bank-transactions/${await idOf('m-taken')}/link`, {
+      token, body: { orderId: otherPo } });
+    await api('POST', `/api/bank-transactions/${await idOf('m-tomb')}/link`, {
+      token, body: { orderId: otherPo } });
+    await api('POST', `/api/bank-transactions/${await idOf('m-tomb')}/unlink`, { token });
+    await api('POST', `/api/bank-transactions/${await idOf('m-ign')}/ignore`, { token });
+
+    for (const txn of ['TAKEN0001', 'TOMB00001', 'IGNORED01']) {
+      const poId = await createPO(token);
+      const r = await api<{ paymentsLinked: number }>('PATCH', `/api/orders/${poId}`, {
+        token, body: { paypalTxnId: txn },
+      });
+      expect(r.status, txn).toBe(200);
+      expect(r.body.paymentsLinked, txn).toBe(0);
+      const rows = await getTestDb()`SELECT id FROM bank_transactions WHERE order_id = ${poId}`;
+      expect(rows, txn).toHaveLength(0);
+    }
+    // The one that was already linked still belongs to the PO that claimed it.
+    const taken = await getTestDb()`SELECT order_id FROM bank_transactions WHERE external_id = 'm-taken'`;
+    expect(taken[0].order_id).toBe(otherPo);
+  });
+
+  it('a typed id will not split a pair across two POs', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const poA = await createPO(token);
+    const db = getTestDb();
+
+    await api('POST', `/api/bank-transactions/${await idOf('m-settle')}/link`, {
+      token, body: { orderId: poA } });
+    // Free one leg while its partner stays with poA — the state the guard is
+    // there for. Reached by hand because no endpoint will produce it.
+    await db`
+      UPDATE bank_transactions
+      SET order_id = NULL, link_kind = NULL, linked_by = NULL, linked_at = NULL
+      WHERE external_id = 'm-settle'`;
+
+    const poB = await createPO(token);
+    const r = await api<{ paymentsLinked: number }>('PATCH', `/api/orders/${poB}`, {
+      token, body: { paypalTxnId: TXN_A },
+    });
+    expect(r.body.paymentsLinked).toBe(0);
+    const settle = await db`SELECT order_id FROM bank_transactions WHERE external_id = 'm-settle'`;
+    expect(settle[0].order_id).toBeNull();
+  });
+
+  it('a PO created carrying the transaction id links on create', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        paypalTxnId: TXN_A,
+        lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
+      },
+    });
+    expect(r.status).toBe(201);
+    const legs = await getTestDb()`
+      SELECT external_id FROM bank_transactions WHERE order_id = ${r.body.id}`;
+    expect(legs).toHaveLength(2);
+  });
+
+  // ── The other direction: linking on the Payments page fills the PO's field.
+
+  it('linking fills an empty PO transaction id and records who filled it', async () => {
+    await seedPairedAndSingles();
+    const { token, user } = await loginAs(ALEX);
+    const poId = await createPO(token);
+
+    const r = await api<{ orderTxnFilled: boolean }>(
+      'POST', `/api/bank-transactions/${await idOf('m-settle')}/link`,
+      { token, body: { orderId: poId } });
+    expect(r.status).toBe(200);
+    expect(r.body.orderTxnFilled).toBe(true);
+
+    const db = getTestDb();
+    const order = await db`SELECT paypal_txn_id FROM orders WHERE id = ${poId}`;
+    expect(order[0].paypal_txn_id).toBe(TXN_A);
+
+    const events = await db`
+      SELECT actor_id, detail FROM order_events
+      WHERE order_id = ${poId} AND kind = 'meta_changed'`;
+    expect(events).toHaveLength(1);
+    expect(events[0].actor_id).toBe(user.id);
+  });
+
+  it('linking never overwrites a transaction id the PO already names', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    const db = getTestDb();
+    await db`UPDATE orders SET paypal_txn_id = 'TYPEDBYHAND' WHERE id = ${poId}`;
+
+    const r = await api<{ orderTxnFilled: boolean }>(
+      'POST', `/api/bank-transactions/${await idOf('m-settle')}/link`,
+      { token, body: { orderId: poId } });
+    expect(r.status).toBe(200);
+    expect(r.body.orderTxnFilled).toBe(false);
+
+    const order = await db`SELECT paypal_txn_id FROM orders WHERE id = ${poId}`;
+    expect(order[0].paypal_txn_id).toBe('TYPEDBYHAND');
+    // The link itself still happened.
+    const legs = await db`SELECT id FROM bank_transactions WHERE order_id = ${poId}`;
+    expect(legs).toHaveLength(2);
+    const events = await db`
+      SELECT id FROM order_events WHERE order_id = ${poId} AND kind = 'meta_changed'`;
+    expect(events).toHaveLength(0);
+  });
+
   it('rejects a link to a missing order and an unlink of an unlinked row', async () => {
     await seedPairedAndSingles();
     const { token } = await loginAs(ALEX);

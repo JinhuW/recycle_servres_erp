@@ -408,6 +408,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payMatchSeller: 'seller {name}',
     payMatchAffinity: 'usual purchaser',
     payLinkedToast: 'Linked to {id}',
+    payLinkedFilledToast: 'Linked to {id} — its transaction ID was filled in',
     payUnlinkedToast: 'Link removed',
     payEmpty: 'No transactions',
     payEmptyUnlinked: 'Nothing left to reconcile',
@@ -831,6 +832,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     poOnBehalfSelf: 'Myself',
     poOnBehalfLocked: 'Owner is set — change it from the order page',
     eoOwnerLockedDone: 'A Done order keeps its owner',
+    eoPaymentLinkedToast: 'Saved {id} — its bank payment is now linked',
     acOwnerChanged: 'Purchaser changed',
 
     // StatusChangeDialog

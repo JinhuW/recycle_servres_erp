@@ -16,6 +16,7 @@ import {
 } from '../banktx/match';
 import { syncBankTransactions } from '../banktx/sync';
 import { getDb } from '../db';
+import { writeOrderEvent } from '../services/orderAudit';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import type { Env, User } from '../types';
 
@@ -320,12 +321,28 @@ bankTx.post('/:id/link', async (c) => {
   if (order.length === 0) return c.json({ error: 'Order not found' }, 404);
 
   const kind = group[0].amount < 0 ? 'payment' : 'refund';
-  await sql`
-    UPDATE bank_transactions
-    SET order_id = ${orderId}, link_kind = ${kind}, link_auto = FALSE,
-        linked_by = ${c.var.user.id}, linked_at = NOW()
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
-  return c.json({ ok: true, orderId, linkKind: kind });
+  const txnId = group.find((l) => l.paypal_txn_id)?.paypal_txn_id ?? null;
+  const orderTxnFilled = await sql.begin(async (tx) => {
+    await tx`
+      UPDATE bank_transactions
+      SET order_id = ${orderId}, link_kind = ${kind}, link_auto = FALSE,
+          linked_by = ${c.var.user.id}, linked_at = NOW()
+      WHERE id IN ${tx(group.map((l) => l.id))}`;
+    if (!txnId) return false;
+    // Only into an empty field: a PO already naming a transaction was told so
+    // by the purchaser who paid, and a manager linking here is not a
+    // correction of that. The link stands either way.
+    const filled = await tx`
+      UPDATE orders SET paypal_txn_id = ${txnId}
+      WHERE id = ${orderId} AND paypal_txn_id IS NULL
+      RETURNING id`;
+    if (filled.length === 0) return false;
+    await writeOrderEvent(tx, orderId, c.var.user.id, 'meta_changed', {
+      changes: [{ field: 'paypal_txn_id', from: null, to: txnId }],
+    });
+    return true;
+  });
+  return c.json({ ok: true, orderId, linkKind: kind, orderTxnFilled });
 });
 
 bankTx.post('/:id/unlink', async (c) => {

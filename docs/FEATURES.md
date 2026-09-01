@@ -209,6 +209,14 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   ID — which is the key auto-link matches on — so those POs arrive already able
   to reconcile themselves, instead of landing in the unlinked queue for a
   manager to match by amount and date.
+- **The link is made when a human makes it, in either direction** (v1.118.0).
+  Saving a transaction ID on a PO — on edit, on create, or on the draft PO
+  minted from a delivered package — claims the matching transaction on the
+  spot instead of waiting out the six-hourly sync, and records it as a manual
+  link. Linking on the Payments page fills the PO's transaction ID and logs the
+  fill against the manager. Neither side overwrites the other: a PO already
+  naming a different transaction keeps it, and a typed ID claims only
+  transactions nobody has linked, ignored, or deliberately unlinked.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`

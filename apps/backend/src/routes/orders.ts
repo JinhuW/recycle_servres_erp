@@ -18,6 +18,7 @@ import { advanceOrderTx, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE } from 
 import { txnRequiredFor } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
+import { linkPaypalTxnToOrder } from '../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
@@ -1030,6 +1031,8 @@ orders.post('/', async (c) => {
         ? { onBehalfOfUserId: owner.ownerId, onBehalfOfName: owner.ownerName }
         : {}),
     });
+
+    if (newPaypalTxnId) await linkPaypalTxnToOrder(tx, newPaypalTxnId, newId, u.id);
   });
 
   return c.json({ id: newId, lineIds: newLineIds }, 201);
@@ -1382,6 +1385,9 @@ orders.patch('/:id', async (c) => {
   // The stage a purchaser edit pulled the order back from — set only when the
   // revert ran, and the flag the audit block writes its `reverted` event on.
   let revertedFrom: string | null = null;
+  // Bank transactions a saved transaction id claimed. Returned so the client
+  // can refresh the PO's payments ledger without a reload.
+  let paymentsLinked = 0;
   let committedLineIds: string[] = [];
 
   try {
@@ -1544,6 +1550,14 @@ orders.patch('/:id', async (c) => {
             payment      = COALESCE(${body.payment ?? null}, payment)
           WHERE id = ${id}
         `;
+        // The id names a payment that has very likely already synced, so link
+        // it here rather than leaving it to a pass that runs every six hours.
+        // Not gated on the value having changed: only free transactions are
+        // claimed, so re-saving is idempotent, and someone re-saving because
+        // the payment still isn't showing should get the link.
+        if (setPaypal && normPaypal) {
+          paymentsLinked = await linkPaypalTxnToOrder(tx, normPaypal, id, u.id);
+        }
       }
       // Owner moves under the same lock as the meta fields, with its own
       // event kind: user_id isn't a META_FIELD (the timeline names people,
@@ -1896,7 +1910,7 @@ orders.patch('/:id', async (c) => {
   const unswept = await deleteAttachments(c.env, removedScanKeys);
   if (unswept.length) log.error('r2 delete (line removed)', unswept);
 
-  return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter });
+  return c.json({ ok: true, addedLineIds, lifecycle: lifecycleAfter, paymentsLinked });
 });
 
 // ── Create an empty Draft order so the submit screen can autosave lines as

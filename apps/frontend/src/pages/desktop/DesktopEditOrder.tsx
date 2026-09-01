@@ -676,7 +676,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       const addedLines = lines.filter(l => !l._id);
-      const r = await api.patch<{ ok: true; addedLineIds: string[]; lifecycle: string }>(`/api/orders/${order.id}`, {
+      const r = await api.patch<{
+        ok: true; addedLineIds: string[]; lifecycle: string; paymentsLinked?: number;
+      }>(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
@@ -735,7 +737,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
         return;
       }
-      onSaved('Saved ' + order.id);
+      // Saving a transaction id reconciles the payment on the way past, and the
+      // page is about to navigate away — so the toast is where the manager
+      // finds out it happened.
+      onSaved(r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : 'Saved ' + order.id);
     } catch (e) {
       // Keep the editor open and the user's edits intact on failure — calling
       // onSaved here would navigate away and discard unsaved work.
