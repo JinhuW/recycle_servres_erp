@@ -2,13 +2,13 @@
 id: RS-006
 title: Company-paid POs must carry a payment transaction ID
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-08-31
 reporter: Jinhu
 branch: session/20260831-125858
-pr:
-version:
+pr: 233
+version: 1.115.0
 related: []
 ---
 
