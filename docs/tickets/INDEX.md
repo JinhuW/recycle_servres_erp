@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-009](./RS-009-group-with-popover-is-clipped-off-the-bottom-of-the.md) | in-progress | bug | P2 | Group-with popover is clipped off the bottom of the Payments table | — |
 | [RS-008](./RS-008-adding-a-tracked-package-requires-a-transaction-id.md) | done | story | P2 | Adding a tracked package requires a transaction ID | 1.116.0 |
 | [RS-007](./RS-007-long-activity-log-leaves-a-dead-gap-above-order-stat.md) | in-review | bug | P2 | Long activity log leaves a dead gap above Order status | 1.114.2 |
 | [RS-006](./RS-006-company-paid-pos-must-carry-a-payment-transaction-id.md) | done | story | P2 | Company-paid POs must carry a payment transaction ID | 1.115.0 |

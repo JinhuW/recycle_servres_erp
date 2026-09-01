@@ -7,6 +7,7 @@ import { fmtDate, fmtDateShort, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate } from '../../lib/route';
+import { placePopover } from './popoverPlacement';
 
 // Manager-only reconciliation of Mercury/PayPal transactions against POs.
 // The list serves logical payments: a PayPal charge and its Mercury
@@ -132,10 +133,13 @@ const FILTER_SELECT: CSSProperties = {
   paddingTop: 0, paddingBottom: 0,
 };
 
-// PO picker box: 320 wide, and roughly its search field plus the capped list —
-// only used to decide whether it still fits below the row it belongs to.
+// Popover boxes, used only to decide whether one still fits below the row it
+// belongs to. The PO picker is its search field plus the capped list; the pair
+// picker has no search field, so it is that much shorter.
 const PICKER_W = 320;
 const PICKER_H = 312;
+const PAIR_W = 380;
+const PAIR_H = 262;
 const GAP = 4;
 
 const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
@@ -535,7 +539,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
           {fmtSigned(row.amount, locale)}
         </td>
         <td><StatusChip row={row} t={t} /></td>
-        <td style={{ whiteSpace: 'nowrap', position: 'relative' }}>
+        <td style={{ whiteSpace: 'nowrap' }}>
           {row.orderId ? (
             <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
               {row.orderId}
@@ -649,6 +653,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
 }) {
   const { t } = useT();
   const [pickingPair, setPickingPair] = useState(false);
+  const pairBtnRef = useRef<HTMLButtonElement>(null);
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
       {row.match && !row.orderId && !row.ignored && (
@@ -689,16 +694,20 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
             {t('payUnpair')}
           </button>
         ) : !row.ignored && row.category === 'external' && (
-          // PoPicker anchors to its offset parent, and this row is a plain
-          // <td colSpan>, so the wrapper is what keeps the popover on the
-          // button instead of the page.
-          <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <button type="button" className="btn sm ghost" onClick={() => setPickingPair(p => !p)}>
+          // The picker is fixed-positioned, so the wrapper is layout only —
+          // it's the button's rect that places the popover.
+          <span style={{ display: 'inline-flex' }}>
+            <button
+              ref={pairBtnRef}
+              type="button" className="btn sm ghost"
+              onClick={() => setPickingPair(p => !p)}
+            >
               {t('payGroupWith')}
             </button>
             {pickingPair && (
               <PairPicker
                 txnId={row.id}
+                anchor={pairBtnRef}
                 locale={locale}
                 onPick={id => { onGroup(id); setPickingPair(false); }}
                 onClose={() => setPickingPair(false)}
@@ -846,16 +855,19 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
   // `overflow-y: hidden` sheared the dropdown off at the table's bottom edge.
   // `overflow-y: visible` can't fix it — next to `overflow-x: auto` it computes
   // back to `auto` — so the popover has to leave the scroll container instead.
+  // Right-aligned: the anchor is the actions cell at the row's right edge.
   useLayoutEffect(() => {
     const place = () => {
       const el = anchor.current;
       if (!el) return;
-      const r = el.getBoundingClientRect();
-      const room = window.innerHeight - r.bottom;
-      setPos({
-        top: room < PICKER_H + GAP ? Math.max(GAP, r.top - PICKER_H - GAP) : r.bottom + GAP,
-        left: Math.max(GAP, Math.min(r.right - PICKER_W, window.innerWidth - PICKER_W - GAP)),
-      });
+      setPos(placePopover({
+        anchor: el.getBoundingClientRect(),
+        width: PICKER_W,
+        height: PICKER_H,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        align: 'right',
+        gap: GAP,
+      }));
     };
     place();
     // Capture phase so the inner table scroller is heard, not just the page.
@@ -951,8 +963,9 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
 // PoPicker, without the search box: the server's rules — opposite source, the
 // same amount to the cent, neither leg already grouped — leave a set small
 // enough to read, and nothing about it is searchable anyway.
-function PairPicker({ txnId, locale, onPick, onClose }: {
+function PairPicker({ txnId, anchor, locale, onPick, onClose }: {
   txnId: string;
+  anchor: React.RefObject<HTMLElement | null>;
   locale: string;
   onPick: (otherId: string) => void;
   onClose: () => void;
@@ -960,6 +973,35 @@ function PairPicker({ txnId, locale, onPick, onClose }: {
   const { t } = useT();
   const [rows, setRows] = useState<PairCandidate[] | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Fixed for the same reason PoPicker is — see the comment there. This one
+  // sits deeper still, in the expanded row's `<td colSpan>`, so it was clipped
+  // for every row below the fold. Left-aligned: the anchor is a small button on
+  // the left of the expanded row, and right-aligning a 380px panel to it would
+  // throw the panel off the button.
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = anchor.current;
+      if (!el) return;
+      setPos(placePopover({
+        anchor: el.getBoundingClientRect(),
+        width: PAIR_W,
+        height: PAIR_H,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        align: 'left',
+        gap: GAP,
+      }));
+    };
+    place();
+    // Capture phase so the inner table scroller is heard, not just the page.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -982,9 +1024,10 @@ function PairPicker({ txnId, locale, onPick, onClose }: {
       ref={ref}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'absolute', top: 'calc(100% + 4px)', left: 0, width: 380,
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PAIR_W,
+        visibility: pos ? 'visible' : 'hidden',
         background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
-        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 30, overflow: 'hidden',
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, overflow: 'hidden',
         cursor: 'default', textAlign: 'left',
       }}
     >
