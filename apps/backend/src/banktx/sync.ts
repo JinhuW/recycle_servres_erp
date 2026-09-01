@@ -182,7 +182,12 @@ async function autoPair(tx: Tx): Promise<number> {
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
            category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at
     FROM bank_transactions
-    WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored`;
+    WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored
+      -- A row someone owns, or filed under an internal transaction, is under
+      -- human handling: restructuring it here would move an assigned payment's
+      -- link onto it, or (via transferPair) re-categorize it out of the queue
+      -- the assignment deliberately kept it in.
+      AND assignee_id IS NULL AND internal_txn_id IS NULL`;
 
   // Payment pairing is external-only: a transfer leg's sibling has the
   // OPPOSITE sign (money leaving Mercury lands in PayPal), so it would only
@@ -328,8 +333,12 @@ export async function linkPaypalTxnToOrder(
     const kind = Number(g.amount) < 0 ? 'payment' : 'refund';
     await tx`
       UPDATE bank_transactions
+      -- The link is the answer the owner tag was standing in for, so it
+      -- replaces it — and must, or the CHECK in migrations/0116 aborts the
+      -- transaction, which on the sync path means every run from then on.
       SET order_id = ${orderId}, link_kind = ${kind}, link_auto = ${actorId === null},
-          linked_by = ${actorId}, linked_at = NOW()
+          linked_by = ${actorId}, linked_at = NOW(),
+          assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
       WHERE id IN ${tx(g.ids)}`;
   }
   return groups.length;

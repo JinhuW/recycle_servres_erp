@@ -75,6 +75,10 @@ type PaymentRow = Omit<Leg, 'source'> & {
   linkedByName: string | null;
   ignored: boolean;
   category: 'external' | 'transfer';
+  // Both added in v1.117.0 — optional for the same deploy-skew reason as
+  // Stats.suggested below: the SPA and the API ship on independent pipelines.
+  internalTxn?: { id: string; title: string | null } | null;
+  assignee?: { id: string; name: string } | null;
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
@@ -112,6 +116,10 @@ type Suggestion = {
   affinity: boolean;
   covered: boolean;
 };
+
+type Member = { id: string; name: string; active?: boolean };
+
+type InternalRecord = { id: string; title: string | null; memberCount: number };
 
 type StatusFilter = 'all' | 'unlinked' | 'linked' | 'ignored' | 'transfer';
 
@@ -181,6 +189,8 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [direction, setDirection] = usePersisted<Direction>('desktop.payments.direction', DEFAULT_DIRECTION);
   const [q, setQ] = usePersisted('desktop.payments.q', '');
   const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
+  const [assignee, setAssignee] = usePersisted('desktop.payments.assignee', 'all');
+  const [members, setMembers] = useState<Member[]>([]);
   const [feed, setFeed] = useState<Feed | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -196,9 +206,18 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     if (direction !== 'all') p.set('direction', direction);
     if (q.trim()) p.set('q', q.trim());
     if (hasMatch) p.set('hasMatch', '1');
+    if (assignee !== 'all') p.set('assignee', assignee);
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [status, source, direction, q, hasMatch]);
+  }, [status, source, direction, q, hasMatch, assignee]);
+
+  // The owner picker and the filter share one list; the page is manager-only,
+  // so /api/members is readable here.
+  useEffect(() => {
+    api.get<{ items: Member[] }>('/api/members')
+      .then(r => setMembers(r.items))
+      .catch(handleFetchError);
+  }, []);
 
   // The unlinked and suggested tiles are scoped to the same direction as the
   // list, so the number on the tile and the rows under it can never disagree —
@@ -319,6 +338,10 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <div className="page-sub">{t('paySub')}</div>
         </div>
         <div className="page-actions" style={{ alignItems: 'center', gap: 10 }}>
+          <button type="button" className="btn ghost" onClick={() => navigate('/payments/internal')}>
+            <Icon name="book" size={13} />
+            {t('payIntOpen')}
+          </button>
           <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             {lastSynced ? t('payLastSynced', { when: relTime(lastSynced, locale) }) : t('payNeverSynced')}
           </span>
@@ -380,6 +403,16 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               <option value="all">{t('payDirAll')}</option>
               <option value="out">{t('payDirOut')}</option>
               <option value="in">{t('payDirIn')}</option>
+            </select>
+            <select
+              className="select"
+              value={assignee}
+              onChange={e => setAssignee(e.target.value)}
+              style={FILTER_SELECT}
+            >
+              <option value="all">{t('payAssignFilter')}</option>
+              <option value="unassigned">{t('payAssignUnassigned')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
             <button
               type="button"
@@ -444,6 +477,8 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                     locale={locale}
                     act={act}
                     onToast={onToast}
+                    members={members}
+                    refresh={afterMutation}
                   />
                 ))}
               </tbody>
@@ -461,25 +496,48 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   );
 }
 
-function StatusChip({ row, t }: { row: PaymentRow; t: (k: string) => string }) {
-  if (row.ignored) return <span className="chip muted">{t('payStatusIgnored')}</span>;
+function StatusChip({ row, t }: { row: PaymentRow; t: (k: string, v?: Record<string, string | number>) => string }) {
+  // The owner and the record ride in this cell rather than in columns of their
+  // own: the table is already seven wide, and an eighth wrapped the header.
+  const tags = (
+    <>
+      {row.internalTxn && (
+        <span className="chip accent" style={{ fontSize: 10.5 }}>
+          {t('payIntPartOf', { name: row.internalTxn.title || t('payIntUntitled') })}
+        </span>
+      )}
+      {row.assignee && (
+        <span className="chip" style={{ fontSize: 10.5 }}>
+          {t('payAssigned', { name: row.assignee.name })}
+        </span>
+      )}
+    </>
+  );
+  const wrap = (main: React.ReactNode) => (
+    <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+      {main}{tags}
+    </span>
+  );
+  if (row.ignored) return wrap(<span className="chip muted">{t('payStatusIgnored')}</span>);
   if (!row.orderId && row.category === 'transfer') {
-    return <span className="chip info">{t('payStatusTransfer')}</span>;
+    return wrap(<span className="chip info">{t('payStatusTransfer')}</span>);
   }
-  if (!row.orderId) return <span className="chip dot warn">{t('payStatusUnlinked')}</span>;
-  return (
-    <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+  if (!row.orderId) return wrap(<span className="chip dot warn">{t('payStatusUnlinked')}</span>);
+  return wrap(
+    <>
       <span className={'chip dot ' + (row.linkKind === 'refund' ? 'cool' : 'pos')}>
         {t(row.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
       </span>
       {row.linkAuto && <span className="chip info" style={{ fontSize: 10.5 }}>{t('payAuto')}</span>}
-    </span>
+    </>,
   );
 }
 
-function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
+function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh }: {
   row: PaymentRow;
   open: boolean;
+  members: Member[];
+  refresh: () => void;
   onToggle: () => void;
   locale: string;
   act: (path: string, body?: unknown) => Promise<ActResult | null>;
@@ -647,7 +705,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
           <td colSpan={7} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
             <ExpandedDetail
               row={row} locale={locale} act={act} onToast={onToast}
-              onLink={link} onGroup={group}
+              onLink={link} onGroup={group} members={members} refresh={refresh}
             />
           </td>
         </tr>
@@ -656,9 +714,11 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
   );
 }
 
-function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
+function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, refresh }: {
   row: PaymentRow;
   locale: string;
+  members: Member[];
+  refresh: () => void;
   act: (path: string, body?: unknown) => Promise<ActResult | null>;
   onToast: (msg: string) => void;
   onLink: (orderId: string) => void;
@@ -666,6 +726,8 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
 }) {
   const { t } = useT();
   const [pickingPair, setPickingPair] = useState(false);
+  const [pickingRecord, setPickingRecord] = useState(false);
+  const recordAnchorRef = useRef<HTMLSpanElement>(null);
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
       {row.match && !row.orderId && !row.ignored && (
@@ -723,7 +785,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
             )}
           </span>
         )}
-        {!row.orderId && (
+        {!row.orderId && !row.internalTxn && (
           row.category === 'transfer' ? (
             <button
               type="button" className="btn sm ghost"
@@ -746,6 +808,69 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup }: {
             >
               {t('payMarkTransfer')}
             </button>
+          )
+        )}
+      </div>
+
+      {/* What this money was, and — while no PO answers that — whose it is. */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {row.internalTxn ? (
+          <>
+            <button type="button" className="btn sm ghost" onClick={() => navigate('/payments/internal')}>
+              {t('payIntOpen')}
+            </button>
+            <button
+              type="button" className="btn sm ghost"
+              onClick={() => {
+                const recordId = row.internalTxn!.id;
+                api.delete(`/api/internal-transactions/${recordId}/members/${row.id}`)
+                  .then(() => { onToast(t('payIntRemovedToast')); refresh(); })
+                  .catch(handleFetchError);
+              }}
+            >
+              {t('payIntRemove')}
+            </button>
+          </>
+        ) : !row.orderId && (
+          <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
+            <button type="button" className="btn sm ghost" onClick={() => setPickingRecord(p => !p)}>
+              {t('payIntAdd')}
+            </button>
+            {pickingRecord && (
+              <RecordPicker
+                txnId={row.id}
+                anchor={recordAnchorRef}
+                onDone={(msg) => { setPickingRecord(false); onToast(msg); refresh(); }}
+                onClose={() => setPickingRecord(false)}
+              />
+            )}
+          </span>
+        )}
+        {!row.orderId && (
+          row.assignee ? (
+            <button
+              type="button" className="btn sm ghost"
+              onClick={() => void act(`${row.id}/unassign`).then(ok => {
+                if (ok) onToast(t('payUnassignedToast'));
+              })}
+            >
+              {t('payUnassign')}
+            </button>
+          ) : (
+            <select
+              className="select"
+              value=""
+              onChange={e => {
+                const m = members.find(x => x.id === e.target.value);
+                if (!m) return;
+                void act(`${row.id}/assign`, { userId: m.id })
+                  .then(ok => { if (ok) onToast(t('payAssignedToast', { name: m.name })); });
+              }}
+              style={{ ...FILTER_SELECT, minWidth: 150 }}
+            >
+              <option value="">{t('payAssignTo')}</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
           )
         )}
       </div>
@@ -959,6 +1084,118 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// The internal transactions this payment can be filed under, plus the option to
+// start a new one. Fixed-position like PoPicker rather than absolute like
+// PairPicker: the list grows with the number of records, and `.table-scroll`'s
+// `overflow-y: hidden` shears a tall absolute popover off at the table's edge.
+function RecordPicker({ txnId, anchor, onDone, onClose }: {
+  txnId: string;
+  anchor: React.RefObject<HTMLElement | null>;
+  onDone: (toast: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const [rows, setRows] = useState<InternalRecord[] | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = anchor.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const room = window.innerHeight - r.bottom;
+      setPos({
+        top: room < PICKER_H + GAP ? Math.max(GAP, r.top - PICKER_H - GAP) : r.bottom + GAP,
+        left: Math.max(GAP, Math.min(r.left, window.innerWidth - PICKER_W - GAP)),
+      });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [onClose]);
+
+  useEffect(() => {
+    api.get<{ rows: InternalRecord[] }>('/api/internal-transactions?limit=20')
+      .then(r => setRows(r.rows))
+      .catch(handleFetchError);
+  }, []);
+
+  const file = (record: InternalRecord) => {
+    api.post(`/api/internal-transactions/${record.id}/members`, { txnIds: [txnId] })
+      .then(() => onDone(t('payIntAddedToast', { name: record.title || t('payIntUntitled') })))
+      .catch(handleFetchError);
+  };
+
+  const createWith = () => {
+    api.post('/api/internal-transactions', { txnIds: [txnId] })
+      .then(() => onDone(t('payIntCreatedToast')))
+      .catch(handleFetchError);
+  };
+
+  return (
+    <div
+      ref={ref}
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, width: PICKER_W,
+        visibility: pos ? 'visible' : 'hidden',
+        background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 10,
+        boxShadow: '0 12px 28px rgba(15,23,42,0.14)', zIndex: 90, overflow: 'hidden',
+        cursor: 'default', textAlign: 'left',
+      }}
+    >
+      <button
+        type="button"
+        onClick={createWith}
+        style={{
+          width: '100%', textAlign: 'left', padding: '9px 12px', fontFamily: 'inherit',
+          border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+        }}
+      >
+        <Icon name="plus" size={12} />
+        {t('payIntNew')}
+      </button>
+      <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+        {rows === null ? (
+          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payMoreLoading')}</div>
+        ) : rows.length === 0 ? (
+          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payIntPickNone')}</div>
+        ) : rows.map(r => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => file(r)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '9px 12px', fontFamily: 'inherit',
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            <span style={{ fontWeight: 500 }}>{r.title || t('payIntUntitled')}</span>
+            <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>
+              {r.memberCount === 1 ? t('payIntMembersOne') : t('payIntMembers', { n: r.memberCount })}
+            </span>
+          </button>
+        ))}
       </div>
     </div>
   );
