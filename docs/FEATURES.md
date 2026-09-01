@@ -201,6 +201,10 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
   can never disagree (v1.114.1).
+- A **linked row shows the PO's cost beside the PO id** (v1.117.0), so the
+  payment and what it was meant to cover read on one line. The figure is goods +
+  `other_fees` — the PO's cost as its own page states it, and what the bank was
+  actually asked to pay.
 - Since v1.115.0 a company-paid PO cannot be submitted without its transaction
   ID — which is the key auto-link matches on — so those POs arrive already able
   to reconcile themselves, instead of landing in the unlinked queue for a

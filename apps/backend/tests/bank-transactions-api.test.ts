@@ -41,6 +41,7 @@ type PaymentRow = {
   legs: { source: string; externalId: string }[];
   pairCandidate: { id: string; source: string; dayGap: number } | null;
   orderId: string | null;
+  orderCost: number | null;
   linkKind: string | null;
   linkAuto: boolean;
   ignored: boolean;
@@ -301,6 +302,32 @@ describe('bank transactions API', () => {
     expect(unlink.status).toBe(200);
     const after = await db`SELECT order_id, no_auto_link FROM bank_transactions WHERE external_id IN ('7AB12345CD678901E', 'm-settle')`;
     expect(after.every((l) => l.order_id === null && l.no_auto_link === true)).toBe(true);
+  });
+
+  // The number a manager reads the row's own amount against. Goods alone would
+  // report 1200 beside a -1240 payment and look like a shortfall.
+  it('a linked row carries the PO cost, goods plus fees', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    await getTestDb()`UPDATE orders SET total_cost = 1200, other_fees = 40 WHERE id = ${poId}`;
+
+    const pairedLegId = await idOf('m-settle');
+    await api('POST', `/api/bank-transactions/${pairedLegId}/link`, { token, body: { orderId: poId } });
+
+    const r = await api<{ rows: PaymentRow[] }>('GET', '/api/bank-transactions', { token });
+    expect(r.status).toBe(200);
+    const byId = new Map(r.body.rows.map((x) => [x.id, x]));
+    const linked = [...byId.values()].find((x) => x.orderId === poId);
+    expect(linked?.orderCost).toBe(1240);
+    expect(linked?.amount).toBe(-1240);
+    // An unlinked row has no PO to cost.
+    expect(byId.get(await idOf('m-wire'))?.orderCost).toBeNull();
+
+    // No stored goods total is not a cost of zero, and not a fees-only figure.
+    await getTestDb()`UPDATE orders SET total_cost = NULL WHERE id = ${poId}`;
+    const after = await api<{ rows: PaymentRow[] }>('GET', '/api/bank-transactions', { token });
+    expect(after.body.rows.find((x) => x.orderId === poId)?.orderCost).toBeNull();
   });
 
   it('rejects a link to a missing order and an unlink of an unlinked row', async () => {
