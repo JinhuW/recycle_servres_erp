@@ -135,6 +135,42 @@ async function warehouseErr(
   return wh.length ? null : 'Unknown warehouse';
 }
 
+// Same boundary, for the client a PO was bought from. Without it a malformed
+// uuid reaches the FK inside the transaction and surfaces as a 500 instead of
+// the 400 the caller can act on — and a well-formed id belonging to someone
+// else's book was simply accepted, which is how a PO ends up naming a client
+// the purchaser was never allowed to see.
+//
+// Reads elsewhere are scoped with effectiveRole so a manager can preview as a
+// purchaser; this is a write, so it consults u.role directly (lib/role.ts: the
+// preview is a viewing convenience, not a permission demotion).
+async function supplierErr(
+  sql: ReturnType<typeof getDb>,
+  u: User,
+  supplierId: string | null,
+): Promise<string | null> {
+  if (supplierId === null) return null;
+  let rows: { owner_id: string | null }[];
+  try {
+    rows = await sql<{ owner_id: string | null }[]>`
+      SELECT owner_id FROM suppliers WHERE id = ${supplierId}::uuid LIMIT 1
+    `;
+  } catch (e) {
+    // Only 22P02 is the caller's fault. Swallowing everything else would turn a
+    // dead pool into "Unknown client" — see the same idiom in warehouses.ts.
+    if ((e as { code?: string }).code === PG_INVALID_TEXT_REPRESENTATION) return 'Unknown client';
+    throw e;
+  }
+  if (rows.length === 0) return 'Unknown client';
+  // A house-account client (owner_id null) is nobody's private book, so it stays
+  // attachable by anyone; the 0114 backfill never produces one.
+  const ownerId = rows[0]!.owner_id;
+  if (u.role !== 'manager' && ownerId !== null && ownerId !== u.id) return 'Unknown client';
+  return null;
+}
+
+const PG_INVALID_TEXT_REPRESENTATION = '22P02';
+
 // An `Other` line has no spec fields to identify it, so its type carries the
 // whole answer to "what kind of thing is this?". Required alongside the
 // description, and only for that category — the rest are self-describing.
@@ -357,6 +393,7 @@ orders.get('/', async (c) => {
     JOIN users u      ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
+                          AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name
@@ -394,7 +431,10 @@ orders.get('/', async (c) => {
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
       // Optional and additive: a stale SPA that never reads it is unaffected.
-      supplier: r.supplier_id ? { id: r.supplier_id, name: r.supplier_name } : null,
+      // Keyed on the JOINED name, not the raw column: the join is scoped to the
+      // caller's book, so a PO carrying someone else's client reads as unset
+      // rather than leaking an id with a null name beside it.
+      supplier: r.supplier_name ? { id: r.supplier_id, name: r.supplier_name } : null,
       warehouse: r.warehouse_id ? { id: r.warehouse_id, short: r.warehouse_short, region: r.warehouse_region } : null,
       qty: r.qty,
       revenue: r.revenue,
@@ -432,6 +472,8 @@ orders.get('/:id', async (c) => {
     JOIN users u ON u.id = o.user_id
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
+                          AND (${effectiveRole(u) === 'manager'} OR sup.owner_id IS NULL
+                               OR sup.owner_id = ${u.id})
     WHERE o.id = ${id}
     LIMIT 1
   `)[0];
@@ -545,7 +587,9 @@ orders.get('/:id', async (c) => {
       otherFees: order.other_fees,
       otherFeesNote: order.other_fees_note,
       paypalTxnId: order.paypal_txn_id,
-      supplier: order.supplier_id ? { id: order.supplier_id, name: order.supplier_name } : null,
+      supplier: order.supplier_name
+        ? { id: order.supplier_id, name: order.supplier_name }
+        : null,
       commissionRate: order.commission_rate,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
@@ -854,6 +898,8 @@ orders.post('/', async (c) => {
   if ('error' in owner) return c.json({ error: owner.error }, owner.status);
   const whErr = await warehouseErr(sql, body.warehouseId ?? null);
   if (whErr) return c.json({ error: whErr }, 400);
+  const supErr = await supplierErr(sql, u, body.supplierId ?? null);
+  if (supErr) return c.json({ error: supErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
   // The owner's, not the actor's: a manager filing on behalf ships to the
   // purchaser's location.
@@ -1183,6 +1229,10 @@ orders.patch('/:id', async (c) => {
   if (body.warehouseId !== undefined) {
     const whErr = await warehouseErr(sql, body.warehouseId ?? null);
     if (whErr) return c.json({ error: whErr }, 400);
+  }
+  if (body.supplierId !== undefined) {
+    const supErr = await supplierErr(sql, u, body.supplierId ?? null);
+    if (supErr) return c.json({ error: supErr }, 400);
   }
 
   // Field range gates — qty>0, unit_cost>=0, sell_price>=0. Without these,
