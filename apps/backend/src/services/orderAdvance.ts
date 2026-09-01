@@ -8,6 +8,7 @@
 
 import { writeOrderEvent } from './orderAudit';
 import { notifyManagers } from '../lib/notify';
+import { companyPayTxnMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
@@ -31,6 +32,7 @@ export type AdvanceOutcome =
   | { kind: 'finalStage' }
   | { kind: 'committedLines'; offendingLineIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
+  | { kind: 'missingTxnId' }
   | { kind: 'ok'; nextStageId: string };
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
@@ -189,8 +191,11 @@ export async function advanceOrderTx(
 ): Promise<AdvanceOutcome> {
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
-  const cur = (await tx`SELECT user_id, lifecycle FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
-    | { user_id: string; lifecycle: string } | undefined;
+  const cur = (await tx`
+    SELECT user_id, lifecycle, payment, paypal_txn_id, created_at
+    FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
+    | { user_id: string; lifecycle: string; payment: string;
+        paypal_txn_id: string | null; created_at: Date } | undefined;
   if (!cur) return { kind: 'notFound' };
 
   const curIdx = stages.indexOf(cur.lifecycle);
@@ -208,6 +213,16 @@ export async function advanceOrderTx(
   // submits the order. Every other transition stays manager-only.
   if (actor?.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
     return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
+  }
+
+  // Guard: a company-paid PO leaves Draft only once it names the payment that
+  // funded it. Held against every actor — a manager stage-jump and the carrier
+  // poll included — because a rule the two commonest paths can route around is
+  // not a rule. The id is also what auto-link matches on, so filling it is what
+  // makes the PO reconcile itself later.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
+      && await companyPayTxnMissing(tx, cur)) {
+    return { kind: 'missingTxnId' };
   }
 
   // Guard: a cascade that moves lines off a sellable status breaks any sell

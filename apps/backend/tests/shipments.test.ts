@@ -41,6 +41,7 @@ async function createPo(token: string, warehouseId: string | null = 'WH-LA1'): P
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       category: 'RAM',
       ...(warehouseId ? { warehouseId } : {}),
       lines: [{

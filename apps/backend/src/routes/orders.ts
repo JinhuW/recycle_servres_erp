@@ -15,6 +15,7 @@ import {
   type ExportCategory,
 } from '../lib/categoryColumns';
 import { advanceOrderTx, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
+import { txnRequiredFor } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -527,6 +528,10 @@ orders.get('/:id', async (c) => {
     });
   }
   const everSubmitted = await wasEverSubmitted(sql, id);
+  // Whether the company-pay transaction-id rule governs this order. The cutoff
+  // it depends on lives in the DB, so a shell that decided for itself would
+  // block exactly the pre-cutoff drafts the rule exempts.
+  const txnRequired = await txnRequiredFor(sql, order as { payment: string; created_at: Date });
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
@@ -587,6 +592,7 @@ orders.get('/:id', async (c) => {
       otherFees: order.other_fees,
       otherFeesNote: order.other_fees_note,
       paypalTxnId: order.paypal_txn_id,
+      txnRequired,
       supplier: order.supplier_name
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
@@ -888,6 +894,9 @@ orders.post('/', async (c) => {
         /** The client we bought from. Optional — a PO can be filed before
          *  anyone says who it came from. */
         supplierId?: string | null;
+        /** The payment that funded it. A company-paid PO can't leave Draft
+         *  without one, so the create path has to be able to carry it. */
+        paypalTxnId?: string | null;
         lines: LineInput[];
       }
     | null;
@@ -898,6 +907,14 @@ orders.post('/', async (c) => {
   if ('error' in owner) return c.json({ error: owner.error }, owner.status);
   const whErr = await warehouseErr(sql, body.warehouseId ?? null);
   if (whErr) return c.json({ error: whErr }, 400);
+  // Same canon and cap as PATCH and the add-package boundary, so an id that
+  // arrives here diffs clean against one typed or OCR'd later.
+  if (typeof body.paypalTxnId === 'string' && body.paypalTxnId.replace(/\s+/g, '').length > 64) {
+    return c.json({ error: 'paypalTxnId is too long' }, 400);
+  }
+  const newPaypalTxnId = typeof body.paypalTxnId === 'string'
+    ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
+    : null;
   const supErr = await supplierErr(sql, u, body.supplierId ?? null);
   if (supErr) return c.json({ error: supErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
@@ -940,14 +957,14 @@ orders.post('/', async (c) => {
     await tx`
       INSERT INTO orders (
         id, user_id, category, warehouse_id, payment, notes, total_cost,
-        other_fees, other_fees_note, lifecycle, supplier_id
+        other_fees, other_fees_note, lifecycle, supplier_id, paypal_txn_id
       )
       VALUES (
         ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
         ${warehouseId}, ${body.payment ?? 'company'}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft',
-        ${body.supplierId ?? null}
+        ${body.supplierId ?? null}, ${newPaypalTxnId}
       )
     `;
     for (let i = 0; i < body.lines.length; i++) {
@@ -2442,6 +2459,11 @@ orders.post('/:id/advance', async (c) => {
     return c.json({
       error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
       offendingLineIds: outcome.offendingLineIds,
+    }, 409);
+  }
+  if (outcome.kind === 'missingTxnId') {
+    return c.json({
+      error: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
     }, 409);
   }
   return c.json({ ok: true, lifecycle: outcome.nextStageId });

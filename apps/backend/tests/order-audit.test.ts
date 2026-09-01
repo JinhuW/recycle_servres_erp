@@ -27,6 +27,7 @@ async function createDraftWithLines(token: string) {
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       category: 'RAM',
       warehouseId: 'WH-LA1',
       lines: [
@@ -401,7 +402,8 @@ describe('a derived goods-total move reaches the timeline', () => {
     const { token } = await loginAs(MARCUS);
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { lines: [{ category: 'RAM', brand: 'Samsung', partNumber: 'AUD-1',
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', lines: [{ category: 'RAM', brand: 'Samsung', partNumber: 'AUD-1',
                         condition: 'Pulled — Tested', qty: 1, unitCost: 100 }] },
     });
     expect(r.status).toBe(201);

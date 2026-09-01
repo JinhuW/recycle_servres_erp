@@ -18,7 +18,8 @@ describe('GET /api/dashboard manager rolePreview=as_purchaser scoping', () => {
   async function makeAdvancedPO(token: string): Promise<string> {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
-      body: { category: 'RAM', lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }] },
     });
     expect(created.status).toBe(201);
     const adv = await api('POST', `/api/orders/${created.body.id}/advance`, { token });

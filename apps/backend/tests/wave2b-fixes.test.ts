@@ -28,6 +28,7 @@ async function makeReviewingOrder(managerToken: string, purchaserToken: string):
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token: purchaserToken,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       category: 'RAM', warehouseId: 'WH-LA1',
       lines: [{ category: 'RAM', qty: 2, unitCost: 50, condition: 'New', sellPrice: 80 }],
     },
@@ -104,6 +105,7 @@ describe('Wave 2B backend fixes', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pur,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 50, condition: 'New', sellPrice: 99.99 }],
       },
@@ -133,6 +135,7 @@ describe('Wave 2B backend fixes', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pur,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1',
         lines: [{ category: 'RAM', qty: 1, unitCost: 50, condition: 'New', sellPrice: 77 }],
       },

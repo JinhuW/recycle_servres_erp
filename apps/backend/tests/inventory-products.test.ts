@@ -15,6 +15,7 @@ async function po(token: string, opts: { brand: string; partNumber?: string; qty
   const r = await api<{ id: string }>('POST', '/api/orders', {
     token,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       category: 'RAM',
       lines: [{
         category: 'RAM', brand: opts.brand, capacity: '32GB', type: 'DDR4',
@@ -71,6 +72,7 @@ describe('GET /api/inventory/products', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         lines: [{
           category: 'RAM', brand: 'STATX', capacity: '32GB', type: 'DDR4',

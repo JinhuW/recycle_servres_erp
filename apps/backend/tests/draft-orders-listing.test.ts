@@ -54,6 +54,7 @@ describe('GET /api/orders draft visibility', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
       },
@@ -86,6 +87,7 @@ describe('GET /api/orders draft visibility', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pTok,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
       },

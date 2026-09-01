@@ -16,7 +16,8 @@ describe('POST /api/orders onBehalfOfUserId', () => {
 
     const r = await api<{ id: string }>('POST', '/api/orders', {
       token: alex.token,
-      body: { ...LINES, onBehalfOfUserId: marcus.user.id },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: marcus.user.id },
     });
     expect(r.status).toBe(201);
 
@@ -44,7 +45,8 @@ describe('POST /api/orders onBehalfOfUserId', () => {
 
     const r = await api<{ error: string }>('POST', '/api/orders', {
       token: marcus.token,
-      body: { ...LINES, onBehalfOfUserId: priya.user.id },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: priya.user.id },
     });
     expect(r.status).toBe(403);
   });
@@ -55,7 +57,8 @@ describe('POST /api/orders onBehalfOfUserId', () => {
 
     const r = await api<{ error: string }>('POST', '/api/orders', {
       token: alex.token,
-      body: { ...LINES, onBehalfOfUserId: sofia.user.id },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: sofia.user.id },
     });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/purchaser/i);
@@ -65,7 +68,8 @@ describe('POST /api/orders onBehalfOfUserId', () => {
     const alex = await loginAs(ALEX);
     const r = await api<{ error: string }>('POST', '/api/orders', {
       token: alex.token,
-      body: { ...LINES, onBehalfOfUserId: '00000000-0000-0000-0000-000000000000' },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: '00000000-0000-0000-0000-000000000000' },
     });
     expect(r.status).toBe(400);
   });
@@ -74,7 +78,8 @@ describe('POST /api/orders onBehalfOfUserId', () => {
     const alex = await loginAs(ALEX);
     const r = await api<{ error: string }>('POST', '/api/orders', {
       token: alex.token,
-      body: { ...LINES, onBehalfOfUserId: 'marcus' },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: 'marcus' },
     });
     expect(r.status).toBe(400);
   });
@@ -89,7 +94,8 @@ describe('warehouseId boundary check on every write path', () => {
     const alex = await loginAs(ALEX);
     const r = await api<{ error: string }>('POST', '/api/orders', {
       token: alex.token,
-      body: { ...LINES, warehouseId: '' },
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, warehouseId: '' },
     });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/warehouse/i);
@@ -98,7 +104,8 @@ describe('warehouseId boundary check on every write path', () => {
   it('PATCH /api/orders/:id rejects an unknown warehouse as 400 and null still clears', async () => {
     const alex = await loginAs(ALEX);
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
     expect(created.status).toBe(201);
 
@@ -122,7 +129,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const marcus = await loginAs(MARCUS);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
     expect(created.status).toBe(201);
 
@@ -153,7 +161,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const marcus = await loginAs(MARCUS);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
     const adv = await api('POST', `/api/orders/${created.body.id}/advance`, { token: alex.token });
     expect(adv.status).toBe(200);
@@ -174,7 +183,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const marcus = await loginAs(MARCUS);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES, onBehalfOfUserId: marcus.user.id },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: marcus.user.id },
     });
     const r = await api('PATCH', `/api/orders/${created.body.id}`, {
       token: alex.token, body: { onBehalfOfUserId: alex.user.id },
@@ -192,7 +202,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const priya = await loginAs(PRIYA);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: marcus.token, body: { ...LINES },
+      token: marcus.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
     const r = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
       token: marcus.token, body: { onBehalfOfUserId: priya.user.id },
@@ -205,7 +216,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const sofia = await loginAs(SOFIA);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
     const r = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
       token: alex.token, body: { onBehalfOfUserId: sofia.user.id },
@@ -219,7 +231,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const marcus = await loginAs(MARCUS);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
     for (let i = 0; i < 3; i++) {
       const adv = await api('POST', `/api/orders/${created.body.id}/advance`, { token: alex.token });
@@ -236,7 +249,8 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     const marcus = await loginAs(MARCUS);
 
     const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: { ...LINES, onBehalfOfUserId: marcus.user.id },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: marcus.user.id },
     });
     const r = await api('PATCH', `/api/orders/${created.body.id}`, {
       token: alex.token, body: { onBehalfOfUserId: marcus.user.id },
