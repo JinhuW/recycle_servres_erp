@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-011](./RS-011-internal-transaction-records-and-an-owner-for-paymen.md) | in-review | story | P2 | Internal transaction records, and an owner for payments with no PO | — |
+| [RS-011](./RS-011-internal-transaction-records-and-an-owner-for-paymen.md) | done | story | P2 | Internal transaction records, and an owner for payments with no PO | 1.119.0 |
 | [RS-010](./RS-010-paypal-transaction-id-links-the-po-and-the-payment-i.md) | done | story | P2 | PayPal transaction ID links the PO and the payment in both directions | 1.118.0 |
 | [RS-009](./RS-009-linked-payments-do-not-show-the-po-s-cost.md) | done | story | P2 | Linked payments do not show the PO's cost | 1.117.0 |
 | [RS-008](./RS-008-adding-a-tracked-package-requires-a-transaction-id.md) | done | story | P2 | Adding a tracked package requires a transaction ID | 1.116.0 |
