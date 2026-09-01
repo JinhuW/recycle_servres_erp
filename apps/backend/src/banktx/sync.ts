@@ -4,7 +4,7 @@
 // matches to purchase orders. Everything per source runs in one transaction,
 // so a crash mid-source leaves the previous cursor and a clean retry.
 
-import type { TransactionSql } from 'postgres';
+import type { Sql, TransactionSql } from 'postgres';
 import { getDb } from '../db';
 import type { Env } from '../types';
 import { pickBankProviders } from './index';
@@ -292,9 +292,52 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
 // unambiguous match links the whole logical payment; amount/date proximity is
 // deliberately never persisted — those are read-time suggestions only.
 
+// The one place a PayPal txn id becomes a persisted link. Shared with the
+// order routes, which call it the moment a human types the id rather than
+// leaving the match to a pass that runs every six hours; two copies of this
+// rule would drift the instant either side grew a condition.
+//
+// `actorId` distinguishes the callers: a human typing the id is not an
+// automatic guess, and the Payments page badges the difference.
+//
+// Only free transactions are claimed. `no_auto_link` is a manager's Unlink,
+// `ignored` is their dismissal, and a row already carrying an order_id is
+// someone else's decision — none of the three is a typed id's to overturn.
+export async function linkPaypalTxnToOrder(
+  tx: Sql | TransactionSql,
+  paypalTxnId: string,
+  orderId: string,
+  actorId: string | null,
+): Promise<number> {
+  const groups = await tx<{ ids: string[]; amount: string }[]>`
+    SELECT ARRAY_AGG(id::text) AS ids, MAX(amount::text) AS amount
+    FROM bank_transactions bt
+    WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
+      AND category <> 'transfer'
+      AND UPPER(paypal_txn_id) = UPPER(${paypalTxnId})
+      -- A pair is one payment in two legs. Linking the free leg of a pair
+      -- whose other leg already belongs to another PO would split it across
+      -- two orders — the state POST /:id/pair refuses outright.
+      AND NOT EXISTS (
+        SELECT 1 FROM bank_transactions sib
+        WHERE bt.pair_id IS NOT NULL AND sib.pair_id = bt.pair_id
+          AND sib.order_id IS NOT NULL)
+    GROUP BY COALESCE(pair_id, id)`;
+
+  for (const g of groups) {
+    const kind = Number(g.amount) < 0 ? 'payment' : 'refund';
+    await tx`
+      UPDATE bank_transactions
+      SET order_id = ${orderId}, link_kind = ${kind}, link_auto = ${actorId === null},
+          linked_by = ${actorId}, linked_at = NOW()
+      WHERE id IN ${tx(g.ids)}`;
+  }
+  return groups.length;
+}
+
 async function autoLink(tx: Tx): Promise<number> {
-  const groups = await tx<{ ids: string[]; ptxn: string; amount: string }[]>`
-    SELECT ARRAY_AGG(id::text) AS ids, MAX(paypal_txn_id) AS ptxn, MAX(amount::text) AS amount
+  const groups = await tx<{ ptxn: string }[]>`
+    SELECT MAX(paypal_txn_id) AS ptxn
     FROM bank_transactions
     WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
       AND paypal_txn_id IS NOT NULL AND category <> 'transfer'
@@ -305,13 +348,7 @@ async function autoLink(tx: Tx): Promise<number> {
     const orders = await tx<{ id: string }[]>`
       SELECT id FROM orders WHERE UPPER(paypal_txn_id) = ${g.ptxn} LIMIT 2`;
     if (orders.length !== 1) continue;
-    const kind = Number(g.amount) < 0 ? 'payment' : 'refund';
-    await tx`
-      UPDATE bank_transactions
-      SET order_id = ${orders[0].id}, link_kind = ${kind}, link_auto = TRUE,
-          linked_by = NULL, linked_at = NOW()
-      WHERE id IN ${tx(g.ids)}`;
-    linked++;
+    linked += await linkPaypalTxnToOrder(tx, g.ptxn, orders[0].id, null);
   }
   return linked;
 }

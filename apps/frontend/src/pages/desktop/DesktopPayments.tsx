@@ -126,6 +126,7 @@ type ActResult = {
   ruleCounterparty?: string | null;
   alsoMarked?: number;
   ruleRemoved?: boolean;
+  orderTxnFilled?: boolean;
 };
 
 // Vertical padding is zeroed because the 32px height is smaller than
@@ -494,8 +495,11 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast }: {
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
-    if (await act(`${row.id}/link`, { orderId })) {
-      onToast(t('payLinkedToast', { id: orderId }));
+    const r = await act(`${row.id}/link`, { orderId });
+    if (r) {
+      // The link filled the PO's empty transaction field, which is a second
+      // thing that happened to a screen the manager isn't looking at.
+      onToast(t(r.orderTxnFilled ? 'payLinkedFilledToast' : 'payLinkedToast', { id: orderId }));
       setPicking(false);
     }
   };
