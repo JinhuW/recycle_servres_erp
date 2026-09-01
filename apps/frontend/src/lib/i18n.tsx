@@ -1329,6 +1329,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipPayTxnLabel: 'PayPal transaction ID',
     shipPayTxnPh: '8XY12345AB678901C',
     shipPayTxnFormatHint: 'Usually 17 letters and digits — double-check this one.',
+    shipPayTxnRequired: 'PayPal transaction ID — ask the manager who paid for this order if you don’t have it.',
     shipPayRemoveShot: 'Remove screenshot',
     shipPayScanFailed: 'Could not read the screenshot — type the transaction ID yourself.',
     shipPayNoTxnFound: 'No transaction ID found in this screenshot — type it yourself.',

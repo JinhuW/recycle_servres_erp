@@ -169,6 +169,13 @@ Transit, and a line's qty can never be 0.
 - Prepaid labels via ShipSaving (v1.68.0, v2 client in v1.79.0).
 - **External labels** can be added with carrier detection, and a delivered
   package flows into creating a PO (v1.75.0).
+- **Adding a package requires its PayPal transaction ID** (v1.116.0). It is not
+  paperwork: the ID carries onto the PO minted from the delivered box, and
+  reconciliation auto-links a bank row to that PO on exactly this value — so a
+  package added without one becomes a PO only a manager can reconcile by hand.
+  Submitting without it is blocked by a dialog that names the one route a
+  purchaser has, since the Payments page is manager-only: ask the manager who
+  paid for the order. Dropping the payment screenshot still fills it for you.
 - **Tracking is Shippo, driven by webhooks**, independent of whichever provider
   printed the label (v1.102.0). A Shippo *test* token only tracks carrier
   `shippo`.
