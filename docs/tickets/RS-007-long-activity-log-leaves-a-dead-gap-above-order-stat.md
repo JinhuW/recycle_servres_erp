@@ -2,13 +2,13 @@
 id: RS-007
 title: Long activity log leaves a dead gap above Order status
 type: bug
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-08-31
 reporter: Jinhu
 branch: session/20260831-125858
-pr:
-version:
+pr: 231
+version: 1.114.2
 related: []
 ---
 
