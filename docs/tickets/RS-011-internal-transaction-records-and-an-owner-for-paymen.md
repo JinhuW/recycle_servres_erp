@@ -2,13 +2,13 @@
 id: RS-011
 title: Internal transaction records, and an owner for payments with no PO
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-01
 reporter: Jinhu
 branch: session/20260831-225948
 pr: 242
-version:
+version: 1.119.0
 related: []
 ---
 
