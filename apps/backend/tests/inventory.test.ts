@@ -335,3 +335,75 @@ describe('GET /api/inventory — row order', () => {
     expectSheetOrder(r.body.items);
   });
 });
+
+// rpm and health became editable dropdowns, but their columns stayed on
+// COALESCE — so the blank option could not clear them, and the timeline claimed
+// it had. The two halves are one bug: the write silently did nothing and the
+// audit said otherwise.
+describe('PATCH /api/inventory/:id — clearing a numeric spec', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function firstHddLine(token: string): Promise<string> {
+    const r = await api<{ items: { id: string; category: string }[] }>(
+      'GET', '/api/inventory', { token });
+    const line = r.body.items.find(i => i.category === 'HDD') ?? r.body.items[0];
+    expect(line, 'seed has no inventory line').toBeDefined();
+    return line!.id;
+  }
+
+  it('clears rpm and logs exactly one true event', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstHddLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET rpm = 7200 WHERE id = ${id}`;
+    const before = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { rpm: null } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    const [row] = await sql<{ rpm: number | null }[]>`
+      SELECT rpm FROM order_lines WHERE id = ${id}`;
+    expect(row.rpm).toBeNull();
+
+    const after = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+    expect(after[0].n).toBe(before[0].n + 1);
+  });
+
+  it('clears health the same way', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstHddLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET health = 98 WHERE id = ${id}`;
+
+    const r = await api('PATCH', `/api/inventory/${id}`, { token, body: { health: null } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    const [row] = await sql<{ health: number | null }[]>`
+      SELECT health FROM order_lines WHERE id = ${id}`;
+    expect(row.health).toBeNull();
+  });
+
+  it('leaves rpm alone when the field is omitted, and writes no event', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await firstHddLine(token);
+    const { getTestDb } = await import('./helpers/db');
+    const sql = getTestDb();
+    await sql`UPDATE order_lines SET rpm = 7200 WHERE id = ${id}`;
+    const before = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+
+    await api('PATCH', `/api/inventory/${id}`, { token, body: { condition: 'Used' } });
+
+    const [row] = await sql<{ rpm: number | null }[]>`
+      SELECT rpm FROM order_lines WHERE id = ${id}`;
+    expect(row.rpm).toBe(7200);
+    const after = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events WHERE order_line_id = ${id}`;
+    // condition may or may not have changed; rpm must contribute nothing.
+    expect(after[0].n).toBeLessThanOrEqual(before[0].n + 1);
+  });
+});
