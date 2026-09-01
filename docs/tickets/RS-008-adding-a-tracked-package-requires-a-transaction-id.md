@@ -7,7 +7,7 @@ priority: P2
 created: 2026-08-31
 reporter: Jinhu
 branch: feat/shipping-txn-required
-pr:
+pr: 235
 version: 1.116.0
 related: [RS-006]
 ---
