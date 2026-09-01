@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.119.0] - 2026-09-01
+
+### Features
+- feat(payments): internal transaction records, and an owner for payments with
+  no PO. Two things a bank row had nowhere to put. **Internal transactions** are
+  manager-written records that group the rows of one internal money movement — a
+  Mercury→PayPal transfer, a card-funding chain — and carry the note explaining
+  it; filing a row takes it off the reconciliation queue, and the record's
+  totals count a transfer's two opposite legs as the two real movements they are
+  while still counting a payment pair once. **Assigning a member** does the
+  opposite on purpose: it leaves the payment in the queue, because a payment
+  that needs explaining still needs explaining — it just now has someone to
+  explain it, and an Assignee filter to find it by. The two are mutually
+  exclusive with a PO link: linking clears the owner (a triage tag), and refuses
+  a filed row (part of a record someone wrote a note on).
 ## [1.118.0] - 2026-08-31
 
 ### Features

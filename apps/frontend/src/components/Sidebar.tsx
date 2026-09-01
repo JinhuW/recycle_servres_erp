@@ -7,7 +7,7 @@ import type { Role } from '../lib/types';
 export type DesktopView =
   | 'dashboard' | 'submit' | 'history' | 'shipping' | 'clients' | 'market'
   | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers'
-  | 'activity' | 'payments' | 'tracker' | 'coordinator' | 'settings';
+  | 'activity' | 'payments' | 'internaltx' | 'tracker' | 'coordinator' | 'settings';
 
 type NavItem = { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string };
 
@@ -63,7 +63,8 @@ export function Sidebar({ view, setView }: Props) {
         </div>
       </div>
 
-      {/* Analysis lives as a tab under Inventory — keep Inventory lit there. */}
+      {/* Analysis and Internal transactions live as tabs under Inventory and
+          Payments — keep the parent lit while you are on one. */}
       {NAV.map(group => {
         const items = group.items.filter(n => n.roles.includes(user.role));
         if (!items.length) return null;
@@ -71,7 +72,9 @@ export function Sidebar({ view, setView }: Props) {
           <div key={group.tKey} className="nav-group">
             <div className="nav-section">{t(group.tKey)}</div>
             {items.map(n => {
-              const active = view === n.id || (n.id === 'inventory' && view === 'analysis');
+              const active = view === n.id
+                || (n.id === 'inventory' && view === 'analysis')
+                || (n.id === 'payments' && view === 'internaltx');
               return (
                 <button
                   key={n.id}

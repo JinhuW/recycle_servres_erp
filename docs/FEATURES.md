@@ -217,6 +217,19 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   fill against the manager. Neither side overwrites the other: a PO already
   naming a different transaction keeps it, and a typed ID claims only
   transactions nobody has linked, ignored, or deliberately unlinked.
+- **Internal transactions** (v1.119.0) are records that group the bank rows of
+  one internal movement — a Mercury→PayPal transfer, a card-funding chain — and
+  carry a title and a **note**, the first user-written text a bank row has ever
+  had. Reachable from Payments; a filed row leaves the unlinked queue and names
+  its record. Their totals read a transfer's two opposite-signed legs as two
+  real movements (so a transfer nets to zero) while a payment pair — the same
+  money seen twice — still counts once.
+- **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
+  filters by owner or by Unassigned. Assigning deliberately does *not* resolve
+  the row: a payment that needs explaining still needs explaining, it just has
+  someone to explain it. Linking that payment to a PO clears the owner, since
+  the PO is the answer the tag stood in for; a row filed under an internal
+  transaction refuses the link instead, because a note is attached to it.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
