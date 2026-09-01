@@ -2,12 +2,12 @@
 id: RS-010
 title: PayPal transaction ID links the PO and the payment in both directions
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-08-31
 reporter: Jinhu
 branch: session/20260831-224925
-pr:
+pr: 241
 version: 1.118.0
 related: [RS-006]
 ---
