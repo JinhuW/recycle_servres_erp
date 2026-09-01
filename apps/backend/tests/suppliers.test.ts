@@ -330,3 +330,77 @@ describe('clients — reassignment', () => {
     expect(row.ownerName).toBeNull();
   });
 });
+
+// Changing who owns a book is the one supplier write that has to leave a trace,
+// so it gets exactly one door.
+describe('owner changes go through /reassign only', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('PATCH refuses ownerId even for a manager, and points at the endpoint', async () => {
+    const alex = await loginAs(ALEX);
+    const priya = await loginAs(PRIYA);
+    const id = await mkClient(alex.token, 'Door Policy Supply');
+
+    const r = await api<{ error: string }>('PATCH', `/api/suppliers/${id}`, {
+      token: alex.token, body: { ownerId: priya.user.id },
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toContain('reassign');
+
+    // and it really did not write
+    const d = await api<{ ownerId: string | null }>('GET', `/api/suppliers/${id}`, { token: alex.token });
+    expect(d.body.ownerId).toBe(alex.user.id);
+  });
+
+  it('reassign still works and still writes the owner_changed note', async () => {
+    const alex = await loginAs(ALEX);
+    const priya = await loginAs(PRIYA);
+    const id = await mkClient(alex.token, 'Handover Supply');
+
+    const r = await api('POST', `/api/suppliers/${id}/reassign`, {
+      token: alex.token, body: { ownerId: priya.user.id },
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+
+    const sql = getTestDb();
+    const notes = await sql<{ kind: string }[]>`
+      SELECT kind FROM supplier_notes WHERE supplier_id = ${id}::uuid AND kind = 'owner_changed'`;
+    expect(notes.length).toBe(1);
+  });
+});
+
+describe('the suggestion rail counts orders, not boxes', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('a PO shipped in three cartons plus a package is one PO, counted once', async () => {
+    const marcus = await loginAs(MARCUS);
+    const sql = getTestDb();
+    const [wh] = await sql<{ id: string }[]>`SELECT id FROM warehouses LIMIT 1`;
+
+    await sql`
+      INSERT INTO orders (id, user_id, category, warehouse_id, lifecycle, total_cost, created_at)
+      VALUES ('PO-BOXES1', ${marcus.user.id}, 'RAM', ${wh.id}, 'done', 12000, NOW())`;
+    // Three boxes on ONE order — shipments is one row per box.
+    for (const n of [1, 2, 3]) {
+      await sql`
+        INSERT INTO shipments (order_id, from_name, from_street1, from_city, from_state,
+                               from_zip, weight_oz, length_in, width_in, height_in,
+                               provider, created_at)
+        VALUES ('PO-BOXES1', 'Cartonly Liquidators', ${'10' + n + ' Dock St'}, 'Aurora',
+                'CO', '80012', 10, 1, 1, 1, 'stub', NOW())`;
+    }
+    // and a tracked package for the same seller on the same order
+    await sql`
+      INSERT INTO packages (tracking_number, carrier, order_id, seller_name, created_at)
+      VALUES ('1ZBOXES000000001', 'UPS', 'PO-BOXES1', 'Cartonly Liquidators', NOW())`;
+
+    const r = await api<{ items: { name: string; poCount: number; spend: number }[] }>(
+      'GET', '/api/suppliers/suggestions', { token: marcus.token });
+    expect(r.status).toBe(200);
+    const row = r.body.items.find(i => i.name === 'Cartonly Liquidators');
+    expect(row, 'the seller should be suggested').toBeTruthy();
+    // Was 4 (three shipment rows + one package row) and $48,000 before the fix.
+    expect(row!.poCount).toBe(1);
+    expect(row!.spend).toBe(12000);
+  });
+});
