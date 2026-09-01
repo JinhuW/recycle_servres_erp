@@ -2,7 +2,7 @@
 id: RS-009
 title: Linked payments do not show the PO's cost
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-08-31
 reporter: Jinhu
