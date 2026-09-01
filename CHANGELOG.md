@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.116.1] - 2026-08-31
+
+### Fixes
+
+- Grouping two transactions into one payment works from every row again. The
+  "Group with" candidate list was positioned inside the Payments table's scroll
+  container, which clips anything past its bottom edge, so for any row in the
+  lower part of the list the candidates were rendered somewhere unreachable and
+  the grouping could not be completed at all. The panel is now placed against
+  the viewport, like the PO picker beside it, and follows its button when the
+  table scrolls. Manual grouping had been broken this way for every row below
+  the fold since it shipped in v1.103.0.
+- The placement arithmetic the two pickers share — open below, flip above when
+  the room runs out, clamp to the viewport edges — is now one tested function
+  rather than a copy in each. The copy is why the second picker shipped without
+  the first one's fix.
+
 ## [1.116.0] - 2026-08-31
 
 ### Features
