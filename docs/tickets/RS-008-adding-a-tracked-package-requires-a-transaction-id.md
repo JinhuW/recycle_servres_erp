@@ -2,7 +2,7 @@
 id: RS-008
 title: Adding a tracked package requires a transaction ID
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-08-31
 reporter: Jinhu
