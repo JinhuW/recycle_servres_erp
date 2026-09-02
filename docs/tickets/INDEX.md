@@ -5,6 +5,13 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-012](./RS-012-carrier-movement-stalls-a-po-silently-and-assigning.md) | done | bug | P1 | Carrier movement stalls a PO silently, and assigning a paired payment can 500 | 1.119.1 |
+| [RS-011](./RS-011-internal-transaction-records-and-an-owner-for-paymen.md) | done | story | P2 | Internal transaction records, and an owner for payments with no PO | 1.119.0 |
+| [RS-010](./RS-010-paypal-transaction-id-links-the-po-and-the-payment-i.md) | done | story | P2 | PayPal transaction ID links the PO and the payment in both directions | 1.118.0 |
+| [RS-009](./RS-009-linked-payments-do-not-show-the-po-s-cost.md) | done | story | P2 | Linked payments do not show the PO's cost | 1.117.0 |
+| [RS-008](./RS-008-adding-a-tracked-package-requires-a-transaction-id.md) | done | story | P2 | Adding a tracked package requires a transaction ID | 1.116.0 |
+| [RS-007](./RS-007-long-activity-log-leaves-a-dead-gap-above-order-stat.md) | in-review | bug | P2 | Long activity log leaves a dead gap above Order status | 1.114.2 |
+| [RS-006](./RS-006-company-paid-pos-must-carry-a-payment-transaction-id.md) | done | story | P2 | Company-paid POs must carry a payment transaction ID | 1.115.0 |
 | [RS-005](./RS-005-release-review-findings-before-the-prod-cut.md) | done | bug | P1 | Release-review findings before the prod cut | 1.114.1 |
 | [RS-004](./RS-004-inventory-export-and-screens-read-in-the-vendor-bid.md) | in-review | story | P2 | Inventory export and screens read in the vendor bid-sheet order | 1.113.0 |
 | [RS-003](./RS-003-mobile-po-add-item-buttons-require-scrolling-past-th.md) | in-review | story | P2 | Mobile PO add-item buttons require scrolling past the whole line list | 1.109.0 |

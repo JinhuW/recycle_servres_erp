@@ -274,15 +274,21 @@ html.desktop, body.desktop, .desktop #root {
      ├───────────────────┤   +      │
      │ action-card       │ activity │
      └───────────────────┴──────────┘
-   The side column spans both rows. The items-card hugs its content
-   (align-self: start) so it can NEVER grow a dead gap below its totals footer;
-   the items row flexes so the action-card (a floating bottom bar) pins to the
-   bottom. Payment is fixed-height at the top of the side; Activity fills the
-   remaining side height and scrolls internally (scrollbar hidden). The items
-   table caps at a 10-row budget, then scrolls. The activity log's max height
-   TRACKS the visible row count (--oe-rows, set by the component, capped at 10)
-   so a short table gives a short log and a 10-row table gives the tallest log —
-   either way it scrolls instead of stretching the layout. */
+   The side column spans both rows, so it is the column that can outgrow the
+   other — and the rows are sized so that when it does, the surplus lands BELOW
+   the action-card rather than between the two left cards. (Rows were once
+   `1fr auto`, which put the whole surplus in the items row and opened a
+   screen-tall dead band above "Order status".) Both left cards hug their
+   content with align-self: start.
+   Everything above the activity log is fixed-height at the top of the side;
+   Activity fills the remaining height and scrolls internally (scrollbar
+   hidden). It is addressed by CLASS, not position: it renders nothing until
+   its fetch lands and the manager-only payments ledger renders above it only
+   once a bank transaction is linked, so the child index is not stable.
+   The items table caps at a 10-row budget, then scrolls. The activity log's
+   max height TRACKS the visible row count (--oe-rows, set by the component,
+   capped at 10) so a short table gives a short log and a 10-row table gives the
+   tallest log — either way it scrolls instead of stretching the layout. */
 .page.page-order-edit {
   padding-bottom: 8px;
   display: flex;
@@ -303,7 +309,10 @@ html.desktop, body.desktop, .desktop #root {
 .page.page-order-edit > .oe-body {
   display: grid;
   grid-template-columns: 1fr 280px;
-  grid-template-rows: 1fr auto;
+  /* Row 1 sizes to the items-card, row 2 takes whatever a taller side column
+     forces on the grid — so the surplus is trailing space under the action-card
+     instead of a gap above it. */
+  grid-template-rows: auto 1fr;
   grid-template-areas:
     "items  side"
     "action side";
@@ -323,6 +332,9 @@ html.desktop, body.desktop, .desktop #root {
 .page.page-order-edit > .oe-body > .oe-action-card {
   grid-area: action;
   min-width: 0;
+  /* Sit right under the items-card: without this the stretch default paints the
+     bar's background down the whole flexible row. */
+  align-self: start;
 }
 .page.page-order-edit > .oe-body > .oe-side {
   grid-area: side;
@@ -331,13 +343,13 @@ html.desktop, body.desktop, .desktop #root {
   gap: 12px;
   min-height: 0;
 }
-/* First side child = Payment detail card (natural height pinned at top).
-   Second side child = Activity log (fills remaining height, internal scroll
-   if longer than the available space). */
-.page.page-order-edit > .oe-body > .oe-side > :nth-child(1) {
+/* Everything that isn't the activity log (payment detail, payments ledger)
+   keeps its natural height at the top of the column; the log fills what is
+   left and scrolls internally if the history is longer than that. */
+.page.page-order-edit > .oe-body > .oe-side > :not(.oe-side-activity) {
   flex-shrink: 0;
 }
-.page.page-order-edit > .oe-body > .oe-side > :nth-child(2) {
+.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity {
   flex: 1;
   min-height: 0;
   /* Track the item table's height: header + current row count, floored at the
@@ -350,16 +362,16 @@ html.desktop, body.desktop, .desktop #root {
 }
 /* OrderActivityLog: header (button) stays pinned, the timeline body (the
    inner div that renders when open) is the one that scrolls. */
-.page.page-order-edit > .oe-body > .oe-side > :nth-child(2) > button {
+.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity > button {
   flex-shrink: 0;
 }
-.page.page-order-edit > .oe-body > .oe-side > :nth-child(2) > div {
+.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity > div {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
 }
-.page.page-order-edit > .oe-body > .oe-side > :nth-child(2) > div::-webkit-scrollbar { display: none; }
+.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity > div::-webkit-scrollbar { display: none; }
 .page.page-order-edit .oe-items-card > .card-head,
 .page.page-order-edit .oe-items-card > .oe-items-foot {
   flex-shrink: 0;

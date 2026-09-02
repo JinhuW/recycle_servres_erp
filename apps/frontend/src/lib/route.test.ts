@@ -28,6 +28,13 @@ describe('parseShippingRoute', () => {
     }
   });
 
+  // Internal transactions is a tab under Payments — its own view, so the page
+  // renders, but the sidebar keeps Payments lit.
+  it('separates the internal-transactions tab from the payments list', () => {
+    expect(pathToDesktopView('/payments')).toBe('payments');
+    expect(pathToDesktopView('/payments/internal')).toBe('internaltx');
+  });
+
   // A client is a shareable link, so the detail path has to resolve too.
   it('maps /clients and a deep link to one client', () => {
     expect(pathToDesktopView('/clients')).toBe('clients');

@@ -17,6 +17,11 @@ type Props = {
   // The phone opens it closed: it is the longest block on a screen that is
   // already tall, and the header carries the event count either way.
   defaultOpen?: boolean;
+  // Lets a host lay the card out by class rather than by position. The desktop
+  // order-edit side column needs that: this component renders nothing until its
+  // fetch lands, and it has a conditional sibling above it, so no positional
+  // selector can name it reliably.
+  className?: string;
 };
 
 const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
@@ -195,7 +200,7 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true }: Props) {
+export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, className }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [events, setEvents] = useState<OrderEvent[]>([]);
@@ -220,7 +225,7 @@ export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true }
   if (!loaded) return null;
 
   return (
-    <div className="card" style={{ padding: 0 }}>
+    <div className={'card' + (className ? ' ' + className : '')} style={{ padding: 0 }}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}

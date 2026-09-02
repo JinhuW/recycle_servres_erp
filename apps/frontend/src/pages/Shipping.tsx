@@ -634,7 +634,7 @@ function AddPackageScreen({ showToast }: { showToast: (msg: string, kind?: Toast
         </div>
 
         <div className="ph-field">
-          <label>{t('shipPayTxnLabel')}</label>
+          <label>{t('shipPayTxnLabel')} <span className="req">*</span></label>
           <input
             className="input mono"
             value={f.paypalTxnId}

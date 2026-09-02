@@ -435,6 +435,53 @@ describe('bank transaction sync', () => {
     expect(rows.get('m-pay')).toMatchObject({ category: 'external', order_id: poId });
   });
 
+  // The owner tag and a PO link are mutually exclusive (a CHECK, migrations
+  // /0116), so an auto-link that ignored the owner would abort the whole
+  // per-source transaction — and keep aborting it on every run.
+  it('auto-link clears the owner instead of tripping the constraint', async () => {
+    const poId = await createPO(TXN_A);
+    const { token, user } = await loginAs(ALEX);
+    await syncBankTransactions(testEnv, [fakeProvider('paypal', [{ externalId: TXN_A, amount: -400 }])]);
+
+    const db = getTestDb();
+    const [row] = await db<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = ${TXN_A}`;
+    await db`UPDATE bank_transactions SET order_id = NULL, link_kind = NULL, link_auto = FALSE,
+             linked_at = NULL, no_auto_link = FALSE WHERE id = ${row.id}`;
+    const assign = await api('POST', `/api/bank-transactions/${row.id}/assign`, {
+      token, body: { userId: user.id } });
+    expect(assign.status).toBe(200);
+
+    const result = await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: TXN_A, amount: -400 }]),
+    ]);
+    expect(result.perSource.paypal?.error).toBeUndefined();
+    const [after] = await db`SELECT order_id, assignee_id FROM bank_transactions WHERE id = ${row.id}`;
+    expect(after.order_id).toBe(poId);
+    expect(after.assignee_id).toBeNull();
+  });
+
+  // An owned row is under human handling: auto-pair would propagate a link onto
+  // it, and transfer-pair would re-categorize it out of the very queue the
+  // assignment kept it in.
+  it('auto-pair leaves an owned leg alone', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'm-own', amount: -640 }]),
+    ]);
+    const { token, user } = await loginAs(ALEX);
+    const db = getTestDb();
+    const [own] = await db<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = 'm-own'`;
+    await api('POST', `/api/bank-transactions/${own.id}/assign`, { token, body: { userId: user.id } });
+
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: 'p-own', amount: -640 }]),
+    ]);
+
+    const rows = await legs();
+    expect(rows.get('m-own')?.pair_id).toBeNull();
+    expect(rows.get('p-own')?.pair_id).toBeNull();
+    expect(rows.get('m-own')?.category).toBe('external');
+  });
+
   it('one failing provider does not block the other', async () => {
     const broken: BankProvider = {
       source: 'paypal',

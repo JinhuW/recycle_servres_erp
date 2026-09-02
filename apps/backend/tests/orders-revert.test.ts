@@ -36,6 +36,7 @@ async function createSubmitted(pur: string): Promise<{ id: string; lineId: strin
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token: pur,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
       lines: [{
         category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
@@ -271,6 +272,7 @@ describe('revert guards', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pur,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
       },
@@ -336,6 +338,7 @@ describe('revert guards', () => {
     const created = await api<{ id: string }>('POST', '/api/orders', {
       token: pur,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
         lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
       },

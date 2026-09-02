@@ -45,6 +45,12 @@ moves Draft → Submitted → In Transit → Reviewing → Done.
   line diff (v1.97.0). Notes, photos and attachments don't trigger it. A
   reverted order is a Draft that was already submitted, so deleting it archives
   rather than wipes.
+- **A company-paid PO names the payment that funded it before it leaves
+  Draft** (v1.115.0) — the transaction ID is required, and the advance is
+  refused without it for every actor, a manager stage-jump and carrier movement
+  included. Self-pay POs are unaffected. The rule governs only orders created
+  after it reached the environment, so POs already on file stay exempt. Mobile
+  gained the field as an input; it used to be read-only there.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0).
 - **Costs split into a goods total and other fees** (v1.43.0); a goods overflow
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
@@ -163,6 +169,13 @@ Transit, and a line's qty can never be 0.
 - Prepaid labels via ShipSaving (v1.68.0, v2 client in v1.79.0).
 - **External labels** can be added with carrier detection, and a delivered
   package flows into creating a PO (v1.75.0).
+- **Adding a package requires its PayPal transaction ID** (v1.116.0). It is not
+  paperwork: the ID carries onto the PO minted from the delivered box, and
+  reconciliation auto-links a bank row to that PO on exactly this value — so a
+  package added without one becomes a PO only a manager can reconcile by hand.
+  Submitting without it is blocked by a dialog that names the one route a
+  purchaser has, since the Payments page is manager-only: ask the manager who
+  paid for the order. Dropping the payment screenshot still fills it for you.
 - **Tracking is Shippo, driven by webhooks**, independent of whichever provider
   printed the label (v1.102.0). A Shippo *test* token only tracks carrier
   `shippo`.
@@ -188,6 +201,35 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - The queue **opens on money out**, and the Unlinked and Suggested tiles take
   the same direction lens as the rows beneath them, so the count and the list
   can never disagree (v1.114.1).
+- A **linked row shows the PO's cost beside the PO id** (v1.117.0), so the
+  payment and what it was meant to cover read on one line. The figure is goods +
+  `other_fees` — the PO's cost as its own page states it, and what the bank was
+  actually asked to pay.
+- Since v1.115.0 a company-paid PO cannot be submitted without its transaction
+  ID — which is the key auto-link matches on — so those POs arrive already able
+  to reconcile themselves, instead of landing in the unlinked queue for a
+  manager to match by amount and date.
+- **The link is made when a human makes it, in either direction** (v1.118.0).
+  Saving a transaction ID on a PO — on edit, on create, or on the draft PO
+  minted from a delivered package — claims the matching transaction on the
+  spot instead of waiting out the six-hourly sync, and records it as a manual
+  link. Linking on the Payments page fills the PO's transaction ID and logs the
+  fill against the manager. Neither side overwrites the other: a PO already
+  naming a different transaction keeps it, and a typed ID claims only
+  transactions nobody has linked, ignored, or deliberately unlinked.
+- **Internal transactions** (v1.119.0) are records that group the bank rows of
+  one internal movement — a Mercury→PayPal transfer, a card-funding chain — and
+  carry a title and a **note**, the first user-written text a bank row has ever
+  had. Reachable from Payments; a filed row leaves the unlinked queue and names
+  its record. Their totals read a transfer's two opposite-signed legs as two
+  real movements (so a transfer nets to zero) while a payment pair — the same
+  money seen twice — still counts once.
+- **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
+  filters by owner or by Unassigned. Assigning deliberately does *not* resolve
+  the row: a payment that needs explaining still needs explaining, it just has
+  someone to explain it. Linking that payment to a PO clears the owner, since
+  the PO is the answer the tag stood in for; a row filed under an internal
+  transaction refuses the link instead, because a note is attached to it.
 
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`

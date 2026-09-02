@@ -32,6 +32,7 @@ import notificationsRoutes from './routes/notifications';
 import trackerRoutes from './routes/tracker';
 import coordinatorRoutes from './routes/coordinator';
 import bankTxRoutes from './routes/bankTx';
+import internalTxRoutes from './routes/internalTx';
 import suppliersRoutes from './routes/suppliers';
 import warehousesRoutes from './routes/warehouses';
 import customersRoutes from './routes/customers';
@@ -349,6 +350,7 @@ app.route('/api/tracker', trackerRoutes);
 app.route('/api/coordinator', coordinatorRoutes);
 // Same shape: self-applied authMiddleware + manager gate.
 app.route('/api/bank-transactions', bankTxRoutes);
+app.route('/api/internal-transactions', internalTxRoutes);
 // Clients (buy-side counterparties). Deliberately NOT in CACHEABLE_PREFIXES:
 // like /api/warehouses this list is edited and re-read inside one user action,
 // and a 60s browser copy is what made a saved warehouse address look unsaved.

@@ -3,6 +3,7 @@
 // go through here so the id mint, the draft INSERT, and the empty `created`
 // event can't drift apart per site. Runs inside the caller's transaction.
 
+import { linkPaypalTxnToOrder } from '../banktx/sync';
 import { nextHumanId } from '../lib/id-seq';
 import { writeOrderEvent, type SqlLike } from './orderAudit';
 
@@ -45,5 +46,12 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
       ? { onBehalfOfUserId: opts.ownerId, onBehalfOfName: opts.onBehalfOfName ?? null }
       : {}),
   });
+  // A PO minted from a scanned payment screenshot is born knowing its
+  // transaction, so this is its only chance to link: no later edit changes the
+  // field, and without this it would wait out the sync loop for a match that
+  // is already sitting in the unlinked queue.
+  if (opts.paypalTxnId) {
+    await linkPaypalTxnToOrder(tx, opts.paypalTxnId, orderId, opts.actorId);
+  }
   return orderId;
 }

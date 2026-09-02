@@ -3,12 +3,12 @@
 // handlers don't each re-implement the query. The fallback is only used when
 // the key is absent — migration 0025 seeds the standard keys.
 
-import postgres from 'postgres';
-
-type Sql = ReturnType<typeof postgres>;
+import type { SqlLike } from '../services/orderAudit';
 
 export async function getWorkspaceSetting<T>(
-  sql: Sql,
+  // Takes a transaction handle too: the PO advance guard reads its cutoff from
+  // inside the same transaction that holds the order's row lock.
+  sql: SqlLike,
   key: string,
   fallback: T,
 ): Promise<T> {
@@ -54,7 +54,7 @@ export const SAFE_UPLOAD_MIME = new Set([
 ]);
 
 export async function getUploadLimits(
-  sql: Sql,
+  sql: SqlLike,
 ): Promise<{ maxBytes: number; allowedMime: Set<string> }> {
   const [maxBytes, mimeList] = await Promise.all([
     getWorkspaceSetting(sql, 'upload_max_bytes', DEFAULT_UPLOAD_MAX_BYTES),

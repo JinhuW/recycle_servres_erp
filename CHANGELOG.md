@@ -17,6 +17,156 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.119.1] - 2026-09-02
+
+### Fixes
+
+- A company-paid purchase order that never named the payment funding it could
+  be left behind silently.  The carrier reporting the box in transit runs the
+  same advance a person does, and the same rule blocks it — but where a person
+  gets a 409 explaining why, the carrier path threw the answer away: the
+  shipment moved, the order stayed in Draft, and nothing anywhere said so.  It
+  now records the stall against the order, the shipment and the tracking
+  number.  The order still needs a human to add the transaction id; the
+  difference is that the stall is findable instead of being mistaken for the
+  rule no longer applying.
+- Assigning an owner to a payment whose two legs are only half linked returned
+  a server error.  A paired payment is read from its PayPal leg, so a pair
+  linked through its Mercury leg looked unlinked, the assignment was allowed,
+  and it then collided with the constraint that keeps a payment from being
+  owned and answered at once.  Unlinking hit the same blind spot from the other
+  side and reported the payment as "not linked", which left no way out of the
+  state at all.  Both now read the whole payment rather than one leg of it, as
+  do ignoring, marking a transfer, and linking.
+
+## [1.119.0] - 2026-09-01
+
+### Features
+- feat(payments): internal transaction records, and an owner for payments with
+  no PO. Two things a bank row had nowhere to put. **Internal transactions** are
+  manager-written records that group the rows of one internal money movement — a
+  Mercury→PayPal transfer, a card-funding chain — and carry the note explaining
+  it; filing a row takes it off the reconciliation queue, and the record's
+  totals count a transfer's two opposite legs as the two real movements they are
+  while still counting a payment pair once. **Assigning a member** does the
+  opposite on purpose: it leaves the payment in the queue, because a payment
+  that needs explaining still needs explaining — it just now has someone to
+  explain it, and an Assignee filter to find it by. The two are mutually
+  exclusive with a PO link: linking clears the owner (a triage tag), and refuses
+  a filed row (part of a record someone wrote a note on).
+## [1.118.0] - 2026-08-31
+
+### Features
+- feat(orders): **a PayPal transaction ID now links the PO and the payment the
+  moment a human types it, from whichever side they type it on.** v1.115.0 and
+  v1.116.0 both made the ID mandatory on the promise that it "is what auto-link
+  matches on" — but the only thing relating `orders.paypal_txn_id` to
+  `bank_transactions.paypal_txn_id` was `autoLink()` inside the bank sync, which
+  runs **every six hours**. So a purchaser could type the ID and leave a manager
+  reading an unlinked queue whose answer was already in the database; and a
+  manager who linked the payment on the Payments page wrote nothing back, so the
+  PO still read as unpaid and auto-link still had nothing to match on.
+
+  Both write points now close the loop. Saving a transaction ID on a PO —
+  through the edit form, on create, or on the draft PO minted from a delivered
+  package's screenshot scan — claims the matching transaction immediately, and
+  records it as a human link (`link_auto = FALSE`) rather than an automatic
+  guess. Linking on the Payments page fills the PO's transaction ID and writes
+  the fill into the order's activity log against the manager who did it.
+
+  Two collisions decide in favour of whoever spoke first. A PO that already
+  names a *different* transaction keeps what the purchaser typed — the payment
+  still links, the field is not overwritten. And a typed ID claims only *free*
+  transactions: one already linked to another PO, one a manager ignored, and one
+  a manager deliberately unlinked (the `no_auto_link` tombstone) are all left
+  where they are.
+
+  The write itself is one shared function, so the typed path and the sync path
+  cannot drift. It carries one tightening the six-hour cadence had made
+  unreachable and instant links do not: the free leg of a pair whose other leg
+  belongs to another PO is no longer claimable, because that splits one payment
+  across two orders — a state `POST /:id/pair` already refuses outright
+  ([RS-010](docs/tickets/RS-010-paypal-transaction-id-links-the-po-and-the-payment-i.md))
+
+## [1.117.0] - 2026-08-31
+
+### Features
+- feat(payments): **a linked payment now shows what the PO cost, beside the PO
+  it paid.** The Linked tab ended each row with a bare `PO-1400` pill while the
+  money that moved sat two columns to its left, so the only question worth
+  asking of that list — did this payment cover that PO? — could not be answered
+  without opening the PO. One screenshot had `PO-1412` on two separate $2,800
+  rows with no way to tell whether it was now settled, short, or paid twice.
+  The figure shown is the PO's cost as its own page states it: goods plus
+  `other_fees`, not the goods total alone. Fees are a separate column the bank
+  very much did charge — it is why the matcher already scores a payment against
+  both — so a goods-only number would have read as a shortfall on most
+  fee-carrying POs and manufactured the confusion it was added to remove.
+  ([RS-009](docs/tickets/RS-009-linked-payments-do-not-show-the-po-s-cost.md))
+
+## [1.116.0] - 2026-08-31
+
+### Features
+- feat(shipping): **adding a tracked package now requires the PayPal transaction
+  ID.** The field had been optional on the Add-package form since it landed in
+  v1.87.0, which quietly cost more than a blank column: `routes/packages.ts`
+  copies a package's `paypal_txn_id` onto the PO minted from the delivered box,
+  and `banktx/sync.ts` auto-links a Mercury/PayPal row to a PO on exactly that
+  value. A package added without one therefore became a PO that could only be
+  reconciled by a manager guessing from amount and date. Submitting without the
+  ID now opens the same blocking dialog every other blocked submit uses, and —
+  because the Payments page is manager-only and a purchaser has no way to look
+  the ID up — the dialog names the one route they do have: ask the manager who
+  paid for the order. The gate lives in the shared `useAddPackageForm` hook, so
+  the phone and the desktop page cannot drift on it, and it sits ahead of the
+  double-submit latch rather than behind it, where an early return would have
+  swallowed every later attempt in silence. This is the shipping-side twin of
+  v1.115.0's PO rule: a package added with an ID mints a PO that already
+  satisfies the advance guard, so nobody is asked twice
+  ([RS-008](docs/tickets/RS-008-adding-a-tracked-package-requires-a-transaction-id.md))
+
+## [1.115.0] - 2026-08-31
+
+### Features
+- feat(orders): **a company-paid PO now names the payment that funded it.**
+  `orders.payment` and `orders.paypal_txn_id` had sat side by side since `0001`
+  and `0099` with nothing relating them, so a purchaser could file a company-paid
+  PO, move it to In Transit, and leave no record of which payment covered it —
+  reconciliation then happened backwards, a manager on the Payments page guessing
+  from amount and date. Leaving Draft now requires the transaction ID. The guard
+  lives in `advanceOrderTx`, not the route, so it holds for a manager stage-jump
+  and for carrier movement too; a rule the two commonest paths could route around
+  would not be one. Self-pay POs are untouched.
+
+  The field is also what auto-link matches on, so this does more than create a
+  paper trail: a company-paid PO now arrives able to reconcile itself the moment
+  Mercury/PayPal syncs.
+
+  Scoped to orders created after the rule reaches an environment — migration
+  `0115` stamps the cutoff as `NOW()`, so each environment grandfathers exactly
+  what it already had. The server decides and reports it as `txnRequired` on the
+  order, because a shell that judged for itself would block the very pre-cutoff
+  drafts the rule exempts. Mobile gained the field as an input; it had been
+  read-only there, which left a mobile purchaser no way to satisfy the rule at
+  all.
+
+## [1.114.2] - 2026-08-31
+
+### Fixes
+- fix(orders): **a long activity history no longer opens a dead band above
+  "Order status" on the desktop PO page.** The side column's "scroll inside your
+  own card" rule was addressed by position — `:nth-child(2)` — but the aside has
+  a conditional middle child: the manager-only payments ledger, which appears
+  once a bank transaction is linked to the PO. On those orders the cap landed on
+  the ledger and the activity log ran to its full natural height, roughly a
+  screen and a half for 47 events. The log is now addressed by class
+  (`.oe-side-activity`), which is the only thing that holds: the component
+  renders nothing until its own fetch lands, so the child count moves 1 → 3
+  during load and no positional selector is right throughout. The grid rows
+  changed with it (`1fr auto` → `auto 1fr`, with the action card pinned to the
+  top of its row) so that if the side column is ever the taller of the two, the
+  surplus is trailing space *under* the status bar instead of a gap above it.
+
 ## [1.114.1] - 2026-08-31
 
 ### Fixes

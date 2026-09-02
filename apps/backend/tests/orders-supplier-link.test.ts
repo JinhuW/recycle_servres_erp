@@ -16,6 +16,7 @@ async function submittedPO(token: string, supplierId?: string) {
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token,
     body: {
+      paypalTxnId: 'TESTPAYTXN0000001',
       warehouseId: wh.body.items[0].id,
       supplierId,
       lines: [{ category: 'RAM', itemType: 'RAM', qty: 4, unitCost: 25, brand: 'Samsung' }],
@@ -121,6 +122,7 @@ describe('supplierId is validated at the boundary', () => {
     const r = await api('POST', '/api/orders', {
       token: marcus.token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         warehouseId: wh.body.items[0].id,
         supplierId: 'not-a-uuid',
         lines: [{ category: 'RAM', itemType: 'RAM', qty: 1, unitCost: 5, brand: 'Samsung' }],
@@ -135,6 +137,7 @@ describe('supplierId is validated at the boundary', () => {
     const r = await api('POST', '/api/orders', {
       token: marcus.token,
       body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
         warehouseId: wh.body.items[0].id,
         supplierId: '00000000-0000-4000-8000-000000000000',
         lines: [{ category: 'RAM', itemType: 'RAM', qty: 1, unitCost: 5, brand: 'Samsung' }],
@@ -155,13 +158,15 @@ describe('supplierId is validated at the boundary', () => {
       lines: [{ category: 'RAM', itemType: 'RAM', qty: 1, unitCost: 5, brand: 'Samsung' }],
     };
     const refused = await api('POST', '/api/orders', {
-      token: marcus.token, body: { ...mine, supplierId: alexClient },
+      token: marcus.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...mine, supplierId: alexClient },
     });
     expect(refused.status).toBe(400);
 
     // A manager may attach any client — that is the role, not an oversight.
     const allowed = await api('POST', '/api/orders', {
-      token: alex.token, body: { ...mine, supplierId: alexClient },
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...mine, supplierId: alexClient },
     });
     expect(allowed.status).toBe(201);
   });

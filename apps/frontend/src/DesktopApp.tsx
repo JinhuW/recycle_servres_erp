@@ -35,6 +35,7 @@ const DesktopVendorBids = lazy(() => import('./pages/desktop/DesktopVendorBids')
 const DesktopTransfers = lazy(() => import('./pages/desktop/DesktopTransfers').then(m => ({ default: m.DesktopTransfers })));
 const DesktopActivity = lazy(() => import('./pages/desktop/DesktopActivity').then(m => ({ default: m.DesktopActivity })));
 const DesktopPayments = lazy(() => import('./pages/desktop/DesktopPayments').then(m => ({ default: m.DesktopPayments })));
+const DesktopInternalTxns = lazy(() => import('./pages/desktop/DesktopInternalTxns').then(m => ({ default: m.DesktopInternalTxns })));
 const DesktopSettings = lazy(() => import('./pages/desktop/DesktopSettings').then(m => ({ default: m.DesktopSettings })));
 const DesktopTracker = lazy(() => import('./pages/desktop/DesktopTracker').then(m => ({ default: m.DesktopTracker })));
 const DesktopCoordinator = lazy(() => import('./pages/desktop/DesktopCoordinator').then(m => ({ default: m.DesktopCoordinator })));
@@ -161,7 +162,7 @@ export function DesktopApp() {
   }
 
   // Default to dashboard if a purchaser tried to navigate to a manager-only view.
-  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'payments' || view === 'tracker' || view === 'coordinator')
+  const view2: DesktopView = user.role === 'purchaser' && (view === 'inventory' || view === 'analysis' || view === 'sellorders' || view === 'vendorbids' || view === 'transfers' || view === 'activity' || view === 'payments' || view === 'internaltx' || view === 'tracker' || view === 'coordinator')
     ? 'dashboard'
     : view;
 
@@ -247,6 +248,7 @@ export function DesktopApp() {
             {view2 === 'transfers' && <DesktopTransfers onToast={showToast} />}
             {view2 === 'activity'  && <DesktopActivity />}
             {view2 === 'payments'  && <DesktopPayments onToast={showToast} />}
+            {view2 === 'internaltx' && <DesktopInternalTxns onToast={showToast} />}
             {view2 === 'tracker'   && <DesktopTracker showToast={showToast} />}
             {view2 === 'coordinator' && <DesktopCoordinator showToast={showToast} />}
             {view2 === 'settings'   && <DesktopSettings showToast={showToast} />}

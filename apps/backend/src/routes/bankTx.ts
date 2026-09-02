@@ -16,6 +16,7 @@ import {
 } from '../banktx/match';
 import { syncBankTransactions } from '../banktx/sync';
 import { getDb } from '../db';
+import { writeOrderEvent } from '../services/orderAudit';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import type { Env, User } from '../types';
 
@@ -27,6 +28,10 @@ const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   });
 
 type SqlClient = ReturnType<typeof getDb>;
+
+// A bad ?assignee= reaches Postgres as a ::uuid cast, which errors as a 500
+// rather than the 400 the caller earned.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type LegRow = {
   id: string;
@@ -45,6 +50,8 @@ type LegRow = {
   linked_at: Date | null;
   ignored: boolean;
   category: string;
+  internal_txn_id: string | null;
+  assignee_id: string | null;
 };
 
 function shapeLeg(l: LegRow) {
@@ -75,7 +82,7 @@ async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
   return sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
-           linked_by, linked_at, ignored, category
+           linked_by, linked_at, ignored, category, internal_txn_id, assignee_id
     FROM bank_transactions
     WHERE id = ${id}
        OR pair_id = (SELECT pair_id FROM bank_transactions WHERE id = ${id} AND pair_id IS NOT NULL)
@@ -90,6 +97,10 @@ bankTx.get('/', async (c) => {
   const source = c.req.query('source') ?? 'all';
   const direction = c.req.query('direction') ?? 'all';
   const q = c.req.query('q')?.trim() ?? '';
+  const assignee = c.req.query('assignee')?.trim() ?? '';
+  if (assignee && assignee !== 'unassigned' && !UUID_RE.test(assignee)) {
+    return c.json({ error: 'assignee must be a user id or "unassigned"' }, 400);
+  }
   const hasMatch = c.req.query('hasMatch') === '1';
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const cursor = decodeCursor(c.req.query('cursor'));
@@ -118,6 +129,11 @@ bankTx.get('/', async (c) => {
           AND (ql.counterparty ILIKE ${like} OR ql.description ILIKE ${like}
                OR ql.paypal_txn_id ILIKE ${like} OR ql.external_id ILIKE ${like})))`
     : sql`TRUE`;
+  // The owner lives on every leg, so the display leg alone answers this.
+  const assigneeFrag =
+    assignee === '' ? sql`TRUE`
+    : assignee === 'unassigned' ? sql`bt.assignee_id IS NULL`
+    : sql`bt.assignee_id = ${assignee}::uuid`;
   const cursorFrag = cursor
     ? sql`AND (bt.posted_at, bt.id) < (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`
     : sql`AND TRUE`;
@@ -127,11 +143,23 @@ bankTx.get('/', async (c) => {
     ? sql`${openRowFrag(sql, 'bt')} AND ${hasMatchFrag(sql, 'bt')}`
     : sql`TRUE`;
 
+  // `order_cost` is what the bank was asked to pay for the linked PO, so a row
+  // can be read against its own amount: goods (a line mirror or a negotiated lot
+  // price) plus the fees charged on top. Goods alone reads short of the payment
+  // on any PO carrying a fee, which is most of them — `amountDateFrag` in
+  // banktx/match.ts matches on both for that reason. NULL when there is no
+  // stored goods total, since a fees-only figure would read as the PO's cost.
+  //
+  // The join is aliased `po`, not `o`: `hasMatchFrag` lands in this WHERE
+  // carrying its own `EXISTS (SELECT 1 FROM orders o …)`.
   const rows = await sql`
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            u.name AS linked_by_name,
+           (po.total_cost + po.other_fees)::float AS order_cost,
+           bt.internal_txn_id, it.title AS internal_txn_title,
+           bt.assignee_id, au.name AS assignee_name,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
@@ -141,9 +169,12 @@ bankTx.get('/', async (c) => {
             WHERE bt.pair_id IS NOT NULL AND l.pair_id = bt.pair_id) AS pair_legs
     FROM bank_transactions bt
     LEFT JOIN users u ON u.id = bt.linked_by
+    LEFT JOIN orders po ON po.id = bt.order_id
+    LEFT JOIN users au ON au.id = bt.assignee_id
+    LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
-      AND ${matchFrag} ${cursorFrag}
+      AND ${assigneeFrag} AND ${matchFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
   `;
@@ -200,12 +231,17 @@ bankTx.get('/', async (c) => {
       paypalTxnId: r.paypal_txn_id,
       legs: (r.pair_legs as ReturnType<typeof shapeLeg>[] | null) ?? [shapeLeg(r as unknown as LegRow)],
       orderId: r.order_id,
+      orderCost: r.order_cost,
       linkKind: r.link_kind,
       linkAuto: r.link_auto,
       linkedAt: r.linked_at,
       linkedByName: r.linked_by_name ?? null,
       ignored: r.ignored,
       category: r.category,
+      internalTxn: r.internal_txn_id
+        ? { id: r.internal_txn_id, title: r.internal_txn_title ?? null }
+        : null,
+      assignee: r.assignee_id ? { id: r.assignee_id, name: r.assignee_name } : null,
     })),
     nextCursor,
   });
@@ -278,7 +314,7 @@ bankTx.get('/by-order/:orderId', async (c) => {
   const rows = await sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
-           linked_by, linked_at, ignored
+           linked_by, linked_at, ignored, internal_txn_id, assignee_id
     FROM bank_transactions
     WHERE order_id = ${orderId} AND (pair_id IS NULL OR source = 'paypal')
     ORDER BY posted_at DESC, id DESC`;
@@ -302,25 +338,47 @@ bankTx.post('/:id/link', async (c) => {
 
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].ignored) return c.json({ error: 'Unignore the transaction before linking it' }, 400);
+  if (group.some((l) => l.ignored)) return c.json({ error: 'Unignore the transaction before linking it' }, 400);
+  // A membership is part of a record someone wrote a note on, so it is refused
+  // rather than cleared. The owner tag below has no such home and goes quietly.
+  if (group.some((l) => l.internal_txn_id)) {
+    return c.json({ error: 'Remove the transaction from its internal transaction before linking it' }, 400);
+  }
 
   const order = await sql`SELECT id FROM orders WHERE id = ${orderId} LIMIT 1`;
   if (order.length === 0) return c.json({ error: 'Order not found' }, 404);
 
   const kind = group[0].amount < 0 ? 'payment' : 'refund';
-  await sql`
-    UPDATE bank_transactions
-    SET order_id = ${orderId}, link_kind = ${kind}, link_auto = FALSE,
-        linked_by = ${c.var.user.id}, linked_at = NOW()
-    WHERE id IN ${sql(group.map((l) => l.id))}`;
-  return c.json({ ok: true, orderId, linkKind: kind });
+  const txnId = group.find((l) => l.paypal_txn_id)?.paypal_txn_id ?? null;
+  const orderTxnFilled = await sql.begin(async (tx) => {
+    await tx`
+      UPDATE bank_transactions
+      SET order_id = ${orderId}, link_kind = ${kind}, link_auto = FALSE,
+          linked_by = ${c.var.user.id}, linked_at = NOW(),
+          assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
+      WHERE id IN ${tx(group.map((l) => l.id))}`;
+    if (!txnId) return false;
+    // Only into an empty field: a PO already naming a transaction was told so
+    // by the purchaser who paid, and a manager linking here is not a
+    // correction of that. The link stands either way.
+    const filled = await tx`
+      UPDATE orders SET paypal_txn_id = ${txnId}
+      WHERE id = ${orderId} AND paypal_txn_id IS NULL
+      RETURNING id`;
+    if (filled.length === 0) return false;
+    await writeOrderEvent(tx, orderId, c.var.user.id, 'meta_changed', {
+      changes: [{ field: 'paypal_txn_id', from: null, to: txnId }],
+    });
+    return true;
+  });
+  return c.json({ ok: true, orderId, linkKind: kind, orderTxnFilled });
 });
 
 bankTx.post('/:id/unlink', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (!group[0].order_id) return c.json({ error: 'Not linked' }, 400);
+  if (!group.some((l) => l.order_id)) return c.json({ error: 'Not linked' }, 400);
   // The tombstone keeps auto-link from resurrecting the removed link on the
   // next sync; a manual re-link is unaffected.
   await sql`
@@ -375,18 +433,50 @@ bankTx.post('/:id/pair', async (c) => {
   if (a.order_id && b.order_id && a.order_id !== b.order_id) {
     return c.json({ error: 'Legs are linked to different orders — unlink one first' }, 400);
   }
+  // Pairing merges two groups, so every piece of per-group state has to end up
+  // agreeing: a lone value spreads, two different ones are a decision only the
+  // manager can make. Without this the feed — which renders the PayPal leg
+  // alone — would silently swallow whatever sat on the Mercury one.
+  if (a.assignee_id && b.assignee_id && a.assignee_id !== b.assignee_id) {
+    return c.json({ error: 'Legs are assigned to different members — unassign one first' }, 400);
+  }
+  if (a.internal_txn_id && b.internal_txn_id && a.internal_txn_id !== b.internal_txn_id) {
+    return c.json({ error: 'Legs belong to different internal transactions — remove one first' }, 400);
+  }
+  if ((a.internal_txn_id || b.internal_txn_id) && (a.order_id || b.order_id)) {
+    return c.json({ error: 'A leg in an internal transaction cannot be paired with one linked to a purchase order' }, 400);
+  }
 
   const linked = a.order_id ? a : b.order_id ? b : null;
+  const assigned = a.assignee_id ? a : b.assignee_id ? b : null;
+  const filed = a.internal_txn_id ? a : b.internal_txn_id ? b : null;
   await sql.begin(async (tx) => {
     const pairId = crypto.randomUUID();
     await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${a.id}, ${b.id})`;
+    if (filed) {
+      await tx`
+        UPDATE bank_transactions
+        SET internal_txn_id = ${filed.internal_txn_id},
+            category = 'transfer', category_manual = TRUE
+        WHERE pair_id = ${pairId} AND internal_txn_id IS NULL`;
+    }
     if (linked) {
+      // Clears the owner in the same statement: the CHECK refuses a row that is
+      // both linked and assigned, so propagating the link onto an assigned leg
+      // would abort the transaction.
       await tx`
         UPDATE bank_transactions
         SET order_id = ${linked.order_id}, link_kind = ${linked.link_kind},
             link_auto = ${linked.link_auto}, linked_by = ${linked.linked_by},
-            linked_at = ${linked.linked_at}
+            linked_at = ${linked.linked_at},
+            assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
         WHERE pair_id = ${pairId} AND order_id IS NULL`;
+    } else if (assigned) {
+      await tx`
+        UPDATE bank_transactions
+        SET assignee_id = ${assigned.assignee_id}, assigned_by = ${c.var.user.id},
+            assigned_at = NOW()
+        WHERE pair_id = ${pairId} AND assignee_id IS NULL`;
     }
   });
   return c.json({ ok: true });
@@ -410,7 +500,7 @@ bankTx.post('/:id/ignore', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].order_id) return c.json({ error: 'Unlink the transaction before ignoring it' }, 400);
+  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before ignoring it' }, 400);
   await sql`
     UPDATE bank_transactions SET ignored = TRUE
     WHERE id IN ${sql(group.map((l) => l.id))}`;
@@ -446,7 +536,7 @@ bankTx.post('/:id/mark-transfer', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].order_id) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
+  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
 
   const rules = counterpartyRulesOf(group);
   let alsoMarked = 0;
@@ -473,6 +563,11 @@ bankTx.post('/:id/unmark-transfer', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+  // Otherwise the row is filed under an internal transaction and back in the
+  // unlinked queue at the same time.
+  if (group.some((l) => l.internal_txn_id)) {
+    return c.json({ error: 'Remove the transaction from its internal transaction first' }, 400);
+  }
 
   const rules = counterpartyRulesOf(group);
   let ruleRemoved = false;
@@ -494,6 +589,45 @@ bankTx.post('/:id/unmark-transfer', async (c) => {
     }
   });
   return c.json({ ok: true, ruleRemoved });
+});
+
+// ─── Assign / unassign ───────────────────────────────────────────────────────
+// Who an unexplained payment belongs to. Unlike every other verdict here this
+// one does NOT take the row off the queue: the payment still needs an answer,
+// it now just has someone to answer it. A PO link is the answer, which is why
+// the two are mutually exclusive (enforced by a CHECK in migrations/0116).
+
+bankTx.post('/:id/assign', async (c) => {
+  const sql = getDb(c.env);
+  const body = await c.req.json<{ userId?: string }>().catch(() => ({} as { userId?: string }));
+  const userId = body.userId?.trim();
+  if (!userId || !UUID_RE.test(userId)) return c.json({ error: 'userId is required' }, 400);
+
+  const group = await groupOf(sql, c.req.param('id'));
+  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before assigning it' }, 400);
+
+  // Deactivated members are soft-deleted, so an id alone isn't enough.
+  const [member] = await sql<{ name: string }[]>`
+    SELECT name FROM users WHERE id = ${userId} AND active LIMIT 1`;
+  if (!member) return c.json({ error: 'Member not found' }, 404);
+
+  await sql`
+    UPDATE bank_transactions
+    SET assignee_id = ${userId}, assigned_by = ${c.var.user.id}, assigned_at = NOW()
+    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  return c.json({ ok: true, assignee: { id: userId, name: member.name } });
+});
+
+bankTx.post('/:id/unassign', async (c) => {
+  const sql = getDb(c.env);
+  const group = await groupOf(sql, c.req.param('id'));
+  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+  await sql`
+    UPDATE bank_transactions
+    SET assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
+    WHERE id IN ${sql(group.map((l) => l.id))}`;
+  return c.json({ ok: true });
 });
 
 // ─── Link-picker suggestions ─────────────────────────────────────────────────

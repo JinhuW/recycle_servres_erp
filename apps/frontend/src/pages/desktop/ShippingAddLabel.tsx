@@ -131,7 +131,7 @@ export function ShippingAddLabel({ showToast }: Props) {
           </div>
         )}
         <div className="field" style={{ marginTop: 10 }}>
-          <label className="label">{t('shipPayTxnLabel')}</label>
+          <label className="label">{t('shipPayTxnLabel')} <span className="req">*</span></label>
           <input
             className="input mono"
             value={f.paypalTxnId}

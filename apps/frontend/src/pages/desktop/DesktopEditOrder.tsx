@@ -583,6 +583,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     linesDirty || warehouseDirty || paymentDirty || otherFeesDirty
     || otherFeesNoteDirty || paypalDirty;
 
+  // A company-paid PO names the payment that funded it before it leaves Draft.
+  // The server decides whether the rule governs this order (its cutoff lives in
+  // the DB), and refuses the advance regardless — this only saves the
+  // round-trip. `=== true` deliberately: an older backend omits the field.
+  const txnBlocked =
+    order.txnRequired === true && statusDirty && status !== 'Draft' && !paypalTxn.trim();
+
   const lineReady = (l: EditLine) => lineRequirements(l).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
@@ -590,7 +597,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // save sends none, so an incomplete legacy line must not block it — the
   // purchaser can't fix that line at this stage anyway.
   const canSave =
-    dirty && !saving && (!orderLocked || (canReopen && statusDirty))
+    dirty && !saving && !txnBlocked && (!orderLocked || (canReopen && statusDirty))
     && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
@@ -623,6 +630,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     saving || canSave  ? []
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
+  : txnBlocked         ? [t('poTxnRequired')]
   : lines.flatMap((l, i) => {
       if (brandConfirmPending(l)) {
         return [lines.length === 1
@@ -668,7 +676,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       const presentIds = new Set(lines.filter(l => l._id).map(l => l._id!));
       const removeLineIds = persistedIds.filter(id => !presentIds.has(id));
       const addedLines = lines.filter(l => !l._id);
-      const r = await api.patch<{ ok: true; addedLineIds: string[]; lifecycle: string }>(`/api/orders/${order.id}`, {
+      const r = await api.patch<{
+        ok: true; addedLineIds: string[]; lifecycle: string; paymentsLinked?: number;
+      }>(`/api/orders/${order.id}`, {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
@@ -727,7 +737,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         showErrorDialog(t('linePhotoRetryHold', { n: stillQueued }));
         return;
       }
-      onSaved('Saved ' + order.id);
+      // Saving a transaction id reconciles the payment on the way past, and the
+      // page is about to navigate away — so the toast is where the manager
+      // finds out it happened.
+      onSaved(r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : 'Saved ' + order.id);
     } catch (e) {
       // Keep the editor open and the user's edits intact on failure — calling
       // onSaved here would navigate away and discard unsaved work.
@@ -1235,7 +1248,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         {/* PO audit log — lives under Payment detail in the side column, fully
             foldable. The component hides its own card chrome before load and
             handles the empty-state copy for drafts. */}
-        <OrderActivityLog orderId={order.id} refreshKey={activityKey} />
+        <OrderActivityLog orderId={order.id} refreshKey={activityKey} className="oe-side-activity" />
       </aside>
 
       <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
@@ -1458,7 +1471,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('poPaypalTxn')}</label>
+              <label className="label">
+                {t('poPaypalTxn')}
+                {order.txnRequired === true && <span className="req">*</span>}
+              </label>
               <input
                 className="input mono"
                 value={paypalTxn}
