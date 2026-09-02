@@ -2,13 +2,13 @@
 id: RS-012
 title: Carrier movement stalls a PO silently, and assigning a paired payment can 500
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-02
 reporter: Jinhu
 branch: session/20260831-225948
-pr:
-version:
+pr: 244
+version: 1.119.1
 related: [RS-006, RS-011]
 ---
 
@@ -67,13 +67,13 @@ group `/assign` refuses — leaving no way out without the second fix.
 
 ## Acceptance criteria
 
-- [ ] A company-paid PO with no transaction ID that the carrier reports moving
+- [x] A company-paid PO with no transaction ID that the carrier reports moving
       stays in Draft **and** writes a `log.warn` naming the order, the shipment
       and the tracking number.
-- [ ] `POST /api/bank-transactions/:id/assign` on a pair whose Mercury leg is
+- [x] `POST /api/bank-transactions/:id/assign` on a pair whose Mercury leg is
       linked answers 400, not 500.
-- [ ] `POST /api/bank-transactions/:id/unlink` on that same pair succeeds.
-- [ ] Regression tests cover both, and the test for the first asserts the
+- [x] `POST /api/bank-transactions/:id/unlink` on that same pair succeeds.
+- [x] Regression tests cover both, and the test for the first asserts the
       warning fired — not merely that the PO stayed in Draft.
 
 ## Out of scope
