@@ -60,13 +60,13 @@ CREATE TABLE bank_ignore_rules (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source            TEXT NOT NULL CHECK (source IN ('mercury','paypal')),
   counterparty_eq   TEXT,        -- NULL = this condition is not part of the rule
-  description_like  TEXT,        -- matched ILIKE '%…%', wildcards escaped
+  description_has  TEXT,        -- literal case-insensitive substring, no wildcards
   direction         TEXT CHECK (direction IN ('in','out')),
   created_by        UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   -- A rule with no text condition would match a whole account.
-  CHECK (counterparty_eq IS NOT NULL OR description_like IS NOT NULL),
-  UNIQUE (source, counterparty_eq, description_like, direction)
+  CHECK (counterparty_eq IS NOT NULL OR description_has IS NOT NULL),
+  UNIQUE (source, counterparty_eq, description_has, direction)
 );
 
 CREATE INDEX bank_ignore_rules_created_by_idx ON bank_ignore_rules (created_by);
@@ -105,14 +105,20 @@ not to repair what the upsert clobbered.
 
 One exported function, `applyIgnoreRules(tx, source?)`: a single UPDATE joining
 unresolved rows against the rules, stamping `ignored` and `ignore_rule_id`
-together.  Reuses `escapeLike` from `lib/pagination.ts`-adjacent helpers rather
-than a second escaper.
+together.
+
+The description condition is a **literal substring test**, not `LIKE` — a
+stored pattern containing `%` or `_` would otherwise silently widen the rule,
+and escaping at write time would make the drawer display a pattern the user
+never typed.  `strpos` sidesteps both: nothing to escape, and the stored text
+is exactly what gets shown back.
 
 ```
 FROM bank_ignore_rules r
 WHERE bt.source = r.source
   AND (r.counterparty_eq  IS NULL OR bt.counterparty = r.counterparty_eq)
-  AND (r.description_like IS NULL OR bt.description ILIKE '%'||r.description_like||'%')
+  AND (r.description_has IS NULL
+       OR strpos(upper(bt.description), upper(r.description_has)) > 0)
   AND (r.direction IS NULL
        OR (r.direction = 'out' AND bt.amount < 0)
        OR (r.direction = 'in'  AND bt.amount > 0))
