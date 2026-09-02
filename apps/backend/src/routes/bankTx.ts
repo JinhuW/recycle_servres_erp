@@ -338,7 +338,7 @@ bankTx.post('/:id/link', async (c) => {
 
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].ignored) return c.json({ error: 'Unignore the transaction before linking it' }, 400);
+  if (group.some((l) => l.ignored)) return c.json({ error: 'Unignore the transaction before linking it' }, 400);
   // A membership is part of a record someone wrote a note on, so it is refused
   // rather than cleared. The owner tag below has no such home and goes quietly.
   if (group.some((l) => l.internal_txn_id)) {
@@ -378,7 +378,7 @@ bankTx.post('/:id/unlink', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (!group[0].order_id) return c.json({ error: 'Not linked' }, 400);
+  if (!group.some((l) => l.order_id)) return c.json({ error: 'Not linked' }, 400);
   // The tombstone keeps auto-link from resurrecting the removed link on the
   // next sync; a manual re-link is unaffected.
   await sql`
@@ -500,7 +500,7 @@ bankTx.post('/:id/ignore', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].order_id) return c.json({ error: 'Unlink the transaction before ignoring it' }, 400);
+  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before ignoring it' }, 400);
   await sql`
     UPDATE bank_transactions SET ignored = TRUE
     WHERE id IN ${sql(group.map((l) => l.id))}`;
@@ -536,7 +536,7 @@ bankTx.post('/:id/mark-transfer', async (c) => {
   const sql = getDb(c.env);
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].order_id) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
+  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before marking it a transfer' }, 400);
 
   const rules = counterpartyRulesOf(group);
   let alsoMarked = 0;
@@ -605,7 +605,7 @@ bankTx.post('/:id/assign', async (c) => {
 
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
-  if (group[0].order_id) return c.json({ error: 'Unlink the transaction before assigning it' }, 400);
+  if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before assigning it' }, 400);
 
   // Deactivated members are soft-deleted, so an id alone isn't enough.
   const [member] = await sql<{ name: string }[]>`

@@ -14,6 +14,7 @@ import type { ShippoClient } from './shippo';
 import { advanceOrderTx } from '../services/orderAdvance';
 import { voidShipmentTx } from '../services/shipmentVoid';
 import { notify } from '../lib/notify';
+import { log } from '../lib/log';
 
 const REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
@@ -93,7 +94,19 @@ export async function applyShipmentTracking(
     // moves a Draft PO to In Transit. The system actor is held to exactly
     // that one transition, so a PO in any later stage is a quiet no-op.
     if (next === 'in_transit' || next === 'delivered') {
-      await advanceOrderTx(tx, cur.order_id, null);
+      const outcome = await advanceOrderTx(tx, cur.order_id, null);
+      // A stage this actor may not drive is the quiet no-op above. A missing
+      // transaction id is not: the goods moved, the PO cannot follow them, and
+      // only a human adding the id un-sticks it. Unlogged, the rule looks like
+      // it simply stopped applying.
+      if (outcome.kind === 'missingTxnId') {
+        log.warn('carrier movement could not advance the PO', {
+          orderId: cur.order_id,
+          shipmentId: cur.id,
+          trackingNumber: cur.tracking_number,
+          status: next,
+        });
+      }
     }
     return next;
   });

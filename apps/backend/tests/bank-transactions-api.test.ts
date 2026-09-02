@@ -787,6 +787,38 @@ describe('assigning a payment to a member', () => {
     expect(row?.assignee?.name).toBeTruthy();
   });
 
+  it('refuses a pair linked through its Mercury leg instead of crashing', async () => {
+    await seedPairedAndSingles();
+    const { token, user } = await loginAs(ALEX);
+    const orderId = await createPO(token);
+    const db = getTestDb();
+
+    // The half-linked state auto-link leaves behind when the PayPal leg is
+    // skipped (a transfer rule, or an ignore that survived pairing): the
+    // Mercury leg carries the order, the PayPal leg does not. The group is
+    // ordered source DESC, so the PayPal leg is the one a first-leg check sees.
+    await db`
+      UPDATE bank_transactions
+      SET order_id = ${orderId}, link_kind = 'payment', linked_at = NOW()
+      WHERE external_id = 'm-settle'`;
+
+    for (const leg of ['m-settle', TXN_A]) {
+      const r = await api('POST', `/api/bank-transactions/${await idOf(leg)}/assign`, {
+        token, body: { userId: user.id },
+      });
+      expect(r.status).toBe(400);
+    }
+    const owned = await db`SELECT 1 FROM bank_transactions WHERE assignee_id IS NOT NULL`;
+    expect(owned).toHaveLength(0);
+
+    // And the way out of that state is open — unlink has to see the same
+    // group, or the payment can be neither assigned nor freed.
+    const un = await api('POST', `/api/bank-transactions/${await idOf(TXN_A)}/unlink`, { token });
+    expect(un.status).toBe(200);
+    const still = await db`SELECT 1 FROM bank_transactions WHERE order_id IS NOT NULL`;
+    expect(still).toHaveLength(0);
+  });
+
   it('filters by owner and by unassigned', async () => {
     const txnId = await seedOne();
     const { token, user } = await loginAs(ALEX);
