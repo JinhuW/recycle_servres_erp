@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
 import { refreshShipmentTracking } from '../src/shipping/track';
 import { stubShippingClient } from '../src/shipping/stub';
+import { log } from '../src/lib/log';
 import type { ShippingClient } from '../src/shipping/types';
 
 type Shipment = {
@@ -388,6 +389,53 @@ describe('shipments — tracking refresh', () => {
       SELECT kind FROM order_events WHERE order_id = ${po} AND kind = 'submitted'
     `;
     expect(events2).toHaveLength(1);
+  });
+
+  it('says so when a missing transaction id blocks the advance', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+
+    // Inline rather than createPo(): the helper always names a transaction,
+    // which is exactly the condition under test. Payment defaults to company.
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        category: 'RAM',
+        warehouseId: 'WH-LA1',
+        lines: [{
+          category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200',
+          partNumber: 'SHIP-TEST-NOTXN', condition: 'Pulled — Tested', qty: 4, unitCost: 100,
+        }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const po = created.body.id;
+
+    const s = await createShipment(token, po);
+    await quoteAndBuy(token, po, s.id);
+
+    const sql = getTestDb();
+    await sql`UPDATE shipments SET provider = 'shipsaving' WHERE id = ${s.id}`;
+
+    const warn = vi.spyOn(log, 'warn');
+    await refreshShipmentTracking(sql, stubShippingClient);
+
+    // The carrier is ground truth about the box, so the shipment still moves —
+    // it is the PO that cannot follow it.
+    const ship = (await sql`SELECT status FROM shipments WHERE id = ${s.id}`)[0] as { status: string };
+    expect(ship.status).toBe('in_transit');
+    const order = (await sql`SELECT lifecycle FROM orders WHERE id = ${po}`)[0] as { lifecycle: string };
+    expect(order.lifecycle).toBe('draft');
+    const events = await sql`SELECT kind FROM order_events WHERE order_id = ${po} AND kind = 'submitted'`;
+    expect(events).toHaveLength(0);
+
+    // The point of the fix: the stall is on the record, not silent.
+    const call = warn.mock.calls.find(([, d]) => (d as { orderId?: string } | undefined)?.orderId === po);
+    expect(call).toBeDefined();
+    expect(call![1]).toMatchObject({ shipmentId: s.id, status: 'in_transit' });
+    warn.mockRestore();
   });
 });
 

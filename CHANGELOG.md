@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.119.1] - 2026-09-02
+
+### Fixes
+
+- A company-paid purchase order that never named the payment funding it could
+  be left behind silently.  The carrier reporting the box in transit runs the
+  same advance a person does, and the same rule blocks it — but where a person
+  gets a 409 explaining why, the carrier path threw the answer away: the
+  shipment moved, the order stayed in Draft, and nothing anywhere said so.  It
+  now records the stall against the order, the shipment and the tracking
+  number.  The order still needs a human to add the transaction id; the
+  difference is that the stall is findable instead of being mistaken for the
+  rule no longer applying.
+- Assigning an owner to a payment whose two legs are only half linked returned
+  a server error.  A paired payment is read from its PayPal leg, so a pair
+  linked through its Mercury leg looked unlinked, the assignment was allowed,
+  and it then collided with the constraint that keeps a payment from being
+  owned and answered at once.  Unlinking hit the same blind spot from the other
+  side and reported the payment as "not linked", which left no way out of the
+  state at all.  Both now read the whole payment rather than one leg of it, as
+  do ignoring, marking a transfer, and linking.
+
 ## [1.119.0] - 2026-09-01
 
 ### Features
