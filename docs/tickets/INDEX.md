@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-012](./RS-012-carrier-movement-stalls-a-po-silently-and-assigning.md) | in-progress | bug | P1 | Carrier movement stalls a PO silently, and assigning a paired payment can 500 | — |
+| [RS-012](./RS-012-carrier-movement-stalls-a-po-silently-and-assigning.md) | done | bug | P1 | Carrier movement stalls a PO silently, and assigning a paired payment can 500 | 1.119.1 |
 | [RS-011](./RS-011-internal-transaction-records-and-an-owner-for-paymen.md) | done | story | P2 | Internal transaction records, and an owner for payments with no PO | 1.119.0 |
 | [RS-010](./RS-010-paypal-transaction-id-links-the-po-and-the-payment-i.md) | done | story | P2 | PayPal transaction ID links the PO and the payment in both directions | 1.118.0 |
 | [RS-009](./RS-009-linked-payments-do-not-show-the-po-s-cost.md) | done | story | P2 | Linked payments do not show the PO's cost | 1.117.0 |
