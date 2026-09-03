@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.120.0] - 2026-09-03
+
+### Changes
+
+- The Payments ledger's right-hand side used to be a wall.  Every row in the
+  Unlinked queue printed an amber "Unlinked" chip — a whole column restating
+  the tab that was already selected — beside a Purchase order cell that carried
+  the suggestion *and* two or three buttons at equal weight.  On the rows that
+  actually had a match those buttons wrapped, so those rows stood a line taller
+  and the table stepped; and because they were left-aligned in a cell whose
+  width followed its content, no two `Link…` buttons shared an x.
+
+  Status and Purchase order were one question asked twice — what is this money
+  attached to? — so they are now one column that answers it: a linked PO with
+  its cost, a suggested PO with how far apart the two dates are, `Transfer`,
+  `Ignored`, or `Unlinked`.  The seventh column freed up by the merge is an
+  actions rail: one primary button per row, flush right, at the same x on every
+  row.  `Ignore`, `Not it` and `Not the same` step back and appear when the row
+  is hovered or takes keyboard focus — they keep their place in the tab order,
+  and a device without hover shows them permanently.  Rows are now a uniform
+  height whatever state they are in.
+
 ## [1.119.1] - 2026-09-02
 
 ### Fixes

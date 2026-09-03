@@ -356,7 +356,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payColCounterparty: 'Payee',
     payColAmount: 'Amount',
     payColStatus: 'Status',
-    payColOrder: 'Purchase order',
+    payColActions: 'Actions',
     payStatusUnlinked: 'Unlinked',
     payStatusIgnored: 'Ignored',
     payStatusTransfer: 'Transfer',
@@ -392,7 +392,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payTileTransfersSub: 'between our accounts',
     payTileIgnoredSub: 'not seller payments',
     payFilterHasMatch: 'Has match',
-    payMatchLikely: 'Likely {id} · {when}',
     payMatchCountOne: '1 possible PO',
     // The pool is capped, so a count larger than the list has to say so —
     // otherwise working all of them and finding nothing looks conclusive.

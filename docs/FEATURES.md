@@ -224,6 +224,14 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   its record. Their totals read a transfer's two opposite-signed legs as two
   real movements (so a transfer nets to zero) while a payment pair — the same
   money seen twice — still counts once.
+- **A row states one verdict and offers one action** (v1.120.0). The Status
+  column was folded into the Purchase order column — they answered the same
+  question — so a row now reads a linked PO with its cost, a suggested PO with
+  the gap between the two dates, `Transfer`, `Ignored`, or `Unlinked`, and the
+  freed column is an actions rail whose primary button sits at the same place on
+  every row. `Ignore`, `Not it` and `Not the same` appear on hover or keyboard
+  focus rather than standing on every row at once; a device without hover keeps
+  them visible.
 - **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
   filters by owner or by Unassigned. Assigning deliberately does *not* resolve
   the row: a payment that needs explaining still needs explaining, it just has
