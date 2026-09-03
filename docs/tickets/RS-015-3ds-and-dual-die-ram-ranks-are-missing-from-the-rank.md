@@ -2,13 +2,13 @@
 id: RS-015
 title: 3DS and dual-die RAM ranks are missing from the Rank dropdown
 type: story
-status: in-progress
+status: in-review
 priority: P3
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260903-100736
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/248
+version: 1.120.0
 related: []
 ---
 
