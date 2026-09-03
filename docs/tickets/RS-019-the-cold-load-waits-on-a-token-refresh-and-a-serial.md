@@ -2,12 +2,12 @@
 id: RS-019
 title: the cold load waits on a token refresh and a serial chunk hop
 type: task
-status: in-review
+status: done
 priority: P2
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-140951
-pr:
+pr: 252
 version: 1.122.0
 related: [RS-017]
 ---
