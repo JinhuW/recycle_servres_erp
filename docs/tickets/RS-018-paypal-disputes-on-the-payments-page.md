@@ -2,13 +2,13 @@
 id: RS-018
 title: PayPal disputes on the Payments page
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260903-151545
 pr:
-version:
+version: 1.124.0
 related: []
 ---
 

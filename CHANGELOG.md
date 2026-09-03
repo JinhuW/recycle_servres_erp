@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.124.0] - 2026-09-03
+
+### Features
+
+- **A disputed payment says so.**  When a seller doesn't deliver we open a
+  PayPal case to claim the money back, and until now that case lived entirely
+  in PayPal's web UI — the Payments page showed the payment as an ordinary row.
+  A manager could link a disputed payment to its purchase order and never learn
+  that the money might come back, or that a reply was due.  The six-hourly bank
+  sync now also reads PayPal's Customer Disputes API, and the page grows a
+  **Disputed** tile, a filter beside *Has match*, a red chip on the row, and the
+  case's stage — inquiry, claim, pre-arbitration, arbitration — with its dated
+  history in the expanded row.  Only cases we filed as the purchaser: PayPal has
+  no field naming who filed one, but a transaction's sign is its direction here,
+  so a case we opened always sits on money going out.
+- Message threads and evidence are deliberately not stored.  The ask was for
+  status, and the rest is correspondence and counterparty personal data.
+
+### Notes
+
+- Disputes need the **Disputes** feature ticked on the PayPal REST app (App
+  feature options).  It was off: the live token carried only the Transaction
+  Search scope and every dispute call returned `403 NOT_AUTHORIZED`.  The sync
+  degrades on its own rather than taking the transaction feed down with it, and
+  the Payments header now says *"PayPal disputes not authorised"* instead of
+  showing an empty list that reads as "no cases".
+
 ## [1.123.1] - 2026-09-03
 
 ### Fixes
