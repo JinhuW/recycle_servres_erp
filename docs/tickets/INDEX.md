@@ -10,6 +10,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-016](./RS-016-payments-needs-an-owner-column.md) | done | task | P3 | payments needs an owner column | 1.121.0 |
 | [RS-015](./RS-015-payments-right-side-reads-as-a-mass.md) | done | task | P2 | payments right side reads as a mass | 1.120.0 |
 | [RS-014](./RS-014-a-taught-ignore-rule-hides-a-recurring-pattern-of-ba.md) | in-progress | story | P2 | A taught ignore rule hides a recurring pattern of bank transactions | — |
+| [RS-013](./RS-013-demo-shipping-labels-must-not-charge-a-po-and-bank-s.md) | done | bug | P1 | Demo shipping labels must not charge a PO, and bank sync must report its failures | — |
 | [RS-012](./RS-012-carrier-movement-stalls-a-po-silently-and-assigning.md) | done | bug | P1 | Carrier movement stalls a PO silently, and assigning a paired payment can 500 | 1.119.1 |
 | [RS-011](./RS-011-internal-transaction-records-and-an-owner-for-paymen.md) | done | story | P2 | Internal transaction records, and an owner for payments with no PO | 1.119.0 |
 | [RS-010](./RS-010-paypal-transaction-id-links-the-po-and-the-payment-i.md) | done | story | P2 | PayPal transaction ID links the PO and the payment in both directions | 1.118.0 |

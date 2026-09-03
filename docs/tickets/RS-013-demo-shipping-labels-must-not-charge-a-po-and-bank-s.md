@@ -2,13 +2,13 @@
 id: RS-013
 title: Demo shipping labels must not charge a PO, and bank sync must report its failures
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-02
 reporter: Jinhu
 branch: session/20260902-121934
-pr:
-version:
+pr: 254
+version: 1.123.0
 related: []
 ---
 
