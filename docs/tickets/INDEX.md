@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-021](./RS-021-production-cannot-explain-its-own-failures.md) | done | bug | P2 | Production cannot explain its own failures | — |
+| [RS-021](./RS-021-production-cannot-explain-its-own-failures.md) | done | bug | P2 | Production cannot explain its own failures | 1.125.0 |
 | [RS-020](./RS-020-boot-fx-and-ocr-each-hang-or-die-on-a-transient-that.md) | done | bug | P2 | Boot, FX and OCR each hang or die on a transient that a retry would survive | 1.123.1 |
 | [RS-019](./RS-019-the-cold-load-waits-on-a-token-refresh-and-a-serial.md) | done | task | P2 | the cold load waits on a token refresh and a serial chunk hop | 1.122.0 |
 | [RS-018](./RS-018-paypal-disputes-on-the-payments-page.md) | done | story | P2 | PayPal disputes on the Payments page | 1.124.0 |
