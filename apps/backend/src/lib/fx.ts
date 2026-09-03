@@ -30,6 +30,9 @@ export interface FxLookup {
 
 const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FRANKFURTER_URL = 'https://api.frankfurter.dev/v1/latest';
+// The house standard every other outbound client uses (Mercury, PayPal, Shippo,
+// ShipSaving).
+const FETCH_TIMEOUT_MS = 20_000;
 
 export function listSupportedCurrencies(): readonly SupportedCurrency[] {
   return SUPPORTED_CURRENCIES;
@@ -79,7 +82,10 @@ export async function fetchAndStoreLatest(
 ): Promise<FxLookup> {
   if (quote === 'USD') return getLatestRateToUsd(sql, 'USD');
   const url = `${FRANKFURTER_URL}?base=USD&symbols=${quote}`;
-  const res = await fetch(url);
+  // Not just the refresh loop: an empty table sends a *request* here, including
+  // from the unauthenticated vendor portal. Without a signal this is bounded
+  // only by undici's ~300s default, so a hung upstream pins the request.
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`frankfurter ${res.status}`);
   const body = (await res.json()) as { amount: number; base: string; date: string; rates: Record<string, number> };
   const rate = body.rates?.[quote];
