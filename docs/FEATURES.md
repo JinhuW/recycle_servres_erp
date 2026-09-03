@@ -254,9 +254,24 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   the PO is the answer the tag stood in for; a row filed under an internal
   transaction refuses the link instead, because a note is attached to it.
 
+- **A disputed payment says so** (v1.124.0). The sync reads PayPal's Customer
+  Disputes API alongside the transaction feed, and a payment we have opened a
+  case against carries a red chip, appears behind a **Disputed** tile and
+  filter, and shows the case's stage (inquiry → claim → pre-arbitration →
+  arbitration) with its dated history when the row is expanded. Only cases *we*
+  filed as the purchaser: PayPal names no filer, but a transaction's sign is its
+  direction, so ours always sit on money going out. Message threads and evidence
+  are not stored — the page answers "where has this got to", not "what was
+  said".
+
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
 > first.
+
+> Disputes are a **separate PayPal app permission** from Transaction Search
+> ("Disputes" under App feature options). Without it every dispute call returns
+> `403 NOT_AUTHORIZED` while the money keeps syncing — the Payments header says
+> *"PayPal disputes not authorised"* rather than showing an empty list.
 
 ## Transfers
 

@@ -102,6 +102,7 @@ bankTx.get('/', async (c) => {
     return c.json({ error: 'assignee must be a user id or "unassigned"' }, 400);
   }
   const hasMatch = c.req.query('hasMatch') === '1';
+  const dispute = c.req.query('dispute') === '1';
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const cursor = decodeCursor(c.req.query('cursor'));
 
@@ -142,6 +143,12 @@ bankTx.get('/', async (c) => {
   const matchFrag = hasMatch
     ? sql`${openRowFrag(sql, 'bt')} AND ${hasMatchFrag(sql, 'bt')}`
     : sql`TRUE`;
+  // Money out, because that is what "the case we submitted" means: we paid a
+  // seller and want it back. PayPal has no field saying who filed a case, but a
+  // transaction's sign is its direction here, and a case filed *against* us
+  // would sit on an incoming payment. Consequence worth knowing: if the app
+  // ever gains seller scope, those cases are stored and stay invisible.
+  const disputeFrag = dispute ? sql`bt.dispute IS NOT NULL AND bt.amount < 0` : sql`TRUE`;
 
   // `order_cost` is what the bank was asked to pay for the linked PO, so a row
   // can be read against its own amount: goods (a line mirror or a negotiated lot
@@ -158,6 +165,7 @@ bankTx.get('/', async (c) => {
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            u.name AS linked_by_name,
            (po.total_cost + po.other_fees)::float AS order_cost,
+           bt.dispute,
            bt.internal_txn_id, it.title AS internal_txn_title,
            bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
            (SELECT json_agg(json_build_object(
@@ -174,7 +182,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
-      AND ${assigneeFrag} AND ${matchFrag} ${cursorFrag}
+      AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
   `;
@@ -238,6 +246,10 @@ bankTx.get('/', async (c) => {
       linkedByName: r.linked_by_name ?? null,
       ignored: r.ignored,
       category: r.category,
+      // The whole case, timeline included: it is a few entries on a handful of
+      // rows, so a second round trip when someone expands the row would be
+      // machinery for nothing.
+      disputes: r.dispute ?? null,
       internalTxn: r.internal_txn_id
         ? { id: r.internal_txn_id, title: r.internal_txn_title ?? null }
         : null,
@@ -276,7 +288,12 @@ bankTx.get('/stats', async (c) => {
       COUNT(*) FILTER (WHERE order_id IS NOT NULL)::int                                AS linked_count,
       COUNT(*) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund')::int       AS refund_count,
       COALESCE(SUM(amount) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund'), 0)::float AS refund_amount,
-      COUNT(*) FILTER (WHERE ignored)::int                                             AS ignored_count
+      COUNT(*) FILTER (WHERE ignored)::int                                             AS ignored_count,
+      -- Money-out is baked into the predicate, not left to the direction lens:
+      -- an incoming disputed payment is a case against us, not one we filed,
+      -- and the tile has to agree with the list.
+      COUNT(*) FILTER (WHERE dispute IS NOT NULL AND amount < 0)::int                  AS dispute_count,
+      COALESCE(SUM(ABS(amount)) FILTER (WHERE dispute IS NOT NULL AND amount < 0), 0)::float AS dispute_amount
     FROM bank_transactions
     WHERE pair_id IS NULL OR source = 'paypal'`;
   const [suggested] = await sql`
@@ -287,7 +304,9 @@ bankTx.get('/stats', async (c) => {
       AND ${hasMatchFrag(sql, 'bt')}
       ${dirFragBt}`;
   const sources = await sql`
-    SELECT source, MAX(last_synced_at) AS last_synced_at FROM bank_accounts GROUP BY source`;
+    SELECT source, MAX(last_synced_at) AS last_synced_at,
+           MAX(dispute_error) AS dispute_error
+    FROM bank_accounts GROUP BY source`;
   return c.json({
     unlinked: { count: agg.unlinked_count, amount: agg.unlinked_amount },
     suggested: { count: suggested.count },
@@ -295,7 +314,15 @@ bankTx.get('/stats', async (c) => {
     refunds: { count: agg.refund_count, amount: agg.refund_amount },
     ignored: { count: agg.ignored_count },
     transfers: { count: agg.transfer_count },
-    sources: sources.map((s) => ({ source: s.source, lastSyncedAt: s.last_synced_at })),
+    disputes: { count: agg.dispute_count, amount: agg.dispute_amount },
+    sources: sources.map((s) => ({
+      source: s.source,
+      lastSyncedAt: s.last_synced_at,
+      // Disputes are a separate PayPal permission, so this can be set while the
+      // transaction sync is perfectly healthy. The page says so rather than
+      // showing an empty dispute list that reads as "no cases".
+      disputeError: s.dispute_error ?? null,
+    })),
   });
 });
 
