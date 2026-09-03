@@ -2,13 +2,13 @@
 id: RS-020
 title: Boot, FX and OCR each hang or die on a transient that a retry would survive
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-121934
-pr:
-version:
+pr: 257
+version: 1.123.1
 related: [RS-013]
 ---
 
