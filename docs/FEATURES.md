@@ -59,6 +59,10 @@ moves Draft → Submitted → In Transit → Reviewing → Done.
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
+  Rank covers the plain JEDEC grid plus the high-density packaging codes —
+  dual-die (`4DRx4`, `8DRx4`) and 3DS stacks (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`),
+  which a label scan now keeps instead of flattening to the plain rank
+  (v1.120.0).
 - **Validation is shared between shells**, so desktop, mobile and the backend
   can't drift: all RAM spec fields required (v1.29.0); Chip # required only for
   Micron and Other, whose part numbers don't identify the module (v1.36.0);

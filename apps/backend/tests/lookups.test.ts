@@ -49,4 +49,18 @@ describe('GET /api/lookups', () => {
     expect(caps).not.toContain('1024GB');
     expect(caps.indexOf('1TB')).toBe(caps.indexOf('1000GB') + 1);
   });
+
+  // Guards the seed half of the rank list only: the template DB is migrated and
+  // then seeded, and the seed deletes catalog_options first — so a value missing
+  // from migration 0117 alone would still pass here.
+  it('offers the dual-die and 3DS ranks after the plain grid', async () => {
+    const { token } = await loginAs(ALEX);
+    const r = await api('GET', '/api/lookups', { token });
+    expect(r.status).toBe(200);
+    const ranks: string[] = r.body.catalog.RAM_RANK;
+    for (const v of ['4DRx4', '8DRx4', '2S2Rx4', '2S4Rx4', '4S2Rx4']) {
+      expect(ranks).toContain(v);
+      expect(ranks.indexOf(v)).toBeGreaterThan(ranks.indexOf('8Rx8'));
+    }
+  });
 });
