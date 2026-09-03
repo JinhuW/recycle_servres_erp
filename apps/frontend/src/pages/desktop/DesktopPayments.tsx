@@ -78,7 +78,9 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // Both added in v1.117.0 — optional for the same deploy-skew reason as
   // Stats.suggested below: the SPA and the API ship on independent pipelines.
   internalTxn?: { id: string; title: string | null } | null;
-  assignee?: { id: string; name: string } | null;
+  // `initials` arrived with the Owner column and is optional for the same
+  // deploy-skew reason.
+  assignee?: { id: string; name: string; initials?: string } | null;
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
@@ -455,7 +457,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           </div>
         ) : (
           <div className="table-scroll">
-            <table className="table">
+            <table className="table pay-table">
               <thead>
                 <tr>
                   <th style={{ width: 26 }} />
@@ -463,8 +465,11 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                   <th>{t('payColSource')}</th>
                   <th>{t('payColCounterparty')}</th>
                   <th className="num">{t('payColAmount')}</th>
+                  <th>{t('payColOwner')}</th>
                   <th>{t('payColStatus')}</th>
-                  <th>{t('payColOrder')}</th>
+                  {/* The rail's contents name themselves; a visible heading
+                      over two buttons is a label nobody reads. */}
+                  <th className="pay-actions" aria-label={t('payColActions')} />
                 </tr>
               </thead>
               <tbody>
@@ -493,43 +498,6 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         )}
       </div>
     </>
-  );
-}
-
-function StatusChip({ row, t }: { row: PaymentRow; t: (k: string, v?: Record<string, string | number>) => string }) {
-  // The owner and the record ride in this cell rather than in columns of their
-  // own: the table is already seven wide, and an eighth wrapped the header.
-  const tags = (
-    <>
-      {row.internalTxn && (
-        <span className="chip accent" style={{ fontSize: 10.5 }}>
-          {t('payIntPartOf', { name: row.internalTxn.title || t('payIntUntitled') })}
-        </span>
-      )}
-      {row.assignee && (
-        <span className="chip" style={{ fontSize: 10.5 }}>
-          {t('payAssigned', { name: row.assignee.name })}
-        </span>
-      )}
-    </>
-  );
-  const wrap = (main: React.ReactNode) => (
-    <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
-      {main}{tags}
-    </span>
-  );
-  if (row.ignored) return wrap(<span className="chip muted">{t('payStatusIgnored')}</span>);
-  if (!row.orderId && row.category === 'transfer') {
-    return wrap(<span className="chip info">{t('payStatusTransfer')}</span>);
-  }
-  if (!row.orderId) return wrap(<span className="chip dot warn">{t('payStatusUnlinked')}</span>);
-  return wrap(
-    <>
-      <span className={'chip dot ' + (row.linkKind === 'refund' ? 'cool' : 'pos')}>
-        {t(row.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
-      </span>
-      {row.linkAuto && <span className="chip info" style={{ fontSize: 10.5 }}>{t('payAuto')}</span>}
-    </>,
   );
 }
 
@@ -600,95 +568,138 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
         <td className="num mono" style={{ color: row.amount > 0 ? 'var(--pos)' : undefined, whiteSpace: 'nowrap' }}>
           {fmtSigned(row.amount, locale)}
         </td>
-        <td><StatusChip row={row} t={t} /></td>
-        <td style={{ whiteSpace: 'nowrap', position: 'relative' }}>
-          {row.orderId ? (
-            <>
-              <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
-                {row.orderId}
-              </button>
-              {/* What the PO cost, beside what was paid for it — the row is
-                  otherwise unreadable against its own amount. */}
-              {row.orderCost != null && (
-                <span className="mono muted" style={{ marginLeft: 8, fontSize: 12 }}>
-                  {fmtUSD(row.orderCost, locale)}
-                </span>
-              )}
-            </>
-          ) : row.ignored ? (
-            <button type="button" className="btn sm ghost" onClick={(e) => { stop(e); void act(`${row.id}/unignore`); }}>
-              {t('payUnignore')}
-            </button>
-          ) : grouping ? (
-            <span style={{ display: 'inline-grid', gap: 5, justifyItems: 'start' }} onClick={stop}>
-              <span className="chip dot accent" style={{ fontSize: 10.5 }}>
-                {t('paySamePaymentAs', {
-                  source: grouping.source === 'mercury' ? 'Mercury' : 'PayPal',
-                  when: fmtDateShort(grouping.postedAt, locale),
-                })}
+        {/* Owner and PO are mutually exclusive by constraint (migration 0116),
+            so this column is all dashes on the Linked tab by design. */}
+        <td className="pay-owner">
+          {row.assignee ? (
+            <span className="pay-owner-in" title={row.assignee.name}>
+              <span className="avatar sm">
+                {row.assignee.initials ?? row.assignee.name.slice(0, 1).toUpperCase()}
               </span>
-              <span style={{ display: 'inline-flex', gap: 6 }}>
+              {row.assignee.name.split(' ')[0]}
+            </span>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
+        {/* What this money is attached to. One line, one register: a chip only
+            where attention is earned — a candidate worth acting on — and muted
+            prose everywhere else. */}
+        <td className="pay-link">
+          <span className="pay-link-in">
+            {row.orderId ? (
+              <>
+                <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
+                  {row.orderId}
+                </button>
+                {/* What the PO cost, beside what was paid for it — the row is
+                    otherwise unreadable against its own amount. */}
+                {row.orderCost != null && (
+                  <span className="mono muted" style={{ fontSize: 12 }}>
+                    {fmtUSD(row.orderCost, locale)}
+                  </span>
+                )}
+                <span className={'chip dot ' + (row.linkKind === 'refund' ? 'cool' : 'pos')}>
+                  {t(row.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
+                </span>
+                {row.linkAuto && <span className="chip info" style={{ fontSize: 10.5 }}>{t('payAuto')}</span>}
+              </>
+            ) : row.ignored ? (
+              <span className="muted">{t('payStatusIgnored')}</span>
+            ) : (
+              <>
+                {/* A transfer can still carry a candidate, so the classification
+                    and the suggestion sit side by side rather than one hiding
+                    the other. */}
+                {row.category === 'transfer' && <span className="muted">{t('payStatusTransfer')}</span>}
+                {grouping ? (
+                  <span className="chip dot accent" style={{ fontSize: 10.5 }}>
+                    {t('paySamePaymentAs', {
+                      source: grouping.source === 'mercury' ? 'Mercury' : 'PayPal',
+                      when: fmtDateShort(grouping.postedAt, locale),
+                    })}
+                  </span>
+                ) : likely ? (
+                  <>
+                    <span className="chip dot pos" style={{ fontSize: 10.5 }}>{likely.best.id}</span>
+                    {likely.best.dayGap !== null && (
+                      <span className="muted" style={{ fontSize: 12 }}>{gapLabel(likely.best.dayGap, t)}</span>
+                    )}
+                  </>
+                ) : ambiguous ? (
+                  // Plain text, not a button: the row itself opens on click, so
+                  // a control here would only be a second way to do that and an
+                  // extra tab stop.
+                  <span className="muted">
+                    {row.match!.count === 1
+                      ? t('payMatchCountOne')
+                      : t('payMatchCount', { n: row.match!.count })}
+                  </span>
+                ) : row.category !== 'transfer' && (
+                  <span className="muted">{t('payStatusUnlinked')}</span>
+                )}
+              </>
+            )}
+            {/* The record rides in this cell — unlike the owner, which now has
+                a column, it says what the money *was*, which is what the rest of
+                this cell answers. */}
+            {row.internalTxn && (
+              <span className="chip accent" style={{ fontSize: 10.5 }}>
+                {t('payIntPartOf', { name: row.internalTxn.title || t('payIntUntitled') })}
+              </span>
+            )}
+          </span>
+        </td>
+        {/* The rail. The primary action renders last so it lands flush right on
+            every row shape — right-alignment pins only the right-most item, and
+            rows carry two, three or no secondary buttons. */}
+        <td className="pay-actions">
+          <span ref={actionsRef} className="pay-rail" onClick={stop}>
+            {row.orderId ? null : row.ignored ? (
+              <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unignore`)}>
+                {t('payUnignore')}
+              </button>
+            ) : grouping ? (
+              <>
+                <span className="pay-sec">
+                  <button type="button" className="btn sm ghost" onClick={() => setPairDismissed(true)}>
+                    {t('payNotSame')}
+                  </button>
+                  <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
+                    {t('payIgnore')}
+                  </button>
+                </span>
                 <button type="button" className="btn sm primary" onClick={() => void group(grouping.id)}>
                   {t('payGroup')}
                 </button>
-                <button type="button" className="btn sm ghost" onClick={() => setPairDismissed(true)}>
-                  {t('payNotSame')}
-                </button>
-                <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
-                  {t('payIgnore')}
-                </button>
-              </span>
-            </span>
-          ) : (
-            // Badge and buttons share one line: stacked, a row carrying a match
-            // badge stood a line taller than its neighbours and the table stepped.
-            <span
-              ref={actionsRef}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
-              onClick={stop}
-            >
-              {likely && (
-                <span className="chip dot pos" style={{ fontSize: 10.5 }}>
-                  {t('payMatchLikely', {
-                    id: likely.best.id,
-                    when: gapLabel(likely.best.dayGap, t),
-                  })}
+              </>
+            ) : (
+              <>
+                <span className="pay-sec">
+                  {likely && (
+                    <button
+                      type="button" className="btn sm ghost"
+                      onClick={() => { setDismissed(true); setPicking(true); }}
+                    >
+                      {t('payMatchNotIt')}
+                    </button>
+                  )}
+                  <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
+                    {t('payIgnore')}
+                  </button>
                 </span>
-              )}
-              {ambiguous && (
-                <button
-                  type="button"
-                  className="chip warn"
-                  style={{ fontSize: 10.5, border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
-                  onClick={onToggle}
-                >
-                  {row.match!.count === 1
-                    ? t('payMatchCountOne')
-                    : t('payMatchCount', { n: row.match!.count })}
-                </button>
-              )}
-              {likely ? (
-                <>
+                {likely ? (
                   <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
                     {t('payLink')}
                   </button>
-                  <button
-                    type="button" className="btn sm ghost"
-                    onClick={() => { setDismissed(true); setPicking(true); }}
-                  >
-                    {t('payMatchNotIt')}
+                ) : (
+                  <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
+                    {t('payLink')}
                   </button>
-                </>
-              ) : (
-                <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
-                  {t('payLink')}
-                </button>
-              )}
-              <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
-                {t('payIgnore')}
-              </button>
-            </span>
-          )}
+                )}
+              </>
+            )}
+          </span>
           {picking && !row.orderId && (
             <PoPicker
               txnId={row.id}
@@ -702,7 +713,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
       </tr>
       {open && (
         <tr>
-          <td colSpan={7} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
+          <td colSpan={8} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
             <ExpandedDetail
               row={row} locale={locale} act={act} onToast={onToast}
               onLink={link} onGroup={group} members={members} refresh={refresh}

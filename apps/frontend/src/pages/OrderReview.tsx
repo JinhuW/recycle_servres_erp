@@ -4,12 +4,12 @@ import { PhHeader } from '../components/PhHeader';
 import { LineSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
-import { api } from '../lib/api';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmt, fmtUSD, fmtUSD0 } from '../lib/format';
 import { parseFeeInput, poEffectiveCost } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 import { addableCategories, categoryTone } from '../lib/lookups';
+import { loadWarehouses } from '../lib/warehouses';
 
 // The last step of capturing a NEW purchase order. An order that already
 // exists is edited on its detail screen — this one asks for a warehouse, a
@@ -51,13 +51,13 @@ export function OrderReview({
 
   useEffect(() => {
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => {
+    loadWarehouses()
+      .then(items => {
         if (!alive) return;
-        setWarehouses(r.items);
+        setWarehouses(items);
         // Only default a draft that has never named one. A resumed draft
         // arrives with its own, and the first warehouse in the list is not it.
-        setWarehouseId(prev => prev || r.items[0]?.id || '');
+        setWarehouseId(prev => prev || items[0]?.id || '');
       })
       .catch(handleFetchError);
     return () => { alive = false; };

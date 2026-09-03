@@ -4,6 +4,7 @@
 // from a single DB-backed source. Mirrors lib/lookups.ts conventions.
 
 import { api } from './api';
+import { takeBoot } from './boot';
 
 const settings: Record<string, unknown> = {};
 let loaded = false;
@@ -14,7 +15,8 @@ export function loadWorkspaceSettings(): Promise<void> {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const data = await api.get<{ settings: Record<string, unknown> }>('/api/workspace');
+      const data = await takeBoot<{ settings: Record<string, unknown> }>('/api/workspace')
+        ?? await api.get<{ settings: Record<string, unknown> }>('/api/workspace');
       for (const k of Object.keys(settings)) delete settings[k];
       Object.assign(settings, data.settings);
       loaded = true;

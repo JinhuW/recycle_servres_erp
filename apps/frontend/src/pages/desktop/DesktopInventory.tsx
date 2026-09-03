@@ -19,6 +19,7 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import { InventoryProductTable } from './InventoryProductTable';
 import type { ProductGroup } from './InventoryProductTable';
+import { loadWarehouses } from '../../lib/warehouses';
 
 type InventoryRow = {
   id: string;
@@ -315,8 +316,8 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
 
   useEffect(() => {
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => { if (alive) setWhs(r.items); })
+    loadWarehouses()
+      .then(items => { if (alive) setWhs(items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);

@@ -10,6 +10,7 @@ import { fmtUSD0 } from '../lib/format';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { Skeleton } from '../components/Skeleton';
 import type { Warehouse } from '../lib/types';
+import { loadWarehouses } from '../lib/warehouses';
 
 type Stats = { count: number; profit: number; commission: number };
 
@@ -33,8 +34,8 @@ export function Profile({ onOpenLanguage, onOpenNotifications, onOpenAbout, onOp
   useEffect(() => {
     let alive = true;
     api.get<{ stats: Stats }>('/api/me').then(r => { if (alive) setStats(r.stats); }).catch(handleFetchError);
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => { if (alive) setWarehouses(r.items); })
+    loadWarehouses()
+      .then(items => { if (alive) setWarehouses(items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);

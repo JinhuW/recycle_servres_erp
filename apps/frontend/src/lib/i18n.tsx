@@ -356,7 +356,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payColCounterparty: 'Payee',
     payColAmount: 'Amount',
     payColStatus: 'Status',
-    payColOrder: 'Purchase order',
+    payColOwner: 'Owner',
+    payColActions: 'Actions',
     payStatusUnlinked: 'Unlinked',
     payStatusIgnored: 'Ignored',
     payStatusTransfer: 'Transfer',
@@ -392,7 +393,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payTileTransfersSub: 'between our accounts',
     payTileIgnoredSub: 'not seller payments',
     payFilterHasMatch: 'Has match',
-    payMatchLikely: 'Likely {id} · {when}',
     payMatchCountOne: '1 possible PO',
     // The pool is capped, so a count larger than the list has to say so —
     // otherwise working all of them and finding nothing looks conclusive.
@@ -458,7 +458,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payIntCreatedBy: 'by {name}',
     // Assigning an unlinked payment to a member.
     payAssignTo: 'Assign to…',
-    payAssigned: 'Assigned to {name}',
     payUnassign: 'Unassign',
     payAssignFilter: 'Anyone',
     payAssignUnassigned: 'Unassigned',
@@ -1165,6 +1164,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipConfirmCharge: 'Charged to ShipSaving',
     shipBuyWarning: 'This buys the label now and adds {amount} to this PO’s other fees. Managers are notified.',
     shipBuyBtn: 'Buy label — {amount}',
+    // Demo rates are canned sample prices, so they must be called out on the
+    // rate list and again at the confirm step — the old "Demo" chip only
+    // appeared on the shipment afterwards, once the choice was already made.
+    shipStubRatesWarn: 'Demo rates — these prices are canned sample data, not real carrier quotes. Set SHIPSAVING_APP_KEY and SHIPSAVING_APP_SECRET on the backend to buy real labels.',
+    shipStubNoCharge: 'No charge',
+    shipStubBuyWarning: 'This makes a demo label: no carrier is paid, nothing is added to this PO’s fees, and the PDF prints blank.',
+    shipStubBuyBtn: 'Make demo label',
     acShipmentCreated: 'Shipment added',
     acShipmentPurchased: 'Shipping label purchased',
     acShipmentVoided: 'Shipping label voided',

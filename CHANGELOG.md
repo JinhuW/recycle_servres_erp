@@ -17,6 +17,156 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.123.0] - 2026-09-03
+
+### Fixes
+- fix(shipping): **a demo shipping label no longer charges the purchase order.**
+  Production has been running on the stub label provider since the feature
+  shipped — `SHIPSAVING_APP_KEY`/`SECRET` are unset, which is deliberate, since
+  credentials may lag a deploy. What was not deliberate is where the demo money
+  went: the stub returns plausible prices (`USPS Priority $12.45`), the rate
+  object carried no marker saying which provider produced it, and buying folded
+  that invented figure into `orders.other_fees` — where `po-cost.ts` amortizes
+  it into per-line cost and commission. The only warning was a `Demo` chip
+  suppressed for `draft` and `quoted`, so it appeared *after* the money was on
+  the order.
+
+  A demo purchase now moves nothing: `other_fees` is untouched, and the row
+  carries `fees_applied = FALSE` with `label_cost = NULL` (the two are read
+  together — by the void reversal, and by the cost tape's shipping-vs-other
+  split, which would otherwise re-badge a real fee as shipping). The demo price
+  still lands in `rate_amount` for display. Voiding such a label subtracts
+  nothing, and the manager notification says a demo label was made rather than
+  quoting a dollar figure nobody paid.
+
+  The label wizard now says so before you commit rather than after: the rates
+  step returns which provider quoted it, and demo rates carry a `Demo` chip, a
+  callout, "No charge" in place of the amount, and a *Make demo label* button.
+
+  Found by reading six days of production logs. No purchase order was affected
+  — the window contained one shipment, zero rate fetches and zero label buys
+  ([RS-013](docs/tickets/RS-013-demo-shipping-labels-must-not-charge-a-po-and-bank-s.md)).
+- fix(payments): **the bank reconciliation loop now reports what it did.** It
+  syncs Mercury and PayPal every six hours, and `doSync` deliberately catches
+  each provider's failure into its own slot so one bank being down cannot block
+  the other — which meant the loop's own `catch` never fired for the failure
+  that mattered, and the result it returned was dropped on the floor. Nothing
+  logged on success either, so six days of production logs contained no trace
+  of the loop at all: twenty-four clean passes and twenty-four silent failures
+  looked identical, and the only way to tell was to open Payments and press
+  Sync now. Each pass now emits a `warn` naming any source that failed and its
+  error, and an `info` carrying per-source counts otherwise — through
+  `lib/log.ts`, so the lines are structured and carry the build.
+
+### Other
+- The paid ShipSaving label path is covered by tests for the first time. Every
+  shipping money assertion previously ran through the stub, which was
+  indistinguishable from the real thing only because the stub also moved money;
+  with that fixed, the fee fold and the void reversal would have had no test at
+  all. `tests/helpers/shipsaving.ts` fakes the v2 account so the real path runs
+  through the real route.
+
+## [1.122.0] - 2026-09-03
+
+### Changes
+
+- **The cold load stops waiting on things it never needed to wait for.**  Three
+  measurements shaped this.  The access token lived 15 minutes, and the
+  production log showed `/api/auth/refresh` firing 19 times against 23 app
+  mounts — four out of five loads opened with the whole bootstrap 401ing, a
+  refresh, and a retry, three serial round trips before a single pixel, because
+  a user who steps away for a coffee comes back past the deadline.  It is now
+  60 minutes.  What actually bounds a stolen cookie is the rotating refresh
+  family and its reuse-revocation, not that number; and deactivating a user
+  still takes effect on their very next request, because `authMiddleware`
+  re-checks `active = TRUE` every time rather than trusting the JWT.
+
+  Second, nothing started until the bundle had.  The shell is chosen at runtime
+  by viewport width, so Vite cannot emit a `modulepreload` for it and the
+  browser only learned it needed `DesktopApp-*.js` after parsing 255 KB of
+  JavaScript — and `/api/me`, `/api/lookups` and `/api/workspace`, none of which
+  needs React, waited behind the same parse.  A small boot script now goes in
+  ahead of the entry and starts all of it.  A prefetch that comes back 401 costs
+  nothing: it resolves to null and the normal path refreshes and retries.  The
+  two halves ship together deliberately — they already overlapped each other, so
+  either alone would have saved little.
+
+  Third, `/api/warehouses` had ten call sites across nine components, each with
+  its own `useEffect` and no shared state; one session asked for it six times in
+  1.6 seconds.  It now uses the same single-flight module cache as lookups and
+  workspace settings, invalidated explicitly by the Settings panel that writes
+  it.
+
+- **And the load is now measurable rather than felt.**  `POST
+  /api/client-timings` records navigation timing, LCP, and how many requests and
+  refreshes a page load actually cost — the sibling of the existing client-error
+  sink, and the thing whose absence meant the original report could only be
+  "sometimes it feels slow".  Numbers only; nothing that could carry a URL.
+
+## [1.121.1] - 2026-09-03
+
+### Fixes
+
+- **A deploy no longer breaks tabs that were already open.**  Chunk filenames
+  are content-hashed, so shipping a release replaces the whole asset manifest
+  and the names an open tab still holds stop existing.  Asking for one of them
+  did not return a 404: `not_found_handling = "single-page-application"` treated
+  every miss under `/assets/` as a hit on `index.html`, so the browser was
+  handed a document where it had asked for an ES module.  The lazy page never
+  loaded, the skeleton never resolved, and the tab sat there looking slow — the
+  shape most of the "the page is loading slowly" reports actually took.  Worse,
+  the `/assets/*` rule in `_headers` stamped that HTML `immutable, max-age=1y`,
+  so the failure outlived the deploy that caused it by a year.  It also meant
+  the Worker never ran for those paths, so a missing asset was answered over
+  plain http with no redirect to https.
+
+  A missing hashed asset now returns a real 404, the Worker owns the SPA
+  fallback for actual document paths, and a tab that hits a replaced chunk
+  reloads itself once onto the current build instead of stalling.  Recovery
+  hangs off Vite's own `vite:preloadError`, so it covers every lazy route in
+  the app and any added later without a per-call-site wrapper.
+
+## [1.121.0] - 2026-09-03
+
+### Changes
+
+- **The Payments ledger has an Owner column.**  A payment's owner used to be a
+  `Assigned to …` chip tucked into the Status cell beside whatever that cell
+  already said — an annotation on the status rather than a fact about the row,
+  impossible to scan down the page, and widening the Status cell on exactly the
+  rows that carried it.  That placement was a compromise from when the table had
+  no room for it; merging Status and Purchase order in v1.120.0 made the room.
+
+  Owner now sits between Amount and Status as the person's avatar and first
+  name, full name on hover, with a muted dash where nobody owns the payment.
+  Owner and purchase order are mutually exclusive by database constraint —
+  linking a payment clears its owner — so the column is deliberately all dashes
+  on the Linked tab and behind the Refunds tile.  Initials come from the API
+  rather than being derived from the name, because a member can be renamed
+  without their stored initials being recomputed.
+
+## [1.120.0] - 2026-09-03
+
+### Changes
+
+- The Payments ledger's right-hand side used to be a wall.  Every row in the
+  Unlinked queue printed an amber "Unlinked" chip — a whole column restating
+  the tab that was already selected — beside a Purchase order cell that carried
+  the suggestion *and* two or three buttons at equal weight.  On the rows that
+  actually had a match those buttons wrapped, so those rows stood a line taller
+  and the table stepped; and because they were left-aligned in a cell whose
+  width followed its content, no two `Link…` buttons shared an x.
+
+  Status and Purchase order were one question asked twice — what is this money
+  attached to? — so they are now one column that answers it: a linked PO with
+  its cost, a suggested PO with how far apart the two dates are, `Transfer`,
+  `Ignored`, or `Unlinked`.  The seventh column freed up by the merge is an
+  actions rail: one primary button per row, flush right, at the same x on every
+  row.  `Ignore`, `Not it` and `Not the same` step back and appear when the row
+  is hovered or takes keyboard focus — they keep their place in the tab order,
+  and a device without hover shows them permanently.  Rows are now a uniform
+  height whatever state they are in.
+
 ## [1.119.1] - 2026-09-02
 
 ### Fixes

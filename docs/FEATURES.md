@@ -24,9 +24,11 @@ reach a portal through a URL token.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
   invisible rather than forbidden.
-- Auth is httpOnly cookies — a 15-minute `at` JWT plus a rotating `rt` refresh
-  family. No localStorage, no bearer tokens. Refresh-token reuse revokes the
-  whole family.
+- Auth is httpOnly cookies — a 60-minute `at` JWT plus a rotating `rt` refresh
+  family (the access token was 15 minutes until v1.122.0, which made four out
+  of five app loads open with a 401, a refresh and a retry before painting).
+  No localStorage, no bearer tokens. Refresh-token reuse revokes the whole
+  family.
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (vendor endpoints, which authenticate by URL token instead).
@@ -184,6 +186,14 @@ Transit, and a line's qty can never be 0.
 - Owners get a default warehouse, and managers can create a package PO at any
   status (v1.85.0).
 
+- **Demo labels cost nothing and say so up front** (v1.120.0). Without
+  ShipSaving keys the label wizard quotes the stub provider's canned prices.
+  Those are sample data, so buying one adds nothing to the PO's other fees and
+  records no `label_cost`; voiding it subtracts nothing. The rates step marks
+  every demo rate, replaces the charge line with "No charge", and offers *Make
+  demo label* instead of *Buy label* — the older `Demo` chip only appeared on
+  the shipment afterwards, once the choice had been made.
+
 > Both shipping providers ship **dark until their keys are set** —
 > `SHIPPO_API_TOKEN` / `SHIPPO_WEBHOOK_SECRET` for tracking, ShipSaving portal
 > keys for labels. `/api/health` reports provider modes so this state is
@@ -224,6 +234,19 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   its record. Their totals read a transfer's two opposite-signed legs as two
   real movements (so a transfer nets to zero) while a payment pair — the same
   money seen twice — still counts once.
+- **A row states one verdict and offers one action** (v1.120.0). The Status
+  column was folded into the Purchase order column — they answered the same
+  question — so a row now reads a linked PO with its cost, a suggested PO with
+  the gap between the two dates, `Transfer`, `Ignored`, or `Unlinked`, and the
+  freed column is an actions rail whose primary button sits at the same place on
+  every row. `Ignore`, `Not it` and `Not the same` appear on hover or keyboard
+  focus rather than standing on every row at once; a device without hover keeps
+  them visible.
+- **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
+  name, full name on hover, a dash where nobody owns it. Owner and PO are
+  mutually exclusive by constraint, so the column is empty by design on the
+  Linked tab and behind the Refunds tile. Assigning still happens in the
+  expanded row.
 - **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
   filters by owner or by Unassigned. Assigning deliberately does *not* resolve
   the row: a payment that needs explaining still needs explaining, it just has
@@ -326,6 +349,15 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
 - All strings go through `useT()`; the app ships English and Chinese.
 - User preferences (theme, list-view modes) flow through `lib/preferences.tsx`
   and persist server-side.
+- **A deploy no longer breaks tabs that were already open** (v1.121.1). A
+  content-hashed chunk that a release has replaced now 404s instead of being
+  answered with `index.html`, and a tab that asks for one reloads itself once
+  onto the current build rather than stalling on a skeleton.
+- **The load starts before the bundle does** (v1.122.0). A small boot script,
+  injected ahead of the entry, preloads whichever shell the viewport is about
+  to need and starts `/api/me`, `/api/lookups` and `/api/workspace` — none of
+  which needs React — instead of leaving all four to be discovered after 255 KB
+  of JavaScript has parsed.
 
 ## Observability
 
@@ -335,4 +367,8 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   path, method and the backend's `X-Request-Id`, and `POST /api/client-errors`
   writes one greppable JSON line to stdout — capped at 5 per page load, deduped,
   and with vendor-portal tokens redacted (v1.105.0).
+- **Load timing is reported too** (v1.122.0): `POST /api/client-timings` takes
+  navigation timing, LCP, and the request/refresh counts for the page load, one
+  report per load. Numbers only, no paths — it is the answer to "the page feels
+  slow", which until then had no evidence behind it either way.
 - `/api/health` reports version, build date, commit and provider modes.
