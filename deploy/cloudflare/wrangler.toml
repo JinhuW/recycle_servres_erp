@@ -10,13 +10,21 @@ account_id = "cf0e09b533b74d32407f6fe1b558165b"
 # docs/debug-notes/2026-08-22-mobile-login-bounce-http-secure-cookie.md).
 # Only the content-hashed asset directories skip the Worker invocation: they
 # are referenced relatively by an already-https page, so they never carry the
-# scheme bug and stay on the free asset path. not_found_handling still serves
-# index.html for client-side routes. Cache headers come from
+# scheme bug and stay on the free asset path. Cache headers come from
 # apps/frontend/public/_headers. Inherited by both named environments below.
+#
+# not_found_handling is "none", and the Worker serves index.html itself for
+# document paths. With "single-page-application" the asset layer treats EVERY
+# miss as a hit on index.html — including a miss under /assets/, which is only
+# ever a content-hashed chunk a deploy has replaced. That returned 200 with
+# `content-type: text/html` under the /assets/* `immutable, max-age=1y` rule, so
+# an open tab got a document where it asked for an ES module and cached the
+# result for a year. It also meant the Worker was never invoked for those paths,
+# so the http→https redirect never ran on them either.
 [assets]
 directory = "../../apps/frontend/dist"
 binding = "ASSETS"
-not_found_handling = "single-page-application"
+not_found_handling = "none"
 run_worker_first = [
   "/*",
   "!/assets/*",

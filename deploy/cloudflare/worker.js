@@ -3,6 +3,11 @@
 // backend's SameSite=Lax cookies and X-Requested-By CSRF header keep working
 // with no backend changes.
 const API_PREFIXES = ['/api', '/oauth', '/.well-known'];
+// Content-hashed by the build, and cached `immutable` for a year by
+// public/_headers. A miss under these is never a page the user typed — it is a
+// chunk from a build that has since been replaced — so it must 404 rather than
+// fall back to index.html.
+const HASHED_PREFIXES = ['/assets/', '/fonts/', '/icons/'];
 
 export default {
   async fetch(request, env) {
@@ -20,8 +25,41 @@ export default {
       (p) => url.pathname === p || url.pathname.startsWith(p + '/'),
     );
     if (!isApi) {
-      // Static asset or SPA route (index.html fallback per not_found_handling).
-      return env.ASSETS.fetch(request);
+      const res = await env.ASSETS.fetch(request);
+      if (res.status !== 404) return res;
+      // wrangler.toml sets not_found_handling = "none", so the SPA fallback is
+      // ours to serve — and ours to withhold. A hashed asset that is gone stays
+      // gone: answering it with index.html hands the browser a document where
+      // it asked for a module, and the /assets/* rule in public/_headers would
+      // then cache that answer as immutable for a year (RS-017).
+      //
+      // Defensive rather than load-bearing: these three prefixes are excluded
+      // from run_worker_first, so in practice Cloudflare's asset layer returns
+      // the 404 itself and this branch never runs. It is here so that the
+      // fallback below can never claim a path that is plainly a build artifact,
+      // whichever layer ends up answering.
+      if (HASHED_PREFIXES.some((p) => url.pathname.startsWith(p))) {
+        return new Response('Not found', {
+          status: 404,
+          headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain' },
+        });
+      }
+      // Every other path is a client-side route — the app is hash-routed, so in
+      // practice `/`, the vendor and seller portals (/v/, /s/), /authorize, and
+      // the PWA manifest shortcuts. Same bytes index.html always served, with
+      // the no-cache it carries in _headers, which does not apply to a response
+      // built here.
+      // A plain GET, not a copy of `request`: /share-target arrives as a POST
+      // (the manifest's share target, normally intercepted by the service
+      // worker) and the asset binding would answer a POST with 405.
+      const index = await env.ASSETS.fetch(new URL('/index.html', url));
+      // Copy into a Headers and `set`, rather than spreading into an object
+      // literal: header names arrive lowercased, so a 'Cache-Control' key would
+      // sit alongside the binding's 'cache-control' and the two would be joined
+      // into one comma-separated value instead of one replacing the other.
+      const headers = new Headers(index.headers);
+      headers.set('Cache-Control', 'no-cache');
+      return new Response(index.body, { status: 200, headers });
     }
     const backend = env.BACKEND_URL.replace(/\/$/, '');
     const target = backend + url.pathname + url.search;

@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.121.1] - 2026-09-03
+
+### Fixes
+
+- **A deploy no longer breaks tabs that were already open.**  Chunk filenames
+  are content-hashed, so shipping a release replaces the whole asset manifest
+  and the names an open tab still holds stop existing.  Asking for one of them
+  did not return a 404: `not_found_handling = "single-page-application"` treated
+  every miss under `/assets/` as a hit on `index.html`, so the browser was
+  handed a document where it had asked for an ES module.  The lazy page never
+  loaded, the skeleton never resolved, and the tab sat there looking slow — the
+  shape most of the "the page is loading slowly" reports actually took.  Worse,
+  the `/assets/*` rule in `_headers` stamped that HTML `immutable, max-age=1y`,
+  so the failure outlived the deploy that caused it by a year.  It also meant
+  the Worker never ran for those paths, so a missing asset was answered over
+  plain http with no redirect to https.
+
+  A missing hashed asset now returns a real 404, the Worker owns the SPA
+  fallback for actual document paths, and a tab that hits a replaced chunk
+  reloads itself once onto the current build instead of stalling.  Recovery
+  hangs off Vite's own `vite:preloadError`, so it covers every lazy route in
+  the app and any added later without a per-call-site wrapper.
+
 ## [1.121.0] - 2026-09-03
 
 ### Changes
