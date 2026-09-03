@@ -54,6 +54,16 @@ describe('normalizeFields — RAM', () => {
     expect(f.partNumber).toBe('HMCG84AEBRA115N');
   });
 
+  // The packaging letter is part of the rank on high-density modules. Lose it
+  // and the value no longer equals its catalog entry, so the form drops it.
+  it('keeps the dual-die and 3DS packaging letters when normalising rank', () => {
+    expect(normalizeFields('RAM', { rank: '4DRX4' }).rank).toBe('4DRx4');
+    expect(normalizeFields('RAM', { rank: '2S2RX4' }).rank).toBe('2S2Rx4');
+    expect(normalizeFields('RAM', { rank: '4 S 2 Rx 4' }).rank).toBe('4S2Rx4');
+    // Already canonical: unchanged rather than mangled.
+    expect(normalizeFields('RAM', { rank: '8DRx4' }).rank).toBe('8DRx4');
+  });
+
   it('keeps the hyphen suffix but drops a PN:/S/N prefix and anything after the first space', () => {
     // Real-world SK Hynix / Samsung / Micron labels with speed-grade suffix + lot.
     expect(normalizeFields('RAM', { partNumber: 'HMAA1GU6CJR6N-XN NO AD' }).partNumber).toBe('HMAA1GU6CJR6N-XN');

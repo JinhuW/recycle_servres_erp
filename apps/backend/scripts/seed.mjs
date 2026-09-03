@@ -65,11 +65,18 @@ const DIMM_DEVICE_CLASS = { SODIMM: 'Laptop', UDIMM: 'Desktop', RDIMM: 'Server',
 // bit-width (rarest narrow first) so the dropdown reads naturally.
 // DDR5 introduces 1Rx32 / 2Rx32 on dense SODIMM/UDIMM; 4Rx16 + 8Rx8 are
 // LRDIMM stacks seen on enterprise modules.
+// D is a dual-die package and S an n-high 3DS stack — different constructions,
+// both printed by all three vendors. Order must match migration 0117: this
+// script deletes catalog_options and rewrites it from these arrays, so a
+// database that has been seeded takes its positions from here, not the
+// migration.
 const RAM_RANK   = [
   '1Rx4', '1Rx8', '1Rx16', '1Rx32',
   '2Rx4', '2Rx8', '2Rx16', '2Rx32',
   '4Rx4', '4Rx8', '4Rx16',
   '8Rx4', '8Rx8',
+  '4DRx4', '8DRx4',
+  '2S2Rx4', '2S4Rx4', '4S2Rx4',
 ];
 const RAM_CAP    = ['4GB','8GB','16GB','32GB','64GB','128GB'];
 const RAM_SPEED  = ['800','1066','1333','1600','1866','2133','2400','2666','2933','3200','4000','4400','4800','5200','5600','6000','6400','6800','7200','7600','8000'];
