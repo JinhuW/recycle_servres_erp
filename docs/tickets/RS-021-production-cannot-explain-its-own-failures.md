@@ -2,13 +2,13 @@
 id: RS-021
 title: Production cannot explain its own failures
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-121934
-pr:
-version:
+pr: 260
+version: 1.125.0
 related: [RS-013, RS-020]
 ---
 
