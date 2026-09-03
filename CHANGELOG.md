@@ -17,6 +17,32 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.139.0] - 2026-09-13
+
+### Features
+
+- **The Rank dropdown on RAM lines covers dual-die and 3DS markings.**  It
+  only ever offered the plain JEDEC grid (`1Rx4` through `8Rx8`), which leaves
+  out how high-density modules are actually marked.  Two notations were
+  missing, and they describe different constructions rather than two vendors'
+  spellings of one thing: a dual-die package (`4DRx4`, `8DRx4`) and an n-high
+  3DS stack (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`).  Samsung, SK Hynix and Micron each
+  print both.  All five are now in the catalog (migration 0125), after the
+  plain grid so the common ranks stay at the top of the list.
+- **A label scan keeps those codes instead of losing them.**  The OCR prompt
+  had been handed the old thirteen values as a closed set, so it was
+  instructed to flatten `4DRx4` to `4Rx4`; and an upper-case read of `4DRX4`
+  failed rank normalisation, fell through unchanged, and was then dropped for
+  not matching the catalog — which showed up as the scanner simply not reading
+  the rank.
+
+Production already held three purchase-order lines reading `4DRx4`, entered
+past a dropdown that never offered it; they need no correction, as the value
+added is spelled exactly the way they store it.  An open tab keeps the old
+list until it is reloaded.  Written as #248 on 2026-09-03 and re-cut here after
+its ticket, version and migration numbers were taken while it waited
+([RS-047](docs/tickets/RS-047-3ds-and-dual-die-ram-ranks-are-missing-from-the-rank.md)).
+
 ## [1.138.6] - 2026-09-13
 
 ### Fixed
