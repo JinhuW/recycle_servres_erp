@@ -21,6 +21,7 @@ import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements';
 import { ramBrandNeedsConfirm } from '../../lib/scanValidation';
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
+import { loadWarehouses } from '../../lib/warehouses';
 import {
   deleteLinePhoto, planPhotoCarry, photoSourceFile, uploadLinePhoto,
   uploadedPhotoCount, useLinePhotoBuffer,
@@ -196,8 +197,8 @@ function OrderForm({
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => setWarehouses(r.items))
+    loadWarehouses()
+      .then(setWarehouses)
       .catch(handleFetchError);
   }, []);
 

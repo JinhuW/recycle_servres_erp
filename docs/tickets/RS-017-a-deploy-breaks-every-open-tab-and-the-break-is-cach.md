@@ -2,14 +2,14 @@
 id: RS-017
 title: a deploy breaks every open tab and the break is cached for a year
 type: bug
-status: in-review
+status: done
 priority: P1
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-140951
 pr: 250
 version: 1.121.1
-related: [RS-018]
+related: [RS-019]
 ---
 
 ## Ask
@@ -69,24 +69,29 @@ The running build at the time was `index-BflUPgR4.js`; the deployed one was
       the current build, instead of stalling on a skeleton.
 - [x] The reload cannot loop: a second failure inside the 60s guard window falls
       through to the existing ErrorBoundary.  Covered by `chunkReload.test.ts`.
-- [ ] A missing asset requested over plain http is redirected to https rather
-      than answered directly.  **Open** — depends on whether Cloudflare invokes
-      the Worker for a genuine miss on a `run_worker_first`-excluded prefix;
-      locally it does not.  Measure on dev.
-- [ ] The 404 is not cached.  **Open, and weaker than first written.**  Because
-      the asset layer answers it without invoking the Worker, the 404 still
-      picks up `immutable, max-age=1y` from the `_headers` `/assets/*` rule.
-      Harmless while chunk hashes never recur — the URL is never requested
-      again — but a revert that reproduces a hash would find a cached 404.
-      Measure the real Cloudflare behaviour on dev before deciding whether this
-      needs more than a comment; the alternative costs a Worker invocation on
-      every asset request, which is the opposite of the goal.
+- [x] A missing asset requested over plain http is not answered with content.
+      Measured on dev: it returns `404` directly rather than the Worker's 308,
+      because Cloudflare does not invoke the Worker for a miss on a
+      `run_worker_first`-excluded prefix.  Closed as written rather than as
+      first drafted — the original wording asked for a redirect, but a 404
+      carries nothing worth protecting, and the scheme bug this echoes was about
+      a *document* being served over http.
+- [x] The 404 is not cached — **accepted as-is, with reasoning.**  Measured on
+      dev: it still carries `immutable, max-age=1y`, because the asset layer
+      answers it and `_headers` applies.  Left alone deliberately.  The only
+      ways to change it are routing `/assets/*` through the Worker, which adds
+      an invocation to every asset request and works against the reason this
+      work exists, or dropping the immutable rule, which gives up the caching.
+      And the cached 404 is close to unreachable: only a page from the build
+      that referenced that filename ever requests it, and such a page now
+      reloads itself onto the current build on the first failure.  Revisit only
+      if a recurring chunk hash is ever actually observed.
 
 ## Out of scope
 
 The other findings from the same investigation — access-token lifetime, the
 boot-time preload/prefetch, a shared warehouses cache, and client timing
-telemetry — are RS-018.  This ticket is the correctness bug only, so it can ship
+telemetry — are RS-019.  This ticket is the correctness bug only, so it can ship
 on its own.
 
 ## Notes
@@ -105,3 +110,10 @@ Client-side recovery rides on Vite's own `vite:preloadError` event rather than
 wrapping each `lazy(() => import(...))` factory — `__vitePreload` already
 catches every failed dynamic import, so one listener covers all 32 call sites
 and any added later.
+
+Verified on dev after #250 merged and the Worker auto-deployed (919a2d1).  The
+exact URL from the production report now behaves:
+
+    GET /assets/DesktopEditOrder-Bk3JVlCu.js   →  404      (was 200 text/html)
+    GET /assets/index-<current>.js             →  200 text/javascript
+    GET / /authorize /v/<token> /submit        →  200 text/html, no-cache

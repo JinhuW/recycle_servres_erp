@@ -173,7 +173,7 @@ export function isAuthorizePath(path: string): boolean {
 }
 
 // Post-login continuation for the OAuth bounce: `/oauth/authorize` sends an
-// unauthenticated (or 15-min-expired) caller to `/login?next=…`, and without
+// unauthenticated (or expired) caller to `/login?next=…`, and without
 // something reading `next` back the user lands on the dashboard and the
 // connector's popup waits forever.
 //

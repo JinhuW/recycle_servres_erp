@@ -186,7 +186,9 @@ export async function deactivateMember(sql: Sql, id: string): Promise<boolean> {
     if (r.length === 0) return; // no such user — nothing to revoke
     updated = true;
     // Close the refresh path immediately so they can't mint new access tokens.
-    // (Their current short-lived access token still expires naturally <=15 min.)
+    // (Their current access token still expires naturally within its TTL — and
+    // authMiddleware re-checks `active = TRUE` on every request, so the block
+    // takes effect on their very next call regardless.)
     await revokeUserRefreshTokens(tx, id);
     await revokeUserOAuthTokens(tx, id);
   });

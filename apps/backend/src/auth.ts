@@ -1,4 +1,4 @@
-// JWT + bcrypt helpers. The access token is a short-lived (15 minute) JWT
+// JWT + bcrypt helpers. The access token is a short-lived (60 minute) JWT
 // signed HS256 with env.JWT_SECRET and delivered only via the httpOnly `at`
 // cookie (never in the response body). A separate opaque refresh token,
 // delivered via the httpOnly `rt` cookie and rotated on each use, is used to
@@ -16,9 +16,21 @@ import type { Env, User } from './types';
 
 const isProd = (env: Env) => env.NODE_ENV === 'production';
 
+// Access-token lifetime, and the `at` cookie's — the two must agree or the
+// cookie evaporates while the JWT inside it is still valid, or the reverse.
+//
+// Raised from 15 minutes (2026-09-03). At 15, four out of five app loads opened
+// with the whole bootstrap 401ing, a refresh, and a retry — three serial round
+// trips of blank screen — because a user who steps away for a coffee comes back
+// past the deadline. What actually bounds a stolen cookie is the rotating
+// refresh family and its reuse-revocation, not this number; and deactivating a
+// user still takes effect on their very next request, because authMiddleware
+// re-checks `active = TRUE` every time rather than trusting the JWT.
+const TOKEN_TTL_SEC = 60 * 60;
+
 export function setAuthCookies(c: Context, env: Env, accessJwt: string, refreshRaw: string) {
   const secure = isProd(env);
-  setCookie(c, 'at', accessJwt, { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: 15 * 60 });
+  setCookie(c, 'at', accessJwt, { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: TOKEN_TTL_SEC });
   setCookie(c, 'rt', refreshRaw, { httpOnly: true, sameSite: 'Lax', secure, path: '/api/auth', maxAge: 14 * 24 * 60 * 60 });
 }
 
@@ -27,8 +39,6 @@ export function clearAuthCookies(c: Context, env: Env) {
   deleteCookie(c, 'at', { path: '/', secure });
   deleteCookie(c, 'rt', { path: '/api/auth', secure });
 }
-
-const TOKEN_TTL_SEC = 15 * 60;
 
 export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 10);

@@ -10,6 +10,18 @@ import type { OrderSummary, Shipment, ShipmentRate } from './types';
 const CSRF_HEADER = 'X-Requested-By';
 const CSRF_VALUE = 'recycle-erp';
 
+// Counted here because this is where the requests are. lib/timing.ts reads them
+// at report time; the dependency runs that way only, so the two modules do not
+// form a cycle. `refreshes` is the number the 60-minute access token was meant
+// to drive toward zero — it is the 401 -> refresh -> retry an expired cookie
+// forces before the app can paint.
+let apiCalls = 0;
+let refreshes = 0;
+
+export function loadCallCounts(): { apiCalls: number; refreshes: number } {
+  return { apiCalls, refreshes };
+}
+
 // `status` alone can't say what broke. The dialog these end up in only ever had
 // a message, so a failure read as "Something went wrong" with nothing to grep.
 // `requestId` is the backend's own X-Request-Id for the failed call — it joins
@@ -45,6 +57,7 @@ async function tryRefresh(): Promise<boolean> {
   if (!refreshing) {
     refreshing = (async () => {
       try {
+        refreshes++;
         const res = await fetch('/api/auth/refresh', {
           method: 'POST',
           credentials: 'include',
@@ -70,6 +83,7 @@ function isSessionEndpoint(path: string): boolean {
 }
 
 async function doFetch(method: string, path: string, opts: { isForm?: boolean }, body?: unknown): Promise<Response> {
+  apiCalls++;
   const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
 
   let payload: BodyInit | undefined;
@@ -195,6 +209,10 @@ export async function rawFetch(
   path: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
+  // For a report sent as the page goes away: `keepalive` lets the request
+  // outlive the document. sendBeacon cannot carry the CSRF header, so it would
+  // be dropped by csrfGuard.
+  extraInit?: Pick<RequestInit, 'keepalive'>,
 ): Promise<Response> {
   const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE, ...(extraHeaders ?? {}) };
   let payload: BodyInit | undefined;
@@ -206,6 +224,7 @@ export async function rawFetch(
     method, headers, body: payload,
     credentials: 'include',
     redirect: 'manual',
+    ...extraInit,
   });
 }
 

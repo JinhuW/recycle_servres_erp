@@ -12,6 +12,7 @@ import { useT } from '../../lib/i18n';
 import { navigateBack, navigate } from '../../lib/route';
 import { matchSellers, type PrevSeller } from '../../lib/shippingList';
 import type { Order, Shipment, ShipmentRate, Warehouse } from '../../lib/types';
+import { loadWarehouses } from '../../lib/warehouses';
 
 // Full-page two-step label wizard.
 //   Step 1 — ship-to warehouse, seller address (link or manual), box size.
@@ -94,13 +95,13 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
         // come from the warehouses list, exactly as in label-first mode.
         // Without this, noShipAddr below reads undefined ship fields as "no
         // address" and Get Rates is disabled on every existing PO.
-        api.get<{ items: Warehouse[] }>('/api/warehouses'),
+        loadWarehouses(),
         sid ? listShipments(orderId) : Promise.resolve(null),
       ])
         .then(([o, whs, list]) => {
           if (!alive) return;
           setOrder(o.order);
-          setWarehouses(whs.items);
+          setWarehouses(whs);
           const existing = list?.items.find(x => x.id === sid) ?? null;
           if (existing) {
             setShipment(existing);
@@ -123,11 +124,11 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
       return () => { alive = false; };
     }
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => {
+    loadWarehouses()
+      .then(items => {
         if (!alive) return;
-        setWarehouses(r.items);
-        if (r.items.length === 1) setWarehouseId(r.items[0].id);
+        setWarehouses(items);
+        if (items.length === 1) setWarehouseId(items[0].id);
       })
       .catch(handleFetchError);
     return () => { alive = false; };
