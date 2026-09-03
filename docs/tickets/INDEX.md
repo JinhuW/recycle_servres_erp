@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-016](./RS-016-payments-needs-an-owner-column.md) | done | task | P3 | payments needs an owner column | 1.121.0 |
 | [RS-015](./RS-015-payments-right-side-reads-as-a-mass.md) | done | task | P2 | payments right side reads as a mass | 1.120.0 |
 | [RS-014](./RS-014-a-taught-ignore-rule-hides-a-recurring-pattern-of-ba.md) | in-progress | story | P2 | A taught ignore rule hides a recurring pattern of bank transactions | — |
 | [RS-012](./RS-012-carrier-movement-stalls-a-po-silently-and-assigning.md) | done | bug | P1 | Carrier movement stalls a PO silently, and assigning a paired payment can 500 | 1.119.1 |

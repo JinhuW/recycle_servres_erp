@@ -232,6 +232,11 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   every row. `Ignore`, `Not it` and `Not the same` appear on hover or keyboard
   focus rather than standing on every row at once; a device without hover keeps
   them visible.
+- **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
+  name, full name on hover, a dash where nobody owns it. Owner and PO are
+  mutually exclusive by constraint, so the column is empty by design on the
+  Linked tab and behind the Refunds tile. Assigning still happens in the
+  expanded row.
 - **A payment with no PO can be assigned to a member** (v1.119.0), and the queue
   filters by owner or by Unassigned. Assigning deliberately does *not* resolve
   the row: a payment that needs explaining still needs explaining, it just has
