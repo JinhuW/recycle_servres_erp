@@ -315,7 +315,9 @@ export const updateShipment = (orderId: string, sid: string, body: { from: Shipm
   api.patch<{ shipment: Shipment }>(`/api/orders/${orderId}/shipments/${sid}`, body);
 
 export const fetchShipmentRates = (orderId: string, sid: string) =>
-  api.post<{ rates: ShipmentRate[] }>(`/api/orders/${orderId}/shipments/${sid}/rates`, {});
+  api.post<{ rates: ShipmentRate[]; provider: 'shipsaving' | 'stub' }>(
+    `/api/orders/${orderId}/shipments/${sid}/rates`, {},
+  );
 
 export const buyShipmentLabel = (orderId: string, sid: string, body: { rateId: string; expectedAmount?: number }) =>
   api.post<{ shipment: Shipment; amountChanged: boolean }>(`/api/orders/${orderId}/shipments/${sid}/buy`, body);

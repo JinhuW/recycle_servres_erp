@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
+import { installShipSavingFake, PAID_ENV, PAID_RATE, PAID_TRACKING_NO } from './helpers/shipsaving';
 import { refreshShipmentTracking } from '../src/shipping/track';
 import { stubShippingClient } from '../src/shipping/stub';
 import { log } from '../src/lib/log';
@@ -70,13 +71,27 @@ async function createShipment(token: string, orderId: string): Promise<Shipment>
   return r.body.shipment;
 }
 
-async function quoteAndBuy(token: string, orderId: string, sid: string): Promise<Shipment> {
-  const rates = await api<{ rates: Rate[] }>('POST', `/api/orders/${orderId}/shipments/${sid}/rates`, { token });
+// `paid: true` routes the call at the fake ShipSaving account, which is the only
+// way to exercise the real money path — the client is chosen from credentials,
+// so there is no injection point on an HTTP request. Requires
+// installShipSavingFake() in the enclosing describe.
+type BuyOpts = { paid?: boolean };
+const envFor = (o: BuyOpts) => (o.paid ? { env: PAID_ENV } : {});
+
+async function quoteAndBuy(
+  token: string, orderId: string, sid: string, opts: BuyOpts = {},
+): Promise<Shipment> {
+  const rates = await api<{ rates: Rate[]; provider: string }>(
+    'POST', `/api/orders/${orderId}/shipments/${sid}/rates`, { token, ...envFor(opts) },
+  );
   expect(rates.status).toBe(200);
-  const usps = rates.body.rates.find((r) => r.rateId === 'stub-usps-priority')!;
+  expect(rates.body.provider).toBe(opts.paid ? 'shipsaving' : 'stub');
+  const wanted = opts.paid ? PAID_RATE.rateId : 'stub-usps-priority';
+  const rate = rates.body.rates.find((r) => r.rateId === wanted)!;
   const buy = await api<{ shipment: Shipment }>('POST', `/api/orders/${orderId}/shipments/${sid}/buy`, {
     token,
-    body: { rateId: usps.rateId, expectedAmount: usps.amount },
+    body: { rateId: rate.rateId, expectedAmount: rate.amount },
+    ...envFor(opts),
   });
   expect(buy.status).toBe(200);
   return buy.body.shipment;
@@ -178,25 +193,27 @@ describe('shipments — warehouse address requirement', () => {
 });
 
 describe('shipments — buy folds the label cost into the PO', () => {
-  beforeEach(async () => { await resetDb(); });
+  beforeEach(async () => { await resetDb(); installShipSavingFake(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
 
-  it('stub end-to-end: buy → purchased row, tracking, label URL, fee fold, audit, notification', async () => {
+  it('paid end-to-end: buy → purchased row, tracking, label URL, fee fold, audit, notification', async () => {
     const mgr = await loginAs(ALEX);
     const { token } = await loginAs(MARCUS);
     await setWarehouseAddress(mgr.token);
     const po = await createPo(token);
     const before = await getOrder(token, po);
     const s = await createShipment(token, po);
-    const bought = await quoteAndBuy(token, po, s.id);
+    const bought = await quoteAndBuy(token, po, s.id, { paid: true });
 
     expect(bought.status).toBe('purchased');
+    expect(bought.provider).toBe('shipsaving');
     expect(bought.carrier).toBe('USPS');
-    expect(bought.trackingNumber).toMatch(/^STUB/);
+    expect(bought.trackingNumber).toBe(PAID_TRACKING_NO);
     expect(bought.labelUrl).toBeTruthy();
-    expect(bought.labelCost).toBe(12.45);
+    expect(bought.labelCost).toBe(PAID_RATE.amount);
 
     const after = await getOrder(token, po);
-    expect((after.otherFees ?? 0) - (before.otherFees ?? 0)).toBeCloseTo(12.45, 2);
+    expect((after.otherFees ?? 0) - (before.otherFees ?? 0)).toBeCloseTo(PAID_RATE.amount, 2);
     expect(after.otherFeesNote).toContain('Shipping label');
 
     const ev = await api<{ events: Array<{ kind: string }> }>('GET', `/api/orders/${po}/events`, { token });
@@ -209,6 +226,40 @@ describe('shipments — buy folds the label cost into the PO', () => {
       WHERE n.kind = 'shipment_purchased' AND u.role = 'manager'
     `;
     expect(notes.length).toBeGreaterThan(0);
+  });
+
+  // The stub prices ($12.45 and friends) are canned sample data. Folding them
+  // into other_fees put an invented number into the PO's cost, where po-cost.ts
+  // amortizes it into per-line cost and commission — with nothing on the row
+  // saying it was never paid.
+  it('a demo label buys and tracks, but moves no money and records no cost', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const before = await getOrder(token, po);
+    const s = await createShipment(token, po);
+    const bought = await quoteAndBuy(token, po, s.id);
+
+    expect(bought.status).toBe('purchased');
+    expect(bought.provider).toBe('stub');
+    expect(bought.trackingNumber).toMatch(/^STUB/);
+    // label_cost is read together with fees_applied — a cost with no fee behind
+    // it shows up in the cost tape as shipping and misattributes a real fee.
+    expect(bought.labelCost).toBeNull();
+
+    const after = await getOrder(token, po);
+    expect(after.otherFees ?? 0).toBeCloseTo(before.otherFees ?? 0, 2);
+    expect(after.otherFeesNote ?? '').not.toContain('Shipping label');
+
+    const sql = getTestDb();
+    const row = (await sql`
+      SELECT fees_applied, label_cost, rate_amount FROM shipments WHERE id = ${s.id}
+    `)[0] as { fees_applied: boolean; label_cost: string | null; rate_amount: string | null };
+    expect(row.fees_applied).toBe(false);
+    expect(row.label_cost).toBeNull();
+    // The demo price is still recorded for display — it just isn't a cost.
+    expect(Number(row.rate_amount)).toBeCloseTo(12.45, 2);
   });
 
   it('stores the quotes and refuses a rateId the shipment was never quoted', async () => {
@@ -256,7 +307,8 @@ describe('shipments — buy folds the label cost into the PO', () => {
 });
 
 describe('shipments — void reverts the fee', () => {
-  beforeEach(async () => { await resetDb(); });
+  beforeEach(async () => { await resetDb(); installShipSavingFake(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
 
   it('void → voided, fee removed, second void refused', async () => {
     const mgr = await loginAs(ALEX);
@@ -265,16 +317,18 @@ describe('shipments — void reverts the fee', () => {
     const po = await createPo(token);
     const before = await getOrder(token, po);
     const s = await createShipment(token, po);
-    await quoteAndBuy(token, po, s.id);
+    await quoteAndBuy(token, po, s.id, { paid: true });
 
-    const voided = await api<{ shipment: Shipment }>('POST', `/api/orders/${po}/shipments/${s.id}/void`, { token });
+    const voided = await api<{ shipment: Shipment }>(
+      'POST', `/api/orders/${po}/shipments/${s.id}/void`, { token, env: PAID_ENV },
+    );
     expect(voided.status).toBe(200);
     expect(voided.body.shipment.status).toBe('voided');
 
     const after = await getOrder(token, po);
     expect(after.otherFees ?? 0).toBeCloseTo(before.otherFees ?? 0, 2);
 
-    const again = await api('POST', `/api/orders/${po}/shipments/${s.id}/void`, { token });
+    const again = await api('POST', `/api/orders/${po}/shipments/${s.id}/void`, { token, env: PAID_ENV });
     expect(again.status).toBe(409);
   });
 
@@ -284,16 +338,40 @@ describe('shipments — void reverts the fee', () => {
     await setWarehouseAddress(mgr.token);
     const po = await createPo(token);
     const s = await createShipment(token, po);
-    await quoteAndBuy(token, po, s.id);
+    await quoteAndBuy(token, po, s.id, { paid: true });
 
     // Manager manually zeroes the fee stack after the buy.
     const cut = await api('PATCH', `/api/orders/${po}`, { token: mgr.token, body: { otherFees: 0 } });
     expect(cut.status).toBe(200);
 
-    const voided = await api('POST', `/api/orders/${po}/shipments/${s.id}/void`, { token });
+    const voided = await api('POST', `/api/orders/${po}/shipments/${s.id}/void`, { token, env: PAID_ENV });
     expect(voided.status).toBe(200);
     const after = await getOrder(token, po);
     expect(after.otherFees ?? 0).toBe(0);
+  });
+
+  // fees_applied gates the reversal, so a demo label that added nothing must
+  // also subtract nothing — otherwise voiding one would refund money the PO
+  // never spent.
+  it('voiding a demo label subtracts nothing and writes no fee note', async () => {
+    const mgr = await loginAs(ALEX);
+    const { token } = await loginAs(MARCUS);
+    await setWarehouseAddress(mgr.token);
+    const po = await createPo(token);
+    const s = await createShipment(token, po);
+    await quoteAndBuy(token, po, s.id);
+    // Give the PO a real fee stack so a stray reversal would be visible.
+    await api('PATCH', `/api/orders/${po}`, { token: mgr.token, body: { otherFees: 30 } });
+
+    const voided = await api<{ shipment: Shipment }>(
+      'POST', `/api/orders/${po}/shipments/${s.id}/void`, { token },
+    );
+    expect(voided.status).toBe(200);
+    expect(voided.body.shipment.status).toBe('voided');
+
+    const after = await getOrder(token, po);
+    expect(after.otherFees ?? 0).toBeCloseTo(30, 2);
+    expect(after.otherFeesNote ?? '').not.toContain('Label voided');
   });
 });
 
@@ -587,7 +665,8 @@ describe('warehouses — shipping address round-trip', () => {
 });
 
 describe('shipments — externally voided labels and provider re-stamp', () => {
-  beforeEach(async () => { await resetDb(); });
+  beforeEach(async () => { await resetDb(); installShipSavingFake(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
 
   // A label cancelled on the ShipSaving dashboard reaches us only through the
   // poll. Marking the row voided makes POST /void a 409 ('voided' is
@@ -599,11 +678,12 @@ describe('shipments — externally voided labels and provider re-stamp', () => {
     await setWarehouseAddress(mgr.token);
     const po = await createPo(token);
     const s = await createShipment(token, po);
-    const bought = await quoteAndBuy(token, po, s.id);
+    const bought = await quoteAndBuy(token, po, s.id, { paid: true });
     expect((await getOrder(token, po)).otherFees).toBe(bought.labelCost);
 
+    // No provider retag needed: a paid buy already stamps 'shipsaving', which
+    // is what the poll filters on.
     const sql = getTestDb();
-    await sql`UPDATE shipments SET provider = 'shipsaving' WHERE id = ${s.id}`;
     const externallyVoided: ShippingClient = {
       ...stubShippingClient,
       async getShipment() {

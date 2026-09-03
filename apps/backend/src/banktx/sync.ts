@@ -6,10 +6,13 @@
 
 import type { Sql, TransactionSql } from 'postgres';
 import { getDb } from '../db';
+import { log } from '../lib/log';
 import type { Env } from '../types';
 import { pickBankProviders } from './index';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedTxn } from './types';
+
+const bankLog = log.child({ module: 'banktx' });
 
 const OVERLAP_MS = 5 * 24 * 60 * 60 * 1000;
 const BACKFILL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -58,6 +61,20 @@ export function syncBankTransactions(env: Env, providersOverride?: BankProvider[
   return run;
 }
 
+// doSync swallows a provider's failure into its own slot so one bank being down
+// can't block the other — which means the loop's catch never fires for the
+// failure that actually matters. Without this the six-hourly pass is silent in
+// both directions: nothing distinguishes twenty-four clean runs from
+// twenty-four broken ones, and the only way to find out is to open Payments and
+// press Sync now. Exported so a test can assert the lines.
+export function reportSyncResult(result: SyncResult): void {
+  for (const [source, counts] of Object.entries(result.perSource)) {
+    if (!counts) continue;
+    if (counts.error) bankLog.warn('sync failed for a source', { source, error: counts.error });
+    else bankLog.info('sync pass', { source, ...counts });
+  }
+}
+
 // Background freshness (same shape as startShipmentTrackingLoop). Volumes are
 // tiny and the page has a Sync-now button, so a slow cadence is plenty. Never
 // starts when nothing is configured.
@@ -69,9 +86,9 @@ export function startBankSyncLoop(env: Env): { stop: () => void } {
   const tick = async () => {
     if (stopped) return;
     try {
-      await syncBankTransactions(env);
+      reportSyncResult(await syncBankTransactions(env));
     } catch (err) {
-      console.warn('[banktx] sync pass failed', err);
+      bankLog.error('sync pass failed', err);
     }
   };
   void tick();

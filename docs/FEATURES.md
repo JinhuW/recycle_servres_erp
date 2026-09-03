@@ -186,6 +186,14 @@ Transit, and a line's qty can never be 0.
 - Owners get a default warehouse, and managers can create a package PO at any
   status (v1.85.0).
 
+- **Demo labels cost nothing and say so up front** (v1.120.0). Without
+  ShipSaving keys the label wizard quotes the stub provider's canned prices.
+  Those are sample data, so buying one adds nothing to the PO's other fees and
+  records no `label_cost`; voiding it subtracts nothing. The rates step marks
+  every demo rate, replaces the charge line with "No charge", and offers *Make
+  demo label* instead of *Buy label* — the older `Demo` chip only appeared on
+  the shipment afterwards, once the choice had been made.
+
 > Both shipping providers ship **dark until their keys are set** —
 > `SHIPPO_API_TOKEN` / `SHIPPO_WEBHOOK_SECRET` for tracking, ShipSaving portal
 > keys for labels. `/api/health` reports provider modes so this state is
