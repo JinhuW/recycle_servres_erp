@@ -24,9 +24,11 @@ reach a portal through a URL token.
 - Desktop role gating is three-layered: the sidebar's `roles` list, a
   `DesktopApp` view bounce, and in-page filters. Missing one leaves the view
   invisible rather than forbidden.
-- Auth is httpOnly cookies — a 15-minute `at` JWT plus a rotating `rt` refresh
-  family. No localStorage, no bearer tokens. Refresh-token reuse revokes the
-  whole family.
+- Auth is httpOnly cookies — a 60-minute `at` JWT plus a rotating `rt` refresh
+  family (the access token was 15 minutes until v1.122.0, which made four out
+  of five app loads open with a 401, a refresh and a retry before painting).
+  No localStorage, no bearer tokens. Refresh-token reuse revokes the whole
+  family.
 - Every mutating request carries `X-Requested-By: recycle-erp`; the CSRF guard
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (vendor endpoints, which authenticate by URL token instead).
@@ -339,6 +341,15 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
 - All strings go through `useT()`; the app ships English and Chinese.
 - User preferences (theme, list-view modes) flow through `lib/preferences.tsx`
   and persist server-side.
+- **A deploy no longer breaks tabs that were already open** (v1.121.1). A
+  content-hashed chunk that a release has replaced now 404s instead of being
+  answered with `index.html`, and a tab that asks for one reloads itself once
+  onto the current build rather than stalling on a skeleton.
+- **The load starts before the bundle does** (v1.122.0). A small boot script,
+  injected ahead of the entry, preloads whichever shell the viewport is about
+  to need and starts `/api/me`, `/api/lookups` and `/api/workspace` — none of
+  which needs React — instead of leaving all four to be discovered after 255 KB
+  of JavaScript has parsed.
 
 ## Observability
 
@@ -348,4 +359,8 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   path, method and the backend's `X-Request-Id`, and `POST /api/client-errors`
   writes one greppable JSON line to stdout — capped at 5 per page load, deduped,
   and with vendor-portal tokens redacted (v1.105.0).
+- **Load timing is reported too** (v1.122.0): `POST /api/client-timings` takes
+  navigation timing, LCP, and the request/refresh counts for the page load, one
+  report per load. Numbers only, no paths — it is the answer to "the page feels
+  slow", which until then had no evidence behind it either way.
 - `/api/health` reports version, build date, commit and provider modes.

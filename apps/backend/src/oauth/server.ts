@@ -240,7 +240,7 @@ oauth.get('/authorize', async (c) => {
     return c.redirect(`/login?next=${next}`, 302);
   }
   // Apply the role ceiling here so the consent screen shows only the scopes
-  // that will actually be granted. The role comes from the 15-min `at` JWT;
+  // that will actually be granted. The role comes from the `at` JWT;
   // /authorize/consent re-checks it against the live DB record.
   const granted = restrictScopesToRole(requested, payload.role);
   if (granted.length === 0) return redirectWithError('invalid_scope');

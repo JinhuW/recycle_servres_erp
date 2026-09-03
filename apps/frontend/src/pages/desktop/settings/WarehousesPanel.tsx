@@ -5,6 +5,7 @@ import { handleFetchError } from '../../../lib/errorToast';
 import { useT } from '../../../lib/i18n';
 import type { Warehouse } from '../../../lib/types';
 import { SettingsHeader, Toggle, type Member, type ToastFn } from './_shared';
+import { loadWarehouses, resetWarehouses } from '../../../lib/warehouses';
 
 // ─── Warehouses ───────────────────────────────────────────────────────────────
 type WarehouseRow = Warehouse & { active: boolean; receiving: boolean };
@@ -29,16 +30,19 @@ export function WarehousesPanel({ showToast }: { showToast: ToastFn }) {
   const [modalWh, setModalWh] = useState<Warehouse | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const reload = () => api.get<{ items: Warehouse[] }>('/api/warehouses')
-    .then(r => {
-      setWhs(r.items.map(w => ({
+  // resetWarehouses first: this panel is the only thing that writes
+  // warehouses, so it owns invalidating the shared cache every other screen
+  // reads. Archiving drops a row from the list entirely.
+  const reload = () => { resetWarehouses(); return loadWarehouses()
+    .then(items => {
+      setWhs(items.map(w => ({
         ...w,
         active: w.active ?? true,
         receiving: w.short !== 'HK',
       })));
     })
     .catch(handleFetchError)
-    .finally(() => setLoadedOnce(true));
+    .finally(() => setLoadedOnce(true)); };
   useEffect(() => { reload(); }, []);
 
   const updateRow = (id: string, patch: Partial<WarehouseRow>) =>

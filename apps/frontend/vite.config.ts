@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { bootPlugin } from './vite-plugin-boot';
 
 export default defineConfig({
   plugins: [
     react(),
+    bootPlugin(),
     VitePWA({
       registerType: 'prompt',
       // SW registration is owned by src/lib/pwa.ts so we can gate on user consent.

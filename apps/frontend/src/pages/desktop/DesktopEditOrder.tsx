@@ -50,6 +50,7 @@ const LIVE_LABEL_STATUSES = new Set(['purchased', 'in_transit', 'delivered', 'ex
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
+import { loadWarehouses } from '../../lib/warehouses';
 
 
 
@@ -329,8 +330,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   useEffect(() => {
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => { if (alive) setWarehouses(r.items); })
+    loadWarehouses()
+      .then(items => { if (alive) setWarehouses(items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);

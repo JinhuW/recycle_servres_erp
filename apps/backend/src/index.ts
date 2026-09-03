@@ -49,6 +49,7 @@ import vendorPublicRoutes from './routes/vendorPublic';
 import vendorBidsRoutes from './routes/vendorBids';
 import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
+import clientTimingRoutes from './routes/clientTimings';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -302,6 +303,10 @@ app.use('/api/activity/*', authMiddleware);
 // registration would leave it unauthenticated.
 app.use('/api/client-errors', authMiddleware);
 app.use('/api/client-errors/*', authMiddleware);
+// Same bare-path-plus-wildcard pair, and for the same reason: the report POSTs
+// to the prefix root, which `/*` alone does not match.
+app.use('/api/client-timings', authMiddleware);
+app.use('/api/client-timings/*', authMiddleware);
 // Bare paths matter here too: the shipments list and packages list live at
 // the prefix root. /api/public/shipping stays public — /api/shipping/* does
 // not match it.
@@ -340,6 +345,7 @@ app.route('/api/workspace', fxRatesRoutes);
 app.route('/api/vendor-bids', vendorBidsRoutes);
 app.route('/api/activity', activityRoutes);
 app.route('/api/client-errors', clientErrorRoutes);
+app.route('/api/client-timings', clientTimingRoutes);
 // /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
 // list above. csrfGuard still runs from the global stack.

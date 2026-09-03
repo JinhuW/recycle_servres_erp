@@ -9,6 +9,7 @@ import { PasswordMeter } from '../../../components/PasswordMeter';
 import { pwStrengthLabels } from '../../../lib/passwordI18n';
 import { validatePasswordChange, passwordChangeErrorKey } from '../../../lib/passwordPolicy';
 import { SettingsHeader, type ToastFn } from './_shared';
+import { loadWarehouses } from '../../../lib/warehouses';
 
 // The desktop "Account" panel: identity card + password-change form +
 // sessions note. Validation matches the backend: 8+ char min, must differ
@@ -21,8 +22,8 @@ export function AccountPanel({ showToast }: { showToast?: ToastFn }) {
 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => setWarehouses(r.items))
+    loadWarehouses()
+      .then(setWarehouses)
       .catch(handleFetchError);
   }, []);
 

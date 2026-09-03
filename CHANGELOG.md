@@ -17,6 +17,43 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.122.0] - 2026-09-03
+
+### Changes
+
+- **The cold load stops waiting on things it never needed to wait for.**  Three
+  measurements shaped this.  The access token lived 15 minutes, and the
+  production log showed `/api/auth/refresh` firing 19 times against 23 app
+  mounts — four out of five loads opened with the whole bootstrap 401ing, a
+  refresh, and a retry, three serial round trips before a single pixel, because
+  a user who steps away for a coffee comes back past the deadline.  It is now
+  60 minutes.  What actually bounds a stolen cookie is the rotating refresh
+  family and its reuse-revocation, not that number; and deactivating a user
+  still takes effect on their very next request, because `authMiddleware`
+  re-checks `active = TRUE` every time rather than trusting the JWT.
+
+  Second, nothing started until the bundle had.  The shell is chosen at runtime
+  by viewport width, so Vite cannot emit a `modulepreload` for it and the
+  browser only learned it needed `DesktopApp-*.js` after parsing 255 KB of
+  JavaScript — and `/api/me`, `/api/lookups` and `/api/workspace`, none of which
+  needs React, waited behind the same parse.  A small boot script now goes in
+  ahead of the entry and starts all of it.  A prefetch that comes back 401 costs
+  nothing: it resolves to null and the normal path refreshes and retries.  The
+  two halves ship together deliberately — they already overlapped each other, so
+  either alone would have saved little.
+
+  Third, `/api/warehouses` had ten call sites across nine components, each with
+  its own `useEffect` and no shared state; one session asked for it six times in
+  1.6 seconds.  It now uses the same single-flight module cache as lookups and
+  workspace settings, invalidated explicitly by the Settings panel that writes
+  it.
+
+- **And the load is now measurable rather than felt.**  `POST
+  /api/client-timings` records navigation timing, LCP, and how many requests and
+  refreshes a page load actually cost — the sibling of the existing client-error
+  sink, and the thing whose absence meant the original report could only be
+  "sometimes it feels slow".  Numbers only; nothing that could carry a URL.
+
 ## [1.121.1] - 2026-09-03
 
 ### Fixes

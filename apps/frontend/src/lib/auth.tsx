@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError } from './api';
+import { takeBoot } from './boot';
 import { loadLookups, resetLookups } from './lookups';
 import { loadWorkspaceSettings, resetWorkspaceSettings } from './workspace';
+import { resetWarehouses } from './warehouses';
 import type { User, Lang } from './types';
 
 // Drop all client-side auth state. Shared by the user-initiated logout() and
@@ -10,6 +12,7 @@ function clearLocalAuthState(setUser: (u: User | null) => void) {
   setUser(null);
   resetLookups();
   resetWorkspaceSettings();
+  resetWarehouses();
 }
 
 // Decide what `auth:unauthorized` should do. With a live user we run the full
@@ -64,7 +67,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // here just means "no valid session" — treat it as logged-out, quietly.
   useEffect(() => {
     Promise.all([
-      api.get<{ user: User }>('/api/me').then(r => setUser(r.user)),
+      // takeBoot picks up the fetch the boot script started before the entry
+      // bundle parsed. Null means there wasn't a usable one — no boot script in
+      // dev, or a 401 — and the api.get path then refreshes and retries, which
+      // the raw boot fetch deliberately does not.
+      (async () => {
+        const pre = await takeBoot<{ user: User }>('/api/me');
+        const r = pre ?? await api.get<{ user: User }>('/api/me');
+        setUser(r.user);
+      })(),
       // Lookups are best-effort: a transient failure must not look like an
       // auth failure or strand a valid user on the login screen. loadLookups()
       // resets itself on failure, so it stays retry-able.

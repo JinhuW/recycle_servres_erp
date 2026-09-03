@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-019](./RS-019-the-cold-load-waits-on-a-token-refresh-and-a-serial.md) | in-review | task | P2 | the cold load waits on a token refresh and a serial chunk hop | 1.122.0 |
+| [RS-017](./RS-017-a-deploy-breaks-every-open-tab-and-the-break-is-cach.md) | done | bug | P1 | a deploy breaks every open tab and the break is cached for a year | 1.121.1 |
 | [RS-016](./RS-016-payments-needs-an-owner-column.md) | done | task | P3 | payments needs an owner column | 1.121.0 |
 | [RS-015](./RS-015-payments-right-side-reads-as-a-mass.md) | done | task | P2 | payments right side reads as a mass | 1.120.0 |
 | [RS-014](./RS-014-a-taught-ignore-rule-hides-a-recurring-pattern-of-ba.md) | in-progress | story | P2 | A taught ignore rule hides a recurring pattern of bank transactions | — |

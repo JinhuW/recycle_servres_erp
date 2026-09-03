@@ -8,6 +8,7 @@
 
 import { CATEGORY_ORDER } from '@recycle-erp/shared';
 import { api } from './api';
+import { takeBoot } from './boot';
 
 export { CATEGORY_ORDER };
 
@@ -149,7 +150,10 @@ export function loadLookups(): Promise<void> {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const data = await api.get<LookupsResponse>('/api/lookups');
+      // The boot script may already have this in flight from before the bundle
+      // parsed; null means it wasn't usable and this is a normal fetch.
+      const data = await takeBoot<LookupsResponse>('/api/lookups')
+        ?? await api.get<LookupsResponse>('/api/lookups');
       // Mutate in place so any module that holds a reference sees the values.
       for (const [group, values] of Object.entries(data.catalog)) {
         const target = (catalog as Record<string, string[]>)[group];

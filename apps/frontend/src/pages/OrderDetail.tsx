@@ -21,6 +21,7 @@ import { normalizePaypalTxnInput } from '../lib/paypalTxn';
 import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, OrderLine, Warehouse } from '../lib/types';
+import { loadWarehouses } from '../lib/warehouses';
 
 // `order.status` can collapse to 'Mixed' when an order's lines disagree, which
 // would falsely lock the owner out. `lifecycle` is authoritative, so we map it
@@ -176,8 +177,8 @@ export function OrderDetail({
 
   useEffect(() => {
     let alive = true;
-    api.get<{ items: Warehouse[] }>('/api/warehouses')
-      .then(r => { if (alive) setWarehouses(r.items); })
+    loadWarehouses()
+      .then(items => { if (alive) setWarehouses(items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, []);
