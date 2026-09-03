@@ -17,6 +17,9 @@ import type {
   ShippingClient, TrackingInfo, VoidRef,
 } from './types';
 import { parseEta } from './types';
+import { log } from '../lib/log';
+
+const shipLog = log.child({ module: 'shipping' });
 
 const DEFAULT_BASE = 'https://x-api.shipsaving.com';
 const TIMEOUT_MS = 20_000;
@@ -255,7 +258,7 @@ export function shipSavingClient(env: Env): ShippingClient {
       // from the freshly picked quote, so they may not describe this label —
       // surface it for reconciliation instead of failing a charged purchase.
       if (data.duplicate_label) {
-        console.warn(
+        shipLog.warn(
           `[shipping] create_and_pay returned an existing label for platform_uk_id ${ctx.platformUkId} `
           + `(rate_id ${rateId}) — verify carrier/service against ShipSaving if the rate was re-picked`,
         );

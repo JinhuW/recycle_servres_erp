@@ -840,6 +840,7 @@ const zh: Record<string, string> = {
   shipConfirmCharge: '从 ShipSaving 扣费',
   shipBuyWarning: '将立即购买运单,并把 {amount} 计入本采购单的其他费用。经理会收到通知。',
   shipBuyBtn: '购买运单 —— {amount}',
+  shipTrackingOff: '自动物流跟踪尚未启用 —— 该包裹不会自动更新状态。',
   shipStubRatesWarn: '演示费率 —— 以下价格为内置样例数据,并非真实承运商报价。请在后端配置 SHIPSAVING_APP_KEY 与 SHIPSAVING_APP_SECRET 以购买真实运单。',
   shipStubNoCharge: '不扣费',
   shipStubBuyWarning: '这将生成一张演示运单:不会向承运商付款,不会计入本采购单的费用,PDF 打印为空白。',

@@ -47,13 +47,3 @@ export async function closeSharedDb(): Promise<void> {
     all.map(p => p.end({ timeout: 5 }).catch(() => { /* already closed */ })),
   );
 }
-
-// Hono middleware: previously bound a per-request pool. The shared pool now
-// lives for the process lifetime, so this is a passthrough kept only so the
-// existing `app.use('*', (c, next) => dbScope(c, next))` mount is unchanged.
-export async function dbScope(
-  _c: { env: Env },
-  next: () => Promise<void>,
-): Promise<void> {
-  await next();
-}

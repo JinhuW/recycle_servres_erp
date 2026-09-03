@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { TableSkeleton } from '../../components/Skeleton';
-import { api } from '../../lib/api';
+import { ApiError, api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { handleFetchError } from '../../lib/errorToast';
 import { fmtDateShort, fmtMoney } from '../../lib/format';
@@ -409,7 +409,11 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
       await refreshPackage(pkg.id);
       onMutated();
     } catch (e) {
-      handleFetchError(e);
+      // 501 means tracking has no provider configured. That is a state of the
+      // deployment, not a failure of this click, so it does not deserve the
+      // blocking "Something went wrong" dialog a warehouse user was getting.
+      if (e instanceof ApiError && e.status === 501) showToast(t('shipTrackingOff'), 'error');
+      else handleFetchError(e);
     } finally {
       setBusy(false);
     }

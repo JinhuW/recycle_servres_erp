@@ -4,6 +4,9 @@ import type { ShippoClient as ShippoClientT } from './shippo';
 import { shipSavingClient } from './shipsaving';
 import { shippoClient } from './shippo';
 import { stubShippingClient } from './stub';
+import { log } from '../lib/log';
+
+const shipLog = log.child({ module: 'shipping' });
 
 export type {
   RateQuote,
@@ -27,7 +30,7 @@ export function pickShippingClient(env: Env): ShippingClient {
   if (env.SHIPSAVING_APP_KEY && env.SHIPSAVING_APP_SECRET) return shipSavingClient(env);
   if (!warnedAboutStub) {
     warnedAboutStub = true;
-    console.warn(
+    shipLog.warn(
       '[shipping] SHIPSAVING_APP_KEY / SHIPSAVING_APP_SECRET not set — using the STUB shipping provider. Rates and labels are canned demo data; no real labels are bought. Set both to enable ShipSaving v2.',
     );
   }
@@ -56,12 +59,12 @@ export function pickTrackingClient(env: Env): TrackingChoice {
     if (!warnedAboutTrackingConfig) {
       warnedAboutTrackingConfig = true;
       if (!env.SHIPPO_WEBHOOK_SECRET) {
-        console.warn(
+        shipLog.warn(
           '[shipping] SHIPPO_API_TOKEN is set but SHIPPO_WEBHOOK_SECRET is not — numbers will be registered with Shippo and every push it sends will 404. Set the secret and point the Shippo dashboard at /api/public/shippo/<secret> on the public hostname.',
         );
       }
       if (env.SHIPPO_API_TOKEN.startsWith('shippo_test_')) {
-        console.warn(
+        shipLog.warn(
           '[shipping] SHIPPO_API_TOKEN is a TEST token — it only tracks the `shippo` demo carrier and 400s every real UPS/FedEx/USPS number. Tracking will look configured and move nothing.',
         );
       }
@@ -74,7 +77,7 @@ export function pickTrackingClient(env: Env): TrackingChoice {
   }
   if (!warnedAboutTrackingStub) {
     warnedAboutTrackingStub = true;
-    console.warn(
+    shipLog.warn(
       '[shipping] SHIPPO_API_TOKEN is not set and ShipSaving is unconfigured — tracking is STUBBED. Packages and shipments will never move on their own. Set SHIPPO_API_TOKEN to track externally-bought labels.',
     );
   }

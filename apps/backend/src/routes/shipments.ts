@@ -15,6 +15,9 @@ import { writeOrderEvent } from '../services/orderAudit';
 import { FEE_NOTE_MAX, voidShipmentTx } from '../services/shipmentVoid';
 import { notifyManagers } from '../lib/notify';
 import { effectiveRole } from '../lib/role';
+import { log } from '../lib/log';
+
+const shipLog = log.child({ module: 'shipping' });
 import { pickShippingClient, carrierTrackingUrl } from '../shipping';
 import type { RateQuote, ShipAddress, ShipPackage, ShipmentStatus } from '../shipping';
 import { canTransition } from '../shipping/status';
@@ -429,7 +432,7 @@ shipments.post('/:orderId/shipments/:sid/rates', async (c) => {
       },
     );
   } catch (err) {
-    console.error('[shipping] rate fetch failed', err);
+    shipLog.error('rate fetch failed', err);
     return c.json({ error: 'The shipping provider could not return rates — try again' }, 502);
   }
 
@@ -497,7 +500,7 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   try {
     label = await client.buyByRateId(rateId, { platformUkId: sid, quote });
   } catch (err) {
-    console.error('[shipping] label purchase failed', err);
+    shipLog.error('label purchase failed', err);
     return c.json({ error: 'The shipping provider rejected the purchase — refresh rates and try again' }, 502);
   }
 
@@ -523,7 +526,8 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   } catch (err) {
     // Label bought but not stored: keep going with no stored PDF rather than
     // strand the charge; the tracking number is still recorded.
-    console.error(`[shipping] label ${label.trackingNumber} purchased but upload failed`, err);
+    shipLog.child({ trackingNumber: label.trackingNumber })
+      .error('label purchased but upload failed', err);
     upload = null;
   }
 
@@ -584,8 +588,8 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
       });
     });
   } catch (err) {
-    console.error(
-      `[shipping] label ${label.trackingNumber} PURCHASED but recording failed — reconcile against ShipSaving manually`,
+    shipLog.child({ trackingNumber: label.trackingNumber }).error(
+      'label PURCHASED but recording failed — reconcile against ShipSaving manually',
       err,
     );
     throw err;

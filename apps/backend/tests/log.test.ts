@@ -152,6 +152,32 @@ describe('request logging', () => {
     expect(typeof line.ms).toBe('number');
   });
 
+  // Without this, a 4xx line is byte-identical to a 200 except for the status
+  // integer — and PATCH /api/orders/:id alone has six distinct 409 branches, so
+  // a production refusal could not be told apart after the fact.
+  it('carries the refusal reason on a 4xx', async () => {
+    await resetDb();
+    const r = await api('GET', '/api/orders');
+    expect(r.status).toBe(401);
+    const line = JSON.parse(out.at(-1)!);
+    expect(line).toMatchObject({ message: 'request', status: 401 });
+    expect(typeof line.error).toBe('string');
+    expect(line.error.length).toBeGreaterThan(0);
+  });
+
+  it('leaves a 2xx line without an error field', async () => {
+    await api('GET', '/');
+    expect(JSON.parse(out.at(-1)!).error).toBeUndefined();
+  });
+
+  it('does not duplicate the reason on a 5xx — app.onError already carries it', async () => {
+    await resetDb();
+    const { cookies } = await loginAs(ALEX);
+    const r = await api('GET', '/api/orders', { cookies, env: { DATABASE_URL: DEAD_DB } });
+    expect(r.status).toBe(500);
+    expect(JSON.parse(out.at(-1)!).error).toBeUndefined();
+  });
+
   it('redacts the vendor portal token from the logged path', async () => {
     // The token is the only gate to a vendor's data — a bearer-equivalent
     // secret that must never be replayable from the log stream.
