@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-140951
-pr:
+pr: 247
 version: 1.120.0
 related: []
 ---
