@@ -7,7 +7,7 @@ priority: P3
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-140951
-pr:
+pr: 249
 version: 1.121.0
 related: [RS-015]
 ---
