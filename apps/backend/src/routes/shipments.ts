@@ -440,7 +440,10 @@ shipments.post('/:orderId/shipments/:sid/rates', async (c) => {
     UPDATE shipments SET status = 'quoted', quotes = ${sql.json(rates as never)}
     WHERE id = ${sid} AND status IN ('draft','quoted')
   `;
-  return c.json({ rates });
+  // The provider rides on the response, not on each RateQuote: one call is one
+  // client, and the wizard needs it to mark demo rates *before* the buy. Adding
+  // it to RateQuote would also change the shape stored in `quotes`.
+  return c.json({ rates, provider: client.provider });
 });
 
 // ── Buy ──────────────────────────────────────────────────────────────────────
@@ -501,6 +504,13 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   const amountChanged =
     typeof body.expectedAmount === 'number' && Math.abs(body.expectedAmount - label.amount) > 0.01;
 
+  // A stub label is a demo: no carrier was paid, so its price must not reach
+  // the books. label_cost stays NULL alongside fees_applied = FALSE — the two
+  // are read together (voidShipmentTx's reversal, and the cost tape's
+  // shipping-vs-other split), and a cost with no fee behind it misattributes
+  // a real fee as shipping.
+  const demo = client.provider === 'stub';
+
   let upload;
   try {
     upload = await uploadAttachment(
@@ -539,33 +549,38 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
           tracking_url = ${label.trackingUrl ?? carrierTrackingUrl(label.carrier, label.trackingNumber)},
           label_storage_key = ${upload?.storageKey ?? null},
           label_delivery_url = ${upload?.deliveryUrl ?? null},
-          label_cost = ${label.amount},
-          fees_applied = TRUE,
+          label_cost = ${demo ? null : label.amount},
+          fees_applied = ${!demo},
           tracking_status = 'purchased'
         WHERE id = ${sid}
       `;
-      await tx`
-        UPDATE orders SET
-          other_fees = other_fees + ${label.amount},
-          other_fees_note = left(
-            concat_ws(' | ', nullif(other_fees_note, ''), ${'Shipping label ' + label.trackingNumber}::text),
-            ${FEE_NOTE_MAX}::int
-          )
-        WHERE id = ${orderId}
-      `;
+      if (!demo) {
+        await tx`
+          UPDATE orders SET
+            other_fees = other_fees + ${label.amount},
+            other_fees_note = left(
+              concat_ws(' | ', nullif(other_fees_note, ''), ${'Shipping label ' + label.trackingNumber}::text),
+              ${FEE_NOTE_MAX}::int
+            )
+          WHERE id = ${orderId}
+        `;
+      }
       await writeOrderEvent(tx, orderId, u.id, 'shipment_purchased', {
         shipmentId: sid,
         carrier: label.carrier,
         service: label.service,
         amount: label.amount,
         trackingNumber: label.trackingNumber,
+        ...(demo && { demo: true }),
       });
       await notifyManagers(tx, {
         kind: 'shipment_purchased',
         tone: 'info',
         icon: 'package',
         title: `Shipping label bought for ${orderId}`,
-        body: `${u.name} bought ${label.carrier} ${label.service} — $${label.amount.toFixed(2)}`,
+        body: demo
+          ? `${u.name} bought a demo ${label.carrier} ${label.service} label — no charge, nothing added to the PO`
+          : `${u.name} bought ${label.carrier} ${label.service} — $${label.amount.toFixed(2)}`,
       });
     });
   } catch (err) {

@@ -1164,6 +1164,13 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     shipConfirmCharge: 'Charged to ShipSaving',
     shipBuyWarning: 'This buys the label now and adds {amount} to this PO’s other fees. Managers are notified.',
     shipBuyBtn: 'Buy label — {amount}',
+    // Demo rates are canned sample prices, so they must be called out on the
+    // rate list and again at the confirm step — the old "Demo" chip only
+    // appeared on the shipment afterwards, once the choice was already made.
+    shipStubRatesWarn: 'Demo rates — these prices are canned sample data, not real carrier quotes. Set SHIPSAVING_APP_KEY and SHIPSAVING_APP_SECRET on the backend to buy real labels.',
+    shipStubNoCharge: 'No charge',
+    shipStubBuyWarning: 'This makes a demo label: no carrier is paid, nothing is added to this PO’s fees, and the PDF prints blank.',
+    shipStubBuyBtn: 'Make demo label',
     acShipmentCreated: 'Shipment added',
     acShipmentPurchased: 'Shipping label purchased',
     acShipmentVoided: 'Shipping label voided',

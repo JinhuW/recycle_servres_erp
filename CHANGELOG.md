@@ -17,6 +17,55 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.123.0] - 2026-09-03
+
+### Fixes
+- fix(shipping): **a demo shipping label no longer charges the purchase order.**
+  Production has been running on the stub label provider since the feature
+  shipped — `SHIPSAVING_APP_KEY`/`SECRET` are unset, which is deliberate, since
+  credentials may lag a deploy. What was not deliberate is where the demo money
+  went: the stub returns plausible prices (`USPS Priority $12.45`), the rate
+  object carried no marker saying which provider produced it, and buying folded
+  that invented figure into `orders.other_fees` — where `po-cost.ts` amortizes
+  it into per-line cost and commission. The only warning was a `Demo` chip
+  suppressed for `draft` and `quoted`, so it appeared *after* the money was on
+  the order.
+
+  A demo purchase now moves nothing: `other_fees` is untouched, and the row
+  carries `fees_applied = FALSE` with `label_cost = NULL` (the two are read
+  together — by the void reversal, and by the cost tape's shipping-vs-other
+  split, which would otherwise re-badge a real fee as shipping). The demo price
+  still lands in `rate_amount` for display. Voiding such a label subtracts
+  nothing, and the manager notification says a demo label was made rather than
+  quoting a dollar figure nobody paid.
+
+  The label wizard now says so before you commit rather than after: the rates
+  step returns which provider quoted it, and demo rates carry a `Demo` chip, a
+  callout, "No charge" in place of the amount, and a *Make demo label* button.
+
+  Found by reading six days of production logs. No purchase order was affected
+  — the window contained one shipment, zero rate fetches and zero label buys
+  ([RS-013](docs/tickets/RS-013-demo-shipping-labels-must-not-charge-a-po-and-bank-s.md)).
+- fix(payments): **the bank reconciliation loop now reports what it did.** It
+  syncs Mercury and PayPal every six hours, and `doSync` deliberately catches
+  each provider's failure into its own slot so one bank being down cannot block
+  the other — which meant the loop's own `catch` never fired for the failure
+  that mattered, and the result it returned was dropped on the floor. Nothing
+  logged on success either, so six days of production logs contained no trace
+  of the loop at all: twenty-four clean passes and twenty-four silent failures
+  looked identical, and the only way to tell was to open Payments and press
+  Sync now. Each pass now emits a `warn` naming any source that failed and its
+  error, and an `info` carrying per-source counts otherwise — through
+  `lib/log.ts`, so the lines are structured and carry the build.
+
+### Other
+- The paid ShipSaving label path is covered by tests for the first time. Every
+  shipping money assertion previously ran through the stub, which was
+  indistinguishable from the real thing only because the stub also moved money;
+  with that fixed, the fee fold and the void reversal would have had no test at
+  all. `tests/helpers/shipsaving.ts` fakes the v2 account so the real path runs
+  through the real route.
+
 ## [1.122.0] - 2026-09-03
 
 ### Changes

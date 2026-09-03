@@ -42,6 +42,10 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [shipment, setShipment] = useState<Shipment | null>(null);
   const [rates, setRates] = useState<ShipmentRate[]>([]);
+  // Whether these rates came from the demo provider. The row's own `provider`
+  // is the draft's stamp and is re-derived at buy time, so the rate response is
+  // the only thing that knows before the money step.
+  const [demoRates, setDemoRates] = useState(false);
   const [picked, setPicked] = useState<ShipmentRate | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -241,6 +245,7 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
       setShipment(saved);
       const r = await fetchShipmentRates(poId, saved.id);
       setRates(r.rates);
+      setDemoRates(r.provider === 'stub');
       setPicked(null);
       setStep(2);
     } catch (e) {
@@ -447,6 +452,7 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
       {step === 2 && (
         <section className="ship-wizard-section">
           <div className="ship-sec-title">{t('shipStep2Title')}</div>
+          {demoRates && <div className="ship-callout-warn">{t('shipStubRatesWarn')}</div>}
           {rates.map((r) => {
             const sel = picked?.rateId === r.rateId;
             return (
@@ -460,6 +466,7 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
                 <span>
                   <span className="ship-carrier-chip">{r.carrier}</span>{' '}
                   <span style={{ color: 'var(--fg-muted)', fontSize: 12.5 }}>{r.service}</span>
+                  {demoRates && <> <span className="chip muted">{t('shipDemoTag')}</span></>}
                 </span>
                 <span className="ship-rate-days">
                   {r.deliveryDays != null ? t('shipDays', { n: r.deliveryDays }) : ''}
@@ -480,10 +487,14 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
               </div>
               <div className="ship-confirm-row strong">
                 <span>{t('shipConfirmCharge')}</span>
-                <span className="mono">{fmtMoney(picked.amount, picked.currency)}</span>
+                <span className="mono">
+                  {demoRates ? t('shipStubNoCharge') : fmtMoney(picked.amount, picked.currency)}
+                </span>
               </div>
               <div className="ship-callout-warn">
-                {t('shipBuyWarning', { amount: fmtMoney(picked.amount, picked.currency) })}
+                {demoRates
+                  ? t('shipStubBuyWarning')
+                  : t('shipBuyWarning', { amount: fmtMoney(picked.amount, picked.currency) })}
               </div>
             </div>
           )}
@@ -509,7 +520,10 @@ export function ShippingLabelWizard({ orderId, sid, showToast }: Props) {
           )}
           {step === 2 && (
             <button className="btn accent" onClick={buy} disabled={busy || !picked}>
-              {busy ? '…' : picked ? t('shipBuyBtn', { amount: fmtMoney(picked.amount, picked.currency) }) : t('shipGetRates')}
+              {busy ? '…'
+                : !picked ? t('shipGetRates')
+                : demoRates ? t('shipStubBuyBtn')
+                : t('shipBuyBtn', { amount: fmtMoney(picked.amount, picked.currency) })}
             </button>
           )}
         </div>
