@@ -159,7 +159,7 @@ bankTx.get('/', async (c) => {
            u.name AS linked_by_name,
            (po.total_cost + po.other_fees)::float AS order_cost,
            bt.internal_txn_id, it.title AS internal_txn_title,
-           bt.assignee_id, au.name AS assignee_name,
+           bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
@@ -241,7 +241,9 @@ bankTx.get('/', async (c) => {
       internalTxn: r.internal_txn_id
         ? { id: r.internal_txn_id, title: r.internal_txn_title ?? null }
         : null,
-      assignee: r.assignee_id ? { id: r.assignee_id, name: r.assignee_name } : null,
+      assignee: r.assignee_id
+        ? { id: r.assignee_id, name: r.assignee_name, initials: r.assignee_initials }
+        : null,
     })),
     nextCursor,
   });

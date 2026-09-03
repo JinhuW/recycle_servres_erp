@@ -78,7 +78,9 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // Both added in v1.117.0 — optional for the same deploy-skew reason as
   // Stats.suggested below: the SPA and the API ship on independent pipelines.
   internalTxn?: { id: string; title: string | null } | null;
-  assignee?: { id: string; name: string } | null;
+  // `initials` arrived with the Owner column and is optional for the same
+  // deploy-skew reason.
+  assignee?: { id: string; name: string; initials?: string } | null;
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
@@ -463,6 +465,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                   <th>{t('payColSource')}</th>
                   <th>{t('payColCounterparty')}</th>
                   <th className="num">{t('payColAmount')}</th>
+                  <th>{t('payColOwner')}</th>
                   <th>{t('payColStatus')}</th>
                   {/* The rail's contents name themselves; a visible heading
                       over two buttons is a label nobody reads. */}
@@ -494,25 +497,6 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           </div>
         )}
       </div>
-    </>
-  );
-}
-
-// The owner and the record ride in the status cell rather than in columns of
-// their own: the table is seven wide, and an eighth wrapped the header.
-function RowTags({ row, t }: { row: PaymentRow; t: T }) {
-  return (
-    <>
-      {row.internalTxn && (
-        <span className="chip accent" style={{ fontSize: 10.5 }}>
-          {t('payIntPartOf', { name: row.internalTxn.title || t('payIntUntitled') })}
-        </span>
-      )}
-      {row.assignee && (
-        <span className="chip" style={{ fontSize: 10.5 }}>
-          {t('payAssigned', { name: row.assignee.name })}
-        </span>
-      )}
     </>
   );
 }
@@ -584,6 +568,20 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
         <td className="num mono" style={{ color: row.amount > 0 ? 'var(--pos)' : undefined, whiteSpace: 'nowrap' }}>
           {fmtSigned(row.amount, locale)}
         </td>
+        {/* Owner and PO are mutually exclusive by constraint (migration 0116),
+            so this column is all dashes on the Linked tab by design. */}
+        <td className="pay-owner">
+          {row.assignee ? (
+            <span className="pay-owner-in" title={row.assignee.name}>
+              <span className="avatar sm">
+                {row.assignee.initials ?? row.assignee.name.slice(0, 1).toUpperCase()}
+              </span>
+              {row.assignee.name.split(' ')[0]}
+            </span>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
         {/* What this money is attached to. One line, one register: a chip only
             where attention is earned — a candidate worth acting on — and muted
             prose everywhere else. */}
@@ -642,7 +640,14 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
                 )}
               </>
             )}
-            <RowTags row={row} t={t} />
+            {/* The record rides in this cell — unlike the owner, which now has
+                a column, it says what the money *was*, which is what the rest of
+                this cell answers. */}
+            {row.internalTxn && (
+              <span className="chip accent" style={{ fontSize: 10.5 }}>
+                {t('payIntPartOf', { name: row.internalTxn.title || t('payIntUntitled') })}
+              </span>
+            )}
           </span>
         </td>
         {/* The rail. The primary action renders last so it lands flush right on
@@ -708,7 +713,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
       </tr>
       {open && (
         <tr>
-          <td colSpan={7} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
+          <td colSpan={8} style={{ background: 'var(--bg-soft)', padding: '10px 16px 12px' }}>
             <ExpandedDetail
               row={row} locale={locale} act={act} onToast={onToast}
               onLink={link} onGroup={group} members={members} refresh={refresh}

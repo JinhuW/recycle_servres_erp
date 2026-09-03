@@ -356,6 +356,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payColCounterparty: 'Payee',
     payColAmount: 'Amount',
     payColStatus: 'Status',
+    payColOwner: 'Owner',
     payColActions: 'Actions',
     payStatusUnlinked: 'Unlinked',
     payStatusIgnored: 'Ignored',
@@ -457,7 +458,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payIntCreatedBy: 'by {name}',
     // Assigning an unlinked payment to a member.
     payAssignTo: 'Assign to…',
-    payAssigned: 'Assigned to {name}',
     payUnassign: 'Unassign',
     payAssignFilter: 'Anyone',
     payAssignUnassigned: 'Unassigned',

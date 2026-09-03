@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.121.0] - 2026-09-03
+
+### Changes
+
+- **The Payments ledger has an Owner column.**  A payment's owner used to be a
+  `Assigned to …` chip tucked into the Status cell beside whatever that cell
+  already said — an annotation on the status rather than a fact about the row,
+  impossible to scan down the page, and widening the Status cell on exactly the
+  rows that carried it.  That placement was a compromise from when the table had
+  no room for it; merging Status and Purchase order in v1.120.0 made the room.
+
+  Owner now sits between Amount and Status as the person's avatar and first
+  name, full name on hover, with a muted dash where nobody owns the payment.
+  Owner and purchase order are mutually exclusive by database constraint —
+  linking a payment clears its owner — so the column is deliberately all dashes
+  on the Linked tab and behind the Refunds tile.  Initials come from the API
+  rather than being derived from the name, because a member can be renamed
+  without their stored initials being recomputed.
+
 ## [1.120.0] - 2026-09-03
 
 ### Changes
