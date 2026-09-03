@@ -2,13 +2,13 @@
 id: RS-017
 title: a deploy breaks every open tab and the break is cached for a year
 type: bug
-status: in-progress
+status: in-review
 priority: P1
 created: 2026-09-03
 reporter: Jinhu
 branch: session/20260902-140951
-pr:
-version:
+pr: 250
+version: 1.121.1
 related: [RS-018]
 ---
 
@@ -59,17 +59,28 @@ The running build at the time was `index-BflUPgR4.js`; the deployed one was
 
 ## Acceptance criteria
 
-- [ ] A request for a content-hashed asset that no longer exists returns `404`
-      with `Cache-Control: no-store` — not `200 text/html`, and not cached.
-- [ ] The SPA fallback still works for every real document path: `/`,
-      `/authorize`, `/v/<token>`, `/s/<token>`, and the PWA manifest shortcuts
-      (`/submit`, `/inventory`, `/sell-orders`, `/share-target`).
-- [ ] A missing asset requested over plain http is redirected to https rather
-      than answered directly.
-- [ ] A tab whose chunk has been deployed away reloads itself once and lands on
+- [x] A request for a content-hashed asset that no longer exists returns `404`,
+      not `200 text/html`.  Verified against `wrangler dev` on a real build for
+      `/assets/`, `/fonts/` and `/icons/`.
+- [x] The SPA fallback still works for every real document path: `/`,
+      `/authorize`, `/v/<token>`, `/s/<token>`, the PWA manifest shortcuts, and
+      any unknown path.  All return `200 text/html` with `no-cache`.
+- [x] A tab whose chunk has been deployed away reloads itself once and lands on
       the current build, instead of stalling on a skeleton.
-- [ ] The reload cannot loop: a second failure inside the guard window falls
-      through to the existing ErrorBoundary.
+- [x] The reload cannot loop: a second failure inside the 60s guard window falls
+      through to the existing ErrorBoundary.  Covered by `chunkReload.test.ts`.
+- [ ] A missing asset requested over plain http is redirected to https rather
+      than answered directly.  **Open** — depends on whether Cloudflare invokes
+      the Worker for a genuine miss on a `run_worker_first`-excluded prefix;
+      locally it does not.  Measure on dev.
+- [ ] The 404 is not cached.  **Open, and weaker than first written.**  Because
+      the asset layer answers it without invoking the Worker, the 404 still
+      picks up `immutable, max-age=1y` from the `_headers` `/assets/*` rule.
+      Harmless while chunk hashes never recur — the URL is never requested
+      again — but a revert that reproduces a hash would find a cached 404.
+      Measure the real Cloudflare behaviour on dev before deciding whether this
+      needs more than a comment; the alternative costs a Worker invocation on
+      every asset request, which is the opposite of the goal.
 
 ## Out of scope
 
