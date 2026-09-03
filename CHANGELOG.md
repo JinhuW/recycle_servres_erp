@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.123.1] - 2026-09-03
+
+### Fixes
+- fix(scan): **a label scan that times out is retried once instead of becoming
+  an error dialog.** Seen in production: a purchaser held their phone over a RAM
+  stick, waited twenty seconds, got "OCR failed", re-shot the same label, and
+  the second attempt came back in two. The retry belongs on this side of the
+  phone. Only a timeout is retried — an HTTP error from the model would fail
+  the same way twice.
+
+  Both attempts and the existing not-valid-JSON re-ask now share **one 45-second
+  budget**. Each of those used to mint a fresh 20-second signal, so a single
+  scan could spend forty seconds on the model on top of the route's own
+  fifteen-second image upload, with nothing bounding the pair. The receipt
+  renamer shares this client, so its worst case is now bounded too.
+- fix(boot): **a database that is slow to accept connections during a deploy no
+  longer takes production down until someone redeploys by hand.** The container
+  runs `migrate.mjs && init-admin.mjs && pnpm start`, so a failed migration
+  means the server never starts; Railway then burns its `ON_FAILURE` retries and
+  the service **stays down after Postgres comes back**. The migration runner now
+  treats an unreachable database as the transient it usually is: six attempts
+  with backoff over roughly twenty-three seconds, each logged, before exiting
+  non-zero. Its connect timeout drops from the postgres.js default of thirty
+  seconds to five, so the retries fit inside a sensible window. A migration that
+  fails on its *SQL* still exits immediately — only the connect is retried.
+- fix(fx): the exchange-rate fetch carries a 20-second timeout, matching every
+  other outbound client. It was the only one without a signal, bounded only by
+  undici's ~300-second default — and it is reachable from request handlers, not
+  just the six-hourly loop: the manager refresh, and, on a cold rate table, the
+  **unauthenticated** vendor portal ([RS-020](docs/tickets/RS-020-boot-fx-and-ocr-each-hang-or-die-on-a-transient-that.md)).
+
 ## [1.123.0] - 2026-09-03
 
 ### Fixes

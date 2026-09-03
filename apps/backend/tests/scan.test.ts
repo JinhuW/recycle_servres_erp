@@ -58,7 +58,8 @@ describe('POST /api/scan/label', () => {
   });
 
   it('fail-fast: OpenRouter 500 → route returns 502', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
+    const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
     const { token } = await loginAs(MARCUS);
     const r = await multipart(
       '/api/scan/label',
@@ -67,6 +68,50 @@ describe('POST /api/scan/label', () => {
     );
     expect(r.status).toBe(502);
     expect((r.body as { error: string }).error).toMatch(/OCR failed/);
+    // An HTTP error is not a transient — a second attempt fails the same way,
+    // so only a timeout is retried.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // Seen once in production: a purchaser waited 20s over a RAM stick, got an
+  // error dialog, re-shot the same label and it came back in 2s. The retry
+  // belongs on this side of the phone.
+  it('retries once when the model times out, and succeeds on the second attempt', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), {
+      name: 'TimeoutError',
+    });
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ choices: [{ message: { content: '{"brand":"Micron"}' } }] }), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { token } = await loginAs(MARCUS);
+    const r = await multipart(
+      '/api/scan/label',
+      { file: jpeg(), category: 'RAM' },
+      { token, env: { OPENROUTER_API_KEY: 'test-key' } },
+    );
+    expect(r.status).toBe(200);
+    expect((r.body as { extracted: Record<string, string> }).extracted.brand).toBe('Micron');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after the retry also times out, and still answers 502', async () => {
+    const timeout = Object.assign(new Error('The operation was aborted due to timeout'), {
+      name: 'TimeoutError',
+    });
+    const fetchMock = vi.fn().mockRejectedValue(timeout);
+    vi.stubGlobal('fetch', fetchMock);
+    const { token } = await loginAs(MARCUS);
+    const r = await multipart(
+      '/api/scan/label',
+      { file: jpeg(), category: 'RAM' },
+      { token, env: { OPENROUTER_API_KEY: 'test-key' } },
+    );
+    expect(r.status).toBe(502);
+    // Two attempts, not four: the retry does not compound with the JSON re-ask.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

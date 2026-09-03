@@ -327,6 +327,11 @@ inventory search, sell-order draft creation.
 - An item's specs are editable from the item itself, and a **blanked dropdown
   clears the field** — including the numeric ones, RPM and health (v1.114.1).
 - Receipt auto-rename runs only on images, never spreadsheets or PDFs.
+- **A scan that times out retries itself once** before showing the field an
+  error (v1.123.1). A slow turn used to surface on the phone as "OCR failed",
+  and the human re-shot the same label. Only timeouts retry; an error from the
+  model still fails immediately. Every attempt on one scan shares a single
+  45-second budget, so a scan cannot spend two full timeouts on the model.
 
 > Provider selection is silent: OpenRouter (Gemma 3 27B) when
 > `OPENROUTER_API_KEY` is set, otherwise a deterministic stub. A prod deploy
