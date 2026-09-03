@@ -17,6 +17,53 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.125.0] - 2026-09-03
+
+### Fixes
+- fix(shipping): **pressing Refresh on a package no longer tells a warehouse
+  user to set an environment variable.** Tracking has no provider configured in
+  production, so the endpoint answers 501 — and the Shipping page routed that
+  through the generic error handler, which raised a blocking "Something went
+  wrong" dialog containing the raw backend string *"Tracking is not configured —
+  set SHIPPO_API_TOKEN"*. Two people hit it within seconds of adding a package.
+  Both shells now catch the 501 the way the Tracker and Coordinator pages
+  already do and show a plain sentence instead: automatic tracking isn't
+  switched on yet, so this package won't update on its own. The backend string
+  says the same thing, because it reaches a phone verbatim.
+
+### Other
+- **A refused request now says why in the log.** The request line recorded
+  method, path, status and duration, so a 4xx was byte-identical to a 200 apart
+  from the status integer — and `PATCH /api/orders/:id` alone has six distinct
+  409 branches, so a refusal in production could not be told apart after the
+  fact. The response's `error` string now rides the line, for **4xx only**: a
+  5xx already gets its own record with a stack from `app.onError`.
+- **Seventeen log sites across eight files stopped bypassing the logger.** They
+  were concentrated in exactly the code that handles money and freight — rate
+  fetch failed, label purchase failed, label purchased but upload failed, the
+  tracking sweep, the Shippo webhook, the scan failures. `console.*` output
+  carries no version, no commit and no `requestId`, and it is unstructured text
+  in a stream where everything else is JSON; Railway also tags all stderr as
+  `level: "error"`, so these sat indistinguishable from the corepack boot
+  banner. They are now `log.child({ module })` calls and gain the request
+  correlation for free.
+- **OCR partial-fill records exist in production for the first time.** The block
+  recording a scan where the model returned only some expected fields — the ones
+  that become a PO line with a wrong speed or a missing capacity — was gated
+  entirely on `ERROR_LOG_DIR`, which is a Docker/compose feature and unset on
+  Railway. With 166 scans in the six-day window feeding inventory and cost, the
+  highest-volume quality signal in the system was being kept nowhere. It now
+  also emits a structured line carrying the category, the coverage ratio and
+  which fields were missing — names only, never the extracted values, which
+  transcribe a customer's label.
+- Removed `dbScope`, a middleware that awaited `next()` and did nothing else,
+  mounted under a comment claiming it bound a pooled Postgres client per request
+  and closed it at the end "to prevent the connection-pool leak that exhausts
+  Postgres". Runtime risk was zero — the shared pool is correct — but the
+  comment described the design that had been *removed*, which is the kind of
+  thing the next person to touch connection handling would have trusted
+  ([RS-021](docs/tickets/RS-021-production-cannot-explain-its-own-failures.md)).
+
 ## [1.124.0] - 2026-09-03
 
 ### Features

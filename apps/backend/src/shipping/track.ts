@@ -16,6 +16,8 @@ import { voidShipmentTx } from '../services/shipmentVoid';
 import { notify } from '../lib/notify';
 import { log } from '../lib/log';
 
+const shipLog = log.child({ module: 'shipping' });
+
 const REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
 export type TrackedShipmentRow = {
@@ -170,7 +172,8 @@ export async function refreshShipmentTracking(
       const info = await client.getShipment(row.tracking_number, row.carrier);
       if (await applyShipmentTracking(sql, row, info)) updated++;
     } catch (err) {
-      console.warn(`[shipping] tracking refresh failed for shipment ${row.id}; keeping previous state`, err);
+      shipLog.child({ shipmentId: row.id })
+        .warn('tracking refresh failed; keeping previous state', err);
     }
   }
   return { checked: rows.length, updated };
@@ -194,7 +197,8 @@ export async function refreshPackageTracking(
       const info = await client.getShipment(row.tracking_number, row.carrier);
       if (await applyPackageTracking(sql, row, info)) updated++;
     } catch (err) {
-      console.warn(`[shipping] tracking refresh failed for package ${row.id}; keeping previous state`, err);
+      shipLog.child({ packageId: row.id })
+        .warn('tracking refresh failed; keeping previous state', err);
     }
   }
   return { checked: rows.length, updated };
@@ -215,7 +219,8 @@ export async function registerPackageTracking(
     await sql`UPDATE packages SET tracking_registered_at = NOW() WHERE id = ${pkg.id}`;
     return true;
   } catch (err) {
-    console.warn(`[shipping] tracking registration failed for package ${pkg.id}; the sweep will retry`, err);
+    shipLog.child({ packageId: pkg.id })
+      .warn('tracking registration failed; the sweep will retry', err);
     return false;
   }
 }
@@ -274,7 +279,7 @@ export function startShipmentTrackingLoop(sql: Sql, env: Env): { stop: () => voi
       if (labels.provider !== 'stub') await refreshShipmentTracking(sql, labels);
       if (tracking.provider !== 'stub') await refreshPackageTracking(sql, tracking.source);
     } catch (err) {
-      console.warn('[shipping] tracking refresh pass failed', err);
+      shipLog.warn('tracking refresh pass failed', err);
     } finally {
       running = false;
     }

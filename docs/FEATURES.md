@@ -194,6 +194,12 @@ Transit, and a line's qty can never be 0.
   demo label* instead of *Buy label* — the older `Demo` chip only appeared on
   the shipment afterwards, once the choice had been made.
 
+- **A package Refresh explains itself when tracking is off** (v1.125.0). It used
+  to raise a blocking "Something went wrong" dialog carrying the backend's own
+  `SHIPPO_API_TOKEN` message at whoever pressed it; both shells now say plainly
+  that automatic tracking isn't switched on yet and the package won't update on
+  its own.
+
 > Both shipping providers ship **dark until their keys are set** —
 > `SHIPPO_API_TOKEN` / `SHIPPO_WEBHOOK_SECRET` for tracking, ShipSaving portal
 > keys for labels. `/api/health` reports provider modes so this state is

@@ -4,7 +4,7 @@ import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { PhoneListSkeleton } from '../components/Skeleton';
 import { SnScanner } from '../components/SnScanner';
-import { api, listShipments } from '../lib/api';
+import { ApiError, api, listShipments } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CARRIERS, extractTrackingFromBarcode } from '../lib/carrierDetect';
 import { FMT_HINT_KEY, useAddPackageForm } from '../lib/useAddPackageForm';
@@ -411,7 +411,11 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
       await refreshPackage(row.pkg.id);
       onRefreshed();
     } catch (e) {
-      handleFetchError(e);
+      // 501 means tracking has no provider configured — a state of the
+      // deployment, not a failure of this tap, so it must not raise the
+      // blocking "Something went wrong" dialog.
+      if (e instanceof ApiError && e.status === 501) showToast(t('shipTrackingOff'), 'error');
+      else handleFetchError(e);
     } finally {
       setBusy(false);
     }

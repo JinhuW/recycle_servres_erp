@@ -17,6 +17,9 @@ import type { Env, User } from '../types';
 import { getDb } from '../db';
 import { trackToInfo } from '../shipping/shippo';
 import { applyPackageTracking, type TrackedPackageRow } from '../shipping/track';
+import { log } from '../lib/log';
+
+const shippoLog = log.child({ module: 'shippo' });
 
 const shippoWebhook = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -68,7 +71,7 @@ shippoWebhook.post('/:secret', async (c) => {
   if (!row) {
     // Silent otherwise: the push path degrades to the 45-minute poll with no
     // symptom but latency.
-    console.warn(`[shippo] track_updated for a number no package matches: ${canon}`);
+    shippoLog.warn('track_updated for a number no package matches', { trackingNumber: canon });
     return c.json({ ok: true, applied: false });
   }
 

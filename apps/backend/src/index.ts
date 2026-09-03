@@ -14,7 +14,7 @@ import { describeOcr } from './ai';
 import { authMiddleware } from './auth';
 import { csrfGuard } from './csrf';
 import { describeShipping } from './shipping';
-import { dbScope, getDb } from './db';
+import { getDb } from './db';
 import { readBuildTime } from './lib/version';
 import { metricsMiddleware, metricsHandler } from './metrics';
 import authRoutes from './routes/auth';
@@ -85,6 +85,28 @@ app.use('*', (c, next) => {
 // try/finally because a throw from bodyLimit, the CORS origin callback, or
 // app.onError itself escapes past this middleware, and a request that blew up
 // is exactly the one you want a line for.
+
+// A 4xx line used to be byte-identical to a 200 except for the status integer,
+// which made a refusal undiagnosable after the fact: PATCH /api/orders/:id
+// alone has six distinct 409 branches and the line matched all of them equally.
+// 4xx only — a 5xx already gets its own log.error with a stack from
+// app.onError, and its body is the generic message anyway.
+const ERROR_BODY_MAX = 2048;
+
+async function refusalReason(res: Response): Promise<string | undefined> {
+  if (!res.headers.get('Content-Type')?.includes('application/json')) return undefined;
+  try {
+    // clone(), not the response itself: the body is a live stream the server
+    // has yet to consume, and reading it here would leave the client nothing.
+    const text = (await res.clone().text()).slice(0, ERROR_BODY_MAX);
+    const parsed = JSON.parse(text) as { error?: unknown };
+    return typeof parsed.error === 'string' ? parsed.error : undefined;
+  } catch {
+    // A body that isn't the shape we log is not itself worth a line.
+    return undefined;
+  }
+}
+
 app.use('*', async (c, next) => {
   const startedAt = performance.now();
   let failed = false;
@@ -94,13 +116,16 @@ app.use('*', async (c, next) => {
     failed = true;
     throw e;
   } finally {
+    const status = c.res.status;
+    const reason = status >= 400 && status < 500 ? await refusalReason(c.res) : undefined;
     log.info('request', {
       method: c.req.method,
       path: redactSensitivePath(c.req.path),
       // On the thrown path this can still read 200 — the error response hasn't
       // been installed yet, which is what `failed` disambiguates.
-      status: c.res.status,
+      status,
       ms: Math.round(performance.now() - startedAt),
+      ...(reason !== undefined && { error: reason }),
       ...(failed && { failed: true }),
     });
   }
@@ -161,10 +186,6 @@ app.use(
 app.use('*', metricsMiddleware);
 app.get('/metrics', metricsHandler);
 app.use('*', csrfGuard);
-// Bind one pooled Postgres client per request and close it when the request
-// ends — prevents the connection-pool leak that exhausts Postgres and takes
-// the whole service down under load.
-app.use('*', (c, next) => dbScope(c, next));
 
 app.get('/', (c) =>
   c.json({

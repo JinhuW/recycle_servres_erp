@@ -13,6 +13,9 @@ import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import { carrierTrackingUrl, pickTrackingClient } from '../shipping';
+import { log } from '../lib/log';
+
+const pkgLog = log.child({ module: 'packages' });
 import { applyPackageTracking, registerPackageTracking } from '../shipping/track';
 
 const packages = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -220,14 +223,18 @@ packages.post('/:id/refresh', async (c) => {
 
   const tracking = pickTrackingClient(c.env);
   if (tracking.provider === 'stub') {
-    return c.json({ error: 'Tracking is not configured — set SHIPPO_API_TOKEN' }, 501);
+    // Reaches a warehouse phone verbatim, so it names what the person can do
+    // (nothing, yet) rather than the env var an admin has to set.
+    return c.json({
+      error: 'Automatic tracking is not switched on yet — this package will not update on its own.',
+    }, 501);
   }
 
   let info;
   try {
     info = await tracking.source.getShipment(row.tracking_number, row.carrier);
   } catch (err) {
-    console.warn(`[packages] manual tracking refresh failed for ${id}`, err);
+    pkgLog.child({ packageId: id }).warn('manual tracking refresh failed', err);
     return c.json({ error: 'The tracking provider could not be reached — try again' }, 502);
   }
   await applyPackageTracking(sql, row, info);

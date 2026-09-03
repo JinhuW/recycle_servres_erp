@@ -1205,6 +1205,10 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // Demo rates are canned sample prices, so they must be called out on the
     // rate list and again at the confirm step — the old "Demo" chip only
     // appeared on the shipment afterwards, once the choice was already made.
+    // Shown when a package Refresh hits the 501 from an unconfigured tracking
+    // provider. The person tapping it is in a warehouse — name the situation,
+    // not the environment variable an admin has to set.
+    shipTrackingOff: 'Automatic tracking isn’t switched on yet — this package won’t update on its own.',
     shipStubRatesWarn: 'Demo rates — these prices are canned sample data, not real carrier quotes. Set SHIPSAVING_APP_KEY and SHIPSAVING_APP_SECRET on the backend to buy real labels.',
     shipStubNoCharge: 'No charge',
     shipStubBuyWarning: 'This makes a demo label: no carrier is paid, nothing is added to this PO’s fees, and the PDF prints blank.',
