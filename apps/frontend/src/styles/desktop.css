@@ -3277,3 +3277,42 @@ html.desktop, body.desktop, .desktop #root {
 @media (max-width: 720px) {
   .cli-field-row { grid-template-columns: 1fr; }
 }
+
+/* ===== Payments ledger =====
+   The queue's job is draining, so a row shows one verdict and one thing to
+   click.  The status column was dropped into this one (they answered the same
+   question — what is this money attached to?), freeing the seventh column for
+   an actions rail. */
+/* `width: 1%` on a nowrap cell in an auto-layout table shrinks it to its
+   content, so the table's slack lands on the payee column — which has the
+   longest variable content — instead of stranding the verdict mid-table, an
+   arm's length from the button that acts on it. */
+.pay-table .pay-link { white-space: nowrap; width: 1%; }
+.pay-link-in { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Right-aligned so the primary button — rendered last — lands at the same x on
+   every row, whatever secondaries sit beside it. */
+.pay-table .pay-actions { white-space: nowrap; width: 1%; text-align: right; }
+.pay-rail { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Secondary actions rest invisible: ~25 equal-weight buttons on screen is what
+   made this page unreadable.  `opacity` rather than `display` keeps them in the
+   tab order and keeps their width, so the rail doesn't shift when they appear;
+   `pointer-events` is what stops an invisible button from taking a click. */
+.pay-sec {
+  display: inline-flex; align-items: center; gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.table tr:hover .pay-sec,
+.table tr:focus-within .pay-sec { opacity: 1; pointer-events: auto; }
+
+/* Touch tablets get this shell, not the phone one (PHONE_BREAKPOINT is 720),
+   and they have no hover to reveal anything with. */
+@media (hover: none) {
+  .pay-sec { opacity: 1; pointer-events: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pay-sec { transition: none; }
+}
