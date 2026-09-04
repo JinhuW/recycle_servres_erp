@@ -33,6 +33,13 @@ type SqlClient = ReturnType<typeof getDb>;
 // rather than the 400 the caller earned.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const SETTLE_FILTERS = ['all', 'settled', 'pending', 'failed', 'reversed'];
+// Money that never moved, or moved and came back. Nothing may be linked,
+// paired, assigned or filed against it — there is no payment to reconcile.
+// The SQL half of this rule lives in openRowFrag (banktx/match.ts).
+const SETTLE_DEAD = ['failed', 'reversed'];
+const isDead = (r: { settle_status?: unknown }) => SETTLE_DEAD.includes(r.settle_status as string);
+
 type LegRow = {
   id: string;
   source: string;
@@ -50,6 +57,7 @@ type LegRow = {
   linked_at: Date | null;
   ignored: boolean;
   category: string;
+  settle_status: string;
   internal_txn_id: string | null;
   assignee_id: string | null;
 };
@@ -64,6 +72,7 @@ function shapeLeg(l: LegRow) {
     counterparty: l.counterparty,
     description: l.description,
     paypalTxnId: l.paypal_txn_id,
+    settleStatus: l.settle_status,
   };
 }
 
@@ -82,7 +91,7 @@ async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
   return sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
-           linked_by, linked_at, ignored, category, internal_txn_id, assignee_id
+           linked_by, linked_at, ignored, category, settle_status, internal_txn_id, assignee_id
     FROM bank_transactions
     WHERE id = ${id}
        OR pair_id = (SELECT pair_id FROM bank_transactions WHERE id = ${id} AND pair_id IS NOT NULL)
@@ -103,6 +112,10 @@ bankTx.get('/', async (c) => {
   }
   const hasMatch = c.req.query('hasMatch') === '1';
   const dispute = c.req.query('dispute') === '1';
+  const settle = c.req.query('settle') ?? 'all';
+  if (!SETTLE_FILTERS.includes(settle)) {
+    return c.json({ error: `settle must be one of ${SETTLE_FILTERS.join(', ')}` }, 400);
+  }
   const limit = clampLimit(c.req.query('limit'), 50, 200);
   const cursor = decodeCursor(c.req.query('cursor'));
 
@@ -149,6 +162,9 @@ bankTx.get('/', async (c) => {
   // would sit on an incoming payment. Consequence worth knowing: if the app
   // ever gains seller scope, those cases are stored and stay invisible.
   const disputeFrag = dispute ? sql`bt.dispute IS NOT NULL AND bt.amount < 0` : sql`TRUE`;
+  // In the WHERE for the same reason as `hasMatch` above — a lens applied to
+  // the page would return short pages under keyset paging.
+  const settleFrag = settle === 'all' ? sql`TRUE` : sql`bt.settle_status = ${settle}`;
 
   // `order_cost` is what the bank was asked to pay for the linked PO, so a row
   // can be read against its own amount: goods (a line mirror or a negotiated lot
@@ -163,6 +179,7 @@ bankTx.get('/', async (c) => {
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
+           bt.settle_status,
            u.name AS linked_by_name,
            (po.total_cost + po.other_fees)::float AS order_cost,
            -- Money-out only, matching the tile and the ?dispute=1 filter below.
@@ -178,7 +195,8 @@ bankTx.get('/', async (c) => {
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
               'counterparty', l.counterparty, 'description', l.description,
-              'paypalTxnId', l.paypal_txn_id) ORDER BY l.source DESC)
+              'paypalTxnId', l.paypal_txn_id,
+              'settleStatus', l.settle_status) ORDER BY l.source DESC)
             FROM bank_transactions l
             WHERE bt.pair_id IS NOT NULL AND l.pair_id = bt.pair_id) AS pair_legs
     FROM bank_transactions bt
@@ -188,7 +206,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
-      AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} ${cursorFrag}
+      AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
   `;
@@ -204,7 +222,7 @@ bankTx.get('/', async (c) => {
   // Only the rows the manager can still act on need candidates; a linked,
   // ignored or transfer row is already off the queue.
   const openLegs: MatchLeg[] = slice
-    .filter((r) => !r.order_id && !r.ignored && r.category === 'external')
+    .filter((r) => !r.order_id && !r.ignored && r.category === 'external' && !isDead(r))
     .map((r) => ({
       id: r.id as string,
       amount: Number(r.amount),
@@ -218,7 +236,10 @@ bankTx.get('/', async (c) => {
   // open, because only an open row renders the suggestion. limit 2 is all the
   // decision needs: one is a suggestion, two is ambiguity the picker handles.
   const pairLegs: PairLeg[] = slice
-    .filter((r) => !r.pair_id && !r.order_id && !r.ignored && r.category === 'external')
+    // Settled only: an unsettled leg is not half of a payment yet, which is
+    // the rule autoPair and pairEligibleFrag both follow.
+    .filter((r) => !r.pair_id && !r.order_id && !r.ignored && r.category === 'external'
+      && r.settle_status === 'settled')
     .map((r) => ({
       id: r.id as string,
       source: r.source as string,
@@ -252,6 +273,7 @@ bankTx.get('/', async (c) => {
       linkedByName: r.linked_by_name ?? null,
       ignored: r.ignored,
       category: r.category,
+      settleStatus: r.settle_status,
       // The whole case, timeline included: it is a few entries on a handful of
       // rows, so a second round trip when someone expands the row would be
       // machinery for nothing.
@@ -278,30 +300,30 @@ bankTx.get('/stats', async (c) => {
   // incoming payments sat there unseen. Linked / refunds / ignored / transfers
   // stay direction-blind: those are not what the queue filters on.
   const direction = c.req.query('direction') ?? 'all';
-  const dirFrag =
-    direction === 'out' ? sql`AND amount < 0`
-    : direction === 'in' ? sql`AND amount > 0`
-    : sql``;
   const dirFragBt =
     direction === 'out' ? sql`AND bt.amount < 0`
     : direction === 'in' ? sql`AND bt.amount > 0`
     : sql``;
+  // `openRowFrag` rather than an inline copy of it: the Unlinked tile and the
+  // ?status=unlinked list have to answer the same question, and when this held
+  // its own copy the two drifted the moment either grew a condition.
+  const open = openRowFrag(sql, 'bt');
   const [agg] = await sql`
     SELECT
-      COUNT(*) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external' ${dirFrag})::int AS unlinked_count,
-      COALESCE(SUM(ABS(amount)) FILTER (WHERE order_id IS NULL AND NOT ignored AND category = 'external' ${dirFrag}), 0)::float AS unlinked_amount,
-      COUNT(*) FILTER (WHERE category = 'transfer')::int                               AS transfer_count,
-      COUNT(*) FILTER (WHERE order_id IS NOT NULL)::int                                AS linked_count,
-      COUNT(*) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund')::int       AS refund_count,
-      COALESCE(SUM(amount) FILTER (WHERE order_id IS NOT NULL AND link_kind = 'refund'), 0)::float AS refund_amount,
-      COUNT(*) FILTER (WHERE ignored)::int                                             AS ignored_count,
+      COUNT(*) FILTER (WHERE ${open} ${dirFragBt})::int AS unlinked_count,
+      COALESCE(SUM(ABS(bt.amount)) FILTER (WHERE ${open} ${dirFragBt}), 0)::float AS unlinked_amount,
+      COUNT(*) FILTER (WHERE bt.category = 'transfer')::int                            AS transfer_count,
+      COUNT(*) FILTER (WHERE bt.order_id IS NOT NULL)::int                             AS linked_count,
+      COUNT(*) FILTER (WHERE bt.order_id IS NOT NULL AND bt.link_kind = 'refund')::int  AS refund_count,
+      COALESCE(SUM(bt.amount) FILTER (WHERE bt.order_id IS NOT NULL AND bt.link_kind = 'refund'), 0)::float AS refund_amount,
+      COUNT(*) FILTER (WHERE bt.ignored)::int                                          AS ignored_count,
       -- Money-out is baked into the predicate, not left to the direction lens:
       -- an incoming disputed payment is a case against us, not one we filed,
       -- and the tile has to agree with the list.
-      COUNT(*) FILTER (WHERE dispute IS NOT NULL AND amount < 0)::int                  AS dispute_count,
-      COALESCE(SUM(ABS(amount)) FILTER (WHERE dispute IS NOT NULL AND amount < 0), 0)::float AS dispute_amount
-    FROM bank_transactions
-    WHERE pair_id IS NULL OR source = 'paypal'`;
+      COUNT(*) FILTER (WHERE bt.dispute IS NOT NULL AND bt.amount < 0)::int             AS dispute_count,
+      COALESCE(SUM(ABS(bt.amount)) FILTER (WHERE bt.dispute IS NOT NULL AND bt.amount < 0), 0)::float AS dispute_amount
+    FROM bank_transactions bt
+    WHERE bt.pair_id IS NULL OR bt.source = 'paypal'`;
   const [suggested] = await sql`
     SELECT COUNT(*)::int AS count
     FROM bank_transactions bt
@@ -349,7 +371,7 @@ bankTx.get('/by-order/:orderId', async (c) => {
   const rows = await sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
-           linked_by, linked_at, ignored, internal_txn_id, assignee_id
+           linked_by, linked_at, ignored, settle_status, internal_txn_id, assignee_id
     FROM bank_transactions
     WHERE order_id = ${orderId} AND (pair_id IS NULL OR source = 'paypal')
     ORDER BY posted_at DESC, id DESC`;
@@ -359,7 +381,11 @@ bankTx.get('/by-order/:orderId', async (c) => {
     linkKind: r.link_kind,
     linkAuto: r.link_auto,
   }));
-  const net = payments.reduce((sum, p) => sum + p.amount, 0);
+  // A payment can be reversed after it was linked — PayPal reuses the
+  // transaction id — so the row stays on the PO, listed and badged, but the
+  // money it represents is no longer part of what the PO has been paid.
+  const net = payments.reduce(
+    (sum, p) => (SETTLE_DEAD.includes(p.settleStatus) ? sum : sum + p.amount), 0);
   return c.json({ payments, net: Math.round(net * 100) / 100 });
 });
 
@@ -374,6 +400,9 @@ bankTx.post('/:id/link', async (c) => {
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
   if (group.some((l) => l.ignored)) return c.json({ error: 'Unignore the transaction before linking it' }, 400);
+  // The money never left, or came back. Linking it would make the PO read as
+  // paid by a payment that did not happen.
+  if (group.some(isDead)) return c.json({ error: 'This payment did not settle' }, 400);
   // A membership is part of a record someone wrote a note on, so it is refused
   // rather than cleared. The owner tag below has no such home and goes quietly.
   if (group.some((l) => l.internal_txn_id)) {
@@ -464,6 +493,12 @@ bankTx.post('/:id/pair', async (c) => {
   if (!a || !b) return c.json({ error: 'Not found' }, 404);
   if (a.pair_id || b.pair_id) return c.json({ error: 'Already paired' }, 400);
   if (a.source === b.source) return c.json({ error: 'A pair needs one Mercury and one PayPal leg' }, 400);
+  // Settled on both sides: a pending charge's settlement leg has not happened
+  // yet, so whatever it is being grouped with is not it. Same rule autoPair
+  // and pairEligibleFrag follow, so the picker never offers this either.
+  if (a.settle_status !== 'settled' || b.settle_status !== 'settled') {
+    return c.json({ error: 'Both payments must have settled before they can be grouped' }, 400);
+  }
   if (Number(a.amount) !== Number(b.amount)) return c.json({ error: 'Amounts differ' }, 400);
   if (a.order_id && b.order_id && a.order_id !== b.order_id) {
     return c.json({ error: 'Legs are linked to different orders — unlink one first' }, 400);
@@ -587,7 +622,10 @@ bankTx.post('/:id/mark-transfer', async (c) => {
       const updated = await tx`
         UPDATE bank_transactions SET category = 'transfer'
         WHERE source = ${r.source} AND counterparty = ${r.counterparty}
-          AND category = 'external' AND NOT category_manual AND order_id IS NULL`;
+          AND category = 'external' AND NOT category_manual AND order_id IS NULL
+          -- Money that never moved is not a transfer, and reclassifying it
+          -- would count it in the Transfers tile it is kept out of.
+          AND settle_status = 'settled'`;
       alsoMarked += updated.count;
     }
   });
@@ -641,6 +679,8 @@ bankTx.post('/:id/assign', async (c) => {
   const group = await groupOf(sql, c.req.param('id'));
   if (group.length === 0) return c.json({ error: 'Not found' }, 404);
   if (group.some((l) => l.order_id)) return c.json({ error: 'Unlink the transaction before assigning it' }, 400);
+  // Nothing to explain: no money moved, so there is no payment to own.
+  if (group.some(isDead)) return c.json({ error: 'This payment did not settle' }, 400);
 
   // Deactivated members are soft-deleted, so an id alone isn't enough.
   const [member] = await sql<{ name: string }[]>`

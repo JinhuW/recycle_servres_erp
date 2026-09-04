@@ -25,6 +25,7 @@ function fakeProvider(source: BankSource, txns: TxnSpec[]): BankProvider {
           description: null,
           paypalTxnId: source === 'paypal' ? t.externalId : null,
           category: 'external' as const,
+          settleStatus: 'settled' as const,
           raw: { id: t.externalId },
           ...t,
         })),

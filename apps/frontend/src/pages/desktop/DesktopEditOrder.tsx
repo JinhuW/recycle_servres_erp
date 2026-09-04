@@ -1963,6 +1963,10 @@ function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale: string
     payments: {
       id: string; source: string; postedAt: string; amount: number;
       counterparty: string | null; linkKind: 'payment' | 'refund' | null; linkAuto: boolean;
+      // Added in v1.127.0; optional because the SPA and the API deploy on
+      // independent pipelines. Absent means settled — nothing else used to be
+      // ingested at all.
+      settleStatus?: 'settled' | 'pending' | 'failed' | 'reversed';
     }[];
     net: number;
   } | null>(null);
@@ -1997,6 +2001,18 @@ function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale: string
             <span className={'chip dot ' + (p.linkKind === 'refund' ? 'cool' : 'pos')} style={{ fontSize: 10.5 }}>
               {t(p.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
             </span>
+            {/* Without this the PO reads as paid by money that is still in
+                flight, or that came back — the net below already excludes the
+                second kind, and the chip is what explains the difference. */}
+            {p.settleStatus && p.settleStatus !== 'settled' && (
+              <span
+                className={'chip dot ' + (p.settleStatus === 'pending' ? 'warn' : p.settleStatus === 'reversed' ? 'neg' : 'muted')}
+                style={{ fontSize: 10.5 }}
+              >
+                {t(p.settleStatus === 'pending' ? 'paySettlePending'
+                  : p.settleStatus === 'reversed' ? 'paySettleReversed' : 'paySettleFailed')}
+              </span>
+            )}
             <span className="muted">{fmtDateShort(p.postedAt, locale)}</span>
             <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p.counterparty ?? (p.source === 'paired' ? 'PayPal + Mercury' : p.source)}

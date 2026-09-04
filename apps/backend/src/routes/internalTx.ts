@@ -183,8 +183,10 @@ async function addMembers(
   recordId: string,
   txnIds: string[],
 ): Promise<{ error: string } | { added: number }> {
-  const legs = await sql<{ id: string; order_id: string | null; internal_txn_id: string | null }[]>`
-    SELECT id, order_id, internal_txn_id
+  const legs = await sql<{
+    id: string; order_id: string | null; internal_txn_id: string | null; settle_status: string;
+  }[]>`
+    SELECT id, order_id, internal_txn_id, settle_status
     FROM bank_transactions
     WHERE id IN ${sql(txnIds)}
        OR pair_id IN (SELECT pair_id FROM bank_transactions
@@ -192,6 +194,11 @@ async function addMembers(
   if (legs.length === 0) return { error: 'Not found' };
   if (legs.some((l) => l.order_id)) {
     return { error: 'Unlink the transaction from its purchase order before filing it' };
+  }
+  // A record groups the legs of one real movement. A payment that never left,
+  // or came back, has no leg to group.
+  if (legs.some((l) => l.settle_status === 'failed' || l.settle_status === 'reversed')) {
+    return { error: 'This payment did not settle' };
   }
   const other = legs.find((l) => l.internal_txn_id && l.internal_txn_id !== recordId);
   if (other) return { error: 'The transaction already belongs to another internal transaction' };

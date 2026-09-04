@@ -134,7 +134,18 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
   const cursors = await sql<{ min: string | null }[]>`
     SELECT MIN(sync_cursor) AS min FROM bank_accounts WHERE source = ${source}`;
   const cursorMs = cursors[0]?.min ? new Date(cursors[0].min).getTime() : NaN;
-  const sinceMs = Number.isFinite(cursorMs) ? cursorMs - OVERLAP_MS : Date.now() - BACKFILL_MS;
+  // A row we are still holding as pending has to stay inside the window until
+  // it resolves, however long that takes — otherwise its badge is frozen at
+  // whatever it said the day it fell out. The overlap alone is not enough: a
+  // PayPal payment can sit pending for weeks, and a Mercury pending row is
+  // dated by creation because it has no posted date at all.
+  const [oldest] = await sql<{ min: Date | null }[]>`
+    SELECT MIN(posted_at) AS min FROM bank_transactions
+    WHERE source = ${source} AND settle_status = 'pending'`;
+  const sinceMs = Math.min(
+    Number.isFinite(cursorMs) ? cursorMs - OVERLAP_MS : Date.now() - BACKFILL_MS,
+    oldest?.min ? oldest.min.getTime() : Infinity,
+  );
   const runStartIso = new Date().toISOString();
 
   const { accounts, txns } = await provider.fetchSince(new Date(sinceMs).toISOString());
@@ -175,16 +186,22 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       // the tombstones are human state and must survive every re-sync.
       const [row] = await tx<{ fresh: boolean }[]>`
         INSERT INTO bank_transactions
-          (source, external_id, account_id, posted_at, amount, counterparty, description, paypal_txn_id, category, raw)
+          (source, external_id, account_id, posted_at, amount, counterparty, description, paypal_txn_id,
+           category, settle_status, raw)
         VALUES
           (${source}, ${t.externalId}, ${accountId}, ${t.postedAt}, ${t.amount},
-           ${t.counterparty}, ${t.description}, ${t.paypalTxnId}, ${t.category}, ${tx.json(t.raw as never)})
+           ${t.counterparty}, ${t.description}, ${t.paypalTxnId}, ${t.category},
+           ${t.settleStatus}, ${tx.json(t.raw as never)})
         ON CONFLICT (source, external_id) DO UPDATE SET
           posted_at = EXCLUDED.posted_at,
           amount = EXCLUDED.amount,
           counterparty = EXCLUDED.counterparty,
           description = EXCLUDED.description,
           paypal_txn_id = EXCLUDED.paypal_txn_id,
+          -- Never a human's to override, and the only thing that clears a
+          -- pending badge: a payment settles by being re-fetched, not by
+          -- anyone acting on it here.
+          settle_status = EXCLUDED.settle_status,
           -- A human verdict wins, and so does a link: re-classifying a row
           -- someone tied to an order would drop it out of payment pairing
           -- behind their back (the state mark-transfer refuses to create).
@@ -201,7 +218,10 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       UPDATE bank_transactions bt SET category = 'transfer'
       FROM bank_transfer_counterparties r
       WHERE bt.source = r.source AND bt.counterparty = r.counterparty
-        AND bt.category = 'external' AND NOT bt.category_manual AND bt.order_id IS NULL`;
+        AND bt.category = 'external' AND NOT bt.category_manual AND bt.order_id IS NULL
+        -- Money that never moved is not a transfer; reclassifying it would put
+        -- it back into a tile it is deliberately kept out of.
+        AND bt.settle_status = 'settled'`;
 
     // Only PayPal rows carry a case. The Mercury settlement leg parses the same
     // paypal_txn_id out of its description, so without this filter a pair that
@@ -245,6 +265,11 @@ async function autoPair(tx: Tx): Promise<number> {
            category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at
     FROM bank_transactions
     WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored
+      -- Pairing is a claim that two legs are one payment. A pending charge's
+      -- settlement leg does not exist yet, and a failed one's never will, so
+      -- an amount+date match on either can only be a false positive. A pending
+      -- row pairs on the sync after it settles.
+      AND settle_status = 'settled'
       -- A row someone owns, or filed under an internal transaction, is under
       -- human handling: restructuring it here would move an assigned payment's
       -- link onto it, or (via transferPair) re-categorize it out of the queue
@@ -381,6 +406,10 @@ export async function linkPaypalTxnToOrder(
     FROM bank_transactions bt
     WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
       AND category <> 'transfer'
+      -- A payment in flight still answers "what paid for this PO"; a denied or
+      -- reversed one does not, and claiming it would leave the order reading
+      -- as paid on money that never left, or came back.
+      AND settle_status IN ('settled', 'pending')
       AND UPPER(paypal_txn_id) = UPPER(${paypalTxnId})
       -- A pair is one payment in two legs. Linking the free leg of a pair
       -- whose other leg already belongs to another PO would split it across
@@ -412,6 +441,7 @@ async function autoLink(tx: Tx): Promise<number> {
     FROM bank_transactions
     WHERE order_id IS NULL AND NOT no_auto_link AND NOT ignored
       AND paypal_txn_id IS NOT NULL AND category <> 'transfer'
+      AND settle_status IN ('settled', 'pending')
     GROUP BY COALESCE(pair_id, id)`;
 
   let linked = 0;

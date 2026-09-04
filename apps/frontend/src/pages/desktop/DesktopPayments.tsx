@@ -22,7 +22,26 @@ type Leg = {
   counterparty: string | null;
   description: string | null;
   paypalTxnId: string | null;
+  settleStatus?: SettleStatus;
 };
+
+// Did the money move? 'failed' never will, 'reversed' did and came back —
+// both are records rather than tasks, and the backend keeps them out of the
+// queue, the tiles and every action.
+type SettleStatus = 'settled' | 'pending' | 'failed' | 'reversed';
+
+const SETTLE_CHIP: Record<Exclude<SettleStatus, 'settled'>, { tone: string; key: string }> = {
+  pending: { tone: 'warn', key: 'paySettlePending' },
+  failed: { tone: 'muted', key: 'paySettleFailed' },
+  reversed: { tone: 'neg', key: 'paySettleReversed' },
+};
+
+// A row from a backend that predates v1.127.0 says nothing, and everything it
+// could have sent had settled — that was the only kind that was ingested.
+const settleOf = (r: { settleStatus?: SettleStatus }): SettleStatus => r.settleStatus ?? 'settled';
+// No money moved, so there is nothing to link, group, own or file.
+const settleDead = (r: { settleStatus?: SettleStatus }) =>
+  settleOf(r) === 'failed' || settleOf(r) === 'reversed';
 
 type MatchConfidence = 'high' | 'medium' | 'low';
 
@@ -163,6 +182,11 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // payment can carry a claim and a card chargeback at once. Added in v1.124.0,
   // optional for the same deploy-skew reason as Stats.suggested below.
   disputes?: Dispute[] | null;
+  // Whether the money actually moved. Added in v1.127.0, optional for the same
+  // deploy-skew reason as Stats.suggested below — a row from an older backend
+  // has no opinion, and an absent value reads as settled because until this
+  // version nothing else was ever ingested.
+  settleStatus?: SettleStatus;
   // Both added in v1.117.0 — optional for the same deploy-skew reason as
   // Stats.suggested below: the SPA and the API ship on independent pipelines.
   internalTxn?: { id: string; title: string | null } | null;
@@ -284,6 +308,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [q, setQ] = usePersisted('desktop.payments.q', '');
   const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
   const [disputed, setDisputed] = usePersisted('desktop.payments.disputed', false);
+  const [settle, setSettle] = usePersisted('desktop.payments.settle', 'all');
   const [assignee, setAssignee] = usePersisted('desktop.payments.assignee', 'all');
   const [members, setMembers] = useState<Member[]>([]);
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -302,10 +327,11 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     if (q.trim()) p.set('q', q.trim());
     if (hasMatch) p.set('hasMatch', '1');
     if (disputed) p.set('dispute', '1');
+    if (settle !== 'all') p.set('settle', settle);
     if (assignee !== 'all') p.set('assignee', assignee);
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [status, source, direction, q, hasMatch, disputed, assignee]);
+  }, [status, source, direction, q, hasMatch, disputed, settle, assignee]);
 
   // The owner picker and the filter share one list; the page is manager-only,
   // so /api/members is readable here.
@@ -421,22 +447,23 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     // payment is usually already linked to its PO, so nesting this under
     // 'unlinked' the way Suggested is nested would show an empty list beside a
     // count that isn't zero.
-    : key === 'disputed' ? status === 'all' && disputed
+    : key === 'disputed' ? status === 'all' && disputed && settle === 'all'
     // Unlinked and Suggested are nested, so only the narrower one lights up.
-    : status === key && direction === DEFAULT_DIRECTION && !hasMatch && !disputed;
+    : status === key && direction === DEFAULT_DIRECTION && !hasMatch && !disputed && settle === 'all';
 
-  // Every tile clears the other two lenses. Leaving one on would filter the
-  // list past what the clicked tile counted, and the count and the rows beneath
-  // it would disagree.
+  // Every tile clears the other lenses. Leaving one on would filter the list
+  // past what the clicked tile counted, and the count and the rows beneath it
+  // would disagree — the settlement select most sharply of all, since no tile
+  // counts a failed row.
+  const clearLenses = () => { setHasMatch(false); setDisputed(false); setSettle('all'); };
   const clickTile = (key: TileKey) => {
-    if (tileActive(key)) { setStatus('all'); setDirection(DEFAULT_DIRECTION); setHasMatch(false); setDisputed(false); return; }
-    if (key === 'refunds') { setStatus('linked'); setDirection('in'); setHasMatch(false); setDisputed(false); return; }
-    if (key === 'suggested') { setStatus('unlinked'); setDirection(DEFAULT_DIRECTION); setHasMatch(true); setDisputed(false); return; }
-    if (key === 'disputed') { setStatus('all'); setDirection(DEFAULT_DIRECTION); setHasMatch(false); setDisputed(true); return; }
+    if (tileActive(key)) { setStatus('all'); setDirection(DEFAULT_DIRECTION); clearLenses(); return; }
+    if (key === 'refunds') { setStatus('linked'); setDirection('in'); clearLenses(); return; }
+    if (key === 'suggested') { setStatus('unlinked'); setDirection(DEFAULT_DIRECTION); clearLenses(); setHasMatch(true); return; }
+    if (key === 'disputed') { setStatus('all'); setDirection(DEFAULT_DIRECTION); clearLenses(); setDisputed(true); return; }
     setStatus(key);
     setDirection(DEFAULT_DIRECTION);
-    setHasMatch(false);
-    setDisputed(false);
+    clearLenses();
   };
 
   return (
@@ -498,7 +525,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                 role="tab"
                 aria-selected={status === s}
                 className={status === s ? 'active' : ''}
-                onClick={() => { setStatus(s); setHasMatch(false); setDisputed(false); }}
+                onClick={() => { setStatus(s); clearLenses(); }}
               >
                 {t(`payFilter_${s}`)}
               </button>
@@ -521,6 +548,27 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               <option value="all">{t('payDirAll')}</option>
               <option value="out">{t('payDirOut')}</option>
               <option value="in">{t('payDirIn')}</option>
+            </select>
+            {/* The only way to reach a failed or reversed row: no tile counts
+                one, and the queue deliberately does not carry them. */}
+            <select
+              className="select"
+              value={settle}
+              // Picking a state widens the tab to All, for the reason the
+              // Disputed tile does: failed and reversed rows are deliberately
+              // not in the queue, so asking for them from inside it would
+              // always answer with an empty list.
+              onChange={e => {
+                setSettle(e.target.value);
+                if (e.target.value !== 'all') setStatus('all');
+              }}
+              style={FILTER_SELECT}
+            >
+              <option value="all">{t('paySettleAll')}</option>
+              <option value="settled">{t('paySettleSettled')}</option>
+              <option value="pending">{t('paySettlePending')}</option>
+              <option value="failed">{t('paySettleFailed')}</option>
+              <option value="reversed">{t('paySettleReversed')}</option>
             </select>
             <select
               className="select"
@@ -680,6 +728,12 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
   // twice.
   const lead = row.disputes?.[0] ?? null;
 
+  const settled = settleOf(row);
+  const settleChip = settled === 'settled' ? null : SETTLE_CHIP[settled];
+  // No money moved, so every verdict this rail offers is meaningless — and the
+  // endpoints behind them refuse it anyway.
+  const dead = settleDead(row);
+
   return (
     <>
       <tr className="row-hover" style={{ cursor: 'pointer' }} onClick={onToggle}>
@@ -694,6 +748,14 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
           <span className={'chip ' + (row.source === 'paired' ? 'accent' : row.source === 'mercury' ? 'info' : '')} style={{ fontSize: 11 }}>
             {SOURCE_LABEL[row.source]}
           </span>
+          {/* Before the case chip, because it qualifies the payment itself: a
+              disputed payment that never settled is first of all one that
+              never settled. Settled rows show nothing — that is every row. */}
+          {settleChip && (
+            <span className={'chip dot ' + settleChip.tone} style={{ fontSize: 10.5, marginLeft: 6 }}>
+              {t(settleChip.key)}
+            </span>
+          )}
           {/* Here rather than in the Status cell: that cell states one verdict
               about what the money was, and a case is not a competing answer to
               it — it is a fact about the transaction, which is what this column
@@ -803,7 +865,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
             rows carry two, three or no secondary buttons. */}
         <td className="pay-actions">
           <span ref={actionsRef} className="pay-rail" onClick={stop}>
-            {row.orderId ? null : row.ignored ? (
+            {row.orderId || dead ? null : row.ignored ? (
               <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unignore`)}>
                 {t('payUnignore')}
               </button>
@@ -887,12 +949,29 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
   const [pickingPair, setPickingPair] = useState(false);
   const [pickingRecord, setPickingRecord] = useState(false);
   const recordAnchorRef = useRef<HTMLSpanElement>(null);
+  const settled = settleOf(row);
+  const dead = settleDead(row);
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
+      {settled !== 'settled' && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <span className={'chip dot ' + SETTLE_CHIP[settled].tone} style={{ fontSize: 10.5 }}>
+            {t(SETTLE_CHIP[settled].key)}
+          </span>
+          {/* The date the row already carries is the one that matters here:
+              for a pending PayPal charge it is when the payment was started,
+              so "pending since" is a number of days a reader can act on. */}
+          <span className="muted">
+            {settled === 'pending'
+              ? t('paySettlePendingSince', { when: fmtDate(row.postedAt, locale) })
+              : t(settled === 'reversed' ? 'paySettleReversedHint' : 'paySettleFailedHint')}
+          </span>
+        </div>
+      )}
       {(row.disputes ?? []).map(d => (
         <DisputeDetail key={d.disputeId} dispute={d} locale={locale} />
       ))}
-      {row.match && !row.orderId && !row.ignored && (
+      {row.match && !row.orderId && !row.ignored && !dead && (
         <MatchList txnId={row.id} locale={locale} onLink={onLink} />
       )}
       <div style={{ display: 'grid', gap: 4 }}>
@@ -929,7 +1008,9 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
           <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unpair`)}>
             {t('payUnpair')}
           </button>
-        ) : !row.ignored && row.category === 'external' && (
+        ) : !row.ignored && row.category === 'external' && settled === 'settled' && (
+          // Settled only: an unsettled leg is not half of a payment yet, and
+          // POST /:id/pair refuses it.
           // PoPicker anchors to its offset parent, and this row is a plain
           // <td colSpan>, so the wrapper is what keeps the popover on the
           // button instead of the page.
@@ -947,7 +1028,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
             )}
           </span>
         )}
-        {!row.orderId && !row.internalTxn && (
+        {!row.orderId && !row.internalTxn && !dead && (
           row.category === 'transfer' ? (
             <button
               type="button" className="btn sm ghost"
@@ -993,7 +1074,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
               {t('payIntRemove')}
             </button>
           </>
-        ) : !row.orderId && (
+        ) : !row.orderId && !dead && (
           <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
             <button type="button" className="btn sm ghost" onClick={() => setPickingRecord(p => !p)}>
               {t('payIntAdd')}
@@ -1008,7 +1089,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
             )}
           </span>
         )}
-        {!row.orderId && (
+        {!row.orderId && !dead && (
           row.assignee ? (
             <button
               type="button" className="btn sm ghost"
