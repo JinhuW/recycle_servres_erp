@@ -18,6 +18,8 @@ import { synthesizePartNumber, serialIssue } from '@recycle-erp/shared';
 import { lineRequirements, missingFieldNames } from '../lib/lineRequirements';
 import { SerialCheckDialog, type SerialLineIssue } from '../components/SerialCheckDialog';
 import { SnScanner } from '../components/SnScanner';
+import { SerialChipsField } from '../components/SerialChipsField';
+import { addSerials } from '../lib/serialField';
 import { BrandConfirmDialog } from '../components/BrandConfirmDialog';
 import { MarketAssist } from '../components/MarketAssist';
 import { useMarketLookup } from '../lib/useMarketLookup';
@@ -190,8 +192,13 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
   // Reads the raw extraction, not cleanDetected: an off-catalog brand is
   // stripped before it reaches the form, and that is exactly the case that
   // most needs a second look.
+  // The second call re-runs the same rule against the line's own brand: picking
+  // a real one in the Brand select answers the question the dialog would ask,
+  // and asking it anyway reads as a bug. `Other` and off-catalog still prompt.
   const brandNeedsConfirm =
-    category === 'RAM' && !!detected && !brandConfirmed && ramBrandNeedsConfirm(detected.extracted);
+    category === 'RAM' && !!detected && !brandConfirmed
+    && ramBrandNeedsConfirm(detected.extracted)
+    && ramBrandNeedsConfirm({ brand: line.brand ?? '' });
 
   const snCount = parseSerials(line.serialNumber).length;
   const marketFor = useMarketLookup([line.partNumber]);
@@ -535,24 +542,12 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
               <span className="chip accent" style={{ fontSize: 10, marginLeft: 'auto' }}>{t('serialCount', { n: snCount })}</span>
             )}
           </label>
-          <div style={{ position: 'relative' }}>
-            <textarea
-              className="input mono"
-              rows={Math.min(Math.max(snCount, 2), 5)}
-              value={line.serialNumber ?? ''}
-              onChange={e => set('serialNumber', e.target.value)}
-              placeholder={t('serialNumbersPh')}
-              style={{ resize: 'vertical', lineHeight: 1.6, paddingRight: 50 }}
-            />
-            <button
-              type="button"
-              className="ph-sn-scan"
-              aria-label={t('snScan')}
-              onClick={() => setSnScanOpen(true)}
-            >
-              <Icon name="scan" size={17} />
-            </button>
-          </div>
+          <SerialChipsField
+            value={line.serialNumber ?? ''}
+            onChange={v => set('serialNumber', v)}
+            placeholder={t('serialNumbersPh')}
+            onScan={() => setSnScanOpen(true)}
+          />
           <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
             {line.category === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
               ? t('serialNumbersHintDdr5')
@@ -670,8 +665,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           onDone={scannedSns => {
             setSnScanOpen(false);
             if (!scannedSns.length) return;
-            const cur = (line.serialNumber ?? '').replace(/\s+$/, '');
-            set('serialNumber', cur ? cur + '\n' + scannedSns.join('\n') : scannedSns.join('\n'));
+            set('serialNumber', addSerials(line.serialNumber, scannedSns.join('\n')));
           }}
         />
       )}
@@ -682,7 +676,7 @@ export function SubmitForm({ category, detected, lineCount, editingLineIdx, exis
           brand={line.brand}
           onConfirm={b => { set('brand', b); setBrandConfirmed(true); setBrandDialog(false); }}
           onRetake={() => { setBrandDialog(false); onRescan(line); }}
-          retakeLabel={t('retakePhoto')}
+          retakeLabel={t('brandConfirmRetake')}
           onCancel={() => setBrandDialog(false)}
         />
       )}

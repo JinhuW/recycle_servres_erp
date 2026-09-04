@@ -2,13 +2,13 @@
 id: RS-022
 title: Code-review findings before the prod cut
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-04
 reporter: jinhu
 branch: fix/rs-022-review-findings
-pr:
-version:
+pr: 263
+version: 1.125.1
 related: [RS-018, RS-020, RS-021]
 ---
 
@@ -41,21 +41,21 @@ The findings, and what each actually costs:
 
 ## Acceptance criteria
 
-- [ ] `POST /oauth/register` with a hostile `redirect_uris` entry returns a fixed
+- [x] `POST /oauth/register` with a hostile `redirect_uris` entry returns a fixed
       RFC 7591 error code, and that text does not appear in the request log line.
-- [ ] A 4xx `error` string is bounded at 256 chars **after** parsing, so a long
+- [x] A 4xx `error` string is bounded at 256 chars **after** parsing, so a long
       body no longer costs the line its reason.
-- [ ] The payments feed returns `disputes: null` on money-in rows; money-out rows
+- [x] The payments feed returns `disputes: null` on money-in rows; money-out rows
       still carry the case.  The chip, tile, and filter agree.
-- [ ] Dispute pagination prefers `rel: "next"` and stops when the next URL
+- [x] Dispute pagination prefers `rel: "next"` and stops when the next URL
       repeats.
-- [ ] The header chip says "not authorised" only for a 403/NOT_AUTHORIZED
+- [x] The header chip says "not authorised" only for a 403/NOT_AUTHORIZED
       message, and something neutral otherwise (EN + ZH).
-- [ ] Dispute amounts, timeline amounts, and refunded amounts render in the
+- [x] Dispute amounts, timeline amounts, and refunded amounts render in the
       case's own currency.
-- [ ] `migrate.mjs` retries `57P03` and the socket-error class, and fails fast on
+- [x] `migrate.mjs` retries `57P03` and the socket-error class, and fails fast on
       `28P01` / `3D000`.
-- [ ] Backend + frontend suites, typecheck, and build all green.
+- [x] Backend + frontend suites, typecheck, and build all green.
 
 ## Out of scope
 

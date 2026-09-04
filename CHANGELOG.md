@@ -17,6 +17,70 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.126.1] - 2026-09-04
+
+Five findings from a review of the serial chips that shipped hours earlier in
+v1.126.0, fixed before they reached `main`.
+
+**A scanned serial could be stored one character short.** The chip field mirrors
+half-typed text into its value, and worked out which characters were still being
+typed by asking whether the value *ended with* them. A scan writes into that
+value from outside, so if the code it appended happened to end with the same
+characters as the text in the input — `2` typed, `SNX0012` scanned — the tail of
+the scanned serial answered the question and was stripped off it. The field then
+showed `SNX001`, and the next chip edit persisted it. The question is now
+answered by identity: the pending text counts only against the exact value the
+field itself last emitted, and any other value came from somewhere that already
+folded it in. A serial written down wrong is worse than one written down twice,
+and nothing downstream would have caught it.
+
+**The scan button stopped running away.** A serial field taller than 190 px
+scrolls, and the button was positioned inside that scrolling box — so on the
+32-stick lot the chips were built for, scrolling to the input carried the
+trigger off the top edge. It now hangs off a wrapper that doesn't scroll.
+
+**Smaller things.** An armed chip — the red outline Backspace puts on the last
+serial before deleting it — survived leaving the field, so coming back and
+pressing Backspace once deleted a serial with no warning; it now disarms on blur
+and whenever a scan writes into the field, which on iOS does not blur anything.
+On a read-only order the serial field kept its full-strength background and
+border while every field around it was greyed, advertising an edit the disabled
+fieldset was already refusing. And `docs/tickets/INDEX.md` again lost a Shipped
+version to its own regeneration order — RS-023 has it back.
+
+## [1.126.0] - 2026-09-04
+
+Three papercuts in RAM line entry, all reported from the phone.
+
+**Serial numbers are labels now, not a text blob.** The serial field in both the
+mobile submit form and the desktop line drawer was a textarea, so removing one
+scanned SN meant selecting exactly the right characters out of a monospace
+column. Each serial is now a chip: the `×` removes it whole, and Backspace in an
+empty input arms the last chip before deleting it (a 32-stick lot is expensive
+to re-scan, and there is no undo). Typing, pasting a list, and the QR scanner
+all feed the same field, which still stores what it always did — one
+newline-joined string — so the DDR5 and count-vs-qty rules are untouched. Text
+that has been typed but not yet turned into a chip is mirrored into the field
+value rather than committed on blur: iOS Safari does not blur an input when a
+button is tapped, and the old shape would have dropped the last serial on Save
+and then complained about a count mismatch for a serial visibly on screen.
+
+**The brand-confirm dialog fits, and its photo opens.** That dialog exists to
+make a purchaser look at the photo again, so the photo is now tappable and opens
+the full-screen viewer — with Escape closing the zoom only, instead of taking
+the dialog with it. The footer is down to the two actions that matter, `Retake`
+and `Confirm`; Cancel moved to an `×` in the head. Three buttons wrapped to two
+lines at 420 px and would have been clipped outright at 360 px, where the shell
+leaves the footer about 260 px of room.
+
+**And it stops asking a question already answered.** Saving a RAM line whose
+brand the AI could not read opened the dialog even when the purchaser had since
+picked a real brand in the line's own Brand select. The gate now re-reads that
+brand: a catalog value settles it, while blank, `Other`, or an off-catalog
+reading still prompt — `Other` is the catalog's "I don't know", which is exactly
+what the dialog is for. One predicate change covers all six save paths (mobile
+form, desktop drawer confirm, submit, and order edit).
+
 ## [1.125.1] - 2026-09-04
 
 Eight findings from a review of everything `main` has not seen yet (v1.123.1

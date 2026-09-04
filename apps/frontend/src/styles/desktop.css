@@ -1504,7 +1504,10 @@ html.desktop, body.desktop, .desktop #root {
 /* Read-only form area for purchasers viewing shipped orders. Dims fields and
    prevents edits, but keeps action buttons fully interactive. */
 .order-readonly { opacity: 1; }
-.order-readonly input,
+/* The serial field is a div, so it needs naming here — and its own input is
+   then excluded, or the dimming compounds on the one control inside it. */
+.order-readonly .sn-field,
+.order-readonly input:not(.sn-field-input),
 .order-readonly select,
 .order-readonly textarea {
   pointer-events: none;

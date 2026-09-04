@@ -329,6 +329,75 @@ button { font-family: inherit; cursor: pointer; }
   border-style: dashed;
 }
 
+/* ===== Serial-number entry field =====
+   The editable counterpart to the pills above: committed serials are tokens
+   you delete whole, and the trailing input is where the next one is typed or
+   scanned. Sized rather than row-counted — a 32-stick lot scrolls inside the
+   box instead of pushing the phone's sticky action bar off screen. */
+/* Anchors the phone's scan trigger. It can't hang off .sn-field itself: that
+   box scrolls, and an absolutely-positioned child of a scroll container travels
+   with the content — a full lot of chips carried the button out of sight. */
+.sn-field-wrap { position: relative; width: 100%; }
+.sn-field {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  width: 100%;
+  min-height: 62px; max-height: 190px; overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  align-content: flex-start;
+  cursor: text;
+}
+.sn-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.sn-token {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 3px 2px 7px;
+  border-radius: 5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px; font-weight: 500; line-height: 1.6;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  /* No 22ch ellipsis here, unlike .sn-chip: hiding the tail of the serial you
+     are about to delete defeats the point of the control. */
+  white-space: nowrap;
+}
+.sn-token.armed {
+  border-color: var(--neg);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--neg) 22%, transparent);
+}
+/* Flashed when a re-typed serial is already in the list, so the rejected text
+   points at the chip that holds it rather than merely disappearing. */
+.sn-token.dup {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.sn-token-x {
+  display: grid; place-items: center;
+  width: 16px; height: 16px;
+  border: none; border-radius: 4px;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sn-token-x:hover { background: var(--bg); color: var(--neg); }
+.sn-token-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sn-field-input {
+  flex: 1 1 9ch;
+  min-width: 9ch;
+  border: none; outline: none; padding: 2px 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px; line-height: 1.6;
+}
+
 /* ===== Avatars ===== */
 .avatar {
   width: 28px; height: 28px;

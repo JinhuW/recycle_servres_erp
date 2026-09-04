@@ -576,6 +576,14 @@
   width: 100%;
   outline: none;
 }
+/* The serial chip box is an input in everything but tag name, so it takes the
+   phone shell's roomier padding and radius alongside .input / .select. */
+.ph-field .sn-field {
+  padding: 10px 12px;
+  border-radius: 11px;
+}
+.ph-field .sn-field-input { font-size: 14px; }
+
 /* Match the desktop normalization: lucide chevron in place of the OS arrow. */
 .ph-field .select {
   appearance: none;
