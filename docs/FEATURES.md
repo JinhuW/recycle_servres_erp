@@ -345,9 +345,15 @@ inventory search, sell-order draft creation.
   with high-res capture and client-side MozJPEG compression (v0.1.1).
 - Mobile QR/serial scanning: a button on the serial-number field (v1.83.0),
   single-shot — capture, confirm, auto-close (v1.83.2).
+- **Serials are chips, in both shells** (v1.126.0): scanned, typed or pasted,
+  each one deletes whole via its `×` or a two-step Backspace. The stored value
+  is unchanged, and text typed but not yet chipped still counts toward the
+  DDR5 / count-vs-qty rules.
 - The scanner **says so when AI recognition is unavailable** and names the
   escalation (v1.97.2), and won't take a purchaser's name for a RAM brand the
-  model couldn't read (v1.106.0).
+  model couldn't read (v1.106.0). The confirm dialog's photo **opens
+  full-screen** on tap, and the prompt **stops once a real brand is picked** in
+  the line's own Brand select — `Other` and off-catalog still ask (v1.126.0).
 - An item's specs are editable from the item itself, and a **blanked dropdown
   clears the field** — including the numeric ones, RPM and health (v1.114.1).
 - Receipt auto-rename runs only on images, never spreadsheets or PDFs.

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
 import { Icon } from './Icon';
+import { ImageLightbox } from './ImageLightbox';
 import { useT } from '../lib/i18n';
 import { RAM_BRANDS } from '../lib/catalog';
 
@@ -37,63 +38,92 @@ export function BrandConfirmDialog({ photoUrl, aiRead, brand, onConfirm, onRetak
     brand && RAM_BRANDS.includes(brand) ? brand : '',
   );
   const [imgBroken, setImgBroken] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
   const showPhoto = !!photoUrl && !imgBroken;
 
   return (
-    <Modal onClose={onCancel} shellStyle={{ maxWidth: 420 }}>
-      <div className="modal-head">
-        <div>
-          <div className="modal-title">{t('brandConfirmTitle')}</div>
-          <div className="modal-sub">{t('brandConfirmSub')}</div>
-        </div>
-        <Icon name="alert" size={16} />
-      </div>
-      <div className="modal-body">
-        {showPhoto ? (
-          <img
-            src={photoUrl!}
-            alt={t('aiPhotoLabel')}
-            onError={() => setImgBroken(true)}
-            style={{
-              width: '100%', maxHeight: 220, objectFit: 'contain',
-              borderRadius: 12, border: '1px solid var(--border)',
-              background: 'var(--bg-soft)',
-            }}
-          />
-        ) : (
-          <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>{t('brandConfirmNoPhoto')}</div>
-        )}
-        {!!aiRead && (
-          <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>
-            {t('brandConfirmAiRead', { value: aiRead })}
+    <>
+      <Modal onClose={onCancel} shellStyle={{ maxWidth: 420 }} closeOnEscape={!zoomed}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{t('brandConfirmTitle')}</div>
+            <div className="modal-sub">{t('brandConfirmSub')}</div>
           </div>
-        )}
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, fontWeight: 600 }}>
-          {t('brand')}
-          <select
-            className="select"
-            value={picked}
-            autoFocus
-            onChange={e => setPicked(e.target.value)}
-          >
-            <option value="">{t('brandConfirmPick')}</option>
-            {RAM_BRANDS.map(b => <option key={b}>{b}</option>)}
-          </select>
-        </label>
-      </div>
-      <div className="modal-foot" style={{ justifyContent: onRetake ? 'space-between' : 'flex-end' }}>
-        {onRetake && (
-          <button className="btn" onClick={onRetake}>
-            <Icon name="camera" size={13} /> {retakeLabel ?? t('brandConfirmReupload')}
+          {/* Cancel lives here rather than in the footer: three buttons on one
+              row are clipped by the shell's overflow at phone widths, and the
+              footer is where the two actions that matter have to fit. */}
+          <button className="btn ghost sm" onClick={onCancel} aria-label={t('cancel')} title={t('cancel')}>
+            <Icon name="x" size={15} />
           </button>
-        )}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-          <button className="btn accent" disabled={!picked} onClick={() => onConfirm(picked)}>
+        </div>
+        <div className="modal-body">
+          {showPhoto ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <img
+                src={photoUrl!}
+                alt={t('aiPhotoLabel')}
+                onError={() => setImgBroken(true)}
+                onClick={() => setZoomed(true)}
+                style={{
+                  width: '100%', maxHeight: 220, objectFit: 'contain',
+                  borderRadius: 12, border: '1px solid var(--border)',
+                  background: 'var(--bg-soft)', cursor: 'zoom-in',
+                }}
+              />
+              <button
+                className="btn ghost sm"
+                onClick={() => setZoomed(true)}
+                style={{ alignSelf: 'center', fontSize: 11.5, color: 'var(--fg-subtle)' }}
+              >
+                <Icon name="search" size={12} /> {t('brandConfirmZoom')}
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>{t('brandConfirmNoPhoto')}</div>
+          )}
+          {!!aiRead && (
+            <div style={{ fontSize: 12.5, color: 'var(--fg-subtle)' }}>
+              {t('brandConfirmAiRead', { value: aiRead })}
+            </div>
+          )}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5, fontWeight: 600 }}>
+            {t('brand')}
+            <select
+              className="select"
+              value={picked}
+              autoFocus
+              onChange={e => setPicked(e.target.value)}
+            >
+              <option value="">{t('brandConfirmPick')}</option>
+              {RAM_BRANDS.map(b => <option key={b}>{b}</option>)}
+            </select>
+          </label>
+          {onRetake && (
+            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{t('brandConfirmRetakeNote')}</div>
+          )}
+        </div>
+        <div className="modal-foot" style={{ justifyContent: onRetake ? 'space-between' : 'flex-end' }}>
+          {onRetake && (
+            <button className="btn" onClick={onRetake} style={{ whiteSpace: 'nowrap' }}>
+              <Icon name="camera" size={13} /> {retakeLabel ?? t('brandConfirmReupload')}
+            </button>
+          )}
+          <button
+            className="btn accent"
+            disabled={!picked}
+            onClick={() => onConfirm(picked)}
+            style={{ whiteSpace: 'nowrap' }}
+          >
             <Icon name="check" size={13} /> {t('brandConfirmCta')}
           </button>
         </div>
-      </div>
-    </Modal>
+      </Modal>
+      {/* Sibling of the Modal, not a child: .modal-shell is overflow:hidden and
+          animates a transform, which would make it the containing block for a
+          position:fixed descendant. */}
+      {zoomed && showPhoto && (
+        <ImageLightbox url={photoUrl!} alt={t('aiPhotoLabel')} zIndex={200} onClose={() => setZoomed(false)} />
+      )}
+    </>
   );
 }

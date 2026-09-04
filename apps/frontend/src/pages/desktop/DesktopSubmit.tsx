@@ -183,9 +183,19 @@ export function scanToLinePatch(scan: ScanResponse, category?: Category): Partia
  * button is only one of four. The category test matters: switching a scanned
  * RAM line to another category leaves the flag behind, and an SSD line must
  * not be asked a RAM question.
+ *
+ * The second test re-runs the same rule against the line's *own* brand, so
+ * picking a real one in the Brand select answers the question as well as the
+ * dialog does — being asked to re-pick what you just picked reads as a bug.
+ * `Other` and off-catalog values still prompt: `Other` is the catalog's "I
+ * don't know", which is precisely what the dialog is for. Note the flag itself
+ * stays `true` on a line settled this way — only the dialog's confirm clears
+ * it — but nothing else reads it and it never reaches the API.
  */
 export const brandConfirmPending = (l: Line): boolean =>
-  l.category === 'RAM' && !!l._brandNeedsConfirm;
+  l.category === 'RAM'
+  && !!l._brandNeedsConfirm
+  && ramBrandNeedsConfirm({ brand: l.brand ?? '' });
 
 function OrderForm({
   onDone,
