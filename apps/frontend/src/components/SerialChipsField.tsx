@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { parseSerials } from '@recycle-erp/shared';
 import { Icon } from './Icon';
 import { useT } from '../lib/i18n';
-import { addSerials, removeSerialAt, stripPending } from '../lib/serialField';
+import { addSerials, readPending, removeSerialAt, stripPending } from '../lib/serialField';
 
 type Props = {
   value: string | null | undefined;
@@ -35,23 +35,33 @@ export function SerialChipsField({ value, onChange, placeholder, onScan, scanLab
   const [dupAt, setDupAt] = useState(-1);
   const dupTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(dupTimer.current), []);
+  // The last value this field handed out. Everything below turns on whether the
+  // value we were given back is still that one.
+  const lastEmitted = useRef<string | null>(null);
 
   const raw = value ?? '';
   // A write from outside (the scanner appending a serial) rebuilds the value
-  // without our tail, which promotes the half-typed text to a chip. Deriving
-  // the pending text from the value rather than trusting state is what keeps it
-  // from being rendered twice — as a chip and in the input.
-  const pendingText = pending && raw.endsWith(pending) ? pending : '';
+  // without our tail, which promotes the half-typed text to a chip — so the
+  // pending text is honoured only against the value we ourselves emitted, never
+  // against a value that merely ends with those characters.
+  const ours = raw === lastEmitted.current;
+  const pendingText = readPending(raw, pending, lastEmitted.current);
   const chips = parseSerials(stripPending(raw, pendingText));
   const committed = chips.join('\n');
+  // An external write lands without a blur (iOS doesn't blur on a button tap),
+  // so an arming from before it would point at whatever chip is last now — the
+  // scanned one.
+  const armedNow = armed && ours;
 
   // `pending` rides along in the value so the DDR5 / count-vs-qty rules and the
   // count badge read what the user can see.
   const write = (nextChips: string, nextPending: string) => {
+    const next = nextPending ? (nextChips ? `${nextChips}\n${nextPending}` : nextPending) : nextChips;
+    lastEmitted.current = next;
     setPending(nextPending);
     setArmed(false);
     setDupAt(-1);
-    onChange(nextPending ? (nextChips ? `${nextChips}\n${nextPending}` : nextPending) : nextChips);
+    onChange(next);
   };
 
   const commit = (text: string) => {
@@ -87,53 +97,61 @@ export function SerialChipsField({ value, onChange, placeholder, onScan, scanLab
   };
 
   return (
-    <div
-      className="sn-field"
-      style={onScan ? { paddingRight: 50 } : undefined}
-      onClick={e => { if (e.target === e.currentTarget) inputRef.current?.focus(); }}
-    >
-      {chips.map((sn, i) => (
-        <span
-          key={`${sn}-${i}`}
-          className={
-            armed && i === chips.length - 1 ? 'sn-token armed'
-            : i === dupAt ? 'sn-token dup'
-            : 'sn-token'
-          }
-        >
-          {sn}
-          <button
-            type="button"
-            className="sn-token-x"
-            aria-label={t('snRemove', { sn })}
-            onClick={() => removeAt(i)}
+    <div className="sn-field-wrap">
+      <div
+        className="sn-field"
+        style={onScan ? { paddingRight: 50 } : undefined}
+        onClick={e => { if (e.target === e.currentTarget) inputRef.current?.focus(); }}
+      >
+        {chips.map((sn, i) => (
+          <span
+            key={`${sn}-${i}`}
+            className={
+              armedNow && i === chips.length - 1 ? 'sn-token armed'
+              : i === dupAt ? 'sn-token dup'
+              : 'sn-token'
+            }
           >
-            <Icon name="x" size={10} />
-          </button>
-        </span>
-      ))}
-      <input
-        ref={inputRef}
-        className="sn-field-input mono"
-        value={pendingText}
-        aria-label={t('serialNumbers')}
-        placeholder={chips.length === 0 ? placeholder : undefined}
-        autoCapitalize="characters"
-        autoCorrect="off"
-        spellCheck={false}
-        enterKeyHint="done"
-        onChange={e => onInput(e.target.value)}
-        onKeyDown={e => {
-          // An IME's Enter arrives mid-composition and would chip half-typed text.
-          if (e.nativeEvent.isComposing) return;
-          if (e.key === 'Enter') { e.preventDefault(); if (pendingText.trim()) commit(pendingText); return; }
-          if (e.key === 'Backspace' && pendingText === '' && chips.length > 0) {
-            e.preventDefault();
-            if (armed) removeAt(chips.length - 1);
-            else setArmed(true);
-          }
-        }}
-      />
+            {sn}
+            <button
+              type="button"
+              className="sn-token-x"
+              aria-label={t('snRemove', { sn })}
+              onClick={() => removeAt(i)}
+            >
+              <Icon name="x" size={10} />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          className="sn-field-input mono"
+          value={pendingText}
+          aria-label={t('serialNumbers')}
+          placeholder={chips.length === 0 ? placeholder : undefined}
+          autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="done"
+          onChange={e => onInput(e.target.value)}
+          // Arming is a two-step gesture, and a step the user has walked away
+          // from is not one they still mean.
+          onBlur={() => setArmed(false)}
+          onKeyDown={e => {
+            // An IME's Enter arrives mid-composition and would chip half-typed text.
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === 'Enter') { e.preventDefault(); if (pendingText.trim()) commit(pendingText); return; }
+            if (e.key === 'Backspace' && pendingText === '' && chips.length > 0) {
+              e.preventDefault();
+              if (armedNow) removeAt(chips.length - 1);
+              else setArmed(true);
+            }
+          }}
+        />
+      </div>
+      {/* Outside the field, which scrolls: an absolute child of a scroll
+          container travels with the content, so a 32-stick lot carried the
+          trigger off the top of the box. */}
       {onScan && (
         <button type="button" className="ph-sn-scan" aria-label={scanLabel ?? t('snScan')} onClick={onScan}>
           <Icon name="scan" size={17} />

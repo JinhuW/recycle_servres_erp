@@ -334,9 +334,12 @@ button { font-family: inherit; cursor: pointer; }
    you delete whole, and the trailing input is where the next one is typed or
    scanned. Sized rather than row-counted — a 32-stick lot scrolls inside the
    box instead of pushing the phone's sticky action bar off screen. */
+/* Anchors the phone's scan trigger. It can't hang off .sn-field itself: that
+   box scrolls, and an absolutely-positioned child of a scroll container travels
+   with the content — a full lot of chips carried the button out of sight. */
+.sn-field-wrap { position: relative; width: 100%; }
 .sn-field {
   display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
-  position: relative;
   width: 100%;
   min-height: 62px; max-height: 190px; overflow-y: auto;
   padding: 8px 10px;

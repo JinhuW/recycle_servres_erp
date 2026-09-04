@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.126.1] - 2026-09-04
+
+Five findings from a review of the serial chips that shipped hours earlier in
+v1.126.0, fixed before they reached `main`.
+
+**A scanned serial could be stored one character short.** The chip field mirrors
+half-typed text into its value, and worked out which characters were still being
+typed by asking whether the value *ended with* them. A scan writes into that
+value from outside, so if the code it appended happened to end with the same
+characters as the text in the input — `2` typed, `SNX0012` scanned — the tail of
+the scanned serial answered the question and was stripped off it. The field then
+showed `SNX001`, and the next chip edit persisted it. The question is now
+answered by identity: the pending text counts only against the exact value the
+field itself last emitted, and any other value came from somewhere that already
+folded it in. A serial written down wrong is worse than one written down twice,
+and nothing downstream would have caught it.
+
+**The scan button stopped running away.** A serial field taller than 190 px
+scrolls, and the button was positioned inside that scrolling box — so on the
+32-stick lot the chips were built for, scrolling to the input carried the
+trigger off the top edge. It now hangs off a wrapper that doesn't scroll.
+
+**Smaller things.** An armed chip — the red outline Backspace puts on the last
+serial before deleting it — survived leaving the field, so coming back and
+pressing Backspace once deleted a serial with no warning; it now disarms on blur
+and whenever a scan writes into the field, which on iOS does not blur anything.
+On a read-only order the serial field kept its full-strength background and
+border while every field around it was greyed, advertising an edit the disabled
+fieldset was already refusing. And `docs/tickets/INDEX.md` again lost a Shipped
+version to its own regeneration order — RS-023 has it back.
+
 ## [1.126.0] - 2026-09-04
 
 Three papercuts in RAM line entry, all reported from the phone.

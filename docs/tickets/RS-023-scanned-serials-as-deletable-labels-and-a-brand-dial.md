@@ -54,23 +54,23 @@ the backend are untouched.
 
 ## Acceptance criteria
 
-- [ ] A scanned or typed serial renders as a label chip in the serial field, in
+- [x] A scanned or typed serial renders as a label chip in the serial field, in
       both the mobile submit form and the desktop line drawer.
-- [ ] Removing a serial takes the whole label: the chip's `×`, or Backspace in
+- [x] Removing a serial takes the whole label: the chip's `×`, or Backspace in
       an empty input (first press highlights the last chip, second removes it).
-- [ ] The chip field round-trips the same newline-joined string, and typed text
+- [x] The chip field round-trips the same newline-joined string, and typed text
       that has not yet become a chip still counts toward the DDR5 / count-vs-qty
       validators.
-- [ ] Opening an existing line with serials renders chips without marking the
+- [x] Opening an existing line with serials renders chips without marking the
       line dirty.
-- [ ] Tapping the photo in the brand dialog opens the full-screen lightbox; Esc
+- [x] Tapping the photo in the brand dialog opens the full-screen lightbox; Esc
       closes the zoom only, leaving the dialog open.
-- [ ] The brand dialog's footer is a single unwrapped row at a 360 px viewport:
+- [x] The brand dialog's footer is a single unwrapped row at a 360 px viewport:
       `Retake` and `Confirm`. Cancel moves to an `×` in the dialog head.
-- [ ] Saving a RAM line whose brand is set to a real catalog brand does not open
+- [x] Saving a RAM line whose brand is set to a real catalog brand does not open
       the brand dialog — on the mobile form, the desktop drawer, submit, and
       order edit.
-- [ ] A brand that is blank, `Other`, or off-catalog still prompts.
+- [x] A brand that is blank, `Other`, or off-catalog still prompts.
 
 ## Out of scope
 
