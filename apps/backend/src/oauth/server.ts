@@ -141,7 +141,11 @@ oauth.post('/register', async (c) => {
     return c.json({ error: 'client_name and redirect_uris required' }, 400);
   }
   for (const r of body.redirect_uris) {
-    if (!isValidRedirectUri(r)) return c.json({ error: `invalid redirect_uri: ${r}` }, 400);
+    // The rejected URI is deliberately not echoed. Registration is open and
+    // unauthenticated, and a validation failure creates no client row — so it
+    // never reaches the throttle above, which counts rows. Echoing would hand
+    // an anonymous caller a free write of chosen text into the request log.
+    if (!isValidRedirectUri(r)) return c.json({ error: 'invalid_redirect_uri' }, 400);
   }
   const allowedGrants = new Set(['authorization_code', 'refresh_token']);
   const grants = (body.grant_types ?? ['authorization_code', 'refresh_token']).filter(g => allowedGrants.has(g));

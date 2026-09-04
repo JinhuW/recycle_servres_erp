@@ -141,6 +141,26 @@ describe('PayPal disputes on the payments feed', () => {
     expect(rows.map(r => r.disputes?.[0].disputeId)).toEqual(['PP-D-OURS']);
   });
 
+  it('leaves the case off an incoming payment in the unfiltered feed too', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', paypalOut([
+        { externalId: TXN_IN, amount: 480, counterparty: 'A Customer', postedAt: new Date(NOW - 4 * DAY) },
+      ]), async () => [
+        dispute({ disputeId: 'PP-D-OURS', txnIds: [TXN_A] }),
+        dispute({ disputeId: 'PP-D-THEIRS', txnIds: [TXN_IN], amount: 480 }),
+      ]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    // Not behind ?dispute=1: the row payload has to agree with the tile and the
+    // filter, or the incoming row badges red in the default list while the
+    // Disputed tile reads 1 and clicking it never reaches that row.
+    const rows = await list(token, '?status=all');
+    const incoming = rows.find(r => r.amount === 480);
+    const outgoing = rows.find(r => r.amount === -1240);
+    expect(incoming?.disputes).toBeNull();
+    expect(outgoing?.disputes?.[0].disputeId).toBe('PP-D-OURS');
+  });
+
   it('counts the tile the same way the list filters it', async () => {
     await syncBankTransactions(testEnv, [
       fakeProvider('paypal', paypalOut([

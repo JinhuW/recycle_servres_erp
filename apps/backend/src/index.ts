@@ -91,7 +91,15 @@ app.use('*', (c, next) => {
 // alone has six distinct 409 branches and the line matched all of them equally.
 // 4xx only — a 5xx already gets its own log.error with a stack from
 // app.onError, and its body is the generic message anyway.
+//
+// Two different bounds, and they are not interchangeable. ERROR_BODY_MAX guards
+// the read; it has to stay well clear of a real body, because the slice happens
+// before JSON.parse and a truncated body throws — costing the line the very
+// reason it exists for. A committed-lines 409 carrying offendingLineIds runs
+// past 256 bytes on three lines alone. REASON_MAX then bounds what is logged,
+// which is where a caller-influenced string has to be cut short.
 const ERROR_BODY_MAX = 2048;
+const REASON_MAX = 256;
 
 async function refusalReason(res: Response): Promise<string | undefined> {
   if (!res.headers.get('Content-Type')?.includes('application/json')) return undefined;
@@ -100,7 +108,7 @@ async function refusalReason(res: Response): Promise<string | undefined> {
     // has yet to consume, and reading it here would leave the client nothing.
     const text = (await res.clone().text()).slice(0, ERROR_BODY_MAX);
     const parsed = JSON.parse(text) as { error?: unknown };
-    return typeof parsed.error === 'string' ? parsed.error : undefined;
+    return typeof parsed.error === 'string' ? parsed.error.slice(0, REASON_MAX) : undefined;
   } catch {
     // A body that isn't the shape we log is not itself worth a line.
     return undefined;

@@ -17,6 +17,65 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.125.1] - 2026-09-04
+
+Eight findings from a review of everything `main` has not seen yet (v1.123.1
+through v1.125.0), fixed before the cut rather than after it. None was severe
+enough to hold the release; three were worth not shipping.
+
+### Fixes
+
+- **Open client registration no longer echoes the caller's text into the log
+  stream.** A rejected `redirect_uri` came back as `invalid redirect_uri: <the
+  URI>`, and the request logger added in v1.125.0 copies a 4xx `error` string
+  onto its line. Registration is unauthenticated by design, and its throttle
+  counts *created client rows* — a validation failure creates none, so it is not
+  throttled at all. Anyone could therefore write chosen text into production
+  logs, once per request, indefinitely. The refusal is now the fixed RFC 7591
+  code `invalid_redirect_uri`, and the logger caps any reason at 256 characters
+  as a second line of defence. The cap sits on the extracted string, not on the
+  body read, which stays at 2 KB: the slice happens before the JSON is parsed,
+  so shortening it would make the parse fail and cost the line the very reason
+  it exists to carry.
+- **A disputed payment coming *in* no longer badges red.** The dispute sync
+  reads every case on the account, including the ones filed against us, and the
+  feed attached them to any transaction they named — while the Disputed tile and
+  its filter both counted money going out only. A chargeback from a customer
+  therefore showed a red Dispute chip in the list, over a tile reading zero,
+  that clicking Disputed could never reach. The feed now applies the same
+  direction rule the tile and filter always did.
+- **The dispute sync can no longer stall on one page of results.** It followed
+  whichever link carried a `next_page_token`, and from the second page onward
+  PayPal's *self* link carries one too — so the loop could re-read a single page
+  until its 20-round cap ran out. Because every case summary costs a second call
+  for its detail, that is a thousand PayPal requests for fifty cases, with the
+  rest of the list silently dropped. It now prefers the link marked `next` and
+  stops as soon as a page repeats.
+- **A dispute-sync failure no longer always blames the PayPal permission.** Any
+  stored error — a timeout, a 502, a DNS blip — rendered as *"PayPal disputes
+  not authorised"*, which sends an admin to the PayPal dashboard to fix a
+  setting that is already correct. That wording is now reserved for an actual
+  403; anything else says the sync failed.
+- **A dispute in a foreign currency shows its own.** The case amount, the
+  refunded amount and every timeline entry were formatted as US dollars while
+  the currency sat unread on the record, so a €1,240 claim read as $1,240.
+- **A wrong database password fails the container immediately instead of six
+  times slowly.** The migration runner's connect retry, added in v1.123.1,
+  caught every error alike, so a bad credential or a missing database spent ~23
+  seconds and six connect timeouts reaching the same failure — logging "database
+  not reachable yet" throughout, which is the line an operator reads while the
+  service merely looks slow to boot. It now waits only on failures that a wait
+  can fix, `57P03` (*the server is still starting up*) among them, and dies at
+  once on anything else.
+
+### Other
+
+- The dispute timeline no longer builds React keys that can collide: PayPal
+  records both parties' halves of a fund movement at the same instant and type.
+- Two comments dated the disputes payload to v1.122.0; it shipped in v1.124.0.
+  They exist so a reader can reason about the frontend/backend skew window,
+  which a wrong version defeats.
+
 ## [1.125.0] - 2026-09-03
 
 ### Fixes

@@ -249,13 +249,23 @@ async function fetchDisputes(env: Env): Promise<NormalizedDispute[]> {
   let url = `${base(env)}/v1/customer/disputes?page_size=${DISPUTE_PAGE_SIZE}`;
   const summaries: WireDisputeSummary[] = [];
   for (let page = 0; page < DISPUTE_MAX_PAGES && url; page++) {
-    const body = await getJson<{ items?: WireDisputeSummary[]; links?: { href?: string }[] }>(
+    const body = await getJson<{ items?: WireDisputeSummary[]; links?: { href?: string; rel?: string }[] }>(
       env, url, '/v1/customer/disputes',
     );
     summaries.push(...(body.items ?? []));
-    // Matched on the href rather than `rel`: PayPal publishes no `rel` enum for
-    // this response, and the token is what identifies the link either way.
-    url = body.links?.find(l => l.href?.includes('next_page_token='))?.href ?? '';
+    // `rel` first, href as the fallback: PayPal documents no `rel` enum for this
+    // response, but from page 2 the *self* link also carries a
+    // `next_page_token=`, so matching the token alone can pick the page just
+    // fetched. The equality break is what makes that survivable either way —
+    // without it the loop re-reads one page for all DISPUTE_MAX_PAGES rounds,
+    // and since every summary costs a detail GET below, a stall is 1,000 PayPal
+    // round trips and a case list silently truncated at the first page.
+    const links = body.links ?? [];
+    const next = links.find(l => l.rel === 'next' && l.href)?.href
+      ?? links.find(l => l.href?.includes('next_page_token='))?.href
+      ?? '';
+    if (next === url) break;
+    url = next;
   }
 
   const out: NormalizedDispute[] = [];

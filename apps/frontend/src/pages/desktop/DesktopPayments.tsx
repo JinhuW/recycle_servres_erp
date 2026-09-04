@@ -3,7 +3,7 @@ import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtDate, fmtDateShort, fmtUSD, relTime } from '../../lib/format';
+import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate } from '../../lib/route';
@@ -87,6 +87,14 @@ type Dispute = {
 // PayPal's own ladder. A case enters at INQUIRY and only climbs.
 const DISPUTE_STAGES = ['INQUIRY', 'CHARGEBACK', 'PRE_ARBITRATION', 'ARBITRATION'] as const;
 
+// The missing app permission is one cause of a dispute-sync failure, and it is
+// the only one an admin can act on — but a timeout or a 502 stored the same way
+// would have sent them to developer.paypal.com to fix a setting that was already
+// correct. Matched against the shape the provider stores
+// ("… failed: HTTP 403 {json}"), because a bare /403/ hits any request id
+// carrying those digits.
+const DISPUTE_FORBIDDEN = /HTTP 403|NOT_AUTHORIZED/;
+
 // A case still in play is red; once PayPal has decided, it is history and reads
 // as history.
 const disputeLive = (d: Dispute) => d.status !== 'RESOLVED';
@@ -152,7 +160,7 @@ type PaymentRow = Omit<Leg, 'source'> & {
   ignored: boolean;
   category: 'external' | 'transfer';
   // The PayPal case(s) opened on this payment, newest first. A list because one
-  // payment can carry a claim and a card chargeback at once. Added in v1.122.0,
+  // payment can carry a claim and a card chargeback at once. Added in v1.124.0,
   // optional for the same deploy-skew reason as Stats.suggested below.
   disputes?: Dispute[] | null;
   // Both added in v1.117.0 — optional for the same deploy-skew reason as
@@ -175,7 +183,7 @@ type Stats = {
   refunds: { count: number; amount: number };
   ignored: { count: number };
   transfers: { count: number };
-  // Added in v1.122.0 — optional for the same reason as suggested above.
+  // Added in v1.124.0 — optional for the same reason as suggested above.
   disputes?: { count: number; amount: number };
   // `disputeError` is set when PayPal refuses the disputes API while the
   // transaction sync is fine, which is its own state and not a sync failure.
@@ -452,7 +460,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               "no cases", which is how a feature quietly ships dark. */}
           {disputeError && (
             <span className="chip dot neg" style={{ fontSize: 11 }} title={disputeError}>
-              {t('payDisputeUnauthorised')}
+              {DISPUTE_FORBIDDEN.test(disputeError) ? t('payDisputeUnauthorised') : t('payDisputeSyncFailed')}
             </span>
           )}
           <button type="button" className="btn primary" onClick={syncNow} disabled={syncing}>
@@ -1045,6 +1053,11 @@ function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: strin
   // because "waiting on them" is as much of an answer as "waiting on us".
   const due = d.buyerResponseDueAt ?? d.sellerResponseDueAt;
   const live = disputeLive(d);
+  // Every amount in this card is the case's currency, not ours — a EUR claim
+  // rendered with a '$' misstates money we are trying to recover. The timeline
+  // borrows it: a fund movement carries its own currency_code on the wire, but
+  // the normaliser keeps only the number, and a case settles in one currency.
+  const cur = d.currency ?? 'USD';
 
   return (
     <div
@@ -1059,7 +1072,7 @@ function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: strin
           {disputeLabel(t, d.status)}
         </span>
         <span className="mono muted">{d.disputeId}</span>
-        {d.amount != null && <span className="mono">{fmtUSD(d.amount, locale)}</span>}
+        {d.amount != null && <span className="mono">{fmtMoney(d.amount, cur, locale)}</span>}
         <span className="muted">{disputeLabel(t, d.reason)}</span>
         {live && due && (
           <span className="chip dot neg" style={{ fontSize: 10.5 }}>
@@ -1088,15 +1101,15 @@ function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: strin
       )}
 
       <div style={{ display: 'grid', gap: 3 }}>
-        {d.timeline.map(e => (
-          <div key={e.at + e.kind + e.code} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        {d.timeline.map((e, i) => (
+          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
             <span className="mono muted" style={{ minWidth: 96 }}>{fmtDate(e.at, locale)}</span>
             <span>
               {e.kind === 'opened' ? t('payDisputeEvtOpened', { reason: disputeLabel(t, e.code) })
                 : e.kind === 'money' ? t('payDisputeEvtMoney', { what: disputeLabel(t, e.code) })
                 : disputeLabel(t, e.code)}
             </span>
-            {e.amount != null && <span className="mono">{fmtUSD(e.amount, locale)}</span>}
+            {e.amount != null && <span className="mono">{fmtMoney(e.amount, cur, locale)}</span>}
           </div>
         ))}
       </div>
@@ -1104,7 +1117,7 @@ function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: strin
       {d.outcomeCode && d.outcomeCode !== 'NONE' && (
         <div className="muted">
           {t('payDisputeOutcome', { outcome: disputeLabel(t, d.outcomeCode) })}
-          {d.refundedAmount != null && ` \u00b7 ${fmtUSD(d.refundedAmount, locale)}`}
+          {d.refundedAmount != null && ` \u00b7 ${fmtMoney(d.refundedAmount, cur, locale)}`}
         </div>
       )}
     </div>

@@ -1957,6 +1957,7 @@ const zh: Record<string, string> = {
   payDisputeOpen: '争议',
   payDisputeClosed: '争议已结案',
   payDisputeUnauthorised: 'PayPal 争议接口未授权',
+  payDisputeSyncFailed: 'PayPal 争议未同步',
   payDisputeDue: '需在 {when} 前回复',
   payDisputeOutcome: '结果：{outcome}',
   payDisputeEvtOpened: '发起争议 — {reason}',

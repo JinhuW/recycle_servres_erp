@@ -277,7 +277,10 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 > Disputes are a **separate PayPal app permission** from Transaction Search
 > ("Disputes" under App feature options). Without it every dispute call returns
 > `403 NOT_AUTHORIZED` while the money keeps syncing — the Payments header says
-> *"PayPal disputes not authorised"* rather than showing an empty list.
+> *"PayPal disputes not authorised"* rather than showing an empty list. Any
+> other sync failure says *"PayPal disputes didn't sync"* instead (v1.125.1):
+> the permission is the only cause an admin can act on, so a timeout that
+> claimed to be one sent them to fix a setting that was already right.
 
 ## Transfers
 
