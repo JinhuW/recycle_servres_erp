@@ -38,13 +38,15 @@
 #   5. `pnpm install` inside it (hardlinks from the pnpm store, so it is cheap).
 #   6. Inside tmux, rename the tab to the session (`feat/x` → `x`;
 #      a timestamp branch → `erp-<HH:MM>`).
-#   7. cd there and exec `claude`.
+#   7. cd there and exec `claude --dangerously-skip-permissions`.
 #
-# Permission prompts are off for this repo via permissions.defaultMode in
-# .claude/settings.json, which applies to sessions started any way — not just
-# this launcher. The worktree isolates the BRANCH, not the machine: that mode
+# Launched sessions run with permission prompts OFF, from the flag on that exec.
+# permissions.defaultMode in .claude/settings.json no longer does it: from CLI
+# 2.1.257 that mode is ignored when it comes from project or local settings, so
+# a session that starts elsewhere and moves in via EnterWorktree (--print-only)
+# keeps its prompts. The worktree isolates the BRANCH, not the machine: bypass
 # still permits any shell command, any file outside the worktree, and pushes to
-# any remote.
+# any remote. Drop the flag below to get prompts back.
 #
 # A NEW session branches from origin/dev — never main — per the repo workflow.
 # --checkout takes the branch as it stands and does not rebase or reset it.
@@ -553,9 +555,11 @@ case "$MODE" in
     # `exec` keeps this PID, so the lock names the claude process itself and the
     # slot frees automatically when that session exits.
     claim_worktree "$target" "$$"
-    # Permission prompts are off for this repo via permissions.defaultMode in
-    # .claude/settings.json, which covers sessions started any way — not just
-    # this launcher. The worktree isolates the BRANCH, not the machine.
-    exec claude ${CLAUDE_ARGS+"${CLAUDE_ARGS[@]}"}
+    # The flag, not .claude/settings.json, is what turns prompts off: a CLI at
+    # 2.1.257 or newer ignores permissions.defaultMode from project settings.
+    # The worktree isolates the BRANCH, not the machine — bypass still allows
+    # any shell command, any file outside this directory, and pushes to any
+    # remote. It goes before the pass-through so `--` args still win.
+    exec claude --dangerously-skip-permissions ${CLAUDE_ARGS+"${CLAUDE_ARGS[@]}"}
     ;;
 esac
