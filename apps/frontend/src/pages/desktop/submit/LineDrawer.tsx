@@ -10,6 +10,7 @@ import type { Category, ScanResponse } from '../../../lib/types';
 import type { Line } from '../DesktopSubmit';
 import { scanToLinePatch, brandConfirmPending } from '../DesktopSubmit';
 import { BrandConfirmDialog } from '../../../components/BrandConfirmDialog';
+import { SerialChipsField } from '../../../components/SerialChipsField';
 import { RAM_BRANDS } from '../../../lib/catalog';
 import { useT } from '../../../lib/i18n';
 import { RamFields, SsdFields, HddFields, OtherFields } from './LineFields';
@@ -514,13 +515,10 @@ export function LineDrawer({
                   </span>
                 )}
               </label>
-              <textarea
-                className="input mono"
-                rows={Math.min(Math.max(snCount, 2), 6)}
+              <SerialChipsField
                 value={line.serialNumber ?? ''}
-                onChange={e => set({ serialNumber: e.target.value })}
+                onChange={v => set({ serialNumber: v })}
                 placeholder={t('serialNumbersPh')}
-                style={{ resize: 'vertical', lineHeight: 1.6 }}
               />
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 {cat === 'RAM' && (line.generation ?? '').trim().toUpperCase() === 'DDR5'
