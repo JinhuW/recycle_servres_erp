@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { addSerials, removeSerialAt, stripPending } from './serialField';
+import { parseSerials } from '@recycle-erp/shared';
+import { addSerials, readPending, removeSerialAt, stripPending } from './serialField';
 
 describe('addSerials', () => {
   it('seeds an empty field', () => {
@@ -44,6 +45,29 @@ describe('removeSerialAt', () => {
   it('leaves the field alone for an out-of-range index', () => {
     expect(removeSerialAt('A\nB', 5)).toBe('A\nB');
     expect(removeSerialAt('A\nB', -1)).toBe('A\nB');
+  });
+});
+
+describe('readPending', () => {
+  it('honours the pending text while the value is the one the field emitted', () => {
+    expect(readPending('X\n2', '2', 'X\n2')).toBe('2');
+  });
+
+  it('has nothing to hold back when nothing is pending', () => {
+    expect(readPending('X', '', 'X')).toBe('');
+  });
+
+  it('drops the pending text once someone else has written the value', () => {
+    expect(readPending('X\n2\nSNX0012', '2', 'X\n2')).toBe('');
+  });
+
+  it('keeps a scanned serial whole when it ends with the half-typed text', () => {
+    // The scan lands while `2` is still in the input. A suffix test reads the
+    // tail of SNX0012 as that pending `2` and stores the serial one character
+    // short — the whole reason this is decided by identity.
+    const scanned = 'X\n2\nSNX0012';
+    const pending = readPending(scanned, '2', 'X\n2');
+    expect(parseSerials(stripPending(scanned, pending))).toEqual(['X', '2', 'SNX0012']);
   });
 });
 

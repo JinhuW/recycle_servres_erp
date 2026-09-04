@@ -35,6 +35,25 @@ export function removeSerialAt(raw: string | null | undefined, index: number): s
 }
 
 /**
+ * Whether the text the field thinks is still being typed is still true of
+ * `value` — answered by identity, not by looking at the value's tail.
+ *
+ * `lastEmitted` is the value the field itself last handed to its parent. Only
+ * then does its pending text still describe the last segment. Any other value
+ * arrived from outside (the scanner appending a serial), and whoever wrote it
+ * already folded the pending text into the blob, so there is nothing to hold
+ * back.
+ *
+ * A suffix test — "does the value end with the pending text?" — reads true by
+ * coincidence: scan `SNX0012` while `2` sits half-typed and the tail of the
+ * *scanned* code answers the question, so it gets stripped and the serial is
+ * stored one character short.
+ */
+export function readPending(value: string, pending: string, lastEmitted: string | null): string {
+  return pending && value === lastEmitted ? pending : '';
+}
+
+/**
  * The committed part of the field: `value` minus the text still being typed.
  *
  * The field mirrors uncommitted input into its value so the validators see it,
