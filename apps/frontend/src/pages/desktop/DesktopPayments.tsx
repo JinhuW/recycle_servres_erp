@@ -27,7 +27,8 @@ type Leg = {
 
 // Did the money move? 'failed' never will, 'reversed' did and came back —
 // both are records rather than tasks, and the backend keeps them out of the
-// queue, the tiles and every action.
+// queue, the tiles and every action. 'pending' is a real payment that has not
+// posted yet: it groups, links and counts like a settled one, badged.
 type SettleStatus = 'settled' | 'pending' | 'failed' | 'reversed';
 
 const SETTLE_CHIP: Record<Exclude<SettleStatus, 'settled'>, { tone: string; key: string }> = {
@@ -42,6 +43,10 @@ const settleOf = (r: { settleStatus?: SettleStatus }): SettleStatus => r.settleS
 // No money moved, so there is nothing to link, group, own or file.
 const settleDead = (r: { settleStatus?: SettleStatus }) =>
   settleOf(r) === 'failed' || settleOf(r) === 'reversed';
+const settleChipOf = (r: { settleStatus?: SettleStatus }) => {
+  const s = settleOf(r);
+  return s === 'settled' ? null : SETTLE_CHIP[s];
+};
 
 type MatchConfidence = 'high' | 'medium' | 'low';
 
@@ -980,6 +985,12 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
             <span className={'chip ' + (leg.source === 'mercury' ? 'info' : '')} style={{ fontSize: 10.5 }}>
               {leg.source === 'mercury' ? 'Mercury' : 'PayPal'}
             </span>
+            {/* The group's chip says the worst of its legs; this says which. */}
+            {settleChipOf(leg) && (
+              <span className={'chip dot ' + settleChipOf(leg)!.tone} style={{ fontSize: 10.5 }}>
+                {t(settleChipOf(leg)!.key)}
+              </span>
+            )}
             <span className="mono muted">{fmtDate(leg.postedAt, locale)}</span>
             <span className="mono">{fmtSigned(leg.amount, locale)}</span>
             <span className="muted">{t('payTxnId')}: <span className="mono">{leg.paypalTxnId ?? leg.externalId}</span></span>
@@ -1008,9 +1019,9 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
           <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unpair`)}>
             {t('payUnpair')}
           </button>
-        ) : !row.ignored && row.category === 'external' && settled === 'settled' && (
-          // Settled only: an unsettled leg is not half of a payment yet, and
-          // POST /:id/pair refuses it.
+        ) : !row.ignored && row.category === 'external' && !dead && (
+          // A pending leg groups like a settled one; only failed and reversed
+          // are refused by POST /:id/pair.
           // PoPicker anchors to its offset parent, and this row is a plain
           // <td colSpan>, so the wrapper is what keeps the popover on the
           // button instead of the page.

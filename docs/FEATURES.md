@@ -281,8 +281,16 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   - **Pending is chased.** It counts in the tiles, and auto-link claims it on
     an exact transaction-ID match so the PO stops reading as unpaid — it just
     says the money has not cleared, on the row and on the PO's payments ledger.
-    It is never *paired*, by hand or automatically, because the settlement leg
-    does not exist until it settles; the sync pairs it on the next pass.
+  - **Pending pairs like anything else** (v1.128.0). The common pending leg is
+    the Mercury pull, reported days before it posts; holding the pair back
+    until then showed one payment as two unlinked rows. A pending leg on either
+    side is auto-paired, offered by the picker and accepted by Group. The group
+    is badged *Pending* while any leg is, the settlement filter agrees with the
+    badge, and the expanded row says which leg. A pair whose leg later *fails*
+    lets go of it on the next sync — no tombstone — so the retried pull can
+    take its place. Only failed and reversed legs never pair; transfer pairing
+    still wants both legs settled. The PO ledger reads the PayPal leg alone, so
+    it says cleared while the pull is still pending.
   - **Failed and reversed are records, not tasks.** Out of the queue, out of
     every tile, no actions at all. Choosing one in the filter widens the tab to
     All, since asking for them from inside the queue would always answer empty.

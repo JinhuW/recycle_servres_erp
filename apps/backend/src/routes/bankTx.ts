@@ -10,7 +10,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../auth';
 import {
-  fetchCandidates, hasMatchFrag, matchSummaries, openRowFrag, pairCandidatesBatch,
+  fetchCandidates, groupSettleFrag, hasMatchFrag, matchSummaries, openRowFrag, pairCandidatesBatch,
   PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
   type MatchLeg, type PairCandidate, type PairLeg,
 } from '../banktx/match';
@@ -164,7 +164,7 @@ bankTx.get('/', async (c) => {
   const disputeFrag = dispute ? sql`bt.dispute IS NOT NULL AND bt.amount < 0` : sql`TRUE`;
   // In the WHERE for the same reason as `hasMatch` above — a lens applied to
   // the page would return short pages under keyset paging.
-  const settleFrag = settle === 'all' ? sql`TRUE` : sql`bt.settle_status = ${settle}`;
+  const settleFrag = settle === 'all' ? sql`TRUE` : sql`${groupSettleFrag(sql, 'bt')} = ${settle}`;
 
   // `order_cost` is what the bank was asked to pay for the linked PO, so a row
   // can be read against its own amount: goods (a line mirror or a negotiated lot
@@ -179,7 +179,7 @@ bankTx.get('/', async (c) => {
     SELECT bt.id, bt.source, bt.external_id, bt.posted_at, bt.amount::float AS amount,
            bt.counterparty, bt.description, bt.paypal_txn_id, bt.pair_id,
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
-           bt.settle_status,
+           ${groupSettleFrag(sql, 'bt')} AS settle_status,
            u.name AS linked_by_name,
            (po.total_cost + po.other_fees)::float AS order_cost,
            -- Money-out only, matching the tile and the ?dispute=1 filter below.
@@ -236,10 +236,10 @@ bankTx.get('/', async (c) => {
   // open, because only an open row renders the suggestion. limit 2 is all the
   // decision needs: one is a suggestion, two is ambiguity the picker handles.
   const pairLegs: PairLeg[] = slice
-    // Settled only: an unsettled leg is not half of a payment yet, which is
-    // the rule autoPair and pairEligibleFrag both follow.
+    // Same rule autoPair and pairEligibleFrag follow: pending is a real leg,
+    // failed and reversed are records.
     .filter((r) => !r.pair_id && !r.order_id && !r.ignored && r.category === 'external'
-      && r.settle_status === 'settled')
+      && !isDead(r))
     .map((r) => ({
       id: r.id as string,
       source: r.source as string,
@@ -493,11 +493,11 @@ bankTx.post('/:id/pair', async (c) => {
   if (!a || !b) return c.json({ error: 'Not found' }, 404);
   if (a.pair_id || b.pair_id) return c.json({ error: 'Already paired' }, 400);
   if (a.source === b.source) return c.json({ error: 'A pair needs one Mercury and one PayPal leg' }, 400);
-  // Settled on both sides: a pending charge's settlement leg has not happened
-  // yet, so whatever it is being grouped with is not it. Same rule autoPair
-  // and pairEligibleFrag follow, so the picker never offers this either.
-  if (a.settle_status !== 'settled' || b.settle_status !== 'settled') {
-    return c.json({ error: 'Both payments must have settled before they can be grouped' }, 400);
+  // A pending leg is a real half of a payment; a failed or reversed one is a
+  // record of money that never moved, or came back. Same rule autoPair and
+  // pairEligibleFrag follow, so the picker never offers this either.
+  if (isDead(a) || isDead(b)) {
+    return c.json({ error: 'A failed or reversed payment cannot be grouped' }, 400);
   }
   if (Number(a.amount) !== Number(b.amount)) return c.json({ error: 'Amounts differ' }, 400);
   if (a.order_id && b.order_id && a.order_id !== b.order_id) {

@@ -54,6 +54,7 @@ type LegRow = {
   link_auto: boolean;
   linked_by: string | null;
   linked_at: Date | null;
+  settle_status: string;
 };
 
 // Two concurrent "Sync now" clicks (or a click racing the interval) join the
@@ -247,6 +248,21 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       await tx`UPDATE bank_accounts SET dispute_error = ${disputeError ?? null} WHERE source = ${source}`;
     }
 
+    // A pair may now hold a leg that has not posted, and Mercury pulls do
+    // fail — then retry under a new id. The pair has to let go of the failed
+    // leg or the retry finds its PayPal charge already taken. Only pair_id is
+    // cleared: no_auto_pair is a human's Ungroup, and setting it here would
+    // stop the retry pairing on its own. Transfer pairs are left alone.
+    const dissolved = await tx`
+      UPDATE bank_transactions SET pair_id = NULL
+      WHERE pair_id IN (SELECT pair_id FROM bank_transactions
+                        WHERE pair_id IS NOT NULL AND settle_status = 'failed'
+                          AND category = 'external')
+      RETURNING id`;
+    if (dissolved.count > 0) {
+      bankLog.info('dissolved pairs with a failed leg', { source, rows: dissolved.count });
+    }
+
     const paired = await autoPair(tx);
     const autoLinked = await autoLink(tx);
     return { inserted, updated, paired, autoLinked, disputes: disputeHits, disputeError };
@@ -262,14 +278,16 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
 async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
-           category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at
+           category, category_manual, order_id, link_kind, link_auto, linked_by, linked_at,
+           settle_status
     FROM bank_transactions
     WHERE pair_id IS NULL AND NOT no_auto_pair AND NOT ignored
-      -- Pairing is a claim that two legs are one payment. A pending charge's
-      -- settlement leg does not exist yet, and a failed one's never will, so
-      -- an amount+date match on either can only be a false positive. A pending
-      -- row pairs on the sync after it settles.
-      AND settle_status = 'settled'
+      -- Pairing is a claim that two legs are one payment. A pending leg is
+      -- one: Mercury reports the pull days before it posts, and holding the
+      -- pair back until then left one payment showing as two unlinked rows.
+      -- A failed leg never moved money and a reversed one gave it back, so a
+      -- match on either can only be a false positive.
+      AND settle_status <> 'failed' AND settle_status <> 'reversed'
       -- A row someone owns, or filed under an internal transaction, is under
       -- human handling: restructuring it here would move an assigned payment's
       -- link onto it, or (via transferPair) re-categorize it out of the queue
@@ -333,7 +351,9 @@ async function autoPair(tx: Tx): Promise<number> {
     }
   }
 
-  const transferPairs = await transferPair(tx, legs, taken);
+  // Transfers stay settled-only: the counterparty rule and mark-transfer both
+  // refuse to reclassify a pending row, and pairing here would do it anyway.
+  const transferPairs = await transferPair(tx, legs.filter((l) => l.settle_status === 'settled'), taken);
   return pairs.length + transferPairs;
 }
 
