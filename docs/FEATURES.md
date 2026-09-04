@@ -270,9 +270,37 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   are not stored — the page answers "where has this got to", not "what was
   said".
 
+- **Money that hasn't settled says so** (v1.127.0). Both providers used to drop
+  every row that had not settled, so a payment in flight was indistinguishable
+  from one that never happened — a $20,570 PayPal charge sat pending for
+  fifteen days without existing in the ERP at all. Every state is now ingested
+  and normalised across the two providers: **settled**, **pending**, **failed**
+  (PayPal denied, Mercury cancelled/failed/blocked) and **reversed**. A row
+  that has not settled carries a chip beside its source, and a settlement
+  filter sits with the source and direction ones.
+  - **Pending is chased.** It counts in the tiles, and auto-link claims it on
+    an exact transaction-ID match so the PO stops reading as unpaid — it just
+    says the money has not cleared, on the row and on the PO's payments ledger.
+    It is never *paired*, by hand or automatically, because the settlement leg
+    does not exist until it settles; the sync pairs it on the next pass.
+  - **Failed and reversed are records, not tasks.** Out of the queue, out of
+    every tile, no actions at all. Choosing one in the filter widens the tab to
+    All, since asking for them from inside the queue would always answer empty.
+  - **A reversed payment stops counting towards its order.** PayPal reverses in
+    place, reusing the transaction id, so this lands on a row already linked to
+    a PO. It stays on the ledger, badged, but leaves the PO's linked total.
+
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
-> first.
+> first. Since v1.127.0 the other answer is that it is **pending**: it is
+> ingested and badged, not missing.
+
+> **The sync window is `cursor − 5 days`, plus the oldest row still pending.**
+> The overlap alone would let a payment that stays pending for weeks fall out
+> of every fetch and freeze its badge; a Mercury pending row has no posted date
+> at all. Transactions that were already pending when v1.127.0 shipped needed a
+> one-off cursor rewind (migration `0119`) — the overlap could never have
+> reached them.
 
 > Disputes are a **separate PayPal app permission** from Transaction Search
 > ("Disputes" under App feature options). Without it every dispute call returns

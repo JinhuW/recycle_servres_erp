@@ -8,6 +8,13 @@ export type BankSource = 'mercury' | 'paypal';
 // funding leg of a bank-funded payment) — never linkable to a purchase order.
 export type BankTxnCategory = 'external' | 'transfer';
 
+// Did the money move?  Both providers spell this differently (PayPal S/P/D/V,
+// Mercury sent/pending/cancelled/failed/reversed/blocked) and each maps into
+// this set at its own boundary.  'failed' is money that never moved and never
+// will; 'reversed' is money that moved and came back — the distinction matters
+// because only the second one can arrive on a row we already linked to a PO.
+export type SettleStatus = 'settled' | 'pending' | 'failed' | 'reversed';
+
 export type NormalizedTxn = {
   source: BankSource;
   externalId: string;
@@ -22,6 +29,7 @@ export type NormalizedTxn = {
   // Only PayPal metadata can classify at fetch time; Mercury legs arrive
   // 'external' and are reclassified when transfer-pairing settles them.
   category: BankTxnCategory;
+  settleStatus: SettleStatus;
   raw: unknown;
 };
 

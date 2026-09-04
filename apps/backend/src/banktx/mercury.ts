@@ -5,7 +5,9 @@
 
 import type { Env } from '../types';
 import { PAYPAL_TXN_STRICT } from '../ai/paypal';
-import type { BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, NormalizedTxn } from './types';
+import type {
+  BankAccountInfo, BankFetch, BankProvider, BankTxnCategory, NormalizedTxn, SettleStatus,
+} from './types';
 
 const DEFAULT_BASE = 'https://api.mercury.com';
 const TIMEOUT_MS = 20_000;
@@ -58,6 +60,19 @@ export function mercuryTxnCategory(kind: string | undefined, description: string
   return description && PAYPAL_ACH_DESCRIPTOR.test(description) ? 'transfer' : 'external';
 }
 
+// Mercury documents six: pending, sent, cancelled, failed, reversed, blocked.
+// The last two are the ones easily missed — leaving them out would have let
+// real money movement fall to the unknown-value default below.
+//
+// Anything unrecognised maps to 'pending' for the same reason PayPal's does:
+// an unseen state should be shown and treated as in flight, not hidden.
+export function mercurySettleStatus(status: string | undefined): SettleStatus {
+  return status === 'sent' ? 'settled'
+    : status === 'cancelled' || status === 'failed' || status === 'blocked' ? 'failed'
+    : status === 'reversed' ? 'reversed'
+    : 'pending';
+}
+
 async function call<T>(env: Env, path: string, query: Record<string, string>): Promise<T> {
   const base = (env.MERCURY_API_URL ?? DEFAULT_BASE).replace(/\/$/, '');
   const qs = Object.keys(query).length ? `?${new URLSearchParams(query)}` : '';
@@ -92,10 +107,10 @@ export function mercuryProvider(env: Env): BankProvider {
           );
           const rows = page.transactions ?? [];
           for (const t of rows) {
-            // Pending rows have no posted date and re-arrive once sent; the
-            // cursor overlap picks them up then. Failed/cancelled never post.
-            if (t.status !== 'sent') continue;
             const amount = num(t.amount);
+            // A pending row has no postedAt — it has not posted. Dating it by
+            // creation is what puts it in the feed at all, and is the date the
+            // page then shows as "pending since".
             const when = t.postedAt ?? t.createdAt;
             if (!t.id || amount === null || !when) continue;
             const description = t.bankDescription ?? t.note ?? t.externalMemo ?? null;
@@ -111,6 +126,7 @@ export function mercuryProvider(env: Env): BankProvider {
                 [t.counterpartyName, description].filter(Boolean).join(' ') || null,
               ),
               category: mercuryTxnCategory(t.kind, description),
+              settleStatus: mercurySettleStatus(t.status),
               raw: t,
             });
           }

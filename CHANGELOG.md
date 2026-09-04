@@ -17,6 +17,52 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.127.0] - 2026-09-04
+
+### Features
+
+- **Payments shows money that hasn't settled yet.**  A $20,570 PayPal payment
+  to a seller was missing from the page, and had been for fifteen days.  It was
+  not a sync failure and not Transaction Search's reporting lag: PayPal was
+  reporting it as *pending*, and both providers threw away every row that had
+  not settled — PayPal kept only `S`, Mercury only `sent`.  A payment in flight
+  was therefore indistinguishable from a payment that never happened.  Seven
+  such transactions were sitting in production, about $41k between them, none
+  of them anywhere in the ERP.  Every state is now ingested and normalised to
+  one vocabulary across the two providers — settled, pending, failed
+  (denied/cancelled/blocked) and reversed — and a row that has not settled
+  carries a chip in its Source cell, with a settlement filter beside the source
+  and direction ones.  A settled row looks exactly as it did.
+- **Pending money is chased; money that never moved is not.**  A pending
+  payment is a full member of the queue: it counts in the tiles, and auto-link
+  claims it on an exact transaction-ID match so the purchase order stops
+  reading as unpaid — it just says the money has not cleared, on the Payments
+  row and on the PO's own payments ledger.  It is never *paired*, by hand or
+  automatically, because the settlement leg it would be paired with does not
+  exist until it settles; the sync pairs it on the next pass after it does.
+  Failed and reversed rows stay out of the queue, out of every tile, and offer
+  no actions at all — they are records, and reaching them means asking for
+  them through the filter.
+- **A payment that is reversed stops counting towards its order.**  PayPal
+  reverses in place, reusing the transaction id, so this lands on a row already
+  linked to a PO.  It stays on the ledger, badged, but leaves the PO's linked
+  total — which previously would have gone on reading as fully paid after the
+  money came back.
+
+### Notes
+
+- The five-day cursor overlap is why the transactions that were *already*
+  pending needed a one-off rewind: every one of them was last touched outside
+  that window, so shipping the feature alone would have left the payment that
+  prompted it still missing.  Migration `0119` winds the sync cursor back 180
+  days once, and each run now also reaches back to the oldest row still marked
+  pending — a Mercury pending row has no posted date at all, so without that
+  its badge could never resolve.
+- The Unlinked tile counted from its own inline copy of the open-row predicate
+  rather than the shared one.  Excluding failed rows in the shared fragment
+  alone would have hidden them from the list while leaving them inside the tile
+  above it — the same tile/list disagreement v1.114.1 fixed for the direction
+  lens.  `/stats` now calls the shared fragment.
 ## [1.126.1] - 2026-09-04
 
 Five findings from a review of the serial chips that shipped hours earlier in

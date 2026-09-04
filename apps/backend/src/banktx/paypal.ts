@@ -11,7 +11,7 @@
 import type { Env } from '../types';
 import type {
   BankFetch, BankProvider, BankTxnCategory, DisputeTimelineEntry,
-  NormalizedDispute, NormalizedTxn,
+  NormalizedDispute, NormalizedTxn, SettleStatus,
 } from './types';
 
 const DEFAULT_BASE = 'https://api-m.paypal.com';
@@ -115,6 +115,19 @@ async function listPage(env: Env, query: Record<string, string>): Promise<{ rows
 // never seller money. Everything else is external.
 export function paypalTxnCategory(eventCode: string | undefined): BankTxnCategory {
   return eventCode && /^T0[347]/.test(eventCode) ? 'transfer' : 'external';
+}
+
+// S = settled, P = pending, D = denied, V = a settled payment reversed in
+// place — PayPal reuses the transaction id rather than issuing a new row, so
+// this one can arrive on a payment already linked to a PO.
+//
+// Anything else maps to 'pending': a state nobody has seen is better shown and
+// treated as in flight than hidden, and 'failed' would hide it.
+export function paypalSettleStatus(status: string | undefined): SettleStatus {
+  return status === 'S' ? 'settled'
+    : status === 'D' ? 'failed'
+    : status === 'V' ? 'reversed'
+    : 'pending';
 }
 
 function counterpartyOf(t: WireTxn): string | null {
@@ -299,9 +312,7 @@ export function paypalProvider(env: Env): BankProvider {
           });
           for (const t of rows) {
             const info = t.transaction_info;
-            // 'S' = settled money movement; pending ('P') rows re-arrive via
-            // the cursor overlap once they settle, denied/reversed never do.
-            if (!info?.transaction_id || info.transaction_status !== 'S') continue;
+            if (!info?.transaction_id) continue;
             const amount = Number(info.transaction_amount?.value);
             if (!Number.isFinite(amount) || !info.transaction_initiation_date) continue;
             const externalId = info.transaction_id.toUpperCase();
@@ -315,6 +326,7 @@ export function paypalProvider(env: Env): BankProvider {
               description: info.transaction_subject ?? info.transaction_note ?? null,
               paypalTxnId: externalId,
               category: paypalTxnCategory(info.transaction_event_code),
+              settleStatus: paypalSettleStatus(info.transaction_status),
               raw: t,
             });
           }

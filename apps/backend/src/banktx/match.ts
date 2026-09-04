@@ -181,7 +181,11 @@ function sellerNameFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
 // carrying no match at all.
 export function openRowFrag(sql: SqlClient, legAlias: string) {
   const a = sql(legAlias);
-  return sql`${a}.order_id IS NULL AND NOT ${a}.ignored AND ${a}.category = 'external'`;
+  return sql`${a}.order_id IS NULL AND NOT ${a}.ignored AND ${a}.category = 'external'
+    -- A denied or reversed payment is a record, not a task: there is nothing
+    -- to reconcile it against. Pending stays in — that money is still moving,
+    -- and it is exactly what the queue exists to chase.
+    AND ${a}.settle_status <> 'failed' AND ${a}.settle_status <> 'reversed'`;
 }
 
 // For the list filter and the stats tile, where only "does this row have any
@@ -221,6 +225,10 @@ export function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: st
     ${c}.pair_id IS NULL
     AND NOT ${c}.ignored
     AND ${c}.category = 'external'
+    -- Same rule autoPair follows: an unsettled leg is not half of anything
+    -- yet. Offering one here would make the picker propose the very match the
+    -- endpoint refuses.
+    AND ${c}.settle_status = 'settled'
     AND ${c}.source <> ${l}.source
     AND ${c}.amount = ${l}.amount
     AND (${c}.order_id IS NULL OR ${l}.order_id IS NULL OR ${c}.order_id = ${l}.order_id)`;
@@ -441,6 +449,10 @@ export async function fetchCandidatesBatch(
              SELECT -SUM(bt.amount) FROM bank_transactions bt
              WHERE bt.order_id = o.id AND NOT bt.ignored
                AND (bt.pair_id IS NULL OR bt.source = 'paypal')
+               -- PayPal reverses a payment in place, keeping the transaction
+               -- id, so a linked row can turn into money that came back. Left
+               -- in, the PO would go on reading as fully paid.
+               AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed'
            ), 0)::float AS linked_total,
            ${sellerNameFrag(sql, 'l')} AS seller_name,
            EXISTS (

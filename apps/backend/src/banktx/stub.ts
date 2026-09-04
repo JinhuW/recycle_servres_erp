@@ -3,15 +3,19 @@
 // (the OCR module's silent stub already burned us once).
 
 import type {
-  BankFetch, BankProvider, BankTxnCategory, NormalizedDispute, NormalizedTxn,
+  BankFetch, BankProvider, BankTxnCategory, NormalizedDispute, NormalizedTxn, SettleStatus,
 } from './types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function txn(
-  partial: Omit<NormalizedTxn, 'raw' | 'category'> & { category?: BankTxnCategory },
+  partial: Omit<NormalizedTxn, 'raw' | 'category' | 'settleStatus'>
+    & { category?: BankTxnCategory; settleStatus?: SettleStatus },
 ): NormalizedTxn {
-  return { category: 'external', ...partial, raw: { stub: true, id: partial.externalId } };
+  return {
+    category: 'external', settleStatus: 'settled', ...partial,
+    raw: { stub: true, id: partial.externalId },
+  };
 }
 
 // A fixed anchor keeps re-syncs idempotent within a process while staying
@@ -56,6 +60,14 @@ export function stubMercuryProvider(): BankProvider {
             postedAt: new Date(anchor - 4 * DAY_MS), amount: -800,
             counterparty: 'PayPal', description: 'PAYPAL TRANSFER', paypalTxnId: null,
           }),
+          // An ACH still in flight — no posted date on the wire, so it is
+          // dated by creation. Stays in the queue, badged.
+          txn({
+            source: 'mercury', externalId: 'stub-m-6', accountExternalId: 'stub-checking',
+            postedAt: new Date(anchor - 6 * DAY_MS), amount: -1875,
+            counterparty: 'Rack & Stack Ltd', description: 'ACH to seller', paypalTxnId: null,
+            settleStatus: 'pending',
+          }),
         ],
       };
     },
@@ -87,6 +99,22 @@ export function stubPaypalProvider(): BankProvider {
             postedAt: new Date(anchor - 4 * DAY_MS), amount: 800,
             counterparty: null, description: 'Bank Deposit to PP Account',
             paypalTxnId: '5TR00000TRANSFER1', category: 'transfer',
+          }),
+          // A large payment sitting pending — the case that prompted all this.
+          // In the queue and in the totals, but never paired until it settles.
+          txn({
+            source: 'paypal', externalId: '1PENDING0000STUB1', accountExternalId: 'primary',
+            postedAt: new Date(anchor - 15 * DAY_MS), amount: -20570,
+            counterparty: 'Kody Orr', description: 'Server lot',
+            paypalTxnId: '1PENDING0000STUB1', settleStatus: 'pending',
+          }),
+          // Denied: a record, not a task. Out of the queue and every tile,
+          // reachable only through the settlement filter.
+          txn({
+            source: 'paypal', externalId: '2DENIED00000STUB1', accountExternalId: 'primary',
+            postedAt: new Date(anchor - 8 * DAY_MS), amount: -430,
+            counterparty: 'Parts Plus', description: 'Declined by PayPal',
+            paypalTxnId: '2DENIED00000STUB1', settleStatus: 'failed',
           }),
         ],
       };
