@@ -2,13 +2,13 @@
 id: RS-025
 title: Serial-chip review findings before the prod cut
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-04
 reporter: jinhu
 branch: fix/rs-025-serial-chip-review-findings
 pr: https://github.com/JinhuW/recycle_servres_erp/pull/269
-version:
+version: 1.126.1
 related: [RS-023, RS-022]
 ---
 
@@ -40,22 +40,22 @@ renders `X`, `2`, `SNX001` and puts `2` back in the input.
 
 ## Acceptance criteria
 
-- [ ] A serial appended from outside the field (the QR scanner) is chipped
+- [x] A serial appended from outside the field (the QR scanner) is chipped
       whole, whatever the half-typed text in the input happens to be — including
       when the scanned code ends with those same characters.
-- [ ] The uncommitted-text decision is made by identity — is this the value the
+- [x] The uncommitted-text decision is made by identity — is this the value the
       field itself last emitted — not by a suffix match, and a unit test covers
       the truncation case through to the parsed serial list.
-- [ ] Typing a character does not clear the input: an ordinary keystroke still
+- [x] Typing a character does not clear the input: an ordinary keystroke still
       round-trips through the parent unchanged.
-- [ ] The scan button stays docked in the field's corner when the chip list
+- [x] The scan button stays docked in the field's corner when the chip list
       overflows and scrolls.
-- [ ] On a read-only (Done) order, the serial field dims with the other fields
+- [x] On a read-only (Done) order, the serial field dims with the other fields
       and its chips stay legible.
-- [ ] An armed chip disarms when the input loses focus, and when a scan writes
+- [x] An armed chip disarms when the input loses focus, and when a scan writes
       into the field — the red outline never survives onto a chip the user did
       not arm.
-- [ ] `docs/tickets/INDEX.md` shows RS-023 shipped in 1.126.0.
+- [x] `docs/tickets/INDEX.md` shows RS-023 shipped in 1.126.0.
 
 ## Out of scope
 
@@ -73,3 +73,10 @@ renders `X`, `2`, `SNX001` and puts `2` back in the input.
 - Finding 5's cause, so it stops recurring: `ticket.sh status <id> done`
   reindexes immediately, so filling `version:` *after* it writes an empty
   Shipped cell (`git show c66ffba`).  Fill the fields first, reindex second.
+- How each criterion was established: 1, 2 and 7 by test and by the regenerated
+  index; 4 and 5 in a browser against the real stylesheets, old structure beside
+  new (the app's own dev server was serving another session's worktree, so the
+  check was made on the CSS, not in the running app); 3 and 6 by tracing both
+  parents' setters — `SubmitForm.tsx:206` and `LineDrawer.tsx:86` both store the
+  string verbatim, which is what makes the identity check safe — and not by
+  clicking, there being no jsdom in this workspace.
