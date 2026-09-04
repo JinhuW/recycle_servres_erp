@@ -91,18 +91,21 @@ switches the branch out from under the first.
   worktree is handed back with its uncommitted work intact, unless a live
   session is still in it.  Because git allows a branch in only one worktree,
   a branch checked out in the main checkout is refused rather than stolen.
-- **Every session in this repo runs with permission prompts off.**
-  `.claude/settings.json` sets `permissions.defaultMode: "bypassPermissions"`,
-  which covers all entry points; `scripts/new-session.sh` also passes
-  `--dangerously-skip-permissions` when it launches `claude` itself.  The CLI
-  flag alone was not enough: it only applies when the launcher execs `claude`,
-  so a session that started in the main checkout and moved in via
-  `EnterWorktree` kept normal prompts (permission mode is fixed at launch and
-  `EnterWorktree` only changes the working directory).
+- **Sessions launched by `scripts/new-session.sh` run with permission prompts
+  off**, because it execs `claude --dangerously-skip-permissions`.  The
+  `permissions.defaultMode: "bypassPermissions"` in `.claude/settings.json` is
+  no longer what does it: **from CLI 2.1.257 that mode is ignored when it comes
+  from project or local settings** (user or managed settings only).  It is left
+  in place for older CLIs.
+- **A session that arrives via `EnterWorktree` therefore keeps its prompts** —
+  permission mode is fixed at launch, and the `--print-only` path never execs
+  `claude`.  Covering that one means a user-scope `defaultMode` in
+  `~/.claude/settings.json`, which applies to every project on the machine.
+  See [docs/debug-notes/2026-09-04-project-bypass-permissions-ignored.md](./docs/debug-notes/2026-09-04-project-bypass-permissions-ignored.md).
 - The worktree isolates the *branch*, not the machine: bypass mode still permits
   any shell command, any file outside the worktree, and pushes to any remote.
-  To get prompts back, drop `defaultMode` from `.claude/settings.json` (or
-  override it in the gitignored `.claude/settings.local.json`).
+  To get prompts back, drop the flag from the `exec` line in
+  `scripts/new-session.sh`.
 - **If a session starts in the main checkout anyway**, the `SessionStart` hook
   in `.claude/settings.json` (`scripts/claude-session-hook.sh`) says so.  The
   agent should then run `scripts/new-session.sh --print-only` and call
