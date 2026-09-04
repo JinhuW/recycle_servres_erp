@@ -2,7 +2,7 @@
 id: RS-026
 title: Group a pending payment leg with its settled sibling
 type: task
-status: in-review
+status: done
 priority: P2
 created: 2026-09-04
 reporter: jinhu
