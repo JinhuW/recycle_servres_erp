@@ -2,12 +2,12 @@
 id: RS-025
 title: Serial-chip review findings before the prod cut
 type: bug
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-04
 reporter: jinhu
 branch: fix/rs-025-serial-chip-review-findings
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/269
 version:
 related: [RS-023, RS-022]
 ---

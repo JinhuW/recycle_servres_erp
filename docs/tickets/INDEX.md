@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-025](./RS-025-serial-chip-review-findings-before-the-prod-cut.md) | in-progress | bug | P2 | Serial-chip review findings before the prod cut | — |
+| [RS-025](./RS-025-serial-chip-review-findings-before-the-prod-cut.md) | in-review | bug | P2 | Serial-chip review findings before the prod cut | — |
 | [RS-023](./RS-023-scanned-serials-as-deletable-labels-and-a-brand-dial.md) | done | task | P2 | Scanned serials as deletable labels, and a brand dialog that fits | 1.126.0 |
 | [RS-022](./RS-022-code-review-findings-before-the-prod-cut.md) | done | bug | P2 | Code-review findings before the prod cut | 1.125.1 |
 | [RS-021](./RS-021-production-cannot-explain-its-own-failures.md) | done | bug | P2 | Production cannot explain its own failures | 1.125.0 |
