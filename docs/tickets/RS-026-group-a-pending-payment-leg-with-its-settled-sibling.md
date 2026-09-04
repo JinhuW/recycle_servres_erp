@@ -2,13 +2,13 @@
 id: RS-026
 title: Group a pending payment leg with its settled sibling
 type: task
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-04
 reporter: jinhu
 branch: fix/rs-026-pair-pending-legs
-pr:
-version:
+pr: 275
+version: 1.128.0
 related: [RS-024]
 ---
 
