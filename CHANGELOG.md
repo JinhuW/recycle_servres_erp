@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.128.0] - 2026-09-04
+
+### Features
+
+- **A pending leg groups with its sibling.**  v1.127.0 started ingesting
+  pending rows but would not *pair* one — automatically, from the picker, or
+  by hand — on the reasoning that a pending charge's settlement leg does not
+  exist yet.  In production the pending leg is usually the other one: the
+  PayPal charge has settled and the Mercury pull that funds it is reported
+  pending for a day or three before it posts.  Both rows exist, and the page
+  showed one payment as two unlinked rows with no way to join them.  A pending
+  leg on either side now pairs like a settled one; only failed and reversed
+  legs are refused, and transfer pairing still asks for settled legs on both
+  sides.
+- **The group says pending while any leg is.**  The feed row is the PayPal
+  leg, so grouping the pull would have made the badge vanish.  One expression
+  now decides a group's state for both the badge and the settlement filter —
+  dead-first, so a reversed charge still reads reversed whatever its pull is
+  doing and stays out of the PO's paid total — and the expanded row badges
+  the leg that is still in flight.
+- **A pair lets go of a failed leg.**  Mercury pulls fail and are retried
+  under a new id; a pair that kept the failed one would leave the retry unable
+  to find its charge.  The sync clears the pair without the human Ungroup
+  tombstone, so the retry pairs on its own, and logs how many it split.
+
+### Notes
+
+- The PO payments ledger still reads the PayPal leg alone: a PO whose pull is
+  pending reads as cleared there until it posts.  Known, not changed here.
+
 ## [1.127.0] - 2026-09-04
 
 ### Features
