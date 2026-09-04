@@ -2,13 +2,13 @@
 id: RS-024
 title: Payments must show money that has not settled yet
 type: story
-status: in-progress
+status: in-review
 priority: P1
 created: 2026-09-04
 reporter: Jinhu
 branch: feat/pending-payments
-pr:
-version:
+pr: 268
+version: 1.127.0
 related: [RS-018]
 ---
 
