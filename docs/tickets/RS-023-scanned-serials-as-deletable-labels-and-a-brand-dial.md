@@ -2,13 +2,13 @@
 id: RS-023
 title: Scanned serials as deletable labels, and a brand dialog that fits
 type: task
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-04
 reporter: jinhu
 branch: feat/rs-023-serial-chips-brand-dialog
-pr:
-version:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/266
+version: 1.126.0
 related: []
 ---
 
