@@ -101,7 +101,7 @@ export function stubPaypalProvider(): BankProvider {
             paypalTxnId: '5TR00000TRANSFER1', category: 'transfer',
           }),
           // A large payment sitting pending — the case that prompted all this.
-          // In the queue and in the totals, but never paired until it settles.
+          // In the queue and in the totals; its Mercury pull has not arrived.
           txn({
             source: 'paypal', externalId: '1PENDING0000STUB1', accountExternalId: 'primary',
             postedAt: new Date(anchor - 15 * DAY_MS), amount: -20570,

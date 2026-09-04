@@ -188,6 +188,20 @@ export function openRowFrag(sql: SqlClient, legAlias: string) {
     AND ${a}.settle_status <> 'failed' AND ${a}.settle_status <> 'reversed'`;
 }
 
+// What a logical payment's settlement state is, read from its feed row (the
+// PayPal leg, or a lone row). Dead-first: a reversed charge reads reversed
+// whatever its pull is doing, and stays out of the PO's paid total; otherwise
+// the group is pending until its last leg posts. The filter and the row's
+// badge both use this, so they cannot disagree about which rows are pending.
+export function groupSettleFrag(sql: SqlClient, legAlias: string) {
+  const a = sql(legAlias);
+  return sql`CASE
+    WHEN ${a}.settle_status IN ('failed', 'reversed') THEN ${a}.settle_status
+    WHEN EXISTS (SELECT 1 FROM bank_transactions l
+                 WHERE l.pair_id = ${a}.pair_id AND l.settle_status = 'pending') THEN 'pending'
+    ELSE ${a}.settle_status END`;
+}
+
 // For the list filter and the stats tile, where only "does this row have any
 // candidate at all" matters. Sits in the feed query's own WHERE so keyset
 // pagination over the filtered set stays honest.
@@ -225,10 +239,11 @@ export function pairEligibleFrag(sql: SqlClient, legAlias: string, candAlias: st
     ${c}.pair_id IS NULL
     AND NOT ${c}.ignored
     AND ${c}.category = 'external'
-    -- Same rule autoPair follows: an unsettled leg is not half of anything
-    -- yet. Offering one here would make the picker propose the very match the
-    -- endpoint refuses.
-    AND ${c}.settle_status = 'settled'
+    -- Same rule autoPair follows: a pending leg is a real half — Mercury
+    -- reports the pull before it posts — but a failed or reversed one is a
+    -- record of money that never moved, or came back. Offering one here would
+    -- make the picker propose the very match the endpoint refuses.
+    AND ${c}.settle_status <> 'failed' AND ${c}.settle_status <> 'reversed'
     AND ${c}.source <> ${l}.source
     AND ${c}.amount = ${l}.amount
     AND (${c}.order_id IS NULL OR ${l}.order_id IS NULL OR ${c}.order_id = ${l}.order_id)`;

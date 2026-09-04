@@ -145,37 +145,118 @@ describe('unsettled bank transactions', () => {
       expect(row.orderId).toBe(poId);
     });
 
-    it('is never paired — automatically, as a suggestion, or by hand', async () => {
+    // The pending leg is usually the Mercury pull — reported days before it
+    // posts — but the rule is the same whichever side is still in flight.
+    it('pairs while still pending on the sync', async () => {
       await syncBankTransactions(testEnv, [
         fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240, settleStatus: 'pending' }]),
         fakeProvider('mercury', [{ externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A }]),
       ]);
-      const db = getTestDb();
-      const rows = await db<{ pair_id: string | null }[]>`SELECT pair_id FROM bank_transactions`;
-      expect(rows.every((r) => r.pair_id === null)).toBe(true);
+      const rows = await getTestDb()<{ pair_id: string | null }[]>`SELECT pair_id FROM bank_transactions`;
+      expect(rows).toHaveLength(2);
+      expect(rows.every((r) => r.pair_id !== null)).toBe(true);
+    });
 
-      const { token } = await loginAs(ALEX);
+    // An assigned leg is under human handling, which autoPair honours and the
+    // picker does not — the way to reach the by-hand path with both legs
+    // inside the auto window.
+    it('is offered and grouped by hand while pending', async () => {
+      await syncBankTransactions(testEnv, [
+        fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240, settleStatus: 'pending' }]),
+      ]);
+      const { token, user } = await loginAs(ALEX);
+      const db = getTestDb();
+      const assign = await api('POST', `/api/bank-transactions/${await idOf(TXN_A)}/assign`, {
+        token, body: { userId: user.id },
+      });
+      expect(assign.status).toBe(200);
+      await syncBankTransactions(testEnv, [
+        fakeProvider('mercury', [{ externalId: 'm-1', amount: -1240 }]),
+      ]);
       const mercury = (await list(token)).find((r) => r.source === 'mercury')!;
-      expect(mercury.pairCandidate).toBeNull();
+      expect(mercury.pairCandidate).not.toBeNull();
 
       const r = await api('POST', `/api/bank-transactions/${mercury.id}/pair`, {
         token, body: { otherId: await idOf(TXN_A) },
       });
-      expect(r.status).toBe(400);
+      expect(r.status).toBe(200);
+      const rows = await db<{ pair_id: string | null; assignee_id: string | null }[]>`
+        SELECT pair_id, assignee_id FROM bank_transactions`;
+      expect(rows).toHaveLength(2);
+      expect(rows[0].pair_id).not.toBeNull();
+      expect(rows[1].pair_id).toBe(rows[0].pair_id);
+      expect(rows.every((x) => x.assignee_id === user.id)).toBe(true);
     });
 
-    it('pairs on the sync after it settles', async () => {
+    // The feed row is the PayPal leg. If the badge read only that leg, grouping
+    // the pull would make the pending state vanish from the page.
+    it('the group is badged pending until its last leg settles', async () => {
+      const both = (mercury: 'pending' | 'settled') => [
+        fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240 }]),
+        fakeProvider('mercury', [
+          { externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A, settleStatus: mercury },
+        ]),
+      ];
+      await syncBankTransactions(testEnv, both('pending'));
+      const { token } = await loginAs(ALEX);
+      let rows = await list(token);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ source: 'paired', settleStatus: 'pending' });
+      expect(await list(token, '?settle=pending')).toHaveLength(1);
+      expect(await list(token, '?settle=settled')).toHaveLength(0);
+
+      await syncBankTransactions(testEnv, both('settled'));
+      rows = await list(token);
+      expect(rows[0]).toMatchObject({ source: 'paired', settleStatus: 'settled' });
+      expect(await list(token, '?settle=pending')).toHaveLength(0);
+    });
+
+    // Mercury pulls fail and are retried under a new id. If the pair held on
+    // to the failed leg, the retry would find its PayPal charge already taken.
+    it('a pair with a failed leg dissolves so the retry can pair', async () => {
       await syncBankTransactions(testEnv, [
-        fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240, settleStatus: 'pending' }]),
-        fakeProvider('mercury', [{ externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A }]),
+        fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240 }]),
+        fakeProvider('mercury', [
+          { externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A, settleStatus: 'pending' },
+        ]),
       ]);
       await syncBankTransactions(testEnv, [
         fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240 }]),
-        fakeProvider('mercury', [{ externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A }]),
+        fakeProvider('mercury', [
+          { externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A, settleStatus: 'failed' },
+          { externalId: 'm-2', amount: -1240, paypalTxnId: TXN_A },
+        ]),
       ]);
-      const rows = await getTestDb()<{ pair_id: string | null }[]>`
-        SELECT pair_id FROM bank_transactions`;
-      expect(rows.every((r) => r.pair_id !== null)).toBe(true);
+      const rows = await getTestDb()<{ external_id: string; pair_id: string | null }[]>`
+        SELECT external_id, pair_id FROM bank_transactions`;
+      const pairOf = new Map(rows.map((r) => [r.external_id, r.pair_id]));
+      expect(pairOf.get('m-1')).toBeNull();
+      expect(pairOf.get('m-2')).not.toBeNull();
+      expect(pairOf.get('m-2')).toBe(pairOf.get(TXN_A));
+    });
+
+    // Dead-first: the money did leave, then came back. The pair was real, and
+    // the reversal must not be masked by a sibling that is merely pending.
+    it('a reversed leg keeps its pair and still reads reversed', async () => {
+      const poId = await createPO(TXN_A);
+      const both = (paypal: 'settled' | 'reversed') => [
+        fakeProvider('paypal', [{ externalId: TXN_A, amount: -1240, settleStatus: paypal }]),
+        fakeProvider('mercury', [
+          { externalId: 'm-1', amount: -1240, paypalTxnId: TXN_A, settleStatus: 'pending' },
+        ]),
+      ];
+      await syncBankTransactions(testEnv, both('settled'));
+      await syncBankTransactions(testEnv, both('reversed'));
+      const rows = await getTestDb()<{ pair_id: string | null }[]>`SELECT pair_id FROM bank_transactions`;
+      expect(rows[0].pair_id).not.toBeNull();
+      expect(rows[1].pair_id).toBe(rows[0].pair_id);
+
+      const { token } = await loginAs(ALEX);
+      expect((await list(token))[0]).toMatchObject({ source: 'paired', settleStatus: 'reversed' });
+      expect(await list(token, '?settle=reversed')).toHaveLength(1);
+      expect(await list(token, '?settle=pending')).toHaveLength(0);
+      const paid = await api<{ net: number }>('GET', `/api/bank-transactions/by-order/${poId}`, { token });
+      expect(paid.body.net).toBe(0);
     });
 
     it('counts in the unlinked tile, as any other row does', async () => {
