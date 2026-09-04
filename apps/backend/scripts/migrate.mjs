@@ -10,6 +10,7 @@ import './load-env.mjs';
 // Plain-node import of a .ts module: Node strips the types. log.ts is kept
 // free of intra-repo imports so this resolves without a transpiler.
 import { log as rootLog } from '../src/lib/log.ts';
+import { isTransientConnectError } from './pg-retry.mjs';
 
 const log = rootLog.child({ module: 'migrate' });
 
@@ -34,6 +35,12 @@ const reset = process.argv.includes('--reset');
 // transient, so wait it out rather than turning it into an outage. Only the
 // connect is retried; a migration that fails on its SQL still exits non-zero
 // immediately, which is the behaviour you want.
+//
+// And only a *transient* connect: a wrong password or an absent database is
+// never going to fix itself, so retrying it spends ~23s plus six connect
+// timeouts to reach the same failure, having logged "database not reachable
+// yet" six times — which is the line an operator reads while the container
+// merely looks slow to start.
 const CONNECT_ATTEMPTS = 6;
 
 async function connectWithRetry(statement) {
@@ -41,6 +48,7 @@ async function connectWithRetry(statement) {
     try {
       return await statement();
     } catch (err) {
+      if (!isTransientConnectError(err)) throw err;
       if (attempt >= CONNECT_ATTEMPTS) throw err;
       const waitMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
       log.warn('database not reachable yet; retrying', {

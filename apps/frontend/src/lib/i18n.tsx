@@ -398,6 +398,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payDisputeOpen: 'Dispute',
     payDisputeClosed: 'Dispute closed',
     payDisputeUnauthorised: 'PayPal disputes not authorised',
+    payDisputeSyncFailed: "PayPal disputes didn't sync",
     payDisputeDue: 'Reply by {when}',
     payDisputeOutcome: 'Outcome: {outcome}',
     payDisputeEvtOpened: 'Case opened \u2014 {reason}',

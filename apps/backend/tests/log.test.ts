@@ -165,6 +165,34 @@ describe('request logging', () => {
     expect(line.error.length).toBeGreaterThan(0);
   });
 
+  // Registration is open and unauthenticated, and a validation failure creates
+  // no client row — so it never reaches the throttle, which counts rows. If the
+  // refusal echoed the rejected URI, an anonymous caller would own a free write
+  // of arbitrary text into the log stream, once per request, forever.
+  it('does not echo a rejected redirect_uri from open registration into the log', async () => {
+    await resetDb();
+    const marker = 'javascript:alert(' + 'X'.repeat(400) + ')';
+    const r = await api('POST', '/oauth/register', {
+      body: { client_name: 'probe', redirect_uris: [marker] },
+    });
+    expect(r.status).toBe(400);
+    const line = JSON.parse(out.at(-1)!);
+    expect(line).toMatchObject({ message: 'request', status: 400 });
+    expect(out.at(-1)!).not.toContain('XXXX');
+  });
+
+  // The body read has to stay generous — it is sliced before JSON.parse, so
+  // cutting it short would make the parse throw and cost the line its reason
+  // entirely. The bound belongs on the string that actually gets logged.
+  it('bounds the logged reason without losing it on a long body', async () => {
+    await resetDb();
+    const r = await api('GET', '/api/orders');
+    expect(r.status).toBe(401);
+    const { error } = JSON.parse(out.at(-1)!);
+    expect(typeof error).toBe('string');
+    expect(error.length).toBeLessThanOrEqual(256);
+  });
+
   it('leaves a 2xx line without an error field', async () => {
     await api('GET', '/');
     expect(JSON.parse(out.at(-1)!).error).toBeUndefined();

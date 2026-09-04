@@ -165,7 +165,13 @@ bankTx.get('/', async (c) => {
            bt.order_id, bt.link_kind, bt.link_auto, bt.linked_at, bt.ignored, bt.category,
            u.name AS linked_by_name,
            (po.total_cost + po.other_fees)::float AS order_cost,
-           bt.dispute,
+           -- Money-out only, matching the tile and the ?dispute=1 filter below.
+           -- fetchDisputes takes every case on the account, so a chargeback
+           -- filed *against* us lands on an incoming payment: ungated, that row
+           -- badged red in the default list while the Disputed tile read 0 and
+           -- clicking it returned nothing. A transaction's sign is the only
+           -- filer PayPal gives us.
+           CASE WHEN bt.amount < 0 THEN bt.dispute END AS dispute,
            bt.internal_txn_id, it.title AS internal_txn_title,
            bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
            (SELECT json_agg(json_build_object(
