@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '../../components/Icon';
 import { ListSkeleton } from '../../components/Skeleton';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { fmtDate, fmtDateShort, fmtUSD, relTime } from '../../lib/format';
+import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate } from '../../lib/route';
@@ -55,6 +55,90 @@ type PairCandidate = {
   dayGap: number;
 };
 
+// One dated thing that happened to a case. `code` is PayPal's own enum value,
+// translated here rather than on the wire.
+type DisputeEvent = {
+  at: string;
+  kind: 'opened' | 'adjudication' | 'money' | 'outcome';
+  code: string | null;
+  stage: string | null;
+  party: string | null;
+  amount: number | null;
+};
+
+type Dispute = {
+  disputeId: string;
+  reason: string | null;
+  status: string | null;
+  disputeState: string | null;
+  lifeCycleStage: string | null;
+  channel: string | null;
+  amount: number | null;
+  currency: string | null;
+  outcomeCode: string | null;
+  refundedAmount: number | null;
+  openedAt: string | null;
+  updatedAt: string | null;
+  buyerResponseDueAt: string | null;
+  sellerResponseDueAt: string | null;
+  timeline: DisputeEvent[];
+};
+
+// PayPal's own ladder. A case enters at INQUIRY and only climbs.
+const DISPUTE_STAGES = ['INQUIRY', 'CHARGEBACK', 'PRE_ARBITRATION', 'ARBITRATION'] as const;
+
+// The missing app permission is one cause of a dispute-sync failure, and it is
+// the only one an admin can act on — but a timeout or a 502 stored the same way
+// would have sent them to developer.paypal.com to fix a setting that was already
+// correct. Matched against the shape the provider stores
+// ("… failed: HTTP 403 {json}"), because a bare /403/ hits any request id
+// carrying those digits.
+const DISPUTE_FORBIDDEN = /HTTP 403|NOT_AUTHORIZED/;
+
+// A case still in play is red; once PayPal has decided, it is history and reads
+// as history.
+const disputeLive = (d: Dispute) => d.status !== 'RESOLVED';
+
+// PayPal's enums, mapped to keys once. Covers the closed sets a purchaser's
+// case actually moves through — stage, status, reason, adjudication type, fund
+// movement, outcome. A code with no entry renders as itself rather than blank:
+// the adjudication-reason list alone runs past a hundred values and is not
+// worth a key each.
+const DISPUTE_LABEL: Record<string, string> = {
+  INQUIRY: 'payDisputeStageInquiry',
+  CHARGEBACK: 'payDisputeStageChargeback',
+  PRE_ARBITRATION: 'payDisputeStagePreArbitration',
+  ARBITRATION: 'payDisputeStageArbitration',
+  OPEN: 'payDisputeStatusOpen',
+  WAITING_FOR_BUYER_RESPONSE: 'payDisputeStatusWaitingBuyer',
+  WAITING_FOR_SELLER_RESPONSE: 'payDisputeStatusWaitingSeller',
+  UNDER_REVIEW: 'payDisputeStatusUnderReview',
+  RESOLVED: 'payDisputeStatusResolved',
+  OTHER: 'payDisputeStatusOther',
+  MERCHANDISE_OR_SERVICE_NOT_RECEIVED: 'payDisputeReasonNotReceived',
+  MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED: 'payDisputeReasonNotAsDescribed',
+  UNAUTHORISED: 'payDisputeReasonUnauthorised',
+  CREDIT_NOT_PROCESSED: 'payDisputeReasonCreditNotProcessed',
+  DUPLICATE_TRANSACTION: 'payDisputeReasonDuplicate',
+  INCORRECT_AMOUNT: 'payDisputeReasonIncorrectAmount',
+  PAYMENT_BY_OTHER_MEANS: 'payDisputeReasonOtherMeans',
+  CANCELED_RECURRING_BILLING: 'payDisputeReasonCanceledBilling',
+  PROBLEM_WITH_REMITTANCE: 'payDisputeReasonRemittance',
+  DENY_BUYER: 'payDisputeAdjDenyBuyer',
+  PAYOUT_TO_BUYER: 'payDisputeAdjPayoutBuyer',
+  PAYOUT_TO_SELLER: 'payDisputeAdjPayoutSeller',
+  RECOVER_FROM_SELLER: 'payDisputeAdjRecoverSeller',
+  DEBIT: 'payDisputeMoneyDebit',
+  CREDIT: 'payDisputeMoneyCredit',
+  RESOLVED_BUYER_FAVOUR: 'payDisputeOutcomeBuyer',
+  RESOLVED_SELLER_FAVOUR: 'payDisputeOutcomeSeller',
+  RESOLVED_WITH_PAYOUT: 'payDisputeOutcomePayout',
+  CANCELED_BY_BUYER: 'payDisputeOutcomeCanceled',
+};
+
+const disputeLabel = (t: (k: string) => string, code: string | null): string =>
+  !code ? '\u2014' : DISPUTE_LABEL[code] ? t(DISPUTE_LABEL[code]) : code;
+
 type PaymentRow = Omit<Leg, 'source'> & {
   source: 'mercury' | 'paypal' | 'paired';
   legs: Leg[];
@@ -75,6 +159,10 @@ type PaymentRow = Omit<Leg, 'source'> & {
   linkedByName: string | null;
   ignored: boolean;
   category: 'external' | 'transfer';
+  // The PayPal case(s) opened on this payment, newest first. A list because one
+  // payment can carry a claim and a card chargeback at once. Added in v1.124.0,
+  // optional for the same deploy-skew reason as Stats.suggested below.
+  disputes?: Dispute[] | null;
   // Both added in v1.117.0 — optional for the same deploy-skew reason as
   // Stats.suggested below: the SPA and the API ship on independent pipelines.
   internalTxn?: { id: string; title: string | null } | null;
@@ -95,7 +183,11 @@ type Stats = {
   refunds: { count: number; amount: number };
   ignored: { count: number };
   transfers: { count: number };
-  sources: { source: string; lastSyncedAt: string | null }[];
+  // Added in v1.124.0 — optional for the same reason as suggested above.
+  disputes?: { count: number; amount: number };
+  // `disputeError` is set when PayPal refuses the disputes API while the
+  // transaction sync is fine, which is its own state and not a sync failure.
+  sources: { source: string; lastSyncedAt: string | null; disputeError?: string | null }[];
 };
 
 type SyncResult = {
@@ -191,6 +283,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const [direction, setDirection] = usePersisted<Direction>('desktop.payments.direction', DEFAULT_DIRECTION);
   const [q, setQ] = usePersisted('desktop.payments.q', '');
   const [hasMatch, setHasMatch] = usePersisted('desktop.payments.hasMatch', false);
+  const [disputed, setDisputed] = usePersisted('desktop.payments.disputed', false);
   const [assignee, setAssignee] = usePersisted('desktop.payments.assignee', 'all');
   const [members, setMembers] = useState<Member[]>([]);
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -208,10 +301,11 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     if (direction !== 'all') p.set('direction', direction);
     if (q.trim()) p.set('q', q.trim());
     if (hasMatch) p.set('hasMatch', '1');
+    if (disputed) p.set('dispute', '1');
     if (assignee !== 'all') p.set('assignee', assignee);
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [status, source, direction, q, hasMatch, assignee]);
+  }, [status, source, direction, q, hasMatch, disputed, assignee]);
 
   // The owner picker and the filter share one list; the page is manager-only,
   // so /api/members is readable here.
@@ -305,7 +399,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     return times.length ? new Date(Math.max(...times)) : null;
   }, [stats]);
 
-  type TileKey = StatusFilter | 'refunds' | 'suggested';
+  const disputeError = (stats?.sources ?? []).find(s => s.disputeError)?.disputeError ?? null;
+
+  type TileKey = StatusFilter | 'refunds' | 'suggested' | 'disputed';
   const tiles: { key: TileKey; label: string; count: number; sub: string; tone: string }[] = stats ? [
     { key: 'unlinked', label: t('payTileUnlinked'), count: stats.unlinked.count, sub: fmtUSD(stats.unlinked.amount, locale), tone: 'warn' },
     { key: 'suggested', label: t('payTileSuggested'), count: stats.suggested?.count ?? 0, sub: t('payTileSuggestedSub'), tone: 'accent' },
@@ -313,6 +409,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
     { key: 'refunds', label: t('payTileRefunds'), count: stats.refunds.count, sub: fmtUSD(stats.refunds.amount, locale), tone: 'cool' },
     { key: 'transfer', label: t('payTileTransfers'), count: stats.transfers.count, sub: t('payTileTransfersSub'), tone: 'info' },
     { key: 'ignored', label: t('payTileIgnored'), count: stats.ignored.count, sub: t('payTileIgnoredSub'), tone: 'muted' },
+    { key: 'disputed', label: t('payTileDisputed'), count: stats.disputes?.count ?? 0, sub: fmtUSD(stats.disputes?.amount ?? 0, locale), tone: 'neg' },
   ] : [];
 
   // Every tile but Refunds sits at the page's default direction, so that — not
@@ -320,16 +417,26 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const tileActive = (key: TileKey) =>
     key === 'refunds' ? status === 'linked' && direction === 'in'
     : key === 'suggested' ? status === 'unlinked' && hasMatch
+    // Disputes cut across the queue rather than sitting inside it: a disputed
+    // payment is usually already linked to its PO, so nesting this under
+    // 'unlinked' the way Suggested is nested would show an empty list beside a
+    // count that isn't zero.
+    : key === 'disputed' ? status === 'all' && disputed
     // Unlinked and Suggested are nested, so only the narrower one lights up.
-    : status === key && direction === DEFAULT_DIRECTION && !hasMatch;
+    : status === key && direction === DEFAULT_DIRECTION && !hasMatch && !disputed;
 
+  // Every tile clears the other two lenses. Leaving one on would filter the
+  // list past what the clicked tile counted, and the count and the rows beneath
+  // it would disagree.
   const clickTile = (key: TileKey) => {
-    if (tileActive(key)) { setStatus('all'); setDirection(DEFAULT_DIRECTION); setHasMatch(false); return; }
-    if (key === 'refunds') { setStatus('linked'); setDirection('in'); setHasMatch(false); return; }
-    if (key === 'suggested') { setStatus('unlinked'); setDirection(DEFAULT_DIRECTION); setHasMatch(true); return; }
+    if (tileActive(key)) { setStatus('all'); setDirection(DEFAULT_DIRECTION); setHasMatch(false); setDisputed(false); return; }
+    if (key === 'refunds') { setStatus('linked'); setDirection('in'); setHasMatch(false); setDisputed(false); return; }
+    if (key === 'suggested') { setStatus('unlinked'); setDirection(DEFAULT_DIRECTION); setHasMatch(true); setDisputed(false); return; }
+    if (key === 'disputed') { setStatus('all'); setDirection(DEFAULT_DIRECTION); setHasMatch(false); setDisputed(true); return; }
     setStatus(key);
     setDirection(DEFAULT_DIRECTION);
     setHasMatch(false);
+    setDisputed(false);
   };
 
   return (
@@ -347,6 +454,15 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             {lastSynced ? t('payLastSynced', { when: relTime(lastSynced, locale) }) : t('payNeverSynced')}
           </span>
+          {/* Its own state, not a sync failure: the money keeps arriving while
+              PayPal refuses the disputes API. Said out loud because the
+              alternative — a dispute list that is permanently empty — reads as
+              "no cases", which is how a feature quietly ships dark. */}
+          {disputeError && (
+            <span className="chip dot neg" style={{ fontSize: 11 }} title={disputeError}>
+              {DISPUTE_FORBIDDEN.test(disputeError) ? t('payDisputeUnauthorised') : t('payDisputeSyncFailed')}
+            </span>
+          )}
           <button type="button" className="btn primary" onClick={syncNow} disabled={syncing}>
             <Icon name="rotate" size={13} />
             {syncing ? t('paySyncing') : t('paySyncNow')}
@@ -382,7 +498,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
                 role="tab"
                 aria-selected={status === s}
                 className={status === s ? 'active' : ''}
-                onClick={() => { setStatus(s); setHasMatch(false); }}
+                onClick={() => { setStatus(s); setHasMatch(false); setDisputed(false); }}
               >
                 {t(`payFilter_${s}`)}
               </button>
@@ -430,6 +546,21 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
             >
               <Icon name="zap" size={12} />
               {t('payFilterHasMatch')}
+            </button>
+            <button
+              type="button"
+              className="btn sm"
+              aria-pressed={disputed}
+              onClick={() => setDisputed(v => !v)}
+              style={{
+                height: 32, fontSize: 12.5,
+                ...(disputed
+                  ? { background: 'var(--neg-soft)', borderColor: 'var(--neg)', color: 'var(--neg)' }
+                  : { color: 'var(--fg-muted)' }),
+              }}
+            >
+              <Icon name="alert" size={12} />
+              {t('payFilterDisputed')}
             </button>
             <div style={{ position: 'relative' }}>
               <Icon name="search" size={13} style={{
@@ -544,6 +675,11 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
     if (await act(`${row.id}/pair`, { otherId })) onToast(t('payGroupedToast'));
   };
 
+  // The row badges one case — the newest, which the server sorted to the front.
+  // The rest are in the expansion; a second chip here would say the same thing
+  // twice.
+  const lead = row.disputes?.[0] ?? null;
+
   return (
     <>
       <tr className="row-hover" style={{ cursor: 'pointer' }} onClick={onToggle}>
@@ -554,10 +690,22 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
           />
         </td>
         <td style={{ whiteSpace: 'nowrap' }}>{fmtDateShort(row.postedAt, locale)}</td>
-        <td>
+        <td style={{ whiteSpace: 'nowrap' }}>
           <span className={'chip ' + (row.source === 'paired' ? 'accent' : row.source === 'mercury' ? 'info' : '')} style={{ fontSize: 11 }}>
             {SOURCE_LABEL[row.source]}
           </span>
+          {/* Here rather than in the Status cell: that cell states one verdict
+              about what the money was, and a case is not a competing answer to
+              it — it is a fact about the transaction, which is what this column
+              already carries. */}
+          {lead && (
+            <span
+              className={'chip dot ' + (disputeLive(lead) ? 'neg' : 'muted')}
+              style={{ fontSize: 10.5, marginLeft: 6 }}
+            >
+              {t(disputeLive(lead) ? 'payDisputeOpen' : 'payDisputeClosed')}
+            </span>
+          )}
         </td>
         <td>
           <span style={{ fontWeight: 500 }}>{row.counterparty ?? '—'}</span>
@@ -741,6 +889,9 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
   const recordAnchorRef = useRef<HTMLSpanElement>(null);
   return (
     <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
+      {(row.disputes ?? []).map(d => (
+        <DisputeDetail key={d.disputeId} dispute={d} locale={locale} />
+      ))}
       {row.match && !row.orderId && !row.ignored && (
         <MatchList txnId={row.id} locale={locale} onLink={onLink} />
       )}
@@ -892,6 +1043,87 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
 // The ranked candidate list behind the row's "{n} matches" badge. Fetched when
 // the row opens rather than with the feed: the badge only needs the count, and
 // most rows are never expanded.
+// The case, as PayPal tells it: where it has got to, and what has happened.
+// Rendered from the row — the whole case rides along with the feed, so
+// expanding a transaction costs no round trip.
+function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: string }) {
+  const { t } = useT();
+  const stageIdx = DISPUTE_STAGES.indexOf(d.lifeCycleStage as (typeof DISPUTE_STAGES)[number]);
+  // Ours is the buyer clock; the seller's shows when it is the one running,
+  // because "waiting on them" is as much of an answer as "waiting on us".
+  const due = d.buyerResponseDueAt ?? d.sellerResponseDueAt;
+  const live = disputeLive(d);
+  // Every amount in this card is the case's currency, not ours — a EUR claim
+  // rendered with a '$' misstates money we are trying to recover. The timeline
+  // borrows it: a fund movement carries its own currency_code on the wire, but
+  // the normaliser keeps only the number, and a case settles in one currency.
+  const cur = d.currency ?? 'USD';
+
+  return (
+    <div
+      style={{
+        display: 'grid', gap: 8, padding: '10px 12px', borderRadius: 10,
+        background: 'var(--bg-elev)',
+        border: '1px solid ' + (live ? 'color-mix(in oklch, var(--neg) 30%, var(--border))' : 'var(--border)'),
+      }}
+    >
+      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <span className={'chip dot ' + (live ? 'neg' : 'muted')} style={{ fontSize: 10.5 }}>
+          {disputeLabel(t, d.status)}
+        </span>
+        <span className="mono muted">{d.disputeId}</span>
+        {d.amount != null && <span className="mono">{fmtMoney(d.amount, cur, locale)}</span>}
+        <span className="muted">{disputeLabel(t, d.reason)}</span>
+        {live && due && (
+          <span className="chip dot neg" style={{ fontSize: 10.5 }}>
+            {t('payDisputeDue', { when: fmtDateShort(due, locale) })}
+          </span>
+        )}
+      </div>
+
+      {/* The stage ladder. Divs, not buttons: .so-step is written for a stepper
+          you click through, and there is nothing here to click. */}
+      {stageIdx >= 0 && (
+        <div className="so-stepper">
+          {DISPUTE_STAGES.map((stage, i) => (
+            <Fragment key={stage}>
+              {i > 0 && <span className={'so-step-bar' + (i <= stageIdx ? ' reached' : '')} />}
+              <div
+                className={'so-step' + (i < stageIdx ? ' reached' : i === stageIdx ? ' active' : '')}
+                style={{ cursor: 'default' }}
+              >
+                <span className="so-step-dot">{i + 1}</span>
+                <span className="so-step-label">{disputeLabel(t, stage)}</span>
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gap: 3 }}>
+        {d.timeline.map((e, i) => (
+          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <span className="mono muted" style={{ minWidth: 96 }}>{fmtDate(e.at, locale)}</span>
+            <span>
+              {e.kind === 'opened' ? t('payDisputeEvtOpened', { reason: disputeLabel(t, e.code) })
+                : e.kind === 'money' ? t('payDisputeEvtMoney', { what: disputeLabel(t, e.code) })
+                : disputeLabel(t, e.code)}
+            </span>
+            {e.amount != null && <span className="mono">{fmtMoney(e.amount, cur, locale)}</span>}
+          </div>
+        ))}
+      </div>
+
+      {d.outcomeCode && d.outcomeCode !== 'NONE' && (
+        <div className="muted">
+          {t('payDisputeOutcome', { outcome: disputeLabel(t, d.outcomeCode) })}
+          {d.refundedAmount != null && ` \u00b7 ${fmtMoney(d.refundedAmount, cur, locale)}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MatchList({ txnId, locale, onLink }: {
   txnId: string;
   locale: string;

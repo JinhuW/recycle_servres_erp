@@ -436,7 +436,10 @@ describe('packages — ask the carrier now', () => {
     const pkg = await addPackage(token);
     const r = await api<{ error: string }>('POST', `/api/packages/${pkg.id}/refresh`, { token });
     expect(r.status).toBe(501);
-    expect(r.body.error).toContain('SHIPPO_API_TOKEN');
+    // This string reaches a warehouse phone verbatim, so it must describe the
+    // situation rather than name the env var an admin has to set.
+    expect(r.body.error).toMatch(/not switched on/i);
+    expect(r.body.error).not.toContain('SHIPPO_API_TOKEN');
   });
 
   it('502s, and keeps the row as it was, when the provider cannot be reached', async () => {

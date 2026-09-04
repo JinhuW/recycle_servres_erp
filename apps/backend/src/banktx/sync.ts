@@ -10,7 +10,7 @@ import { log } from '../lib/log';
 import type { Env } from '../types';
 import { pickBankProviders } from './index';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
-import type { BankProvider, BankSource, NormalizedTxn } from './types';
+import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
 
 const bankLog = log.child({ module: 'banktx' });
 
@@ -24,6 +24,12 @@ export type SyncCounts = {
   updated: number;
   paired: number;
   autoLinked: number;
+  // Cases matched onto a transaction this run. `disputeError` is deliberately
+  // not the per-source `error` below: that one means the transaction sync
+  // failed, and folding a disputes 403 into it would report the money feed as
+  // broken when it had just synced fine.
+  disputes: number;
+  disputeError?: string;
 };
 
 export type SyncResult = {
@@ -115,7 +121,7 @@ async function doSync(env: Env, providersOverride?: BankProvider[]): Promise<Syn
     } catch (e) {
       // One provider down must not block the other; the page shows the error.
       result.perSource[provider.source] = {
-        inserted: 0, updated: 0, paired: 0, autoLinked: 0,
+        inserted: 0, updated: 0, paired: 0, autoLinked: 0, disputes: 0,
         error: e instanceof Error ? e.message : 'sync failed',
       };
     }
@@ -132,6 +138,21 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
   const runStartIso = new Date().toISOString();
 
   const { accounts, txns } = await provider.fetchSince(new Date(sinceMs).toISOString());
+
+  // Disputes are a second API behind a second app permission, so this failing
+  // must leave the money feed alone. The message is *stored*, not merely
+  // logged: nobody watches stdout for the six-hourly loop, and a dispute list
+  // that is quietly always empty reads as good news.
+  let disputes: NormalizedDispute[] = [];
+  let disputeError: string | undefined;
+  if (provider.fetchDisputes) {
+    try {
+      disputes = await provider.fetchDisputes();
+    } catch (e) {
+      disputeError = e instanceof Error ? e.message : 'dispute sync failed';
+      log.warn('dispute sync failed', { module: 'banktx', source, error: disputeError });
+    }
+  }
 
   return sql.begin(async (tx) => {
     const accountIds = new Map<string, string>();
@@ -182,9 +203,33 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
       WHERE bt.source = r.source AND bt.counterparty = r.counterparty
         AND bt.category = 'external' AND NOT bt.category_manual AND bt.order_id IS NULL`;
 
+    // Only PayPal rows carry a case. The Mercury settlement leg parses the same
+    // paypal_txn_id out of its description, so without this filter a pair that
+    // hasn't been grouped yet would be badged twice and counted twice.
+    let disputeHits = 0;
+    for (const d of disputes) {
+      if (!d.disputeId || d.txnIds.length === 0) continue;
+      const rows = await tx<{ id: string; dispute: NormalizedDispute[] | null }[]>`
+        SELECT id, dispute FROM bank_transactions
+        WHERE source = 'paypal' AND UPPER(paypal_txn_id) = ANY(${d.txnIds}::text[])`;
+      // A case for a payment the feed hasn't reached yet matches nothing and
+      // lands on the next pass — the window is 180 days, not a cursor.
+      if (rows.length) disputeHits++;
+      for (const r of rows) {
+        // One payment can carry a PayPal claim *and* a card chargeback, so this
+        // is a list keyed by case id, not a single value.
+        const next = [...(r.dispute ?? []).filter(x => x.disputeId !== d.disputeId), d]
+          .sort((a, b) => (b.openedAt ?? '').localeCompare(a.openedAt ?? ''));
+        await tx`UPDATE bank_transactions SET dispute = ${tx.json(next as never)} WHERE id = ${r.id}`;
+      }
+    }
+    if (provider.fetchDisputes) {
+      await tx`UPDATE bank_accounts SET dispute_error = ${disputeError ?? null} WHERE source = ${source}`;
+    }
+
     const paired = await autoPair(tx);
     const autoLinked = await autoLink(tx);
-    return { inserted, updated, paired, autoLinked };
+    return { inserted, updated, paired, autoLinked, disputes: disputeHits, disputeError };
   });
 }
 

@@ -2,7 +2,9 @@
 // explicit BANKTX_STUB flag — never as a silent fallback for missing keys
 // (the OCR module's silent stub already burned us once).
 
-import type { BankFetch, BankProvider, BankTxnCategory, NormalizedTxn } from './types';
+import type {
+  BankFetch, BankProvider, BankTxnCategory, NormalizedDispute, NormalizedTxn,
+} from './types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -88,6 +90,32 @@ export function stubPaypalProvider(): BankProvider {
           }),
         ],
       };
+    },
+    // One live case against the RAM lot payment, so the badge, the filter and
+    // the timeline all have something to render without credentials.
+    async fetchDisputes(): Promise<NormalizedDispute[]> {
+      return [{
+        disputeId: 'PP-D-STUB001',
+        txnIds: ['7AB12345CD678901E'],
+        reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
+        status: 'WAITING_FOR_SELLER_RESPONSE',
+        disputeState: 'REQUIRED_OTHER_PARTY_ACTION',
+        lifeCycleStage: 'INQUIRY',
+        channel: 'INTERNAL',
+        amount: 1240,
+        currency: 'USD',
+        outcomeCode: null,
+        refundedAmount: null,
+        openedAt: new Date(anchor - 2 * DAY_MS).toISOString(),
+        updatedAt: new Date(anchor - DAY_MS).toISOString(),
+        buyerResponseDueAt: null,
+        sellerResponseDueAt: new Date(anchor + 5 * DAY_MS).toISOString(),
+        timeline: [{
+          at: new Date(anchor - 2 * DAY_MS).toISOString(),
+          kind: 'opened', code: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
+          stage: null, party: null, amount: 1240,
+        }],
+      }];
     },
   };
 }

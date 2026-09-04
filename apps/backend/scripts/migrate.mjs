@@ -10,6 +10,7 @@ import './load-env.mjs';
 // Plain-node import of a .ts module: Node strips the types. log.ts is kept
 // free of intra-repo imports so this resolves without a transpiler.
 import { log as rootLog } from '../src/lib/log.ts';
+import { isTransientConnectError } from './pg-retry.mjs';
 
 const log = rootLog.child({ module: 'migrate' });
 
@@ -22,8 +23,41 @@ if (!url) {
   process.exit(1);
 }
 
-const sql = postgres(url, { onnotice: () => {} });
+// Short connect timeout because this runner retries; the postgres.js default of
+// 30s would spend the whole restart budget on two attempts.
+const sql = postgres(url, { onnotice: () => {}, connect_timeout: 5 });
 const reset = process.argv.includes('--reset');
+
+// The container's CMD chains on `&&`: a failure here means the server never
+// starts, Railway's ON_FAILURE policy burns its retries, and the service then
+// stays down *after* Postgres comes back — it needs a human to redeploy. A
+// database that is merely slow to accept connections during a deploy is a
+// transient, so wait it out rather than turning it into an outage. Only the
+// connect is retried; a migration that fails on its SQL still exits non-zero
+// immediately, which is the behaviour you want.
+//
+// And only a *transient* connect: a wrong password or an absent database is
+// never going to fix itself, so retrying it spends ~23s plus six connect
+// timeouts to reach the same failure, having logged "database not reachable
+// yet" six times — which is the line an operator reads while the container
+// merely looks slow to start.
+const CONNECT_ATTEMPTS = 6;
+
+async function connectWithRetry(statement) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await statement();
+    } catch (err) {
+      if (!isTransientConnectError(err)) throw err;
+      if (attempt >= CONNECT_ATTEMPTS) throw err;
+      const waitMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
+      log.warn('database not reachable yet; retrying', {
+        attempt, of: CONNECT_ATTEMPTS, waitMs, error: err instanceof Error ? err.message : String(err),
+      });
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
 
 if (reset && process.env.NODE_ENV === 'production' && process.env.ALLOW_DESTRUCTIVE_RESET !== 'true') {
   log.error(
@@ -38,7 +72,8 @@ if (reset && process.env.NODE_ENV === 'production' && process.env.ALLOW_DESTRUCT
 const MIGRATE_LOCK_KEY = 778423; // arbitrary, dedicated to this runner
 
 try {
-  await sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
+  // First statement of the run, so this is where a cold/absent database shows up.
+  await connectWithRetry(() => sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`);
   if (reset) {
     log.warn('dropping existing tables');
     // Drop everything in the public schema (dev-only). Older versions of this

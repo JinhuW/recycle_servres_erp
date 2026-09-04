@@ -6,11 +6,14 @@ import { extractPaypalTxn } from '../ai/paypal';
 import { normalizeFields } from '../ai/normalize';
 import { EXPECTED_FIELDS_BY_CATEGORY } from '../ai/prompts';
 import { appendErrorRecord, redactSensitivePath, redactSensitiveQuery } from '../lib/error-log';
+import { log } from '../lib/log';
 import { createRateLimiter } from '../lib/rate-limit';
 import { getUploadLimits } from '../lib/settings';
 import type { Env, LineCategory, User } from '../types';
 
 const scan = new Hono<{ Bindings: Env; Variables: { user: User; requestId: string } }>();
+
+const scanLog = log.child({ module: 'scan' });
 
 // Per-user sliding-window rate limit: max 20 scans per 60-second window.
 // One limiter for both scan kinds — same user, same abuse surface.
@@ -31,7 +34,7 @@ function logScanFailure(
   c: ScanCtx, u: User, kind: 'label' | 'payment', stage: ScanStage, e: unknown,
 ): void {
   const what = stage === 'upload' ? 'image upload (R2)' : 'OCR';
-  console.error(`${kind} ${stage} error`, e);
+  scanLog.child({ kind, stage }).error('scan failed', e);
   const dir = process.env.ERROR_LOG_DIR;
   if (!dir) return;
   const url = new URL(c.req.url);
@@ -141,6 +144,20 @@ scan.post('/label', async (c) => {
   const expected = EXPECTED_FIELDS_BY_CATEGORY[category];
   const missing = expected.filter((f) => !result.fields[f] || result.fields[f].trim() === '');
   if (missing.length > 0 && result.provider !== 'stub') {
+    // The record above goes to errors.jsonl, which only exists where
+    // ERROR_LOG_DIR is set — the Docker stack. On Railway stdout is the only
+    // sink, so without this line the highest-volume quality signal in the
+    // system is kept nowhere in production. Field *names* only: the values
+    // transcribe a customer's label.
+    scanLog.info('scan partial fill', {
+      category,
+      missing,
+      missingCount: missing.length,
+      expectedCount: expected.length,
+      confidence: result.confidence,
+      provider: result.provider,
+      storageKey: uploaded.storageKey,
+    });
     const dir = process.env.ERROR_LOG_DIR;
     if (dir) {
       const requestId = c.var.requestId ?? 'unknown';

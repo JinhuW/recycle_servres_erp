@@ -194,6 +194,12 @@ Transit, and a line's qty can never be 0.
   demo label* instead of *Buy label* — the older `Demo` chip only appeared on
   the shipment afterwards, once the choice had been made.
 
+- **A package Refresh explains itself when tracking is off** (v1.125.0). It used
+  to raise a blocking "Something went wrong" dialog carrying the backend's own
+  `SHIPPO_API_TOKEN` message at whoever pressed it; both shells now say plainly
+  that automatic tracking isn't switched on yet and the package won't update on
+  its own.
+
 > Both shipping providers ship **dark until their keys are set** —
 > `SHIPPO_API_TOKEN` / `SHIPPO_WEBHOOK_SECRET` for tracking, ShipSaving portal
 > keys for labels. `/api/health` reports provider modes so this state is
@@ -254,9 +260,27 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   the PO is the answer the tag stood in for; a row filed under an internal
   transaction refuses the link instead, because a note is attached to it.
 
+- **A disputed payment says so** (v1.124.0). The sync reads PayPal's Customer
+  Disputes API alongside the transaction feed, and a payment we have opened a
+  case against carries a red chip, appears behind a **Disputed** tile and
+  filter, and shows the case's stage (inquiry → claim → pre-arbitration →
+  arbitration) with its dated history when the row is expanded. Only cases *we*
+  filed as the purchaser: PayPal names no filer, but a transaction's sign is its
+  direction, so ours always sit on money going out. Message threads and evidence
+  are not stored — the page answers "where has this got to", not "what was
+  said".
+
 > PayPal's Transaction Search lags ~3 hours. A fresh transaction missing from
 > Payments is usually that, not a sync bug — check `last_refreshed_datetime`
 > first.
+
+> Disputes are a **separate PayPal app permission** from Transaction Search
+> ("Disputes" under App feature options). Without it every dispute call returns
+> `403 NOT_AUTHORIZED` while the money keeps syncing — the Payments header says
+> *"PayPal disputes not authorised"* rather than showing an empty list. Any
+> other sync failure says *"PayPal disputes didn't sync"* instead (v1.125.1):
+> the permission is the only cause an admin can act on, so a timeout that
+> claimed to be one sent them to fix a setting that was already right.
 
 ## Transfers
 
@@ -327,6 +351,11 @@ inventory search, sell-order draft creation.
 - An item's specs are editable from the item itself, and a **blanked dropdown
   clears the field** — including the numeric ones, RPM and health (v1.114.1).
 - Receipt auto-rename runs only on images, never spreadsheets or PDFs.
+- **A scan that times out retries itself once** before showing the field an
+  error (v1.123.1). A slow turn used to surface on the phone as "OCR failed",
+  and the human re-shot the same label. Only timeouts retry; an error from the
+  model still fails immediately. Every attempt on one scan shares a single
+  45-second budget, so a scan cannot spend two full timeouts on the model.
 
 > Provider selection is silent: OpenRouter (Gemma 3 27B) when
 > `OPENROUTER_API_KEY` is set, otherwise a deterministic stub. A prod deploy

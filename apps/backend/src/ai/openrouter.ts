@@ -12,8 +12,20 @@ const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 // Cap each OpenRouter call so a hung/slow model can't hold a request (and a
 // server worker) open indefinitely. On timeout fetch throws an AbortError,
-// which scan.ts already converts to a 502 "retry the shot".
+// which scan.ts converts to a 502 "retry the shot".
 const OCR_TIMEOUT_MS = 20_000;
+// One budget across every attempt this call makes — the timeout retry below and
+// the JSON re-ask further down. Each used to mint a *fresh* 20s signal, so a
+// scan could spend 40s on the model (plus the route's 15s upload) with nothing
+// bounding the pair. Sized to allow one full attempt plus most of a second.
+const OCR_DEADLINE_MS = 45_000;
+
+// AbortSignal.timeout rejects with a DOMException, so match on the name rather
+// than the constructor.
+function isTimeout(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name;
+  return name === 'TimeoutError' || name === 'AbortError';
+}
 
 function sniffMime(b: Uint8Array): string {
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
@@ -57,7 +69,12 @@ export async function openRouterImageJson(
     { type: 'image_url', image_url: { url: dataUrl } },
   ];
 
-  async function ask(messages: ChatMessage[]): Promise<string> {
+  const deadline = Date.now() + OCR_DEADLINE_MS;
+  const remaining = () => Math.min(OCR_TIMEOUT_MS, deadline - Date.now());
+
+  async function askOnce(messages: ChatMessage[]): Promise<string> {
+    const budget = remaining();
+    if (budget <= 0) throw new Error('OpenRouter: deadline exceeded');
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {
@@ -72,7 +89,7 @@ export async function openRouterImageJson(
         max_tokens: 1024,
         messages,
       }),
-      signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
+      signal: AbortSignal.timeout(budget),
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
@@ -82,6 +99,19 @@ export async function openRouterImageJson(
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw new Error('OpenRouter: no content in response');
     return content;
+  }
+
+  // A single slow turn was reaching the field as an error dialog on a phone
+  // held over a RAM stick — the human then re-shot the same label and it came
+  // back in two seconds. Retry that here instead. Only a timeout is retried; an
+  // HTTP error from the model means the second attempt would fail the same way.
+  async function ask(messages: ChatMessage[]): Promise<string> {
+    try {
+      return await askOnce(messages);
+    } catch (e) {
+      if (!isTimeout(e) || remaining() <= 0) throw e;
+      return askOnce(messages);
+    }
   }
 
   const first = await ask([{ role: 'user', content: baseContent }]);

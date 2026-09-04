@@ -17,6 +17,170 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.125.1] - 2026-09-04
+
+Eight findings from a review of everything `main` has not seen yet (v1.123.1
+through v1.125.0), fixed before the cut rather than after it. None was severe
+enough to hold the release; three were worth not shipping.
+
+### Fixes
+
+- **Open client registration no longer echoes the caller's text into the log
+  stream.** A rejected `redirect_uri` came back as `invalid redirect_uri: <the
+  URI>`, and the request logger added in v1.125.0 copies a 4xx `error` string
+  onto its line. Registration is unauthenticated by design, and its throttle
+  counts *created client rows* — a validation failure creates none, so it is not
+  throttled at all. Anyone could therefore write chosen text into production
+  logs, once per request, indefinitely. The refusal is now the fixed RFC 7591
+  code `invalid_redirect_uri`, and the logger caps any reason at 256 characters
+  as a second line of defence. The cap sits on the extracted string, not on the
+  body read, which stays at 2 KB: the slice happens before the JSON is parsed,
+  so shortening it would make the parse fail and cost the line the very reason
+  it exists to carry.
+- **A disputed payment coming *in* no longer badges red.** The dispute sync
+  reads every case on the account, including the ones filed against us, and the
+  feed attached them to any transaction they named — while the Disputed tile and
+  its filter both counted money going out only. A chargeback from a customer
+  therefore showed a red Dispute chip in the list, over a tile reading zero,
+  that clicking Disputed could never reach. The feed now applies the same
+  direction rule the tile and filter always did.
+- **The dispute sync can no longer stall on one page of results.** It followed
+  whichever link carried a `next_page_token`, and from the second page onward
+  PayPal's *self* link carries one too — so the loop could re-read a single page
+  until its 20-round cap ran out. Because every case summary costs a second call
+  for its detail, that is a thousand PayPal requests for fifty cases, with the
+  rest of the list silently dropped. It now prefers the link marked `next` and
+  stops as soon as a page repeats.
+- **A dispute-sync failure no longer always blames the PayPal permission.** Any
+  stored error — a timeout, a 502, a DNS blip — rendered as *"PayPal disputes
+  not authorised"*, which sends an admin to the PayPal dashboard to fix a
+  setting that is already correct. That wording is now reserved for an actual
+  403; anything else says the sync failed.
+- **A dispute in a foreign currency shows its own.** The case amount, the
+  refunded amount and every timeline entry were formatted as US dollars while
+  the currency sat unread on the record, so a €1,240 claim read as $1,240.
+- **A wrong database password fails the container immediately instead of six
+  times slowly.** The migration runner's connect retry, added in v1.123.1,
+  caught every error alike, so a bad credential or a missing database spent ~23
+  seconds and six connect timeouts reaching the same failure — logging "database
+  not reachable yet" throughout, which is the line an operator reads while the
+  service merely looks slow to boot. It now waits only on failures that a wait
+  can fix, `57P03` (*the server is still starting up*) among them, and dies at
+  once on anything else.
+
+### Other
+
+- The dispute timeline no longer builds React keys that can collide: PayPal
+  records both parties' halves of a fund movement at the same instant and type.
+- Two comments dated the disputes payload to v1.122.0; it shipped in v1.124.0.
+  They exist so a reader can reason about the frontend/backend skew window,
+  which a wrong version defeats.
+
+## [1.125.0] - 2026-09-03
+
+### Fixes
+- fix(shipping): **pressing Refresh on a package no longer tells a warehouse
+  user to set an environment variable.** Tracking has no provider configured in
+  production, so the endpoint answers 501 — and the Shipping page routed that
+  through the generic error handler, which raised a blocking "Something went
+  wrong" dialog containing the raw backend string *"Tracking is not configured —
+  set SHIPPO_API_TOKEN"*. Two people hit it within seconds of adding a package.
+  Both shells now catch the 501 the way the Tracker and Coordinator pages
+  already do and show a plain sentence instead: automatic tracking isn't
+  switched on yet, so this package won't update on its own. The backend string
+  says the same thing, because it reaches a phone verbatim.
+
+### Other
+- **A refused request now says why in the log.** The request line recorded
+  method, path, status and duration, so a 4xx was byte-identical to a 200 apart
+  from the status integer — and `PATCH /api/orders/:id` alone has six distinct
+  409 branches, so a refusal in production could not be told apart after the
+  fact. The response's `error` string now rides the line, for **4xx only**: a
+  5xx already gets its own record with a stack from `app.onError`.
+- **Seventeen log sites across eight files stopped bypassing the logger.** They
+  were concentrated in exactly the code that handles money and freight — rate
+  fetch failed, label purchase failed, label purchased but upload failed, the
+  tracking sweep, the Shippo webhook, the scan failures. `console.*` output
+  carries no version, no commit and no `requestId`, and it is unstructured text
+  in a stream where everything else is JSON; Railway also tags all stderr as
+  `level: "error"`, so these sat indistinguishable from the corepack boot
+  banner. They are now `log.child({ module })` calls and gain the request
+  correlation for free.
+- **OCR partial-fill records exist in production for the first time.** The block
+  recording a scan where the model returned only some expected fields — the ones
+  that become a PO line with a wrong speed or a missing capacity — was gated
+  entirely on `ERROR_LOG_DIR`, which is a Docker/compose feature and unset on
+  Railway. With 166 scans in the six-day window feeding inventory and cost, the
+  highest-volume quality signal in the system was being kept nowhere. It now
+  also emits a structured line carrying the category, the coverage ratio and
+  which fields were missing — names only, never the extracted values, which
+  transcribe a customer's label.
+- Removed `dbScope`, a middleware that awaited `next()` and did nothing else,
+  mounted under a comment claiming it bound a pooled Postgres client per request
+  and closed it at the end "to prevent the connection-pool leak that exhausts
+  Postgres". Runtime risk was zero — the shared pool is correct — but the
+  comment described the design that had been *removed*, which is the kind of
+  thing the next person to touch connection handling would have trusted
+  ([RS-021](docs/tickets/RS-021-production-cannot-explain-its-own-failures.md)).
+
+## [1.124.0] - 2026-09-03
+
+### Features
+
+- **A disputed payment says so.**  When a seller doesn't deliver we open a
+  PayPal case to claim the money back, and until now that case lived entirely
+  in PayPal's web UI — the Payments page showed the payment as an ordinary row.
+  A manager could link a disputed payment to its purchase order and never learn
+  that the money might come back, or that a reply was due.  The six-hourly bank
+  sync now also reads PayPal's Customer Disputes API, and the page grows a
+  **Disputed** tile, a filter beside *Has match*, a red chip on the row, and the
+  case's stage — inquiry, claim, pre-arbitration, arbitration — with its dated
+  history in the expanded row.  Only cases we filed as the purchaser: PayPal has
+  no field naming who filed one, but a transaction's sign is its direction here,
+  so a case we opened always sits on money going out.
+- Message threads and evidence are deliberately not stored.  The ask was for
+  status, and the rest is correspondence and counterparty personal data.
+
+### Notes
+
+- Disputes need the **Disputes** feature ticked on the PayPal REST app (App
+  feature options).  It was off: the live token carried only the Transaction
+  Search scope and every dispute call returned `403 NOT_AUTHORIZED`.  The sync
+  degrades on its own rather than taking the transaction feed down with it, and
+  the Payments header now says *"PayPal disputes not authorised"* instead of
+  showing an empty list that reads as "no cases".
+
+## [1.123.1] - 2026-09-03
+
+### Fixes
+- fix(scan): **a label scan that times out is retried once instead of becoming
+  an error dialog.** Seen in production: a purchaser held their phone over a RAM
+  stick, waited twenty seconds, got "OCR failed", re-shot the same label, and
+  the second attempt came back in two. The retry belongs on this side of the
+  phone. Only a timeout is retried — an HTTP error from the model would fail
+  the same way twice.
+
+  Both attempts and the existing not-valid-JSON re-ask now share **one 45-second
+  budget**. Each of those used to mint a fresh 20-second signal, so a single
+  scan could spend forty seconds on the model on top of the route's own
+  fifteen-second image upload, with nothing bounding the pair. The receipt
+  renamer shares this client, so its worst case is now bounded too.
+- fix(boot): **a database that is slow to accept connections during a deploy no
+  longer takes production down until someone redeploys by hand.** The container
+  runs `migrate.mjs && init-admin.mjs && pnpm start`, so a failed migration
+  means the server never starts; Railway then burns its `ON_FAILURE` retries and
+  the service **stays down after Postgres comes back**. The migration runner now
+  treats an unreachable database as the transient it usually is: six attempts
+  with backoff over roughly twenty-three seconds, each logged, before exiting
+  non-zero. Its connect timeout drops from the postgres.js default of thirty
+  seconds to five, so the retries fit inside a sensible window. A migration that
+  fails on its *SQL* still exits immediately — only the connect is retried.
+- fix(fx): the exchange-rate fetch carries a 20-second timeout, matching every
+  other outbound client. It was the only one without a signal, bounded only by
+  undici's ~300-second default — and it is reachable from request handlers, not
+  just the six-hourly loop: the manager refresh, and, on a cold rate table, the
+  **unauthenticated** vendor portal ([RS-020](docs/tickets/RS-020-boot-fx-and-ocr-each-hang-or-die-on-a-transient-that.md)).
+
 ## [1.123.0] - 2026-09-03
 
 ### Fixes
