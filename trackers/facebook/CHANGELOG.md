@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-09-05
+
 ### Changed
 
 - **Ramp: the homelab worker is temporarily narrowed to `rs_southeast` (28
