@@ -13,8 +13,32 @@
 # workers override this with their own /data/fb_state.json (see sharding.py),
 # so setting it here only affects a direct `aimm --config master.toml` run.
 storage_state_path = "configs/sessions/personal.json"
-# proxy_server is injected per worker by the sharding generator; a bare Phase 1
-# run uses the local IP.
+# Route the homelab worker's browser through a proxy.
+#
+# Sharded workers get this injected per region by the sharding generator; the
+# phase-1 worker had nothing, so every search came from the house's own IP —
+# the same IP the operator's lookups run from. On 2026-08-26 one Facebook
+# account was revoked twice in 90 minutes, and the IP was the only constant
+# across both incidents.
+#
+# UNSET IS SAFE AND IS THE DEFAULT. An unexpanded ${VAR} resolves to None with
+# a warning (utils.py:315) and handle_proxy_server returns early, so with no
+# PROXY_HOMELAB in secrets.env this line changes nothing.
+#
+# A STRING, DELIBERATELY NOT A LIST. get_proxy_options does
+# `random.choice(self.proxy_server)` per page, so a list rotates the exit IP
+# mid-session — and Facebook binds a session to the IP it was created on, which
+# makes rotation worse than no proxy at all. One sticky endpoint only.
+#
+# The session must then be RE-CAPTURED THROUGH THIS PROXY. A session born on
+# the house IP and replayed from the proxy is a location change on an existing
+# login, which is the pattern this is meant to avoid:
+#     rs-session capture --proxy "$PROXY_HOMELAB" --storage-state <file>
+proxy_server = "${PROXY_HOMELAB}"
+# Only needed for user:pass proxies; IP-authorised endpoints leave these unset
+# (both must be present or get_proxy_options ignores them).
+proxy_username = "${PROXY_HOMELAB_USER}"
+proxy_password = "${PROXY_HOMELAB_PASS}"
 
 # --------------------------------------------------------------------------
 # AI backend — OpenRouter, reached through the OpenAI-compatible client.

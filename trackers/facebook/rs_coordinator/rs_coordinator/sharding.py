@@ -96,6 +96,14 @@ def build_worker_config(
             facebook[pacing_key] = worker[pacing_key]
 
     monitor = config.setdefault("monitor", {})
+    # master.toml's [monitor] proxy block belongs to the PHASE-1 homelab worker
+    # and names ${PROXY_HOMELAB*}. A sharded worker must never inherit it: its
+    # proxy is its region's, and pointing two workers at one exit IP defeats the
+    # one-account-per-IP rule fleet.toml is built on. Dropped first, then set
+    # from proxy_env, so a region with no proxy (denver-1, home base) ends up
+    # with no proxy rather than the homelab's.
+    for proxy_key in ("proxy_server", "proxy_username", "proxy_password"):
+        monitor.pop(proxy_key, None)
     proxy_env = worker.get("proxy_env")
     if proxy_env:
         monitor["proxy_server"] = [f"${{{proxy_env}}}"]

@@ -18,6 +18,30 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Added
+
+- **The homelab worker can now route through a proxy (`PROXY_HOMELAB`), off by
+  default.** Sharded workers get a proxy injected per region; the phase-1
+  worker never had one, so every search left from the house's own IP — the same
+  IP the operator's session captures and city lookups run from. On 2026-08-26
+  one Facebook account was revoked twice in 90 minutes and that IP was the only
+  constant across both incidents. `[monitor].proxy_server` in `master.toml` now
+  reads `${PROXY_HOMELAB}` (plus optional `_USER`/`_PASS` for authenticated
+  endpoints).
+
+  **Unset is safe and is the default**: an unexpanded `${VAR}` resolves to None
+  with a warning and `handle_proxy_server` returns early, so with nothing in
+  `secrets.env` the worker behaves exactly as before. Verified both directions
+  against `MonitorConfig` rather than assumed.
+
+  Written as a STRING, deliberately not a list: `get_proxy_options` does
+  `random.choice(self.proxy_server)` per page, so a list rotates the exit IP
+  mid-session — and Facebook binds a session to the IP it was created on, which
+  makes rotation worse than no proxy at all. Activating it also requires
+  re-capturing the session *through* the proxy
+  (`rs-session capture --proxy "$PROXY_HOMELAB"`), because replaying a session
+  born on one IP from another is the location change the proxy exists to avoid.
+
 ## [0.5.1] - 2026-08-26
 
 ### Changed
