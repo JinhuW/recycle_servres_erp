@@ -8,7 +8,7 @@ prompt is not on screen.
 
 import pytest
 
-from rs_poster import totp
+from rs_poster import session_cli, totp
 from rs_poster.session_cli import (
     _autofill_two_factor,
     _resolve_totp_or_warn,
@@ -206,3 +206,38 @@ def test_session_listing_pairs_each_account_once(tmp_path):
 
 def test_session_listing_of_a_missing_directory_is_empty(tmp_path):
     assert _session_files(tmp_path / "nope") == []
+
+
+# -- proxy_settings ---------------------------------------------------------
+# Chromium does not authenticate from credentials embedded in a proxy URL:
+# passing user:pass@host as `server` produced a silent page-load timeout, not
+# an auth error. The splitter is what makes `--proxy "$PROXY_X"` (the form
+# deploy/README.md documents for onboarding every worker) actually work.
+
+def test_proxy_settings_absent_proxy_is_none():
+    assert session_cli.proxy_settings(None) is None
+    assert session_cli.proxy_settings("") is None
+
+
+def test_proxy_settings_unauthenticated_proxy_passes_through():
+    assert session_cli.proxy_settings("http://proxy.example.net:8080") == {
+        "server": "http://proxy.example.net:8080"
+    }
+
+
+def test_proxy_settings_splits_credentials_out_of_the_url():
+    # '+' is a real character in at least one live password; it must survive
+    # verbatim (unquote, not unquote_plus, which would turn it into a space).
+    assert session_cli.proxy_settings("http://alice:s3cr3t+x@proxy.example.net:8080") == {
+        "server": "http://proxy.example.net:8080",
+        "username": "alice",
+        "password": "s3cr3t+x",
+    }
+
+
+def test_proxy_settings_percent_decodes_userinfo():
+    assert session_cli.proxy_settings("http://alice:p%40ss%2Bword@h:1") == {
+        "server": "http://h:1",
+        "username": "alice",
+        "password": "p@ss+word",
+    }

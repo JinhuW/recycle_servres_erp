@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rs-session capture --proxy` never authenticated to a proxy that needs a
+  password.** The code passed the whole `http://user:pass@host:port` string to
+  Playwright as `proxy={"server": ...}`, but Chromium does not read credentials
+  from a proxy URL — it got a 407 it never answered, and the symptom was a
+  page-load *timeout*, so it read as "the proxy is down" rather than an auth
+  failure. Measured against a live authenticated proxy: the embedded form times
+  out both raw and percent-encoded, while split `username`/`password` fields
+  connect immediately. This is the exact form `deploy/README.md` tells you to
+  use when onboarding a worker (`--proxy "$PROXY_SOUTH_CENTRAL"`), so every
+  fleet capture through an authenticated proxy would have failed the same way.
+  A new `proxy_settings()` splits the URL into the fields Playwright wants;
+  `+` in a password survives verbatim (`unquote`, not `unquote_plus`).
+
 ## [0.5.2] - 2026-09-05
 
 ### Added
