@@ -133,170 +133,52 @@ login_wait_time = 120
 # The 28 originals are listed last, in `# was covered before 2026-08-26`. Once
 # the new centres have each been visited a few times this ordering stops
 # mattering and can go back to being geographic.
+# ===================================================================
+# RAMP IN EFFECT (2026-09-05): phase-1 worker narrowed to rs_southeast
+# only — 28 centres — while a previously-revoked account settles behind
+# the new proxy. TO WIDEN BACK TO ALL 127: restore search_city / city_name
+# / radius from scratchpad/master.full127.toml (or re-run the reorder
+# script), then release + deploy. The [region.*] blocks below are
+# UNTOUCHED and still hold the full list.
+# ===================================================================
 search_city = [
-    # ---- added 2026-08-26 — never searched before (99) ----
-    "portland_maine",        # Portland, ME
-    "105580889476291",       # Atlantic City, NJ
-    "108398645850982",       # Newark, NJ
-    "105466899487612",       # Trenton, NJ
-    "107384699291109",       # Albany, NY
-    "103129393060364",       # Allentown, PA
-    "108306975863361",       # Erie, PA
-    "107976589222439",       # Harrisburg, PA
-    "104088049626788",       # Scranton, PA
-    "112673872077767",       # Burlington, VT
-    "105957942768622",       # Wilmington, DE
-    "fort-myers-fl",         # Fort Myers, FL
-    "pensacola",             # Pensacola, FL
-    "107903159238479",       # Tallahassee, FL
-    "108251189197758",       # West Palm Beach, FL
-    "augusta",               # Augusta, GA
-    "104019619634224",       # Savannah, GA
-    "108079649219516",       # Hagerstown, MD
-    "104063499628686",       # Asheville, NC
-    "107812615908638",       # Greensboro, NC
-    "wilmington",            # Wilmington, NC
-    "charleston",            # Charleston, SC
-    "104052009631991",       # Columbia, SC
-    "greenville",            # Greenville, SC
-    "roanoke-va",            # Roanoke, VA
-    "109514829067837",       # Charleston, WV
-    "108205955874066",       # Morgantown, WV
-    "cedar-rapids",          # Cedar Rapids, IA
-    "desmoines",             # Des Moines, IA
-    "chicago",               # Chicago, IL
-    "113848465291957",       # Peoria, IL
-    "108768365814696",       # Rockford, IL
-    "104023752968315",       # Springfield, IL
-    "fort-wayne",            # Fort Wayne, IN
-    "indianapolis",          # Indianapolis, IN
-    "lexington",             # Lexington, KY
-    "detroit",               # Detroit, MI
-    "grandrapids",           # Grand Rapids, MI
-    "106102649421844",       # Lansing, MI
-    "duluth",                # Duluth, MN
-    "minneapolis",           # Minneapolis, MN
-    "103941732976595",       # Rochester, MN
-    "104114042957938",       # Akron, OH
-    "cincinnati",            # Cincinnati, OH
-    "104023459634857",       # Dayton, OH
-    "106021666096708",       # Toledo, OH
-    "greenbay",              # Green Bay, WI
-    "madison",               # Madison, WI
-    "milwaukee",             # Milwaukee, WI
-    "109434842408576",       # Birmingham, AL
-    "huntsville",            # Huntsville, AL
-    "mobile_alabama",        # Mobile, AL
-    "107906675905496",       # Montgomery, AL
-    "108357722519215",       # Fayetteville, AR
-    "littlerock",            # Little Rock, AR
-    "112136275468553",       # Topeka, KS
-    "wichita",               # Wichita, KS
-    "batonrouge",            # Baton Rouge, LA
-    "neworleans",            # New Orleans, LA
-    "108894155797150",       # Shreveport, LA
-    "kansascity",            # Kansas City, MO
-    "springfield_missouri",  # Springfield, MO
-    "stlouis",               # St. Louis, MO
-    "jackson-ms",            # Jackson, MS
-    "oklahoma",              # Oklahoma City, OK
-    "tulsa",                 # Tulsa, OK
-    "chattanooga-tn",        # Chattanooga, TN
-    "knoxville",             # Knoxville, TN
-    "memphis",               # Memphis, TN
-    "nashville",             # Nashville, TN
-    "austin",                # Austin, TX
-    "dallas",                # Dallas, TX
-    "elpaso",                # El Paso, TX
-    "houston",               # Houston, TX
-    "lubbock-tx",            # Lubbock, TX
-    "sanantonio",            # San Antonio, TX
-    "phoenix",               # Phoenix, AZ
-    "tucson",                # Tucson, AZ
-    "coloradosprings",       # Colorado Springs, CO
-    "denver",                # Denver, CO
-    "112825518732186",       # Fort Collins, CO
-    "boise",                 # Boise, ID
-    "112454482100538",       # Billings, MT
-    "112775412068008",       # Missoula, MT
-    "111902158823110",       # Fargo, ND
-    "lincoln_nebraska",      # Lincoln, NE
-    "omaha",                 # Omaha, NE
-    "albuquerque",           # Albuquerque, NM
-    "vegas",                 # Las Vegas, NV
-    "reno",                  # Reno, NV
-    "sioux-falls",           # Sioux Falls, SD
-    "saltlakecity",          # Salt Lake City, UT
-    "109287255756240",       # Casper, WY
-    "109588499067433",       # Cheyenne, WY
-    "107915639228865",       # Eugene, OR
-    "portland",              # Portland, OR
-    "seattle",               # Seattle, WA
-    "spokane",               # Spokane, WA
-    "108707615821090",       # Tacoma, WA
-    # ---- was covered before 2026-08-26 (28) ----
-    "108119482550253",       # Hartford, CT
-    "108541499165950",       # New Haven, CT
-    "boston",                # Boston, MA
-    "112781448736001",       # Springfield, MA
-    "105596609473837",       # Worcester, MA
-    "bangor",                # Bangor, ME
-    "107634079257154",       # Manchester, NH
-    "buffalo",               # Buffalo, NY
-    "nyc",                   # New York, NY
-    "rochester",             # Rochester, NY
-    "syracuse",              # Syracuse, NY
-    "philly",                # Philadelphia, PA
-    "pittsburgh",            # Pittsburgh, PA
-    "providence",            # Providence, RI
-    "dc",                    # Washington, DC
-    "jacksonville",          # Jacksonville, FL
-    "miami",                 # Miami, FL
-    "orlando",               # Orlando, FL
-    "tampa",                 # Tampa, FL
-    "atlanta",               # Atlanta, GA
-    "baltimore",             # Baltimore, MD
-    "charlotte",             # Charlotte, NC
-    "raleigh",               # Raleigh, NC
-    "richmond",              # Richmond, VA
-    "virginiabeach",         # Virginia Beach, VA
-    "louisville",            # Louisville, KY
-    "cleveland",             # Cleveland, OH
-    "columbus",              # Columbus, OH
+    "dc",               # Washington, DC
+    "105957942768622",  # Wilmington, DE
+    "fort-myers-fl",    # Fort Myers, FL
+    "jacksonville",     # Jacksonville, FL
+    "miami",            # Miami, FL
+    "orlando",          # Orlando, FL
+    "pensacola",        # Pensacola, FL
+    "107903159238479",  # Tallahassee, FL
+    "tampa",            # Tampa, FL
+    "108251189197758",  # West Palm Beach, FL
+    "atlanta",          # Atlanta, GA
+    "augusta",          # Augusta, GA
+    "104019619634224",  # Savannah, GA
+    "baltimore",        # Baltimore, MD
+    "108079649219516",  # Hagerstown, MD
+    "104063499628686",  # Asheville, NC
+    "charlotte",        # Charlotte, NC
+    "107812615908638",  # Greensboro, NC
+    "raleigh",          # Raleigh, NC
+    "wilmington",       # Wilmington, NC
+    "charleston",       # Charleston, SC
+    "104052009631991",  # Columbia, SC
+    "greenville",       # Greenville, SC
+    "richmond",         # Richmond, VA
+    "roanoke-va",       # Roanoke, VA
+    "virginiabeach",    # Virginia Beach, VA
+    "109514829067837",  # Charleston, WV
+    "108205955874066",  # Morgantown, WV
 ]
 city_name = [
-    "Portland, ME", "Atlantic City, NJ", "Newark, NJ", "Trenton, NJ",
-    "Albany, NY", "Allentown, PA", "Erie, PA", "Harrisburg, PA",
-    "Scranton, PA", "Burlington, VT", "Wilmington, DE", "Fort Myers, FL",
-    "Pensacola, FL", "Tallahassee, FL", "West Palm Beach, FL", "Augusta, GA",
-    "Savannah, GA", "Hagerstown, MD", "Asheville, NC", "Greensboro, NC",
-    "Wilmington, NC", "Charleston, SC", "Columbia, SC", "Greenville, SC",
-    "Roanoke, VA", "Charleston, WV", "Morgantown, WV", "Cedar Rapids, IA",
-    "Des Moines, IA", "Chicago, IL", "Peoria, IL", "Rockford, IL",
-    "Springfield, IL", "Fort Wayne, IN", "Indianapolis, IN", "Lexington, KY",
-    "Detroit, MI", "Grand Rapids, MI", "Lansing, MI", "Duluth, MN",
-    "Minneapolis, MN", "Rochester, MN", "Akron, OH", "Cincinnati, OH",
-    "Dayton, OH", "Toledo, OH", "Green Bay, WI", "Madison, WI",
-    "Milwaukee, WI", "Birmingham, AL", "Huntsville, AL", "Mobile, AL",
-    "Montgomery, AL", "Fayetteville, AR", "Little Rock, AR", "Topeka, KS",
-    "Wichita, KS", "Baton Rouge, LA", "New Orleans, LA", "Shreveport, LA",
-    "Kansas City, MO", "Springfield, MO", "St. Louis, MO", "Jackson, MS",
-    "Oklahoma City, OK", "Tulsa, OK", "Chattanooga, TN", "Knoxville, TN",
-    "Memphis, TN", "Nashville, TN", "Austin, TX", "Dallas, TX",
-    "El Paso, TX", "Houston, TX", "Lubbock, TX", "San Antonio, TX",
-    "Phoenix, AZ", "Tucson, AZ", "Colorado Springs, CO", "Denver, CO",
-    "Fort Collins, CO", "Boise, ID", "Billings, MT", "Missoula, MT",
-    "Fargo, ND", "Lincoln, NE", "Omaha, NE", "Albuquerque, NM",
-    "Las Vegas, NV", "Reno, NV", "Sioux Falls, SD", "Salt Lake City, UT",
-    "Casper, WY", "Cheyenne, WY", "Eugene, OR", "Portland, OR",
-    "Seattle, WA", "Spokane, WA", "Tacoma, WA", "Hartford, CT",
-    "New Haven, CT", "Boston, MA", "Springfield, MA", "Worcester, MA",
-    "Bangor, ME", "Manchester, NH", "Buffalo, NY", "New York, NY",
-    "Rochester, NY", "Syracuse, NY", "Philadelphia, PA", "Pittsburgh, PA",
-    "Providence, RI", "Washington, DC", "Jacksonville, FL", "Miami, FL",
-    "Orlando, FL", "Tampa, FL", "Atlanta, GA", "Baltimore, MD",
-    "Charlotte, NC", "Raleigh, NC", "Richmond, VA", "Virginia Beach, VA",
-    "Louisville, KY", "Cleveland, OH", "Columbus, OH",
+    "Washington, DC", "Wilmington, DE", "Fort Myers, FL", "Jacksonville, FL",
+    "Miami, FL", "Orlando, FL", "Pensacola, FL", "Tallahassee, FL",
+    "Tampa, FL", "West Palm Beach, FL", "Atlanta, GA", "Augusta, GA",
+    "Savannah, GA", "Baltimore, MD", "Hagerstown, MD", "Asheville, NC",
+    "Charlotte, NC", "Greensboro, NC", "Raleigh, NC", "Wilmington, NC",
+    "Charleston, SC", "Columbia, SC", "Greenville, SC", "Richmond, VA",
+    "Roanoke, VA", "Virginia Beach, VA", "Charleston, WV", "Morgantown, WV",
 ]
 # Two things about radius, both measured 2026-08-20, both surprising.
 #
@@ -334,15 +216,7 @@ city_name = [
 radius = [
     100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
     100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 60, 60, 100, 60, 60, 100, 60, 100, 100,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
-    100, 100, 100, 100, 100, 100, 100,
+    100, 100, 100, 100,
 ]
 currency = "USD"
 

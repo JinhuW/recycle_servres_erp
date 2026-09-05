@@ -18,6 +18,20 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **Ramp: the homelab worker is temporarily narrowed to `rs_southeast` (28
+  centres) while a previously-revoked account settles behind the new proxy.**
+  Account 100029243280255 was revoked twice on 2026-08-26; it is being brought
+  back on the Decodo ISP proxy (the shared house IP was the constant across both
+  kills), but a cold-looking account's first act being a 127-city sweep is the
+  heaviest possible first-activity signal. So the phase-1 city list is cut to
+  one region — anchored on `dc` (Data Center Alley) — for a few days, then
+  widened back to all 127. Only the phase-1 `search_city`/`city_name`/`radius`
+  arrays changed; the `[region.*]` blocks are untouched and still hold the full
+  list, so the sharded fleet and `rsc gen-configs` are unaffected. A RAMP banner
+  in `master.toml` says how to widen back.
+
 ## [0.5.3] - 2026-09-05
 
 ### Fixed
