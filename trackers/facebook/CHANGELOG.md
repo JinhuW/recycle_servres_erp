@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-09-05
+
 ### Fixed
 
 - **`rs-session capture --proxy` never authenticated to a proxy that needs a
