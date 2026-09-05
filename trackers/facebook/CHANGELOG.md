@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-05
+
 ### Added
 
 - **The homelab worker can now route through a proxy (`PROXY_HOMELAB`), off by
