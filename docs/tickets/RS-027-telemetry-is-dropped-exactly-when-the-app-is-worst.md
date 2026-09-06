@@ -2,7 +2,7 @@
 id: RS-027
 title: Telemetry is dropped exactly when the app is worst
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-05
 reporter: Jinhu
