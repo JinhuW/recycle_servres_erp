@@ -2,13 +2,13 @@
 id: RS-028
 title: Group the price template's RAM tab by device type and DDR generation
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-06
 reporter: Jinhu
 branch: feat/price-template-grouping
-pr:
-version:
+pr: 280
+version: 1.129.0
 related: []
 ---
 
