@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-028](./RS-028-group-the-price-template-s-ram-tab-by-device-type-an.md) | in-progress | story | P2 | Group the price template's RAM tab by device type and DDR generation | — |
+| [RS-028](./RS-028-group-the-price-template-s-ram-tab-by-device-type-an.md) | done | story | P2 | Group the price template's RAM tab by device type and DDR generation | 1.129.0 |
 | [RS-027](./RS-027-telemetry-is-dropped-exactly-when-the-app-is-worst.md) | done | bug | P2 | Telemetry is dropped exactly when the app is worst | 1.128.1 |
 | [RS-026](./RS-026-group-a-pending-payment-leg-with-its-settled-sibling.md) | done | task | P2 | Group a pending payment leg with its settled sibling | 1.128.0 |
 | [RS-025](./RS-025-serial-chip-review-findings-before-the-prod-cut.md) | done | bug | P2 | Serial-chip review findings before the prod cut | 1.126.1 |
