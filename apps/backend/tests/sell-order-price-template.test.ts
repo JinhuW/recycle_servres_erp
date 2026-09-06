@@ -157,8 +157,10 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       const { row: headerRow, cols } = findHeaderRow(ws);
       const lastCol = Math.max(...cols.values());
       // The dropdowns must span the whole header, '#' through 'Note / 备注',
-      // and reach the one product row this order puts on each tab.
-      const first = `${ws.getColumn(1).letter}${headerRow}`;
+      // and reach the one product row this order puts on each tab. '#' is not
+      // always column A: the RAM tab carries merged group labels to its left,
+      // and Excel refuses to sort a range holding unequal merges.
+      const first = `${ws.getColumn(cols.get('#')!).letter}${headerRow}`;
       const last = `${ws.getColumn(lastCol).letter}${headerRow + 1}`;
       expect(ws.autoFilter).toBe(`${first}:${last}`);
       // No protection to grey the dropdowns out or to refuse a sort — that is
@@ -197,6 +199,110 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     // (8GB before 128GB, not lexically) and speed last. Rank does not sort:
     // the Hynix pair splits on speed alone. The spec-less manual line sinks.
     expect(labels).toEqual(['c', 'b', 'd', 'e', 'f', 'manual']);
+  });
+
+  it('groups the RAM tab by device then DDR generation with merged labels', async () => {
+    const ram = (label: string, specs: Record<string, string | number>) => ({
+      category: 'RAM', label, partNumber: label, condition: null,
+      qty: 1, imageUrl: null, specs,
+    });
+    const ssd = {
+      category: 'SSD', label: 'ssd', partNumber: 'ssd', condition: null,
+      qty: 1, imageUrl: null, specs: { brand: 'Intel', capacity: '1TB' },
+    };
+    // Scrambled on the way in. Two DDR4 runs (one per device group) must
+    // stay two cells; the type-less manual line sinks to a trailing bucket.
+    const products = [
+      ram('srv-ddr4-b', { type: 'Server', generation: 'DDR4', brand: 'Samsung', capacity: '32GB' }),
+      ram('lap-ddr4',   { type: 'Laptop', generation: 'DDR4', brand: 'Samsung', capacity: '8GB' }),
+      ram('manual',     {}),
+      ram('srv-ddr3',   { type: 'Server', generation: 'DDR3', brand: 'Hynix',   capacity: '16GB' }),
+      ram('desk-ddr4',  { type: 'Desktop', generation: 'DDR4', brand: 'Micron', capacity: '8GB' }),
+      ram('desk-ddr5',  { type: 'Desktop', generation: 'DDR5', brand: 'Micron', capacity: '16GB' }),
+      ram('srv-ddr4-a', { type: 'Server', generation: 'DDR4', brand: 'Hynix',   capacity: '32GB' }),
+      ram('desk-ddr3',  { type: 'Desktop', generation: 'DDR3', brand: 'Micron', capacity: '4GB' }),
+      ssd,
+    ];
+    const buf = await buildPriceTemplateWorkbook(
+      { id: 'SL-GRP', customerName: 'Acme', currencyCode: 'USD' },
+      products,
+      [{ warehouse: 'LA1', products }],
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+
+    const ramTab = wb.worksheets.find(w => w.name === 'RAM')!;
+    const { row: headerRow, cols } = findHeaderRow(ramTab);
+    // Two label columns sit left of '#'; their header cells are blank, as on
+    // the desk's own sheet, so nothing here can confuse the import parser.
+    expect(cols.get('#')).toBe(3);
+    expect(ramTab.getRow(headerRow).getCell(1).value).toBeNull();
+    expect(ramTab.getRow(headerRow).getCell(2).value).toBeNull();
+
+    const labels: string[] = [];
+    const index: number[] = [];
+    for (let r = headerRow + 1; r <= ramTab.rowCount; r++) {
+      labels.push(String(ramTab.getRow(r).getCell(cols.get('Item')!).value ?? ''));
+      index.push(Number(ramTab.getRow(r).getCell(cols.get('#')!).value));
+    }
+    // Desktop & laptop before Server; DDR3 < DDR4 < DDR5 inside a device
+    // group; desktop ahead of laptop inside a generation; then the usual
+    // brand/capacity order (Hynix before Samsung). Type-less last.
+    expect(labels).toEqual([
+      'desk-ddr3', 'desk-ddr4', 'lap-ddr4', 'desk-ddr5',
+      'srv-ddr3', 'srv-ddr4-a', 'srv-ddr4-b',
+      'manual',
+    ]);
+    // '#' keeps counting across groups.
+    expect(index).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    // Merged spans: every row in a span reads the master's address, so assert
+    // on that rather than on the (proxied) cell values.
+    const first = headerRow + 1;
+    const span = (col: number, r: number) => ramTab.getRow(r).getCell(col).master.address;
+    const label = (col: number, r: number) => String(ramTab.getRow(r).getCell(col).value);
+    // Column A: Desktop & laptop rows 1-4, Server rows 5-7, '—' row 8.
+    expect(span(1, first)).toBe(`A${first}`);
+    expect(span(1, first + 3)).toBe(`A${first}`);
+    expect(label(1, first)).toBe('Desktop & laptop');
+    expect(span(1, first + 4)).toBe(`A${first + 4}`);
+    expect(span(1, first + 6)).toBe(`A${first + 4}`);
+    expect(label(1, first + 4)).toBe('Server');
+    expect(ramTab.getRow(first + 7).getCell(1).isMerged).toBe(false);
+    expect(label(1, first + 7)).toBe('—');
+    // Column B: the two DDR4 runs belong to different device groups and stay
+    // apart; the lone desk-ddr5 row is a plain (unmerged) cell.
+    expect(label(2, first)).toBe('DDR3');
+    expect(ramTab.getRow(first).getCell(2).isMerged).toBe(false);
+    expect(span(2, first + 1)).toBe(`B${first + 1}`);
+    expect(span(2, first + 2)).toBe(`B${first + 1}`);
+    expect(label(2, first + 1)).toBe('DDR4');
+    expect(label(2, first + 3)).toBe('DDR5');
+    expect(span(2, first + 5)).toBe(`B${first + 5}`);
+    expect(span(2, first + 6)).toBe(`B${first + 5}`);
+    expect(label(2, first + 7)).toBe('—');
+
+    // Filter dropdowns start at '#', never on a merged column.
+    expect(String(ramTab.autoFilter)).toMatch(new RegExp(`^C${headerRow}:`));
+
+    // Tabs without device/generation specs are untouched: '#' stays in A.
+    const ssdTab = wb.worksheets.find(w => w.name === 'SSD')!;
+    expect(findHeaderRow(ssdTab).cols.get('#')).toBe(1);
+
+    // The packing tab walks the same order (no merges there — a picker reads
+    // it row by row), so bidder and picker find a product in the same place.
+    const pack = wb.worksheets.find(w => w.name === 'Pack - LA1')!;
+    const packParts: string[] = [];
+    pack.eachRow((row, r) => {
+      // Rows 1-2 are merged banners, which proxy their text to every cell.
+      const part = row.getCell(2).value;
+      if (r > 3 && typeof part === 'string' && part !== 'Part #') packParts.push(part);
+    });
+    expect(packParts).toEqual([
+      'desk-ddr3', 'desk-ddr4', 'lap-ddr4', 'desk-ddr5',
+      'srv-ddr3', 'srv-ddr4-a', 'srv-ddr4-b',
+      'manual', 'ssd',
+    ]);
   });
 
   it('labels the price columns CNY on a CNY order', async () => {
@@ -301,7 +407,8 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     const dl = await loadWorkbook(res);
     for (const ws of dl.worksheets) expect(ws.getImages()).toHaveLength(0);
     for (const ws of categoryTabs(dl)) {
-      expect(findHeaderRow(ws).cols.get('Image URL')).toBe(2);
+      const { cols } = findHeaderRow(ws);
+      expect(cols.get('Image URL')).toBe(cols.get('#')! + 1);
     }
 
     // Builder path: a real https URL renders as a clickable hyperlink cell.
