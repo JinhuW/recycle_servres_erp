@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-05
 reporter: Jinhu
 branch: session/20260905-204221
-pr:
+pr: 278
 version: 1.128.1
 related: [RS-019, RS-021]
 ---
