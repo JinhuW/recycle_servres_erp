@@ -19,7 +19,8 @@
  * error doesn't carry its own message.
  */
 
-import { ApiError, rawFetch } from './api';
+import { ApiError } from './api';
+import { sendBeacon } from './beacon';
 
 declare global {
   interface Window {
@@ -62,10 +63,11 @@ export function _resetErrorReportingForTests(): void {
 /**
  * Send a browser-side failure to the backend so it lands in the operator's log.
  *
- * Fire-and-forget by construction: `rawFetch` returns the raw Response and never
- * throws on a non-2xx, so this cannot re-enter handleFetchError and loop. The
- * only rejection left is the network itself, and that is swallowed — a failure
- * to report a failure is not worth a second dialog.
+ * Fire-and-forget by construction: `sendBeacon` never throws and never rejects,
+ * so this cannot re-enter handleFetchError and loop. It also holds the report
+ * when the endpoint 401s for want of a session — a crash on the login screen
+ * used to be reported into a 401 and lost, which is the half of the stream
+ * least likely to be reproducible on request. See lib/beacon.ts.
  */
 export function reportClientError(report: {
   message: string;
@@ -87,11 +89,11 @@ export function reportClientError(report: {
   seen.add(key);
   reported++;
 
-  void rawFetch('POST', '/api/client-errors', {
+  sendBeacon('/api/client-errors', {
     ...report,
     href: window.location.href,
     userAgent: navigator.userAgent,
-  }).catch(() => { /* the network is already the problem */ });
+  });
 }
 
 export function handleFetchError(err: unknown): void {

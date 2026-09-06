@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.128.1] - 2026-09-05
+
+### Fixed
+
+- **Telemetry no longer disappears on the loads worth measuring.**  A sweep of
+  five days of production logs found the backend genuinely quiet — no unhandled
+  errors, no 5xx, one client crash and that one already fixed — but it also
+  found a hole in the instrumentation that was reporting the quiet.  The
+  browser's timing and error beacons post to authenticated endpoints, and
+  `rawFetch` deliberately neither refreshes nor retries, so a report sent before
+  the user had a session got a 401 and was dropped on the floor.
+
+  That loss was not spread evenly.  Every one of it landed on a logged-out cold
+  load — the empty-cache first paint, the slowest load there is, and precisely
+  the case the timing stream was built to explain.  Seven of ninety-one timing
+  reports went that way, so the cold-load percentiles were being drawn from a
+  sample with the slow tail cut off.  Worse, the same applied to crashes: one of
+  the two client errors ever reported was lost this way, meaning **a crash that
+  happened before login was never recorded at all** — the failure least likely
+  to be reproducible on request.
+
+  A report that 401s for want of a session is now held and re-sent the moment
+  one exists, carrying the numbers captured when it was made rather than
+  whatever the counters read later.  A login landing while the report is still
+  in flight re-sends immediately instead of queueing, so the race cannot strand
+  it; a silent mid-session refresh counts as a session too; a second 401 is
+  dropped rather than retried forever; and the queue is capped so a tab nobody
+  logs into cannot grow one.  The endpoints stay authenticated — nothing new is
+  writable without a cookie.  The vendor and seller portals, where nobody logs
+  in and a held report could never drain, no longer send one.
+
 ## [1.128.0] - 2026-09-04
 
 ### Features

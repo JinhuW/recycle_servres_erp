@@ -63,6 +63,13 @@ async function tryRefresh(): Promise<boolean> {
           credentials: 'include',
           headers: { [CSRF_HEADER]: CSRF_VALUE },
         });
+        // The mirror of the `auth:unauthorized` below. A silent mid-session
+        // refresh never reaches AuthProvider's setUser, so without this a
+        // telemetry report that 401ed against the expired cookie would wait for
+        // a session signal that only a fresh login could ever send.
+        if (res.ok && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('auth:established'));
+        }
         return res.ok;
       } catch {
         return false;
