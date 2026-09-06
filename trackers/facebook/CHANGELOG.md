@@ -18,6 +18,21 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+### Changed
+
+- **Every worker now sweeps twice a day inside a 07:00–23:00 window, instead of
+  looping every ~hour (owner call, 2026-09-06).** The continuous ~45–75 min
+  cycle is the request-rate pattern that keeps getting accounts flagged. A new
+  `start_at = ["13:00", "21:00"]` at `[marketplace.facebook]` (which *overrides*
+  `search_interval`) makes the monitor sweep once at each time and idle between —
+  two sweeps means each city is visited twice a day, and both finish well inside
+  the window (a ~28-city sweep runs 4–5h). The times are UTC because the
+  container clock is UTC; they map to 07:00 and 15:00 Denver (MDT) and must be
+  bumped to `["14:00","22:00"]` when Denver returns to MST. Applies fleet-wide:
+  `start_at` propagates through `sharding.py` into every generated worker config.
+  One caveat: the monitor runs one sweep on startup, so deploys should be done
+  during the window (they were).
+
 ## [0.5.4] - 2026-09-05
 
 ### Changed

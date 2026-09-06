@@ -84,6 +84,28 @@ max_tokens = 4096
 # occasions Facebook interrupts a restored session.
 login_wait_time = 120
 
+# --------------------------------------------------------------------------
+# WHEN TO SEARCH — twice a day, inside a 07:00–23:00 window (owner call,
+# 2026-09-06, to reduce the request rate that keeps getting accounts flagged).
+#
+# start_at OVERRIDES search_interval (the per-item 45m/75m values below no
+# longer drive the cadence): the monitor sweeps once at each listed time and
+# sits idle between, instead of looping every ~hour. Two times = each city
+# visited twice a day. A 28-city sweep runs ~4-5h, so 07:00->~11:30 and
+# 15:00->~20:00 both finish well inside the window.
+#
+# THE TIMES ARE UTC, because the container's clock is UTC (Etc/UTC on the VM).
+# Mapped from Denver business time:
+#     07:00 MDT = 13:00 UTC        15:00 MDT = 21:00 UTC
+# NOTE ON DST: this is a fixed UTC offset. It tracks Mountain DAYLIGHT time
+# (MDT, UTC-6). When Denver falls back to MST (UTC-7, ~early Nov), shift both
+# to ["14:00","22:00"] to keep them at 07:00/15:00 local.
+#
+# One wrinkle worth knowing: the monitor runs one sweep immediately on startup
+# (monitor.py "run all jobs at the first time"), so a deploy/restart triggers
+# an off-schedule sweep. Deploy DURING the window and it stays inside it.
+start_at = ["13:00", "21:00"]
+
 # Nationwide single-machine run — every mainland state except California.
 # Sharded workers ignore this and use search_region = "<their region>" instead.
 #
