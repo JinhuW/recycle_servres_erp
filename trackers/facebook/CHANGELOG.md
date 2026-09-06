@@ -18,6 +18,8 @@ deployed?" harder to answer.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-09-05
+
 ### Changed
 
 - **Every worker now sweeps twice a day inside a 07:00–23:00 window, instead of
