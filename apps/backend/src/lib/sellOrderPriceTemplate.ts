@@ -23,6 +23,18 @@
 // its part/price/condition heuristics: "chip#" and "note备注" contain none of
 // partnumber/price/单价/condition/成色 etc.).
 //
+// The RAM tab reads the way the desk's own sheet does (user-requested
+// 2026-09-06, from a screenshot of that sheet): two merged label columns to
+// the LEFT of "#" group the rows by device — "Desktop & laptop" / "Server" —
+// and then by DDR generation, and the rows are ordered that way before the
+// usual brand/capacity/speed order kicks in. The packing tabs walk the same
+// order (labels excluded — a picker reads row by row). Two things follow from
+// merged cells that a reader may trip on: the autofilter starts at "#", not
+// column A, because Excel refuses to sort a range holding unequal merges; and
+// a dropdown sort reorders the data columns while the labels stay put. The
+// Gen / Type spec columns therefore stay on the tab — they are what filtering
+// actually works on.
+//
 // After the category tabs come per-warehouse PACKING-CHECKLIST tabs (one per
 // warehouse on the order, named by its short code): stacked per-category
 // sections with a tickable "Packed ✓" column, quantities and subtotals but
@@ -31,7 +43,7 @@
 // findHeaders() requires BOTH, so the import skips them. Never add a header
 // containing price/unitprice/单价/价格 here.
 
-import { sortSheetRows } from './categoryColumns';
+import { compareSpecValue, sortSheetRows } from './categoryColumns';
 
 export type PriceTemplateProduct = {
   category: string;
@@ -104,6 +116,86 @@ function sortForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] 
   return sortSheetRows(products, (p) => ({ specs: p.specs, label: p.label }));
 }
 
+// ── RAM grouping ─────────────────────────────────────────────────────────────
+
+// Outer group follows the desk's sheet, which lumps desktop and laptop
+// modules. `order_lines.type` is free text, so anything that isn't one of
+// these values lands in a trailing "—" bucket rather than vanishing.
+const DEVICE_GROUPS: readonly { label: string; types: readonly string[] }[] = [
+  { label: 'Desktop & laptop', types: ['Desktop', 'Laptop'] },
+  { label: 'Server', types: ['Server'] },
+];
+const BLANK_LABEL = '—';
+
+const deviceRank = (type: string): number => {
+  const i = DEVICE_GROUPS.findIndex((g) => g.types.includes(type));
+  return i === -1 ? DEVICE_GROUPS.length : i;
+};
+const deviceLabel = (type: string): string =>
+  DEVICE_GROUPS[deviceRank(type)]?.label ?? BLANK_LABEL;
+// Desktop ahead of laptop inside the shared group.
+const typeRank = (type: string): number => {
+  const i = DEVICE_GROUPS.flatMap((g) => g.types).indexOf(type);
+  return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+};
+
+type GroupCol = { key: string; width: number; label: (v: string) => string };
+
+// Left-to-right: outer label, then generation. Header cells stay blank.
+const RAM_GROUP_COLS: readonly GroupCol[] = [
+  { key: 'type',       width: 18, label: deviceLabel },
+  { key: 'generation', width: 9,  label: (v) => v || BLANK_LABEL },
+];
+
+const spec = (p: PriceTemplateProduct, key: string): string => String(p.specs[key] ?? '');
+
+// Device group, DDR generation (numeric, blanks last — DDR3 < DDR4 < DDR5),
+// desktop before laptop, then the shared brand/capacity/speed order. Bid tab
+// and packing tabs both use this so a product sits in the same place on each.
+function sortRamForSheet(products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+  return sortForSheet(products).sort((a, b) => {
+    const d = deviceRank(spec(a, 'type')) - deviceRank(spec(b, 'type'));
+    if (d !== 0) return d;
+    const g = compareSpecValue(spec(a, 'generation'), spec(b, 'generation'));
+    if (g !== 0) return g;
+    return typeRank(spec(a, 'type')) - typeRank(spec(b, 'type'));
+  });
+}
+
+function sortCategoryForSheet(category: string, products: PriceTemplateProduct[]): PriceTemplateProduct[] {
+  return category === 'RAM' ? sortRamForSheet(products) : sortForSheet(products);
+}
+
+// Merge each run of rows that share a label into one centred cell. A run is
+// keyed on the label PREFIX (outer label + this column), so two DDR4 runs
+// under different device groups stay two cells.
+function renderGroupLabels(
+  ws: import('exceljs').Worksheet,
+  groupCols: readonly GroupCol[],
+  sorted: PriceTemplateProduct[],
+  firstRow: number,
+): void {
+  const thin = { style: 'thin' } as const;
+  groupCols.forEach((col, g) => {
+    const prefix = (p: PriceTemplateProduct) =>
+      groupCols.slice(0, g + 1).map((c) => c.label(spec(p, c.key))).join(' ');
+    let start = 0;
+    while (start < sorted.length) {
+      let end = start;
+      while (end + 1 < sorted.length && prefix(sorted[end + 1]) === prefix(sorted[start])) end++;
+      const top = firstRow + start;
+      const bottom = firstRow + end;
+      if (bottom > top) ws.mergeCells(top, g + 1, bottom, g + 1);
+      const cell = ws.getCell(top, g + 1);
+      cell.value = col.label(spec(sorted[start], col.key));
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+      start = end + 1;
+    }
+  });
+}
+
 // Fold products into CATEGORY_ORDER buckets; unknown categories go to Other
 // so nothing can fall off the workbook.
 function groupByCategory(products: PriceTemplateProduct[]): Map<string, PriceTemplateProduct[]> {
@@ -154,23 +246,26 @@ function renderCategorySheet(
   const cur = head.currencyCode;
   const currencyLabel = cur === 'CNY' ? '人民币 CNY' : 'USD';
 
-  // The spec block sits between Item and Part Number, so every later column
-  // index depends on the category's spec-column count.
+  // The group labels sit left of "#" and the spec block between Item and Part
+  // Number, so every column index depends on both counts.
+  const groupCols = category === 'RAM' ? RAM_GROUP_COLS : [];
   const specCols = SPEC_COLS_BY_CATEGORY[category] ?? [];
+  const g = groupCols.length;
   const IDX = {
-    index: 1,
-    image: 2,
-    item: 3,
-    specStart: 4,
-    part: 4 + specCols.length,
-    condition: 5 + specCols.length,
-    qty: 6 + specCols.length,
-    price: 7 + specCols.length,
-    total: 8 + specCols.length,
-    note: 9 + specCols.length,
+    index: 1 + g,
+    image: 2 + g,
+    item: 3 + g,
+    specStart: 4 + g,
+    part: 4 + g + specCols.length,
+    condition: 5 + g + specCols.length,
+    qty: 6 + g + specCols.length,
+    price: 7 + g + specCols.length,
+    total: 8 + g + specCols.length,
+    note: 9 + g + specCols.length,
   };
 
   ws.columns = [
+    ...groupCols.map((c) => ({ width: c.width })),
     { width: 5 }, { width: 40 }, { width: 34 },
     ...specCols.map((c) => ({ width: c.width })),
     { width: 24 }, { width: 18 }, { width: 8 }, { width: 16 }, { width: 14 },
@@ -214,8 +309,15 @@ function renderCategorySheet(
     cell.fill = HEADER_FILL;
     cell.border = { bottom: { style: 'medium' } };
   }
+  // Group-label header cells: styled as part of the band, deliberately no
+  // text — a header there would be one more thing for the parser to read.
+  for (let col = 1; col <= g; col++) {
+    const cell = headerRow.getCell(col);
+    cell.fill = HEADER_FILL;
+    cell.border = { bottom: { style: 'medium' } };
+  }
 
-  const sorted = sortForSheet(products);
+  const sorted = sortCategoryForSheet(category, products);
   sorted.forEach((p, i) => {
     const r = HEADER_ROW + 1 + i;
     const row = ws.getRow(r);
@@ -251,10 +353,13 @@ function renderCategorySheet(
     }
   });
 
+  renderGroupLabels(ws, groupCols, sorted, HEADER_ROW + 1);
+
   // Header-row filter dropdowns, spanning the header down to the last data row
-  // so sorting from a dropdown carries every row with it.
+  // so sorting from a dropdown carries every row with it. Starts at "#": the
+  // merged label columns to its left would make Excel refuse the sort.
   ws.autoFilter = {
-    from: { row: HEADER_ROW, column: 1 },
+    from: { row: HEADER_ROW, column: IDX.index },
     to: { row: HEADER_ROW + sorted.length, column: IDX.note },
   };
 }
@@ -352,7 +457,7 @@ function renderWarehouseSheet(
     let sectionQty = 0;
     // Same order as the bid tabs, so a picker walking the shelf and a manager
     // reading the bid see a product in the same place.
-    for (const p of sortForSheet(byCategory.get(cat)!)) {
+    for (const p of sortCategoryForSheet(cat, byCategory.get(cat)!)) {
       const row = ws.getRow(r++);
       cols.forEach((c, i) => {
         const cell = row.getCell(i + 1);

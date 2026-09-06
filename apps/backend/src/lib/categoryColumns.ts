@@ -68,7 +68,9 @@ export function exportCategory(v: unknown): ExportCategory {
 // deliberately not a key. Categories without those specs just fall through to
 // the label tie-break. Every stock workbook uses this — bid tabs, packing tabs
 // and the inventory export alike — so a picker, a bidder and a manager read a
-// product in the same place.
+// product in the same place. The bid sheet's RAM rows put a device-group /
+// DDR-generation grouping ahead of it (lib/sellOrderPriceTemplate); this order
+// still decides the sequence inside each group.
 export const SHEET_SORT_KEYS = ['brand', 'capacity', 'speed'] as const;
 
 // Numeric collation, same rule as the vendor catalog chips: it keeps 8GB below

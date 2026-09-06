@@ -138,7 +138,9 @@ Transit, and a line's qty can never be 0.
   category rank ahead of it on the screens, which have no tabs to group by
   (v1.111.0). One implementation serves the workbooks and the lists. The screens
   still take the newest 200 rows from the database; only their arrangement
-  changed.
+  changed. The bid sheet's RAM tab (and its packing tabs) put a device-group /
+  DDR-generation grouping ahead of that order (v1.129.0); the export and the
+  screens do not.
 - Other-type stock can be filtered by Untyped (v1.49.0).
 - Spec fields on an inventory line are editable in place on desktop.
 - **Committed sell orders reserve the units they name**, not the whole lot.
@@ -158,7 +160,11 @@ Transit, and a line's qty can never be 0.
   move it.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0), plus per-warehouse
-  packing-checklist tabs named `Pack - <warehouse>` (v1.28.0).
+  packing-checklist tabs named `Pack - <warehouse>` (v1.28.0). **The RAM tab
+  groups its rows with merged label columns left of `#`** — "Desktop & laptop"
+  / "Server", then DDR3 / DDR4 / DDR5 — ahead of the brand/capacity/speed
+  order, and the packing tabs walk the same sequence; the filter dropdowns
+  start at `#` because Excel won't sort across unequal merges (v1.129.0).
 - **Vendor bids**: vendors reach a tokenised portal with faceted catalog
   filtering, submit bids, and managers review and promote them on a dedicated
   screen. Promotion picks and validates a customer for general links.

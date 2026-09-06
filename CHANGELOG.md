@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.129.0] - 2026-09-06
+
+### Added
+
+- **The bid sheet's RAM tab now reads the way the desk's own spreadsheet
+  does.**  Two merged label columns to the left of `#` group the rows by device
+  — "Desktop & laptop", then "Server" — and inside that by DDR generation
+  (DDR3, DDR4, DDR5), with the usual brand → capacity → speed order underneath.
+  A run of rows sharing a label is one centred cell, `#` keeps counting across
+  groups, and rows whose type or generation is unknown sink to a trailing "—"
+  bucket instead of vanishing.  The `Pack - <warehouse>` tabs walk the same
+  order without the labels, so the picker and the bidder still find a product
+  in the same place.  Because Excel refuses to sort a range that holds unequal
+  merged cells, the filter dropdowns now start at `#`; the Gen and Type spec
+  columns stay on the tab, since they are what filtering actually works on.
+  SSD, HDD and Other tabs are untouched, and the price import round-trip
+  still parses the new layout (RS-028).
+
 ## [1.128.1] - 2026-09-05
 
 ### Fixed
