@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-027](./RS-027-telemetry-is-dropped-exactly-when-the-app-is-worst.md) | in-review | bug | P2 | Telemetry is dropped exactly when the app is worst | — |
 | [RS-026](./RS-026-group-a-pending-payment-leg-with-its-settled-sibling.md) | done | task | P2 | Group a pending payment leg with its settled sibling | 1.128.0 |
 | [RS-025](./RS-025-serial-chip-review-findings-before-the-prod-cut.md) | done | bug | P2 | Serial-chip review findings before the prod cut | 1.126.1 |
 | [RS-024](./RS-024-payments-must-show-money-that-has-not-settled-yet.md) | done | story | P1 | Payments must show money that has not settled yet | 1.127.0 |

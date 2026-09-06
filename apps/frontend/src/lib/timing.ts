@@ -9,7 +9,8 @@
 // Numbers only. No paths, no ids beyond the session's own auth — a timing
 // report should never be a place a URL can leak.
 
-import { loadCallCounts, rawFetch } from './api';
+import { loadCallCounts } from './api';
+import { sendBeacon } from './beacon';
 
 // One per page load. A SPA route change is not a page load, and re-reporting on
 // each one would drown the signal in noise.
@@ -40,7 +41,7 @@ function report(): void {
   if (!nav) return;
   sent = true;
 
-  void rawFetch('POST', '/api/client-timings', {
+  sendBeacon('/api/client-timings', {
     // Server think time plus the network to it — the part the backend's own
     // logs already cover, here for comparison against the rest.
     ttfb: Math.round(nav.responseStart - nav.requestStart),
@@ -56,14 +57,17 @@ function report(): void {
     // A phone on 3G and a desktop on the office LAN are different populations;
     // without this the distribution is bimodal for no visible reason.
     downlink: (navigator as { connection?: { downlink?: number } }).connection?.downlink ?? null,
-  }, undefined, { keepalive: true }).catch(() => {
-    // A dropped timing report is not worth telling anyone about.
-  });
+  }, { keepalive: true });
 }
 
 /** Start observing, and arrange to report once. Call once, after render. */
 export function installTiming(): void {
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
+  // The vendor and seller portals are token-URL shells that talk to
+  // /api/public/* and never log anyone in — same guard the boot script uses.
+  // A report from one can only 401, and would then wait for a session that is
+  // never coming.
+  if (/^\/(v|s)\//.test(location.pathname)) return;
   observeLcp();
 
   // LCP is not final until the user interacts or the page is hidden, so waiting
