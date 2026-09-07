@@ -699,6 +699,8 @@ const zh: Record<string, string> = {
   soReopenTooltip: '重新打开此销售订单',
   soDownloadPriceTemplate: '报价模板（投标表）',
   soDownloadPriceTemplateHint: '含商品规格、图片链接和空白价格 — 发给供应商填写',
+  soDownloadPackingList: '装箱清单',
+  soDownloadPackingListHint: '每个仓库一个工作表，含勾选框和数量，不含价格 — 供拣货使用，不发给供应商',
   soPriceImportTitle: '供应商报价导入',
   soPriceImportStep2: '供应商填写单价',
   soPriceImportStep3: '将填好的文件拖到这里',

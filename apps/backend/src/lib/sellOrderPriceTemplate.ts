@@ -1,7 +1,18 @@
-// Vendor bid sheet for one sell order: a styled workbook the manager emails
-// out and the vendor fills in. Built directly with exceljs rather than
-// lib/xlsx.ts — the flat sheet builder there has no notion of merged
-// instruction rows, per-cell styling, or formulas.
+// The two spreadsheets a sell order produces, sharing one row order:
+//
+//   buildPriceTemplateWorkbook — the vendor BID SHEET, emailed out and filled
+//     in by the vendor, one tab per category.
+//   buildPackingListWorkbook  — the internal PACKING CHECKLIST, one tab per
+//     warehouse, never sent to a vendor.
+//
+// They shipped as one file until 2026-09-07, which meant every bid request
+// carried the warehouse's picking list with it. Splitting them is why the
+// row order lives in one place: a picker and a bidder must still find a
+// product in the same position on their own sheet.
+//
+// Built directly with exceljs rather than lib/xlsx.ts — the flat sheet builder
+// there has no notion of merged instruction rows, per-cell styling, or
+// formulas.
 //
 // One worksheet per category present (RAM / SSD / HDD / Other, user-requested
 // 2026-07-22: "the SSD should be in a dedicated sub sheet"), each carrying
@@ -23,24 +34,27 @@
 // its part/price/condition heuristics: "chip#" and "note备注" contain none of
 // partnumber/price/单价/condition/成色 etc.).
 //
-// The RAM tab reads the way the desk's own sheet does (user-requested
+// The RAM sections read the way the desk's own sheet does (user-requested
 // 2026-09-06, from a screenshot of that sheet): two merged label columns to
-// the LEFT of "#" group the rows by device — "Desktop & laptop" / "Server" —
-// and then by DDR generation, and the rows are ordered that way before the
-// usual brand/capacity/speed order kicks in. The packing tabs walk the same
-// order (labels excluded — a picker reads row by row). Two things follow from
-// merged cells that a reader may trip on: the autofilter starts at "#", not
-// column A, because Excel refuses to sort a range holding unequal merges; and
-// a dropdown sort reorders the data columns while the labels stay put. The
-// Gen / Type spec columns therefore stay on the tab — they are what filtering
-// actually works on.
+// the LEFT of the data group the rows by device — "Desktop & laptop" /
+// "Server" — and then by DDR generation, and the rows are ordered that way
+// before the usual brand/capacity/speed order kicks in. Each label column
+// carries its own light palette and the rows a paler wash of their generation
+// (user-requested 2026-09-07): the merges alone left the tab reading as one
+// undifferentiated block. Two things follow from merged cells that a reader
+// may trip on: the bid tab's autofilter starts at "#", not column A, because
+// Excel refuses to sort a range holding unequal merges; and a dropdown sort
+// reorders the data columns while the labels stay put. The Gen / Type spec
+// columns therefore stay on the tab — they are what filtering actually works
+// on.
 //
-// After the category tabs come per-warehouse PACKING-CHECKLIST tabs (one per
-// warehouse on the order, named by its short code): stacked per-category
-// sections with a tickable "Packed ✓" column, quantities and subtotals but
-// deliberately NO prices — the same file goes to the vendor with blank bids.
-// Parser safety: these tabs carry "Part #" but no price-matching header, and
-// findHeaders() requires BOTH, so the import skips them. Never add a header
+// The PACKING-CHECKLIST tabs (one per warehouse on the order, named by its
+// short code) are stacked per-category sections with a tickable "Packed ✓"
+// column, quantities and subtotals but deliberately NO prices: a picker has no
+// use for them, and their absence is also what keeps the import parser out.
+// These tabs carry "Part #" but no price-matching header, and findHeaders()
+// requires BOTH, so uploading this workbook to the price import is rejected
+// outright rather than silently matching nothing. Never add a header
 // containing price/unitprice/单价/价格 here.
 
 import { compareSpecValue, sortSheetRows } from './categoryColumns';
@@ -108,6 +122,36 @@ const BAND_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F293
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E7EB' } } as const;
 const PRICE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7C2' } } as const;
 
+const tintFill = (argb: string) =>
+  ({ type: 'pattern', pattern: 'solid', fgColor: { argb } }) as const;
+
+// Group tints. The two label columns get separate palettes so a reader tells
+// the device split from the generation split without reading either; the rows
+// take a much paler wash of their generation, which bands a group across the
+// sheet while leaving its label cell darker than the rows it heads.
+//
+// Anything outside these tables — a generation string the desk invented, or
+// the trailing "—" bucket — falls to the neutrals rather than going untinted,
+// so an unrecognised value still reads as a group.
+const DEVICE_TINTS: Record<string, string> = {
+  'Desktop & laptop': 'FFD6E4F7',
+  Server: 'FFD8ECD9',
+};
+const GEN_TINTS: Record<string, string> = {
+  DDR2: 'FFF6DCE8',
+  DDR3: 'FFFBE3C4',
+  DDR4: 'FFCFE9EC',
+  DDR5: 'FFE2D8F3',
+};
+const ROW_TINTS: Record<string, string> = {
+  DDR2: 'FFFCF1F5',
+  DDR3: 'FFFDF4E8',
+  DDR4: 'FFEDF7F8',
+  DDR5: 'FFF3EFFA',
+};
+const NEUTRAL_TINT = 'FFE6E7EA';
+const NEUTRAL_ROW_TINT = 'FFF6F7F8';
+
 const CATEGORY_ORDER = ['RAM', 'SSD', 'HDD', 'Other'] as const;
 
 // Row order lives in lib/categoryColumns so the inventory export ships the same
@@ -139,13 +183,28 @@ const typeRank = (type: string): number => {
   return i === -1 ? Number.MAX_SAFE_INTEGER : i;
 };
 
-type GroupCol = { key: string; width: number; label: (v: string) => string };
+type GroupCol = {
+  key: string;
+  width: number;
+  label: (v: string) => string;
+  tint: (v: string) => string;
+};
 
 // Left-to-right: outer label, then generation. Header cells stay blank.
 const RAM_GROUP_COLS: readonly GroupCol[] = [
-  { key: 'type',       width: 18, label: deviceLabel },
-  { key: 'generation', width: 9,  label: (v) => v || BLANK_LABEL },
+  {
+    key: 'type', width: 18, label: deviceLabel,
+    tint: (v) => DEVICE_TINTS[deviceLabel(v)] ?? NEUTRAL_TINT,
+  },
+  {
+    key: 'generation', width: 9, label: (v) => v || BLANK_LABEL,
+    tint: (v) => GEN_TINTS[v] ?? NEUTRAL_TINT,
+  },
 ];
+
+// The wash a data row gets under the group it belongs to.
+const rowTint = (p: PriceTemplateProduct): string =>
+  ROW_TINTS[String(p.specs.generation ?? '')] ?? NEUTRAL_ROW_TINT;
 
 const spec = (p: PriceTemplateProduct, key: string): string => String(p.specs[key] ?? '');
 
@@ -166,9 +225,13 @@ function sortCategoryForSheet(category: string, products: PriceTemplateProduct[]
   return category === 'RAM' ? sortRamForSheet(products) : sortForSheet(products);
 }
 
-// Merge each run of rows that share a label into one centred cell. A run is
-// keyed on the label PREFIX (outer label + this column), so two DDR4 runs
-// under different device groups stay two cells.
+// Merge each run of rows that share a label into one centred cell, tinted from
+// its own column's palette. A run is keyed on the label PREFIX (outer label +
+// this column), so two DDR4 runs under different device groups stay two cells.
+//
+// Styling only the merge master is enough: exceljs hands every slave cell the
+// master's style object by reference, and Excel renders a merged range from
+// its top-left cell regardless.
 function renderGroupLabels(
   ws: import('exceljs').Worksheet,
   groupCols: readonly GroupCol[],
@@ -189,6 +252,7 @@ function renderGroupLabels(
       const cell = ws.getCell(top, g + 1);
       cell.value = col.label(spec(sorted[start], col.key));
       cell.font = { bold: true };
+      cell.fill = tintFill(col.tint(spec(sorted[start], col.key)));
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
       cell.border = { top: thin, bottom: thin, left: thin, right: thin };
       start = end + 1;
@@ -211,7 +275,6 @@ function groupByCategory(products: PriceTemplateProduct[]): Map<string, PriceTem
 export async function buildPriceTemplateWorkbook(
   head: PriceTemplateHead,
   products: PriceTemplateProduct[],
-  warehouses: PriceTemplateWarehouse[] = [],
 ): Promise<Buffer> {
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
@@ -225,6 +288,18 @@ export async function buildPriceTemplateWorkbook(
   }
   // A workbook needs at least one sheet to be a valid file.
   if (byCategory.size === 0) renderCategorySheet(wb, 'Other', head, []);
+
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+// The picking side of the same order, one tab per warehouse. Separate file, not
+// a separate tab: this one never goes to a vendor.
+export async function buildPackingListWorkbook(
+  head: PriceTemplateHead,
+  warehouses: PriceTemplateWarehouse[],
+): Promise<Buffer> {
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
 
   for (const wh of warehouses) {
     renderWarehouseSheet(wb, head, wh);
@@ -321,6 +396,14 @@ function renderCategorySheet(
   sorted.forEach((p, i) => {
     const r = HEADER_ROW + 1 + i;
     const row = ws.getRow(r);
+    // Wash the row under its group, per cell — assigning to row.fill would
+    // stamp row.style, which the label cells created after this loop would
+    // then inherit. Runs before the price cell's own fill so the yellow bid
+    // column still wins: that fill is what tells a vendor where to type.
+    if (g > 0) {
+      const wash = tintFill(rowTint(p));
+      for (let col = IDX.index; col <= IDX.note; col++) row.getCell(col).fill = wash;
+    }
     row.getCell(IDX.index).value = i + 1;
     row.getCell(IDX.item).value = p.label;
     specCols.forEach((c, j) => {
@@ -373,9 +456,10 @@ type WhCol = { header: string; key: string; width: number; numFmt?: string };
 // Condition / Image URL here). The bid tabs still carry all of them.
 const PACK_OMITTED_SPECS = new Set(['classification', 'chip']);
 
-// Section layout: Packed ✓ | Part # | <category specs> | Qty. No prices by
-// design (user-decided): the file doubles as the vendor bid sheet. "Part #"
-// (not "Part Number") plus the absence of any price header keeps
+// Section layout: Packed ✓ | Part # | <category specs> | Qty, shifted right by
+// PACK_GROUP_OFFSET to leave room for the RAM group labels. No prices by
+// design (user-decided): a picker has no use for them, and "Part #" (not "Part
+// Number") plus the absence of any price header is also what keeps
 // findHeaders() from ever parsing these tabs.
 function whSectionCols(category: string): WhCol[] {
   return [
@@ -385,6 +469,11 @@ function whSectionCols(category: string): WhCol[] {
     { header: 'Qty',       key: 'qty',       width: 8, numFmt: '#,##0' },
   ];
 }
+
+// Every pack tab reserves the group-label columns, whether or not it holds a
+// RAM section: two tabs on the same order then have the same layout, so a
+// picker moving between warehouses doesn't have to re-find the columns.
+const PACK_GROUP_OFFSET = RAM_GROUP_COLS.length;
 
 function renderWarehouseSheet(
   wb: import('exceljs').Workbook,
@@ -405,10 +494,13 @@ function renderWarehouseSheet(
       widths[i] = Math.max(widths[i] ?? 0, c.width);
     });
   }
-  widths.forEach((w, i) => {
-    ws.getColumn(i + 1).width = w;
+  RAM_GROUP_COLS.forEach((c, i) => {
+    ws.getColumn(i + 1).width = c.width;
   });
-  const bannerSpan = Math.max(widths.length, 6);
+  widths.forEach((w, i) => {
+    ws.getColumn(i + 1 + PACK_GROUP_OFFSET).width = w;
+  });
+  const bannerSpan = PACK_GROUP_OFFSET + Math.max(widths.length, 6);
 
   ws.mergeCells(1, 1, 1, bannerSpan);
   const band = ws.getCell(1, 1);
@@ -439,15 +531,15 @@ function renderWarehouseSheet(
   let totalQty = 0;
   for (const cat of sections) {
     const cols = whSectionCols(cat);
-    const qtyIdx = cols.findIndex((c) => c.key === 'qty') + 1;
+    const qtyIdx = cols.findIndex((c) => c.key === 'qty') + 1 + PACK_GROUP_OFFSET;
 
     const title = ws.getRow(r++);
-    title.getCell(1).value = cat;
+    title.getCell(1 + PACK_GROUP_OFFSET).value = cat;
     title.font = { bold: true };
 
     const header = ws.getRow(r++);
     cols.forEach((c, i) => {
-      const cell = header.getCell(i + 1);
+      const cell = header.getCell(i + 1 + PACK_GROUP_OFFSET);
       cell.value = c.header;
       cell.font = { bold: true };
       cell.fill = HEADER_FILL;
@@ -456,11 +548,18 @@ function renderWarehouseSheet(
 
     let sectionQty = 0;
     // Same order as the bid tabs, so a picker walking the shelf and a manager
-    // reading the bid see a product in the same place.
-    for (const p of sortCategoryForSheet(cat, byCategory.get(cat)!)) {
+    // reading the bid see a product in the same place. Sorted once: the group
+    // labels below merge runs of THIS array, so the two must not diverge.
+    const sectionRows = sortCategoryForSheet(cat, byCategory.get(cat)!);
+    const firstRow = r;
+    for (const p of sectionRows) {
       const row = ws.getRow(r++);
+      // Wash under the group, tick box excluded — a tinted box reads as
+      // already ticked once the sheet is printed.
+      const wash = cat === 'RAM' ? tintFill(rowTint(p)) : null;
       cols.forEach((c, i) => {
-        const cell = row.getCell(i + 1);
+        const cell = row.getCell(i + 1 + PACK_GROUP_OFFSET);
+        if (wash && c.key !== 'packed') cell.fill = wash;
         switch (c.key) {
           case 'packed':
             // Blank bordered tick box — pen after printing, or type x in Excel.
@@ -476,10 +575,13 @@ function renderWarehouseSheet(
       });
       sectionQty += p.qty;
     }
+    // Spans are merged across sectionRows only, so they stop at the section's
+    // last row and can never reach the subtotal below it.
+    if (cat === 'RAM') renderGroupLabels(ws, RAM_GROUP_COLS, sectionRows, firstRow);
     totalQty += sectionQty;
 
     const subtotal = ws.getRow(r++);
-    subtotal.getCell(1).value = 'Subtotal';
+    subtotal.getCell(1 + PACK_GROUP_OFFSET).value = 'Subtotal';
     subtotal.getCell(qtyIdx).value = sectionQty;
     subtotal.getCell(qtyIdx).numFmt = '#,##0';
     subtotal.font = { bold: true };
@@ -488,8 +590,8 @@ function renderWarehouseSheet(
   }
 
   const total = ws.getRow(r);
-  total.getCell(1).value = 'Warehouse total';
-  total.getCell(2).value = totalQty;
-  total.getCell(2).numFmt = '#,##0';
+  total.getCell(1 + PACK_GROUP_OFFSET).value = 'Warehouse total';
+  total.getCell(2 + PACK_GROUP_OFFSET).value = totalQty;
+  total.getCell(2 + PACK_GROUP_OFFSET).numFmt = '#,##0';
   total.font = { bold: true };
 }
