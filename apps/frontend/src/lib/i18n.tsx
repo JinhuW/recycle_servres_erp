@@ -2420,6 +2420,14 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     fbcDetailVnc: 'VNC',
     fbcFleetUnavailable: 'fleet view unavailable',
     fbcFleetUnavailableNote: 'The fleet view did not load: the facade is unreachable, or it predates the fleet route. Checkpoints and review volume above are unaffected.',
+    fbcColBuild: 'Build',
+    fbcColBuildHint: 'The build the worker reported in its last heartbeat',
+    fbcBuildPre: 'pre-0.5.6',
+    fbcBuildPreHint: 'This worker runs an image that predates build reporting',
+    fbcBuildSame: 'Same build as the coordinator',
+    fbcBuildDiffers: 'Differs from the coordinator, which runs {v}',
+    fbcBuildOf: '{svc} build',
+    fbcBuildUnknown: '{svc} build not reported',
   },
 };
 

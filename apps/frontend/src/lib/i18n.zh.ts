@@ -1999,6 +1999,14 @@ const zh: Record<string, string> = {
   fbcDetailVnc: 'VNC',
   fbcFleetUnavailable: '机群视图不可用',
   fbcFleetUnavailableNote: '机群视图未能加载：门面服务不可达，或其版本尚无机群路由。上方的验证队列和审核量不受影响。',
+  fbcColBuild: '构建版本',
+  fbcColBuildHint: '节点在最近一次心跳中上报的构建版本',
+  fbcBuildPre: '0.5.6 之前',
+  fbcBuildPreHint: '该节点运行的镜像早于版本上报功能',
+  fbcBuildSame: '与协调器构建版本相同',
+  fbcBuildDiffers: '与协调器不同，协调器运行 {v}',
+  fbcBuildOf: '{svc} 构建版本',
+  fbcBuildUnknown: '{svc} 未上报构建版本',
 
   // ── 付款对账 ──
   nav_payments: '付款对账',

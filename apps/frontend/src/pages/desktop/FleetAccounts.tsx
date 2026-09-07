@@ -201,10 +201,17 @@ export function AccountsCard({ fleet, unavailable, hits, query, filter, expanded
             {fleet ? t('fbcAccSub', { shown: shown.length, n: all.length }) : '…'}
           </div>
         </div>
-        {fleet && (fleet.health.ok
-          ? <span className="chip muted" title={t('fbcLivenessHint')}>{t('fbcAccAsOf', { age: relTime(fleet.generated_at, locale) })}</span>
-          : <span className="chip neg">{t('fbcAccHealthDown')}</span>)}
-        {!fleet && unavailable && <span className="chip neg">{t('fbcFleetUnavailable')}</span>}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {fleet && (['coordinator', 'console'] as const).map(svc => (
+            fleet.versions[svc]
+              ? <span key={svc} className="chip info mono" title={t('fbcBuildOf', { svc })}>{svc} {fleet.versions[svc]}</span>
+              : <span key={svc} className="chip muted" title={t('fbcBuildUnknown', { svc })}>{svc} ?</span>
+          ))}
+          {fleet && (fleet.health.ok
+            ? <span className="chip muted" title={t('fbcLivenessHint')}>{t('fbcAccAsOf', { age: relTime(fleet.generated_at, locale) })}</span>
+            : <span className="chip neg">{t('fbcAccHealthDown')}</span>)}
+          {!fleet && unavailable && <span className="chip neg">{t('fbcFleetUnavailable')}</span>}
+        </div>
       </div>
 
       {!fleet && unavailable && (
@@ -241,11 +248,13 @@ export function AccountsCard({ fleet, unavailable, hits, query, filter, expanded
               <th className="num" title={t('fbcColAlertsHint', { days: HITS_DAYS })}>
                 {t('fbcColAlerts', { days: HITS_DAYS })}
               </th>
+              <th title={t('fbcColBuildHint')}>{t('fbcColBuild')}</th>
             </tr>
           </thead>
           <tbody>
             {shown.map(w => (
               <AccountRow key={w.worker_id} account={w} hits={byCity} terms={terms}
+                coordinatorVersion={fleet?.versions.coordinator ?? null}
                 open={expanded.has(w.worker_id)} onToggle={() => onToggle(w.worker_id)} locale={locale} />
             ))}
           </tbody>
@@ -263,10 +272,11 @@ export function AccountsCard({ fleet, unavailable, hits, query, filter, expanded
   );
 }
 
-function AccountRow({ account: w, hits, terms, open, onToggle, locale }: {
+function AccountRow({ account: w, hits, terms, coordinatorVersion, open, onToggle, locale }: {
   account: FleetAccount;
   hits: Map<string, CityHits>;
   terms: readonly string[];
+  coordinatorVersion: string | null;
   open: boolean;
   onToggle: () => void;
   locale: string;
@@ -322,9 +332,28 @@ function AccountRow({ account: w, hits, terms, open, onToggle, locale }: {
           {h?.last_heartbeat_at ? relTime(h.last_heartbeat_at, locale) : t('fbcNever')}
         </td>
         <td className={`num ${alerts ? '' : 'muted'}`}>{h ? alerts : '—'}</td>
+        <td><BuildChip health={h} coordinatorVersion={coordinatorVersion} /></td>
       </tr>
       {open && <AccountDetail account={w} hits={hits} terms={terms} locale={locale} />}
     </>
+  );
+}
+
+// A worker's build next to the coordinator's: the same build is quiet, a
+// different one is flagged, so a container left on an old image stands out.
+function BuildChip({ health, coordinatorVersion }: {
+  health: FleetAccount['health']; coordinatorVersion: string | null;
+}) {
+  const { t } = useT();
+  if (!health) return <span className="muted">—</span>;
+  const v = health.version;
+  if (!v) return <span className="chip muted" title={t('fbcBuildPreHint')}>{t('fbcBuildPre')}</span>;
+  const same = Boolean(coordinatorVersion && v.startsWith(coordinatorVersion));
+  return (
+    <span className={`chip ${same ? 'muted' : 'warn'} mono`}
+      title={same ? t('fbcBuildSame') : t('fbcBuildDiffers', { v: coordinatorVersion ?? '?' })}>
+      {v}
+    </span>
   );
 }
 
@@ -401,7 +430,7 @@ function AccountDetail({ account: w, hits, terms, locale }: {
 
   return (
     <tr className="fl-detail">
-      <td colSpan={8}>
+      <td colSpan={9}>
         <div className="fl-detail-inner">
           <div>
             <div className="fl-section-label">

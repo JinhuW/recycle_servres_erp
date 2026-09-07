@@ -31,6 +31,9 @@ export type FleetWorker = {
   last_listing_at: string | null;
   error_count: number;
   vnc_url: string | null;
+  // The build the worker reported ("0.5.6 (d3e9a30)"); null from images
+  // that predate build reporting.
+  version?: string | null;
   liveness: WorkerLiveness;
   needs_attention: boolean;
 };
@@ -157,6 +160,9 @@ export type FleetDoc = {
   monitor_worker_id: string | null;
   sources: { master: boolean; fleet: boolean; monitor: boolean };
   health: { ok: boolean; error: string | null };
+  // Builds of the two control-plane services; a worker's own build is on
+  // its health row.
+  versions: { console: string | null; coordinator: string | null };
   ai_model: string | null;
   search: FleetSearchSettings;
   items: FleetItem[];
