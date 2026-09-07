@@ -1066,6 +1066,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soReopenTooltip: 'Reopen this sell order',
     soDownloadPriceTemplate: 'Price template (bid sheet)',
     soDownloadPriceTemplateHint: 'Item specs + photo links + blank prices — send to the vendor to fill in',
+    soDownloadPackingList: 'Packing list',
+    soDownloadPackingListHint: 'One tab per warehouse, tick boxes and quantities, no prices — for the pickers, not the vendor',
     soPriceImportTitle: 'Vendor price import',
     soPriceImportStep2: 'Vendor fills unit prices',
     soPriceImportStep3: 'Drop the filled file here',

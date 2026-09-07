@@ -343,11 +343,11 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     expect(dl.status).toBe(200);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(await dl.arrayBuffer());
-    // Category bid tabs first, then the warehouse packing-checklist tab.
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'Pack - LA1']);
+    // One tab per category, and nothing else — the packing checklist is its
+    // own download now (GET /:id/packing-list).
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD']);
 
-    // ...fill the Unit Price cell of every product row, vendor-style. The
-    // packing tab has no Unit Price column, so it is naturally skipped.
+    // ...fill the Unit Price cell of every product row, vendor-style.
     for (const ws of wb.worksheets) {
       let headerRow = 0, partCol = 0, priceCol = 0;
       for (let r = 1; r <= ws.rowCount && !headerRow; r++) {
@@ -366,10 +366,7 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
     }
     const filled = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
 
-    // ...and every bid tab's price lands in the preview — while the parser
-    // never reads the packing tab even though it repeats the part numbers
-    // (it has "Part #" but no price header, so findHeaders skips it; a
-    // parsed LA1 row would demote the bid rows to duplicates here).
+    // ...and every bid tab's price lands in the preview.
     const res = await multipart(`/api/sell-orders/${id}/price-import/preview`, { file: filled }, { token });
     expect(res.status).toBe(200);
     const body = res.body as PriceImportPreview;

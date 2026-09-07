@@ -17,6 +17,37 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.130.0] - 2026-09-07
+
+### Added
+
+- **The packing checklist is its own download, and the RAM groups are
+  coloured.**  The `Pack - <warehouse>` tabs used to live inside the vendor bid
+  sheet, which meant every bid request emailed out carried the warehouse's own
+  picking list with it.  They now come off a second button on the sell-order
+  footer — *Packing list* beside *Price template (bid sheet)* — as their own
+  workbook, from `GET /api/sell-orders/:id/packing-list`.  Both files are built
+  from one query and one sort, so a picker and a bidder still find a product in
+  the same position on their own sheet; that shared order is what makes the
+  split safe.
+
+  The grouping RS-028 gave the bid sheet's RAM tab is now on the packing tabs
+  too, on the same two leading columns — device group, then DDR generation,
+  merged over each run.  Every pack tab reserves those columns whether or not
+  it holds RAM, so two warehouses on one order always read the same way.
+
+  And the groups are told apart by colour rather than by merge boundaries
+  alone: the device column and the generation column draw from separate light
+  palettes, and each row takes a paler wash of its own generation, banding a
+  group across the sheet.  The `Unit Price` column keeps its yellow — it is the
+  only thing on the sheet telling a vendor where to type — and the `Packed`
+  tick box stays white, because a tinted box reads as already ticked once the
+  sheet is printed.  Rows with no recognised type or generation still get a
+  neutral band instead of going blank.
+
+  Uploading the packing workbook to the price import is now rejected as having
+  no price column, instead of parsing to zero matches (RS-029).
+
 ## [1.129.0] - 2026-09-06
 
 ### Added

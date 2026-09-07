@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
 import app from '../src/index';
 import { resetDb } from './helpers/db';
-import { api, testEnv } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
-import { buildPriceTemplateWorkbook } from '../src/lib/sellOrderPriceTemplate';
+import {
+  buildPriceTemplateWorkbook, buildPackingListWorkbook,
+} from '../src/lib/sellOrderPriceTemplate';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -41,8 +43,9 @@ async function loadWorkbook(res: Response): Promise<ExcelJS.Workbook> {
   return wb;
 }
 
-// Vendor bid tabs only — warehouse packing tabs (Pack - LA1…) have their own
-// layout ('Part #', no Unit Price) and are asserted separately.
+// The bid workbook is category tabs and nothing else; the packing tabs are a
+// separate download with their own layout ('Part #', no Unit Price), asserted
+// in the GET /:id/packing-list block below.
 const CATEGORY_TABS = new Set(['RAM', 'SSD', 'HDD', 'Other']);
 const categoryTabs = (wb: ExcelJS.Workbook): ExcelJS.Worksheet[] =>
   wb.worksheets.filter(w => CATEGORY_TABS.has(w.name));
@@ -75,9 +78,9 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(res.headers.get('content-disposition')).toContain('price-template');
 
     const wb = await loadWorkbook(res);
-    // RAM line + SSD line → a dedicated sub-sheet each, in fixed order, then
-    // the packing-checklist tab of the one warehouse on the order.
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'Pack - LA1']);
+    // RAM line + SSD line → a dedicated sub-sheet each, in fixed order. The
+    // packing checklist is not in this file.
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD']);
 
     const parts: string[] = [];
     for (const ws of categoryTabs(wb)) {
@@ -226,7 +229,6 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     const buf = await buildPriceTemplateWorkbook(
       { id: 'SL-GRP', customerName: 'Acme', currencyCode: 'USD' },
       products,
-      [{ warehouse: 'LA1', products }],
     );
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf as unknown as ArrayBuffer);
@@ -289,13 +291,43 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     const ssdTab = wb.worksheets.find(w => w.name === 'SSD')!;
     expect(findHeaderRow(ssdTab).cols.get('#')).toBe(1);
 
-    // The packing tab walks the same order (no merges there — a picker reads
-    // it row by row), so bidder and picker find a product in the same place.
-    const pack = wb.worksheets.find(w => w.name === 'Pack - LA1')!;
+    // The two label columns draw from separate palettes, and a group's own
+    // rows are washed under it — the merges alone left the tab reading as one
+    // block, which is what this colouring is for.
+    const fill = (col: number, r: number): string =>
+      String((ramTab.getRow(r).getCell(col).fill as { fgColor?: { argb?: string } })?.fgColor?.argb ?? '');
+    // Desktop & laptop vs Server, and DDR3 vs DDR4 vs DDR5, all differ.
+    expect(fill(1, first)).not.toBe(fill(1, first + 4));
+    expect(fill(2, first)).not.toBe(fill(2, first + 1));
+    expect(fill(2, first + 1)).not.toBe(fill(2, first + 3));
+    // The device column never borrows the generation column's colour.
+    expect(fill(1, first)).not.toBe(fill(2, first));
+    // Rows follow their generation: the two DDR4 rows match each other and
+    // not the DDR3 row above them.
+    const dataCol = cols.get('Item')!;
+    expect(fill(dataCol, first + 1)).toBe(fill(dataCol, first + 2));
+    expect(fill(dataCol, first + 1)).not.toBe(fill(dataCol, first));
+    // ...but the wash never takes the bid column's yellow, which is the only
+    // thing on the sheet telling a vendor where to type.
+    const priceCol = cols.get('Unit Price (USD)')!;
+    expect(fill(priceCol, first + 1)).toBe('FFFFF7C2');
+
+    // The packing workbook walks the same order and carries the same labels,
+    // so bidder and picker find a product in the same place.
+    const packWb = new ExcelJS.Workbook();
+    await packWb.xlsx.load(
+      await buildPackingListWorkbook(
+        { id: 'SL-GRP', customerName: 'Acme', currencyCode: 'USD' },
+        [{ warehouse: 'LA1', products }],
+      ) as unknown as ArrayBuffer,
+    );
+    const pack = packWb.worksheets.find(w => w.name === 'Pack - LA1')!;
+    // Part # sits right of the two reserved label columns and the tick box.
+    const packPartCol = 2 + 2;
     const packParts: string[] = [];
     pack.eachRow((row, r) => {
       // Rows 1-2 are merged banners, which proxy their text to every cell.
-      const part = row.getCell(2).value;
+      const part = row.getCell(packPartCol).value;
       if (r > 3 && typeof part === 'string' && part !== 'Part #') packParts.push(part);
     });
     expect(packParts).toEqual([
@@ -303,6 +335,20 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       'srv-ddr3', 'srv-ddr4-a', 'srv-ddr4-b',
       'manual', 'ssd',
     ]);
+    // Same merged spans as the bid tab: the RAM section starts on the row
+    // after its header, and the SSD section below it gets no labels.
+    const packFirst = pack.getRow(1).number;
+    let packRamFirst = 0;
+    pack.eachRow((row, r) => {
+      if (!packRamFirst && String(row.getCell(packPartCol).value ?? '') === 'desk-ddr3') packRamFirst = r;
+    });
+    expect(packRamFirst).toBeGreaterThan(packFirst);
+    const packSpan = (col: number, r: number) => pack.getRow(r).getCell(col).master.address;
+    expect(packSpan(1, packRamFirst)).toBe(packSpan(1, packRamFirst + 3));
+    expect(String(pack.getRow(packRamFirst).getCell(1).value)).toBe('Desktop & laptop');
+    expect(String(pack.getRow(packRamFirst + 4).getCell(1).value)).toBe('Server');
+    expect(packSpan(2, packRamFirst + 1)).toBe(packSpan(2, packRamFirst + 2));
+    expect(String(pack.getRow(packRamFirst + 1).getCell(2).value)).toBe('DDR4');
   });
 
   it('labels the price columns CNY on a CNY order', async () => {
@@ -334,7 +380,7 @@ describe('GET /api/sell-orders/:id/price-template', () => {
       ],
     });
     const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/price-template`, token));
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'Other', 'Pack - LA1']);
+    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'Other']);
     const other = wb.worksheets.find(w => w.name === 'Other')!;
     const { row: headerRow, cols } = findHeaderRow(other);
     const itemCol = cols.get('Item')!;
@@ -433,7 +479,47 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(String(built.getRow(headerRow + 1).getCell(cols.get('Chip #')!).value)).toBe('K4A8G085WB-BCTD');
   });
 
-  it('appends price-free packing-checklist tabs, one per warehouse', async () => {
+  it('404s unknown orders and 403s non-managers', async () => {
+    const mgr = await loginAs(ALEX);
+    const missing = await getRaw('/api/sell-orders/SO-nope/price-template', mgr.token);
+    expect(missing.status).toBe(404);
+
+    const id = await createOrder(mgr.token);
+    const pur = await loginAs(MARCUS);
+    const forbidden = await getRaw(`/api/sell-orders/${id}/price-template`, pur.token);
+    expect(forbidden.status).toBe(403);
+  });
+});
+
+describe('GET /api/sell-orders/:id/packing-list', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // Every pack tab reserves the two RAM group-label columns, so the section
+  // grid starts here whether or not the warehouse holds RAM.
+  const PACK_OFFSET = 2;
+
+  const cellStrings = (ws: ExcelJS.Worksheet): string[] => {
+    const out: string[] = [];
+    ws.eachRow(row => row.eachCell({ includeEmpty: false }, cell => {
+      out.push(String(cell.value ?? ''));
+    }));
+    return out;
+  };
+  // Read a labelled row's numbers. The label sits at the first grid column,
+  // not column A — the label columns are to its left.
+  const rowQty = (ws: ExcelJS.Worksheet, firstCell: string): number[] => {
+    const out: number[] = [];
+    ws.eachRow(row => {
+      if (String(row.getCell(1 + PACK_OFFSET).value ?? '') === firstCell) {
+        row.eachCell({ includeEmpty: false }, cell => {
+          if (typeof cell.value === 'number') out.push(cell.value);
+        });
+      }
+    });
+    return out;
+  };
+
+  it('streams price-free packing-checklist tabs, one per warehouse', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, {
       lines: [
@@ -442,16 +528,14 @@ describe('GET /api/sell-orders/:id/price-template', () => {
         { category: 'SSD', label: 'Drive B', partNumber: 'WH-S1', qty: 1, unitPrice: 90, warehouseId: 'WH-LA1' },
       ],
     });
-    const wb = await loadWorkbook(await getRaw(`/api/sell-orders/${id}/price-template`, token));
-    expect(wb.worksheets.map(w => w.name)).toEqual(['RAM', 'SSD', 'Pack - LA1', 'Pack - NJ2']);
+    const res = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain(XLSX_MIME);
+    expect(res.headers.get('content-disposition')).toContain('packing-list');
 
-    const cellStrings = (ws: ExcelJS.Worksheet): string[] => {
-      const out: string[] = [];
-      ws.eachRow(row => row.eachCell({ includeEmpty: false }, cell => {
-        out.push(String(cell.value ?? ''));
-      }));
-      return out;
-    };
+    const wb = await loadWorkbook(res);
+    // Warehouse tabs only — the bid sheet is its own download.
+    expect(wb.worksheets.map(w => w.name)).toEqual(['Pack - LA1', 'Pack - NJ2']);
 
     // LA1 holds both categories as stacked sections with qty subtotals and a
     // warehouse total; the NJ2 split stays on its own tab.
@@ -472,22 +556,11 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(la1Cells).not.toContain('DIMM A');
     expect(la1Cells).not.toContain('Drive B');
     // Price-free by design: nothing on a packing tab may look like a price —
-    // that's also what keeps the import parser away from these tabs.
+    // that's also what keeps the import parser away from this workbook.
     expect(la1Cells.some(v => /price|单价|价格/i.test(v))).toBe(false);
-    // Packing tabs ship unprotected too — a picker types into the tick boxes.
+    // Packing tabs ship unprotected — a picker types into the tick boxes.
     expect(la1.sheetProtection).toBeFalsy();
 
-    const rowQty = (ws: ExcelJS.Worksheet, firstCell: string): number[] => {
-      const out: number[] = [];
-      ws.eachRow(row => {
-        if (String(row.getCell(1).value ?? '') === firstCell) {
-          row.eachCell({ includeEmpty: false }, cell => {
-            if (typeof cell.value === 'number') out.push(cell.value);
-          });
-        }
-      });
-      return out;
-    };
     // LA1: RAM qty 2 + SSD qty 1 → subtotals [2, 1], total 3. NJ2: RAM 3.
     expect(rowQty(la1, 'Subtotal')).toEqual([2, 1]);
     expect(rowQty(la1, 'Warehouse total')).toEqual([3]);
@@ -499,14 +572,30 @@ describe('GET /api/sell-orders/:id/price-template', () => {
     expect(rowQty(nj2, 'Warehouse total')).toEqual([3]);
   });
 
+  it('is rejected outright when uploaded to the price import', async () => {
+    // The parser needs a part header AND a price header on the same row; this
+    // workbook has the first and never the second. Uploading the wrong file
+    // must say so, not quietly match nothing.
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token);
+    const dl = await getRaw(`/api/sell-orders/${id}/packing-list`, token);
+    const file = new Blob([await dl.arrayBuffer()], { type: XLSX_MIME });
+
+    const res = await multipart(
+      `/api/sell-orders/${id}/price-import/preview`, { file }, { token },
+    );
+    expect(res.status).toBe(400);
+    expect((res.body as { code?: string }).code).toBe('columns-not-found');
+  });
+
   it('404s unknown orders and 403s non-managers', async () => {
     const mgr = await loginAs(ALEX);
-    const missing = await getRaw('/api/sell-orders/SO-nope/price-template', mgr.token);
+    const missing = await getRaw('/api/sell-orders/SO-nope/packing-list', mgr.token);
     expect(missing.status).toBe(404);
 
     const id = await createOrder(mgr.token);
     const pur = await loginAs(MARCUS);
-    const forbidden = await getRaw(`/api/sell-orders/${id}/price-template`, pur.token);
+    const forbidden = await getRaw(`/api/sell-orders/${id}/packing-list`, pur.token);
     expect(forbidden.status).toBe(403);
   });
 });

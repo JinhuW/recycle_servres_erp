@@ -159,12 +159,23 @@ Transit, and a line's qty can never be 0.
   (v1.51.2). Its header text is load-bearing for the import parser — don't
   move it.
 - The price template splits into one worksheet per category with per-attribute
-  spec columns and image URLs (v1.25.0, v1.27.0), plus per-warehouse
-  packing-checklist tabs named `Pack - <warehouse>` (v1.28.0). **The RAM tab
-  groups its rows with merged label columns left of `#`** — "Desktop & laptop"
-  / "Server", then DDR3 / DDR4 / DDR5 — ahead of the brand/capacity/speed
-  order, and the packing tabs walk the same sequence; the filter dropdowns
-  start at `#` because Excel won't sort across unequal merges (v1.129.0).
+  spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
+  with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
+  DDR3 / DDR4 / DDR5 — ahead of the brand/capacity/speed order; the filter
+  dropdowns start at `#` because Excel won't sort across unequal merges
+  (v1.129.0). Each label column carries its own light palette and each row a
+  paler wash of its generation, so a group reads as a band; the yellow
+  `Unit Price` column is untouched by it (v1.130.0).
+- **The packing checklist is a separate download** — `Packing list` beside the
+  bid-sheet button, `GET /api/sell-orders/:id/packing-list`, managers only. It
+  carries per-warehouse `Pack - <warehouse>` tabs (v1.28.0) with tick boxes,
+  quantities and subtotals but no prices, and it lived inside the bid-sheet
+  workbook until v1.130.0, which meant the vendor's copy carried it. Its RAM
+  sections repeat the bid tab's merged labels and colours on two reserved
+  leading columns — reserved on every pack tab, so two warehouses on one order
+  read alike. Both files come from one query and one sort, so a picker and a
+  bidder find a product in the same place; uploading this one to the price
+  import is rejected for having no price column (v1.130.0).
 - **Vendor bids**: vendors reach a tokenised portal with faceted catalog
   filtering, submit bids, and managers review and promote them on a dedicated
   screen. Promotion picks and validates a customer for general links.
