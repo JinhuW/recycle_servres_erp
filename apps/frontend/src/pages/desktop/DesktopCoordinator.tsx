@@ -5,27 +5,31 @@ import { ApiError } from '../../lib/api';
 import {
   challengeScreenshotUrl,
   coordinatorApi,
+  type AlertHitRow,
   type Challenge,
   type FilterPrompt,
+  type FleetDoc,
   type FleetFilter,
-  type FleetWorker,
   type ReviewStatsDay,
-  type WorkerLiveness,
-  type WorkerState,
 } from '../../lib/coordinator';
 import { handleFetchError } from '../../lib/errorToast';
 import { relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
+import {
+  AccountsCard, CoverageCard, FleetKpis, HITS_DAYS, PhrasesCard, SettingsCard,
+} from './FleetAccounts';
 
 // ─── Facebook tracker console ─────────────────────────────────────────────────
-// The dedicated Facebook Marketplace monitor page: review volume, the worker
-// fleet, the checkpoint queue (workers parked on a CAPTCHA or login challenge
-// until a human clears them), the content-filter prompt, and a placeholder for
-// per-ad click stats. Fleet + queue go through the /api/coordinator proxy; a
-// 501 from it means the backend has no control-plane credentials, which gets
-// its own quiet state instead of error toasts. The review-volume and prompt
-// cards are UI-only for now — they render bundled sample data (marked as such)
-// until the coordinator grows stats/prompt endpoints.
+// The dedicated Facebook Marketplace monitor page: the fleet's accounts (who
+// searches which cities, and is it alive), review volume, the checkpoint queue
+// (workers parked on a CAPTCHA or login challenge until a human clears them),
+// the search phrases and settings the fleet runs, the coverage map, the
+// content-filter prompt, and a placeholder for per-ad click stats. Everything
+// live goes through the /api/coordinator proxy; a 501 from it means the
+// backend has no control-plane credentials, which gets its own quiet state
+// instead of error toasts. Review volume and the prompt fail soft to bundled
+// sample data (marked as such); the fleet cards render from one composed
+// document the facade builds (see FleetAccounts.tsx).
 
 const REFRESH_MS = 30_000;
 
@@ -121,11 +125,30 @@ export function DesktopCoordinator({ showToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
 
-  const [workers, setWorkers] = useState<FleetWorker[] | null>(null);
+  const [fleet, setFleet] = useState<FleetDoc | null>(null);
+  // The fleet document needs a facade that knows /v1/fleet. An older facade
+  // (404) or an unreachable one (502) must not take the rest of the page
+  // down, so only "proxy unconfigured" (501) is fatal here; anything else
+  // leaves the fleet cards in their own unavailable state.
+  const [fleetUnavailable, setFleetUnavailable] = useState(false);
+  const [hits, setHits] = useState<AlertHitRow[] | null>(null);
   const [challenges, setChallenges] = useState<Challenge[] | null>(null);
   const [stats, setStats] = useState<ReviewStatsDay[] | Unavailable | null>(null);
   const [prompt, setPrompt] = useState<FilterPrompt | Unavailable | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
+
+  // The search box and the seg filter apply to every fleet card at once, so
+  // they live here rather than in any one card.
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<FleetFilter>('all');
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleRow = useCallback((id: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   const fail = useCallback((err: unknown) => {
     // 501 = proxy env vars unset; 404 = a backend that predates the proxy
@@ -138,8 +161,16 @@ export function DesktopCoordinator({ showToast }: Props) {
   }, []);
 
   const load = useCallback(() => {
-    coordinatorApi.listWorkers().then(setWorkers).catch(fail);
+    coordinatorApi.fleet()
+      .then(doc => { setFleet(doc); setFleetUnavailable(false); })
+      .catch(err => {
+        if (err instanceof ApiError && err.status === 501) { fail(err); return; }
+        setFleetUnavailable(true);
+      });
     coordinatorApi.listOpenChallenges().then(setChallenges).catch(fail);
+    // Per-city alert counts decorate the fleet cards; without them the cards
+    // still render, just without the numbers.
+    coordinatorApi.alertHits(HITS_DAYS).then(setHits).catch(() => setHits([]));
     // Stats and prompt fail soft to their sample fallbacks — never a dialog.
     coordinatorApi.reviewStats(STATS_DAYS)
       .then(setStats)
@@ -160,7 +191,9 @@ export function DesktopCoordinator({ showToast }: Props) {
 
   return (
     <>
-      <PageHead t={t} />
+      <PageHead query={query} onQuery={setQuery} filter={filter} onFilter={setFilter} />
+
+      {!notConfigured && <FleetKpis fleet={fleet} challenges={challenges} locale={locale} />}
 
       {/* ── Review volume (live when the facade answers, sample otherwise) ── */}
       <ReviewVolumeCard locale={locale} stats={stats} />
@@ -188,8 +221,18 @@ export function DesktopCoordinator({ showToast }: Props) {
             onError={fail}
           />
 
-          {/* ── Fleet ── */}
-          <FleetCard workers={workers} locale={locale} />
+          {/* ── Accounts: one row per Facebook account ── */}
+          <AccountsCard fleet={fleet} unavailable={fleetUnavailable} hits={hits} query={query} filter={filter}
+            expanded={expanded} onToggle={toggleRow} locale={locale} />
+
+          {/* ── What each account searches for, and the shared settings ── */}
+          <div className="grid-2" style={{ marginBottom: 16 }}>
+            <PhrasesCard fleet={fleet} query={query} />
+            <SettingsCard fleet={fleet} />
+          </div>
+
+          {/* ── Every search centre, lit by whoever searches it now ── */}
+          <CoverageCard fleet={fleet} hits={hits} query={query} />
         </>
       )}
 
@@ -202,142 +245,43 @@ export function DesktopCoordinator({ showToast }: Props) {
   );
 }
 
-function PageHead({ t }: { t: (k: string, vars?: Record<string, string>) => string }) {
+const FLEET_FILTERS: readonly FleetFilter[] = ['all', 'active', 'attention'];
+const FILTER_LABEL_KEY: Record<FleetFilter, string> = {
+  all: 'fbcFilterAll', active: 'fbcFilterReporting', attention: 'fbcFilterAttention',
+};
+
+function PageHead({ query, onQuery, filter, onFilter }: {
+  query: string;
+  onQuery: (q: string) => void;
+  filter: FleetFilter;
+  onFilter: (f: FleetFilter) => void;
+}) {
+  const { t } = useT();
   return (
     <div className="page-head">
       <div>
         <h1 className="page-title">{t('fbcTitle')}</h1>
         <div className="page-sub">{t('fbcSubtitle')}</div>
       </div>
-    </div>
-  );
-}
-
-const FLEET_FILTERS: readonly FleetFilter[] = ['all', 'attention'];
-const FILTER_LABEL_KEY: Record<FleetFilter, string> = {
-  all: 'fbcFilterAll', attention: 'fbcFilterAttention',
-};
-
-const LIVENESS_CHIP: Record<WorkerLiveness, { chip: string; key: string }> = {
-  live: { chip: 'chip pos', key: 'fbcLive' },
-  stale: { chip: 'chip warn', key: 'fbcStale' },
-  dead: { chip: 'chip neg', key: 'fbcDead' },
-};
-
-const STATE_CHIP: Record<WorkerState, string> = {
-  HEALTHY: 'chip pos',
-  DEGRADED: 'chip warn',
-  SESSION_EXPIRED: 'chip warn',
-  CHALLENGE_2FA: 'chip accent',
-  CHALLENGE_EMAIL: 'chip accent',
-  CHALLENGE_CAPTCHA: 'chip accent',
-  CHECKPOINT: 'chip accent',
-  DEAD: 'chip neg',
-};
-
-function FleetCard({ workers, locale }: { workers: FleetWorker[] | null; locale: string }) {
-  const { t } = useT();
-  const [filter, setFilter] = useState<FleetFilter>('all');
-
-  const shown = (workers ?? []).filter(w => filter === 'all' || w.needs_attention);
-
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-head">
-        <div>
-          <div className="card-title">{t('fbcFleetTitle')}</div>
-          <div className="card-sub">
-            {workers
-              ? t('fbcFleetSub', { shown: String(shown.length), n: String(workers.length) })
-              : '…'}
-          </div>
-        </div>
-        <div className="seg" role="tablist" aria-label={t('fbcFleetTitle')}>
+      <div className="page-actions">
+        <label className="toolbar-search">
+          <Icon name="search" size={14} />
+          <input className="input" type="search" value={query} autoComplete="off"
+            placeholder={t('fbcSearchPlaceholder')} aria-label={t('fbcSearchPlaceholder')}
+            onChange={e => onQuery(e.target.value)} />
+        </label>
+        <div className="seg" role="tablist" aria-label={t('fbcAccTitle')}>
           {FLEET_FILTERS.map(f => (
             <button key={f} type="button" role="tab" aria-selected={filter === f}
               className={filter === f ? 'active' : ''}
-              onClick={() => setFilter(f)}>
+              onClick={() => onFilter(f)}>
               {t(FILTER_LABEL_KEY[f])}
             </button>
           ))}
         </div>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t('fbcColStatus')}</th>
-              <th>{t('fbcColWorker')}</th>
-              <th>{t('fbcColRegion')}</th>
-              <th>{t('fbcColState')}</th>
-              <th>{t('fbcColSession')}</th>
-              <th>{t('fbcColHeartbeat')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map(w => <WorkerRow key={w.worker_id} worker={w} locale={locale} />)}
-          </tbody>
-        </table>
-        {workers && shown.length === 0 && (
-          <div style={{ padding: '14px 16px', color: 'var(--fg-subtle)', fontSize: 13 }}>
-            {filter === 'attention' ? t('fbcFleetAllWell') : t('fbcFleetEmpty')}
-          </div>
-        )}
-      </div>
     </div>
   );
-}
-
-function WorkerRow({ worker, locale }: { worker: FleetWorker; locale: string }) {
-  const { t } = useT();
-  const live = LIVENESS_CHIP[worker.liveness] ?? LIVENESS_CHIP.dead;
-  const days = worker.session_days_left;
-
-  return (
-    <tr style={worker.needs_attention ? { background: 'var(--warn-soft)' } : undefined}>
-      <td>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span className={worker.liveness === 'live' ? 'vl-dot' : undefined}
-            style={worker.liveness === 'live' ? undefined : {
-              width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
-              background: worker.liveness === 'dead' ? 'var(--neg)' : 'var(--warn)',
-            }} />
-          <span className={live.chip}>{t(live.key)}</span>
-        </span>
-      </td>
-      <td className="mono">
-        {worker.worker_id}
-        {worker.error_count > 0 && (
-          <span className="chip neg" style={{ marginLeft: 6 }}>×{worker.error_count}</span>
-        )}
-      </td>
-      <td className={worker.region ? undefined : 'muted'}>{worker.region ?? '—'}</td>
-      <td>
-        <span className={STATE_CHIP[worker.state] ?? 'chip muted'}>{stateLabel(t, worker.state)}</span>
-      </td>
-      <td
-        className={worker.session_expiry ? undefined : 'muted'}
-        title={worker.session_expiry ?? undefined}
-        style={days !== null && days <= 3 ? { color: 'var(--neg)', fontWeight: 550 } : undefined}
-      >
-        {!worker.session_expiry ? '—'
-          : days === null ? worker.session_expiry
-          : days <= 0 ? t('fbcSessionExpired')
-          : t('fbcSessionDays', { n: String(days) })}
-      </td>
-      <td className={worker.last_heartbeat_at ? undefined : 'muted'}>
-        {worker.last_heartbeat_at ? relTime(worker.last_heartbeat_at, locale) : t('fbcNever')}
-      </td>
-    </tr>
-  );
-}
-
-// The control plane can add states faster than this UI ships, so an unknown
-// one falls back to its raw name rather than a blank cell.
-function stateLabel(t: (k: string) => string, state: WorkerState): string {
-  const key = `fbcState_${state}`;
-  const label = t(key);
-  return label === key ? state : label;
 }
 
 function ChallengeQueueCard({ challenges, locale, onResolved, onError }: {
