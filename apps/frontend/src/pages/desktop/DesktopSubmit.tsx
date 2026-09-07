@@ -216,15 +216,17 @@ function OrderForm({
   // "my orders", notifications). '' means the manager keeps it themselves.
   const isManager = user?.role === 'manager';
   const [onBehalfOfUserId, setOnBehalfOfUserId] = useState('');
-  const [purchasers, setPurchasers] = useState<
+  const [members, setMembers] = useState<
     { id: string; name: string; defaultWarehouseId?: string | null }[]
   >([]);
   useEffect(() => {
     if (!isManager) return;
-    api.get<{ items: { id: string; name: string; role: string; defaultWarehouseId?: string | null }[] }>('/api/members')
-      .then(r => setPurchasers(r.items.filter(m => m.role === 'purchaser')))
+    // Any member can own the PO, managers included; the signed-in manager is
+    // already the "Myself" option, so they are left off the list.
+    api.get<{ items: { id: string; name: string; defaultWarehouseId?: string | null }[] }>('/api/members')
+      .then(r => setMembers(r.items.filter(m => m.id !== user?.id)))
       .catch(handleFetchError);
-  }, [isManager]);
+  }, [isManager, user?.id]);
 
   // Which category the next line defaults to. Persisted so a purchaser who
   // works through a pallet of drives doesn't re-pick on every session; the
@@ -364,7 +366,7 @@ function OrderForm({
   // current user's, else the first in the list.
   const [warehouseTouched, setWarehouseTouched] = useState(false);
   const ownerDefaultWh = onBehalfOfUserId
-    ? purchasers.find(p => p.id === onBehalfOfUserId)?.defaultWarehouseId
+    ? members.find(m => m.id === onBehalfOfUserId)?.defaultWarehouseId
     : user?.defaultWarehouseId;
   useEffect(() => {
     if (!warehouses.length || warehouseTouched) return;
@@ -1014,8 +1016,8 @@ function OrderForm({
                 title={orderId ? t('poOnBehalfLocked') : undefined}
               >
                 <option value="">{t('poOnBehalfSelf')}</option>
-                {purchasers.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                {members.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
             </div>

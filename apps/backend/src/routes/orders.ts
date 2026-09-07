@@ -85,10 +85,12 @@ async function assertCategoriesEnabled(
   return null;
 }
 
-// Managers may file a PO for a purchaser (`onBehalfOfUserId`). The raw role is
-// checked — not effectiveRole — so a manager previewing as purchaser keeps the
-// ability, and the target is validated up front so a typo'd id fails as a 400
-// rather than an FK 500. Returns the resolved owner or an error response.
+// Managers may file a PO for another member (`onBehalfOfUserId`) — a manager
+// as readily as a purchaser, since managers own the POs they file themselves.
+// The raw role is checked — not effectiveRole — so a manager previewing as
+// purchaser keeps the ability, and the target is validated up front so a
+// typo'd id fails as a 400 rather than an FK 500. Returns the resolved owner
+// or an error response.
 async function resolveOrderOwner(
   sql: ReturnType<typeof getDb>,
   u: User,
@@ -111,11 +113,11 @@ async function resolveOrderOwner(
   }
   const rows = await sql<{ id: string; name: string; defaultWarehouseId: string | null }[]>`
     SELECT id, name, default_warehouse_id AS "defaultWarehouseId" FROM users
-    WHERE id = ${onBehalfOfUserId} AND active = TRUE AND role = 'purchaser'
+    WHERE id = ${onBehalfOfUserId} AND active = TRUE
     LIMIT 1
   `;
   if (!rows.length) {
-    return { error: 'onBehalfOfUserId must name an active purchaser', status: 400 };
+    return { error: 'onBehalfOfUserId must name an active member', status: 400 };
   }
   return {
     ownerId: onBehalfOfUserId,

@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.131.0] - 2026-09-07
+
+### Changed
+
+- **The PO owner picker offers managers too.**  The Purchaser select on the PO
+  edit page, and the on-behalf select on Submit, listed only purchaser-role
+  members, and the backend refused a manager's id in `onBehalfOfUserId` for
+  `POST /api/orders`, `POST /api/orders/draft` and `PATCH /api/orders/:id`
+  alike.  Managers already own the POs they file, so there was never a reason
+  the owner had to be a purchaser.  Both pickers now list every active member,
+  purchasers first, and the backend accepts any active member as the owner —
+  unknown, inactive and malformed ids still fail with 400.  Stage rights are
+  unchanged: they come from the actor's role, never from ownership, so a
+  purchaser still cannot take a manager-owned PO past In Transit (RS-030).
+
 ## [1.130.0] - 2026-09-07
 
 ### Added

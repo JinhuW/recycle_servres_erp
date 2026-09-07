@@ -336,24 +336,25 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     return () => { alive = false; };
   }, []);
 
-  // A manager may hand the PO to a different purchaser (or take it back) at
-  // any stage short of Done — ownership drives commission and "my orders".
+  // A manager may hand the PO to any other member — purchaser or manager —
+  // (or take it back) at any stage short of Done; ownership drives commission
+  // and "my orders".
   const [ownerId, setOwnerId] = useState(order.userId);
-  const [purchasers, setPurchasers] = useState<{ id: string; name: string }[]>([]);
+  const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     if (isPurchaser) return;
     let alive = true;
-    api.get<{ items: { id: string; name: string; role: string }[] }>('/api/members')
-      .then(r => { if (alive) setPurchasers(r.items.filter(m => m.role === 'purchaser')); })
+    api.get<{ items: { id: string; name: string }[] }>('/api/members')
+      .then(r => { if (alive) setMembers(r.items); })
       .catch(handleFetchError);
     return () => { alive = false; };
   }, [isPurchaser]);
   const ownerDirty = ownerId !== order.userId;
-  // The member list holds purchasers only; the current owner (possibly a
-  // manager) and the signed-in manager both need a row so the select can
-  // show the order as-is and offer "take it back".
+  // The member list holds active members only; a deactivated owner still
+  // needs a row so the select can show the order as-is. The signed-in user is
+  // ensured too, so the list never loses "take it back" while it loads.
   const ownerOptions = useMemo(() => {
-    const opts = purchasers.map(p => ({ ...p }));
+    const opts = members.map(m => ({ ...m }));
     const ensure = (id?: string, name?: string | null) => {
       if (!id || opts.some(o => o.id === id)) return;
       opts.unshift({ id, name: name ?? id });
@@ -361,7 +362,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     ensure(order.userId, order.userName);
     ensure(user?.id, user?.name);
     return opts;
-  }, [purchasers, order.userId, order.userName, user?.id, user?.name]);
+  }, [members, order.userId, order.userName, user?.id, user?.name]);
 
   // Escape closes the drawer; if none open, closes the page.
   // When the delete modal is open, Escape dismisses it (if not mid-delete)

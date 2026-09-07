@@ -5,6 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-030](./RS-030-let-the-po-owner-picker-offer-managers-as-well-as-pu.md) | in-progress | story | P2 | Let the PO owner picker offer managers as well as purchasers | — |
+| [RS-029](./RS-029-colour-the-ram-groups-and-split-the-packing-list-ont.md) | in-progress | story | P2 | Colour the RAM groups and split the packing list onto its own download | 1.130.0 |
 | [RS-028](./RS-028-group-the-price-template-s-ram-tab-by-device-type-an.md) | done | story | P2 | Group the price template's RAM tab by device type and DDR generation | 1.129.0 |
 | [RS-027](./RS-027-telemetry-is-dropped-exactly-when-the-app-is-worst.md) | done | bug | P2 | Telemetry is dropped exactly when the app is worst | 1.128.1 |
 | [RS-026](./RS-026-group-a-pending-payment-leg-with-its-settled-sibling.md) | done | task | P2 | Group a pending payment leg with its settled sibling | 1.128.0 |
