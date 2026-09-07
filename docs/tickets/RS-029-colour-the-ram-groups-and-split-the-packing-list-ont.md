@@ -7,8 +7,8 @@ priority: P2
 created: 2026-09-07
 reporter: Jinhu
 branch: feat/packing-slip-export
-pr:
-version:
+pr: 283
+version: 1.130.0
 related: [RS-028]
 ---
 
@@ -43,24 +43,24 @@ colours on the device column, generation colours on the generation column).
 
 ## Acceptance criteria
 
-- [ ] The bid sheet's RAM tab tints each group: the device label column by
+- [x] The bid sheet's RAM tab tints each group: the device label column by
       device, the generation label column by generation, and each data row by
       a paler wash of its generation. The `Unit Price` column keeps its yellow
       fill — that fill is what tells a vendor where to type.
-- [ ] `GET /api/sell-orders/:id/price-template` returns category tabs only.
+- [x] `GET /api/sell-orders/:id/price-template` returns category tabs only.
       No `Pack - <wh>` tab is in that workbook any more.
-- [ ] A new `GET /api/sell-orders/:id/packing-list` returns the
+- [x] A new `GET /api/sell-orders/:id/packing-list` returns the
       `Pack - <wh>` tabs as their own workbook, manager-only, 404 on an
       unknown order, filename `…-packing-list-<date>.xlsx`.
-- [ ] The sell-order detail footer has a second download button for it,
+- [x] The sell-order detail footer has a second download button for it,
       beside the existing bid-sheet one, with EN + ZH strings.
-- [ ] The pack tabs carry the same merged group labels and tints as the bid
+- [x] The pack tabs carry the same merged group labels and tints as the bid
       tab's RAM section, on the same two leading columns.
-- [ ] Row order is byte-identical between the two files — a picker and a
+- [x] Row order is byte-identical between the two files — a picker and a
       bidder still find a product in the same place.
-- [ ] SSD / HDD / Other tabs are unchanged, and the price import round-trip
+- [x] SSD / HDD / Other tabs are unchanged, and the price import round-trip
       still parses the bid sheet.
-- [ ] Uploading the *packing* workbook to the price import is rejected as
+- [x] Uploading the *packing* workbook to the price import is rejected as
       having no price column, rather than silently matching nothing.
 
 ## Out of scope
