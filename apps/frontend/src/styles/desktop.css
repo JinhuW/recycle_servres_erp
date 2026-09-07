@@ -3324,3 +3324,95 @@ html.desktop, body.desktop, .desktop #root {
 @media (prefers-reduced-motion: reduce) {
   .pay-sec { transition: none; }
 }
+
+/* ===== Facebook fleet (coordinator page) =====
+   The accounts table, per-item search phrases, settings list and coverage map
+   on the Facebook-tracker page. Shared with the standalone dashboard rs-console
+   serves — keep the class names in step with facebook_tracker/rs_console. */
+.fl-status { display: inline-flex; align-items: center; gap: 8px; }
+.fl-status .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.fl-status .dot.stale { background: var(--warn); }
+.fl-status .dot.dead  { background: var(--neg); }
+.fl-status .dot.unknown,
+.fl-status .dot.none  { background: var(--border-strong); }
+
+.fl-account { font-size: 12px; color: var(--fg-muted); margin-top: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-family: 'Inter', system-ui, sans-serif; }
+.fl-account .sep { color: var(--fg-subtle); }
+.fl-account .mono { font-size: 11.5px; }
+.fl-row { cursor: pointer; }
+.fl-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fl-row[aria-expanded="true"] td { background: var(--bg-soft); }
+.fl-row .caret { color: var(--fg-subtle); transition: transform 0.15s; }
+.fl-row[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.fl-row.needs-attention td { background: var(--warn-soft); }
+.fl-detail td { padding: 0 !important; background: var(--bg-soft); }
+.fl-detail-inner {
+  display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px 28px;
+  padding: 14px 18px 18px 42px;
+  border-top: 1px dashed var(--border);
+}
+.fl-detail-inner dl {
+  margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px;
+  font-size: 12.5px; align-content: start;
+}
+.fl-detail-inner dt { color: var(--fg-subtle); }
+.fl-detail-inner dd { margin: 0; overflow-wrap: anywhere; }
+.fl-section-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-subtle); margin-bottom: 6px;
+}
+.fl-cities { display: flex; flex-wrap: wrap; gap: 6px; }
+.fl-cities .chip .n { font-weight: 600; opacity: 0.8; }
+
+/* Phrases render as what they are: literal search-bar text. */
+.fl-phrase {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 8px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;
+  background: var(--bg-soft); border: 1px solid var(--border-strong);
+}
+.fl-phrase .icon { color: var(--fg-subtle); }
+.fl-item { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.fl-item + .fl-item { border-top: 1px solid var(--border); }
+.fl-item.off { opacity: 0.6; }
+.fl-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fl-item-head .name { font-weight: 600; font-size: 13.5px; }
+.fl-item-desc { font-size: 12.5px; color: var(--fg-muted); max-width: 70ch; }
+.fl-rule { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: var(--fg-muted); overflow-wrap: anywhere; }
+.fl-rule + .fl-rule { margin-top: 4px; }
+.fl-rules { display: grid; grid-template-columns: 90px 1fr; gap: 8px 12px; font-size: 12.5px; align-items: baseline; }
+.fl-rules .k { color: var(--fg-subtle); }
+
+.fl-settings { margin: 0; display: grid; grid-template-columns: 1fr; }
+.fl-settings > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 18px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.fl-settings > div:last-child { border-bottom: none; }
+.fl-settings dt { color: var(--fg-muted); }
+.fl-settings dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+
+.fl-region { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.fl-region + .fl-region { border-top: 1px solid var(--border); }
+.fl-region-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fl-region-head .name { font-weight: 600; font-size: 13.5px; }
+.fl-region-head .count { color: var(--fg-subtle); font-size: 12.5px; }
+.fl-legend { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--fg-subtle); flex-wrap: wrap; }
+.fl-legend .chip .n { font-weight: 600; opacity: 0.8; margin-left: 4px; }
+.fl-empty { padding: 14px 18px; color: var(--fg-subtle); font-size: 13px; }
+/* "2 / 7": the denominator sits beside the big number, quieter and smaller. */
+.kpi-value .fl-of { font-size: 14px; font-weight: 500; color: var(--fg-subtle); margin-left: 6px; }
+
+.card-note {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 14px 18px; color: var(--fg-muted); font-size: 12.5px;
+  border-bottom: 1px solid var(--border);
+}
+.card-note .icon { margin-top: 2px; color: var(--fg-subtle); flex-shrink: 0; }
+.card > .card-note:last-child { border-bottom: none; }
+
+.fl-cities mark, .fl-phrase mark, .fl-rule mark, .fl-row mark, .fl-item mark, .fl-region mark {
+  background: color-mix(in oklch, var(--warn) 45%, transparent); color: inherit;
+  border-radius: 3px; padding: 0 1px;
+}
+
+@media (max-width: 1000px) {
+  .fl-detail-inner { grid-template-columns: 1fr; padding-left: 18px; }
+}
