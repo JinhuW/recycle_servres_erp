@@ -40,22 +40,40 @@ reach a portal through a URL token.
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Done.
+moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done.
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
-- **Purchasers edit until Done.** A material edit sends the PO back to Draft
-  and raises a change-review dialog for the manager, showing the full field and
-  line diff (v1.97.0). Notes, photos and attachments don't trigger it. A
-  reverted order is a Draft that was already submitted, so deleting it archives
-  rather than wipes.
+- **Purchasers edit until the review closes.** A material edit sends the PO
+  back to Draft and raises a change-review dialog for the manager, showing the
+  full field and line diff (v1.97.0). Notes, photos and attachments don't
+  trigger it. A reverted order is a Draft that was already submitted, so
+  deleting it archives rather than wipes. The window used to run until Done;
+  it now ends at Ready to Pay (v1.132.0).
+- **Ready to Pay sits between Reviewing and Done** (v1.132.0): the review is
+  finished and the purchaser's commission is owed; Done means it was paid.
+  The book closes at Ready to Pay — lines, costs, payment reference and
+  ownership freeze, notes still append, shipments and line goods edits refuse
+  — and the PO's lines read Done for every stock and sellable bucket. Managers
+  and the owner are notified when a PO reaches it. The stage is a PO stage
+  only: it can't be written as a line status.
+- **Only the warehouse's manager takes a PO into Reviewing or Ready to Pay**
+  (v1.132.0): the manager linked to the PO's warehouse in Settings, including
+  stage-jumps that pass through either stage. Both shells lock the step for
+  everyone else and say who can; the desktop lock follows the warehouse
+  selected in the form. A PO with no warehouse, or a warehouse with no usable
+  manager, is open to any manager. Ready to Pay → Done and every backward
+  move stay open to every manager.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement
   included. Self-pay POs are unaffected. The rule governs only orders created
   after it reached the environment, so POs already on file stay exempt. Mobile
   gained the field as an input; it used to be read-only there.
-- Managers can reopen a Done PO back to Reviewing (v1.81.0).
+- Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
+  v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing; any move
+  that pulls lines off Done is refused while a line sits on an open sell
+  order.
 - **Costs split into a goods total and other fees** (v1.43.0); a goods overflow
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
   commission is calculated from. `orders.category` and `orders.total_cost` are
@@ -366,7 +384,9 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10);
-the contributor leaderboard uses projected Done-PO profit (v1.0.1).
+the contributor leaderboard uses projected Done-PO profit (v1.0.1). Both
+count a PO from Ready to Pay on, when its commission becomes owed
+(v1.132.0).
 
 ## Oversight extras
 

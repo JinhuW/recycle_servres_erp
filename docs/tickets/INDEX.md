@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-030](./RS-030-let-the-po-owner-picker-offer-managers-as-well-as-pu.md) | done | story | P2 | Let the PO owner picker offer managers as well as purchasers | — |
+| [RS-032](./RS-032-add-a-ready-to-pay-stage-for-the-purchaser-s-commiss.md) | in-review | story | P2 | Add a Ready to Pay stage for the purchaser's commission | — |
+| [RS-031](./RS-031-only-the-warehouse-manager-moves-a-po-into-reviewing.md) | in-review | story | P2 | Only the warehouse manager moves a PO into Reviewing | — |
+| [RS-030](./RS-030-let-the-po-owner-picker-offer-managers-as-well-as-pu.md) | done | story | P2 | Let the PO owner picker offer managers as well as purchasers | 1.131.0 |
 | [RS-029](./RS-029-colour-the-ram-groups-and-split-the-packing-list-ont.md) | in-progress | story | P2 | Colour the RAM groups and split the packing list onto its own download | 1.130.0 |
 | [RS-028](./RS-028-group-the-price-template-s-ram-tab-by-device-type-an.md) | done | story | P2 | Group the price template's RAM tab by device type and DDR generation | 1.129.0 |
 | [RS-027](./RS-027-telemetry-is-dropped-exactly-when-the-app-is-worst.md) | done | bug | P2 | Telemetry is dropped exactly when the app is worst | 1.128.1 |
