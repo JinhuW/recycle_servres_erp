@@ -23,9 +23,10 @@ dashboard.get('/', async (c) => {
   // Two financial lenses, never mixed on one screen — keyed off effectiveRole:
   //  - Managers see REALIZED sales: revenue/profit/commission from
   //    sell_order_lines of Done sell orders, priced at sol.unit_price, team-wide.
-  //  - Purchasers see PROJECTED profit from their OWN Done purchase orders — the
-  //    margin "set" on each line, (sell_price - unit_cost) * qty. It lands on the
-  //    dashboard the moment the PO's lifecycle flips to 'done'.
+  //  - Purchasers see PROJECTED profit from their OWN reviewed purchase orders —
+  //    the margin "set" on each line, (sell_price - unit_cost) * qty. It lands on
+  //    the dashboard the moment the PO reaches Ready to Pay: that is when the
+  //    commission becomes owed, and Done only records that it was paid.
   // A line nobody has priced is not a sale at cost. Its NULL sell_price drops
   // out of every SUM below, and the recent-activity rows state no profit rather
   // than $0 — the strip sits directly under the KPI tiles, so a row claiming a
@@ -36,10 +37,10 @@ dashboard.get('/', async (c) => {
   const salePrevWin = sql`so.status = 'Done'
                           AND so.updated_at >= NOW() - (${days * 2} || ' days')::interval
                           AND so.updated_at <  NOW() - (${days}     || ' days')::interval`;
-  // Projected windows key off the PO's own created_at; only the purchaser's Done POs count.
-  const projDateWin = sql`po.lifecycle = 'done' AND po.user_id = ${u.id}
+  // Projected windows key off the PO's own created_at; only the purchaser's reviewed POs count.
+  const projDateWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
                           AND po.created_at >= NOW() - (${days} || ' days')::interval`;
-  const projPrevWin = sql`po.lifecycle = 'done' AND po.user_id = ${u.id}
+  const projPrevWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
                           AND po.created_at >= NOW() - (${days * 2} || ' days')::interval
                           AND po.created_at <  NOW() - (${days}     || ' days')::interval`;
   // The "Recent activity" panel always tracks ingest (the purchasing pipeline).
@@ -163,7 +164,7 @@ dashboard.get('/', async (c) => {
                    COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
             FROM series s
             LEFT JOIN orders po
-              ON po.lifecycle = 'done'
+              ON po.lifecycle IN ('ready_to_pay', 'done')
              AND po.user_id = ${u.id}
              AND po.created_at >= s.week_start
              AND po.created_at <  s.week_start + INTERVAL '1 week'
@@ -173,8 +174,8 @@ dashboard.get('/', async (c) => {
           `,
       // Leaderboard — projected per purchaser (the PO owner), same lens as the
       // purchaser dashboard: (sell_price - unit_cost) * qty over each purchaser's
-      // Done PO lines, windowed on the PO created_at. LEFT JOIN keeps purchasers
-      // with no Done POs on the board with 0s.
+      // reviewed PO lines, windowed on the PO created_at. LEFT JOIN keeps
+      // purchasers with no such POs on the board with 0s.
       sql<{
         id: string; name: string; initials: string; email: string; role: string;
         count: number; revenue: number; profit: number; commission: number;
@@ -189,7 +190,7 @@ dashboard.get('/', async (c) => {
           FROM order_lines ol
           JOIN orders po ON po.id = ol.order_id
           ${feeBasis}
-          WHERE po.lifecycle = 'done' AND po.created_at >= NOW() - (${days} || ' days')::interval
+          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= NOW() - (${days} || ' days')::interval
           GROUP BY po.user_id
         )
         SELECT u.id, u.name, u.initials, u.email, u.role,

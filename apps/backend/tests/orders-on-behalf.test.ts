@@ -306,23 +306,26 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     expect(r.body.error).toMatch(/member/i);
   });
 
-  it('refuses to move ownership of a Done order', async () => {
-    const alex = await loginAs(ALEX);
-    const marcus = await loginAs(MARCUS);
+  // Ownership decides whose commission the closed book pays, so it freezes
+  // with the rest from Ready to Pay on.
+  for (const stage of ['ready_to_pay', 'done']) {
+    it(`refuses to move ownership of a ${stage} order`, async () => {
+      const alex = await loginAs(ALEX);
+      const marcus = await loginAs(MARCUS);
 
-    const created = await api<{ id: string }>('POST', '/api/orders', {
-      token: alex.token, body: {
-        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
-    });
-    for (let i = 0; i < 3; i++) {
-      const adv = await api('POST', `/api/orders/${created.body.id}/advance`, { token: alex.token });
+      const created = await api<{ id: string }>('POST', '/api/orders', {
+        token: alex.token, body: {
+          paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
+      });
+      const adv = await api('POST', `/api/orders/${created.body.id}/advance`, {
+        token: alex.token, body: { toStage: stage } });
       expect(adv.status).toBe(200);
-    }
-    const r = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
-      token: alex.token, body: { onBehalfOfUserId: marcus.user.id },
+      const r = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
+        token: alex.token, body: { onBehalfOfUserId: marcus.user.id },
+      });
+      expect(r.status).toBe(409);
     });
-    expect(r.status).toBe(409);
-  });
+  }
 
   it('writes no event when the target already owns the order', async () => {
     const alex = await loginAs(ALEX);

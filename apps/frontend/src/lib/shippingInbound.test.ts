@@ -164,6 +164,7 @@ describe('shared row predicates (desktop chips/CTAs use these too)', () => {
   it('needsCompletePo: delivered and the book still open; unknown lifecycle stays quiet', () => {
     expect(needsCompletePo('delivered', 'confirmed')).toBe(true);
     expect(needsCompletePo('delivered', 'done')).toBe(false);
+    expect(needsCompletePo('delivered', 'ready_to_pay')).toBe(false);
     expect(needsCompletePo('delivered', undefined)).toBe(false);
     expect(needsCompletePo('in_transit', 'confirmed')).toBe(false);
   });

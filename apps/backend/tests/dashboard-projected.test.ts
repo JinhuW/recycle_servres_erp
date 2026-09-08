@@ -121,6 +121,21 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     expect(mine.commission).toBeCloseTo(r.body.kpis.commission, 2);
   });
 
+  it('a PO counts from Ready to Pay on — that is when the commission is owed', async () => {
+    await clearWindow();
+    await insertDonePO('PO-PROJ-RTP', MARCUS, { rate: 0.1, lifecycle: 'reviewing' },
+      [{ unitCost: 10, sellPrice: 200, qty: 4 }]);
+
+    const { token } = await loginAs(MARCUS);
+    const before = await api<{ kpis: { profit: number; count: number } }>('GET', '/api/dashboard?range=30d', { token });
+    expect(before.body.kpis.count).toBe(0);
+
+    await getTestDb()`UPDATE orders SET lifecycle = 'ready_to_pay' WHERE id = 'PO-PROJ-RTP'`;
+    const after = await api<{ kpis: { profit: number; count: number } }>('GET', '/api/dashboard?range=30d', { token });
+    expect(after.body.kpis.profit).toBeCloseTo((200 - 10) * 4, 2);
+    expect(after.body.kpis.count).toBe(1);
+  });
+
   it('a PO contributes nothing until its lifecycle flips to done', async () => {
     await clearWindow();
     await insertDonePO('PO-PROJ-INTRANSIT', MARCUS, { rate: 0.1, lifecycle: 'in_transit' },

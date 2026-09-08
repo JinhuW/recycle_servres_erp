@@ -19,7 +19,7 @@ import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
-import { canCreatePo, groupInbound, inboundAction, journeyPos, type InboundAction } from '../lib/shippingInbound';
+import { canCreatePo, groupInbound, inboundAction, journeyPos, needsCompletePo, type InboundAction } from '../lib/shippingInbound';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import type { Order, Shipment } from '../lib/types';
 
@@ -779,7 +779,7 @@ function PoShippingScreen({ orderId, showToast }: { orderId: string; showToast: 
                   <Icon name="mail" size={14} /> {t('shipMobShareLink')}
                 </button>
               )}
-              {s.status === 'delivered' && order.lifecycle !== 'done' && (
+              {needsCompletePo(s.status, order.lifecycle) && (
                 <button className="ph-ship-cta accent" onClick={() => navigate(`/purchase-orders/${order.id}`)}>
                   {t('shipCompletePo')}
                 </button>

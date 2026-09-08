@@ -17,6 +17,45 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.132.0] - 2026-09-07
+
+### Added
+
+- **A Ready to Pay stage between Reviewing and Done.**  Done used to carry two
+  meanings at once — the review is finished, and the purchaser's commission is
+  settled — with nothing recording the gap between them.  A PO now moves
+  Draft → In Transit → Reviewing → Ready to Pay → Done: Ready to Pay says the
+  goods were checked and the commission is owed; Done says it was paid.  The
+  book closes at Ready to Pay rather than Done, because the figure is what the
+  purchaser gets paid on — lines, costs, the payment reference and ownership
+  freeze there, notes still append, and shipments and line goods edits refuse
+  as they did for Done.  The purchaser's edit window ends there too.  Lines
+  keep reading Done for every stock and sellable bucket, so inventory never
+  learned a fifth value.  Managers and the PO's owner are notified when a PO
+  reaches Ready to Pay; the dashboard's projected commission counts a PO from
+  that moment.  Managers can move Done back to Ready to Pay and Ready to Pay
+  back to Reviewing, under the same committed-line guard as the existing Done
+  → Reviewing reopen.  Both shells show the stage on the stepper, the list
+  chips, the activity log and the analysis colours; "hide Done" keeps Ready to
+  Pay visible (RS-032).
+
+### Changed
+
+- **Review is the warehouse manager's call.**  Any manager could take a PO
+  from In Transit into Reviewing.  It now has to be the manager linked to the
+  PO's warehouse in Settings → Warehouses — for the move into Reviewing, the
+  move into Ready to Pay, and any stage-jump that passes through either.  The
+  refusal names who can and the stage that was asked for.  A PO with no
+  warehouse, or a warehouse whose manager is unassigned, demoted or
+  deactivated, stays open to any manager, so no order can get stuck behind an
+  empty gate.  Ready to Pay → Done and every backward move stay open to every
+  manager.  The desktop stepper locks the steps for everyone else and says who
+  can take them, following the warehouse selected in the form; the mobile
+  page hides its advance button and says the same (RS-031).
+- A stage label can no longer be written as a *line* status through the
+  inventory editor: the line status select offers only the four inventory
+  values, and the API refuses anything else with a 400.
+
 ## [1.131.0] - 2026-09-07
 
 ### Changed

@@ -18,20 +18,12 @@ import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
 import { normalizePaypalTxnInput } from '../lib/paypalTxn';
-import { ORDER_STATUSES, statusTone, isCompleted } from '../lib/status';
+import {
+  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
+} from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
 import type { Category, Order, OrderLine, Warehouse } from '../lib/types';
 import { loadWarehouses } from '../lib/warehouses';
-
-// `order.status` can collapse to 'Mixed' when an order's lines disagree, which
-// would falsely lock the owner out. `lifecycle` is authoritative, so we map it
-// to the canonical status and only fall back for unknown lifecycles.
-const LIFECYCLE_STATUS: Record<string, string> = {
-  draft: 'Draft',
-  in_transit: 'In Transit',
-  reviewing: 'Reviewing',
-  done: 'Done',
-};
 
 // How many of a line's photos the row shows before it offers the rest. Four
 // 44px tiles is what fits next to the line's controls on a small phone.
@@ -77,7 +69,9 @@ export function OrderDetail({
 
   const isPurchaser = user?.role !== 'manager';
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
-  const orderLocked = isCompleted(effectiveStatus);
+  // Locked from Ready to Pay on: the review is over and the figure is what
+  // the purchaser gets paid on.
+  const orderLocked = isClosedBook(effectiveStatus);
   // The purchaser keeps their order until it is Done. Past Draft the edit
   // costs them the stage: the backend sends the order back to Draft, so
   // `revertOnSave` warns before the first write that does it.
@@ -293,13 +287,17 @@ export function OrderDetail({
   };
 
   // Submitting is the purchaser's one stage move — everything past it belongs
-  // to the manager, and the backend rejects the rest from them anyway.
+  // to the manager, and the backend rejects the rest from them anyway. Into
+  // Reviewing and Ready to Pay it has to be the warehouse's own manager; the
+  // button here posts against the saved warehouse, so the gate reads that.
+  const gateWarehouse = warehouses.find(w => w.id === order.warehouse?.id);
+  const gateLocked = isPurchaser ? [] : warehouseGateLockedStatuses(effectiveStatus, gateWarehouse, user?.id);
   const nextStatus: string | null = (() => {
     if (effectiveStatus === 'Draft') return 'In Transit';
     if (isPurchaser) return null;
-    if (effectiveStatus === 'In Transit') return 'Reviewing';
-    if (effectiveStatus === 'Reviewing') return 'Done';
-    return null;
+    const i = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
+    const next = i >= 0 ? ORDER_STATUSES[i + 1] ?? null : null;
+    return next && !gateLocked.includes(next) ? next : null;
   })();
   const canAdvance = !!nextStatus && !advancing && !saving;
 
@@ -393,11 +391,11 @@ export function OrderDetail({
   const cats = addableCategories();
 
   const currentIdx = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
-  const purchaserCanReachIdx = isPurchaser
-    ? (effectiveStatus === 'Draft' ? ORDER_STATUSES.indexOf('In Transit')
-      : effectiveStatus === 'In Transit' ? ORDER_STATUSES.indexOf('Reviewing')
-      : currentIdx)
-    : ORDER_STATUSES.length - 1;
+  // The furthest dot this user could reach: purchasers stop at In Transit,
+  // a manager held by the warehouse gate stops just short of it.
+  const canReachIdx = isPurchaser
+    ? (effectiveStatus === 'Draft' ? ORDER_STATUSES.indexOf('In Transit') : currentIdx)
+    : gateLocked.length ? ORDER_STATUSES.indexOf(gateLocked[0]) - 1 : ORDER_STATUSES.length - 1;
 
   return (
     <div className="phone-app">
@@ -438,9 +436,9 @@ export function OrderDetail({
               const reached = currentIdx >= 0 && i <= currentIdx;
               const active = i === currentIdx;
               const tone = statusTone(s);
-              const locked = isPurchaser && i > purchaserCanReachIdx;
+              const locked = i > canReachIdx;
               const dotColor = active
-                ? `var(--${tone === 'warn' ? 'warn' : tone === 'pos' ? 'pos' : tone === 'info' ? 'info-strong, var(--info)' : 'fg'})`
+                ? `var(--${tone === 'warn' ? 'warn' : tone === 'pos' ? 'pos' : tone === 'info' ? 'info-strong, var(--info)' : tone === 'accent' ? 'accent' : 'fg'})`
                 : reached
                   ? 'var(--fg)'
                   : 'var(--border-strong)';
@@ -485,9 +483,9 @@ export function OrderDetail({
               <Icon name="flag" size={14} />
               {advancing
                 ? t('advancing')
-                : (nextStatus === 'Done'
-                    ? t('lifecycleMarkDone')
-                    : t('lifecycleAdvance', { status: nextStatus }))}
+                : nextStatus === 'Done' ? t('lifecycleMarkDone')
+                  : nextStatus === 'Ready to Pay' ? t('lifecycleMarkReadyToPay')
+                  : t('lifecycleAdvance', { status: nextStatus })}
             </button>
           )}
           {!nextStatus && orderLocked && (
@@ -497,7 +495,21 @@ export function OrderDetail({
               fontSize: 12, display: 'flex', alignItems: 'center', gap: 8,
               border: '1px solid var(--border)',
             }}>
-              <Icon name="lock" size={12} /> {t('lifecycleDoneNote')}
+              <Icon name="lock" size={12} />
+              {effectiveStatus === 'Ready to Pay' ? t('lifecycleReadyToPayNote') : t('lifecycleDoneNote')}
+            </div>
+          )}
+          {!nextStatus && !orderLocked && !isPurchaser && gateLocked.length > 0 && (
+            <div style={{
+              marginTop: 12, padding: '8px 12px', borderRadius: 10,
+              background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
+              fontSize: 12, display: 'flex', alignItems: 'center', gap: 8,
+              border: '1px solid var(--border)',
+            }}>
+              <Icon name="lock" size={12} />
+              {t('lifecycleWarehouseMgrLock', {
+                name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0],
+              })}
             </div>
           )}
           {!nextStatus && !orderLocked && isPurchaser && effectiveStatus === 'Reviewing' && (

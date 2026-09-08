@@ -21,6 +21,7 @@ const shipLog = log.child({ module: 'shipping' });
 import { pickShippingClient, carrierTrackingUrl } from '../shipping';
 import type { RateQuote, ShipAddress, ShipPackage, ShipmentStatus } from '../shipping';
 import { canTransition } from '../shipping/status';
+import { isClosedBook } from '../services/orderAdvance';
 
 const shipments = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
@@ -277,7 +278,7 @@ shipments.post('/:orderId/shipments', async (c) => {
   const order = await loadOrder(sql, orderId);
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (!canMutate(u, order)) return c.json({ error: 'Forbidden' }, 403);
-  if (order.lifecycle === 'done') return c.json({ error: 'Order is done — its book is closed' }, 409);
+  if (isClosedBook(order.lifecycle)) return c.json({ error: 'Order has been reviewed — its book is closed' }, 409);
 
   const body = (await c.req.json().catch(() => null)) as
     | { from?: unknown; package?: unknown; sellerFill?: boolean }
@@ -458,7 +459,7 @@ shipments.post('/:orderId/shipments/:sid/buy', async (c) => {
   const order = await loadOrder(sql, orderId);
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (!canMutate(u, order)) return c.json({ error: 'Forbidden' }, 403);
-  if (order.lifecycle === 'done') return c.json({ error: 'Order is done — its book is closed' }, 409);
+  if (isClosedBook(order.lifecycle)) return c.json({ error: 'Order has been reviewed — its book is closed' }, 409);
 
   const body = (await c.req.json().catch(() => null)) as
     | { rateId?: string; expectedAmount?: number }
@@ -610,7 +611,7 @@ shipments.post('/:orderId/shipments/:sid/void', async (c) => {
   const order = await loadOrder(sql, orderId);
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (!canMutate(u, order)) return c.json({ error: 'Forbidden' }, 403);
-  if (order.lifecycle === 'done') return c.json({ error: 'Order is done — its book is closed' }, 409);
+  if (isClosedBook(order.lifecycle)) return c.json({ error: 'Order has been reviewed — its book is closed' }, 409);
 
   const shipment = (await sql`
     SELECT ${SHIPMENT_COLS(sql)} FROM shipments WHERE id = ${sid} AND order_id = ${orderId} LIMIT 1

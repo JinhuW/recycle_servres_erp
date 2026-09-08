@@ -17,7 +17,7 @@ import {
   STATUS_CHIP, filterInbound, fmtEta, inboundCarriers, inboundCounts,
   inboundToCsv, mergeInbound, type ShipOrder, type ShipRow,
 } from '../../lib/shippingList';
-import { canCreatePo, needsCompletePo, waitingSeller } from '../../lib/shippingInbound';
+import { bookClosed, canCreatePo, needsCompletePo, waitingSeller } from '../../lib/shippingInbound';
 import { useEffectiveUser } from '../../lib/tweaks';
 import type { Order, Shipment, ShipmentStatus } from '../../lib/types';
 import { ShippingAddLabel } from './ShippingAddLabel';
@@ -83,7 +83,7 @@ function FocusedShipping({ orderId }: { orderId: string }) {
     return () => { alive = false; };
   }, [orderId]);
 
-  const canEdit = !!order && !order.archivedAt && order.lifecycle !== 'done'
+  const canEdit = !!order && !order.archivedAt && !bookClosed(order.lifecycle)
     && (user?.role === 'manager' || order.userId === user?.id);
 
   return (

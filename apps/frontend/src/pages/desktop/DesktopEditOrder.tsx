@@ -5,7 +5,9 @@ import { useAuth } from '../../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
-import { ORDER_STATUSES, statusTone, isCompleted } from '../../lib/status';
+import {
+  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
+} from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
@@ -59,13 +61,8 @@ import { loadWarehouses } from '../../lib/warehouses';
 // lines were autosaved as 'In Transit'. Gating edit-access on that ambiguous
 // string locked purchasers out of their own draft. `lifecycle` is the
 // authoritative stage (see orders.ts), so derive the canonical status from it
-// and only fall back to the derived string for unknown lifecycles.
-const LIFECYCLE_STATUS: Record<string, string> = {
-  draft: 'Draft',
-  in_transit: 'In Transit',
-  reviewing: 'Reviewing',
-  done: 'Done',
-};
+// (LIFECYCLE_STATUS) and only fall back to the derived string for unknown
+// lifecycles.
 
 type Props = {
   order: Order;
@@ -96,27 +93,39 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Edit-gating keys off the authoritative lifecycle, not the 'Mixed'-prone
   // derived status, so an owner is never locked out of their own draft.
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
-  const orderLocked = isCompleted(effectiveStatus);
-  // The purchaser keeps their order until it is Done. Editing it after
-  // submission is allowed and costs them the stage: the backend sends it back
-  // to Draft, so `revertOnSave` warns before the first such save.
+  // Locked from Ready to Pay on: the review is over and the figure is what
+  // the purchaser gets paid on. Managers keep the stage moves (below).
+  const orderLocked = isClosedBook(effectiveStatus);
+  // The purchaser keeps their order until the review closes it. Editing it
+  // after submission is allowed and costs them the stage: the backend sends it
+  // back to Draft, so `revertOnSave` warns before the first such save.
   const purchaserCanEdit = !isPurchaser || !orderLocked;
   const canEditOrder = purchaserCanEdit && !orderLocked;
   const revertOnSave = isPurchaser && !orderLocked && effectiveStatus !== 'Draft';
   // Notes and submission evidence outlive the purchaser's edit window: the
   // manager owns pricing from Reviewing on, but whoever raised the PO can keep
-  // documenting it until Done. Mirrors the backend's notes-only gate.
+  // documenting it until the book closes. Mirrors the backend's notes-only
+  // gate.
   const isOwnerOrManager = !isPurchaser || order.userId === user?.id;
   const canAnnotate = !orderLocked && isOwnerOrManager;
-  // A Done order is a closed book, but managers keep one backward move:
-  // send it back to Reviewing (the backend guards lines committed to open
-  // sell orders). Everything else stays read-only until that reopen lands.
+  // A closed order keeps its stage moves for managers: Done can go back to
+  // Ready to Pay or Reviewing, Ready to Pay forward to Done or back to
+  // Reviewing (the backend guards lines committed to open sell orders).
+  // Everything else stays read-only until such a move lands.
   const canReopen = !isPurchaser && orderLocked;
+  const REOPEN_TARGETS: Record<string, string[]> = {
+    'Done': ['Reviewing', 'Ready to Pay'],
+    'Ready to Pay': ['Reviewing', 'Done'],
+  };
   const [status, setStatus] = useState(effectiveStatus);
   // The stage as last written. Normally the one the page opened with, but a
   // save that has to keep the user here (a photo upload that failed) has
   // already advanced the order — re-sending it would step it on again.
   const [savedStatus, setSavedStatus] = useState(effectiveStatus);
+  // Declared up here because the stepper gate below reads the selected
+  // warehouse; the field itself renders with the rest of the order details.
+  const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   // Submitting is the one stage move a purchaser makes. Everything after it is
   // the manager's, and a purchaser edit moves the stage on its own — so past
   // Draft the stepper offers nothing to pick.
@@ -125,9 +134,22 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // back to Draft has already moved the stage, and the prop does not refetch
   // while this page is open. Reading the prop leaves the purchaser told to
   // "submit it again" with only the stage they just left on offer.
+  //
+  // A manager who is not the warehouse's manager is held off Reviewing and
+  // Ready to Pay (and any jump past them). The gate follows the warehouse
+  // *selected* in the form — Save writes it before it advances — so picking
+  // another warehouse can lock or unlock the steps on the spot.
+  const gateWarehouse = warehouses.find(w => w.id === warehouseId);
+  const gateLocked = useMemo(
+    () => (isPurchaser ? [] : warehouseGateLockedStatuses(savedStatus, gateWarehouse, user?.id)),
+    [isPurchaser, savedStatus, gateWarehouse, user?.id],
+  );
   const allowedStatuses = isPurchaser
     ? savedStatus === 'Draft' ? ['Draft', 'In Transit'] : [savedStatus]
-    : ORDER_STATUSES.slice();
+    : ORDER_STATUSES.filter(s => !gateLocked.includes(s));
+  useEffect(() => {
+    if (gateLocked.includes(status as typeof gateLocked[number])) setStatus(savedStatus);
+  }, [gateLocked, status, savedStatus]);
   // Optional Done evidence (note + attachments). The dialog live-saves to the
   // backend; these mirror its latest confirmed state for the read-only block.
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
@@ -250,7 +272,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // removed would otherwise be missed by save()'s removeLineIds diff.
   const [persistedIds, setPersistedIds] = useState<string[]>(() => order.lines.map(l => l.id));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
-  const [warehouseId, setWarehouseId] = useState<string>(order.warehouse?.id ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
   // Default to 0% when no rate has been set on the order yet, so the field
   // and the side commission summary show a concrete value out of the gate
@@ -293,7 +314,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.id]);
   const shipFees = shipSplit?.fees ?? 0;
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -1271,10 +1291,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               const active = s === status;
               const currentIdx = ORDER_STATUSES.indexOf(status as typeof ORDER_STATUSES[number]);
               const reached = currentIdx >= 0 && i <= currentIdx;
-              const locked = isPurchaser && !allowedStatuses.includes(s);
+              const locked = !allowedStatuses.includes(s);
               // On a closed order the whole stepper freezes except the
-              // manager's reopen target (Done → Reviewing).
-              const stepDisabled = locked || (orderLocked && !(canReopen && s === 'Reviewing'));
+              // manager's moves out of it (REOPEN_TARGETS).
+              const stepDisabled = locked
+                || (orderLocked && !(canReopen && REOPEN_TARGETS[savedStatus]?.includes(s)));
               return (
                 <Fragment key={s}>
                   <button
@@ -1292,7 +1313,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     }}
                     disabled={stepDisabled}
                     title={locked
-                      ? t('eoStepLockedTooltip')
+                      ? (isPurchaser
+                        ? t('eoStepLockedTooltip')
+                        : t('eoStepWarehouseMgrTooltip', {
+                          name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0] ?? s,
+                        }))
                       : t('eoSetStatusTo', { s })}
                   >
                     <span className="so-step-dot">
@@ -1315,7 +1340,20 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               border: '1px solid var(--border)',
             }}>
               <Icon name="lock" size={13} />
-              {t('eoReviewedByMgr')}
+              {effectiveStatus === 'Ready to Pay' ? t('eoReadyToPayNote') : t('eoReviewedByMgr')}
+            </div>
+          )}
+          {!isPurchaser && gateLocked.length > 0 && (
+            <div style={{
+              marginTop: 10, padding: '8px 12px', borderRadius: 8,
+              background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
+              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
+              border: '1px solid var(--border)',
+            }}>
+              <Icon name="lock" size={13} />
+              {t('eoWarehouseMgrOnly', {
+                name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0],
+              })}
             </div>
           )}
           {isPurchaser && purchaserCanEdit && effectiveStatus === 'Draft' && (
