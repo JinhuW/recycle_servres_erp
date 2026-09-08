@@ -32,7 +32,7 @@ const CAT_COLOR: Record<string, string> = {
 };
 const catColor = (c: string) => CAT_COLOR[c] ?? 'var(--fg-muted)';
 const STATUS_COLOR: Record<string, string> = {
-  Done: 'var(--accent-strong)', Reviewing: 'var(--info)',
+  Done: 'var(--accent-strong)', 'Ready to Pay': 'var(--accent)', Reviewing: 'var(--info)',
   'In Transit': 'var(--warn)', Draft: 'var(--fg-subtle)',
 };
 const statusColor = (s: string) => STATUS_COLOR[s] ?? 'var(--fg-muted)';
