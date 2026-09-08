@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.133.0] - 2026-09-07
+
+### Changed
+
+- **The Payments `Link…` button never links on its own.**  Since v1.120.0 the
+  button at the end of an unlinked row did one of two things: on a row where
+  the server had found a single confident candidate it posted the link the
+  moment it was clicked, and on every other row it opened the PO picker.
+  Nothing on the button said which, and the ellipsis promised a next step that
+  never came on exactly the rows where a wrong link costs the most.  A link is
+  an audited write that also fills the PO's transaction ID, so it is now
+  always the manager's choice: `Link…` opens the picker on every row, with the
+  ranked suggestions listed first under their own heading and free-text search
+  taking over as they type.  The picker says "showing X of Y" when the pool is
+  capped and, on a row with no candidates, invites a search instead of
+  reporting one as failed.  Its rows now wrap onto two lines, so the reason
+  chip is no longer clipped off the right edge.  The `Not it` hover button is
+  gone — it existed only as the escape hatch from the one-click link.
+- **A button that links directly names its PO.**  The per-suggestion button in
+  the expanded row reads `Link PO-1414` rather than `Link…`: it acts on the
+  click, and the PO it acts on is the row it sits in.
+
 ## [1.132.0] - 2026-09-07
 
 ### Added

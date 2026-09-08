@@ -282,9 +282,18 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   question — so a row now reads a linked PO with its cost, a suggested PO with
   the gap between the two dates, `Transfer`, `Ignored`, or `Unlinked`, and the
   freed column is an actions rail whose primary button sits at the same place on
-  every row. `Ignore`, `Not it` and `Not the same` appear on hover or keyboard
-  focus rather than standing on every row at once; a device without hover keeps
-  them visible.
+  every row. `Ignore` and `Not the same` appear on hover or keyboard focus
+  rather than standing on every row at once; a device without hover keeps them
+  visible.
+- **`Link…` always opens the picker; the manager chooses the PO** (v1.133.0).
+  Until then a row with a single confident candidate linked to it on one click,
+  with nothing on the button saying so. Now every row's `Link…` opens the PO
+  picker — ranked suggestions first under a "Suggested purchase orders" heading
+  (with "showing X of Y" when the pool is capped), "Search results" once the
+  manager types — and the link happens when they click a PO in it. The
+  per-suggestion button in the expanded row is labelled with its PO
+  (`Link PO-1414`) because it does link on the click. `Not it` is gone; it
+  existed only to escape the one-click path.
 - **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
   name, full name on hover, a dash where nobody owns it. Owner and PO are
   mutually exclusive by constraint, so the column is empty by design on the

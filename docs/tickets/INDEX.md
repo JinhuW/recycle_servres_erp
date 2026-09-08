@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-033](./RS-033-the-payments-link-button-links-without-saying-to-wha.md) | in-progress | bug | P2 | The Payments Link button links without saying to what | — |
 | [RS-032](./RS-032-add-a-ready-to-pay-stage-for-the-purchaser-s-commiss.md) | done | story | P2 | Add a Ready to Pay stage for the purchaser's commission | 1.132.0 |
 | [RS-031](./RS-031-only-the-warehouse-manager-moves-a-po-into-reviewing.md) | done | story | P2 | Only the warehouse manager moves a PO into Reviewing | 1.132.0 |
 | [RS-030](./RS-030-let-the-po-owner-picker-offer-managers-as-well-as-pu.md) | done | story | P2 | Let the PO owner picker offer managers as well as purchasers | 1.131.0 |
