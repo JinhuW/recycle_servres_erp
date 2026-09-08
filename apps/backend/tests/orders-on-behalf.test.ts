@@ -51,17 +51,65 @@ describe('POST /api/orders onBehalfOfUserId', () => {
     expect(r.status).toBe(403);
   });
 
-  it('rejects a target that is not a purchaser', async () => {
+  it('lets a manager create an order owned by another manager', async () => {
     const alex = await loginAs(ALEX);
     const sofia = await loginAs(SOFIA);
 
-    const r = await api<{ error: string }>('POST', '/api/orders', {
+    const r = await api<{ id: string }>('POST', '/api/orders', {
       token: alex.token,
       body: {
         paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: sofia.user.id },
     });
+    expect(r.status).toBe(201);
+
+    const got = await api<{ order: { userId: string } }>(
+      'GET', '/api/orders/' + r.body.id, { token: alex.token },
+    );
+    expect(got.body.order.userId).toBe(sofia.user.id);
+
+    const ev = await api<{ events: { kind: string; actor: { id: string } | null }[] }>(
+      'GET', `/api/orders/${r.body.id}/events`, { token: alex.token },
+    );
+    expect(ev.body.events.find(e => e.kind === 'created')?.actor?.id).toBe(alex.user.id);
+  });
+
+  it('rejects an inactive member', async () => {
+    const alex = await loginAs(ALEX);
+    // Log in first: deactivation revokes the session, but the id is all the
+    // test needs from it.
+    const marcus = await loginAs(MARCUS);
+    const off = await api('PATCH', `/api/members/${marcus.user.id}`, {
+      token: alex.token, body: { active: false },
+    });
+    expect(off.status).toBe(200);
+
+    const r = await api<{ error: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: marcus.user.id },
+    });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/purchaser/i);
+    expect(r.body.error).toMatch(/member/i);
+  });
+
+  // Ownership never grants stage rights: the actor's role does, whoever the
+  // order belongs to.
+  it('a manager-owned order still cannot be advanced past In Transit by a purchaser', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    const marcus = await loginAs(MARCUS);
+
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: alex.token,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES, onBehalfOfUserId: sofia.user.id },
+    });
+    expect(created.status).toBe(201);
+
+    const submit = await api('POST', `/api/orders/${created.body.id}/advance`, { token: marcus.token });
+    expect(submit.status).toBe(200);
+    const review = await api('POST', `/api/orders/${created.body.id}/advance`, { token: marcus.token });
+    expect(review.status).toBe(403);
   });
 
   it('rejects an unknown target user', async () => {
@@ -211,7 +259,7 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
     expect(r.status).toBe(403);
   });
 
-  it('rejects a target that is not an active purchaser', async () => {
+  it('lets a manager reassign an order to another manager', async () => {
     const alex = await loginAs(ALEX);
     const sofia = await loginAs(SOFIA);
 
@@ -219,11 +267,43 @@ describe('PATCH /api/orders/:id onBehalfOfUserId — owner reassignment', () => 
       token: alex.token, body: {
         paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
     });
-    const r = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
+    const r = await api('PATCH', `/api/orders/${created.body.id}`, {
       token: alex.token, body: { onBehalfOfUserId: sofia.user.id },
     });
+    expect(r.status).toBe(200);
+
+    const got = await api<{ order: { userId: string } }>(
+      'GET', '/api/orders/' + created.body.id, { token: alex.token },
+    );
+    expect(got.body.order.userId).toBe(sofia.user.id);
+
+    const ev = await api<{ events: {
+      kind: string;
+      detail: { fromUserId?: string; toUserId?: string };
+    }[] }>('GET', `/api/orders/${created.body.id}/events`, { token: alex.token });
+    const changed = ev.body.events.find(e => e.kind === 'owner_changed');
+    expect(changed?.detail.fromUserId).toBe(alex.user.id);
+    expect(changed?.detail.toUserId).toBe(sofia.user.id);
+  });
+
+  it('rejects an inactive member as the new owner', async () => {
+    const alex = await loginAs(ALEX);
+    const marcus = await loginAs(MARCUS);
+
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: alex.token, body: {
+        paypalTxnId: 'TESTPAYTXN0000001', ...LINES },
+    });
+    const off = await api('PATCH', `/api/members/${marcus.user.id}`, {
+      token: alex.token, body: { active: false },
+    });
+    expect(off.status).toBe(200);
+
+    const r = await api<{ error: string }>('PATCH', `/api/orders/${created.body.id}`, {
+      token: alex.token, body: { onBehalfOfUserId: marcus.user.id },
+    });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/purchaser/i);
+    expect(r.body.error).toMatch(/member/i);
   });
 
   it('refuses to move ownership of a Done order', async () => {

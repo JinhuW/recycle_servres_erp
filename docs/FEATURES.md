@@ -33,7 +33,9 @@ reach a portal through a URL token.
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (vendor endpoints, which authenticate by URL token instead).
 - Managers can reassign a PO's purchaser until it is Done (v1.84.0) and submit
-  a PO on behalf of one (v1.82.0).
+  a PO on behalf of one (v1.82.0). The owner can be any active member,
+  managers included — the picker lists purchasers first, then managers
+  (v1.131.0).
 
 ## Purchase orders
 
