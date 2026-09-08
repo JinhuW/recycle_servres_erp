@@ -2,13 +2,13 @@
 id: RS-030
 title: Let the PO owner picker offer managers as well as purchasers
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-07
 reporter: Jinhu
 branch: feat/po-owner-any-member
-pr:
-version:
+pr: 284
+version: 1.131.0
 related: []
 ---
 
