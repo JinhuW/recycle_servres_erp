@@ -697,9 +697,6 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
 }) {
   const { t } = useT();
   const [picking, setPicking] = useState(false);
-  // Dismissal is per page load on purpose: suggestions are read-time only, so
-  // persisting a "not it" would be the same mistake as persisting a match.
-  const [dismissed, setDismissed] = useState(false);
   const actionsRef = useRef<HTMLSpanElement>(null);
   const [pairDismissed, setPairDismissed] = useState(false);
 
@@ -714,9 +711,11 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
     }
   };
 
-  // One-click only when the server found exactly one candidate and is sure of
-  // it; anything else has to be looked at before it is linked.
-  const likely = !dismissed && row.match?.count === 1 && row.match.confidence === 'high'
+  // A sole, high-confidence candidate earns the row a named chip and a primary
+  // button — never a one-click link. Linking is an audited write that also
+  // fills the PO's transaction ID, so the manager chooses the PO in the
+  // picker every time; the suggestion is just listed first there.
+  const likely = row.match?.count === 1 && row.match.confidence === 'high'
     ? row.match : null;
   const ambiguous = !likely && (row.match?.count ?? 0) > 0 ? row.match : null;
 
@@ -891,27 +890,16 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
             ) : (
               <>
                 <span className="pay-sec">
-                  {likely && (
-                    <button
-                      type="button" className="btn sm ghost"
-                      onClick={() => { setDismissed(true); setPicking(true); }}
-                    >
-                      {t('payMatchNotIt')}
-                    </button>
-                  )}
                   <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/ignore`)}>
                     {t('payIgnore')}
                   </button>
                 </span>
-                {likely ? (
-                  <button type="button" className="btn sm primary" onClick={() => void link(likely.best.id)}>
-                    {t('payLink')}
-                  </button>
-                ) : (
-                  <button type="button" className="btn sm" onClick={() => setPicking(p => !p)}>
-                    {t('payLink')}
-                  </button>
-                )}
+                <button
+                  type="button" className={likely ? 'btn sm primary' : 'btn sm'}
+                  onClick={() => setPicking(p => !p)}
+                >
+                  {t('payLink')}
+                </button>
               </>
             )}
           </span>
@@ -1290,11 +1278,13 @@ function MatchList({ txnId, locale, onLink }: {
               {t('payMatchAlreadyPaid', { amt: fmtUSD(Math.max(0, s.linkedTotal), locale) })}
             </span>
           )}
+          {/* Named, not "Link…": this one acts on the click, and the PO it
+              acts on is the row it sits in. */}
           <button
             type="button" className="btn sm" style={{ marginLeft: 'auto' }}
             onClick={() => onLink(s.id)}
           >
-            {t('payLink')}
+            {t('payLinkTo', { id: s.id })}
           </button>
         </div>
       ))}
@@ -1315,6 +1305,7 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
   const { t } = useT();
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<Suggestion[] | null>(null);
+  const [total, setTotal] = useState(0);
   const ref = useRef<HTMLDivElement | null>(null);
   const reqId = useRef(0);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -1356,8 +1347,14 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
     const id = ++reqId.current;
     const timer = setTimeout(() => {
       const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
-      api.get<{ suggestions: Suggestion[] }>(`/api/bank-transactions/${txnId}/suggestions${qs}`)
-        .then(r => { if (id === reqId.current) setRows(r.suggestions); })
+      api.get<{ suggestions: Suggestion[]; total?: number }>(`/api/bank-transactions/${txnId}/suggestions${qs}`)
+        .then(r => {
+          if (id !== reqId.current) return;
+          setRows(r.suggestions);
+          // Only the ranked path reports the uncapped pool; a search is its own
+          // top ten and "showing 10 of 10" would say nothing.
+          setTotal(qs ? 0 : r.total ?? 0);
+        })
         .catch(handleFetchError);
     }, query ? 250 : 0);
     return () => clearTimeout(timer);
@@ -1390,10 +1387,24 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
         />
       </div>
       <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+        {/* The heading scrolls with the list so the popover's outer height —
+            and PICKER_H, which RecordPicker shares — stay put. */}
+        {rows !== null && rows.length > 0 && (
+          <div className="muted" style={{ fontWeight: 600, fontSize: 11.5, padding: '8px 12px 2px' }}>
+            {t(query.trim() ? 'payPickResults' : 'payMatchSuggested')}
+            {total > rows.length && (
+              <span style={{ fontWeight: 400, marginLeft: 6 }}>
+                ({t('payMatchShowing', { shown: rows.length, total })})
+              </span>
+            )}
+          </div>
+        )}
         {rows === null ? (
           <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payMoreLoading')}</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>{t('payPickNone')}</div>
+          <div style={{ padding: 12, color: 'var(--fg-subtle)', fontSize: 12.5 }}>
+            {t(query.trim() ? 'payPickNone' : 'payPickNoSuggest')}
+          </div>
         ) : rows.map(s => {
           const reasonKey = REASON_TKEY[s.reason];
           return (
@@ -1402,20 +1413,25 @@ function PoPicker({ txnId, anchor, onPick, onClose, locale }: {
               type="button"
               onClick={() => onPick(s.id)}
               style={{
-                width: '100%', textAlign: 'left', padding: '9px 12px',
+                width: '100%', textAlign: 'left', padding: '8px 12px',
                 border: 'none', background: 'transparent', cursor: 'pointer',
-                fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 8,
+                fontFamily: 'inherit', display: 'grid', gap: 2,
               }}
             >
-              <span className="mono" style={{ fontWeight: 600 }}>{s.id}</span>
-              <span className="muted" style={{ fontSize: 12 }}>
+              {/* Two lines: the id and why it is here, then the figures. The
+                  popover is 320px and the actions cell it renders in is
+                  `white-space: nowrap`, so one flex line clipped the chip. */}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="mono" style={{ fontWeight: 600 }}>{s.id}</span>
+                {reasonKey && (
+                  <span className="chip info" style={{ marginLeft: 'auto', fontSize: 10.5 }}>{t(reasonKey)}</span>
+                )}
+              </span>
+              <span className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>
                 {fmtUSD(s.totalCost, locale)} · {fmtDateShort(s.createdAt, locale)}
                 {s.dayGap !== null ? ` · ${gapLabel(s.dayGap, t)}` : ''}
                 {s.createdByName ? ` · ${s.createdByName}` : ''}
               </span>
-              {reasonKey && (
-                <span className="chip info" style={{ marginLeft: 'auto', fontSize: 10.5 }}>{t(reasonKey)}</span>
-              )}
             </button>
           );
         })}
