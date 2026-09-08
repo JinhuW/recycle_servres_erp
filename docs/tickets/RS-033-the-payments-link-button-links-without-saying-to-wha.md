@@ -2,13 +2,13 @@
 id: RS-033
 title: The Payments Link button links without saying to what
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-07
 reporter: Jinhu
 branch: feat/payments-link-picker
-pr:
-version:
+pr: 289
+version: 1.133.0
 related: [RS-015, RS-010]
 ---
 
@@ -48,20 +48,20 @@ it the only path off the row and to label the buttons that do link directly.
 
 ## Acceptance criteria
 
-- [ ] `Link…` on a transaction row always opens the PO picker. It never posts
+- [x] `Link…` on a transaction row always opens the PO picker. It never posts
       a link on its own, whatever the server's confidence in the suggestion.
-- [ ] The picker opens on the ranked suggestions under a "Suggested purchase
+- [x] The picker opens on the ranked suggestions under a "Suggested purchase
       orders" heading (with "showing X of Y" when the list is capped) and
       switches the heading to "Search results" once the manager types. A row
       with no suggestions says so and invites a search, rather than reading
       as a failed one.
-- [ ] Clicking a PO in the picker links it, as today.
-- [ ] The per-suggestion button in the expanded row reads `Link PO-nnnn`, not
+- [x] Clicking a PO in the picker links it, as today.
+- [x] The per-suggestion button in the expanded row reads `Link PO-nnnn`, not
       `Link…`; it still links on one click, because it sits in that PO's own
       row next to its cost, date and purchaser.
-- [ ] `Not it` is gone from the rail. It existed only as the escape hatch from
+- [x] `Not it` is gone from the rail. It existed only as the escape hatch from
       the one-click link; with that gone it would do what `Link…` does.
-- [ ] The status chip (`● PO-1414  3d apart` / "N possible POs"), grouping,
+- [x] The status chip (`● PO-1414  3d apart` / "N possible POs"), grouping,
       ignoring, unlink, the internal-transaction picker and the expanded
       detail behave exactly as before.
 
