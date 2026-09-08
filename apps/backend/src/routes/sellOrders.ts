@@ -18,7 +18,7 @@ import {
   type SellOrderLineRow,
 } from '../services/sellOrderPriceImport';
 import {
-  buildPriceTemplateWorkbook,
+  buildPriceTemplateWorkbook, buildPackingListWorkbook,
 } from '../lib/sellOrderPriceTemplate';
 import { canonPartNumberJs } from '../lib/part-number';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
@@ -357,26 +357,19 @@ function customerSlug(name: string | null): string {
     .replace(/\s+/g, '-');
 }
 
-// Vendor bid sheet: the same product grouping the edit form prices by
-// (part|label|condition, qty summed across warehouses), one row each on its
-// category's worksheet (RAM/SSD/HDD/Other tabs), with a clickable item-photo
-// URL and a blank Unit Price column. The vendor fills it and the manager
-// round-trips it through POST /:id/price-import/preview — the parser reads
-// every tab. After the category tabs come per-warehouse packing-checklist
-// tabs (price-free, ignored by the parser — see lib/sellOrderPriceTemplate).
-sellOrders.get('/:id/price-template', async (c) => {
-  const u = c.var.user;
-  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
-  const id = c.req.param('id');
-  const sql = getDb(c.env);
-
+// What both sell-order spreadsheets are built from: the product grouping the
+// edit form prices by (part|label|condition, qty summed across warehouses),
+// and the same grouping scoped per warehouse. One query feeds the bid sheet
+// and the packing list so the two files can never disagree about what is on
+// the order.
+async function loadSellOrderSheetData(sql: SqlClient, id: string) {
   const head = (await sql<{ id: string; currency_code: string; customer_name: string | null }[]>`
     SELECT so.id, so.currency_code, c.name AS customer_name
     FROM sell_orders so
     JOIN customers c ON c.id = so.customer_id
     WHERE so.id = ${id} LIMIT 1
   `)[0];
-  if (!head) return c.json({ error: 'Not found' }, 404);
+  if (!head) return null;
 
   const rows = (await sql`
     SELECT
@@ -469,20 +462,45 @@ sellOrders.get('/:id/price-template', async (c) => {
       products: [...byWarehouse.get(warehouse)!.values()],
     }));
 
-  const buf = await buildPriceTemplateWorkbook(
-    {
+  const slug = customerSlug(head.customer_name);
+  return {
+    head: {
       id: head.id,
       customerName: head.customer_name ?? '',
       currencyCode: head.currency_code,
     },
-    [...groups.values()],
+    products: [...groups.values()],
     warehouses,
-  );
-  const slug = customerSlug(head.customer_name);
-  return xlsxResponse(
-    buf,
-    datedFilename(`${slug ? `${head.id}-${slug}` : head.id}-price-template`),
-  );
+    filenameStem: slug ? `${head.id}-${slug}` : head.id,
+  };
+}
+
+// Vendor bid sheet: one row per product on its category's worksheet
+// (RAM/SSD/HDD/Other tabs), with a clickable item-photo URL and a blank Unit
+// Price column. The vendor fills it and the manager round-trips it through
+// POST /:id/price-import/preview — the parser reads every tab.
+sellOrders.get('/:id/price-template', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const data = await loadSellOrderSheetData(getDb(c.env), c.req.param('id'));
+  if (!data) return c.json({ error: 'Not found' }, 404);
+
+  const buf = await buildPriceTemplateWorkbook(data.head, data.products);
+  return xlsxResponse(buf, datedFilename(`${data.filenameStem}-price-template`));
+});
+
+// The picking side of the same order: per-warehouse checklist tabs, price-free
+// and never sent to a vendor — which is why it is its own download and not a
+// tab on the bid sheet (user-requested 2026-09-07). Same manager-only guard:
+// warehouse staff get the file from a manager.
+sellOrders.get('/:id/packing-list', async (c) => {
+  const u = c.var.user;
+  if (u.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);
+  const data = await loadSellOrderSheetData(getDb(c.env), c.req.param('id'));
+  if (!data) return c.json({ error: 'Not found' }, 404);
+
+  const buf = await buildPackingListWorkbook(data.head, data.warehouses);
+  return xlsxResponse(buf, datedFilename(`${data.filenameStem}-packing-list`));
 });
 
 // Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how

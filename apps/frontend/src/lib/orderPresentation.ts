@@ -4,6 +4,7 @@
 // inside one of them the other drifts and the same PO reads two ways.
 
 import { fmtUSD, fmtUSD0 } from './format';
+import { LIFECYCLE_STATUS } from './status';
 import type { OrderEventChange } from './types';
 
 /** `t` from useT(), passed down so these stay pure functions. */
@@ -57,12 +58,7 @@ export function ownerChangedLine(detail: Record<string, unknown>): string {
   return `${from} → ${to}`;
 }
 
-export const LIFECYCLE_LABEL: Record<string, string> = {
-  draft:      'Draft',
-  in_transit: 'In Transit',
-  reviewing:  'Reviewing',
-  done:       'Done',
-};
+export const LIFECYCLE_LABEL: Record<string, string> = LIFECYCLE_STATUS;
 
 // Friendly labels for the fields we surface on line_edited / meta_changed
 // events and in the revert-review dialog. Anything not listed falls back to

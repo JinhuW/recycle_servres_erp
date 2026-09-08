@@ -14,7 +14,9 @@ import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
   type ExportCategory,
 } from '../lib/categoryColumns';
-import { advanceOrderTx, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
+import {
+  advanceOrderTx, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook,
+} from '../services/orderAdvance';
 import { txnRequiredFor } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
@@ -85,10 +87,12 @@ async function assertCategoriesEnabled(
   return null;
 }
 
-// Managers may file a PO for a purchaser (`onBehalfOfUserId`). The raw role is
-// checked — not effectiveRole — so a manager previewing as purchaser keeps the
-// ability, and the target is validated up front so a typo'd id fails as a 400
-// rather than an FK 500. Returns the resolved owner or an error response.
+// Managers may file a PO for another member (`onBehalfOfUserId`) — a manager
+// as readily as a purchaser, since managers own the POs they file themselves.
+// The raw role is checked — not effectiveRole — so a manager previewing as
+// purchaser keeps the ability, and the target is validated up front so a
+// typo'd id fails as a 400 rather than an FK 500. Returns the resolved owner
+// or an error response.
 async function resolveOrderOwner(
   sql: ReturnType<typeof getDb>,
   u: User,
@@ -111,11 +115,11 @@ async function resolveOrderOwner(
   }
   const rows = await sql<{ id: string; name: string; defaultWarehouseId: string | null }[]>`
     SELECT id, name, default_warehouse_id AS "defaultWarehouseId" FROM users
-    WHERE id = ${onBehalfOfUserId} AND active = TRUE AND role = 'purchaser'
+    WHERE id = ${onBehalfOfUserId} AND active = TRUE
     LIMIT 1
   `;
   if (!rows.length) {
-    return { error: 'onBehalfOfUserId must name an active purchaser', status: 400 };
+    return { error: 'onBehalfOfUserId must name an active member', status: 400 };
   }
   return {
     ownerId: onBehalfOfUserId,
@@ -308,12 +312,9 @@ orders.get('/', async (c) => {
   // The mobile filter chip sends the order's stage label — map to lifecycle.
   // Filtering on per-line status (an earlier design) silently hid empty drafts
   // and drafts whose lines had already advanced past 'Draft'.
-  const STATUS_TO_LIFECYCLE: Record<string, string> = {
-    'Draft': 'draft',
-    'In Transit': 'in_transit',
-    'Reviewing': 'reviewing',
-    'Done': 'done',
-  };
+  const STATUS_TO_LIFECYCLE: Record<string, string> = Object.fromEntries(
+    Object.entries(LIFECYCLE_LABEL).map(([id, label]) => [label, id]),
+  );
   const statusFrag = status
     ? (STATUS_TO_LIFECYCLE[status]
         ? sql`o.lifecycle = ${STATUS_TO_LIFECYCLE[status]}`
@@ -446,7 +447,7 @@ orders.get('/', async (c) => {
       // PO status is authoritative — derive from o.lifecycle, not from line
       // aggregation. Per-line `Sold` (set when inventory ships out via a sell
       // order) is intentional divergence and must not surface as "Mixed".
-      status: LINE_STATUS_FOR_LIFECYCLE[r.lifecycle as string] ?? r.lifecycle,
+      status: LIFECYCLE_LABEL[r.lifecycle as string] ?? r.lifecycle,
     })),
     nextCursor,
   });
@@ -497,7 +498,7 @@ orders.get('/:id', async (c) => {
     ORDER BY ol.position ASC
   `;
 
-  const status = LINE_STATUS_FOR_LIFECYCLE[order.lifecycle as string] ?? order.lifecycle as string;
+  const status = LIFECYCLE_LABEL[order.lifecycle as string] ?? order.lifecycle as string;
 
   // Per-status evidence (note + attachments) — currently captured only for
   // Done. Same response shape as sell orders' statusMeta.
@@ -713,9 +714,6 @@ orders.post('/:id/revert-ack', async (c) => {
   return c.json({ ok: true, acknowledged });
 });
 
-const LIFECYCLE_LABEL: Record<string, string> = {
-  draft: 'Draft', in_transit: 'In Transit', reviewing: 'Reviewing', done: 'Done',
-};
 
 const fmtTs = (v: unknown): string =>
   v ? new Date(v as string).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
@@ -1190,21 +1188,21 @@ orders.patch('/:id', async (c) => {
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
   if (u.role !== 'manager' && existing.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
-  // The purchaser owns their order until it is Done: goods arrive miscounted,
-  // fees land late, a line turns out to be something else. What they may not
-  // do is change it under a manager who has already reviewed it — so a change
-  // to anything the review is about sends the order back to Draft (below, in
-  // the tx, where the lifecycle read is locked). `notes` is not such a field:
-  // receipts and shipping details keep arriving after the goods leave, and
-  // appending one leaves the order where it stands.
+  // The purchaser owns their order until the review closes it (Ready to Pay):
+  // goods arrive miscounted, fees land late, a line turns out to be something
+  // else. What they may not do is change it under a manager who has already
+  // reviewed it — so a change to anything the review is about sends the order
+  // back to Draft (below, in the tx, where the lifecycle read is locked).
+  // `notes` is not such a field: receipts and shipping details keep arriving
+  // after the goods leave, and appending one leaves the order where it stands.
   const materialEdit =
     !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
     body.totalCost !== undefined || body.otherFees !== undefined ||
     body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
     body.payment !== undefined || body.paypalTxnId !== undefined;
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
-    // A Done PO is a closed book to the purchaser, note included.
-    if (existing.lifecycle === 'done') {
+    // Past review the PO is a closed book to the purchaser, note included.
+    if (isClosedBook(existing.lifecycle)) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
     if (!materialEdit && body.notes === undefined && body.supplierId === undefined) {
@@ -1413,12 +1411,13 @@ orders.patch('/:id', async (c) => {
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
       lifecycleAfter = orderBefore.lifecycle;
-      // A Done PO is the closed-book record of what was bought / sold. Any
-      // edit to lines, costs, or commission corrupts that record (and may
-      // also confuse downstream sell-order / commission math). Re-open via
-      // the advance-back flow first if the data really needs to change.
-      // Notes are the only field a manager may freely append on a Done PO.
-      if (orderBefore.lifecycle === 'done') {
+      // From Ready to Pay on the PO is the closed-book record of what was
+      // bought and what the purchaser is paid on. Any edit to lines, costs,
+      // commission or ownership corrupts that record (and may also confuse
+      // downstream sell-order / commission math). Re-open to Reviewing first
+      // if the data really needs to change. Notes are the only field a
+      // manager may freely append on a closed PO.
+      if (isClosedBook(orderBefore.lifecycle)) {
         const touchesFrozen =
           (Array.isArray(body.lines) && body.lines.length > 0) ||
           (Array.isArray(body.addLines) && body.addLines.length > 0) ||
@@ -1441,7 +1440,8 @@ orders.patch('/:id', async (c) => {
           throw new Error('__DONE_LOCKED__');
         }
         // The pre-tx read may have seen an earlier stage: a concurrent advance
-        // to Done must close the book on the purchaser here too, not revert it.
+        // past review must close the book on the purchaser here too, not
+        // revert it.
         if (u.role !== 'manager') throw new Error('__PURCHASER_DONE__');
       }
 
@@ -1878,7 +1878,7 @@ orders.patch('/:id', async (c) => {
   } catch (e) {
     const msg = (e as { message?: string })?.message ?? '';
     if (msg.includes('__DONE_LOCKED__')) {
-      return c.json({ error: 'Order is Done and cannot be modified. Use the advance-back flow if needed.' }, 409);
+      return c.json({ error: 'Order is Ready to Pay or Done and cannot be modified. Move it back to Reviewing first.' }, 409);
     }
     if (msg.includes('__PURCHASER_DONE__')) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
@@ -2123,9 +2123,10 @@ const PO_META_STATUSES = new Set(['Submission', 'Done']);
 function canWriteMeta(u: User, status: string, order: { user_id: string; lifecycle: string }): boolean {
   if (effectiveRole(u) === 'manager') return true;
   // Submission evidence belongs to the purchaser who raised the PO and stays
-  // theirs until it's Done — a receipt or a photo of the goods routinely shows
-  // up after the order has already moved to In Transit or Reviewing.
-  return status === 'Submission' && order.user_id === u.id && order.lifecycle !== 'done';
+  // theirs until the review closes — a receipt or a photo of the goods
+  // routinely shows up after the order has already moved to In Transit or
+  // Reviewing.
+  return status === 'Submission' && order.user_id === u.id && !isClosedBook(order.lifecycle);
 }
 
 // Upsert the text note for a single (order, status).
@@ -2286,11 +2287,11 @@ orders.delete('/:id/status-meta/:status/attachments/:attachmentId', async (c) =>
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The purchaser who raised the PO photographs the goods, and pictures keep
-// arriving after it has moved to In Transit — so ownership lasts until Done,
-// mirroring the Submission-evidence rule in canWriteMeta.
+// arriving after it has moved to In Transit — so ownership lasts until the
+// review closes, mirroring the Submission-evidence rule in canWriteMeta.
 function canWritePhotos(u: User, order: { user_id: string; lifecycle: string }): boolean {
   if (effectiveRole(u) === 'manager') return true;
-  return order.user_id === u.id && order.lifecycle !== 'done';
+  return order.user_id === u.id && !isClosedBook(order.lifecycle);
 }
 
 // Resolves the order + verifies the line belongs to it. A lineId from another

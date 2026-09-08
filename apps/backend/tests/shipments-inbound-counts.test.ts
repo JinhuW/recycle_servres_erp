@@ -76,10 +76,13 @@ describe('GET /api/shipments/inbound-counts', () => {
     await createShipment(marcus.token, poOpen, 'in_transit');
     // neither: voided
     await createShipment(marcus.token, poOpen, 'voided');
-    // arrived, not needs: delivered on a done order
+    // arrived, not needs: delivered on a done order, or on one past review
     const poDone = await createPo(marcus.token);
     await createShipment(marcus.token, poDone, 'delivered');
     await sql`UPDATE orders SET lifecycle = 'done' WHERE id = ${poDone}`;
+    const poRtp = await createPo(marcus.token);
+    await createShipment(marcus.token, poRtp, 'delivered');
+    await sql`UPDATE orders SET lifecycle = 'ready_to_pay' WHERE id = ${poRtp}`;
 
     // Packages: counting is manager-blind, so an undelivered unlinked box is
     // "moving" even though a manager's card offers create-PO on it.

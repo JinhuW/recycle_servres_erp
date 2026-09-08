@@ -116,7 +116,7 @@ shipmentsList.get('/inbound-counts', async (c) => {
       COUNT(*) FILTER (WHERE s.status IN ('purchased', 'in_transit'))::int AS moving,
       COUNT(*) FILTER (
         WHERE s.status IN ('draft', 'quoted', 'exception')
-           OR (s.status = 'delivered' AND o.lifecycle <> 'done')
+           OR (s.status = 'delivered' AND o.lifecycle NOT IN ('ready_to_pay', 'done'))
       )::int AS needs
     FROM shipments s
     JOIN orders o ON o.id = s.order_id

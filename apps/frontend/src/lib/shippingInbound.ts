@@ -28,11 +28,16 @@ export function canCreatePo(
   return !pkg.orderId && (pkg.status === 'delivered' || manager);
 }
 
+/** The PO's book is closed: review finished (Ready to Pay) or paid out (Done). */
+export function bookClosed(orderLifecycle: string | null | undefined): boolean {
+  return orderLifecycle === 'ready_to_pay' || orderLifecycle === 'done';
+}
+
 /** A delivered label asks for the PO to be completed until its book closes. */
 export function needsCompletePo(
   status: string, orderLifecycle: string | null | undefined,
 ): boolean {
-  return status === 'delivered' && orderLifecycle != null && orderLifecycle !== 'done';
+  return status === 'delivered' && orderLifecycle != null && !bookClosed(orderLifecycle);
 }
 
 /** The seller link is out and the seller hasn't finished the form. */

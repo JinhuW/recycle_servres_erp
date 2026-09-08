@@ -13,6 +13,9 @@ import {
 import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
+import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
+
+const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
 // Spec fields PATCH /:id accepts. Category stays fixed on the inventory editor,
 // so unlike the PO route this never has to clear the columns a switched-away
@@ -1077,6 +1080,11 @@ inventory.patch('/:id', async (c) => {
   // Field range gates — surface as 400s before we ever reach the DB. Without
   // these, qty=0 / negative price hit a CHECK constraint and surfaced as a
   // 500 (looks like an internal error to the caller).
+  // Line status is the inventory vocabulary, not the PO stage list: a stage
+  // label written here would drop the line out of every stock bucket.
+  if (body.status !== undefined && !LINE_STATUSES.has(body.status)) {
+    return c.json({ error: 'status must be one of ' + [...LINE_STATUSES].join(', ') }, 400);
+  }
   if (body.qty !== undefined && (!Number.isInteger(body.qty) || body.qty <= 0)) {
     return c.json({ error: 'qty must be a positive integer' }, 400);
   }
@@ -1153,7 +1161,7 @@ inventory.patch('/:id', async (c) => {
       const [parent] = await tx<{ lifecycle: string }[]>`
         SELECT lifecycle FROM orders WHERE id = ${orderId} LIMIT 1
       `;
-      if (parent?.lifecycle === 'done') return { kind: 'doneLocked' };
+      if (parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
     }
 
     // The mirror verdict has to be taken before qty/unit_cost move — afterwards
@@ -1234,7 +1242,7 @@ inventory.patch('/:id', async (c) => {
     return c.json({ error: 'line is committed to an open sell order; close or unlink it before changing qty/status' }, 409);
   }
   if (outcome.kind === 'doneLocked') {
-    return c.json({ error: 'the purchase order is Done; reopen it before changing qty or unit cost' }, 409);
+    return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
   }
   const before = outcome.before;
 

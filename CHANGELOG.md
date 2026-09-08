@@ -17,6 +17,140 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.132.0] - 2026-09-07
+
+### Added
+
+- **A Ready to Pay stage between Reviewing and Done.**  Done used to carry two
+  meanings at once — the review is finished, and the purchaser's commission is
+  settled — with nothing recording the gap between them.  A PO now moves
+  Draft → In Transit → Reviewing → Ready to Pay → Done: Ready to Pay says the
+  goods were checked and the commission is owed; Done says it was paid.  The
+  book closes at Ready to Pay rather than Done, because the figure is what the
+  purchaser gets paid on — lines, costs, the payment reference and ownership
+  freeze there, notes still append, and shipments and line goods edits refuse
+  as they did for Done.  The purchaser's edit window ends there too.  Lines
+  keep reading Done for every stock and sellable bucket, so inventory never
+  learned a fifth value.  Managers and the PO's owner are notified when a PO
+  reaches Ready to Pay; the dashboard's projected commission counts a PO from
+  that moment.  Managers can move Done back to Ready to Pay and Ready to Pay
+  back to Reviewing, under the same committed-line guard as the existing Done
+  → Reviewing reopen.  Both shells show the stage on the stepper, the list
+  chips, the activity log and the analysis colours; "hide Done" keeps Ready to
+  Pay visible (RS-032).
+
+### Changed
+
+- **Review is the warehouse manager's call.**  Any manager could take a PO
+  from In Transit into Reviewing.  It now has to be the manager linked to the
+  PO's warehouse in Settings → Warehouses — for the move into Reviewing, the
+  move into Ready to Pay, and any stage-jump that passes through either.  The
+  refusal names who can and the stage that was asked for.  A PO with no
+  warehouse, or a warehouse whose manager is unassigned, demoted or
+  deactivated, stays open to any manager, so no order can get stuck behind an
+  empty gate.  Ready to Pay → Done and every backward move stay open to every
+  manager.  The desktop stepper locks the steps for everyone else and says who
+  can take them, following the warehouse selected in the form; the mobile
+  page hides its advance button and says the same (RS-031).
+- A stage label can no longer be written as a *line* status through the
+  inventory editor: the line status select offers only the four inventory
+  values, and the API refuses anything else with a 400.
+
+## [1.131.0] - 2026-09-07
+
+### Changed
+
+- **The PO owner picker offers managers too.**  The Purchaser select on the PO
+  edit page, and the on-behalf select on Submit, listed only purchaser-role
+  members, and the backend refused a manager's id in `onBehalfOfUserId` for
+  `POST /api/orders`, `POST /api/orders/draft` and `PATCH /api/orders/:id`
+  alike.  Managers already own the POs they file, so there was never a reason
+  the owner had to be a purchaser.  Both pickers now list every active member,
+  purchasers first, and the backend accepts any active member as the owner —
+  unknown, inactive and malformed ids still fail with 400.  Stage rights are
+  unchanged: they come from the actor's role, never from ownership, so a
+  purchaser still cannot take a manager-owned PO past In Transit (RS-030).
+
+## [1.130.0] - 2026-09-07
+
+### Added
+
+- **The packing checklist is its own download, and the RAM groups are
+  coloured.**  The `Pack - <warehouse>` tabs used to live inside the vendor bid
+  sheet, which meant every bid request emailed out carried the warehouse's own
+  picking list with it.  They now come off a second button on the sell-order
+  footer — *Packing list* beside *Price template (bid sheet)* — as their own
+  workbook, from `GET /api/sell-orders/:id/packing-list`.  Both files are built
+  from one query and one sort, so a picker and a bidder still find a product in
+  the same position on their own sheet; that shared order is what makes the
+  split safe.
+
+  The grouping RS-028 gave the bid sheet's RAM tab is now on the packing tabs
+  too, on the same two leading columns — device group, then DDR generation,
+  merged over each run.  Every pack tab reserves those columns whether or not
+  it holds RAM, so two warehouses on one order always read the same way.
+
+  And the groups are told apart by colour rather than by merge boundaries
+  alone: the device column and the generation column draw from separate light
+  palettes, and each row takes a paler wash of its own generation, banding a
+  group across the sheet.  The `Unit Price` column keeps its yellow — it is the
+  only thing on the sheet telling a vendor where to type — and the `Packed`
+  tick box stays white, because a tinted box reads as already ticked once the
+  sheet is printed.  Rows with no recognised type or generation still get a
+  neutral band instead of going blank.
+
+  Uploading the packing workbook to the price import is now rejected as having
+  no price column, instead of parsing to zero matches (RS-029).
+
+## [1.129.0] - 2026-09-06
+
+### Added
+
+- **The bid sheet's RAM tab now reads the way the desk's own spreadsheet
+  does.**  Two merged label columns to the left of `#` group the rows by device
+  — "Desktop & laptop", then "Server" — and inside that by DDR generation
+  (DDR3, DDR4, DDR5), with the usual brand → capacity → speed order underneath.
+  A run of rows sharing a label is one centred cell, `#` keeps counting across
+  groups, and rows whose type or generation is unknown sink to a trailing "—"
+  bucket instead of vanishing.  The `Pack - <warehouse>` tabs walk the same
+  order without the labels, so the picker and the bidder still find a product
+  in the same place.  Because Excel refuses to sort a range that holds unequal
+  merged cells, the filter dropdowns now start at `#`; the Gen and Type spec
+  columns stay on the tab, since they are what filtering actually works on.
+  SSD, HDD and Other tabs are untouched, and the price import round-trip
+  still parses the new layout (RS-028).
+
+## [1.128.1] - 2026-09-05
+
+### Fixed
+
+- **Telemetry no longer disappears on the loads worth measuring.**  A sweep of
+  five days of production logs found the backend genuinely quiet — no unhandled
+  errors, no 5xx, one client crash and that one already fixed — but it also
+  found a hole in the instrumentation that was reporting the quiet.  The
+  browser's timing and error beacons post to authenticated endpoints, and
+  `rawFetch` deliberately neither refreshes nor retries, so a report sent before
+  the user had a session got a 401 and was dropped on the floor.
+
+  That loss was not spread evenly.  Every one of it landed on a logged-out cold
+  load — the empty-cache first paint, the slowest load there is, and precisely
+  the case the timing stream was built to explain.  Seven of ninety-one timing
+  reports went that way, so the cold-load percentiles were being drawn from a
+  sample with the slow tail cut off.  Worse, the same applied to crashes: one of
+  the two client errors ever reported was lost this way, meaning **a crash that
+  happened before login was never recorded at all** — the failure least likely
+  to be reproducible on request.
+
+  A report that 401s for want of a session is now held and re-sent the moment
+  one exists, carrying the numbers captured when it was made rather than
+  whatever the counters read later.  A login landing while the report is still
+  in flight re-sends immediately instead of queueing, so the race cannot strand
+  it; a silent mid-session refresh counts as a session too; a second 401 is
+  dropped rather than retried forever; and the queue is capped so a tab nobody
+  logs into cannot grow one.  The endpoints stay authenticated — nothing new is
+  writable without a cookie.  The vendor and seller portals, where nobody logs
+  in and a held report could never drain, no longer send one.
+
 ## [1.128.0] - 2026-09-04
 
 ### Features

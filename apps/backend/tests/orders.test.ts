@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
+import { loginAs, ALEX, SOFIA, MARCUS, PRIYA } from './helpers/auth';
 
 describe('POST /api/orders defaults', () => {
   beforeEach(async () => { await resetDb(); });
@@ -202,6 +202,94 @@ describe('POST /api/orders/:id/advance', () => {
     expect(r.status).toBe(200);
     const got = await api<{ order: { lifecycle: string } }>('GET', `/api/orders/${c.body.id}`, { token: mTok });
     expect(got.body.order.lifecycle).toBe('reviewing');
+  });
+});
+
+describe('warehouse manager gate on Reviewing and Ready to Pay', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  const BODY = {
+    paypalTxnId: 'TESTPAYTXN0000001', category: 'RAM', warehouseId: 'WH-LA1',
+    lines: [{ category: 'RAM', qty: 1, unitCost: 10, condition: 'New' }],
+  };
+  const advance = (token: string, id: string, toStage?: string) =>
+    api<{ lifecycle?: string; error?: string }>('POST', `/api/orders/${id}/advance`, {
+      token, body: toStage ? { toStage } : {},
+    });
+  // A PO at In Transit on WH-LA1, submitted by its purchaser.
+  async function inTransitPo(): Promise<string> {
+    const { token } = await loginAs(MARCUS);
+    const c = await api<{ id: string }>('POST', '/api/orders', { token, body: BODY });
+    expect(c.status).toBe(201);
+    expect((await advance(token, c.body.id)).status).toBe(200);
+    return c.body.id;
+  }
+  async function assignLa1(token: string, managerUserId: string | null) {
+    const r = await api('PATCH', '/api/warehouses/WH-LA1', { token, body: { managerUserId } });
+    expect(r.status).toBe(200);
+  }
+
+  it('another manager cannot take the order into Reviewing, and the refusal names who can', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    await assignLa1(alex.token, alex.user.id);
+    const id = await inTransitPo();
+
+    const r = await advance(sofia.token, id);
+    expect(r.status).toBe(403);
+    expect(r.body.error).toMatch(/^Only .+ \(LA1 manager\) can move this order to Reviewing$/);
+    expect((await advance(alex.token, id)).body.lifecycle).toBe('reviewing');
+  });
+
+  it('stage-jumps that cross the gate are refused, naming the stage that was asked for', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    await assignLa1(alex.token, alex.user.id);
+    const id = await inTransitPo();
+
+    const r = await advance(sofia.token, id, 'done');
+    expect(r.status).toBe(403);
+    expect(r.body.error).toMatch(/to Done$/);
+    expect((await advance(sofia.token, id, 'reviewing')).status).toBe(403);
+  });
+
+  it('Ready to Pay is the warehouse manager\'s too; Done and the reopens are anyone\'s', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    await assignLa1(alex.token, alex.user.id);
+    const id = await inTransitPo();
+    expect((await advance(alex.token, id)).body.lifecycle).toBe('reviewing');
+
+    const r = await advance(sofia.token, id);
+    expect(r.status).toBe(403);
+    expect(r.body.error).toMatch(/to Ready to Pay$/);
+    expect((await advance(alex.token, id)).body.lifecycle).toBe('ready_to_pay');
+
+    expect((await advance(sofia.token, id)).body.lifecycle).toBe('done');
+    expect((await advance(sofia.token, id, 'ready_to_pay')).body.lifecycle).toBe('ready_to_pay');
+    expect((await advance(sofia.token, id, 'reviewing')).body.lifecycle).toBe('reviewing');
+  });
+
+  it('a warehouse with no manager, or one whose manager was deactivated, is open to any manager', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    const unassigned = await inTransitPo();
+    expect((await advance(sofia.token, unassigned)).body.lifecycle).toBe('reviewing');
+
+    // Assign a purchaser by mistake: the gate must not make review unreachable.
+    const marcus = await loginAs(MARCUS);
+    await assignLa1(alex.token, marcus.user.id);
+    const misassigned = await inTransitPo();
+    expect((await advance(sofia.token, misassigned)).body.lifecycle).toBe('reviewing');
+  });
+
+  it('a PO with no warehouse is open to any manager', async () => {
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    await assignLa1(alex.token, alex.user.id);
+    const id = await inTransitPo();
+    expect((await api('PATCH', `/api/orders/${id}`, { token: alex.token, body: { warehouseId: null } })).status).toBe(200);
+    expect((await advance(sofia.token, id)).body.lifecycle).toBe('reviewing');
   });
 });
 

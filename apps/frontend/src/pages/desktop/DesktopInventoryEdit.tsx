@@ -4,7 +4,7 @@ import { useT } from '../../lib/i18n';
 import { api, ApiError } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtUSD0, fmtDate, relTime } from '../../lib/format';
-import { ORDER_STATUSES, statusTone } from '../../lib/status';
+import { LINE_STATUSES, statusTone } from '../../lib/status';
 import { useMarketLookup, type ResolvedMarketValue } from '../../lib/useMarketLookup';
 import { PartNumberField } from '../../components/PartNumberField';
 import { CatSelect, CatCombo } from './submit/LineFields';
@@ -773,7 +773,7 @@ function PricingPanel({
             <div className="field">
               <label className="label">{t('status')}</label>
               <select className="select" value={draft.status} onChange={e => set({ status: e.target.value })}>
-                {ORDER_STATUSES.map(s => <option key={s}>{s}</option>)}
+                {LINE_STATUSES.map(s => <option key={s}>{s}</option>)}
               </select>
             </div>
             <div className="field">

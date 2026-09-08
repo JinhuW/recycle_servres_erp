@@ -33,27 +33,47 @@ reach a portal through a URL token.
   drops it otherwise. Exempt: safe methods, `/api/health`, and `/api/public/*`
   (vendor endpoints, which authenticate by URL token instead).
 - Managers can reassign a PO's purchaser until it is Done (v1.84.0) and submit
-  a PO on behalf of one (v1.82.0).
+  a PO on behalf of one (v1.82.0). The owner can be any active member,
+  managers included — the picker lists purchasers first, then managers
+  (v1.131.0).
 
 ## Purchase orders
 
 The core object. A PO is a purchase from a vendor, built line by line, that
-moves Draft → Submitted → In Transit → Reviewing → Done.
+moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done.
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
-- **Purchasers edit until Done.** A material edit sends the PO back to Draft
-  and raises a change-review dialog for the manager, showing the full field and
-  line diff (v1.97.0). Notes, photos and attachments don't trigger it. A
-  reverted order is a Draft that was already submitted, so deleting it archives
-  rather than wipes.
+- **Purchasers edit until the review closes.** A material edit sends the PO
+  back to Draft and raises a change-review dialog for the manager, showing the
+  full field and line diff (v1.97.0). Notes, photos and attachments don't
+  trigger it. A reverted order is a Draft that was already submitted, so
+  deleting it archives rather than wipes. The window used to run until Done;
+  it now ends at Ready to Pay (v1.132.0).
+- **Ready to Pay sits between Reviewing and Done** (v1.132.0): the review is
+  finished and the purchaser's commission is owed; Done means it was paid.
+  The book closes at Ready to Pay — lines, costs, payment reference and
+  ownership freeze, notes still append, shipments and line goods edits refuse
+  — and the PO's lines read Done for every stock and sellable bucket. Managers
+  and the owner are notified when a PO reaches it. The stage is a PO stage
+  only: it can't be written as a line status.
+- **Only the warehouse's manager takes a PO into Reviewing or Ready to Pay**
+  (v1.132.0): the manager linked to the PO's warehouse in Settings, including
+  stage-jumps that pass through either stage. Both shells lock the step for
+  everyone else and say who can; the desktop lock follows the warehouse
+  selected in the form. A PO with no warehouse, or a warehouse with no usable
+  manager, is open to any manager. Ready to Pay → Done and every backward
+  move stay open to every manager.
 - **A company-paid PO names the payment that funded it before it leaves
   Draft** (v1.115.0) — the transaction ID is required, and the advance is
   refused without it for every actor, a manager stage-jump and carrier movement
   included. Self-pay POs are unaffected. The rule governs only orders created
   after it reached the environment, so POs already on file stay exempt. Mobile
   gained the field as an input; it used to be read-only there.
-- Managers can reopen a Done PO back to Reviewing (v1.81.0).
+- Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
+  v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing; any move
+  that pulls lines off Done is refused while a line sits on an open sell
+  order.
 - **Costs split into a goods total and other fees** (v1.43.0); a goods overflow
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
   commission is calculated from. `orders.category` and `orders.total_cost` are
@@ -138,7 +158,9 @@ Transit, and a line's qty can never be 0.
   category rank ahead of it on the screens, which have no tabs to group by
   (v1.111.0). One implementation serves the workbooks and the lists. The screens
   still take the newest 200 rows from the database; only their arrangement
-  changed.
+  changed. The bid sheet's RAM tab (and its packing tabs) put a device-group /
+  DDR-generation grouping ahead of that order (v1.129.0); the export and the
+  screens do not.
 - Other-type stock can be filtered by Untyped (v1.49.0).
 - Spec fields on an inventory line are editable in place on desktop.
 - **Committed sell orders reserve the units they name**, not the whole lot.
@@ -157,8 +179,23 @@ Transit, and a line's qty can never be 0.
   (v1.51.2). Its header text is load-bearing for the import parser — don't
   move it.
 - The price template splits into one worksheet per category with per-attribute
-  spec columns and image URLs (v1.25.0, v1.27.0), plus per-warehouse
-  packing-checklist tabs named `Pack - <warehouse>` (v1.28.0).
+  spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
+  with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
+  DDR3 / DDR4 / DDR5 — ahead of the brand/capacity/speed order; the filter
+  dropdowns start at `#` because Excel won't sort across unequal merges
+  (v1.129.0). Each label column carries its own light palette and each row a
+  paler wash of its generation, so a group reads as a band; the yellow
+  `Unit Price` column is untouched by it (v1.130.0).
+- **The packing checklist is a separate download** — `Packing list` beside the
+  bid-sheet button, `GET /api/sell-orders/:id/packing-list`, managers only. It
+  carries per-warehouse `Pack - <warehouse>` tabs (v1.28.0) with tick boxes,
+  quantities and subtotals but no prices, and it lived inside the bid-sheet
+  workbook until v1.130.0, which meant the vendor's copy carried it. Its RAM
+  sections repeat the bid tab's merged labels and colours on two reserved
+  leading columns — reserved on every pack tab, so two warehouses on one order
+  read alike. Both files come from one query and one sort, so a picker and a
+  bidder find a product in the same place; uploading this one to the price
+  import is rejected for having no price column (v1.130.0).
 - **Vendor bids**: vendors reach a tokenised portal with faceted catalog
   filtering, submit bids, and managers review and promote them on a dedicated
   screen. Promotion picks and validates a customer for general links.
@@ -347,7 +384,9 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10);
-the contributor leaderboard uses projected Done-PO profit (v1.0.1).
+the contributor leaderboard uses projected Done-PO profit (v1.0.1). Both
+count a PO from Ready to Pay on, when its commission becomes owed
+(v1.132.0).
 
 ## Oversight extras
 

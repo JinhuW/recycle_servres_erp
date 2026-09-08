@@ -15,6 +15,15 @@ function clearLocalAuthState(setUser: (u: User | null) => void) {
   resetWarehouses();
 }
 
+// The counterpart of `auth:unauthorized`: a session now exists. lib/beacon.ts
+// listens, to release telemetry that 401ed before the user was logged in. An
+// event rather than a direct call because api.ts announces the same thing on a
+// silent refresh, and it cannot import beacon.ts — beacon.ts imports rawFetch
+// from it.
+function signalSessionEstablished(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('auth:established'));
+}
+
 // Decide what `auth:unauthorized` should do. With a live user we run the full
 // logout (server revoke + local reset). With no user — e.g. the bootstrap
 // /api/me 401 on a logged-out cold load — there is no session to revoke, so we
@@ -75,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const pre = await takeBoot<{ user: User }>('/api/me');
         const r = pre ?? await api.get<{ user: User }>('/api/me');
         setUser(r.user);
+        signalSessionEstablished();
       })(),
       // Lookups are best-effort: a transient failure must not look like an
       // auth failure or strand a valid user on the login screen. loadLookups()
@@ -117,6 +127,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn('Workspace settings failed to load after login; continuing.', e);
     }
     setUser(r.user);
+    // Before the role picker, deliberately: the session is real whichever role
+    // a manager then picks, and anything held for one has waited long enough.
+    signalSessionEstablished();
     // Only managers see the picker — for purchasers there's only one path in.
     if (r.user.role === 'manager') setPendingRoleChoice(true);
   };

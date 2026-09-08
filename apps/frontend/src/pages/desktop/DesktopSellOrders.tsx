@@ -483,23 +483,38 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   );
 }
 
-// ─── Download button ─────────────────────────────────────────────────────────
-// The vendor price template (bid sheet) is the only sell-order export.
+// ─── Download buttons ────────────────────────────────────────────────────────
+// Two exports off one order, and they go to different people: the bid sheet is
+// emailed to a vendor, the packing list stays in the warehouse. Separate files
+// so the vendor's copy never carries the picking checklist.
 function DownloadMenu({ orderId }: { orderId: string }) {
   const { t } = useT();
 
-  const download = async () => {
+  const download = (kind: 'price-template' | 'packing-list') => async () => {
     try {
-      await api.download(`/api/sell-orders/${orderId}/price-template`, `${orderId}-price-template.xlsx`);
+      await api.download(`/api/sell-orders/${orderId}/${kind}`, `${orderId}-${kind}.xlsx`);
     } catch (e) {
       handleFetchError(e);
     }
   };
 
   return (
-    <button className="btn" title={t('soDownloadPriceTemplateHint')} onClick={download}>
-      <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
-    </button>
+    <>
+      <button
+        className="btn"
+        title={t('soDownloadPriceTemplateHint')}
+        onClick={download('price-template')}
+      >
+        <Icon name="dollar" size={14} /> {t('soDownloadPriceTemplate')}
+      </button>
+      <button
+        className="btn"
+        title={t('soDownloadPackingListHint')}
+        onClick={download('packing-list')}
+      >
+        <Icon name="box" size={14} /> {t('soDownloadPackingList')}
+      </button>
+    </>
   );
 }
 

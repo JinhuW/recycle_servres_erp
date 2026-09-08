@@ -7,19 +7,52 @@
 // and all writes happen under one FOR UPDATE lock on the orders row.
 
 import { writeOrderEvent } from './orderAudit';
-import { notifyManagers } from '../lib/notify';
+import { notify, notifyManagers } from '../lib/notify';
 import { companyPayTxnMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
-// map's key order (draft → in_transit → reviewing → done) is the source of
-// truth, matching the frontend's WORKFLOW_STAGES.
+// map's key order (draft → in_transit → reviewing → ready_to_pay → done) is
+// the source of truth, matching the frontend's WORKFLOW_STAGES.
+//
+// Line status is the inventory model, not the PO's stage: every stock and
+// sellable bucket reads 'Done' as "goods confirmed by review", and Ready to
+// Pay is exactly that — review finished, only the commission still owed. So
+// the two closing stages share the line status rather than inventing a fifth
+// value every bucket would have to learn.
 export const LINE_STATUS_FOR_LIFECYCLE: Record<string, string> = {
   draft: 'Draft',
   in_transit: 'In Transit',
   reviewing: 'Reviewing',
+  ready_to_pay: 'Done',
   done: 'Done',
 };
+
+// Stage labels as the UI shows them. The list endpoints derive `status` from
+// this, never from the line status above, or Ready to Pay would read "Done".
+export const LIFECYCLE_LABEL: Record<string, string> = {
+  draft: 'Draft',
+  in_transit: 'In Transit',
+  reviewing: 'Reviewing',
+  ready_to_pay: 'Ready to Pay',
+  done: 'Done',
+};
+
+// The book closes when the review does: from Ready to Pay on, the figure is
+// what the purchaser gets paid on, so lines, costs and ownership freeze.
+export function isClosedBook(lifecycle: string): boolean {
+  return lifecycle === 'ready_to_pay' || lifecycle === 'done';
+}
+
+// Stages whose entry belongs to the PO's warehouse manager. A move from an
+// earlier stage into one of these — or past it in a stage-jump — is theirs
+// alone; once the order sits at or beyond it, any manager may continue, and
+// backward moves are never gated. Gating another stage is one entry here.
+const WAREHOUSE_MANAGER_GATED = new Set(['reviewing', 'ready_to_pay']);
+
+function crossesGatedStage(stages: string[], fromIdx: number, toIdx: number): boolean {
+  return stages.some((s, g) => WAREHOUSE_MANAGER_GATED.has(s) && fromIdx < g && toIdx >= g);
+}
 
 // null actor = the system (tracking poll). It is held to the purchaser rule:
 // only Draft → In Transit, never a stage jump.
@@ -39,7 +72,10 @@ export type AdvanceOutcome =
 // move BACKWARDS. A committed line may never go backwards — not even from Done
 // to Reviewing, which validateSellLines would still accept: a sell order raised
 // against confirmed stock must not find it unconfirmed again.
-const LINE_STATUS_ORDER = Object.values(LINE_STATUS_FOR_LIFECYCLE);
+// Deduped: two stages share 'Done', and a repeated value would make
+// statusesAheadOf('Done') claim Done lines move backwards on a Ready to Pay ↔
+// Done move, refusing it whenever a Done line sits on an open sell order.
+const LINE_STATUS_ORDER = [...new Set(Object.values(LINE_STATUS_FOR_LIFECYCLE))];
 
 function statusesAheadOf(lineStatus: string): string[] {
   const i = LINE_STATUS_ORDER.indexOf(lineStatus);
@@ -192,10 +228,10 @@ export async function advanceOrderTx(
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
   const cur = (await tx`
-    SELECT user_id, lifecycle, payment, paypal_txn_id, created_at
+    SELECT user_id, lifecycle, payment, paypal_txn_id, created_at, warehouse_id
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { user_id: string; lifecycle: string; payment: string;
-        paypal_txn_id: string | null; created_at: Date } | undefined;
+        paypal_txn_id: string | null; created_at: Date; warehouse_id: string | null } | undefined;
   if (!cur) return { kind: 'notFound' };
 
   const curIdx = stages.indexOf(cur.lifecycle);
@@ -213,6 +249,27 @@ export async function advanceOrderTx(
   // submits the order. Every other transition stays manager-only.
   if (actor?.role !== 'manager' && !(cur.lifecycle === 'draft' && nextStageId === 'in_transit')) {
     return { kind: 'forbidden', msg: 'Purchasers can only advance Draft to In Transit' };
+  }
+
+  // Only the warehouse's own manager takes the order into review, and on to
+  // Ready to Pay: they are the one who saw the goods. No warehouse, or a
+  // warehouse whose manager is unassigned, demoted or deactivated, leaves the
+  // move to any manager — a gate nobody can pass is a stuck order, not a rule.
+  // The message names the stage that was asked for, not the gate that tripped.
+  if (cur.warehouse_id && crossesGatedStage(stages, curIdx, stages.indexOf(nextStageId))) {
+    const wh = (await tx`
+      SELECT w.short, w.manager_user_id, mu.name AS manager_name
+      FROM warehouses w
+      LEFT JOIN users mu ON mu.id = w.manager_user_id
+                        AND mu.role = 'manager' AND COALESCE(mu.active, TRUE)
+      WHERE w.id = ${cur.warehouse_id} LIMIT 1
+    `)[0] as { short: string; manager_user_id: string | null; manager_name: string | null } | undefined;
+    if (wh?.manager_name && wh.manager_user_id !== actor?.id) {
+      return {
+        kind: 'forbidden',
+        msg: `Only ${wh.manager_name} (${wh.short} manager) can move this order to ${LIFECYCLE_LABEL[nextStageId]}`,
+      };
+    }
   }
 
   // Guard: a company-paid PO leaves Draft only once it names the payment that
@@ -275,6 +332,21 @@ export async function advanceOrderTx(
         ? `${actor.name} advanced ${id} to In Transit`
         : `Carrier movement advanced ${id} to In Transit`,
     });
+  }
+  // Ready to Pay is the moment money is owed: the payer needs to know, and so
+  // does the purchaser it is owed to. Only forward entry fires it — a Done →
+  // Ready to Pay reopen is a correction, not a new payable.
+  if (nextStageId === 'ready_to_pay' && curIdx < stages.indexOf('ready_to_pay')) {
+    const who = actor?.name ?? 'The system';
+    const n = {
+      kind: 'order_ready_to_pay',
+      tone: 'pos' as const,
+      icon: 'inventory',
+      title: `Order ${id} ready to pay`,
+      body: `${who} finished reviewing ${id} — the commission is payable`,
+    };
+    await notifyManagers(tx, n);
+    await notify(tx, { userId: cur.user_id, ...n });
   }
   return { kind: 'ok', nextStageId };
 }
