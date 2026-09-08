@@ -2,13 +2,13 @@
 id: RS-031
 title: Only the warehouse manager moves a PO into Reviewing
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-07
 reporter: Jinhu
 branch: feat/ready-to-pay-stage
-pr:
-version:
+pr: 285
+version: 1.132.0
 related: []
 ---
 
