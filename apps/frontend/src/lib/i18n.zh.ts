@@ -1921,7 +1921,7 @@ const zh: Record<string, string> = {
   payDirAll: '收支全部',
   payDirOut: '支出',
   payDirIn: '收入',
-  paySearch: '搜索收款方、备注、交易号…',
+  paySearch: '搜索收款方、摘要、备注、交易号…',
   payColDate: '日期',
   payColSource: '来源',
   payColCounterparty: '收款方',
@@ -2078,6 +2078,12 @@ const zh: Record<string, string> = {
   payAssignUnassigned: '未指派',
   payAssignedToast: '已指派给 {name}',
   payUnassignedToast: '已取消指派',
+  payNotePh: '添加备注——这笔付款是怎么回事…',
+  payNoteSave: '保存备注',
+  payNoteClear: '清除备注',
+  payNoteSavedToast: '备注已保存',
+  payNoteClearedToast: '备注已删除',
+  payNoteBy: '{name} · {when}',
 };
 
 export default zh;

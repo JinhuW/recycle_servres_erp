@@ -6,6 +6,7 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-035](./RS-035-assign-the-sell-order-payment-receiver-at-any-time.md) | done | story | P2 | Assign the sell-order payment receiver at any time | 1.135.0 |
+| [RS-035](./RS-035-add-a-note-to-a-payment.md) | in-progress | story | P2 | Add a note to a payment | — |
 | [RS-034](./RS-034-refine-the-po-page-while-the-page-get-small.md) | done | story | P2 | Refine the PO pages when the window gets small | 1.134.0 |
 | [RS-033](./RS-033-the-payments-link-button-links-without-saying-to-wha.md) | done | bug | P2 | The Payments Link button links without saying to what | 1.133.0 |
 | [RS-032](./RS-032-add-a-ready-to-pay-stage-for-the-purchaser-s-commiss.md) | done | story | P2 | Add a Ready to Pay stage for the purchaser's commission | 1.132.0 |

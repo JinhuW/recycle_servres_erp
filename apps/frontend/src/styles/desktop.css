@@ -3407,6 +3407,18 @@ html.desktop, body.desktop, .desktop #root {
 .pay-table .pay-link { white-space: nowrap; width: 1%; }
 .pay-link-in { display: inline-flex; align-items: center; gap: 6px; }
 
+/* The note rides under the payee, clipped to a line: it is a reminder on the
+   collapsed row, and the expanded row has the whole text. */
+.pay-note {
+  display: block;
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Owner. Same content-hugging trick, so the slack still lands on the payee
    cell — the only one that can use it. */
 .pay-table .pay-owner { white-space: nowrap; width: 1%; }
