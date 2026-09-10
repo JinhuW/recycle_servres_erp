@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.135.0] - 2026-09-09
+
+### Changed
+
+- **The sell-order payment receiver can be assigned in any status.**  The
+  receiver — the manager who physically took the customer's money — was only
+  editable from the edit form, and the edit form closes for good once an order
+  is Done or Closed.  That is exactly when the field matters: payment often
+  lands after the deal is marked Done, and it is not always the person who
+  was expected.  The detail modal now offers the receiver picker in view mode,
+  Done and Closed included; a change saves at once, writes the usual
+  `meta_changed` history entry, and refreshes the list's receiver column.  The
+  edit form keeps its own picker, saved with the rest of the form.  The
+  backend never gated this field by status; a regression test now locks that
+  in so a broader "freeze everything on Done" guard can't take it away
+  unnoticed.  [RS-035]
+
 ## [1.134.0] - 2026-09-09
 
 ### Changed

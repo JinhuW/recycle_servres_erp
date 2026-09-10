@@ -181,7 +181,9 @@ Transit, and a line's qty can never be 0.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
   (v1.41.0). Drafts can move straight to Awaiting payment (v1.13.0).
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
-  column with a managers-only receiver rule (v1.16.0).
+  column with a managers-only receiver rule (v1.16.0). The receiver can be
+  reassigned from the detail view in any status, Done and Closed included —
+  the change saves at once and is logged in the order history (v1.135.0).
 - **Negotiated final-price adjustment** with an order-summary breakdown card
   (v1.22.0, v1.23.0).
 - **Vendor price round-trip**: export a bid-sheet XLSX, the vendor fills in
