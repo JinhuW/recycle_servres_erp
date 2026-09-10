@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.136.0] - 2026-09-09
+
+### Features
+
+- **A payment can carry a note.**  Every verdict a manager could put on a
+  bank transaction — a linked PO, a transfer, ignored, an owner — said what
+  the money was attached to, and none of them could say *why*.  The one note
+  in the area sat on an internal-transaction record, which groups several
+  rows; a single payment had no text of its own, so "seller promised the
+  refund by Friday" lived in chat.  The expanded row on Payments now has a
+  note box with Save and Clear, the collapsed row shows the note under the
+  payee, and the caption names who wrote it and when.  Search matches note
+  text.  A note is allowed on any row, linked, ignored or reversed included:
+  it explains, it does not classify, so none of the "unlink first" guards
+  apply.  Stored on every leg of a paired payment, like the owner tag; the
+  feed reads it off whichever leg carries one, so a note left on a lone
+  Mercury settlement survives the sync pairing it with its PayPal charge.
+  Grouping two rows by hand spreads a lone note and refuses two different
+  ones until one is cleared.  Capped at 280 characters.  Migration `0120`.
+  [RS-036]
+
 ## [1.135.0] - 2026-09-09
 
 ### Changed

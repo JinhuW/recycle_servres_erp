@@ -1,5 +1,5 @@
 ---
-id: RS-035
+id: RS-036
 title: Add a note to a payment
 type: story
 status: in-progress
@@ -33,16 +33,16 @@ alone; the feed reads the note across the group instead.
 
 ## Acceptance criteria
 
-- [ ] `POST /api/bank-transactions/:id/note` sets or clears a note on every
+- [x] `POST /api/bank-transactions/:id/note` sets or clears a note on every
       leg of the payment, stamping `note_by` / `note_at`; manager-only; 280
       chars max; empty clears.
-- [ ] The feed row carries `note { text, at, byName }` and `?q=` matches note
+- [x] The feed row carries `note { text, at, byName }` and `?q=` matches note
       text.
-- [ ] Pairing two legs by hand spreads a lone note and refuses two differing
+- [x] Pairing two legs by hand spreads a lone note and refuses two differing
       ones; a note on either leg of an auto-paired payment shows on the row.
-- [ ] Expanded row has a note editor (save / clear) with author and date; the
+- [x] Expanded row has a note editor (save / clear) with author and date; the
       collapsed row shows the note under the payee.
-- [ ] EN + ZH strings; i18n parity test green.
+- [x] EN + ZH strings; i18n parity test green.
 
 ## Out of scope
 
