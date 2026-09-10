@@ -2,13 +2,13 @@
 id: RS-034
 title: Refine the PO pages when the window gets small
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-09
 reporter: Jinhu
 branch: feat/po-narrow-desktop
-pr:
-version:
+pr: 291
+version: 1.134.0
 related: [RS-031, RS-032]
 ---
 
