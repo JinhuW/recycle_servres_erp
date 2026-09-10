@@ -95,6 +95,18 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - The PO list hides Done orders by default with a toggle (v1.89.0); mobile
   managers see the whole org's POs (v1.88.0). The stage filter lives in the
   table toolbar as status chips (v1.39.0).
+- **Archiving a PO takes its goods out of stock** (v1.137.0). Archive still
+  hides the order from the default list and is still reversible, but it now
+  also moves every non-Sold line to the `Archived` line status, which drops
+  it out of the inventory screens, the sellable picker, the vendor catalog
+  and bids, and the MCP search the same way Sold does. Unarchive restores
+  each line to the status it held. If a line sits on an open sell order
+  (Draft, Shipped or Awaiting payment) the archive dialog names the sell
+  orders and lines and asks whether to remove them from those sell orders
+  first; the removal is audited on the sell order and is not undone by
+  unarchiving. A line out on a pending transfer refuses the archive. An
+  archived PO is frozen — edits, stage moves, delete and inventory line edits
+  all refuse until it is unarchived — and both edit shells render it locked.
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -155,7 +167,9 @@ log and `orders.supplier_id`.
 ## Inventory
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
-Transit, and a line's qty can never be 0.
+Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
+`Archived` status and are out of every stock view until the PO is unarchived
+(v1.137.0); like Sold, they are reachable through an explicit status filter.
 
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for

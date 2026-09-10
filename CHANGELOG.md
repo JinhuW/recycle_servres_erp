@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.137.0] - 2026-09-10
+
+### Features
+
+- **Archiving a PO takes its goods out of stock.**  Archive used to be a
+  list-tidying flag: the order dropped out of the default PO list and nothing
+  else changed, so its lines stayed in the inventory screens, the sellable
+  picker, the vendor catalog and the MCP search — 480 units across two
+  archived POs in prod.  Stock has no table of its own; it is every line at
+  Done, In Transit or Reviewing, and three of the readers never join
+  `orders`, so an archive flag could not reach them.  Archive now moves every
+  non-Sold line to a new line status, `Archived`, which drops it out of every
+  bucket the way Sold does; unarchive reads each line's prior status back off
+  its audit trail and restores it, so a Done line and a Reviewing line on the
+  same PO both come back right.  A line an open sell order still names (Draft,
+  Shipped or Awaiting payment) cannot vanish under it: the archive refuses
+  with the sell orders, their status and the lines, both shells turn the
+  archive dialog into that question, and confirming removes the lines from
+  the sell orders — audited there as a removal that names the PO — then
+  archives.  Unarchiving does not put them back; a sell order the removal
+  empties is named in the dialog and left in place.  Done sell orders are
+  never touched (their lines are already Sold); a line out on a pending
+  transfer refuses the archive outright.  An archived PO is frozen — edit,
+  delete, stage moves, the carrier poll and inventory line edits all refuse
+  until it is unarchived — and both edit shells render it locked.  Migration
+  `0121` backfills lines of already-archived POs that no open sell order
+  names.  [RS-037]
+
 ## [1.136.0] - 2026-09-09
 
 ### Features
