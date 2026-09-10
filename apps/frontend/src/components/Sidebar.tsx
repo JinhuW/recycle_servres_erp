@@ -80,6 +80,7 @@ export function Sidebar({ view, setView }: Props) {
                   key={n.id}
                   className={'nav-item ' + (active ? 'active' : '')}
                   onClick={() => setView(n.id)}
+                  title={t(n.tKey)}
                 >
                   <Icon name={n.icon} size={15} className="nav-icon" />
                   <span>{t(n.tKey)}</span>
