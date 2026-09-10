@@ -100,6 +100,17 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - Excel export carries the category's full spec set per line, one tab per
   category (v1.40.0). There is no PDF invoice — it was removed in v1.40.0
   because it had fallen behind the spreadsheet.
+- **Both desktop PO pages hold together in a narrow window** (v1.134.0).
+  Under 1100px the list's toolbar wraps inside its card with the search box
+  giving up width first, the KPI tiles stay in one row while four fit, and
+  the order ID is pinned at the left while the table scrolls sideways. The
+  edit page goes to one column — items, then status/details/Save, then
+  payment detail, ledger and activity — the item table scrolls inside its
+  card, the editable fee's inputs drop under their label, the Order-details
+  fields go two-up, and the status stepper keeps every stage as a numbered
+  dot and names only the current one (each dot names itself on hover). The
+  order ID never wraps at any width, and the Notes box stays inside its card
+  at every width (it used to overhang at 1400px).
 
 ## Clients (the people we buy from)
 
@@ -457,6 +468,10 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
 `/v/<token>` → `VendorApp`; viewport under 720px → `MobileApp`; else
 `DesktopApp`.
 
+- The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
+  64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
+  hover, avatar and sign-out — where it used to disappear and leave a
+  split-screen window with no navigation at all.
 - The mobile shell is a **PWA** with install onboarding, a service worker and a
   share target, scoped to mobile only (v0.1.1).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed

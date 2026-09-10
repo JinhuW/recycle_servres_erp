@@ -1432,7 +1432,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           }}>
             <Icon name="warehouse" size={12} /> {t('orderDetails')}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <div className="oe-fields">
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>
               <div style={{ position: 'relative' }}>
@@ -1565,11 +1565,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
         </div>
 
-        <div style={{
-          padding: 16, display: 'grid',
-          gridTemplateColumns: 'auto repeat(3, 1fr) auto',
-          gap: 18, alignItems: 'center',
-        }}>
+        <div className="oe-foot">
           {/* Shipping lives on its own page — this is the way in. */}
           <button
             className="btn"
@@ -1577,15 +1573,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           >
             <Icon name="truck" size={14} /> {t('shipLabelsBtn')}
           </button>
-          <div>
+          <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
           </div>
-          <div>
+          <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('subTotalUnits')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{totals.qty}</div>
           </div>
-          <div>
+          <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
               {t('totalCost')} {goodsOverridden && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
@@ -1600,7 +1596,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="oe-foot-actions">
             <button className="btn" onClick={onCancel}>{t('cancel')}</button>
             {/* Only ever shown for photos whose upload failed: a queued photo
                 on a line that has no id yet is waiting for Save, not for this. */}

@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.134.0] - 2026-09-09
+
+### Changed
+
+- **The desktop PO pages hold together when the window gets small.**  The
+  desktop shell serves every window from 720px up, but neither purchase-order
+  page had a single width rule: under about 1100px the list's toolbar pushed
+  its search box and Columns button out of the card, the KPI tiles jumped to a
+  2×2 block that took half of a short window, and the edit page kept its fixed
+  280px side column, so the item table was left with ~400px and two of its
+  eight columns, the "Other fees" inputs ran past the cost tape, the status
+  stepper ran past its card and the Order-details grid pushed the Notes box
+  out of the card.  Now, under 1100px, the list's toolbar wraps inside its
+  card (the search box gives up width before anything moves to a second line),
+  the KPI tiles stay in one row while four fit, and the order ID is pinned at
+  the left while the table scrolls sideways so a row never loses its name on
+  the way to Profit.  The edit page goes to one column — items, then
+  status/details/Save, then payment detail, ledger and activity — the item
+  table scrolls inside its card, the fee inputs drop under their label, the
+  detail fields go two-up, the footer wraps with Save still reachable, and the
+  stepper keeps every stage as a numbered dot and names only the current one.
+  Two of these were bugs at every width and are fixed everywhere: the order
+  ID no longer wraps onto two lines, and the Notes box no longer overhangs its
+  card.
+- **Under 900px the sidebar folds to an icon rail instead of vanishing.**  The
+  old rule hid it outright, so a split-screen window had no way to leave the
+  page it was on.  The rail keeps the brand mark, every nav icon (named on
+  hover), the avatar and sign-out in 64px; labels hide by CSS only, so the
+  buttons keep their text for assistive tech.
+
 ## [1.133.0] - 2026-09-07
 
 ### Changed
