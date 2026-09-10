@@ -2,13 +2,13 @@
 id: RS-036
 title: Add a note to a payment
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-09
 reporter: Jinhu
 branch: feat/payment-notes
-pr:
-version:
+pr: 294
+version: 1.136.0
 related: [RS-011, RS-016]
 ---
 
