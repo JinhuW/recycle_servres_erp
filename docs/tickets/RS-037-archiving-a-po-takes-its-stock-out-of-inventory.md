@@ -2,13 +2,13 @@
 id: RS-037
 title: Archiving a PO takes its stock out of inventory
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-10
 reporter: jinhu
 branch: feat/po-archive-stock
-pr:
-version:
+pr: "#297"
+version: 1.137.0
 related: []
 ---
 
@@ -34,28 +34,28 @@ with no lines.
 
 ## Acceptance criteria
 
-- [ ] Archiving a PO moves every non-Sold line to a new line status
+- [x] Archiving a PO moves every non-Sold line to a new line status
       `Archived`; the inventory list, products view, export, sellable search,
       vendor catalog and MCP search no longer show them. `?status=Archived`
       lists them, like Sold.
-- [ ] Unarchiving restores each line to the status it had before the archive
+- [x] Unarchiving restores each line to the status it had before the archive
       (read back from the line's audit trail), so a Done line and a Reviewing
       line on the same PO both come back right.
-- [ ] If any of the PO's lines sit on an open sell order (Draft / Shipped /
+- [x] If any of the PO's lines sit on an open sell order (Draft / Shipped /
       Awaiting payment), archive is refused with a 409 that names the sell
       orders, their status and the lines. Both shells show that as a dialog
       and offer "Remove from sell orders and archive"; confirming removes the
       sell-order lines (audited on the sell order as `line_removed` with the
       reason), then archives.
-- [ ] Done sell orders are never touched (their lines are already Sold).
+- [x] Done sell orders are never touched (their lines are already Sold).
       Lines out on a pending transfer order refuse the archive without a
       prompt.
-- [ ] An archived PO is frozen: edit, delete, stage advance and inventory
+- [x] An archived PO is frozen: edit, delete, stage advance and inventory
       line edits refuse with "unarchive first", and both edit shells render
       it as locked.
-- [ ] POs archived before this change have their non-committed lines
+- [x] POs archived before this change have their non-committed lines
       backfilled to `Archived` by a migration.
-- [ ] The archive dialog copy says stock leaves inventory; the activity log
+- [x] The archive dialog copy says stock leaves inventory; the activity log
       says how many lines moved.
 
 ## Out of scope
