@@ -160,6 +160,9 @@ const DISPUTE_LABEL: Record<string, string> = {
   CANCELED_BY_BUYER: 'payDisputeOutcomeCanceled',
 };
 
+// Mirrors the server's cap on POST /:id/note.
+const NOTE_MAX = 280;
+
 const disputeLabel = (t: (k: string) => string, code: string | null): string =>
   !code ? '\u2014' : DISPUTE_LABEL[code] ? t(DISPUTE_LABEL[code]) : code;
 
@@ -198,6 +201,9 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // `initials` arrived with the Owner column and is optional for the same
   // deploy-skew reason.
   assignee?: { id: string; name: string; initials?: string } | null;
+  // One human-written note per payment, with who wrote it and when. Added in
+  // v1.134.0 — optional for the same deploy-skew reason.
+  note?: { text: string; at: string; byName: string | null } | null;
 };
 
 type Feed = { rows: PaymentRow[]; nextCursor: string | null };
@@ -778,6 +784,9 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
           {row.description && (
             <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>{row.description}</span>
           )}
+          {row.note?.text && (
+            <span className="pay-note" title={row.note.text}>{row.note.text}</span>
+          )}
         </td>
         <td className="num mono" style={{ color: row.amount > 0 ? 'var(--pos)' : undefined, whiteSpace: 'nowrap' }}>
           {fmtSigned(row.amount, locale)}
@@ -1114,6 +1123,67 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
               {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           )
+        )}
+      </div>
+      <NoteEditor row={row} locale={locale} act={act} onToast={onToast} />
+    </div>
+  );
+}
+
+// Why this money is what it is, in the manager's words. Allowed on every row
+// — linked, ignored, dead — because a note explains rather than classifies.
+// The draft reseeds from the row after each save: `act` refetches the feed.
+function NoteEditor({ row, locale, act, onToast }: {
+  row: PaymentRow;
+  locale: string;
+  act: (path: string, body?: unknown) => Promise<ActResult | null>;
+  onToast: (msg: string) => void;
+}) {
+  const { t } = useT();
+  const saved = row.note?.text ?? '';
+  const [draft, setDraft] = useState(saved);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(saved); }, [saved]);
+  const dirty = draft.trim() !== saved;
+
+  const write = async (next: string | null) => {
+    setSaving(true);
+    try {
+      const r = await act(`${row.id}/note`, { note: next });
+      if (r) onToast(t(next ? 'payNoteSavedToast' : 'payNoteClearedToast'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 6, maxWidth: 620 }}>
+      <textarea
+        className="input"
+        value={draft}
+        placeholder={t('payNotePh')}
+        rows={2}
+        maxLength={NOTE_MAX}
+        onChange={e => setDraft(e.target.value)}
+        style={{ fontSize: 12.5, resize: 'vertical' }}
+      />
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button" className="btn sm primary"
+          disabled={!dirty || saving}
+          onClick={() => void write(draft.trim() || null)}
+        >
+          {t('payNoteSave')}
+        </button>
+        {row.note && (
+          <button type="button" className="btn sm ghost" disabled={saving} onClick={() => void write(null)}>
+            {t('payNoteClear')}
+          </button>
+        )}
+        {row.note && (
+          <span className="muted">
+            {t('payNoteBy', { name: row.note.byName ?? '—', when: fmtDate(row.note.at, locale) })}
+          </span>
         )}
       </div>
     </div>

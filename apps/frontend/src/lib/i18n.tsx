@@ -354,7 +354,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payDirAll: 'In & out',
     payDirOut: 'Money out',
     payDirIn: 'Money in',
-    paySearch: 'Search payee, memo, txn id…',
+    paySearch: 'Search payee, memo, note, txn id…',
     payColDate: 'Date',
     payColSource: 'Source',
     payColCounterparty: 'Payee',
@@ -516,6 +516,14 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payAssignUnassigned: 'Unassigned',
     payAssignedToast: 'Assigned to {name}',
     payUnassignedToast: 'Owner removed',
+
+    // A note on a payment.
+    payNotePh: 'Add a note — why this payment is what it is…',
+    payNoteSave: 'Save note',
+    payNoteClear: 'Clear note',
+    payNoteSavedToast: 'Note saved',
+    payNoteClearedToast: 'Note removed',
+    payNoteBy: '{name} · {when}',
 
     // ── Activity — the global audit register ──
     acTitle: 'Activity',

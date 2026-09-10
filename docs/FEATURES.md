@@ -318,6 +318,15 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   someone to explain it. Linking that payment to a PO clears the owner, since
   the PO is the answer the tag stood in for; a row filed under an internal
   transaction refuses the link instead, because a note is attached to it.
+- **A payment can carry a note** (v1.136.0). The expanded row has a note box
+  with Save and Clear; the collapsed row shows the note under the payee, and
+  a caption names who wrote it and when. Search matches note text. A note is
+  allowed on any row — linked, ignored, transfer, failed or reversed — because
+  it explains rather than classifies, so no "unlink first" guard applies. It
+  is stored on every leg of a paired payment, like the owner tag, and read off
+  whichever leg carries one, so a note left on a lone Mercury settlement
+  survives the sync pairing it with its PayPal charge. Grouping by hand
+  spreads a lone note and refuses two different ones. 280 characters.
 
 - **A disputed payment says so** (v1.124.0). The sync reads PayPal's Customer
   Disputes API alongside the transaction feed, and a payment we have opened a
