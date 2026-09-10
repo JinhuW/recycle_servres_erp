@@ -2,13 +2,13 @@
 id: RS-035
 title: Assign the sell-order payment receiver at any time
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-09
 reporter: Jinhu
 branch: feat/so-receiver-anytime
-pr:
-version:
+pr: 293
+version: 1.135.0
 related: []
 ---
 
