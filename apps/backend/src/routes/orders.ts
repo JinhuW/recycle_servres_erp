@@ -15,7 +15,8 @@ import {
   type ExportCategory,
 } from '../lib/categoryColumns';
 import {
-  advanceOrderTx, revertOrderToDraftTx, LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook,
+  advanceOrderTx, revertOrderToDraftTx, archiveOrderLinesTx, unarchiveOrderLinesTx,
+  LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
 import { txnRequiredFor } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
@@ -1400,16 +1401,20 @@ orders.patch('/:id', async (c) => {
                other_fees::float AS other_fees,
                other_fees_note,
                paypal_txn_id,
-               supplier_id
+               supplier_id,
+               archived_at
         FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
             payment: string; total_cost: number | null; commission_rate: number | null;
             other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null;
-            supplier_id: string | null }
+            supplier_id: string | null; archived_at: Date | null }
         | undefined;
       if (!orderBefore) throw new Error('order disappeared mid-edit');
+      // An archived order's lines sit at 'Archived'; a purchaser edit would
+      // revert it to Draft and cascade them straight back into stock.
+      if (orderBefore.archived_at) throw new Error('__ARCHIVED__');
       lifecycleAfter = orderBefore.lifecycle;
       // From Ready to Pay on the PO is the closed-book record of what was
       // bought and what the purchaser is paid on. Any edit to lines, costs,
@@ -1880,6 +1885,9 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__DONE_LOCKED__')) {
       return c.json({ error: 'Order is Ready to Pay or Done and cannot be modified. Move it back to Reviewing first.' }, 409);
     }
+    if (msg.includes('__ARCHIVED__')) {
+      return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+    }
     if (msg.includes('__PURCHASER_DONE__')) {
       return c.json({ error: 'Only managers can edit an order after submission' }, 403);
     }
@@ -2044,7 +2052,8 @@ orders.delete('/:id', async (c) => {
 
 // ── Archive / unarchive a Purchase Order.
 //
-// Archive is a reversible "hide from default list" flag (orders.archived_at),
+// Archive hides the order from the default list (orders.archived_at) and takes
+// its goods out of stock (services/orderAdvance.ts, archiveOrderLinesTx),
 // available to the owner or any manager once the order has left Draft. Hard
 // delete stays Draft-only — once business records exist we want them around
 // for audit, sell-order references, and commission history.
@@ -2059,12 +2068,16 @@ async function setArchived(c: OrderCtx, archive: boolean) {
   // Route is mounted with `:id`, so Hono populates this — assert for the type.
   const id = c.req.param('id') as string;
   const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as { removeFromSellOrders?: boolean } | null;
+  const removeFromSellOrders = body?.removeFromSellOrders === true;
 
   type Outcome =
     | { kind: 'notFound' }
     | { kind: 'forbidden' }
     | { kind: 'isDraft' }
     | { kind: 'noChange' }
+    | { kind: 'committedLines'; sellOrders: ArchiveSellOrderConflict[] }
+    | { kind: 'transferClaimed'; offendingLineIds: string[] }
     | { kind: 'ok' };
 
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
@@ -2084,16 +2097,19 @@ async function setArchived(c: OrderCtx, archive: boolean) {
     const wasArchived = existing.archived_at !== null;
     if (wasArchived === archive) return { kind: 'noChange' };
 
+    const actor = { id: u.id, name: u.name, role: u.role };
     if (archive) {
+      const lines = await archiveOrderLinesTx(tx, id, actor, { removeFromSellOrders });
+      if (lines.kind !== 'ok') return lines;
       await tx`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+      await writeOrderEvent(tx, id, u.id, 'archived', {
+        lines: lines.lines, removedSellOrderLines: lines.removedSellOrderLines,
+      });
     } else {
+      const lines = await unarchiveOrderLinesTx(tx, id, actor);
       await tx`UPDATE orders SET archived_at = NULL WHERE id = ${id}`;
+      await writeOrderEvent(tx, id, u.id, 'unarchived', { lines: lines.lines });
     }
-    await writeOrderEvent(
-      tx, id, u.id,
-      archive ? 'archived' : 'unarchived',
-      {},
-    );
     return { kind: 'ok' };
   });
 
@@ -2102,6 +2118,21 @@ async function setArchived(c: OrderCtx, archive: boolean) {
   if (outcome.kind === 'isDraft') return c.json({ error: 'Draft orders cannot be archived — delete instead' }, 403);
   if (outcome.kind === 'noChange') {
     return c.json({ error: archive ? 'Order is already archived' : 'Order is not archived' }, 409);
+  }
+  // `code` is what the client keys the confirm dialog on: "already archived"
+  // above is a 409 too.
+  if (outcome.kind === 'committedLines') {
+    return c.json({
+      error: 'Lines in this order are on open sell orders. Remove them from those sell orders to archive it.',
+      code: 'committedLines',
+      sellOrders: outcome.sellOrders,
+    }, 409);
+  }
+  if (outcome.kind === 'transferClaimed') {
+    return c.json({
+      error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
+      offendingLineIds: outcome.offendingLineIds,
+    }, 409);
   }
   return c.json({ ok: true });
 }
@@ -2463,6 +2494,7 @@ orders.post('/:id/advance', async (c) => {
   if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
   if (outcome.kind === 'forbidden') return c.json({ error: outcome.msg }, 403);
   if (outcome.kind === 'badStage') return c.json({ error: outcome.msg }, 400);
+  if (outcome.kind === 'archived') return c.json({ error: 'Order is archived — unarchive it first' }, 409);
   if (outcome.kind === 'finalStage') return c.json({ error: 'Already at the final stage' }, 409);
   if (outcome.kind === 'committedLines') {
     return c.json({

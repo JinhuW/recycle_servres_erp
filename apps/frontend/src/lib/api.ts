@@ -36,12 +36,16 @@ export class ApiError extends Error {
   path?: string;
   method?: string;
   requestId?: string;
+  // The decoded response body, for the few endpoints whose 4xx carries more
+  // than a message — a `code` and the records the caller has to decide about.
+  body?: unknown;
 
-  constructor(public status: number, message: string, meta?: ApiErrorMeta) {
+  constructor(public status: number, message: string, meta?: ApiErrorMeta, body?: unknown) {
     super(message);
     this.path = meta?.path;
     this.method = meta?.method;
     this.requestId = meta?.requestId;
+    this.body = body;
   }
 }
 
@@ -128,7 +132,7 @@ async function request<T>(
       }
       const text = await res.text();
       const json = text ? safeJson(text) : null;
-      throw new ApiError(401, errMsg(json, 401), { path, method, requestId: reqId(res) });
+      throw new ApiError(401, errMsg(json, 401), { path, method, requestId: reqId(res) }, json);
     }
   }
 
@@ -136,7 +140,7 @@ async function request<T>(
   const json = text ? safeJson(text) : null;
 
   if (!res.ok) {
-    throw new ApiError(res.status, errMsg(json, res.status), { path, method, requestId: reqId(res) });
+    throw new ApiError(res.status, errMsg(json, res.status), { path, method, requestId: reqId(res) }, json);
   }
   return json as T;
 }
@@ -269,8 +273,10 @@ export const deleteOrder = (orderId: string) =>
 export const discardTransferOrder = (id: string) =>
   api.delete<{ ok: true; id: string }>(`/api/inventory/transfer-orders/${id}`);
 
-export const archiveOrder = (orderId: string) =>
-  api.post<{ ok: true }>(`/api/orders/${orderId}/archive`, {});
+// `removeFromSellOrders` is the user's answer to the 409 the first call
+// returns when the goods sit on open sell orders (see lib/archiveConflict.ts).
+export const archiveOrder = (orderId: string, opts: { removeFromSellOrders?: boolean } = {}) =>
+  api.post<{ ok: true }>(`/api/orders/${orderId}/archive`, opts);
 
 export const unarchiveOrder = (orderId: string) =>
   api.post<{ ok: true }>(`/api/orders/${orderId}/unarchive`, {});

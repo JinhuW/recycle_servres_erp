@@ -157,6 +157,9 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
           {snap.unit_price != null && typeof snap.unit_price === 'number'
             ? <> · {fmtUSD(snap.unit_price, locale)}</>
             : null}
+          {d.reason === 'po_archived'
+            ? <> · {t('historyRemovedLinePoArchived', { id: String(d.orderId ?? '') })}</>
+            : null}
         </>
       );
     }

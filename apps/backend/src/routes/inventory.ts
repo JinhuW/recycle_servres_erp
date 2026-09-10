@@ -13,7 +13,7 @@ import {
 import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
-import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
+import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS } from '../services/orderAdvance';
 
 const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
@@ -121,7 +121,11 @@ function inventoryWhereFrag(
   // Sold is a terminal state — hidden from the default list so day-to-day work
   // isn't cluttered by already-sold lots. The "Show sold" toggle lifts the
   // exclusion; picking Sold explicitly in the status filter overrides it too.
-  const soldFrag     = (status || includeSold) ? sql`TRUE` : sql`l.status <> 'Sold'`;
+  // Archived lines (their PO was archived) are out of stock the same way, and
+  // are reached the same way: an explicit status filter.
+  const soldFrag     = status ? sql`TRUE`
+    : includeSold ? sql`l.status <> ${ARCHIVED_LINE_STATUS}`
+    : sql`l.status NOT IN ('Sold', ${ARCHIVED_LINE_STATUS})`;
   // Effective warehouse = override on the line if present, else the parent
   // order's warehouse. Lets a manager transfer a line to a different warehouse
   // without rewriting the order.
@@ -751,9 +755,12 @@ inventory.get('/products', async (c) => {
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
   const statusFrag   = status ? sql`l.status = ${status}` : sql`TRUE`;
-  // Mirror the list: sold lots drop out of the default grouped view (and its
-  // facet/warehouse counts) unless the toggle or an explicit Sold filter is set.
-  const soldFrag     = (status || includeSold) ? sql`TRUE` : sql`l.status <> 'Sold'`;
+  // Mirror the list: sold and archived lots drop out of the default grouped
+  // view (and its facet/warehouse counts) unless the toggle or an explicit
+  // status filter is set.
+  const soldFrag     = status ? sql`TRUE`
+    : includeSold ? sql`l.status <> ${ARCHIVED_LINE_STATUS}`
+    : sql`l.status NOT IN ('Sold', ${ARCHIVED_LINE_STATUS})`;
   // Warehouse is intentionally NOT pushed into SQL here — keeping every
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
@@ -1125,12 +1132,16 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'committed' }
     | { kind: 'doneLocked' }
+    | { kind: 'archived' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const before = (await tx<Record<string, unknown>[]>`
       SELECT * FROM order_lines WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!before) return { kind: 'notFound' };
+    // The PO is archived: the line is out of stock and its status is the
+    // archive's to restore. Unarchive the PO to edit it.
+    if (before.status === ARCHIVED_LINE_STATUS) return { kind: 'archived' };
 
     // A line committed to a sell order (COMMITTED_SELL_STATUSES) is "spoken
     // for": editing its qty or status out from under the deal silently
@@ -1243,6 +1254,9 @@ inventory.patch('/:id', async (c) => {
   }
   if (outcome.kind === 'doneLocked') {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
+  }
+  if (outcome.kind === 'archived') {
+    return c.json({ error: 'the purchase order is archived; unarchive it before editing its lines' }, 409);
   }
   const before = outcome.before;
 
