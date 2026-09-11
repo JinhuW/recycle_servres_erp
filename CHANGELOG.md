@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.137.1] - 2026-09-11
+
+### Fixed
+
+- **The archive release, reviewed before it reaches prod.**  A `high` review
+  of everything `main` was about to receive (v1.133.0 – v1.137.0) found ten
+  things, most in the week-old archive work.  A purchaser who owned a PO
+  could archive it with `removeFromSellOrders` and delete lines off managers'
+  Shipped and Awaiting-payment sell orders — and read those sell orders' ids,
+  statuses and lines off the first 409, data every sell-order route refuses
+  them.  The conflict question is now the manager's; a purchaser gets a
+  plain refusal.  The inventory line editor keyed its archived guard on the
+  line's status, so a Sold line on an archived PO could be set back to Done
+  and re-enter stock behind the archive; it now reads the parent order.  The
+  Analysis tab had no status predicate at all, so archived goods still
+  counted in every KPI and a stray `Archived` bucket appeared in the
+  pipeline; every aggregate now drops them.  Migration `0121` backfilled
+  lines out on a pending transfer to `Archived` — the exact strand the
+  runtime guard refuses, which leaves receive moving nothing and discard and
+  reopen refusing forever — and `0122` puts those back at In Transit with
+  their audit row.  Both edit shells told the user an archived In Transit or
+  Reviewing order was "Done"; they now say archived.  The conflict dialog
+  keyed its lines by lot, which collides when a sell order names one lot
+  twice; the payload carries the sell-order line id.  [RS-038]
+- **A note follows the sync's pairing.**  The bank sync paired a noted
+  Mercury settlement with its PayPal charge without copying the note, and
+  the feed hid that with a per-row scan of the group.  Pairing now copies a
+  lone note across, as grouping by hand always did, the feed reads the row's
+  own note, and `0123` copies notes onto the pairs made before this.  The
+  note on the collapsed payment row also rendered as primary text — its
+  colour token was never defined.  [RS-038]
+- Smaller: the sidebar's "+" badge survives the icon rail; the archive
+  dialog body is one component for both shells; the open-sell-order status
+  set and the payment-note cap each live in one place.  [RS-038]
+
 ## [1.137.0] - 2026-09-10
 
 ### Features

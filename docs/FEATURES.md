@@ -104,9 +104,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   (Draft, Shipped or Awaiting payment) the archive dialog names the sell
   orders and lines and asks whether to remove them from those sell orders
   first; the removal is audited on the sell order and is not undone by
-  unarchiving. A line out on a pending transfer refuses the archive. An
+  unarchiving. That question, and the removal, are the manager's: a
+  purchaser who owns the PO gets a plain refusal naming no sell orders
+  (v1.137.1). A line out on a pending transfer refuses the archive. An
   archived PO is frozen — edits, stage moves, delete and inventory line edits
-  all refuse until it is unarchived — and both edit shells render it locked.
+  (Sold lines included) all refuse until it is unarchived — and both edit
+  shells render it locked and say so. The Analysis tab leaves archived goods
+  out of every aggregate (v1.137.1).
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -337,10 +341,11 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   a caption names who wrote it and when. Search matches note text. A note is
   allowed on any row — linked, ignored, transfer, failed or reversed — because
   it explains rather than classifies, so no "unlink first" guard applies. It
-  is stored on every leg of a paired payment, like the owner tag, and read off
-  whichever leg carries one, so a note left on a lone Mercury settlement
-  survives the sync pairing it with its PayPal charge. Grouping by hand
-  spreads a lone note and refuses two different ones. 280 characters.
+  is stored on every leg of a paired payment, like the owner tag; when the
+  sync pairs a noted Mercury settlement with its PayPal charge it copies the
+  note across, so the note survives on the row the feed shows (v1.137.1).
+  Grouping by hand spreads a lone note and refuses two different ones. 280
+  characters.
 
 - **A disputed payment says so** (v1.124.0). The sync reads PayPal's Customer
   Disputes API alongside the transaction feed, and a payment we have opened a

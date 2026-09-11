@@ -275,6 +275,20 @@ async function syncOne(sql: ReturnType<typeof getDb>, provider: BankProvider): P
 // (Mercury description carries the PayPal txn id) pairs regardless of date,
 // an amount+date match only when it is unambiguous on both sides.
 
+// A note lives on every leg of a pair (0120) so the feed, which renders one
+// leg, always sees it. /pair copies a lone note across when a human groups
+// two rows; the same has to happen here or a note left on the Mercury
+// settlement before its PayPal charge arrived vanishes behind the display
+// leg. Two different notes are both kept — nothing here can ask which wins.
+async function copyNoteAcrossPair(tx: Tx, pairId: string): Promise<void> {
+  await tx`
+    UPDATE bank_transactions t
+    SET note = s.note, note_by = s.note_by, note_at = s.note_at
+    FROM bank_transactions s
+    WHERE t.pair_id = ${pairId} AND t.note IS NULL
+      AND s.pair_id = ${pairId} AND s.note IS NOT NULL`;
+}
+
 async function autoPair(tx: Tx): Promise<number> {
   const legs = await tx<LegRow[]>`
     SELECT id, source, external_id, amount::text AS amount, posted_at, paypal_txn_id, description,
@@ -341,6 +355,7 @@ async function autoPair(tx: Tx): Promise<number> {
     if (linked.length === 2 && m.order_id !== p.order_id) continue;
     const pairId = crypto.randomUUID();
     await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m.id}, ${p.id})`;
+    await copyNoteAcrossPair(tx, pairId);
     if (linked.length === 1) {
       const src = linked[0];
       await tx`
@@ -389,6 +404,7 @@ async function transferPair(tx: Tx, legs: LegRow[], taken: Set<string>): Promise
     if (dt > PAIR_WINDOW_MS) continue;
     const pairId = crypto.randomUUID();
     await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${m[0].id}, ${p[0].id})`;
+    await copyNoteAcrossPair(tx, pairId);
     await tx`
       UPDATE bank_transactions SET category = 'transfer'
       WHERE id = ${m[0].id} AND NOT category_manual`;

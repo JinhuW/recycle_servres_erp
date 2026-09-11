@@ -84,6 +84,7 @@ const zh: Record<string, string> = {
   errCantSubmitTitle: '暂时无法提交',
   errCantSubmitMsg: '尚未提交。请修正以下问题后重试。',
   saveBlockedLocked: '此订单已完成 —— 无法再编辑。',
+  saveBlockedArchived: '此订单已归档 —— 取消归档后才能编辑。',
   saveBlockedNoChanges: '没有需要保存的更改。',
   sodBlockedNoLines: '请至少添加一项。',
   sodBlockedNoCustomer: '请选择客户。',

@@ -4,7 +4,7 @@ import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedSellStatuses, openSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
@@ -85,7 +85,7 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
 // the line to 'Sold' (filtered elsewhere) and Closed releases the commitment.
 // Used to keep a new sell order from re-picking stock another in-flight order
 // already claims.
-const PENDING_SO_STATUSES = ['Draft', 'Shipped', 'Awaiting payment'];
+const PENDING_SO_STATUSES = openSellStatuses();
 function pendingSellOrderFrag(sql: ReturnType<typeof getDb>, hide: boolean) {
   return hide
     ? sql`l.qty > COALESCE((
@@ -500,6 +500,9 @@ inventory.get('/analysis', async (c) => {
   // section drops in only the axes it honours (see the header note).
   const catCond = category  ? sql`l.category = ${category}` : sql`TRUE`;
   const whCond  = warehouse ? sql`${effWh} = ${warehouse}`  : sql`TRUE`;
+  // An archived PO's goods are out of stock; every aggregate below drops them
+  // the way the list does. (Sold lines still count here, as they always have.)
+  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS}`;
 
   // Grouped unit-count over a whitelisted column for one category, honouring
   // the warehouse scope. The column set is the fixed SUBTYPE_DIMS whitelist, and
@@ -517,7 +520,7 @@ inventory.get('/analysis', async (c) => {
                END AS k,
                COALESCE(SUM(l.qty), 0)::int AS u
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE l.category = ${cat} AND ${whCond}
+        WHERE l.category = ${cat} AND ${whCond} AND ${liveCond}
         GROUP BY 1 ORDER BY 1`;
     }
     const colFrag = col === 'rpm' ? sql`l.rpm::text` : sql`l.${sql(col)}::text`;
@@ -525,7 +528,7 @@ inventory.get('/analysis', async (c) => {
       SELECT COALESCE(NULLIF(${colFrag}, ''), '?') AS k,
              COALESCE(SUM(l.qty), 0)::int AS u
       FROM order_lines l JOIN orders o ON o.id = l.order_id
-      WHERE l.category = ${cat} AND ${whCond}
+      WHERE l.category = ${cat} AND ${whCond} AND ${liveCond}
       GROUP BY 1 ORDER BY u DESC, k LIMIT 16`;
   };
 
@@ -537,7 +540,7 @@ inventory.get('/analysis', async (c) => {
                COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS cost,
                COALESCE(ROUND(SUM(l.qty*l.sell_price)),0)::float AS sell
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE ${catCond} AND ${whCond}`,
+        WHERE ${catCond} AND ${whCond} AND ${liveCond}`,
       // Control list: every category, unfiltered, busiest first.
       sql<{ category: string }[]>`
         SELECT category FROM order_lines
@@ -548,13 +551,13 @@ inventory.get('/analysis', async (c) => {
                COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS cost,
                COALESCE(ROUND(SUM(l.qty*l.sell_price)),0)::float AS sell
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE ${whCond}
+        WHERE ${whCond} AND ${liveCond}
         GROUP BY l.category ORDER BY units DESC`,
       // Status pipeline — scoped by both axes.
       sql<{ status: string; units: number }[]>`
         SELECT l.status, COALESCE(SUM(l.qty),0)::int AS units
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE ${catCond} AND ${whCond}
+        WHERE ${catCond} AND ${whCond} AND ${liveCond}
         GROUP BY l.status ORDER BY units DESC`,
       // Control list: every warehouse, unfiltered.
       sql<{ id: string; short: string; region: string }[]>`
@@ -567,14 +570,14 @@ inventory.get('/analysis', async (c) => {
         FROM order_lines l
         JOIN orders o     ON o.id = l.order_id
         JOIN warehouses w ON w.id = ${effWh}
-        WHERE ${catCond}
+        WHERE ${catCond} AND ${liveCond}
         GROUP BY w.id, w.short, w.region ORDER BY units DESC`,
       // Top brands — scoped by both axes.
       sql<{ k: string; u: number }[]>`
         SELECT COALESCE(NULLIF(l.brand,''),'?') AS k, COALESCE(SUM(l.qty),0)::int AS u
         FROM order_lines l JOIN orders o ON o.id = l.order_id
         WHERE l.brand IS NOT NULL AND l.brand <> '' AND l.brand <> '?'
-          AND ${catCond} AND ${whCond}
+          AND ${catCond} AND ${whCond} AND ${liveCond}
         GROUP BY 1 ORDER BY u DESC, k LIMIT 10`,
     ]);
 
@@ -595,7 +598,7 @@ inventory.get('/analysis', async (c) => {
       sql<{ k: string; u: number }[]>`
         SELECT COALESCE(NULLIF(l.condition,''),'?') AS k, COALESCE(SUM(l.qty),0)::int AS u
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE l.category = ${cat} AND ${whCond}
+        WHERE l.category = ${cat} AND ${whCond} AND ${liveCond}
         GROUP BY 1 ORDER BY u DESC, k`,
     ]);
     subtypes[cat] = {
@@ -1139,9 +1142,15 @@ inventory.patch('/:id', async (c) => {
       SELECT * FROM order_lines WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!before) return { kind: 'notFound' };
-    // The PO is archived: the line is out of stock and its status is the
-    // archive's to restore. Unarchive the PO to edit it.
-    if (before.status === ARCHIVED_LINE_STATUS) return { kind: 'archived' };
+    const orderId = before.order_id as string;
+    const [parent] = await tx<{ lifecycle: string; archived_at: Date | null }[]>`
+      SELECT lifecycle, archived_at FROM orders WHERE id = ${orderId} LIMIT 1
+    `;
+    // The PO is archived: its stock lines sit at 'Archived' and their status
+    // is the archive's to restore, and a Sold line on it must not be walked
+    // back into stock behind the archive either. Keyed on the order, not the
+    // line status, for exactly that second case. Unarchive the PO to edit it.
+    if (parent?.archived_at) return { kind: 'archived' };
 
     // A line committed to a sell order (COMMITTED_SELL_STATUSES) is "spoken
     // for": editing its qty or status out from under the deal silently
@@ -1161,19 +1170,13 @@ inventory.patch('/:id', async (c) => {
     }
 
     const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
-    const orderId = before.order_id as string;
 
     // A Done PO's costs are closed-book, and PATCH /api/orders refuses exactly
     // this edit with 409 — reaching the same line through the inventory editor
     // rewrote the header total anyway. Status, sell price and the spec fields
     // stay editable: that is the ordinary post-Done inventory workflow, and
     // none of them feed the goods total.
-    if (touchesGoods) {
-      const [parent] = await tx<{ lifecycle: string }[]>`
-        SELECT lifecycle FROM orders WHERE id = ${orderId} LIMIT 1
-      `;
-      if (parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
-    }
+    if (touchesGoods && parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
 
     // The mirror verdict has to be taken before qty/unit_cost move — afterwards
     // a stale mirror and a real negotiated price are indistinguishable and the

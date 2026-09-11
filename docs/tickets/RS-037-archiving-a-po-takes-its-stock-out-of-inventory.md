@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-10
 reporter: jinhu
 branch: feat/po-archive-stock
-pr: "#297"
+pr: 297
 version: 1.137.0
 related: []
 ---
