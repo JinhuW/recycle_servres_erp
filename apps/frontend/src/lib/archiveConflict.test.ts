@@ -6,8 +6,8 @@ const conflictBody = {
   error: 'Lines in this order are on open sell orders.',
   code: 'committedLines',
   sellOrders: [
-    { id: 'SO-4001', status: 'Draft', lineCount: 1, lines: [{ inventoryId: 'a', label: 'Samsung 32GB', qty: 2 }] },
-    { id: 'SO-4002', status: 'Shipped', lineCount: 3, lines: [{ inventoryId: 'b', label: 'Micron 16GB', qty: 1 }] },
+    { id: 'SO-4001', status: 'Draft', lineCount: 1, lines: [{ solId: 'sol-1', inventoryId: 'a', label: 'Samsung 32GB', qty: 2 }] },
+    { id: 'SO-4002', status: 'Shipped', lineCount: 3, lines: [{ solId: 'sol-2', inventoryId: 'b', label: 'Micron 16GB', qty: 1 }] },
   ],
 };
 
@@ -16,7 +16,20 @@ describe('readArchiveConflict', () => {
     const c = readArchiveConflict(new ApiError(409, conflictBody.error, {}, conflictBody));
     expect(c?.sellOrders.map(s => s.id)).toEqual(['SO-4001', 'SO-4002']);
     expect(c?.sellOrders[1].status).toBe('Shipped');
-    expect(c?.sellOrders[0].lines).toEqual([{ inventoryId: 'a', label: 'Samsung 32GB', qty: 2 }]);
+    expect(c?.sellOrders[0].lines).toEqual([{ solId: 'sol-1', inventoryId: 'a', label: 'Samsung 32GB', qty: 2 }]);
+  });
+
+  // A sell order may name one lot twice; the two entries must stay apart even
+  // when an older backend sends no solId.
+  it('keys lines by the sell-order line, falling back to position', () => {
+    const body = {
+      code: 'committedLines',
+      sellOrders: [{ id: 'SO-1', status: 'Draft', lineCount: 2, lines: [
+        { inventoryId: 'a', label: 'x', qty: 1 }, { inventoryId: 'a', label: 'x', qty: 2 },
+      ] }],
+    };
+    const c = readArchiveConflict(new ApiError(409, 'x', {}, body));
+    expect(c?.sellOrders[0].lines.map(l => l.solId)).toEqual(['0', '1']);
   });
 
   it('marks a sell order emptied only when every line it holds is being removed', () => {

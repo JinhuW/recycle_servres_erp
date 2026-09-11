@@ -2069,7 +2069,12 @@ async function setArchived(c: OrderCtx, archive: boolean) {
   const id = c.req.param('id') as string;
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { removeFromSellOrders?: boolean } | null;
-  const removeFromSellOrders = body?.removeFromSellOrders === true;
+  // Pulling lines off sell orders — and seeing which sell orders those are —
+  // is manager work: every /api/sell-orders route 403s a purchaser, and the
+  // conflict payload would hand the same ids, statuses and lines to a PO
+  // owner. A purchaser gets a plain refusal and no lever.
+  const isManager = u.role === 'manager';
+  const removeFromSellOrders = isManager && body?.removeFromSellOrders === true;
 
   type Outcome =
     | { kind: 'notFound' }
@@ -2085,7 +2090,7 @@ async function setArchived(c: OrderCtx, archive: boolean) {
       SELECT user_id, lifecycle, archived_at FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0] as { user_id: string; lifecycle: string; archived_at: string | null } | undefined;
     if (!existing) return { kind: 'notFound' };
-    if (u.role !== 'manager' && existing.user_id !== u.id) return { kind: 'forbidden' };
+    if (!isManager && existing.user_id !== u.id) return { kind: 'forbidden' };
     // Draft orders use Delete, not Archive — Archive only applies once an
     // order is part of the business record. A reverted order is a Draft that
     // HAS been submitted, and Delete refuses exactly those, so the history has
@@ -2122,6 +2127,9 @@ async function setArchived(c: OrderCtx, archive: boolean) {
   // `code` is what the client keys the confirm dialog on: "already archived"
   // above is a 409 too.
   if (outcome.kind === 'committedLines') {
+    if (!isManager) {
+      return c.json({ error: 'Lines in this order are on open sell orders — a manager has to archive it.' }, 409);
+    }
     return c.json({
       error: 'Lines in this order are on open sell orders. Remove them from those sell orders to archive it.',
       code: 'committedLines',

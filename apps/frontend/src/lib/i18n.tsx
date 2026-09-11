@@ -154,6 +154,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     errCantSubmitTitle: 'Can’t submit yet',
     errCantSubmitMsg: 'Nothing was submitted. Fix the following, then try again.',
     saveBlockedLocked: 'This order is Done — it can no longer be edited.',
+    saveBlockedArchived: 'This order is archived — unarchive it to edit.',
     saveBlockedNoChanges: 'No changes to save.',
     sodBlockedNoLines: 'Add at least one item.',
     sodBlockedNoCustomer: 'Pick a customer.',

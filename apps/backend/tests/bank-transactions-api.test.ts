@@ -1048,10 +1048,10 @@ describe('notes on a payment', () => {
     expect((await feedRow(token, pId))?.note?.text).toBe('wire half');
   });
 
-  it("shows a Mercury leg's note on the display row after the sync auto-pairs it", async () => {
+  it("copies a Mercury leg's note onto the PayPal leg when the sync auto-pairs them", async () => {
     // The Mercury settlement lands first and gets noted; the PayPal charge
-    // arrives on a later sync and becomes the display leg. Nothing copies the
-    // note across — the feed has to read it from whichever leg has it.
+    // arrives on a later sync and becomes the display leg. Pairing has to
+    // carry the note across — the feed reads only the display leg's own.
     await syncBankTransactions(testEnv, [
       fakeProvider('mercury', [{ externalId: 'late-m', amount: -900, paypalTxnId: 'LATE1234567890ABC' }]),
     ]);
@@ -1065,7 +1065,7 @@ describe('notes on a payment', () => {
     const pId = await idOf('LATE1234567890ABC');
     const [pLeg] = await getTestDb()`SELECT pair_id, note FROM bank_transactions WHERE id = ${pId}`;
     expect(pLeg.pair_id).not.toBeNull();
-    expect(pLeg.note).toBeNull();
+    expect(pLeg.note).toBe('GPU lot from Reddit');
 
     const row = await feedRow(token, pId);
     expect(row).toBeTruthy();

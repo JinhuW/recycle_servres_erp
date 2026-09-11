@@ -3,6 +3,9 @@
 // sell order still names has to be released from that sell order first.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -13,7 +16,7 @@ type Detail = { order: { lifecycle: string; archivedAt: string | null; lines: Li
 type Conflict = {
   error: string;
   code?: string;
-  sellOrders?: { id: string; status: string; lineCount: number; lines: { inventoryId: string; label: string; qty: number }[] }[];
+  sellOrders?: { id: string; status: string; lineCount: number; lines: { solId: string; inventoryId: string; label: string; qty: number }[] }[];
   offendingLineIds?: string[];
 };
 
@@ -182,7 +185,9 @@ describe('archive and open sell orders', () => {
     expect(r.body.sellOrders?.[0].id).toBe(soId);
     expect(r.body.sellOrders?.[0].status).toBe('Shipped');
     expect(r.body.sellOrders?.[0].lineCount).toBe(1);
-    expect(r.body.sellOrders?.[0].lines).toEqual([{ inventoryId: lineIds[0], label: 'x', qty: 1 }]);
+    expect(r.body.sellOrders?.[0].lines).toEqual([
+      { solId: expect.any(String), inventoryId: lineIds[0], label: 'x', qty: 1 },
+    ]);
 
     const got = await get(id, mgr);
     expect(got.body.order.archivedAt).toBeNull();
@@ -256,6 +261,36 @@ describe('archive and open sell orders', () => {
     expect(so.body.order.lines).toHaveLength(0);
   });
 
+  it('a purchaser gets a plain refusal, never the sell orders, and cannot remove anything', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    expect((await api('POST', `/api/sell-orders/${soId}/status`, {
+      token: mgr, body: { to: 'Shipped' },
+    })).status).toBe(200);
+
+    // The owner reaches the endpoint (both shells offer Archive to the owner)
+    // but every sell-order read 403s a purchaser, so the 409 must not leak
+    // the sell order either.
+    const plain = await api<Conflict>('POST', `/api/orders/${id}/archive`, { token: pur });
+    expect(plain.status).toBe(409);
+    expect(plain.body.error).toMatch(/manager/i);
+    expect(plain.body.code).toBeUndefined();
+    expect(plain.body.sellOrders).toBeUndefined();
+
+    const forced = await api<Conflict>('POST', `/api/orders/${id}/archive`, {
+      token: pur, body: { removeFromSellOrders: true },
+    });
+    expect(forced.status).toBe(409);
+    expect(forced.body.sellOrders).toBeUndefined();
+
+    expect((await get(id, mgr)).body.order.archivedAt).toBeNull();
+    const so = await api<{ order: { lines: unknown[] } }>('GET', `/api/sell-orders/${soId}`, { token: mgr });
+    expect(so.body.order.lines).toHaveLength(1);
+    expect((await eventsOf(soId)).filter(e => e.kind === 'line_removed')).toHaveLength(0);
+  });
+
   it('refuses when a line is out on a pending transfer order, with no prompt', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
@@ -311,11 +346,82 @@ describe('an archived order is frozen', () => {
     expect((await api('PATCH', `/api/orders/${id}`, { token: mgr, body: { notes: 'late note' } })).status).toBe(200);
   });
 
+  it('a Sold line on an archived order cannot be walked back into stock', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrderOn(mgr, lineIds[1], 2);
+    expect((await api('POST', `/api/sell-orders/${soId}/status`, {
+      token: mgr, body: { to: 'Done' },
+    })).status).toBe(200);
+    expect((await api('POST', `/api/orders/${id}/archive`, { token: mgr })).status).toBe(200);
+
+    // The archive leaves the Sold line at Sold, so a guard keyed on the line
+    // status would let this through — and the line would be back in the
+    // sellable views while the order stays archived.
+    const r = await api<{ error: string }>('PATCH', `/api/inventory/${lineIds[1]}`, {
+      token: mgr, body: { status: 'Done' },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/archived/i);
+    expect((await statusesOf(id, mgr))[lineIds[1]]).toBe('Sold');
+  });
+
   it('a hand-set line status can never be Archived', async () => {
     const { token: pur } = await loginAs(MARCUS);
     const { token: mgr } = await loginAs(ALEX);
     const { lineIds } = await createReviewing(pur, mgr);
     const r = await api('PATCH', `/api/inventory/${lineIds[0]}`, { token: mgr, body: { status: 'Archived' } });
     expect(r.status).toBe(400);
+  });
+});
+
+// 0121 backfilled the lines of POs archived before the cascade existed; 0122
+// repairs the one case it got wrong. Both run before the seed when a worker
+// builds its template, so the test replays the real files over data it makes.
+const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), '../migrations');
+const M0121 = readFileSync(join(MIGRATIONS, '0121_archived_po_lines.sql'), 'utf8');
+const M0122 = readFileSync(join(MIGRATIONS, '0122_archived_lines_on_pending_transfer.sql'), 'utf8');
+
+describe('0121 + 0122 — backfilling POs archived before the cascade', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('puts a line 0121 stranded on a pending transfer back at In Transit, with its audit row', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
+      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 4 }] },
+    });
+    expect(moved.status).toBe(200);
+    expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('In Transit');
+
+    // A pre-v1.137 archive: the flag alone, lines untouched.
+    const sql = getTestDb();
+    await sql`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+
+    await sql.unsafe(M0121);
+    let st = await statusesOf(id, mgr);
+    expect(st[lineIds[0]]).toBe('Archived');
+    expect(st[lineIds[1]]).toBe('Archived');
+
+    await sql.unsafe(M0122);
+    st = await statusesOf(id, mgr);
+    expect(st[lineIds[0]]).toBe('In Transit');
+    expect(st[lineIds[1]]).toBe('Archived');
+    const audit = await sql<{ detail: { from: string; to: string } }[]>`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${lineIds[0]} AND kind = 'status'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audit[0]?.detail).toMatchObject({ from: 'Archived', to: 'In Transit' });
+
+    // Which is exactly what receive needs to find.
+    const received = await api('POST', `/api/inventory/transfer-orders/${moved.body.transferOrderId}/receive`, { token: mgr });
+    expect(received.status).toBe(200);
+    expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Done');
+
+    // Running the repair again touches nothing.
+    await sql.unsafe(M0122);
+    expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Done');
   });
 });

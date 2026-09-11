@@ -14,6 +14,7 @@ import { useAuth } from '../lib/auth';
 import { linePhotos } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
+import { ArchiveConflictList } from '../components/ArchiveConflictList';
 import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
@@ -495,7 +496,7 @@ export function OrderDetail({
                   : t('lifecycleAdvance', { status: nextStatus })}
             </button>
           )}
-          {!nextStatus && orderLocked && (
+          {!nextStatus && orderLocked && !isArchived && (
             <div style={{
               marginTop: 12, padding: '8px 12px', borderRadius: 10,
               background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
@@ -1161,22 +1162,7 @@ export function OrderDetail({
             </div>
             {archiveConflict && (
                 <div className="modal-body" style={{ paddingTop: 0 }}>
-                  {archiveConflict.sellOrders.map(so => (
-                    <div key={so.id} style={{ fontSize: 12.5, lineHeight: 1.5 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>{so.id}</span>
-                        <span className={'chip ' + statusTone(so.status)} style={{ fontSize: 10.5 }}>{so.status}</span>
-                        {so.emptied && (
-                          <span style={{ color: 'var(--neg)' }}>{t('archiveConflictEmptied')}</span>
-                        )}
-                      </div>
-                      <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: 'var(--fg-muted)' }}>
-                        {so.lines.map(l => (
-                          <li key={l.inventoryId}>{l.label || l.inventoryId.slice(0, 8)} · {t('qtyShort', { n: String(l.qty) })}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                  <ArchiveConflictList conflict={archiveConflict} />
                 </div>
             )}
             <div className="modal-foot">

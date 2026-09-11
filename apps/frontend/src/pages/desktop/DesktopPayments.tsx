@@ -7,6 +7,7 @@ import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/form
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate } from '../../lib/route';
+import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
 // Manager-only reconciliation of Mercury/PayPal transactions against POs.
 // The list serves logical payments: a PayPal charge and its Mercury
@@ -160,9 +161,6 @@ const DISPUTE_LABEL: Record<string, string> = {
   CANCELED_BY_BUYER: 'payDisputeOutcomeCanceled',
 };
 
-// Mirrors the server's cap on POST /:id/note.
-const NOTE_MAX = 280;
-
 const disputeLabel = (t: (k: string) => string, code: string | null): string =>
   !code ? '\u2014' : DISPUTE_LABEL[code] ? t(DISPUTE_LABEL[code]) : code;
 
@@ -202,7 +200,7 @@ type PaymentRow = Omit<Leg, 'source'> & {
   // deploy-skew reason.
   assignee?: { id: string; name: string; initials?: string } | null;
   // One human-written note per payment, with who wrote it and when. Added in
-  // v1.134.0 — optional for the same deploy-skew reason.
+  // v1.136.0 — optional for the same deploy-skew reason.
   note?: { text: string; at: string; byName: string | null } | null;
 };
 
@@ -1163,7 +1161,7 @@ function NoteEditor({ row, locale, act, onToast }: {
         value={draft}
         placeholder={t('payNotePh')}
         rows={2}
-        maxLength={NOTE_MAX}
+        maxLength={PAYMENT_NOTE_MAX}
         onChange={e => setDraft(e.target.value)}
         style={{ fontSize: 12.5, resize: 'vertical' }}
       />

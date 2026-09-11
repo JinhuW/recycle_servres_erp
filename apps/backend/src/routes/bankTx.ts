@@ -19,6 +19,7 @@ import { getDb } from '../db';
 import { writeOrderEvent } from '../services/orderAudit';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import type { Env, User } from '../types';
+import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
 const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
@@ -196,7 +197,7 @@ bankTx.get('/', async (c) => {
            CASE WHEN bt.amount < 0 THEN bt.dispute END AS dispute,
            bt.internal_txn_id, it.title AS internal_txn_title,
            bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
-           n.note, n.note_at, nu.name AS note_by_name,
+           bt.note, bt.note_at, nu.name AS note_by_name,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
@@ -210,19 +211,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN orders po ON po.id = bt.order_id
     LEFT JOIN users au ON au.id = bt.assignee_id
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
-    -- The note is read off whichever leg carries one. POST /:id/note writes
-    -- every leg, but the sync pairs legs without copying anything human
-    -- across, so a note written on a lone Mercury settlement before its
-    -- PayPal charge arrived would otherwise vanish behind the display leg.
-    -- Both noted: the display leg's wins, which is what the last group-wide
-    -- write left there anyway.
-    LEFT JOIN LATERAL (
-      SELECT l.note, l.note_by, l.note_at
-      FROM bank_transactions l
-      WHERE l.id = bt.id OR (bt.pair_id IS NOT NULL AND l.pair_id = bt.pair_id)
-      ORDER BY l.note IS NULL, l.source DESC
-      LIMIT 1) n ON TRUE
-    LEFT JOIN users nu ON nu.id = n.note_by
+    LEFT JOIN users nu ON nu.id = bt.note_by
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
       AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
@@ -742,8 +731,6 @@ bankTx.post('/:id/unassign', async (c) => {
 // not classify — so unlike every verdict above it is allowed on a linked,
 // ignored, transfer or dead row. Empty clears.
 
-const NOTE_MAX = 280;
-
 bankTx.post('/:id/note', async (c) => {
   const sql = getDb(c.env);
   const body = await c.req.json<{ note?: unknown }>().catch(() => ({} as { note?: unknown }));
@@ -751,8 +738,8 @@ bankTx.post('/:id/note', async (c) => {
     return c.json({ error: 'note must be a string or null' }, 400);
   }
   const note = (body.note as string | null | undefined)?.trim() || null;
-  if (note && note.length > NOTE_MAX) {
-    return c.json({ error: `note must be ${NOTE_MAX} characters or fewer` }, 400);
+  if (note && note.length > PAYMENT_NOTE_MAX) {
+    return c.json({ error: `note must be ${PAYMENT_NOTE_MAX} characters or fewer` }, 400);
   }
 
   const group = await groupOf(sql, c.req.param('id'));

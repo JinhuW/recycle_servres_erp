@@ -5,7 +5,9 @@ import { ApiError } from './api';
 export type ArchiveConflictSellOrder = {
   id: string;
   status: string;
-  lines: { inventoryId: string; label: string; qty: number }[];
+  // solId is the sell-order line, which is what tells two entries for the
+  // same lot apart; inventoryId is what the label falls back to.
+  lines: { solId: string; inventoryId: string; label: string; qty: number }[];
   // Every line the sell order holds is one of these, so the removal leaves it
   // with nothing on it.
   emptied: boolean;
@@ -22,7 +24,8 @@ export function readArchiveConflict(err: unknown): ArchiveConflict | null {
   const sellOrders: ArchiveConflictSellOrder[] = [];
   for (const so of body.sellOrders as Array<Record<string, unknown>>) {
     if (typeof so?.id !== 'string' || !Array.isArray(so.lines)) continue;
-    const lines = (so.lines as Array<Record<string, unknown>>).map(l => ({
+    const lines = (so.lines as Array<Record<string, unknown>>).map((l, i) => ({
+      solId: typeof l.solId === 'string' ? l.solId : String(i),
       inventoryId: String(l.inventoryId ?? ''),
       label: typeof l.label === 'string' ? l.label : '',
       qty: typeof l.qty === 'number' ? l.qty : 0,

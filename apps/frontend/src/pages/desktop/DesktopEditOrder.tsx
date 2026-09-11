@@ -4,10 +4,11 @@ import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
+import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
+  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, warehouseGateLockedStatuses,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
@@ -656,6 +657,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // them, which beats a dead button next to a hint that's easy to miss.
   const saveBlockers: string[] =
     saving || canSave  ? []
+  : isArchived         ? [t('saveBlockedArchived')]
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
   : txnBlocked         ? [t('poTxnRequired')]
@@ -1507,7 +1509,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   // A Done PO is a closed book — ownership (commission,
                   // "my orders") is part of the record and stays put.
                   disabled={orderLocked}
-                  title={orderLocked ? t('eoOwnerLockedDone') : undefined}
+                  title={isArchived ? t('saveBlockedArchived') : orderLocked ? t('eoOwnerLockedDone') : undefined}
                   style={{ width: '100%' }}
                 >
                   {ownerOptions.map(o => (
@@ -1757,22 +1759,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
             {archiveConflict && (
                 <div className="modal-body" style={{ paddingTop: 0 }}>
-                  {archiveConflict.sellOrders.map(so => (
-                    <div key={so.id} style={{ fontSize: 12.5, lineHeight: 1.5 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span className="mono" style={{ fontWeight: 600 }}>{so.id}</span>
-                        <span className={'chip ' + statusTone(so.status)} style={{ fontSize: 10.5 }}>{so.status}</span>
-                        {so.emptied && (
-                          <span style={{ color: 'var(--neg)' }}>{t('archiveConflictEmptied')}</span>
-                        )}
-                      </div>
-                      <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: 'var(--fg-muted)' }}>
-                        {so.lines.map(l => (
-                          <li key={l.inventoryId}>{l.label || l.inventoryId.slice(0, 8)} · {t('qtyShort', { n: String(l.qty) })}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                  <ArchiveConflictList conflict={archiveConflict} />
                 </div>
             )}
             <div className="modal-foot">

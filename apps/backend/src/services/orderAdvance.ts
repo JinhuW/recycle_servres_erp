@@ -12,6 +12,7 @@ import { notify, notifyManagers } from '../lib/notify';
 import { companyPayTxnMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
+import { openSellStatuses } from '../lib/sellCommitment';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → ready_to_pay → done) is
@@ -108,7 +109,7 @@ async function committedLineIds(
     JOIN sell_orders so ON so.id = sol.sell_order_id
     WHERE ol.order_id = ${orderId}
       AND ol.status = ANY(${lineStatuses})
-      AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
+      AND so.status = ANY(${openSellStatuses()}::text[])
   ` as unknown as { id: string }[];
   return rows.map(r => r.id);
 }
@@ -235,7 +236,9 @@ export type ArchiveSellOrderConflict = {
   // How many lines the sell order holds in all, so the client can say which
   // ones the removal would leave empty.
   lineCount: number;
-  lines: { inventoryId: string; label: string; qty: number }[];
+  // solId is the sell_order_lines row: a sell order may name one lot twice, so
+  // inventoryId alone does not identify an entry.
+  lines: { solId: string; inventoryId: string; label: string; qty: number }[];
 };
 
 export type ArchiveOutcome =
@@ -274,7 +277,7 @@ export async function archiveOrderLinesTx(
     JOIN order_lines ol ON ol.id = sol.inventory_id
     WHERE ol.order_id = ${id}
       AND ol.status <> 'Sold'
-      AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
+      AND so.status = ANY(${openSellStatuses()}::text[])
     ORDER BY so.id, sol.position
   ` as unknown as (SOLineSnap & {
     sol_id: string; so_id: string; so_status: string; so_line_count: number; inventory_id: string;
@@ -284,7 +287,7 @@ export async function archiveOrderLinesTx(
     const bySo = new Map<string, ArchiveSellOrderConflict>();
     for (const r of claimed) {
       const so = bySo.get(r.so_id) ?? { id: r.so_id, status: r.so_status, lineCount: r.so_line_count, lines: [] };
-      so.lines.push({ inventoryId: r.inventory_id, label: r.label, qty: r.qty });
+      so.lines.push({ solId: r.sol_id, inventoryId: r.inventory_id, label: r.label, qty: r.qty });
       bySo.set(r.so_id, so);
     }
     return { kind: 'committedLines', sellOrders: [...bySo.values()] };
