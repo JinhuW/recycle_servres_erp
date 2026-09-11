@@ -80,18 +80,20 @@ function SortCaret({ active, dir }: { active: boolean; dir: 'asc' | 'desc' | nul
   );
 }
 
-function SortTh({ col, sort, onSort, align, children }: {
+function SortTh({ col, sort, onSort, align, className, children }: {
   col: string;
   sort: SortState;
   onSort: (col: string) => void;
   align?: 'right';
+  className?: string;
   children: ReactNode;
 }) {
   const active = sort.col === col;
+  const cls = [align === 'right' ? 'num' : '', className ?? ''].filter(Boolean).join(' ');
   return (
     <th
       onClick={() => onSort(col)}
-      className={align === 'right' ? 'num' : undefined}
+      className={cls || undefined}
       style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--fg)' : undefined }}>
@@ -299,8 +301,8 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
       </div>
 
       <div className="card orders-card">
-        <div className={'card-head' + (isManager ? ' has-rail' : '')} style={{ gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className={'card-head' + (isManager ? ' has-rail' : '')}>
+          <div className="orders-toolbar-l">
             <div className="card-title">{t('allOrders')}</div>
             <div className="seg">
               {categoryFilterOptions().map(f => (
@@ -311,7 +313,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="orders-toolbar-r">
             <button
               className="btn"
               onClick={() => setShowDone(v => !v)}
@@ -344,17 +346,13 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
               <Icon name="box" size={12} />
               {showArchived ? t('hideArchivedBtn') : t('showArchivedBtn')}
             </button>
-            <div style={{ position: 'relative' }}>
-              <Icon name="search" size={13} style={{
-                position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-                color: 'var(--fg-subtle)',
-              }} />
+            <div className="toolbar-search">
+              <Icon name="search" size={13} />
               <input
                 className="input"
                 placeholder={t('searchOrderPart')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                style={{ paddingLeft: 30, height: 32, fontSize: 12.5, width: 220 }}
               />
             </div>
             <div ref={colsMenuRef} style={{ position: 'relative' }}>
@@ -484,7 +482,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
             <thead>
               <tr>
                 <th style={{ width: 28 }}></th>
-                {isVis('id') && <SortTh col="id" sort={sort} onSort={cycleSort}>{t('orderId')}</SortTh>}
+                {isVis('id') && <SortTh col="id" sort={sort} onSort={cycleSort} className="col-id">{t('orderId')}</SortTh>}
                 {isVis('date') && <SortTh col="date" sort={sort} onSort={cycleSort}>{t('date')}</SortTh>}
                 <SortTh col="submitter" sort={sort} onSort={cycleSort}>{t('submitter')}</SortTh>
                 {isVis('category') && <SortTh col="category" sort={sort} onSort={cycleSort}>{t('category')}</SortTh>}
@@ -528,7 +526,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           color: 'var(--fg-subtle)',
                         }} />
                       </td>
-                      <td className="mono" style={{ fontWeight: 600, display: isVis('id') ? undefined : 'none' }}>
+                      <td className="mono col-id" style={{ fontWeight: 600, display: isVis('id') ? undefined : 'none' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           {o.id}
                           <button

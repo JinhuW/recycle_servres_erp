@@ -98,6 +98,7 @@ describe('bank transactions API', () => {
       ['GET', '/api/bank-transactions/x/pair-candidates'],
       ['POST', '/api/bank-transactions/x/assign'],
       ['POST', '/api/bank-transactions/x/unassign'],
+      ['POST', '/api/bank-transactions/x/note'],
     ] as const) {
       const r = await api(method, path, { token });
       expect(r.status, `${method} ${path}`).toBe(403);
@@ -913,5 +914,166 @@ describe('assigning a payment to a member', () => {
     const owners = await getTestDb()`
       SELECT assignee_id FROM bank_transactions WHERE id IN (${mId}, ${pId})`;
     expect(owners.every((o) => o.assignee_id === user.id)).toBe(true);
+  });
+});
+
+describe('notes on a payment', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  type NotedRow = { id: string; note: { text: string; at: string; byName: string | null } | null };
+
+  async function feedRow(token: string, id: string, query = 'direction=all'): Promise<NotedRow | undefined> {
+    const r = await api<{ rows: NotedRow[] }>('GET', `/api/bank-transactions?${query}`, { token });
+    expect(r.status).toBe(200);
+    return r.body.rows.find((x) => x.id === id);
+  }
+
+  it('writes every leg, stamps the author, shows on the display row, and clears', async () => {
+    await seedPairedAndSingles();
+    const { token, user } = await loginAs(ALEX);
+    const mercuryLegId = await idOf('m-settle');
+    const displayId = await idOf(TXN_A);
+
+    const r = await api<{ ok: true; note: { text: string; byName: string } | null }>(
+      'POST', `/api/bank-transactions/${mercuryLegId}/note`,
+      { token, body: { note: '  Seller promised a refund by Friday  ' } });
+    expect(r.status).toBe(200);
+    expect(r.body.note?.text).toBe('Seller promised a refund by Friday');
+    expect(r.body.note?.byName).toBe(user.name);
+
+    const legs = await getTestDb()`
+      SELECT external_id, note, note_by, note_at
+      FROM bank_transactions WHERE note IS NOT NULL ORDER BY external_id`;
+    expect(legs.map((l) => l.external_id)).toEqual([TXN_A, 'm-settle']);
+    expect(legs.every((l) => l.note_by === user.id && l.note_at !== null)).toBe(true);
+
+    const row = await feedRow(token, displayId);
+    expect(row?.note?.text).toBe('Seller promised a refund by Friday');
+    expect(row?.note?.byName).toBe(user.name);
+    expect(row?.note?.at).toBeTruthy();
+
+    const cleared = await api<{ note: null }>('POST', `/api/bank-transactions/${displayId}/note`, {
+      token, body: { note: '   ' } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.note).toBeNull();
+    const left = await getTestDb()`
+      SELECT 1 FROM bank_transactions
+      WHERE note IS NOT NULL OR note_by IS NOT NULL OR note_at IS NOT NULL`;
+    expect(left).toHaveLength(0);
+    expect((await feedRow(token, displayId))?.note).toBeNull();
+  });
+
+  it('refuses a note that is too long or not a string, and an unknown row', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const id = await idOf('m-wire');
+
+    const long = await api<{ error: string }>('POST', `/api/bank-transactions/${id}/note`, {
+      token, body: { note: 'x'.repeat(281) } });
+    expect(long.status).toBe(400);
+    expect(long.body.error).toMatch(/280/);
+
+    const exact = await api('POST', `/api/bank-transactions/${id}/note`, {
+      token, body: { note: 'x'.repeat(280) } });
+    expect(exact.status).toBe(200);
+
+    const notString = await api('POST', `/api/bank-transactions/${id}/note`, { token, body: { note: 42 } });
+    expect(notString.status).toBe(400);
+
+    const missing = await api('POST', '/api/bank-transactions/00000000-0000-4000-8000-000000000000/note', {
+      token, body: { note: 'hi' } });
+    expect(missing.status).toBe(404);
+  });
+
+  it('can be written on a linked, ignored or reversed row — a note is not a verdict', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const wireId = await idOf('m-wire');
+    const refundId = await idOf('m-refund');
+    const displayId = await idOf(TXN_A);
+    const poId = await createPO(token);
+    await api('POST', `/api/bank-transactions/${wireId}/link`, { token, body: { orderId: poId } });
+    await api('POST', `/api/bank-transactions/${refundId}/ignore`, { token });
+    await getTestDb()`UPDATE bank_transactions SET settle_status = 'reversed' WHERE id = ${displayId}`;
+
+    for (const id of [wireId, refundId, displayId]) {
+      const r = await api('POST', `/api/bank-transactions/${id}/note`, { token, body: { note: 'context' } });
+      expect(r.status, id).toBe(200);
+    }
+    expect((await feedRow(token, wireId, 'status=linked&direction=all'))?.note?.text).toBe('context');
+  });
+
+  it('is searchable through ?q=', async () => {
+    await seedPairedAndSingles();
+    const { token } = await loginAs(ALEX);
+    const wireId = await idOf('m-wire');
+    await api('POST', `/api/bank-transactions/${wireId}/note`, {
+      token, body: { note: 'Zelle top-up for rack #7' } });
+
+    const hit = await api<{ rows: { id: string }[] }>(
+      'GET', '/api/bank-transactions?direction=all&q=rack%20%237', { token });
+    expect(hit.body.rows.map((r) => r.id)).toEqual([wireId]);
+    const miss = await api<{ rows: { id: string }[] }>(
+      'GET', '/api/bank-transactions?direction=all&q=rack%20%238', { token });
+    expect(miss.body.rows).toHaveLength(0);
+  });
+
+  it('spreads a lone note across a manual pair, and refuses two different ones', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [
+        { externalId: 'pm-m', amount: -300 },
+        { externalId: 'pm-decoy', amount: -300 },
+      ]),
+      fakeProvider('paypal', [{ externalId: 'pm-p', amount: -300 }]),
+    ]);
+    const { token, user } = await loginAs(ALEX);
+    const mId = await idOf('pm-m');
+    const pId = await idOf('pm-p');
+
+    await api('POST', `/api/bank-transactions/${mId}/note`, { token, body: { note: 'wire half' } });
+    await api('POST', `/api/bank-transactions/${pId}/note`, { token, body: { note: 'paypal half' } });
+    const clash = await api<{ error: string }>('POST', `/api/bank-transactions/${mId}/pair`, {
+      token, body: { otherId: pId } });
+    expect(clash.status).toBe(400);
+    expect(clash.body.error).toMatch(/different notes/i);
+
+    await api('POST', `/api/bank-transactions/${pId}/note`, { token, body: { note: null } });
+    const paired = await api('POST', `/api/bank-transactions/${mId}/pair`, { token, body: { otherId: pId } });
+    expect(paired.status).toBe(200);
+
+    const legs = await getTestDb()`
+      SELECT note, note_by, note_at FROM bank_transactions WHERE id IN (${mId}, ${pId})`;
+    expect(legs).toHaveLength(2);
+    expect(legs.every((l) => l.note === 'wire half' && l.note_by === user.id && l.note_at !== null)).toBe(true);
+    expect((await feedRow(token, pId))?.note?.text).toBe('wire half');
+  });
+
+  it("copies a Mercury leg's note onto the PayPal leg when the sync auto-pairs them", async () => {
+    // The Mercury settlement lands first and gets noted; the PayPal charge
+    // arrives on a later sync and becomes the display leg. Pairing has to
+    // carry the note across — the feed reads only the display leg's own.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('mercury', [{ externalId: 'late-m', amount: -900, paypalTxnId: 'LATE1234567890ABC' }]),
+    ]);
+    const { token } = await loginAs(ALEX);
+    const mId = await idOf('late-m');
+    await api('POST', `/api/bank-transactions/${mId}/note`, { token, body: { note: 'GPU lot from Reddit' } });
+
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [{ externalId: 'LATE1234567890ABC', amount: -900, counterparty: 'Reddit Seller' }]),
+    ]);
+    const pId = await idOf('LATE1234567890ABC');
+    const [pLeg] = await getTestDb()`SELECT pair_id, note FROM bank_transactions WHERE id = ${pId}`;
+    expect(pLeg.pair_id).not.toBeNull();
+    expect(pLeg.note).toBe('GPU lot from Reddit');
+
+    const row = await feedRow(token, pId);
+    expect(row).toBeTruthy();
+    expect(row?.note?.text).toBe('GPU lot from Reddit');
+
+    // A later write from the display row lands on both legs.
+    await api('POST', `/api/bank-transactions/${pId}/note`, { token, body: { note: 'GPU lot, paid' } });
+    const notes = await getTestDb()`SELECT note FROM bank_transactions WHERE pair_id = ${pLeg.pair_id}`;
+    expect(notes.map((n) => n.note)).toEqual(['GPU lot, paid', 'GPU lot, paid']);
   });
 });

@@ -17,3 +17,14 @@ export const COMMITTED_SELL_STATUSES = ['Shipped', 'Awaiting payment'] as const;
 export function committedSellStatuses(): string[] {
   return [...COMMITTED_SELL_STATUSES];
 }
+
+// Every status in which a sell order still *names* its lines — Draft included.
+// A Draft reserves nothing (above), but a line it names cannot vanish either:
+// the draft is re-validated on promotion and would fail then. Use this where
+// the question is "is anyone still pointing at this line", the committed set
+// where it is "how much of it is spoken for".
+export const OPEN_SELL_STATUSES = ['Draft', ...COMMITTED_SELL_STATUSES] as const;
+
+export function openSellStatuses(): string[] {
+  return [...OPEN_SELL_STATUSES];
+}

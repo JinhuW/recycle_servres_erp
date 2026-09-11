@@ -4,7 +4,7 @@ import { notify } from '../lib/notify';
 import { getWorkspaceSetting } from '../lib/settings';
 import { nextHumanId } from '../lib/id-seq';
 import { canonPartCol, canonPartArg } from '../lib/part-number';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedSellStatuses, openSellStatuses } from '../lib/sellCommitment';
 import { buildXlsxWorkbook, xlsxResponse, datedFilename, type XlsxColumn } from '../lib/xlsx';
 import {
   CATEGORY_ORDER, SPEC_COLS_BY_CATEGORY, exportCategory, lineSpecFields, categoryTabSheets,
@@ -13,7 +13,7 @@ import {
 import { UNTYPED_ITEM, normSellPrice, SPEC_FIELD_TO_DB_COL } from '@recycle-erp/shared';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import type { Env, User } from '../types';
-import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE } from '../services/orderAdvance';
+import { isClosedBook, LINE_STATUS_FOR_LIFECYCLE, ARCHIVED_LINE_STATUS } from '../services/orderAdvance';
 
 const LINE_STATUSES = new Set([...Object.values(LINE_STATUS_FOR_LIFECYCLE), 'Sold']);
 
@@ -85,7 +85,7 @@ function attrFragments(sql: ReturnType<typeof getDb>, a: AttrFilters) {
 // the line to 'Sold' (filtered elsewhere) and Closed releases the commitment.
 // Used to keep a new sell order from re-picking stock another in-flight order
 // already claims.
-const PENDING_SO_STATUSES = ['Draft', 'Shipped', 'Awaiting payment'];
+const PENDING_SO_STATUSES = openSellStatuses();
 function pendingSellOrderFrag(sql: ReturnType<typeof getDb>, hide: boolean) {
   return hide
     ? sql`l.qty > COALESCE((
@@ -121,7 +121,11 @@ function inventoryWhereFrag(
   // Sold is a terminal state — hidden from the default list so day-to-day work
   // isn't cluttered by already-sold lots. The "Show sold" toggle lifts the
   // exclusion; picking Sold explicitly in the status filter overrides it too.
-  const soldFrag     = (status || includeSold) ? sql`TRUE` : sql`l.status <> 'Sold'`;
+  // Archived lines (their PO was archived) are out of stock the same way, and
+  // are reached the same way: an explicit status filter.
+  const soldFrag     = status ? sql`TRUE`
+    : includeSold ? sql`l.status <> ${ARCHIVED_LINE_STATUS}`
+    : sql`l.status NOT IN ('Sold', ${ARCHIVED_LINE_STATUS})`;
   // Effective warehouse = override on the line if present, else the parent
   // order's warehouse. Lets a manager transfer a line to a different warehouse
   // without rewriting the order.
@@ -496,6 +500,9 @@ inventory.get('/analysis', async (c) => {
   // section drops in only the axes it honours (see the header note).
   const catCond = category  ? sql`l.category = ${category}` : sql`TRUE`;
   const whCond  = warehouse ? sql`${effWh} = ${warehouse}`  : sql`TRUE`;
+  // An archived PO's goods are out of stock; every aggregate below drops them
+  // the way the list does. (Sold lines still count here, as they always have.)
+  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS}`;
 
   // Grouped unit-count over a whitelisted column for one category, honouring
   // the warehouse scope. The column set is the fixed SUBTYPE_DIMS whitelist, and
@@ -513,7 +520,7 @@ inventory.get('/analysis', async (c) => {
                END AS k,
                COALESCE(SUM(l.qty), 0)::int AS u
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE l.category = ${cat} AND ${whCond}
+        WHERE l.category = ${cat} AND ${whCond} AND ${liveCond}
         GROUP BY 1 ORDER BY 1`;
     }
     const colFrag = col === 'rpm' ? sql`l.rpm::text` : sql`l.${sql(col)}::text`;
@@ -521,7 +528,7 @@ inventory.get('/analysis', async (c) => {
       SELECT COALESCE(NULLIF(${colFrag}, ''), '?') AS k,
              COALESCE(SUM(l.qty), 0)::int AS u
       FROM order_lines l JOIN orders o ON o.id = l.order_id
-      WHERE l.category = ${cat} AND ${whCond}
+      WHERE l.category = ${cat} AND ${whCond} AND ${liveCond}
       GROUP BY 1 ORDER BY u DESC, k LIMIT 16`;
   };
 
@@ -533,7 +540,7 @@ inventory.get('/analysis', async (c) => {
                COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS cost,
                COALESCE(ROUND(SUM(l.qty*l.sell_price)),0)::float AS sell
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE ${catCond} AND ${whCond}`,
+        WHERE ${catCond} AND ${whCond} AND ${liveCond}`,
       // Control list: every category, unfiltered, busiest first.
       sql<{ category: string }[]>`
         SELECT category FROM order_lines
@@ -544,13 +551,13 @@ inventory.get('/analysis', async (c) => {
                COALESCE(ROUND(SUM(l.qty*l.unit_cost)),0)::float AS cost,
                COALESCE(ROUND(SUM(l.qty*l.sell_price)),0)::float AS sell
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE ${whCond}
+        WHERE ${whCond} AND ${liveCond}
         GROUP BY l.category ORDER BY units DESC`,
       // Status pipeline — scoped by both axes.
       sql<{ status: string; units: number }[]>`
         SELECT l.status, COALESCE(SUM(l.qty),0)::int AS units
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE ${catCond} AND ${whCond}
+        WHERE ${catCond} AND ${whCond} AND ${liveCond}
         GROUP BY l.status ORDER BY units DESC`,
       // Control list: every warehouse, unfiltered.
       sql<{ id: string; short: string; region: string }[]>`
@@ -563,14 +570,14 @@ inventory.get('/analysis', async (c) => {
         FROM order_lines l
         JOIN orders o     ON o.id = l.order_id
         JOIN warehouses w ON w.id = ${effWh}
-        WHERE ${catCond}
+        WHERE ${catCond} AND ${liveCond}
         GROUP BY w.id, w.short, w.region ORDER BY units DESC`,
       // Top brands — scoped by both axes.
       sql<{ k: string; u: number }[]>`
         SELECT COALESCE(NULLIF(l.brand,''),'?') AS k, COALESCE(SUM(l.qty),0)::int AS u
         FROM order_lines l JOIN orders o ON o.id = l.order_id
         WHERE l.brand IS NOT NULL AND l.brand <> '' AND l.brand <> '?'
-          AND ${catCond} AND ${whCond}
+          AND ${catCond} AND ${whCond} AND ${liveCond}
         GROUP BY 1 ORDER BY u DESC, k LIMIT 10`,
     ]);
 
@@ -591,7 +598,7 @@ inventory.get('/analysis', async (c) => {
       sql<{ k: string; u: number }[]>`
         SELECT COALESCE(NULLIF(l.condition,''),'?') AS k, COALESCE(SUM(l.qty),0)::int AS u
         FROM order_lines l JOIN orders o ON o.id = l.order_id
-        WHERE l.category = ${cat} AND ${whCond}
+        WHERE l.category = ${cat} AND ${whCond} AND ${liveCond}
         GROUP BY 1 ORDER BY u DESC, k`,
     ]);
     subtypes[cat] = {
@@ -751,9 +758,12 @@ inventory.get('/products', async (c) => {
   const scopeFrag    = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const categoryFrag = category ? sql`l.category = ${category}` : sql`TRUE`;
   const statusFrag   = status ? sql`l.status = ${status}` : sql`TRUE`;
-  // Mirror the list: sold lots drop out of the default grouped view (and its
-  // facet/warehouse counts) unless the toggle or an explicit Sold filter is set.
-  const soldFrag     = (status || includeSold) ? sql`TRUE` : sql`l.status <> 'Sold'`;
+  // Mirror the list: sold and archived lots drop out of the default grouped
+  // view (and its facet/warehouse counts) unless the toggle or an explicit
+  // status filter is set.
+  const soldFrag     = status ? sql`TRUE`
+    : includeSold ? sql`l.status <> ${ARCHIVED_LINE_STATUS}`
+    : sql`l.status NOT IN ('Sold', ${ARCHIVED_LINE_STATUS})`;
   // Warehouse is intentionally NOT pushed into SQL here — keeping every
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
@@ -1125,12 +1135,22 @@ inventory.patch('/:id', async (c) => {
     | { kind: 'notFound' }
     | { kind: 'committed' }
     | { kind: 'doneLocked' }
+    | { kind: 'archived' }
     | { kind: 'ok'; before: Record<string, unknown> };
   const outcome: Outcome = await sql.begin(async (tx): Promise<Outcome> => {
     const before = (await tx<Record<string, unknown>[]>`
       SELECT * FROM order_lines WHERE id = ${id} LIMIT 1 FOR UPDATE
     `)[0];
     if (!before) return { kind: 'notFound' };
+    const orderId = before.order_id as string;
+    const [parent] = await tx<{ lifecycle: string; archived_at: Date | null }[]>`
+      SELECT lifecycle, archived_at FROM orders WHERE id = ${orderId} LIMIT 1
+    `;
+    // The PO is archived: its stock lines sit at 'Archived' and their status
+    // is the archive's to restore, and a Sold line on it must not be walked
+    // back into stock behind the archive either. Keyed on the order, not the
+    // line status, for exactly that second case. Unarchive the PO to edit it.
+    if (parent?.archived_at) return { kind: 'archived' };
 
     // A line committed to a sell order (COMMITTED_SELL_STATUSES) is "spoken
     // for": editing its qty or status out from under the deal silently
@@ -1150,19 +1170,13 @@ inventory.patch('/:id', async (c) => {
     }
 
     const touchesGoods = body.qty !== undefined || body.unitCost !== undefined;
-    const orderId = before.order_id as string;
 
     // A Done PO's costs are closed-book, and PATCH /api/orders refuses exactly
     // this edit with 409 — reaching the same line through the inventory editor
     // rewrote the header total anyway. Status, sell price and the spec fields
     // stay editable: that is the ordinary post-Done inventory workflow, and
     // none of them feed the goods total.
-    if (touchesGoods) {
-      const [parent] = await tx<{ lifecycle: string }[]>`
-        SELECT lifecycle FROM orders WHERE id = ${orderId} LIMIT 1
-      `;
-      if (parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
-    }
+    if (touchesGoods && parent && isClosedBook(parent.lifecycle)) return { kind: 'doneLocked' };
 
     // The mirror verdict has to be taken before qty/unit_cost move — afterwards
     // a stale mirror and a real negotiated price are indistinguishable and the
@@ -1243,6 +1257,9 @@ inventory.patch('/:id', async (c) => {
   }
   if (outcome.kind === 'doneLocked') {
     return c.json({ error: 'the purchase order is past review; move it back to Reviewing before changing qty or unit cost' }, 409);
+  }
+  if (outcome.kind === 'archived') {
+    return c.json({ error: 'the purchase order is archived; unarchive it before editing its lines' }, 409);
   }
   const before = outcome.before;
 

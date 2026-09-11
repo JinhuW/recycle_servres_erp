@@ -111,3 +111,38 @@ describe('GET /api/inventory/analysis', () => {
     }
   });
 });
+
+describe('GET /api/inventory/analysis and archived POs', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('drops an archived PO out of every aggregate instead of adding an Archived bucket', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: pur,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000001',
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [{ category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4', classification: 'RDIMM',
+          speed: '3200', partNumber: 'ANLYS-ARCH-PN', condition: 'Pulled — Tested', qty: 7, unitCost: 50 }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: pur })).status).toBe(200);
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'reviewing' } })).status).toBe(200);
+
+    const before = await api<Analysis>('GET', '/api/inventory/analysis', { token: mgr });
+    expect((await api('POST', `/api/orders/${id}/archive`, { token: mgr })).status).toBe(200);
+    const after = await api<Analysis>('GET', '/api/inventory/analysis', { token: mgr });
+
+    expect(after.body.totals.units).toBe(before.body.totals.units - 7);
+    expect(after.body.totals.lines).toBe(before.body.totals.lines - 1);
+    expect(after.body.value.cost).toBe(before.body.value.cost - 350);
+    expect(after.body.byStatus.find(r => r.status === 'Archived')).toBeUndefined();
+    expect(after.body.byStatus.reduce((s, r) => s + r.units, 0)).toBe(after.body.totals.units);
+    const ram = (b: Analysis) => b.byCategory.find(r => r.category === 'RAM')?.units ?? 0;
+    expect(ram(after.body)).toBe(ram(before.body) - 7);
+    expect(after.body.subtypes.RAM?.units).toBe(ram(after.body));
+  });
+});

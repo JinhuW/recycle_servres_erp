@@ -95,11 +95,38 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - The PO list hides Done orders by default with a toggle (v1.89.0); mobile
   managers see the whole org's POs (v1.88.0). The stage filter lives in the
   table toolbar as status chips (v1.39.0).
+- **Archiving a PO takes its goods out of stock** (v1.137.0). Archive still
+  hides the order from the default list and is still reversible, but it now
+  also moves every non-Sold line to the `Archived` line status, which drops
+  it out of the inventory screens, the sellable picker, the vendor catalog
+  and bids, and the MCP search the same way Sold does. Unarchive restores
+  each line to the status it held. If a line sits on an open sell order
+  (Draft, Shipped or Awaiting payment) the archive dialog names the sell
+  orders and lines and asks whether to remove them from those sell orders
+  first; the removal is audited on the sell order and is not undone by
+  unarchiving. That question, and the removal, are the manager's: a
+  purchaser who owns the PO gets a plain refusal naming no sell orders
+  (v1.137.1). A line out on a pending transfer refuses the archive. An
+  archived PO is frozen — edits, stage moves, delete and inventory line edits
+  (Sold lines included) all refuse until it is unarchived — and both edit
+  shells render it locked and say so. The Analysis tab leaves archived goods
+  out of every aggregate (v1.137.1).
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
   category (v1.40.0). There is no PDF invoice — it was removed in v1.40.0
   because it had fallen behind the spreadsheet.
+- **Both desktop PO pages hold together in a narrow window** (v1.134.0).
+  Under 1100px the list's toolbar wraps inside its card with the search box
+  giving up width first, the KPI tiles stay in one row while four fit, and
+  the order ID is pinned at the left while the table scrolls sideways. The
+  edit page goes to one column — items, then status/details/Save, then
+  payment detail, ledger and activity — the item table scrolls inside its
+  card, the editable fee's inputs drop under their label, the Order-details
+  fields go two-up, and the status stepper keeps every stage as a numbered
+  dot and names only the current one (each dot names itself on hover). The
+  order ID never wraps at any width, and the Notes box stays inside its card
+  at every width (it used to overhang at 1400px).
 
 ## Clients (the people we buy from)
 
@@ -144,7 +171,9 @@ log and `orders.supplier_id`.
 ## Inventory
 
 There is **no inventory table**. Stock is `order_lines` whose PO is Done or In
-Transit, and a line's qty can never be 0.
+Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
+`Archived` status and are out of every stock view until the PO is unarchived
+(v1.137.0); like Sold, they are reachable through an explicit status filter.
 
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
@@ -170,7 +199,9 @@ Transit, and a line's qty can never be 0.
 - A **draft sell order is a proposal**; inventory is claimed only on promotion
   (v1.41.0). Drafts can move straight to Awaiting payment (v1.13.0).
 - Orders carry a payment receiver, creator-only reopen (v1.15.0) and a receiver
-  column with a managers-only receiver rule (v1.16.0).
+  column with a managers-only receiver rule (v1.16.0). The receiver can be
+  reassigned from the detail view in any status, Done and Closed included —
+  the change saves at once and is logged in the order history (v1.135.0).
 - **Negotiated final-price adjustment** with an order-summary breakdown card
   (v1.22.0, v1.23.0).
 - **Vendor price round-trip**: export a bid-sheet XLSX, the vendor fills in
@@ -282,9 +313,18 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   question — so a row now reads a linked PO with its cost, a suggested PO with
   the gap between the two dates, `Transfer`, `Ignored`, or `Unlinked`, and the
   freed column is an actions rail whose primary button sits at the same place on
-  every row. `Ignore`, `Not it` and `Not the same` appear on hover or keyboard
-  focus rather than standing on every row at once; a device without hover keeps
-  them visible.
+  every row. `Ignore` and `Not the same` appear on hover or keyboard focus
+  rather than standing on every row at once; a device without hover keeps them
+  visible.
+- **`Link…` always opens the picker; the manager chooses the PO** (v1.133.0).
+  Until then a row with a single confident candidate linked to it on one click,
+  with nothing on the button saying so. Now every row's `Link…` opens the PO
+  picker — ranked suggestions first under a "Suggested purchase orders" heading
+  (with "showing X of Y" when the pool is capped), "Search results" once the
+  manager types — and the link happens when they click a PO in it. The
+  per-suggestion button in the expanded row is labelled with its PO
+  (`Link PO-1414`) because it does link on the click. `Not it` is gone; it
+  existed only to escape the one-click path.
 - **Owner is a column** (v1.121.0), between Amount and Status — avatar and first
   name, full name on hover, a dash where nobody owns it. Owner and PO are
   mutually exclusive by constraint, so the column is empty by design on the
@@ -296,6 +336,16 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   someone to explain it. Linking that payment to a PO clears the owner, since
   the PO is the answer the tag stood in for; a row filed under an internal
   transaction refuses the link instead, because a note is attached to it.
+- **A payment can carry a note** (v1.136.0). The expanded row has a note box
+  with Save and Clear; the collapsed row shows the note under the payee, and
+  a caption names who wrote it and when. Search matches note text. A note is
+  allowed on any row — linked, ignored, transfer, failed or reversed — because
+  it explains rather than classifies, so no "unlink first" guard applies. It
+  is stored on every leg of a paired payment, like the owner tag; when the
+  sync pairs a noted Mercury settlement with its PayPal charge it copies the
+  note across, so the note survives on the row the feed shows (v1.137.1).
+  Grouping by hand spreads a lone note and refuses two different ones. 280
+  characters.
 
 - **A disputed payment says so** (v1.124.0). The sync reads PayPal's Customer
   Disputes API alongside the transaction feed, and a payment we have opened a
@@ -448,6 +498,10 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
 `/v/<token>` → `VendorApp`; viewport under 720px → `MobileApp`; else
 `DesktopApp`.
 
+- The desktop shell runs down to 720px. **Under 900px its sidebar folds to a
+  64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
+  hover, avatar and sign-out — where it used to disappear and leave a
+  split-screen window with no navigation at all.
 - The mobile shell is a **PWA** with install onboarding, a service worker and a
   share target, scoped to mobile only (v0.1.1).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed

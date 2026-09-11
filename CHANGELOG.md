@@ -17,6 +17,159 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.137.1] - 2026-09-11
+
+### Fixed
+
+- **The archive release, reviewed before it reaches prod.**  A `high` review
+  of everything `main` was about to receive (v1.133.0 – v1.137.0) found ten
+  things, most in the week-old archive work.  A purchaser who owned a PO
+  could archive it with `removeFromSellOrders` and delete lines off managers'
+  Shipped and Awaiting-payment sell orders — and read those sell orders' ids,
+  statuses and lines off the first 409, data every sell-order route refuses
+  them.  The conflict question is now the manager's; a purchaser gets a
+  plain refusal.  The inventory line editor keyed its archived guard on the
+  line's status, so a Sold line on an archived PO could be set back to Done
+  and re-enter stock behind the archive; it now reads the parent order.  The
+  Analysis tab had no status predicate at all, so archived goods still
+  counted in every KPI and a stray `Archived` bucket appeared in the
+  pipeline; every aggregate now drops them.  Migration `0121` backfilled
+  lines out on a pending transfer to `Archived` — the exact strand the
+  runtime guard refuses, which leaves receive moving nothing and discard and
+  reopen refusing forever — and `0122` puts those back at In Transit with
+  their audit row.  Both edit shells told the user an archived In Transit or
+  Reviewing order was "Done"; they now say archived.  The conflict dialog
+  keyed its lines by lot, which collides when a sell order names one lot
+  twice; the payload carries the sell-order line id.  [RS-038]
+- **A note follows the sync's pairing.**  The bank sync paired a noted
+  Mercury settlement with its PayPal charge without copying the note, and
+  the feed hid that with a per-row scan of the group.  Pairing now copies a
+  lone note across, as grouping by hand always did, the feed reads the row's
+  own note, and `0123` copies notes onto the pairs made before this.  The
+  note on the collapsed payment row also rendered as primary text — its
+  colour token was never defined.  [RS-038]
+- Smaller: the sidebar's "+" badge survives the icon rail; the archive
+  dialog body is one component for both shells; the open-sell-order status
+  set and the payment-note cap each live in one place.  [RS-038]
+
+## [1.137.0] - 2026-09-10
+
+### Features
+
+- **Archiving a PO takes its goods out of stock.**  Archive used to be a
+  list-tidying flag: the order dropped out of the default PO list and nothing
+  else changed, so its lines stayed in the inventory screens, the sellable
+  picker, the vendor catalog and the MCP search — 480 units across two
+  archived POs in prod.  Stock has no table of its own; it is every line at
+  Done, In Transit or Reviewing, and three of the readers never join
+  `orders`, so an archive flag could not reach them.  Archive now moves every
+  non-Sold line to a new line status, `Archived`, which drops it out of every
+  bucket the way Sold does; unarchive reads each line's prior status back off
+  its audit trail and restores it, so a Done line and a Reviewing line on the
+  same PO both come back right.  A line an open sell order still names (Draft,
+  Shipped or Awaiting payment) cannot vanish under it: the archive refuses
+  with the sell orders, their status and the lines, both shells turn the
+  archive dialog into that question, and confirming removes the lines from
+  the sell orders — audited there as a removal that names the PO — then
+  archives.  Unarchiving does not put them back; a sell order the removal
+  empties is named in the dialog and left in place.  Done sell orders are
+  never touched (their lines are already Sold); a line out on a pending
+  transfer refuses the archive outright.  An archived PO is frozen — edit,
+  delete, stage moves, the carrier poll and inventory line edits all refuse
+  until it is unarchived — and both edit shells render it locked.  Migration
+  `0121` backfills lines of already-archived POs that no open sell order
+  names.  [RS-037]
+
+## [1.136.0] - 2026-09-09
+
+### Features
+
+- **A payment can carry a note.**  Every verdict a manager could put on a
+  bank transaction — a linked PO, a transfer, ignored, an owner — said what
+  the money was attached to, and none of them could say *why*.  The one note
+  in the area sat on an internal-transaction record, which groups several
+  rows; a single payment had no text of its own, so "seller promised the
+  refund by Friday" lived in chat.  The expanded row on Payments now has a
+  note box with Save and Clear, the collapsed row shows the note under the
+  payee, and the caption names who wrote it and when.  Search matches note
+  text.  A note is allowed on any row, linked, ignored or reversed included:
+  it explains, it does not classify, so none of the "unlink first" guards
+  apply.  Stored on every leg of a paired payment, like the owner tag; the
+  feed reads it off whichever leg carries one, so a note left on a lone
+  Mercury settlement survives the sync pairing it with its PayPal charge.
+  Grouping two rows by hand spreads a lone note and refuses two different
+  ones until one is cleared.  Capped at 280 characters.  Migration `0120`.
+  [RS-036]
+
+## [1.135.0] - 2026-09-09
+
+### Changed
+
+- **The sell-order payment receiver can be assigned in any status.**  The
+  receiver — the manager who physically took the customer's money — was only
+  editable from the edit form, and the edit form closes for good once an order
+  is Done or Closed.  That is exactly when the field matters: payment often
+  lands after the deal is marked Done, and it is not always the person who
+  was expected.  The detail modal now offers the receiver picker in view mode,
+  Done and Closed included; a change saves at once, writes the usual
+  `meta_changed` history entry, and refreshes the list's receiver column.  The
+  edit form keeps its own picker, saved with the rest of the form.  The
+  backend never gated this field by status; a regression test now locks that
+  in so a broader "freeze everything on Done" guard can't take it away
+  unnoticed.  [RS-035]
+
+## [1.134.0] - 2026-09-09
+
+### Changed
+
+- **The desktop PO pages hold together when the window gets small.**  The
+  desktop shell serves every window from 720px up, but neither purchase-order
+  page had a single width rule: under about 1100px the list's toolbar pushed
+  its search box and Columns button out of the card, the KPI tiles jumped to a
+  2×2 block that took half of a short window, and the edit page kept its fixed
+  280px side column, so the item table was left with ~400px and two of its
+  eight columns, the "Other fees" inputs ran past the cost tape, the status
+  stepper ran past its card and the Order-details grid pushed the Notes box
+  out of the card.  Now, under 1100px, the list's toolbar wraps inside its
+  card (the search box gives up width before anything moves to a second line),
+  the KPI tiles stay in one row while four fit, and the order ID is pinned at
+  the left while the table scrolls sideways so a row never loses its name on
+  the way to Profit.  The edit page goes to one column — items, then
+  status/details/Save, then payment detail, ledger and activity — the item
+  table scrolls inside its card, the fee inputs drop under their label, the
+  detail fields go two-up, the footer wraps with Save still reachable, and the
+  stepper keeps every stage as a numbered dot and names only the current one.
+  Two of these were bugs at every width and are fixed everywhere: the order
+  ID no longer wraps onto two lines, and the Notes box no longer overhangs its
+  card.
+- **Under 900px the sidebar folds to an icon rail instead of vanishing.**  The
+  old rule hid it outright, so a split-screen window had no way to leave the
+  page it was on.  The rail keeps the brand mark, every nav icon (named on
+  hover), the avatar and sign-out in 64px; labels hide by CSS only, so the
+  buttons keep their text for assistive tech.
+
+## [1.133.0] - 2026-09-07
+
+### Changed
+
+- **The Payments `Link…` button never links on its own.**  Since v1.120.0 the
+  button at the end of an unlinked row did one of two things: on a row where
+  the server had found a single confident candidate it posted the link the
+  moment it was clicked, and on every other row it opened the PO picker.
+  Nothing on the button said which, and the ellipsis promised a next step that
+  never came on exactly the rows where a wrong link costs the most.  A link is
+  an audited write that also fills the PO's transaction ID, so it is now
+  always the manager's choice: `Link…` opens the picker on every row, with the
+  ranked suggestions listed first under their own heading and free-text search
+  taking over as they type.  The picker says "showing X of Y" when the pool is
+  capped and, on a row with no candidates, invites a search instead of
+  reporting one as failed.  Its rows now wrap onto two lines, so the reason
+  chip is no longer clipped off the right edge.  The `Not it` hover button is
+  gone — it existed only as the escape hatch from the one-click link.
+- **A button that links directly names its PO.**  The per-suggestion button in
+  the expanded row reads `Link PO-1414` rather than `Link…`: it acts on the
+  click, and the PO it acts on is the row it sits in.
+
 ## [1.132.0] - 2026-09-07
 
 ### Added

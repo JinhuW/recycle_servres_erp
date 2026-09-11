@@ -19,6 +19,7 @@ import { getDb } from '../db';
 import { writeOrderEvent } from '../services/orderAudit';
 import { clampLimit, decodeCursor, encodeCursor, escapeLike } from '../lib/pagination';
 import type { Env, User } from '../types';
+import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
 const bankTx = new Hono<{ Bindings: Env; Variables: { user: User } }>()
   .use('*', authMiddleware)
@@ -60,6 +61,9 @@ type LegRow = {
   settle_status: string;
   internal_txn_id: string | null;
   assignee_id: string | null;
+  note: string | null;
+  note_by: string | null;
+  note_at: Date | null;
 };
 
 function shapeLeg(l: LegRow) {
@@ -91,7 +95,8 @@ async function groupOf(sql: SqlClient, id: string): Promise<LegRow[]> {
   return sql<LegRow[]>`
     SELECT id, source, external_id, posted_at, amount::float AS amount, counterparty,
            description, paypal_txn_id, pair_id, order_id, link_kind, link_auto,
-           linked_by, linked_at, ignored, category, settle_status, internal_txn_id, assignee_id
+           linked_by, linked_at, ignored, category, settle_status, internal_txn_id, assignee_id,
+           note, note_by, note_at
     FROM bank_transactions
     WHERE id = ${id}
        OR pair_id = (SELECT pair_id FROM bank_transactions WHERE id = ${id} AND pair_id IS NOT NULL)
@@ -141,7 +146,8 @@ bankTx.get('/', async (c) => {
         SELECT 1 FROM bank_transactions ql
         WHERE (ql.id = bt.id OR (bt.pair_id IS NOT NULL AND ql.pair_id = bt.pair_id))
           AND (ql.counterparty ILIKE ${like} OR ql.description ILIKE ${like}
-               OR ql.paypal_txn_id ILIKE ${like} OR ql.external_id ILIKE ${like})))`
+               OR ql.paypal_txn_id ILIKE ${like} OR ql.external_id ILIKE ${like}
+               OR ql.note ILIKE ${like})))`
     : sql`TRUE`;
   // The owner lives on every leg, so the display leg alone answers this.
   const assigneeFrag =
@@ -191,6 +197,7 @@ bankTx.get('/', async (c) => {
            CASE WHEN bt.amount < 0 THEN bt.dispute END AS dispute,
            bt.internal_txn_id, it.title AS internal_txn_title,
            bt.assignee_id, au.name AS assignee_name, au.initials AS assignee_initials,
+           bt.note, bt.note_at, nu.name AS note_by_name,
            (SELECT json_agg(json_build_object(
               'id', l.id, 'source', l.source, 'externalId', l.external_id,
               'postedAt', l.posted_at, 'amount', l.amount::float,
@@ -204,6 +211,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN orders po ON po.id = bt.order_id
     LEFT JOIN users au ON au.id = bt.assignee_id
     LEFT JOIN internal_transactions it ON it.id = bt.internal_txn_id
+    LEFT JOIN users nu ON nu.id = bt.note_by
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
       AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
@@ -283,6 +291,9 @@ bankTx.get('/', async (c) => {
         : null,
       assignee: r.assignee_id
         ? { id: r.assignee_id, name: r.assignee_name, initials: r.assignee_initials }
+        : null,
+      note: r.note
+        ? { text: r.note, at: r.note_at, byName: r.note_by_name ?? null }
         : null,
     })),
     nextCursor,
@@ -513,6 +524,9 @@ bankTx.post('/:id/pair', async (c) => {
   if (a.internal_txn_id && b.internal_txn_id && a.internal_txn_id !== b.internal_txn_id) {
     return c.json({ error: 'Legs belong to different internal transactions — remove one first' }, 400);
   }
+  if (a.note && b.note && a.note !== b.note) {
+    return c.json({ error: 'Legs carry different notes — clear one first' }, 400);
+  }
   if ((a.internal_txn_id || b.internal_txn_id) && (a.order_id || b.order_id)) {
     return c.json({ error: 'A leg in an internal transaction cannot be paired with one linked to a purchase order' }, 400);
   }
@@ -520,9 +534,16 @@ bankTx.post('/:id/pair', async (c) => {
   const linked = a.order_id ? a : b.order_id ? b : null;
   const assigned = a.assignee_id ? a : b.assignee_id ? b : null;
   const filed = a.internal_txn_id ? a : b.internal_txn_id ? b : null;
+  const noted = a.note ? a : b.note ? b : null;
   await sql.begin(async (tx) => {
     const pairId = crypto.randomUUID();
     await tx`UPDATE bank_transactions SET pair_id = ${pairId} WHERE id IN (${a.id}, ${b.id})`;
+    if (noted) {
+      await tx`
+        UPDATE bank_transactions
+        SET note = ${noted.note}, note_by = ${noted.note_by}, note_at = ${noted.note_at}
+        WHERE pair_id = ${pairId} AND note IS NULL`;
+    }
     if (filed) {
       await tx`
         UPDATE bank_transactions
@@ -703,6 +724,38 @@ bankTx.post('/:id/unassign', async (c) => {
     SET assignee_id = NULL, assigned_by = NULL, assigned_at = NULL
     WHERE id IN ${sql(group.map((l) => l.id))}`;
   return c.json({ ok: true });
+});
+
+// ─── Note ────────────────────────────────────────────────────────────────────
+// One free-text note per payment, overwritten in place. It explains, it does
+// not classify — so unlike every verdict above it is allowed on a linked,
+// ignored, transfer or dead row. Empty clears.
+
+bankTx.post('/:id/note', async (c) => {
+  const sql = getDb(c.env);
+  const body = await c.req.json<{ note?: unknown }>().catch(() => ({} as { note?: unknown }));
+  if (body.note !== undefined && body.note !== null && typeof body.note !== 'string') {
+    return c.json({ error: 'note must be a string or null' }, 400);
+  }
+  const note = (body.note as string | null | undefined)?.trim() || null;
+  if (note && note.length > PAYMENT_NOTE_MAX) {
+    return c.json({ error: `note must be ${PAYMENT_NOTE_MAX} characters or fewer` }, 400);
+  }
+
+  const group = await groupOf(sql, c.req.param('id'));
+  if (group.length === 0) return c.json({ error: 'Not found' }, 404);
+
+  const [written] = await sql<{ note_at: Date | null }[]>`
+    UPDATE bank_transactions
+    SET note = ${note},
+        note_by = ${note ? c.var.user.id : null},
+        note_at = ${note ? sql`NOW()` : null}
+    WHERE id IN ${sql(group.map((l) => l.id))}
+    RETURNING note_at`;
+  return c.json({
+    ok: true,
+    note: note ? { text: note, at: written.note_at, byName: c.var.user.name } : null,
+  });
 });
 
 // ─── Link-picker suggestions ─────────────────────────────────────────────────

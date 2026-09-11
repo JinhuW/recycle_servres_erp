@@ -3,10 +3,12 @@ import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
+import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
+import { ArchiveConflictList } from '../../components/ArchiveConflictList';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { fmtUSD, fmtDateShort } from '../../lib/format';
 import {
-  ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
+  ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, warehouseGateLockedStatuses,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
 import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
@@ -95,7 +97,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
   // Locked from Ready to Pay on: the review is over and the figure is what
   // the purchaser gets paid on. Managers keep the stage moves (below).
-  const orderLocked = isClosedBook(effectiveStatus);
+  // An archived order is locked too: its lines are out of stock, and every
+  // write the backend would take is refused until it is unarchived.
+  const isArchived = !!order.archivedAt;
+  const orderLocked = isClosedBook(effectiveStatus) || isArchived;
   // The purchaser keeps their order until the review closes it. Editing it
   // after submission is allowed and costs them the stage: the backend sends it
   // back to Draft, so `revertOnSave` warns before the first such save.
@@ -112,7 +117,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Ready to Pay or Reviewing, Ready to Pay forward to Done or back to
   // Reviewing (the backend guards lines committed to open sell orders).
   // Everything else stays read-only until such a move lands.
-  const canReopen = !isPurchaser && orderLocked;
+  const canReopen = !isPurchaser && orderLocked && !isArchived;
   const REOPEN_TARGETS: Record<string, string[]> = {
     'Done': ['Reviewing', 'Ready to Pay'],
     'Ready to Pay': ['Reviewing', 'Done'],
@@ -327,7 +332,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
 
   // Archive: owner-or-manager, any non-Draft stage. Either flips to the other.
   // (Draft uses Delete instead; the backend enforces the same split.)
-  const isArchived = !!order.archivedAt;
   // Mirrors the backend: a reverted order is a Draft that HAS been submitted,
   // and Delete refuses exactly those — so Archive has to take it, or the order
   // offers neither. Unarchiving is always available once archived.
@@ -335,6 +339,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     && (!!order.archivedAt || effectiveStatus !== 'Draft' || !!order.everSubmitted);
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  // The archive endpoint's answer when stock sits on open sell orders: the
+  // modal turns into that question until the user confirms or cancels.
+  const [archiveConflict, setArchiveConflict] = useState<ArchiveConflict | null>(null);
   // Filled when save() detects duplicate part numbers; the modal then drives a
   // "Save anyway" path that bypasses the check.
   const [dupConfirm, setDupConfirm] = useState<DuplicatePartGroup[] | null>(null);
@@ -650,6 +657,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // them, which beats a dead button next to a hint that's easy to miss.
   const saveBlockers: string[] =
     saving || canSave  ? []
+  : isArchived         ? [t('saveBlockedArchived')]
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
   : txnBlocked         ? [t('poTxnRequired')]
@@ -1432,7 +1440,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           }}>
             <Icon name="warehouse" size={12} /> {t('orderDetails')}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <div className="oe-fields">
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('warehouse')}</label>
               <div style={{ position: 'relative' }}>
@@ -1501,7 +1509,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   // A Done PO is a closed book — ownership (commission,
                   // "my orders") is part of the record and stays put.
                   disabled={orderLocked}
-                  title={orderLocked ? t('eoOwnerLockedDone') : undefined}
+                  title={isArchived ? t('saveBlockedArchived') : orderLocked ? t('eoOwnerLockedDone') : undefined}
                   style={{ width: '100%' }}
                 >
                   {ownerOptions.map(o => (
@@ -1565,11 +1573,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           </div>
         </div>
 
-        <div style={{
-          padding: 16, display: 'grid',
-          gridTemplateColumns: 'auto repeat(3, 1fr) auto',
-          gap: 18, alignItems: 'center',
-        }}>
+        <div className="oe-foot">
           {/* Shipping lives on its own page — this is the way in. */}
           <button
             className="btn"
@@ -1577,15 +1581,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           >
             <Icon name="truck" size={14} /> {t('shipLabelsBtn')}
           </button>
-          <div>
+          <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
           </div>
-          <div>
+          <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('subTotalUnits')}</div>
             <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{totals.qty}</div>
           </div>
-          <div>
+          <div className="oe-foot-stat">
             <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
               {t('totalCost')} {goodsOverridden && (
                 <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
@@ -1600,7 +1604,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="oe-foot-actions">
             <button className="btn" onClick={onCancel}>{t('cancel')}</button>
             {/* Only ever shown for photos whose upload failed: a queued photo
                 on a line that has no id yet is waiting for Save, not for this. */}
@@ -1729,8 +1733,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       )}
 
       {showArchive && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) setShowArchive(false); }}>
-          <div className="modal-shell" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) { setShowArchive(false); setArchiveConflict(null); } }}>
+          <div className="modal-shell" style={{ maxWidth: archiveConflict ? 560 : 460 }} onClick={e => e.stopPropagation()}>
             <div className="modal-head">
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                 <div style={{
@@ -1744,33 +1748,48 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                   <Icon name="box" size={18} />
                 </div>
                 <div>
-                  <div className="modal-title">{t('eoArchiveModalTitle', { id: order.id })}</div>
+                  <div className="modal-title">
+                    {archiveConflict ? t('archiveConflictTitle') : t('eoArchiveModalTitle', { id: order.id })}
+                  </div>
                   <div className="modal-sub">
-                    {t('eoArchiveModalBody')}
+                    {archiveConflict ? t('archiveConflictIntro', { id: order.id }) : t('eoArchiveModalBody')}
                   </div>
                 </div>
               </div>
             </div>
+            {archiveConflict && (
+                <div className="modal-body" style={{ paddingTop: 0 }}>
+                  <ArchiveConflictList conflict={archiveConflict} />
+                </div>
+            )}
             <div className="modal-foot">
-              <button className="btn" onClick={() => setShowArchive(false)} disabled={archiving}>
+              <button
+                className="btn"
+                onClick={() => { setShowArchive(false); setArchiveConflict(null); }}
+                disabled={archiving}
+              >
                 {t('cancel')}
               </button>
               <button
-                className="btn accent"
+                className={archiveConflict ? 'btn' : 'btn accent'}
+                style={archiveConflict ? { color: 'var(--neg)', borderColor: 'var(--neg)' } : undefined}
                 disabled={archiving}
                 onClick={async () => {
                   setArchiving(true);
                   try {
-                    await archiveOrder(order.id);
+                    await archiveOrder(order.id, { removeFromSellOrders: !!archiveConflict });
                     onSaved(t('orderArchivedToast'));
                   } catch (e) {
-                    handleFetchError(e);
+                    const conflict = readArchiveConflict(e);
                     setArchiving(false);
+                    if (conflict) { setArchiveConflict(conflict); return; }
+                    handleFetchError(e);
                     setShowArchive(false);
+                    setArchiveConflict(null);
                   }
                 }}
               >
-                {archiving ? '…' : t('archiveOrder')}
+                {archiving ? '…' : archiveConflict ? t('archiveConflictConfirm') : t('archiveOrder')}
               </button>
             </div>
           </div>

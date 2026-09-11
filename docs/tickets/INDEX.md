@@ -5,6 +5,12 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-038](./RS-038-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.137.1 |
+| [RS-037](./RS-037-archiving-a-po-takes-its-stock-out-of-inventory.md) | done | story | P2 | Archiving a PO takes its stock out of inventory | 1.137.0 |
+| [RS-036](./RS-036-add-a-note-to-a-payment.md) | done | story | P2 | Add a note to a payment | 1.136.0 |
+| [RS-035](./RS-035-assign-the-sell-order-payment-receiver-at-any-time.md) | done | story | P2 | Assign the sell-order payment receiver at any time | 1.135.0 |
+| [RS-034](./RS-034-refine-the-po-page-while-the-page-get-small.md) | done | story | P2 | Refine the PO pages when the window gets small | 1.134.0 |
+| [RS-033](./RS-033-the-payments-link-button-links-without-saying-to-wha.md) | done | bug | P2 | The Payments Link button links without saying to what | 1.133.0 |
 | [RS-032](./RS-032-add-a-ready-to-pay-stage-for-the-purchaser-s-commiss.md) | done | story | P2 | Add a Ready to Pay stage for the purchaser's commission | 1.132.0 |
 | [RS-031](./RS-031-only-the-warehouse-manager-moves-a-po-into-reviewing.md) | done | story | P2 | Only the warehouse manager moves a PO into Reviewing | 1.132.0 |
 | [RS-030](./RS-030-let-the-po-owner-picker-offer-managers-as-well-as-pu.md) | done | story | P2 | Let the PO owner picker offer managers as well as purchasers | 1.131.0 |

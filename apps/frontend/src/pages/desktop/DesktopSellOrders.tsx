@@ -483,6 +483,38 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
   );
 }
 
+// ─── Payment receiver picker ─────────────────────────────────────────────────
+// Shared by the edit form (draft state, saved with the rest) and the view
+// mode (saved on change). `current` is the order's saved receiver: a
+// deactivated one isn't in the active-members list, so keep them selectable
+// or opening the picker would silently clear the assignment.
+function ReceiverSelect({ value, current, members, disabled, onChange }: {
+  value: string;
+  current: { id: string; name: string } | null;
+  members: MemberOption[];
+  disabled?: boolean;
+  onChange: (id: string) => void;
+}) {
+  const { t } = useT();
+  return (
+    <select
+      className="select"
+      style={{ maxWidth: 260 }}
+      value={value}
+      disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+    >
+      <option value="">{t('paymentReceiverNone')}</option>
+      {current && !members.some(m => m.id === current.id) && (
+        <option value={current.id}>{current.name}</option>
+      )}
+      {members.map(m => (
+        <option key={m.id} value={m.id}>{m.name}</option>
+      ))}
+    </select>
+  );
+}
+
 // ─── Download buttons ────────────────────────────────────────────────────────
 // Two exports off one order, and they go to different people: the bid sheet is
 // emailed to a vendor, the packing list stays in the warehouse. Separate files
@@ -577,6 +609,7 @@ function SellOrderDetail({
   const [adjusting, setAdjusting] = useState(false);
   const [adjustInput, setAdjustInput] = useState('');
   const [adjustSaving, setAdjustSaving] = useState(false);
+  const [receiverSaving, setReceiverSaving] = useState(false);
   const [pendingAdjust, setPendingAdjust] = useState<number | null>(null);
 
   useEffect(() => {
@@ -612,18 +645,25 @@ function SellOrderDetail({
     return () => { alive = false; };
   }, [draftCurrency]);
 
-  // Customer + member lists — only needed when editing (re-pick either).
+  // Customer list — only needed when editing (re-pick the customer).
   useEffect(() => {
     if (mode !== 'edit') return;
     let alive = true;
     api.get<{ items: Customer[] }>('/api/customers')
       .then(r => { if (alive) setCustomers(r.items); })
       .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [mode]);
+
+  // Members back the receiver picker, which is offered in both modes — the
+  // receiver is the one field that stays assignable after the deal closes.
+  useEffect(() => {
+    let alive = true;
     api.get<{ items: (MemberOption & { role: string })[] }>('/api/members')
       .then(r => { if (alive) setMembers(r.items.filter(m => m.role === 'manager')); })
       .catch(handleFetchError);
     return () => { alive = false; };
-  }, [mode]);
+  }, []);
 
   useEscapeKey(onClose);
 
@@ -735,6 +775,25 @@ function SellOrderDetail({
       handleFetchError(e);
     } finally {
       setAdjustSaving(false);
+    }
+  };
+
+  // View-mode receiver change: no draft, no Save button — it hits the server
+  // at once (the edit form folds the receiver into its PATCH instead). The
+  // detail and history reload, and the list reloads so its receiver column
+  // matches.
+  const saveReceiver = async (userId: string) => {
+    if (!order || userId === (order.paymentReceivedBy?.id ?? '')) return;
+    setReceiverSaving(true);
+    try {
+      await api.patch(`/api/sell-orders/${order.id}`, { paymentReceivedBy: userId || null });
+      setRefreshKey(k => k + 1);
+      setHistoryKey(k => k + 1);
+      onAdjusted?.();
+    } catch (e) {
+      handleFetchError(e);
+    } finally {
+      setReceiverSaving(false);
     }
   };
 
@@ -1049,24 +1108,12 @@ function SellOrderDetail({
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: 12, color: 'var(--fg-subtle)', whiteSpace: 'nowrap' }}>{t('paymentReceiverLabel')}</span>
-                      <select
-                        className="select"
-                        style={{ maxWidth: 260 }}
+                      <ReceiverSelect
                         value={draft.paymentReceivedBy}
-                        onChange={e => setDraft({ ...draft, paymentReceivedBy: e.target.value })}
-                      >
-                        <option value="">{t('paymentReceiverNone')}</option>
-                        {/* A deactivated receiver isn't in the active-members list —
-                            keep them selectable so opening the editor doesn't
-                            silently clear the assignment. */}
-                        {order.paymentReceivedBy
-                          && !members.some(m => m.id === order.paymentReceivedBy!.id) && (
-                          <option value={order.paymentReceivedBy.id}>{order.paymentReceivedBy.name}</option>
-                        )}
-                        {members.map(m => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </select>
+                        current={order.paymentReceivedBy}
+                        members={members}
+                        onChange={id => setDraft({ ...draft, paymentReceivedBy: id })}
+                      />
                     </div>
                   </div>
                   {currencyChanged && (
@@ -1382,14 +1429,20 @@ function SellOrderDetail({
                 </div>
               )}
 
-              {/* Payment receiver — read-only in view mode (edit mode has the
-                  select up in the Customer block) */}
+              {/* Payment receiver — live picker in view mode, Done and Closed
+                  included: who took the money is often only known after the
+                  deal is closed. Edit mode has the select up in the Customer
+                  block, saved with the rest of the form. */}
               {!editable && (
                 <div className="so-section" style={{ marginTop: 24 }}>
                   <div className="so-section-head"><Icon name="user" size={14} /> {t('paymentReceiverLabel')}</div>
-                  <div style={{ fontSize: 13, color: order.paymentReceivedBy ? 'var(--fg)' : 'var(--fg-subtle)' }}>
-                    {order.paymentReceivedBy?.name ?? t('paymentReceiverNone')}
-                  </div>
+                  <ReceiverSelect
+                    value={order.paymentReceivedBy?.id ?? ''}
+                    current={order.paymentReceivedBy}
+                    members={members}
+                    disabled={receiverSaving}
+                    onChange={saveReceiver}
+                  />
                 </div>
               )}
 

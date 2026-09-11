@@ -204,6 +204,9 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
   }
 
   const dirty = JSON.stringify(draft) !== initialRef.current;
+  // Its PO is archived: the line is out of stock and the backend refuses
+  // every edit until the PO is unarchived.
+  const archived = item.status === 'Archived';
   const set = (patch: Partial<Draft>) => setDraft(prev => ({ ...prev!, ...patch }));
 
   const qty = Number(draft.qty) || 0;
@@ -331,7 +334,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
         </div>
         <div className="page-actions">
           <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-          <button className="btn accent" disabled={!dirty || saving} onClick={save}>
+          <button className="btn accent" disabled={!dirty || saving || archived} onClick={save}>
             <Icon name="check" size={13} /> {saving ? '…' : t('save')}
           </button>
         </div>
@@ -356,6 +359,24 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
           </button>
         ))}
       </div>
+
+      {archived && (
+        <div className="card" style={{
+          padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+          background: 'var(--bg-soft)', borderStyle: 'dashed', marginBottom: 14,
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: 'oklch(0.96 0.04 295)', color: 'oklch(0.45 0.16 295)',
+            display: 'grid', placeItems: 'center', flexShrink: 0,
+          }}>
+            <Icon name="box" size={14} />
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
+            <strong style={{ color: 'var(--fg)' }}>{t('ieArchivedTitle')}</strong> · {t('ieArchivedBody', { id: item.order_id })}
+          </div>
+        </div>
+      )}
 
       {blocked && (
         <BlockedByOpenOrdersBanner
@@ -774,6 +795,7 @@ function PricingPanel({
               <label className="label">{t('status')}</label>
               <select className="select" value={draft.status} onChange={e => set({ status: e.target.value })}>
                 {LINE_STATUSES.map(s => <option key={s}>{s}</option>)}
+                {draft.status === 'Archived' && <option>Archived</option>}
               </select>
             </div>
             <div className="field">

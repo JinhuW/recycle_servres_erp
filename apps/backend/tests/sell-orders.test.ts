@@ -567,4 +567,40 @@ describe('sell-order payment receiver', () => {
     });
     expect(r.status).toBe(400);
   });
+
+  // The receiver is the one field that stays open after the deal closes — the
+  // desktop modal offers it inline on Done / Closed orders, where the line
+  // set, customer and currency are all frozen. Lock that in so a broader
+  // "freeze everything on Done" guard can't take it away unnoticed.
+  it('PATCH receiver still works on a Done and on a Closed order', async () => {
+    const { token, user } = await loginAs(ALEX);
+    const sql = getTestDb();
+
+    const done = (await createWithReceiver(token, null)).body.id;
+    const toDone = await api('POST', `/api/sell-orders/${done}/status`, {
+      token, body: { to: 'Done', note: 'paid' },
+    });
+    expect(toDone.status).toBe(200);
+    const setDone = await api('PATCH', `/api/sell-orders/${done}`, {
+      token, body: { paymentReceivedBy: user.id },
+    });
+    expect(setDone.status).toBe(200);
+    const detail = await api<{ order: { status: string; paymentReceivedBy: { id: string } | null } }>(
+      'GET', `/api/sell-orders/${done}`, { token });
+    expect(detail.body.order.status).toBe('Done');
+    expect(detail.body.order.paymentReceivedBy?.id).toBe(user.id);
+
+    const closed = (await createWithReceiver(token, null)).body.id;
+    const toClosed = await api('POST', `/api/sell-orders/${closed}/status`, {
+      token, body: { to: 'Closed', note: 'drop', closeReasonId: 'other' },
+    });
+    expect(toClosed.status).toBe(200);
+    const setClosed = await api('PATCH', `/api/sell-orders/${closed}`, {
+      token, body: { paymentReceivedBy: user.id },
+    });
+    expect(setClosed.status).toBe(200);
+    const row = (await sql`SELECT status, payment_received_by FROM sell_orders WHERE id = ${closed}`)[0];
+    expect(row.status).toBe('Closed');
+    expect(row.payment_received_by).toBe(user.id);
+  });
 });

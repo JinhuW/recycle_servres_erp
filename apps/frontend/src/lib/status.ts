@@ -46,6 +46,7 @@ const TONE: Record<string, 'info' | 'warn' | 'pos' | 'accent' | 'muted'> = {
   'Ready to Pay': 'accent',
   'Done':         'pos',
   'Sold':         'muted',
+  'Archived':     'muted',
   'Mixed':        'muted',
   'Pending':      'warn',
   'Received':     'pos',

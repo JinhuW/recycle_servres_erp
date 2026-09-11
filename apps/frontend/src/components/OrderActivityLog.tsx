@@ -162,10 +162,17 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
       };
     }
     case 'archived': {
-      return { title: 'Archived', lines: ['Hidden from the default order list'] };
+      // Events from before archive touched stock carry no counts.
+      if (typeof d.lines !== 'number') return { title: t('historyArchived'), lines: [t('acArchivedLegacy')] };
+      const lines = [t('acArchivedLines', { n: String(d.lines) })];
+      if (typeof d.removedSellOrderLines === 'number' && d.removedSellOrderLines > 0) {
+        lines.push(t('acArchivedRemovedFromSo', { n: String(d.removedSellOrderLines) }));
+      }
+      return { title: t('historyArchived'), lines };
     }
     case 'unarchived': {
-      return { title: 'Unarchived', lines: ['Restored to the active list'] };
+      if (typeof d.lines !== 'number') return { title: t('historyUnarchived'), lines: [t('acUnarchivedLegacy')] };
+      return { title: t('historyUnarchived'), lines: [t('acUnarchivedLines', { n: String(d.lines) })] };
     }
     case 'shipment_created': {
       return { title: t('acShipmentCreated'), lines: [] };

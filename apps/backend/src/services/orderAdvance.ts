@@ -7,9 +7,12 @@
 // and all writes happen under one FOR UPDATE lock on the orders row.
 
 import { writeOrderEvent } from './orderAudit';
+import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
 import { companyPayTxnMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
+import type { SOLineSnap } from './sellOrderLineMatch';
+import { openSellStatuses } from '../lib/sellCommitment';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → ready_to_pay → done) is
@@ -44,6 +47,13 @@ export function isClosedBook(lifecycle: string): boolean {
   return lifecycle === 'ready_to_pay' || lifecycle === 'done';
 }
 
+// An archived PO's goods are gone from the business, so its lines leave every
+// stock and sellable bucket the same way a sold lot does: by status. A filter
+// on orders.archived_at could not do this — the vendor catalog, bid submit and
+// bid availability never join `orders`. Never a lifecycle status: unarchive
+// puts each line back where it was.
+export const ARCHIVED_LINE_STATUS = 'Archived';
+
 // Stages whose entry belongs to the PO's warehouse manager. A move from an
 // earlier stage into one of these — or past it in a stage-jump — is theirs
 // alone; once the order sits at or beyond it, any manager may continue, and
@@ -62,6 +72,7 @@ export type AdvanceOutcome =
   | { kind: 'notFound' }
   | { kind: 'forbidden'; msg: string }
   | { kind: 'badStage'; msg: string }
+  | { kind: 'archived' }
   | { kind: 'finalStage' }
   | { kind: 'committedLines'; offendingLineIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
@@ -98,7 +109,7 @@ async function committedLineIds(
     JOIN sell_orders so ON so.id = sol.sell_order_id
     WHERE ol.order_id = ${orderId}
       AND ol.status = ANY(${lineStatuses})
-      AND so.status IN ('Draft', 'Shipped', 'Awaiting payment')
+      AND so.status = ANY(${openSellStatuses()}::text[])
   ` as unknown as { id: string }[];
   return rows.map(r => r.id);
 }
@@ -219,6 +230,130 @@ export async function revertOrderToDraftTx(
   return { kind: 'ok', from: fromLifecycle };
 }
 
+export type ArchiveSellOrderConflict = {
+  id: string;
+  status: string;
+  // How many lines the sell order holds in all, so the client can say which
+  // ones the removal would leave empty.
+  lineCount: number;
+  // solId is the sell_order_lines row: a sell order may name one lot twice, so
+  // inventoryId alone does not identify an entry.
+  lines: { solId: string; inventoryId: string; label: string; qty: number }[];
+};
+
+export type ArchiveOutcome =
+  | { kind: 'committedLines'; sellOrders: ArchiveSellOrderConflict[] }
+  | { kind: 'transferClaimed'; offendingLineIds: string[] }
+  | { kind: 'ok'; lines: number; removedSellOrderLines: number };
+
+// Take an order's goods out of stock. The caller holds the orders row FOR
+// UPDATE and writes the `archived` event itself.
+//
+// A line an open sell order still names cannot just vanish — the sell order
+// would hold inventory validateSellLines rejects. The first call reports those
+// sell orders (Draft included: a draft is re-validated on promotion and would
+// fail then) so the user can decide; `removeFromSellOrders` is that decision,
+// and drops the lines from the sell orders before the cascade. Unarchive does
+// not put them back — the removal is audited on the sell order instead.
+export async function archiveOrderLinesTx(
+  tx: SqlLike,
+  id: string,
+  actor: AdvanceActor,
+  opts: { removeFromSellOrders: boolean },
+): Promise<ArchiveOutcome> {
+  // 'Archived' is not a lifecycle status, so the committed-line half of this
+  // guard is a no-op and only the transfer guard runs — the committed lines
+  // are handled below, where the sell orders have to be named.
+  const blocked = await cascadeBlockers(tx, id, ARCHIVED_LINE_STATUS);
+  if (blocked) return { kind: 'transferClaimed', offendingLineIds: blocked.offendingLineIds };
+
+  const claimed = await tx`
+    SELECT sol.id AS sol_id, so.id AS so_id, so.status AS so_status,
+           (SELECT COUNT(*) FROM sell_order_lines x WHERE x.sell_order_id = so.id)::int AS so_line_count,
+           sol.inventory_id, sol.qty, sol.unit_price::float AS unit_price, sol.condition,
+           sol.category, sol.label, sol.sub_label, sol.part_number, sol.warehouse_id
+    FROM sell_order_lines sol
+    JOIN sell_orders so ON so.id = sol.sell_order_id
+    JOIN order_lines ol ON ol.id = sol.inventory_id
+    WHERE ol.order_id = ${id}
+      AND ol.status <> 'Sold'
+      AND so.status = ANY(${openSellStatuses()}::text[])
+    ORDER BY so.id, sol.position
+  ` as unknown as (SOLineSnap & {
+    sol_id: string; so_id: string; so_status: string; so_line_count: number; inventory_id: string;
+  })[];
+
+  if (claimed.length > 0 && !opts.removeFromSellOrders) {
+    const bySo = new Map<string, ArchiveSellOrderConflict>();
+    for (const r of claimed) {
+      const so = bySo.get(r.so_id) ?? { id: r.so_id, status: r.so_status, lineCount: r.so_line_count, lines: [] };
+      so.lines.push({ solId: r.sol_id, inventoryId: r.inventory_id, label: r.label, qty: r.qty });
+      bySo.set(r.so_id, so);
+    }
+    return { kind: 'committedLines', sellOrders: [...bySo.values()] };
+  }
+
+  if (claimed.length > 0) {
+    await tx`DELETE FROM sell_order_lines WHERE id = ANY(${claimed.map(r => r.sol_id)}::uuid[])`;
+    // Same rule as a line rewrite through PATCH: the priced set changed, so a
+    // negotiated final total no longer describes the order.
+    await tx`
+      UPDATE sell_orders
+      SET pre_adjust_native_total = NULL, adjusted_at = NULL, adjusted_by = NULL, updated_at = NOW()
+      WHERE id = ANY(${[...new Set(claimed.map(r => r.so_id))]}::text[])
+    `;
+    for (const r of claimed) {
+      const snapshot: SOLineSnap = {
+        inventory_id: r.inventory_id, qty: r.qty, unit_price: r.unit_price, condition: r.condition,
+        category: r.category, label: r.label, sub_label: r.sub_label, part_number: r.part_number,
+        warehouse_id: r.warehouse_id,
+      };
+      await writeSellOrderEvent(tx, r.so_id, actor?.id ?? null, 'line_removed', {
+        snapshot, reason: 'po_archived', orderId: id,
+      });
+    }
+  }
+
+  const moved = (await tx`
+    SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id = ${id} AND status <> 'Sold'
+  `)[0] as { n: number };
+  await cascadeLineStatusesTx(tx, id, actor?.id ?? null, ARCHIVED_LINE_STATUS);
+  return { kind: 'ok', lines: moved.n, removedSellOrderLines: claimed.length };
+}
+
+// Put an archived order's lines back where the archive found them. The status
+// each line held is read from the audit row the archive cascade wrote for it;
+// archive cycles are serialised by the orders row lock, so the newest
+// `to: Archived` row per line is the one that applies. Lines a pre-cascade
+// archive left at Done are not at 'Archived' and are left alone.
+export async function unarchiveOrderLinesTx(
+  tx: SqlLike,
+  id: string,
+  actor: AdvanceActor,
+): Promise<{ lines: number }> {
+  const rows = await tx`
+    WITH prior AS (
+      SELECT DISTINCT ON (e.order_line_id) e.order_line_id, e.detail->>'from' AS status
+      FROM inventory_events e
+      JOIN order_lines ol ON ol.id = e.order_line_id
+      WHERE ol.order_id = ${id} AND ol.status = ${ARCHIVED_LINE_STATUS}
+        AND e.kind = 'status' AND e.detail->>'to' = ${ARCHIVED_LINE_STATUS}
+      ORDER BY e.order_line_id, e.created_at DESC
+    ),
+    upd AS (
+      UPDATE order_lines ol SET status = p.status
+      FROM prior p WHERE ol.id = p.order_line_id
+      RETURNING ol.id, p.status
+    )
+    INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+    SELECT u.id, ${actor?.id ?? null}::uuid, 'status',
+           jsonb_build_object('field','status','from',${ARCHIVED_LINE_STATUS}::text,'to',u.status)
+    FROM upd u
+    RETURNING order_line_id
+  ` as unknown as { order_line_id: string }[];
+  return { lines: rows.length };
+}
+
 export async function advanceOrderTx(
   tx: SqlLike,
   id: string,
@@ -228,11 +363,16 @@ export async function advanceOrderTx(
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
   const cur = (await tx`
-    SELECT user_id, lifecycle, payment, paypal_txn_id, created_at, warehouse_id
+    SELECT user_id, lifecycle, payment, paypal_txn_id, created_at, warehouse_id, archived_at
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { user_id: string; lifecycle: string; payment: string;
-        paypal_txn_id: string | null; created_at: Date; warehouse_id: string | null } | undefined;
+        paypal_txn_id: string | null; created_at: Date; warehouse_id: string | null;
+        archived_at: Date | null } | undefined;
   if (!cur) return { kind: 'notFound' };
+  // The lines sit at 'Archived'; a cascade here would put them back in stock
+  // behind the archive's back. The tracking poll lands here too and treats
+  // this like any other stage it may not drive.
+  if (cur.archived_at) return { kind: 'archived' };
 
   const curIdx = stages.indexOf(cur.lifecycle);
   let nextStageId: string;

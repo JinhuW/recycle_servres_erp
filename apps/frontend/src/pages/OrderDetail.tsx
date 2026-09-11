@@ -13,6 +13,8 @@ import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { linePhotos } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
+import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
+import { ArchiveConflictList } from '../components/ArchiveConflictList';
 import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
@@ -71,7 +73,10 @@ export function OrderDetail({
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
   // Locked from Ready to Pay on: the review is over and the figure is what
   // the purchaser gets paid on.
-  const orderLocked = isClosedBook(effectiveStatus);
+  // An archived order is locked too: its lines are out of stock, and every
+  // write the backend would take is refused until it is unarchived.
+  const isArchived = !!order.archivedAt;
+  const orderLocked = isClosedBook(effectiveStatus) || isArchived;
   // The purchaser keeps their order until it is Done. Past Draft the edit
   // costs them the stage: the backend sends the order back to Draft, so
   // `revertOnSave` warns before the first write that does it.
@@ -153,7 +158,6 @@ export function OrderDetail({
   // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
   // archive is reversible so we keep the gesture short, matching the
   // platform's "one tap, one sheet" rhythm.
-  const isArchived = !!order.archivedAt;
   // Mirrors the backend: a reverted order is a Draft that HAS been submitted,
   // and Delete refuses exactly those — so Archive has to take it, or the order
   // offers neither. Unarchiving is always available once archived.
@@ -161,6 +165,9 @@ export function OrderDetail({
     && (isArchived || effectiveStatus !== 'Draft' || !!order.everSubmitted);
   const [showArchive, setShowArchive] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  // The archive endpoint's answer when stock sits on open sell orders: the
+  // modal turns into that question until the user confirms or cancels.
+  const [archiveConflict, setArchiveConflict] = useState<ArchiveConflict | null>(null);
 
   // Re-read the evidence list when the server's own version of it moves —
   // never on a mere refetch that returned the same thing.
@@ -293,6 +300,7 @@ export function OrderDetail({
   const gateWarehouse = warehouses.find(w => w.id === order.warehouse?.id);
   const gateLocked = isPurchaser ? [] : warehouseGateLockedStatuses(effectiveStatus, gateWarehouse, user?.id);
   const nextStatus: string | null = (() => {
+    if (isArchived) return null;
     if (effectiveStatus === 'Draft') return 'In Transit';
     if (isPurchaser) return null;
     const i = ORDER_STATUSES.indexOf(effectiveStatus as typeof ORDER_STATUSES[number]);
@@ -488,7 +496,7 @@ export function OrderDetail({
                   : t('lifecycleAdvance', { status: nextStatus })}
             </button>
           )}
-          {!nextStatus && orderLocked && (
+          {!nextStatus && orderLocked && !isArchived && (
             <div style={{
               marginTop: 12, padding: '8px 12px', borderRadius: 10,
               background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
@@ -955,9 +963,13 @@ export function OrderDetail({
                   setArchiving(true);
                   try {
                     await unarchiveOrder(order.id);
+                    // Mobile stays on the page (desktop navigates away), so
+                    // the banner and the restored lines have to be re-read.
+                    await refetchOrder();
                     onSaved(t('orderRestoredToast'));
                   } catch (e) {
                     handleFetchError(e);
+                  } finally {
                     setArchiving(false);
                   }
                 } else {
@@ -1127,8 +1139,8 @@ export function OrderDetail({
       )}
 
       {showArchive && (
-        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) setShowArchive(false); }}>
-          <div className="modal-shell" style={{ maxWidth: 380, width: '92vw' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !archiving) { setShowArchive(false); setArchiveConflict(null); } }}>
+          <div className="modal-shell" style={{ maxWidth: archiveConflict ? 440 : 380, width: '92vw' }} onClick={e => e.stopPropagation()}>
             <div className="modal-head">
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                 <div style={{
@@ -1139,33 +1151,52 @@ export function OrderDetail({
                   <Icon name="box" size={18} />
                 </div>
                 <div>
-                  <div className="modal-title">{t('archivePromptTitle', { id: order.id })}</div>
+                  <div className="modal-title">
+                    {archiveConflict ? t('archiveConflictTitle') : t('archivePromptTitle', { id: order.id })}
+                  </div>
                   <div className="modal-sub">
-                    {t('archivePromptSub')}
+                    {archiveConflict ? t('archiveConflictIntro', { id: order.id }) : t('archivePromptSub')}
                   </div>
                 </div>
               </div>
             </div>
+            {archiveConflict && (
+                <div className="modal-body" style={{ paddingTop: 0 }}>
+                  <ArchiveConflictList conflict={archiveConflict} />
+                </div>
+            )}
             <div className="modal-foot">
-              <button className="btn" onClick={() => setShowArchive(false)} disabled={archiving}>
+              <button
+                className="btn"
+                onClick={() => { setShowArchive(false); setArchiveConflict(null); }}
+                disabled={archiving}
+              >
                 {t('cancel')}
               </button>
               <button
-                className="btn accent"
+                className={archiveConflict ? 'btn' : 'btn accent'}
+                style={archiveConflict ? { color: 'var(--neg)', borderColor: 'var(--neg)' } : undefined}
                 disabled={archiving}
                 onClick={async () => {
                   setArchiving(true);
                   try {
-                    await archiveOrder(order.id);
+                    await archiveOrder(order.id, { removeFromSellOrders: !!archiveConflict });
+                    await refetchOrder();
+                    setShowArchive(false);
+                    setArchiveConflict(null);
+                    setArchiving(false);
                     onSaved(t('orderArchivedToast'));
                   } catch (e) {
-                    handleFetchError(e);
+                    const conflict = readArchiveConflict(e);
                     setArchiving(false);
+                    if (conflict) { setArchiveConflict(conflict); return; }
+                    handleFetchError(e);
                     setShowArchive(false);
+                    setArchiveConflict(null);
                   }
                 }}
               >
-                {archiving ? '…' : t('archive')}
+                {archiving ? '…' : archiveConflict ? t('archiveConflictConfirm') : t('archive')}
               </button>
             </div>
           </div>

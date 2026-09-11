@@ -267,6 +267,52 @@ html.desktop, body.desktop, .desktop #root {
   top: 0;
   z-index: 2;
 }
+/* The toolbar wraps instead of pushing the search box out of the card; the
+   right cluster keeps its right edge on whichever line it lands. */
+.page.page-history > .orders-card > .card-head { flex-wrap: wrap; gap: 10px 16px; }
+.orders-toolbar-l, .orders-toolbar-r { display: flex; align-items: center; flex-wrap: wrap; }
+.orders-toolbar-l { gap: 12px; }
+/* Flex-basis 0 so the right cluster never asks for its max-content width:
+   it takes whatever the title row leaves and wraps *inside* itself, and the
+   search box (basis 140, grows to 220) gives up width before anything moves
+   to a second line. A wrapping container breaks lines on hypothetical sizes,
+   so a shrinkable 220px box would still wrap at 220. */
+.orders-toolbar-r { gap: 8px; flex: 1 1 0; min-width: 0; justify-content: flex-end; }
+.orders-toolbar-l .card-title { white-space: nowrap; }
+.page-history .toolbar-search { flex: 1 1 140px; max-width: 220px; }
+.page-history .toolbar-search > .input { width: 100%; }
+/* Four tiles while four fit; the grid decides, not a breakpoint. 140px is
+   what four need at the 720px floor once the sidebar is a rail. */
+.page.page-history .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.page.page-history .table .col-id { white-space: nowrap; }
+
+/* Narrow window: the table keeps its width and scrolls sideways, but the
+   order ID stays pinned so a row never loses its name on the way to Profit.
+   Only the ID cell is sticky — the chevron before it just slides underneath. */
+/* Once the right cluster can't hold its four controls beside the title row it
+   takes a full-width line of its own — one tidy row, not a stranded Columns
+   button. This trips a little before the layout breakpoint below. */
+@media (max-width: 1280px) {
+  .orders-toolbar-r { flex-basis: 100%; }
+  .page-history .toolbar-search { max-width: 320px; }
+}
+@media (max-width: 1100px) {
+  .page.page-history { padding: 10px 16px 16px; }
+  .page.page-history > .page-head .page-sub { display: none; }
+  .page.page-history .kpi { padding: 12px 14px; }
+  .page.page-history .kpi-value { font-size: 22px; margin-top: 4px; }
+  .page.page-history .table .col-id {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-elev);
+  }
+  /* Header cells are already sticky-top at z-index 2 (the > .orders-card rule
+     above, which this must out-rank); the pinned one sits above its later
+     siblings where the two axes cross. */
+  .page.page-history > .orders-card .table thead th.col-id { background: var(--bg-soft); z-index: 3; }
+  .page.page-history .table tr.row-hover:hover td.col-id { background: var(--bg-soft); }
+}
 
 /* Order-edit page variant — a 2×2 grid:
      ┌───────────────────┬──────────┐
@@ -388,6 +434,49 @@ html.desktop, body.desktop, .desktop #root {
   position: sticky;
   top: 0;
   z-index: 2;
+}
+.page.page-order-edit .oe-items-card > .card-head { flex-wrap: wrap; gap: 10px; }
+.page.page-order-edit .oe-items-card > .card-head > div:first-child { min-width: 0; }
+.page.page-order-edit .oe-items-card > .card-head .card-title { white-space: nowrap; }
+/* Eight columns need far less than the global 1080px table floor. */
+.page.page-order-edit .oe-items-card .table { min-width: 820px; }
+/* Order-details fields. minmax(0, …) matters at every width: a `select` with a
+   long option otherwise widens its track past the card and drags the
+   full-width Notes box out with it. */
+.oe-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.oe-foot {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr)) auto;
+  gap: 18px;
+  align-items: center;
+}
+.oe-foot-stat { white-space: nowrap; }
+.oe-foot-actions { display: flex; gap: 8px; }
+
+/* Narrow window: one column — items, then status/details/Save, then what the
+   side held (payment detail, ledger, activity). The stepper keeps every stage
+   as a numbered dot and names only the current one; each dot's `title` still
+   carries its name. */
+@media (max-width: 1100px) {
+  .page.page-order-edit { padding: 10px 16px 16px; }
+  .page.page-order-edit > .oe-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      "items"
+      "action"
+      "side";
+  }
+  .page.page-order-edit .so-step { padding: 6px 8px; }
+  .page.page-order-edit .so-step:not(.active) .so-step-label { display: none; }
+  .oe-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .oe-foot { display: flex; flex-wrap: wrap; gap: 12px 18px; }
+  .oe-foot-actions { margin-left: auto; }
 }
 
 /* Dashboard page variant — scrollable, but the scrollbar is hidden so the
@@ -739,11 +828,25 @@ html.desktop, body.desktop, .desktop #root {
 .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
 .tab:hover  { color: var(--fg); }
 
-/* ===== Mobile responsive collapse ===== */
+/* ===== Narrow-window collapse =====
+   The sidebar folds to a 64px icon rail rather than vanishing: below 900px the
+   old rule hid it outright, and the desktop shell runs down to 720px, so a
+   split-screen window had no way to leave the page it was on. Labels hide by
+   CSS only, so the buttons keep their text for assistive tech and their
+   `title` names them on hover. */
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
-  .main { padding: 12px 12px 80px; }
+  .app { grid-template-columns: 64px minmax(0, 1fr); }
+  .sidebar { padding: 14px 8px; }
+  .sidebar .brand { padding: 4px 0 12px; justify-content: center; }
+  .sidebar .brand > div:not(.brand-mark),
+  .sidebar .nav-section,
+  .sidebar .nav-item > span:not(.badge),
+  .sidebar .sidebar-foot > div:not(.avatar) { display: none; }
+  .sidebar .nav-item { justify-content: center; padding: 10px 0; }
+  .sidebar .nav-item .badge { margin-left: 0; }
+  .sidebar .nav-item .nav-icon { width: 18px; height: 18px; }
+  .sidebar .nav-group + .nav-group { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .sidebar .sidebar-foot { flex-direction: column; gap: 8px; padding: 12px 0; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
@@ -2362,6 +2465,18 @@ html.desktop, body.desktop, .desktop #root {
 .tape-edit .input { font-size: 12.5px; padding: 5px calc(var(--fig-inset) - 1px); }
 .tape-edit .tape-money { width: 110px; text-align: right; font-variant-numeric: tabular-nums; }
 .tape-edit .tape-note { width: 190px; }
+/* Narrow window: the editable fee's inputs drop to their own line under the
+   label, right-aligned. A leader joins a label to a figure on the same line;
+   with the figure below there is nothing to join, so that row goes without
+   (Chromium also refuses to paint the 1px dotted border on this one wrapped
+   line — see docs/debug-notes/2026-09-09-dotted-leader-vanishes-in-wrapped-tape-row.md).
+   The `:has` guard leaves a read-only tape's printed figure where it is. */
+@media (max-width: 1100px) {
+  .tape-row { flex-wrap: wrap; }
+  .tape-row:has(.tape-edit .input) > .tape-lead { display: none; }
+  .tape-edit:has(.input) { flex: 1 1 100%; justify-content: flex-end; }
+  .tape-edit .tape-note { width: auto; flex: 1 1 120px; max-width: 260px; }
+}
 .tape-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
 .tape-block-cap {
   font-family: 'Inter', system-ui, sans-serif;
@@ -3292,6 +3407,18 @@ html.desktop, body.desktop, .desktop #root {
    arm's length from the button that acts on it. */
 .pay-table .pay-link { white-space: nowrap; width: 1%; }
 .pay-link-in { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The note rides under the payee, clipped to a line: it is a reminder on the
+   collapsed row, and the expanded row has the whole text. */
+.pay-note {
+  display: block;
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
 
 /* Owner. Same content-hugging trick, so the slack still lands on the payee
    cell — the only one that can use it. */
