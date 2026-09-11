@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-038](./RS-038-dev-to-main-review-findings-before-the-prod-cut.md) | in-progress | bug | P2 | Dev-to-main review findings before the prod cut | — |
+| [RS-038](./RS-038-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.137.1 |
 | [RS-037](./RS-037-archiving-a-po-takes-its-stock-out-of-inventory.md) | done | story | P2 | Archiving a PO takes its stock out of inventory | 1.137.0 |
 | [RS-036](./RS-036-add-a-note-to-a-payment.md) | done | story | P2 | Add a note to a payment | 1.136.0 |
 | [RS-035](./RS-035-assign-the-sell-order-payment-receiver-at-any-time.md) | done | story | P2 | Assign the sell-order payment receiver at any time | 1.135.0 |

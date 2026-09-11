@@ -2,13 +2,13 @@
 id: RS-038
 title: Dev-to-main review findings before the prod cut
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-11
 reporter: jinhu
 branch: fix/dev-to-main-review
-pr:
-version:
+pr: 299
+version: 1.137.1
 related: [RS-036, RS-037]
 ---
 
@@ -46,24 +46,24 @@ appears in four TS sites.
 
 ## Acceptance criteria
 
-- [ ] A migration puts every `Archived` line on a pending transfer back to
+- [x] A migration puts every `Archived` line on a pending transfer back to
       `In Transit` with its audit row; replaying `0121` then the repair on a
       transferred, archived-by-flag PO leaves the line at `In Transit`.
-- [ ] A purchaser's archive of a PO whose lines sit on open sell orders
+- [x] A purchaser's archive of a PO whose lines sit on open sell orders
       returns a plain 409 with no `code` / `sellOrders`, and
       `removeFromSellOrders` from a purchaser removes nothing.
-- [ ] `PATCH /api/inventory/:id` refuses with 409 "archived" for any line
+- [x] `PATCH /api/inventory/:id` refuses with 409 "archived" for any line
       whose parent PO is archived, Sold included.
-- [ ] `GET /api/inventory/analysis` excludes `Archived` lines from every
+- [x] `GET /api/inventory/analysis` excludes `Archived` lines from every
       aggregate; archiving a PO drops `totals.units` by its qty.
-- [ ] The conflict payload carries a `solId` per line and both dialogs key on
+- [x] The conflict payload carries a `solId` per line and both dialogs key on
       it.
-- [ ] `autoPair` and `transferPair` copy a lone note across the pair; the feed
+- [x] `autoPair` and `transferPair` copy a lone note across the pair; the feed
       reads `bt.note` directly; a migration backfills pairs made before this.
-- [ ] Both shells say "archived" — not "Done" — when an archived PO refuses
+- [x] Both shells say "archived" — not "Done" — when an archived PO refuses
       an edit.
-- [ ] `.pay-note` renders muted.  The "+" badge survives the icon rail.
-- [ ] Backend + frontend suites, typecheck, and build all green; `dev` then
+- [x] `.pay-note` renders muted.  The "+" badge survives the icon rail.
+- [x] Backend + frontend suites, typecheck, and build all green; `dev` then
       `main` carry the release.
 
 ## Out of scope
