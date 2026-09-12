@@ -2,13 +2,13 @@
 id: RS-041
 title: Archived PO items never show in inventory
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-12
 reporter: jinhu
 branch: fix/archived-po-inventory
-pr:
-version:
+pr: 305
+version: 1.138.2
 related: [RS-037, RS-038]
 ---
 

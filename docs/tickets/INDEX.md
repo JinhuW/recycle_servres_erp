@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-041](./RS-041-archived-po-items-never-show-in-inventory.md) | in-progress | bug | P1 | Archived PO items never show in inventory | — |
+| [RS-041](./RS-041-archived-po-items-never-show-in-inventory.md) | done | bug | P1 | Archived PO items never show in inventory | 1.138.2 |
 | [RS-040](./RS-040-payment-detail-actions-look-like-buttons.md) | in-review | bug | P2 | Payment detail actions look like buttons | 1.138.1 |
 | [RS-039](./RS-039-po-list-links-to-its-linked-payments.md) | done | story | P2 | PO list links to its linked payments | 1.138.0 |
 | [RS-038](./RS-038-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.137.1 |
