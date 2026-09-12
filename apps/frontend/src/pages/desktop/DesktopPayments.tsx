@@ -994,7 +994,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
   const settled = settleOf(row);
   const dead = settleDead(row);
   return (
-    <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
+    <div className="pay-detail">
       {settled !== 'settled' && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <span className={'chip dot ' + SETTLE_CHIP[settled].tone} style={{ fontSize: 10.5 }}>
@@ -1035,135 +1035,148 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {row.orderId && (
-          <>
-            <span className="muted">
-              {row.linkAuto
-                ? t('payLinkedAuto')
-                : t('payLinkedBy', { name: row.linkedByName ?? '—' })}
-              {row.linkedAt ? ` · ${fmtDate(row.linkedAt, locale)}` : ''}
+      <div className="pay-detail-actions">
+        <span className="pay-detail-group">
+          {row.orderId && (
+            <>
+              <span className="muted">
+                {row.linkAuto
+                  ? t('payLinkedAuto')
+                  : t('payLinkedBy', { name: row.linkedByName ?? '—' })}
+                {row.linkedAt ? ` · ${fmtDate(row.linkedAt, locale)}` : ''}
+              </span>
+              <button
+                type="button" className="btn sm"
+                onClick={() => { void act(`${row.id}/unlink`).then(ok => { if (ok) onToast(t('payUnlinkedToast')); }); }}
+              >
+                {t('payUnlink')}
+              </button>
+            </>
+          )}
+          {row.source === 'paired' ? (
+            <button type="button" className="btn sm" onClick={() => void act(`${row.id}/unpair`)}>
+              {t('payUnpair')}
+            </button>
+          ) : !row.ignored && row.category === 'external' && !dead && (
+            // A pending leg groups like a settled one; only failed and reversed
+            // are refused by POST /:id/pair.
+            // PoPicker anchors to its offset parent, and this row is a plain
+            // <td colSpan>, so the wrapper is what keeps the popover on the
+            // button instead of the page.
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                type="button" className="btn sm"
+                aria-expanded={pickingPair}
+                onClick={() => setPickingPair(p => !p)}
+              >
+                {t('payGroupWith')}
+                <Icon name="chevronDown" size={12} className="caret" />
+              </button>
+              {pickingPair && (
+                <PairPicker
+                  txnId={row.id}
+                  locale={locale}
+                  onPick={id => { onGroup(id); setPickingPair(false); }}
+                  onClose={() => setPickingPair(false)}
+                />
+              )}
             </span>
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => { void act(`${row.id}/unlink`).then(ok => { if (ok) onToast(t('payUnlinkedToast')); }); }}
-            >
-              {t('payUnlink')}
-            </button>
-          </>
-        )}
-        {row.source === 'paired' ? (
-          <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unpair`)}>
-            {t('payUnpair')}
-          </button>
-        ) : !row.ignored && row.category === 'external' && !dead && (
-          // A pending leg groups like a settled one; only failed and reversed
-          // are refused by POST /:id/pair.
-          // PoPicker anchors to its offset parent, and this row is a plain
-          // <td colSpan>, so the wrapper is what keeps the popover on the
-          // button instead of the page.
-          <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <button type="button" className="btn sm ghost" onClick={() => setPickingPair(p => !p)}>
-              {t('payGroupWith')}
-            </button>
-            {pickingPair && (
-              <PairPicker
-                txnId={row.id}
-                locale={locale}
-                onPick={id => { onGroup(id); setPickingPair(false); }}
-                onClose={() => setPickingPair(false)}
-              />
-            )}
-          </span>
-        )}
-        {!row.orderId && !row.internalTxn && !dead && (
-          row.category === 'transfer' ? (
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => void act(`${row.id}/unmark-transfer`).then(r => {
-                if (r?.ruleRemoved && row.counterparty) {
-                  onToast(t('payTransferRuleRemovedToast', { name: row.counterparty }));
-                }
-              })}
-            >
-              {t('payNotTransfer')}
-            </button>
-          ) : !row.ignored && (
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => void act(`${row.id}/mark-transfer`).then(r => {
-                if (r?.ruleCounterparty) {
-                  onToast(t('payTransferRuleToast', { name: r.ruleCounterparty, n: r.alsoMarked ?? 0 }));
-                }
-              })}
-            >
-              {t('payMarkTransfer')}
-            </button>
-          )
-        )}
-      </div>
+          )}
+          {!row.orderId && !row.internalTxn && !dead && (
+            row.category === 'transfer' ? (
+              <button
+                type="button" className="btn sm"
+                onClick={() => void act(`${row.id}/unmark-transfer`).then(r => {
+                  if (r?.ruleRemoved && row.counterparty) {
+                    onToast(t('payTransferRuleRemovedToast', { name: row.counterparty }));
+                  }
+                })}
+              >
+                {t('payNotTransfer')}
+              </button>
+            ) : !row.ignored && (
+              <button
+                type="button" className="btn sm"
+                onClick={() => void act(`${row.id}/mark-transfer`).then(r => {
+                  if (r?.ruleCounterparty) {
+                    onToast(t('payTransferRuleToast', { name: r.ruleCounterparty, n: r.alsoMarked ?? 0 }));
+                  }
+                })}
+              >
+                {t('payMarkTransfer')}
+              </button>
+            )
+          )}
+        </span>
 
-      {/* What this money was, and — while no PO answers that — whose it is. */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {row.internalTxn ? (
-          <>
-            <button type="button" className="btn sm ghost" onClick={() => navigate('/payments/internal')}>
-              {t('payIntOpen')}
-            </button>
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => {
-                const recordId = row.internalTxn!.id;
-                api.delete(`/api/internal-transactions/${recordId}/members/${row.id}`)
-                  .then(() => { onToast(t('payIntRemovedToast')); refresh(); })
-                  .catch(handleFetchError);
-              }}
-            >
-              {t('payIntRemove')}
-            </button>
-          </>
-        ) : !row.orderId && !dead && (
-          <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
-            <button type="button" className="btn sm ghost" onClick={() => setPickingRecord(p => !p)}>
-              {t('payIntAdd')}
-            </button>
-            {pickingRecord && (
-              <RecordPicker
-                txnId={row.id}
-                anchor={recordAnchorRef}
-                onDone={(msg) => { setPickingRecord(false); onToast(msg); refresh(); }}
-                onClose={() => setPickingRecord(false)}
-              />
-            )}
-          </span>
-        )}
-        {!row.orderId && !dead && (
-          row.assignee ? (
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => void act(`${row.id}/unassign`).then(ok => {
-                if (ok) onToast(t('payUnassignedToast'));
-              })}
-            >
-              {t('payUnassign')}
-            </button>
-          ) : (
-            <select
-              className="select"
-              value=""
-              onChange={e => {
-                const m = members.find(x => x.id === e.target.value);
-                if (!m) return;
-                void act(`${row.id}/assign`, { userId: m.id })
-                  .then(ok => { if (ok) onToast(t('payAssignedToast', { name: m.name })); });
-              }}
-              style={{ ...FILTER_SELECT, minWidth: 150 }}
-            >
-              <option value="">{t('payAssignTo')}</option>
-              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          )
-        )}
+        {/* What this money was, and — while no PO answers that — whose it is. */}
+        <span className="pay-detail-group">
+          {row.internalTxn ? (
+            <>
+              <button type="button" className="btn sm" onClick={() => navigate('/payments/internal')}>
+                {t('payIntOpen')}
+              </button>
+              <button
+                type="button" className="btn sm"
+                onClick={() => {
+                  const recordId = row.internalTxn!.id;
+                  api.delete(`/api/internal-transactions/${recordId}/members/${row.id}`)
+                    .then(() => { onToast(t('payIntRemovedToast')); refresh(); })
+                    .catch(handleFetchError);
+                }}
+              >
+                {t('payIntRemove')}
+              </button>
+            </>
+          ) : !row.orderId && !dead && (
+            <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
+              <button
+                type="button" className="btn sm"
+                aria-expanded={pickingRecord}
+                onClick={() => setPickingRecord(p => !p)}
+              >
+                {t('payIntAdd')}
+                <Icon name="chevronDown" size={12} className="caret" />
+              </button>
+              {pickingRecord && (
+                <RecordPicker
+                  txnId={row.id}
+                  anchor={recordAnchorRef}
+                  onDone={(msg) => { setPickingRecord(false); onToast(msg); refresh(); }}
+                  onClose={() => setPickingRecord(false)}
+                />
+              )}
+            </span>
+          )}
+          {!row.orderId && !dead && (
+            row.assignee ? (
+              <button
+                type="button" className="btn sm"
+                onClick={() => void act(`${row.id}/unassign`).then(ok => {
+                  if (ok) onToast(t('payUnassignedToast'));
+                })}
+              >
+                {t('payUnassign')}
+              </button>
+            ) : (
+              <select
+                className="select"
+                value=""
+                onChange={e => {
+                  const m = members.find(x => x.id === e.target.value);
+                  if (!m) return;
+                  void act(`${row.id}/assign`, { userId: m.id })
+                    .then(ok => { if (ok) onToast(t('payAssignedToast', { name: m.name })); });
+                }}
+                // Sized to its neighbours in the bar, not to the filter row.
+              style={{ ...FILTER_SELECT, minWidth: 150, height: 27, fontSize: 12 }}
+              >
+                <option value="">{t('payAssignTo')}</option>
+                {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )
+          )}
+        </span>
       </div>
       <NoteEditor row={row} locale={locale} act={act} onToast={onToast} />
     </div>
