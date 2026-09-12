@@ -74,7 +74,9 @@ vendorBids.get('/:id', async (c) => {
            bl.accepted_unit_price::float AS accepted_unit_price, bl.sell_order_id,
            bl.decline_reason,
            COALESCE((SELECT ol.qty FROM order_lines ol
-                     WHERE ol.id = bl.inventory_id AND ol.status = 'Done'), 0) AS available
+                     JOIN orders o ON o.id = ol.order_id
+                     WHERE ol.id = bl.inventory_id AND ol.status = 'Done'
+                       AND o.archived_at IS NULL), 0) AS available
     FROM vendor_bid_lines bl WHERE bl.bid_id = ${id} ORDER BY bl.position
   `;
   const linesOut = lines.map(l => ({
@@ -125,8 +127,10 @@ vendorBids.post('/:id/decide', async (c) => {
       .filter((v): v is string => v !== null);
     const availRows = inventoryIds.length > 0
       ? await tx<{ id: string; qty: number }[]>`
-          SELECT id, qty FROM order_lines
-          WHERE id = ANY(${inventoryIds}::uuid[]) AND status = 'Done'
+          SELECT ol.id, ol.qty FROM order_lines ol
+          JOIN orders o ON o.id = ol.order_id
+          WHERE ol.id = ANY(${inventoryIds}::uuid[]) AND ol.status = 'Done'
+            AND o.archived_at IS NULL
         `
       : [] as { id: string; qty: number }[];
     const availMap = new Map(availRows.map(r => [r.id, r.qty]));

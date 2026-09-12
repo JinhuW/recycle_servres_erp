@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.2] - 2026-09-12
+
+### Fixed
+
+- **Archived PO items never show in inventory.**  v1.137.0 took an archived
+  PO's goods out of stock by moving its lines to the `Archived` status, and
+  every stock reader keyed on that status alone.  Two things slipped through.
+  Migration `0121` had backfilled POs archived before the release but left
+  any line an open sell order still named, so prod PO-1390 kept five
+  `Reviewing` lines on a draft sell order — still listed in Inventory, still
+  offered by the sellable picker, still addable to new sell orders.  And no
+  inventory-facing query looked at the order's own `archived_at`, even though
+  `0122` deliberately leaves a transfer-stranded line at a stock status on an
+  archived PO.  Now the inventory list, products view, export, Analysis, the
+  sellable picker and MCP search, the vendor catalog and bids, sell-order
+  validation and transfers all exclude a line whose PO is archived whatever
+  its status says, Sold lines aside (they are the sales record and keep their
+  own rules).  Migration `0124` finishes what `0121` started: the remaining
+  lines of pre-release archived POs are pulled off open sell orders with the
+  same `line_removed` audit the Archive button writes, then archived — a
+  no-op in prod, where PO-1390 had already been cleared by hand.  [RS-041]
+
 ## [1.138.1] - 2026-09-12
 
 ### Fixed

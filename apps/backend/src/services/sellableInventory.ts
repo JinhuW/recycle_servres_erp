@@ -70,6 +70,7 @@ export async function searchSellableInventory(
          AND so.status = ANY(${committedSellStatuses()}::text[])
     ) committed
     WHERE l.status IN ('Reviewing', 'Done')
+      AND o.archived_at IS NULL
       AND l.qty > committed.qty
       AND (${q}::text IS NULL
            OR LOWER(COALESCE(l.brand,'')) LIKE '%' || ${q ?? ''} || '%'
