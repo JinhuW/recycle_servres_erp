@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.0] - 2026-09-12
+
+### Added
+
+- **The PO list links back to the payments that paid it.**  The Payment
+  column's `Company` / `Self` chip was a label and nothing more; the money
+  behind a PO lived only on the Payments page, reachable from the list by
+  opening the PO, then Payments, then searching.  A manager now reads
+  `Company | $1,279` on every PO with linked bank payments — the ledger's net,
+  refunds subtracted, failed and reversed left out — and clicking it opens
+  the Payments page pinned to that PO: a banner names it, only its payment
+  groups are listed, the first is already expanded, and the tiles and filter
+  bar step aside until "Show all payments" hands the page back with the
+  manager's own filters exactly as they were.  The list endpoint carries the
+  figure as `linkedPaid` (null when nothing is linked, and for anyone who is
+  not a manager, since the page it opens is manager-only), and the feed gained
+  an exact `orderId` filter so the deep link can never pick up `PO-10001` for
+  `PO-1000` or a note that happens to mention the id.  [RS-039]
+
 ## [1.137.1] - 2026-09-11
 
 ### Fixed

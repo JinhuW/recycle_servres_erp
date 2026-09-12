@@ -70,6 +70,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   included. Self-pay POs are unaffected. The rule governs only orders created
   after it reached the environment, so POs already on file stay exempt. Mobile
   gained the field as an input; it used to be read-only there.
+- **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
+  On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
+  on every PO with linked payments — the ledger's net, refunds subtracted,
+  failed and reversed left out — and clicking it opens the Payments page
+  focused on that PO. A PO nothing is linked to keeps the plain chip, and so
+  does every purchaser, since the page it opens is manager-only.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
   v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing; any move
   that pulls lines off Done is refused while a line sits on an open sell
@@ -301,6 +307,12 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   fill against the manager. Neither side overwrites the other: a PO already
   naming a different transaction keeps it, and a typed ID claims only
   transactions nobody has linked, ignored, or deliberately unlinked.
+- **A PO's payments have an address** (v1.138.0): `#/payments/po/<id>` opens
+  the page pinned to that PO — a banner names it, the feed holds only its
+  payment groups (an exact `orderId` filter, not the substring search), the
+  first is expanded, and the tiles and filter bar step aside. The manager's own
+  filters are untouched; "Show all payments" hands the page back as it was.
+  The PO list's Payment cell is what links here.
 - **Internal transactions** (v1.119.0) are records that group the bank rows of
   one internal movement — a Mercury→PayPal transfer, a card-funding chain — and
   carry a title and a **note**, the first user-written text a bank row has ever

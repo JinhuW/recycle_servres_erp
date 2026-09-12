@@ -9,6 +9,7 @@ import { usePersisted, useScrollMemory } from '../../lib/listMemory';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
+import { navigate, paymentsForOrderPath } from '../../lib/route';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { profitTone } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
@@ -594,7 +595,21 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                       <td className={'num mono ' + profitTone(o.profit)} style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
-                        <span className="chip">{o.payment === 'company' ? 'Company' : 'Self'}</span>
+                        {/* A PO the bank has paid says so and opens its payment
+                            group; a manager only, since that page is. The row's
+                            own click toggles the line drawer, hence the stop. */}
+                        {isManager && typeof o.linkedPaid === 'number' ? (
+                          <button
+                            type="button"
+                            className="chip chip-link"
+                            title={t('payLinkOpen')}
+                            onClick={(e) => { e.stopPropagation(); navigate(paymentsForOrderPath(o.id)); }}
+                          >
+                            {o.payment === 'company' ? 'Company' : 'Self'} | {fmtUSD0(o.linkedPaid, locale)}
+                          </button>
+                        ) : (
+                          <span className="chip">{o.payment === 'company' ? 'Company' : 'Self'}</span>
+                        )}
                       </td>
                       <td style={{ display: isVis('status') ? undefined : 'none' }}>
                         <span className={'chip dot ' + statusTone(o.status)}>{o.status}</span>

@@ -111,6 +111,10 @@ bankTx.get('/', async (c) => {
   const source = c.req.query('source') ?? 'all';
   const direction = c.req.query('direction') ?? 'all';
   const q = c.req.query('q')?.trim() ?? '';
+  // Exact, unlike `q`: the PO list's deep link asks for one order's payments,
+  // and a substring would also fetch PO-10001 for PO-1000 or any note that
+  // mentions the id.
+  const orderId = c.req.query('orderId')?.trim() ?? '';
   const assignee = c.req.query('assignee')?.trim() ?? '';
   if (assignee && assignee !== 'unassigned' && !UUID_RE.test(assignee)) {
     return c.json({ error: 'assignee must be a user id or "unassigned"' }, 400);
@@ -214,6 +218,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN users nu ON nu.id = bt.note_by
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
+      AND ${orderId ? sql`bt.order_id = ${orderId}` : sql`TRUE`}
       AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
