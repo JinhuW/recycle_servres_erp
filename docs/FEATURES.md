@@ -327,7 +327,11 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   freed column is an actions rail whose primary button sits at the same place on
   every row. `Ignore` and `Not the same` appear on hover or keyboard focus
   rather than standing on every row at once; a device without hover keeps them
-  visible.
+  visible. The expanded row's own actions — Group with…, Mark as transfer,
+  Add to internal…, Unassign and their counterparts — are outlined buttons in
+  one bar under a hairline (v1.138.1), in two groups: what the money is, then
+  which record or owner it belongs to. The two that open a picker carry a
+  chevron. A row with nothing to offer shows no bar.
 - **`Link…` always opens the picker; the manager chooses the PO** (v1.133.0).
   Until then a row with a single confident candidate linked to it on one click,
   with nothing on the button saying so. Now every row's `Link…` opens the PO

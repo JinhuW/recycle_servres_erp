@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.1] - 2026-09-12
+
+### Fixed
+
+- **The expanded payment row's actions look like buttons.**  Opening a row
+  on the Payments page showed its actions — Group with…, Mark as transfer,
+  Add to internal…, Unassign and their counterparts — as bare words with
+  nothing to click on.  They carried the ghost style the collapsed row's
+  rail uses, where the buttons stay hidden until hover and the row supplies
+  the context; the expanded panel has no hover reveal and sits on the soft
+  grey row background, so a ghost there was just text.  The actions are now
+  the same outlined buttons the rest of the desktop uses, in one bar under a
+  hairline that separates them from the row's facts, spaced into the two
+  groups the code already kept — what the money is, then which record or
+  owner it belongs to.  The two that open a picker carry a chevron that
+  turns while it is open, and the Assign to… select sits level with its
+  neighbours.  A row with nothing to offer shows no bar at all.  (RS-040)
+
 ## [1.138.0] - 2026-09-12
 
 ### Added
