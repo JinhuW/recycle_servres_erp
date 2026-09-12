@@ -2,13 +2,13 @@
 id: RS-039
 title: PO list links to its linked payments
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-12
 reporter: Jinhu
 branch: feat/po-payment-link
-pr:
-version:
+pr: 303
+version: 1.138.0
 related: [RS-011, RS-016, RS-036]
 ---
 
