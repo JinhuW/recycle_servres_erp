@@ -218,7 +218,10 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   prices, import it back (v1.21.0). The sheet ships pre-sorted the way the desk
   reads it, with an autofilter across the header row and no sheet protection
   (v1.51.2). Its header text is load-bearing for the import parser — don't
-  move it.
+  move it. **Saving after a confirmed import records the accepted prices on
+  the Market value board** as `bid:<order>` data points, USD at the saved
+  rate, one per confirmed part (v1.138.3); hand-typed price edits record
+  nothing.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -438,6 +441,12 @@ over MCP.
 - Paginated with infinite scroll (v1.12.0), sortable by clicking column headers
   (v1.67.0).
 - A line can be priced while the buy can still change (v1.54.0).
+- **Four feeds write `last_price`**, each tagged in the event's source: the
+  scraper and MCP connectors (`scraper:`/`mcp:`), a manager's manual entry
+  on the Market page (`manual:`), a sell order reaching Done (`sale:<order>`),
+  and a sell-order save that follows a confirmed vendor price import
+  (`bid:<order>`, v1.138.3). The Activity page shows the source per row; the
+  Market page shows only the price and its age.
 
 ## Activity and audit
 

@@ -732,7 +732,7 @@ const zh: Record<string, string> = {
   soPriceImportManual: '无型号 — 请手动填写价格',
   soPriceImportEmpty: '文件中没有找到匹配的行。',
   soPriceImportConfirm: '填入 {n} 个价格',
-  soPriceImportApplied: '已填入 {n} 个价格 — 请检查并保存',
+  soPriceImportApplied: '已填入 {n} 个价格 — 请检查并保存，保存后将记录到市场价格',
   soPriceImportColumnsNotFound: '未能在文件中找到型号 / 单价列',
   soPriceImportNotXlsx: '这不是 Excel（.xlsx）文件 — 请先另存为 .xlsx 格式',
   soPriceImportTooLarge: '文件过大（最大 8 MB）',

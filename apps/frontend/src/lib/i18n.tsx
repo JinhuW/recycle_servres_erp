@@ -1112,7 +1112,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     soPriceImportManual: 'no part number — enter the price manually',
     soPriceImportEmpty: 'No matching rows were found in the file.',
     soPriceImportConfirm: 'Fill {n} prices',
-    soPriceImportApplied: '{n} prices filled in — review and save',
+    soPriceImportApplied: '{n} prices filled in — review and save; saving records them on the Market value board',
     soPriceImportColumnsNotFound: 'Couldn’t find the Part Number / Unit Price columns in this file',
     soPriceImportNotXlsx: 'This isn’t an Excel (.xlsx) workbook — export or save it as .xlsx first',
     soPriceImportTooLarge: 'File is too large (max 8 MB)',
