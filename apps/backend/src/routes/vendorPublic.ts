@@ -60,8 +60,9 @@ vendorPublic.get('/:token/catalog', async (c) => {
              l.description, l.part_number, l.condition, l.qty, l.created_at,
              ls.delivery_url AS own_scan_url
       FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
       LEFT JOIN label_scans ls ON ls.cf_image_id = l.scan_image_id
-      WHERE l.status IN ('Reviewing', 'Done') AND l.qty > 0
+      WHERE l.status IN ('Reviewing', 'Done') AND l.qty > 0 AND o.archived_at IS NULL
     ),
     sib AS (
       SELECT part_number,
@@ -163,11 +164,13 @@ vendorPublic.post('/:token/bids', async (c) => {
     const snap: Record<string, { category: string; label: string; sub: string | null; pn: string | null }> = {};
     for (const [inventoryId, totalQty] of wanted) {
       const row = (await tx<{ category: string; brand: string | null; capacity: string | null;
-        type: string | null; part_number: string | null; qty: number; status: string }[]>`
-        SELECT category, brand, capacity, type, part_number, qty, status
-        FROM order_lines WHERE id = ${inventoryId} FOR UPDATE
+        type: string | null; part_number: string | null; qty: number; status: string;
+        archived_at: string | null }[]>`
+        SELECT l.category, l.brand, l.capacity, l.type, l.part_number, l.qty, l.status, o.archived_at
+        FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE l.id = ${inventoryId} FOR UPDATE OF l
       `)[0];
-      const sellable = row && (row.status === 'Reviewing' || row.status === 'Done');
+      const sellable = row && (row.status === 'Reviewing' || row.status === 'Done') && row.archived_at === null;
       if (!sellable || row.qty < totalQty) { bad.push(inventoryId); continue; }
       snap[inventoryId] = {
         category: row.category,

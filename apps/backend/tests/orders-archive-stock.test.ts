@@ -382,6 +382,7 @@ describe('an archived order is frozen', () => {
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), '../migrations');
 const M0121 = readFileSync(join(MIGRATIONS, '0121_archived_po_lines.sql'), 'utf8');
 const M0122 = readFileSync(join(MIGRATIONS, '0122_archived_lines_on_pending_transfer.sql'), 'utf8');
+const M0124 = readFileSync(join(MIGRATIONS, '0124_archived_po_lines_on_open_sell_orders.sql'), 'utf8');
 
 describe('0121 + 0122 — backfilling POs archived before the cascade', () => {
   beforeEach(async () => { await resetDb(); });
@@ -423,5 +424,154 @@ describe('0121 + 0122 — backfilling POs archived before the cascade', () => {
     // Running the repair again touches nothing.
     await sql.unsafe(M0122);
     expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Done');
+  });
+});
+
+describe('0124 — the lines 0121 left on open sell orders', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('pulls them off the sell order with the archive audit trail, archives them, and skips a pending transfer', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrderOn(mgr, lineIds[0]);
+    const moved = await api<{ transferOrderId: string }>('POST', '/api/inventory/transfer', {
+      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[1], qty: 2 }] },
+    });
+    expect(moved.status).toBe(200);
+
+    // A pre-v1.137 archive with a negotiated total on the draft, so the reset
+    // is observable.
+    const sql = getTestDb();
+    await sql`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+    await sql`UPDATE sell_orders SET pre_adjust_native_total = 80, adjusted_at = NOW() WHERE id = ${soId}`;
+
+    // The deployed chain: 0121 leaves the committed line alone (the gap this
+    // migration closes) and 0122 puts the transfer-stranded one back.
+    await sql.unsafe(M0121);
+    await sql.unsafe(M0122);
+    expect((await statusesOf(id, mgr))[lineIds[0]]).toBe('Reviewing');
+
+    await sql.unsafe(M0124);
+    const st = await statusesOf(id, mgr);
+    expect(st[lineIds[0]]).toBe('Archived');
+    expect(st[lineIds[1]]).toBe('In Transit');
+
+    const so = await api<{ order: { lines: unknown[] } }>('GET', `/api/sell-orders/${soId}`, { token: mgr });
+    expect(so.body.order.lines).toHaveLength(0);
+    const removed = (await eventsOf(soId)).filter(e => e.kind === 'line_removed');
+    expect(removed).toHaveLength(1);
+    expect(removed[0].actor_id).toBeNull();
+    expect(removed[0].detail.reason).toBe('po_archived');
+    expect(removed[0].detail.orderId).toBe(id);
+    expect(removed[0].detail.snapshot).toMatchObject({ inventory_id: lineIds[0], qty: 1, unit_price: 90, label: 'x' });
+    const [totals] = await sql<{ pre_adjust_native_total: number | null; adjusted_at: string | null }[]>`
+      SELECT pre_adjust_native_total, adjusted_at FROM sell_orders WHERE id = ${soId}`;
+    expect(totals.pre_adjust_native_total).toBeNull();
+    expect(totals.adjusted_at).toBeNull();
+    const audit = await sql<{ detail: { from: string; to: string } }[]>`
+      SELECT detail FROM inventory_events
+      WHERE order_line_id = ${lineIds[0]} AND kind = 'status'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audit[0]?.detail).toMatchObject({ from: 'Reviewing', to: 'Archived' });
+
+    // Gone from stock and from the picker.
+    const inv = await api<{ items: { id: string }[] }>('GET', `/api/inventory?q=${PN.toLowerCase()}`, { token: mgr });
+    expect(inv.body.items.map(i => i.id)).toEqual([]);
+    const sellable = await api<{ items: { inventoryId: string }[] }>(
+      'GET', `/api/sell-orders/sellable?q=${PN.toLowerCase()}`, { token: mgr });
+    expect(sellable.body.items).toEqual([]);
+
+    // A second run finds nothing to do.
+    await sql.unsafe(M0124);
+    expect((await eventsOf(soId)).filter(e => e.kind === 'line_removed')).toHaveLength(1);
+    const [{ n }] = await sql<{ n: number }[]>`
+      SELECT COUNT(*)::int AS n FROM inventory_events
+      WHERE order_line_id = ${lineIds[0]} AND kind = 'status' AND detail->>'to' = 'Archived'`;
+    expect(n).toBe(1);
+  });
+});
+
+// The order flag alone has to keep goods out of stock: 0122 legitimately
+// leaves a transfer-stranded line at a stock status on an archived PO, and a
+// pre-cascade archive left every line that way.
+describe('an archived PO is out of stock whatever its lines say', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  async function archivedWithDrift(): Promise<{ id: string; lineIds: string[]; mgr: string }> {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    // Sell the whole second lot so one line is Sold — the sales record.
+    const soId = await createSellOrderOn(mgr, lineIds[1], 2);
+    expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body: { to: 'Done' } })).status).toBe(200);
+    await getTestDb()`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+    const st = await statusesOf(id, mgr);
+    expect(st[lineIds[0]]).toBe('Reviewing');
+    expect(st[lineIds[1]]).toBe('Sold');
+    return { id, lineIds, mgr };
+  }
+
+  it('hides the stock line from every inventory view, and keeps the Sold one under its own rules', async () => {
+    const { lineIds, mgr } = await archivedWithDrift();
+    const q = PN.toLowerCase();
+    const ids = async (path: string) =>
+      (await api<{ items: { id: string }[] }>('GET', path, { token: mgr })).body.items.map(i => i.id);
+
+    expect(await ids(`/api/inventory?q=${q}`)).toEqual([]);
+    expect(await ids(`/api/inventory?q=${q}&status=Reviewing`)).toEqual([]);
+    expect(await ids(`/api/inventory?q=${q}&includeSold=1`)).toEqual([lineIds[1]]);
+    expect(await ids(`/api/inventory?q=${q}&status=Sold`)).toEqual([lineIds[1]]);
+
+    const products = await api<{ products: { lines: { id: string }[] }[] }>(
+      'GET', `/api/inventory/products?q=${q}`, { token: mgr });
+    expect(products.body.products.flatMap(p => p.lines.map(l => l.id))).toEqual([]);
+
+    const sellable = await api<{ items: { inventoryId: string }[] }>(
+      'GET', `/api/sell-orders/sellable?q=${q}`, { token: mgr });
+    expect(sellable.body.items).toEqual([]);
+  });
+
+  it('drops it from Analysis and the vendor catalog', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const customer = await api<{ id: string }>('POST', '/api/customers', { token: mgr, body: { name: 'Vendor Co', shortName: 'VendCo' } });
+    const link = await api<{ token: string }>('POST', `/api/customers/${customer.body.id}/vendor-link`, { token: mgr });
+    const catalogIds = async () => {
+      const r = await api<{ groups: { items: { id: string }[] }[] }>('GET', `/api/public/vendor/${link.body.token}/catalog`);
+      return r.body.groups.flatMap(g => g.items.map(i => i.id));
+    };
+    type Totals = { totals: { lines: number; units: number } };
+
+    expect(await catalogIds()).toEqual(expect.arrayContaining(lineIds));
+    const before = await api<Totals>('GET', '/api/inventory/analysis', { token: mgr });
+    await getTestDb()`UPDATE orders SET archived_at = NOW() WHERE id = ${id}`;
+    const after = await api<Totals>('GET', '/api/inventory/analysis', { token: mgr });
+
+    expect(after.body.totals.lines).toBe(before.body.totals.lines - 2);
+    expect(after.body.totals.units).toBe(before.body.totals.units - 6);
+    const catalog = await catalogIds();
+    for (const l of lineIds) expect(catalog).not.toContain(l);
+  });
+
+  it('refuses to sell or transfer it', async () => {
+    const { lineIds, mgr } = await archivedWithDrift();
+    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
+    const so = await api<{ error: string }>('POST', '/api/sell-orders', {
+      token: mgr,
+      body: {
+        customerId: customers.body.items[0].id,
+        lines: [{ inventoryId: lineIds[0], category: 'RAM', label: 'x', partNumber: PN, qty: 1, unitPrice: 90 }],
+      },
+    });
+    expect(so.status).toBe(400);
+    expect(so.body.error).toMatch(/archived/);
+
+    const moved = await api<{ error: string }>('POST', '/api/inventory/transfer', {
+      token: mgr, body: { toWarehouseId: 'WH-DAL', lines: [{ id: lineIds[0], qty: 1 }] },
+    });
+    expect(moved.status).toBe(400);
+    expect(moved.body.error).toMatch(/archived/);
   });
 });

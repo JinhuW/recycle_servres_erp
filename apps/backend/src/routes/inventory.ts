@@ -135,8 +135,18 @@ function inventoryWhereFrag(
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
+  const archivedFrag = archivedOrderFrag(sql);
 
-  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+}
+
+// An archived PO's goods are not in stock whatever its lines' status says:
+// an explicit ?status= filter neutralises soldFrag, and a line can sit at a
+// stock status on an archived PO legitimately (a pending transfer, 0122) or
+// by drift. Sold lines are the sales record and Archived ones are reached by
+// filter, so those two stay visible under their own rules.
+function archivedOrderFrag(sql: ReturnType<typeof getDb>) {
+  return sql`(o.archived_at IS NULL OR l.status IN ('Sold', ${ARCHIVED_LINE_STATUS}))`;
 }
 
 // List inventory with the same filters as the desktop screen.
@@ -502,7 +512,7 @@ inventory.get('/analysis', async (c) => {
   const whCond  = warehouse ? sql`${effWh} = ${warehouse}`  : sql`TRUE`;
   // An archived PO's goods are out of stock; every aggregate below drops them
   // the way the list does. (Sold lines still count here, as they always have.)
-  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS}`;
+  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS} AND o.archived_at IS NULL`;
 
   // Grouped unit-count over a whitelisted column for one category, honouring
   // the warehouse scope. The column set is the fixed SUBTYPE_DIMS whitelist, and
@@ -764,6 +774,7 @@ inventory.get('/products', async (c) => {
   const soldFrag     = status ? sql`TRUE`
     : includeSold ? sql`l.status <> ${ARCHIVED_LINE_STATUS}`
     : sql`l.status NOT IN ('Sold', ${ARCHIVED_LINE_STATUS})`;
+  const archivedFrag = archivedOrderFrag(sql);
   // Warehouse is intentionally NOT pushed into SQL here — keeping every
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
@@ -812,7 +823,7 @@ inventory.get('/products', async (c) => {
       ORDER BY ls.created_at ASC
       LIMIT 1
     ) img ON TRUE
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${searchFrag} AND ${pendingFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${searchFrag} AND ${pendingFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
@@ -1375,6 +1386,7 @@ inventory.post('/transfer', async (c) => {
     scan_image_id: string | null;
     scan_confidence: number | null;
     effective_wh: string | null;
+    archived_at: Date | null;
   };
 
   const ids = reqLines.map((r) => r.id);
@@ -1384,6 +1396,7 @@ inventory.post('/transfer', async (c) => {
     | { kind: 'missing' }
     | { kind: 'lineNotFound'; id: string }
     | { kind: 'notSellable'; id: string; status: string }
+    | { kind: 'archived'; id: string }
     | { kind: 'overQty'; id: string; have: number }
     | { kind: 'alreadyThere'; id: string }
     | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
@@ -1398,7 +1411,8 @@ inventory.post('/transfer', async (c) => {
              l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
              l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
-             COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh
+             COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh,
+             o.archived_at
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.id = ANY(${ids}::uuid[])
@@ -1416,6 +1430,7 @@ inventory.post('/transfer', async (c) => {
       if (s.status !== 'Reviewing' && s.status !== 'Done') {
         return { kind: 'notSellable', id: r.id, status: s.status };
       }
+      if (s.archived_at !== null) return { kind: 'archived', id: r.id };
       if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
       if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
     }
@@ -1506,6 +1521,7 @@ inventory.post('/transfer', async (c) => {
   if (outcome.kind === 'notSellable') {
     return c.json({ error: `line ${outcome.id} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
   }
+  if (outcome.kind === 'archived') return c.json({ error: `line ${outcome.id} belongs to an archived order` }, 400);
   if (outcome.kind === 'overQty') return c.json({ error: `line ${outcome.id} only has ${outcome.have} units` }, 400);
   if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
   return c.json({ ok: true, transferOrderId: outcome.transferOrderId, lines: outcome.result });

@@ -105,8 +105,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   hides the order from the default list and is still reversible, but it now
   also moves every non-Sold line to the `Archived` line status, which drops
   it out of the inventory screens, the sellable picker, the vendor catalog
-  and bids, and the MCP search the same way Sold does. Unarchive restores
-  each line to the status it held. If a line sits on an open sell order
+  and bids, and the MCP search the same way Sold does. Since v1.138.2 the
+  order's archived flag itself keeps its non-Sold lines out of all of those,
+  and out of sell orders, bids and transfers, whatever status a line holds —
+  the pre-release backfill is finished by migration 0124, which pulls such
+  lines off open sell orders the way the archive dialog does. Unarchive
+  restores each line to the status it held. If a line sits on an open sell order
   (Draft, Shipped or Awaiting payment) the archive dialog names the sell
   orders and lines and asks whether to remove them from those sell orders
   first; the removal is audited on the sell order and is not undone by
