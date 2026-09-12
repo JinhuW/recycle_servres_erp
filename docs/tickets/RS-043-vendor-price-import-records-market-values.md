@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-12
 reporter: Jinhu
 branch: fix/price-import-market-value
-pr:
+pr: 309
 version: 1.138.3
 related: []
 ---
