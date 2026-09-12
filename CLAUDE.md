@@ -91,18 +91,23 @@ switches the branch out from under the first.
   worktree is handed back with its uncommitted work intact, unless a live
   session is still in it.  Because git allows a branch in only one worktree,
   a branch checked out in the main checkout is refused rather than stolen.
-- **Every session in this repo runs with permission prompts off.**
-  `.claude/settings.json` sets `permissions.defaultMode: "bypassPermissions"`,
-  which covers all entry points; `scripts/new-session.sh` also passes
-  `--dangerously-skip-permissions` when it launches `claude` itself.  The CLI
-  flag alone was not enough: it only applies when the launcher execs `claude`,
-  so a session that started in the main checkout and moved in via
-  `EnterWorktree` kept normal prompts (permission mode is fixed at launch and
-  `EnterWorktree` only changes the working directory).
+- **Launcher sessions run with permission prompts off** because
+  `scripts/new-session.sh` execs `claude --dangerously-skip-permissions`.  That
+  flag is the *only* repo-owned way in: Claude Code ignores a
+  `permissions.defaultMode: "bypassPermissions"` set in a project-scope file
+  (`.claude/settings.json` or `.claude/settings.local.json`) and starts the
+  session in Manual mode — silently.  The repo carried exactly that no-op key
+  for seven weeks while `CLAUDE.md` described a flag that had been removed; see
+  [docs/debug-notes/2026-09-12-project-settings-cannot-enable-bypass-mode.md](./docs/debug-notes/2026-09-12-project-settings-cannot-enable-bypass-mode.md).
+  Don't put the key back.
+- **A plain `claude` started in the main checkout keeps its prompts**, even
+  after the `SessionStart` hook moves it into a worktree via `EnterWorktree`:
+  permission mode is fixed at launch and `EnterWorktree` only changes the
+  working directory.  To cover that path too, set `defaultMode` in
+  `~/.claude/settings.json` (user scope is honoured) or launch with the flag.
 - The worktree isolates the *branch*, not the machine: bypass mode still permits
   any shell command, any file outside the worktree, and pushes to any remote.
-  To get prompts back, drop `defaultMode` from `.claude/settings.json` (or
-  override it in the gitignored `.claude/settings.local.json`).
+  To get prompts back, remove the flag from the `exec claude` line.
 - **If a session starts in the main checkout anyway**, the `SessionStart` hook
   in `.claude/settings.json` (`scripts/claude-session-hook.sh`) says so.  The
   agent should then run `scripts/new-session.sh --print-only` and call
