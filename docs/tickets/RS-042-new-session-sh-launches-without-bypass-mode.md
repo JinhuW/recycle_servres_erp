@@ -2,7 +2,7 @@
 id: RS-042
 title: new-session.sh launches without bypass mode
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-12
 reporter: Jinhu
