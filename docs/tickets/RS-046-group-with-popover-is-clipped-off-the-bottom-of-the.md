@@ -2,13 +2,13 @@
 id: RS-046
 title: Group-with popover is clipped off the bottom of the Payments table
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-13
 reporter: Jinhu
 branch: fix/pair-picker-clipped
-pr:
-version:
+pr: 318
+version: 1.138.6
 related: [RS-005]
 ---
 
