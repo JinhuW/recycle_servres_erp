@@ -2,13 +2,13 @@
 id: RS-047
 title: 3DS and dual-die RAM ranks are missing from the Rank dropdown
 type: story
-status: in-review
+status: done
 priority: P3
 created: 2026-09-13
 reporter: Jinhu
 branch: feat/ram-rank-3ds
-pr:
-version:
+pr: 321
+version: 1.139.0
 related: []
 ---
 
