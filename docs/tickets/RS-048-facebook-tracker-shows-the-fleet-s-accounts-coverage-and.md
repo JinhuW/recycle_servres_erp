@@ -2,13 +2,13 @@
 id: RS-048
 title: Facebook tracker shows the fleet's accounts, coverage and search phrases
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-13
 reporter: Jinhu
 branch: feat/fleet-dashboard
 pr: 282
-version:
+version: 1.140.0
 related: []
 ---
 
