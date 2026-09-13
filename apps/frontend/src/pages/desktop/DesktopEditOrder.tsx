@@ -115,7 +115,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const canAnnotate = !orderLocked && isOwnerOrManager;
   // A closed order keeps its stage moves for managers: Done can go back to
   // Ready to Pay or Reviewing, Ready to Pay forward to Done or back to
-  // Reviewing (the backend guards lines committed to open sell orders).
+  // Reviewing (the backend guards lines committed to sell orders).
   // Everything else stays read-only until such a move lands.
   const canReopen = !isPurchaser && orderLocked && !isArchived;
   const REOPEN_TARGETS: Record<string, string[]> = {

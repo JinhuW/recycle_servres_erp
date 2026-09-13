@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.5] - 2026-09-13
+
+### Fixed
+
+- **A Draft sell order no longer blocks moving a PO back to Reviewing**
+  (RS-045).  PO-1431 sat at Ready to Pay with every earlier sell order
+  Closed, yet the move back to Reviewing was refused as "committed to open
+  sell orders" — a Draft made a minute earlier named five of its lines, and
+  the guard counted drafts alongside Shipped and Awaiting payment.  The guard
+  exists so a sell order never holds lines its own validation rejects, but
+  that validation accepts Reviewing lines, so the refusal protected nothing.
+  The rule is now keyed on where the lines land: a move that keeps them
+  sellable (Reviewing) is refused only by a committed sell order; a move to
+  In Transit or Draft, including the purchaser-edit revert, is still refused
+  by a Draft, since it would be stranded at promotion.  The refusal also names
+  the sell orders (`sellOrderIds`, and in the message) instead of only line
+  UUIDs.  The sellable-status set is shared between the guard and the sell
+  order validation so the two cannot drift.
+
 ## [1.138.4] - 2026-09-13
 
 ### Fixed
