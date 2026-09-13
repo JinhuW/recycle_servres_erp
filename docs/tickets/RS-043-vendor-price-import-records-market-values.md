@@ -2,7 +2,7 @@
 id: RS-043
 title: Vendor price import records market values
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-12
 reporter: Jinhu
