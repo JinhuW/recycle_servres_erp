@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-044](./RS-044-dev-to-main-review-findings-before-the-prod-cut-v1-1.md) | in-review | bug | P2 | Dev-to-main review findings before the prod cut (v1.138) | — |
+| [RS-044](./RS-044-dev-to-main-review-findings-before-the-prod-cut-v1-1.md) | done | bug | P2 | Dev-to-main review findings before the prod cut (v1.138) | 1.138.4 |
 | [RS-043](./RS-043-vendor-price-import-records-market-values.md) | done | bug | P2 | Vendor price import records market values | 1.138.3 |
 | [RS-042](./RS-042-new-session-sh-launches-without-bypass-mode.md) | done | bug | P2 | new-session.sh launches without bypass mode | 1.138.4 |
 | [RS-041](./RS-041-archived-po-items-never-show-in-inventory.md) | done | bug | P1 | Archived PO items never show in inventory | 1.138.2 |

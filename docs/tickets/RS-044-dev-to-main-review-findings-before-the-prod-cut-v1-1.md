@@ -2,13 +2,13 @@
 id: RS-044
 title: Dev-to-main review findings before the prod cut (v1.138)
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-13
 reporter: jinhu
 branch: session/20260913-001639
-pr:
-version:
+pr: 312
+version: 1.138.4
 related: [RS-039, RS-041, RS-042, RS-043]
 ---
 
@@ -58,10 +58,10 @@ The findings, and what each actually costs:
 - [x] `focusOrder` is decoded once.
 - [x] The `ARCHIVED_LINE_STATUS` comment states the two-authority rule.
 - [x] RS-042 is closed with a version; RS-040 is closed.
-- [ ] Prod holds no non-Sold/Archived line on an archived PO that a Shipped or
+- [x] Prod holds no non-Sold/Archived line on an archived PO that a Shipped or
       Awaiting-payment sell order names, checked read-only before the main
       merge (0124's only irreversible path).
-- [ ] Backend + frontend suites, typecheck green; `dev` then `main` carry the
+- [x] Backend + frontend suites, typecheck green; `dev` then `main` carry the
       release.
 
 ## Out of scope
@@ -83,3 +83,9 @@ Precedent: RS-038 (v1.137.1, PR #299) for the previous release.  RS-040 was
 already closed by #311 before this ticket was filed; only RS-042 needed the
 status + version.  The launcher fix in #307 rides this release's changelog
 section since it shipped without a bump.
+
+Prod check for 0124, run read-only over `railway ssh -e production -s
+Postgres` on 2026-09-13 before the main merge: 3 archived POs; 0 lines that
+0124 targets at all (non-Sold/Archived, not on a pending transfer); 0 such
+lines on any Draft, Shipped or Awaiting-payment sell order.  The migration is
+a no-op in prod, as RS-041 predicted after PO-1390 was cleared by hand.
