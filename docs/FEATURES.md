@@ -486,7 +486,17 @@ count a PO from Ready to Pay on, when its commission becomes owed
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
   fleet status filter and infinite scroll (v1.64.0, v1.65.0).
 - **Coordinator** — Facebook tracker page with live fleet, review stats and a
-  filter prompt (v1.83.1).
+  filter prompt (v1.83.1).  The fleet view shows one row per Facebook account
+  (liveness, state, session days left, last search, heartbeat, the week's
+  alerts from its cities, the vault login and Facebook user id, expandable to
+  cities, secrets by name, browser identity, backup age, proxy, session file
+  and pacing), the literal search phrases per item with their title gate and
+  reject rules, the shared search settings, a coverage map of every centre
+  lit by whichever worker searches it now, and each worker's build; one
+  search box filters accounts, cities and phrases at once.  The data is the
+  rs-console facade's `/v1/fleet` document through the manager-only
+  `/api/coordinator` proxy — until that facade is deployed the cards read
+  "fleet view unavailable" and the rest of the page works (v1.140.0).
 
 ## MCP and OAuth connectors
 
