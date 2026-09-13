@@ -8,7 +8,7 @@ See [README.md](./README.md) for what the fields mean.
 | [RS-043](./RS-043-vendor-price-import-records-market-values.md) | done | bug | P2 | Vendor price import records market values | 1.138.3 |
 | [RS-042](./RS-042-new-session-sh-launches-without-bypass-mode.md) | in-review | bug | P2 | new-session.sh launches without bypass mode | — |
 | [RS-041](./RS-041-archived-po-items-never-show-in-inventory.md) | done | bug | P1 | Archived PO items never show in inventory | 1.138.2 |
-| [RS-040](./RS-040-payment-detail-actions-look-like-buttons.md) | in-review | bug | P2 | Payment detail actions look like buttons | 1.138.1 |
+| [RS-040](./RS-040-payment-detail-actions-look-like-buttons.md) | done | bug | P2 | Payment detail actions look like buttons | 1.138.1 |
 | [RS-039](./RS-039-po-list-links-to-its-linked-payments.md) | done | story | P2 | PO list links to its linked payments | 1.138.0 |
 | [RS-038](./RS-038-dev-to-main-review-findings-before-the-prod-cut.md) | done | bug | P2 | Dev-to-main review findings before the prod cut | 1.137.1 |
 | [RS-037](./RS-037-archiving-a-po-takes-its-stock-out-of-inventory.md) | done | story | P2 | Archiving a PO takes its stock out of inventory | 1.137.0 |

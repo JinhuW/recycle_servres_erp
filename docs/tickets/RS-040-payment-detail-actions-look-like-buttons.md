@@ -2,12 +2,12 @@
 id: RS-040
 title: Payment detail actions look like buttons
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-12
 reporter: Jinhu
 branch: fix/payments-detail-actions
-pr:
+pr: 302
 version: 1.138.1
 related: [RS-020, RS-036]
 ---
