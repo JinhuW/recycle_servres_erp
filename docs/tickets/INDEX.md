@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-046](./RS-046-group-with-popover-is-clipped-off-the-bottom-of-the.md) | in-review | bug | P2 | Group-with popover is clipped off the bottom of the Payments table | — |
+| [RS-046](./RS-046-group-with-popover-is-clipped-off-the-bottom-of-the.md) | done | bug | P2 | Group-with popover is clipped off the bottom of the Payments table | 1.138.6 |
 | [RS-045](./RS-045-draft-sell-order-blocks-a-po-s-move-back-to-reviewin.md) | done | bug | P2 | Draft sell order blocks a PO's move back to Reviewing | 1.138.5 |
 | [RS-044](./RS-044-dev-to-main-review-findings-before-the-prod-cut-v1-1.md) | done | bug | P2 | Dev-to-main review findings before the prod cut (v1.138) | 1.138.4 |
 | [RS-043](./RS-043-vendor-price-import-records-market-values.md) | done | bug | P2 | Vendor price import records market values | 1.138.3 |
