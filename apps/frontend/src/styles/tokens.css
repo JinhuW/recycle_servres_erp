@@ -297,6 +297,11 @@ button { font-family: inherit; cursor: pointer; }
 .chip.muted  { background: var(--bg-soft);     color: var(--fg-muted);          border-color: var(--border); }
 .chip.accent { background: var(--accent-soft); color: var(--accent-strong);     border-color: transparent; }
 .chip.cool   { background: var(--cool-soft);   color: oklch(0.45 0.16 295);     border-color: transparent; }
+/* A chip that goes somewhere. Rendered as a <button>: .chip already sets the
+   size and weight and buttons inherit the font family, so no font rule here —
+   the shorthand would reset both. */
+.chip-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.chip-link:hover { border-color: var(--border-strong); color: var(--fg); }
 .chip.dot::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: currentColor; display: inline-block;

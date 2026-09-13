@@ -6,7 +6,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
-import { navigate } from '../../lib/route';
+import { match, navigate, useRoute } from '../../lib/route';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 
 // Manager-only reconciliation of Mercury/PayPal transactions against POs.
@@ -284,8 +284,8 @@ const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
   paired: 'PayPal + Mercury',
 };
 
-// Signed money: the sign carries meaning here (out vs back in), so it is
-// always rendered explicitly instead of fmtUSD's "$-1,240.00".
+// Signed money: the sign carries meaning here (out vs back in), so a plus is
+// rendered too, where fmtUSD shows only a minus.
 function fmtSigned(n: number, locale: string): string {
   return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
 }
@@ -328,19 +328,43 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   const reqId = useRef(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  // `/payments/po/<id>` — arrived from a PO's row. The list shows that PO's
+  // payments and nothing else; the persisted filters are left as the manager
+  // set them, so clearing the focus hands the page back exactly as it was.
+  const { path } = useRoute();
+  const focusOrder = match('/payments/po/:id', path)?.id ?? null;
+  // What the PO list's chip showed — the ledger's net with failed and
+  // reversed legs left out — so the manager can reconcile it against the rows
+  // below, which list every linked leg, dead ones badged. by-order reports
+  // outgoing money negative; the chip and this banner show it as paid.
+  const [focusNet, setFocusNet] = useState<number | null>(null);
+  useEffect(() => {
+    setFocusNet(null);
+    if (!focusOrder) return;
+    let alive = true;
+    api.get<{ net: number }>(`/api/bank-transactions/by-order/${encodeURIComponent(focusOrder)}`)
+      .then(r => { if (alive) setFocusNet(-r.net); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [focusOrder]);
+
   const params = useCallback((cursor?: string) => {
     const p = new URLSearchParams();
-    if (status !== 'all') p.set('status', status);
-    if (source !== 'all') p.set('source', source);
-    if (direction !== 'all') p.set('direction', direction);
-    if (q.trim()) p.set('q', q.trim());
-    if (hasMatch) p.set('hasMatch', '1');
-    if (disputed) p.set('dispute', '1');
-    if (settle !== 'all') p.set('settle', settle);
-    if (assignee !== 'all') p.set('assignee', assignee);
+    if (focusOrder) {
+      p.set('orderId', focusOrder);
+    } else {
+      if (status !== 'all') p.set('status', status);
+      if (source !== 'all') p.set('source', source);
+      if (direction !== 'all') p.set('direction', direction);
+      if (q.trim()) p.set('q', q.trim());
+      if (hasMatch) p.set('hasMatch', '1');
+      if (disputed) p.set('dispute', '1');
+      if (settle !== 'all') p.set('settle', settle);
+      if (assignee !== 'all') p.set('assignee', assignee);
+    }
     if (cursor) p.set('cursor', cursor);
     return p.toString();
-  }, [status, source, direction, q, hasMatch, disputed, settle, assignee]);
+  }, [focusOrder, status, source, direction, q, hasMatch, disputed, settle, assignee]);
 
   // The owner picker and the filter share one list; the page is manager-only,
   // so /api/members is readable here.
@@ -368,6 +392,19 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
 
   useEffect(() => { setFeed(null); reload(); }, [reload]);
   useEffect(() => { refreshStats(); }, [refreshStats]);
+
+  // Landing on a PO's payments opens its group without a click. The first
+  // row, not "the only" one: a payment plus its refund is two rows. Once per
+  // focus, so a row the manager then collapses stays collapsed across the
+  // reload every mutation triggers.
+  const expandedFor = useRef<string | null>(null);
+  useEffect(() => {
+    // Leaving focus re-arms it, so coming back to the same PO expands again.
+    if (!focusOrder) { expandedFor.current = null; return; }
+    if (!feed || expandedFor.current === focusOrder) return;
+    expandedFor.current = focusOrder;
+    setOpenId(feed.rows[0]?.id ?? null);
+  }, [focusOrder, feed]);
 
   const loadMore = useCallback(() => {
     if (!feed?.nextCursor || loadingMore) return;
@@ -506,6 +543,28 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         </div>
       </div>
 
+      {focusOrder ? (
+        // The tiles and filters describe the whole queue; while the page is
+        // pinned to one PO they would count and offer things the list below
+        // does not show, so the focus banner stands in for both.
+        <div className="card" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Icon name="cash" size={14} style={{ color: 'var(--fg-subtle)' }} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{t('payFocusOrder', { id: focusOrder })}</span>
+          {focusNet != null && (
+            <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
+              {t('payFocusNet', { amt: fmtUSD(focusNet, locale) })}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn sm ghost"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => navigate('/payments')}
+          >
+            {t('payFocusClear')}
+          </button>
+        </div>
+      ) : (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         {tiles.map(tile => (
           <button
@@ -523,8 +582,10 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           </button>
         ))}
       </div>
+      )}
 
       <div className="card">
+        {!focusOrder && (
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div className="seg" role="tablist">
             {(['all', 'unlinked', 'linked', 'transfer', 'ignored'] as const).map(s => (
@@ -634,6 +695,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
             </div>
           </div>
         </div>
+        )}
 
         {!feed ? (
           <ListSkeleton rows={6} />
@@ -641,7 +703,7 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <div style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
             {/* An empty money-out queue IS the drained queue; only the
                 money-in lens makes "nothing left to reconcile" a lie. */}
-            {status === 'unlinked' && direction !== 'in' ? t('payEmptyUnlinked') : t('payEmpty')}
+            {!focusOrder && status === 'unlinked' && direction !== 'in' ? t('payEmptyUnlinked') : t('payEmpty')}
           </div>
         ) : (
           <div className="table-scroll">
@@ -952,7 +1014,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
   const settled = settleOf(row);
   const dead = settleDead(row);
   return (
-    <div style={{ display: 'grid', gap: 8, fontSize: 12.5 }}>
+    <div className="pay-detail">
       {settled !== 'settled' && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <span className={'chip dot ' + SETTLE_CHIP[settled].tone} style={{ fontSize: 10.5 }}>
@@ -993,135 +1055,148 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {row.orderId && (
-          <>
-            <span className="muted">
-              {row.linkAuto
-                ? t('payLinkedAuto')
-                : t('payLinkedBy', { name: row.linkedByName ?? '—' })}
-              {row.linkedAt ? ` · ${fmtDate(row.linkedAt, locale)}` : ''}
+      <div className="pay-detail-actions">
+        <span className="pay-detail-group">
+          {row.orderId && (
+            <>
+              <span className="muted">
+                {row.linkAuto
+                  ? t('payLinkedAuto')
+                  : t('payLinkedBy', { name: row.linkedByName ?? '—' })}
+                {row.linkedAt ? ` · ${fmtDate(row.linkedAt, locale)}` : ''}
+              </span>
+              <button
+                type="button" className="btn sm"
+                onClick={() => { void act(`${row.id}/unlink`).then(ok => { if (ok) onToast(t('payUnlinkedToast')); }); }}
+              >
+                {t('payUnlink')}
+              </button>
+            </>
+          )}
+          {row.source === 'paired' ? (
+            <button type="button" className="btn sm" onClick={() => void act(`${row.id}/unpair`)}>
+              {t('payUnpair')}
+            </button>
+          ) : !row.ignored && row.category === 'external' && !dead && (
+            // A pending leg groups like a settled one; only failed and reversed
+            // are refused by POST /:id/pair.
+            // PoPicker anchors to its offset parent, and this row is a plain
+            // <td colSpan>, so the wrapper is what keeps the popover on the
+            // button instead of the page.
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                type="button" className="btn sm"
+                aria-expanded={pickingPair}
+                onClick={() => setPickingPair(p => !p)}
+              >
+                {t('payGroupWith')}
+                <Icon name="chevronDown" size={12} className="caret" />
+              </button>
+              {pickingPair && (
+                <PairPicker
+                  txnId={row.id}
+                  locale={locale}
+                  onPick={id => { onGroup(id); setPickingPair(false); }}
+                  onClose={() => setPickingPair(false)}
+                />
+              )}
             </span>
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => { void act(`${row.id}/unlink`).then(ok => { if (ok) onToast(t('payUnlinkedToast')); }); }}
-            >
-              {t('payUnlink')}
-            </button>
-          </>
-        )}
-        {row.source === 'paired' ? (
-          <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unpair`)}>
-            {t('payUnpair')}
-          </button>
-        ) : !row.ignored && row.category === 'external' && !dead && (
-          // A pending leg groups like a settled one; only failed and reversed
-          // are refused by POST /:id/pair.
-          // PoPicker anchors to its offset parent, and this row is a plain
-          // <td colSpan>, so the wrapper is what keeps the popover on the
-          // button instead of the page.
-          <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <button type="button" className="btn sm ghost" onClick={() => setPickingPair(p => !p)}>
-              {t('payGroupWith')}
-            </button>
-            {pickingPair && (
-              <PairPicker
-                txnId={row.id}
-                locale={locale}
-                onPick={id => { onGroup(id); setPickingPair(false); }}
-                onClose={() => setPickingPair(false)}
-              />
-            )}
-          </span>
-        )}
-        {!row.orderId && !row.internalTxn && !dead && (
-          row.category === 'transfer' ? (
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => void act(`${row.id}/unmark-transfer`).then(r => {
-                if (r?.ruleRemoved && row.counterparty) {
-                  onToast(t('payTransferRuleRemovedToast', { name: row.counterparty }));
-                }
-              })}
-            >
-              {t('payNotTransfer')}
-            </button>
-          ) : !row.ignored && (
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => void act(`${row.id}/mark-transfer`).then(r => {
-                if (r?.ruleCounterparty) {
-                  onToast(t('payTransferRuleToast', { name: r.ruleCounterparty, n: r.alsoMarked ?? 0 }));
-                }
-              })}
-            >
-              {t('payMarkTransfer')}
-            </button>
-          )
-        )}
-      </div>
+          )}
+          {!row.orderId && !row.internalTxn && !dead && (
+            row.category === 'transfer' ? (
+              <button
+                type="button" className="btn sm"
+                onClick={() => void act(`${row.id}/unmark-transfer`).then(r => {
+                  if (r?.ruleRemoved && row.counterparty) {
+                    onToast(t('payTransferRuleRemovedToast', { name: row.counterparty }));
+                  }
+                })}
+              >
+                {t('payNotTransfer')}
+              </button>
+            ) : !row.ignored && (
+              <button
+                type="button" className="btn sm"
+                onClick={() => void act(`${row.id}/mark-transfer`).then(r => {
+                  if (r?.ruleCounterparty) {
+                    onToast(t('payTransferRuleToast', { name: r.ruleCounterparty, n: r.alsoMarked ?? 0 }));
+                  }
+                })}
+              >
+                {t('payMarkTransfer')}
+              </button>
+            )
+          )}
+        </span>
 
-      {/* What this money was, and — while no PO answers that — whose it is. */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {row.internalTxn ? (
-          <>
-            <button type="button" className="btn sm ghost" onClick={() => navigate('/payments/internal')}>
-              {t('payIntOpen')}
-            </button>
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => {
-                const recordId = row.internalTxn!.id;
-                api.delete(`/api/internal-transactions/${recordId}/members/${row.id}`)
-                  .then(() => { onToast(t('payIntRemovedToast')); refresh(); })
-                  .catch(handleFetchError);
-              }}
-            >
-              {t('payIntRemove')}
-            </button>
-          </>
-        ) : !row.orderId && !dead && (
-          <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
-            <button type="button" className="btn sm ghost" onClick={() => setPickingRecord(p => !p)}>
-              {t('payIntAdd')}
-            </button>
-            {pickingRecord && (
-              <RecordPicker
-                txnId={row.id}
-                anchor={recordAnchorRef}
-                onDone={(msg) => { setPickingRecord(false); onToast(msg); refresh(); }}
-                onClose={() => setPickingRecord(false)}
-              />
-            )}
-          </span>
-        )}
-        {!row.orderId && !dead && (
-          row.assignee ? (
-            <button
-              type="button" className="btn sm ghost"
-              onClick={() => void act(`${row.id}/unassign`).then(ok => {
-                if (ok) onToast(t('payUnassignedToast'));
-              })}
-            >
-              {t('payUnassign')}
-            </button>
-          ) : (
-            <select
-              className="select"
-              value=""
-              onChange={e => {
-                const m = members.find(x => x.id === e.target.value);
-                if (!m) return;
-                void act(`${row.id}/assign`, { userId: m.id })
-                  .then(ok => { if (ok) onToast(t('payAssignedToast', { name: m.name })); });
-              }}
-              style={{ ...FILTER_SELECT, minWidth: 150 }}
-            >
-              <option value="">{t('payAssignTo')}</option>
-              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-          )
-        )}
+        {/* What this money was, and — while no PO answers that — whose it is. */}
+        <span className="pay-detail-group">
+          {row.internalTxn ? (
+            <>
+              <button type="button" className="btn sm" onClick={() => navigate('/payments/internal')}>
+                {t('payIntOpen')}
+              </button>
+              <button
+                type="button" className="btn sm"
+                onClick={() => {
+                  const recordId = row.internalTxn!.id;
+                  api.delete(`/api/internal-transactions/${recordId}/members/${row.id}`)
+                    .then(() => { onToast(t('payIntRemovedToast')); refresh(); })
+                    .catch(handleFetchError);
+                }}
+              >
+                {t('payIntRemove')}
+              </button>
+            </>
+          ) : !row.orderId && !dead && (
+            <span ref={recordAnchorRef} style={{ display: 'inline-flex' }}>
+              <button
+                type="button" className="btn sm"
+                aria-expanded={pickingRecord}
+                onClick={() => setPickingRecord(p => !p)}
+              >
+                {t('payIntAdd')}
+                <Icon name="chevronDown" size={12} className="caret" />
+              </button>
+              {pickingRecord && (
+                <RecordPicker
+                  txnId={row.id}
+                  anchor={recordAnchorRef}
+                  onDone={(msg) => { setPickingRecord(false); onToast(msg); refresh(); }}
+                  onClose={() => setPickingRecord(false)}
+                />
+              )}
+            </span>
+          )}
+          {!row.orderId && !dead && (
+            row.assignee ? (
+              <button
+                type="button" className="btn sm"
+                onClick={() => void act(`${row.id}/unassign`).then(ok => {
+                  if (ok) onToast(t('payUnassignedToast'));
+                })}
+              >
+                {t('payUnassign')}
+              </button>
+            ) : (
+              <select
+                className="select"
+                value=""
+                onChange={e => {
+                  const m = members.find(x => x.id === e.target.value);
+                  if (!m) return;
+                  void act(`${row.id}/assign`, { userId: m.id })
+                    .then(ok => { if (ok) onToast(t('payAssignedToast', { name: m.name })); });
+                }}
+                // Sized to its neighbours in the bar, not to the filter row.
+              style={{ ...FILTER_SELECT, minWidth: 150, height: 27, fontSize: 12 }}
+              >
+                <option value="">{t('payAssignTo')}</option>
+                {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )
+          )}
+        </span>
       </div>
       <NoteEditor row={row} locale={locale} act={act} onToast={onToast} />
     </div>

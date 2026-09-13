@@ -156,6 +156,11 @@ export type OrderSummary = {
   // sees it undefined and must read that as "not required". The backend's 409
   // is the real gate either way.
   txnRequired?: boolean;
+  // Net of the bank payments linked to this PO on the Payments page (refunds
+  // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
+  // nothing is linked or the caller is not a manager; either way there is no
+  // link to draw. Optional for the same deploy-skew reason as `txnRequired`.
+  linkedPaid?: number | null;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,

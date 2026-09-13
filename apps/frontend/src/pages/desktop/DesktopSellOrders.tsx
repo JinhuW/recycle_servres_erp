@@ -24,7 +24,7 @@ import { useAuth } from '../../lib/auth';
 import { AddInventoryPicker, type SellableItem } from '../../components/AddInventoryPicker';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { PriceImportSection } from './SellOrderPriceImportDialog';
-import { applyPriceRows } from '../../lib/priceImport';
+import { applyPriceRows, type BidPart, mergeBidParts } from '../../lib/priceImport';
 
 type Currency = 'USD' | 'CNY';
 
@@ -577,6 +577,11 @@ function SellOrderDetail({
     paymentReceivedBy: string;   // '' = not assigned
     currency: Currency;
     lines: EditLine[];
+    // Products — (canonical part, condition) — whose prices came from a
+    // confirmed vendor price import. Save sends them so the backend records
+    // the accepted prices on the Market value board, and clears them the
+    // moment that PATCH lands so a retry of a later step re-sends no bids.
+    bidParts: BidPart[];
   } | null>(null);
   // FX snapshot for the draft's currency (null for USD or until it loads).
   const [fx, setFx] = useState<FxInfo | null>(null);
@@ -626,6 +631,7 @@ function SellOrderDetail({
           paymentReceivedBy: r.order.paymentReceivedBy?.id ?? '',
           currency: r.order.currency,
           lines: r.order.lines.map(toEditLine),
+          bidParts: [],
         });
         setPendingAdjust(null);
       })
@@ -687,6 +693,7 @@ function SellOrderDetail({
     || receiverChanged
     || currencyChanged
     || linesChanged
+    || draft.bidParts.length > 0
     || pendingAdjust != null
   );
 
@@ -874,7 +881,9 @@ function SellOrderDetail({
       // requires the full line set alongside it — resend lines whenever either
       // the currency or the lines themselves changed.
       if (currencyChanged) patchBody.currency = draft.currency;
-      if (linesChanged || currencyChanged) {
+      // A confirmed import is a bid even when the vendor re-quoted the current
+      // prices, so the line set goes with it regardless of a diff.
+      if (linesChanged || currencyChanged || draft.bidParts.length > 0) {
         patchBody.lines = draft.lines.map(l => ({
           inventoryId: l.inventoryId,
           category:    l.category,
@@ -886,9 +895,13 @@ function SellOrderDetail({
           warehouseId: l.warehouseId,
           condition:   l.condition,
         }));
+        if (draft.bidParts.length > 0) patchBody.bidParts = draft.bidParts;
       }
       if (Object.keys(patchBody).length > 0) {
         await api.patch(`/api/sell-orders/${order.id}`, patchBody);
+        // The bids are recorded with that PATCH; if the adjust or status step
+        // below fails, the retry must not record them again.
+        setDraft(d => d && { ...d, bidParts: [] });
         setHistoryKey(k => k + 1);
       }
       // A pending negotiated total applies AFTER the line rewrite (the server
@@ -1271,7 +1284,11 @@ function SellOrderDetail({
                   currency={draft.currency}
                   locale={locale}
                   onApply={rows =>
-                    setDraft(d => d && { ...d, lines: applyPriceRows(d.lines, rows) })}
+                    setDraft(d => d && {
+                      ...d,
+                      lines: applyPriceRows(d.lines, rows),
+                      bidParts: mergeBidParts(d.bidParts, rows),
+                    })}
                 />
               )}
 

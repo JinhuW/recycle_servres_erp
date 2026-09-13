@@ -596,3 +596,66 @@ describe('discarding a partial transfer keeps the clone\'s photos', () => {
     expect(photo.order_line_id).toBe(src.id);
   });
 });
+
+// A PO cannot be archived while a line is out on a pending transfer, but
+// migration 0122 left such lines at In Transit on POs archived before that
+// rule. Receiving or discarding them must land at Archived — not Done or the
+// prior status — or the line sits at a stock status behind the archive flag,
+// hidden from every list yet never restorable by unarchive.
+describe('transfer receive / discard into an archived PO', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The 0121 + 0122 state: the PO archived by flag, its other lines Archived,
+  // the transferred line still In Transit.
+  async function archiveUnderneath(orderId: string, lineId: string): Promise<void> {
+    const db = getTestDb();
+    await db`UPDATE orders SET archived_at = NOW() WHERE id = ${orderId}`;
+    await db`UPDATE order_lines SET status = 'Archived' WHERE order_id = ${orderId} AND id <> ${lineId}`;
+  }
+
+  async function lineRow(id: string): Promise<{ status: string; warehouse_id: string | null }> {
+    const rows = await getTestDb()`SELECT status, warehouse_id FROM order_lines WHERE id = ${id}`;
+    return rows[0] as { status: string; warehouse_id: string | null };
+  }
+
+  it('receive lands the line at Archived with the audit row unarchive reads', async () => {
+    const { token } = await loginAs(ALEX);
+    const t = await transferOne(token);
+    const orderRow = (await getTestDb()`SELECT order_id FROM order_lines WHERE id = ${t.id}`)[0] as { order_id: string };
+    await archiveUnderneath(orderRow.order_id, t.id);
+
+    expect((await api('POST', `/api/inventory/transfer-orders/${t.orderId}/receive`, { token })).status).toBe(200);
+    expect((await lineRow(t.id)).status).toBe('Archived');
+    const list = await api<{ items: InvRow[] }>('GET', '/api/inventory', { token });
+    expect(list.body.items.find((i) => i.id === t.id)).toBeUndefined();
+    const archived = await api<{ items: InvRow[] }>('GET', '/api/inventory?status=Archived', { token });
+    expect(archived.body.items.find((i) => i.id === t.id)).toBeDefined();
+
+    // The received transfer cannot be reopened while the PO is archived —
+    // reopen wants its lines at Done. Unarchive first.
+    expect((await api('POST', `/api/inventory/transfer-orders/${t.orderId}/reopen`, { token })).status).toBe(409);
+
+    expect((await api('POST', `/api/orders/${orderRow.order_id}/unarchive`, { token })).status).toBe(200);
+    expect(await lineRow(t.id)).toEqual({ status: 'Done', warehouse_id: t.to });
+  });
+
+  it('discard lands the line at Archived and unarchive restores its prior status', async () => {
+    const { token } = await loginAs(ALEX);
+    const t = await transferOne(token);
+    const orderRow = (await getTestDb()`SELECT order_id FROM order_lines WHERE id = ${t.id}`)[0] as { order_id: string };
+    const prior = (await getTestDb()`
+      SELECT detail->>'prior_status' AS s FROM inventory_events
+      WHERE order_line_id = ${t.id} AND kind = 'transferred' ORDER BY created_at DESC LIMIT 1
+    `)[0] as { s: string } | undefined;
+    await archiveUnderneath(orderRow.order_id, t.id);
+
+    expect((await api('DELETE', `/api/inventory/transfer-orders/${t.orderId}`, { token })).status).toBe(200);
+    expect(await lineRow(t.id)).toEqual({ status: 'Archived', warehouse_id: t.from });
+
+    expect((await api('POST', `/api/orders/${orderRow.order_id}/unarchive`, { token })).status).toBe(200);
+    const restored = await lineRow(t.id);
+    expect(restored.warehouse_id).toBe(t.from);
+    expect(['Reviewing', 'Done']).toContain(restored.status);
+    if (prior?.s) expect(restored.status).toBe(prior.s);
+  });
+});

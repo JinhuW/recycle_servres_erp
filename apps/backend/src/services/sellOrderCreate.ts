@@ -37,12 +37,15 @@ export async function validateSellLines(
     demand.set(l.inventoryId, (demand.get(l.inventoryId) ?? 0) + l.qty);
   }
   for (const [inventoryId, qty] of demand) {
-    const inv = (await tx<{ qty: number; status: string }[]>`
-      SELECT qty, status FROM order_lines WHERE id = ${inventoryId} LIMIT 1 FOR UPDATE
+    const inv = (await tx<{ qty: number; status: string; archived_at: string | null }[]>`
+      SELECT l.qty, l.status, o.archived_at
+      FROM order_lines l JOIN orders o ON o.id = l.order_id
+      WHERE l.id = ${inventoryId} LIMIT 1 FOR UPDATE OF l
     `)[0];
     if (!inv) return `inventory line ${inventoryId} not found`;
     if (inv.status !== 'Reviewing' && inv.status !== 'Done')
       return `inventory line not sellable (status=${inv.status})`;
+    if (inv.archived_at !== null) return `inventory line's order is archived`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;
     if (!checkConflicts) continue;
     // Reserved units, plus one committed order to name in the error — a bare

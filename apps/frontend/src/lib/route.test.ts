@@ -33,6 +33,8 @@ describe('parseShippingRoute', () => {
   it('separates the internal-transactions tab from the payments list', () => {
     expect(pathToDesktopView('/payments')).toBe('payments');
     expect(pathToDesktopView('/payments/internal')).toBe('internaltx');
+    // A PO's deep link is the payments list, focused — same view, same sidebar.
+    expect(pathToDesktopView('/payments/po/PO-1372')).toBe('payments');
   });
 
   // A client is a shareable link, so the detail path has to resolve too.

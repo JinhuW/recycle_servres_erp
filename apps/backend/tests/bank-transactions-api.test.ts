@@ -308,6 +308,43 @@ describe('bank transactions API', () => {
     expect(after.every((l) => l.order_id === null && l.no_auto_link === true)).toBe(true);
   });
 
+  // The PO list reads the same net the ledger does, and only for a manager:
+  // the figure opens a page a purchaser cannot reach.
+  it('the PO list carries the net linked payments, managers only', async () => {
+    await seedPairedAndSingles();
+    const manager = (await loginAs(ALEX)).token;
+    const purchaser = (await loginAs(MARCUS)).token;
+    const paid = await createPO(purchaser);
+    const unpaid = await createPO(purchaser);
+    for (const ext of ['m-settle', 'm-refund']) {
+      const r = await api('POST', `/api/bank-transactions/${await idOf(ext)}/link`,
+        { token: manager, body: { orderId: paid } });
+      expect(r.status).toBe(200);
+    }
+
+    type Row = { id: string; linkedPaid: number | null };
+    const asManager = await api<{ orders: Row[] }>('GET', '/api/orders', { token: manager });
+    expect(asManager.status).toBe(200);
+    const byId = new Map(asManager.body.orders.map((o) => [o.id, o.linkedPaid]));
+    expect(byId.get(paid)).toBe(1120);   // −1240 paid, +120 refunded
+    expect(byId.get(unpaid)).toBeNull();
+
+    // The purchaser sees their own PO, but not what the bank did about it.
+    const asPurchaser = await api<{ orders: Row[] }>('GET', '/api/orders', { token: purchaser });
+    const own = asPurchaser.body.orders.find((o) => o.id === paid);
+    expect(own).toBeDefined();
+    expect(own?.linkedPaid).toBeNull();
+
+    // The deep link's feed filter is exact: this PO's two groups, nothing else.
+    const feed = await api<{ rows: { orderId: string | null }[] }>(
+      'GET', `/api/bank-transactions?orderId=${paid}`, { token: manager });
+    expect(feed.body.rows).toHaveLength(2);
+    expect(feed.body.rows.every((r) => r.orderId === paid)).toBe(true);
+    const none = await api<{ rows: unknown[] }>(
+      'GET', `/api/bank-transactions?orderId=${unpaid}`, { token: manager });
+    expect(none.body.rows).toHaveLength(0);
+  });
+
   // The number a manager reads the row's own amount against. Goods alone would
   // report 1200 beside a -1240 payment and look like a shortfall.
   it('a linked row carries the PO cost, goods plus fees', async () => {
@@ -519,6 +556,13 @@ describe('bank transactions API', () => {
     const m1 = await idOf('m-1');
     const m2 = await idOf('m-2');
     const m3 = await idOf('m-3');
+
+    // An ignored leg is out of the queue; pairing it would carry the other
+    // leg's link onto it — the one path to a row both linked and ignored.
+    expect((await api('POST', `/api/bank-transactions/${m2}/ignore`, { token })).status).toBe(200);
+    expect((await api('POST', `/api/bank-transactions/${p}/pair`, { token, body: { otherId: m2 } })).status).toBe(400); // other leg ignored
+    expect((await api('POST', `/api/bank-transactions/${m2}/pair`, { token, body: { otherId: p } })).status).toBe(400); // own leg ignored
+    expect((await api('POST', `/api/bank-transactions/${m2}/unignore`, { token })).status).toBe(200);
 
     // Ambiguity kept these unpaired; a human resolves it.
     expect((await api('POST', `/api/bank-transactions/${m1}/pair`, { token, body: { otherId: m2 } })).status).toBe(400); // same source

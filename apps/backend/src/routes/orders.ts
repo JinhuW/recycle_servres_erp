@@ -359,6 +359,19 @@ orders.get('/', async (c) => {
         : sql`AND (${sortExpr}, o.id) > (${cursor.ts}::${castSql}, ${cursor.id})`)
     : sql`AND TRUE`;
 
+  // What the bank has actually paid for the PO, as the Payments page counts
+  // it: one row per logical payment (a pair reports only its PayPal leg), a
+  // refund subtracts, money that failed or came back does not count. Twin of
+  // the linked_total subquery in banktx/match.ts — keep the two in step. NULL,
+  // not 0, when nothing is linked, so the list can tell "unpaid" from "paid
+  // and fully refunded". Managers only: the figure and the page it opens are.
+  const linkedPaidFrag = isManager
+    ? sql`(SELECT -SUM(bt.amount) FROM bank_transactions bt
+           WHERE bt.order_id = o.id AND NOT bt.ignored
+             AND (bt.pair_id IS NULL OR bt.source = 'paypal')
+             AND bt.settle_status <> 'failed' AND bt.settle_status <> 'reversed')`
+    : sql`NULL`;
+
   const rows = await sql`
     SELECT
       o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
@@ -367,6 +380,7 @@ orders.get('/', async (c) => {
       o.other_fees::float AS other_fees,
       o.other_fees_note,
       o.paypal_txn_id,
+      ${linkedPaidFrag}::float AS linked_paid,
       o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
@@ -434,6 +448,7 @@ orders.get('/', async (c) => {
       otherFees: r.other_fees,
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
+      linkedPaid: r.linked_paid,
       // Optional and additive: a stale SPA that never reads it is unaffected.
       // Keyed on the JOINED name, not the raw column: the join is scoped to the
       // caller's book, so a PO carrying someone else's client reads as unset

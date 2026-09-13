@@ -10,14 +10,19 @@ export const fmt = (n: number | null | undefined, locale = 'en-US') =>
     ? '—'
     : n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// The sign goes before the symbol: `-$120`, never `$-120`. A negative reaches
+// these from any net figure — a PO whose only linked payment is a refund.
+const signed = (n: number, symbol: string, digits: string) =>
+  (n < 0 ? '-' : '') + symbol + digits;
+
 export const fmtUSD = (n: number | null | undefined, locale = 'en-US') =>
-  n == null ? '—' : '$' + fmt(n, locale);
+  n == null ? '—' : signed(n, '$', fmt(Math.abs(n), locale));
 
 export const fmt0 = (n: number | null | undefined, locale = 'en-US') =>
   n == null ? '—' : Math.round(n).toLocaleString(locale);
 
 export const fmtUSD0 = (n: number | null | undefined, locale = 'en-US') =>
-  n == null ? '—' : '$' + fmt0(n, locale);
+  n == null ? '—' : signed(Math.round(n), '$', fmt0(Math.abs(n), locale));
 
 export const CURRENCY_SYMBOL: Record<string, string> = { USD: '$', CNY: '¥' };
 
@@ -28,7 +33,7 @@ export const fmtMoney = (
 ) => {
   if (n == null) return '—';
   const sym = CURRENCY_SYMBOL[currency];
-  return sym ? sym + fmt(n, locale) : `${currency} ${fmt(n, locale)}`;
+  return signed(n, sym ?? `${currency} `, fmt(Math.abs(n), locale));
 };
 
 export const fmtDate = (d: Date | string, locale = 'en-US') =>

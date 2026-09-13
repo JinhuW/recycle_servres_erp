@@ -111,6 +111,10 @@ bankTx.get('/', async (c) => {
   const source = c.req.query('source') ?? 'all';
   const direction = c.req.query('direction') ?? 'all';
   const q = c.req.query('q')?.trim() ?? '';
+  // Exact, unlike `q`: the PO list's deep link asks for one order's payments,
+  // and a substring would also fetch PO-10001 for PO-1000 or any note that
+  // mentions the id.
+  const orderId = c.req.query('orderId')?.trim() ?? '';
   const assignee = c.req.query('assignee')?.trim() ?? '';
   if (assignee && assignee !== 'unassigned' && !UUID_RE.test(assignee)) {
     return c.json({ error: 'assignee must be a user id or "unassigned"' }, 400);
@@ -214,6 +218,7 @@ bankTx.get('/', async (c) => {
     LEFT JOIN users nu ON nu.id = bt.note_by
     WHERE (bt.pair_id IS NULL OR bt.source = 'paypal')
       AND ${statusFrag} AND ${sourceFrag} AND ${directionFrag} AND ${qFrag}
+      AND ${orderId ? sql`bt.order_id = ${orderId}` : sql`TRUE`}
       AND ${assigneeFrag} AND ${matchFrag} AND ${disputeFrag} AND ${settleFrag} ${cursorFrag}
     ORDER BY bt.posted_at DESC, bt.id DESC
     LIMIT ${limit + 1}
@@ -503,6 +508,10 @@ bankTx.post('/:id/pair', async (c) => {
   const [b] = await groupOf(sql, body.otherId);
   if (!a || !b) return c.json({ error: 'Not found' }, 404);
   if (a.pair_id || b.pair_id) return c.json({ error: 'Already paired' }, 400);
+  // Pairing spreads the other leg's link onto this one; /link refuses ignored
+  // rows and /ignore refuses linked ones, so this is the one path to a row
+  // that is both — which the PO's paid figure would then count.
+  if (a.ignored || b.ignored) return c.json({ error: 'Unignore the transaction before grouping it' }, 400);
   if (a.source === b.source) return c.json({ error: 'A pair needs one Mercury and one PayPal leg' }, 400);
   // A pending leg is a real half of a payment; a failed or reversed one is a
   // record of money that never moved, or came back. Same rule autoPair and

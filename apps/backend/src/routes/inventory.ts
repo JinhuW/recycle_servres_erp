@@ -135,8 +135,18 @@ function inventoryWhereFrag(
     : sql`TRUE`;
   const attrFrag     = attrFragments(sql, attrs);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
+  const archivedFrag = archivedOrderFrag(sql);
 
-  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+  return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+}
+
+// An archived PO's goods are not in stock whatever its lines' status says:
+// an explicit ?status= filter neutralises soldFrag, and a line can sit at a
+// stock status on an archived PO legitimately (a pending transfer, 0122) or
+// by drift. Sold lines are the sales record and Archived ones are reached by
+// filter, so those two stay visible under their own rules.
+function archivedOrderFrag(sql: ReturnType<typeof getDb>) {
+  return sql`(o.archived_at IS NULL OR l.status IN ('Sold', ${ARCHIVED_LINE_STATUS}))`;
 }
 
 // List inventory with the same filters as the desktop screen.
@@ -501,8 +511,10 @@ inventory.get('/analysis', async (c) => {
   const catCond = category  ? sql`l.category = ${category}` : sql`TRUE`;
   const whCond  = warehouse ? sql`${effWh} = ${warehouse}`  : sql`TRUE`;
   // An archived PO's goods are out of stock; every aggregate below drops them
-  // the way the list does. (Sold lines still count here, as they always have.)
-  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS}`;
+  // the way the list does. Sold lines still count here, as they always have —
+  // they are the sales record, and archiving the PO afterwards does not undo
+  // the sale — so the archive flag exempts them exactly as archivedOrderFrag.
+  const liveCond = sql`l.status <> ${ARCHIVED_LINE_STATUS} AND (o.archived_at IS NULL OR l.status = 'Sold')`;
 
   // Grouped unit-count over a whitelisted column for one category, honouring
   // the warehouse scope. The column set is the fixed SUBTYPE_DIMS whitelist, and
@@ -764,6 +776,7 @@ inventory.get('/products', async (c) => {
   const soldFrag     = status ? sql`TRUE`
     : includeSold ? sql`l.status <> ${ARCHIVED_LINE_STATUS}`
     : sql`l.status NOT IN ('Sold', ${ARCHIVED_LINE_STATUS})`;
+  const archivedFrag = archivedOrderFrag(sql);
   // Warehouse is intentionally NOT pushed into SQL here — keeping every
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
@@ -812,7 +825,7 @@ inventory.get('/products', async (c) => {
       ORDER BY ls.created_at ASC
       LIMIT 1
     ) img ON TRUE
-    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${searchFrag} AND ${pendingFrag}
+    WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${searchFrag} AND ${pendingFrag}
     ORDER BY l.created_at DESC
     LIMIT ${RAW_CAP}
   `) as unknown as Row[];
@@ -1375,6 +1388,7 @@ inventory.post('/transfer', async (c) => {
     scan_image_id: string | null;
     scan_confidence: number | null;
     effective_wh: string | null;
+    archived_at: Date | null;
   };
 
   const ids = reqLines.map((r) => r.id);
@@ -1384,6 +1398,7 @@ inventory.post('/transfer', async (c) => {
     | { kind: 'missing' }
     | { kind: 'lineNotFound'; id: string }
     | { kind: 'notSellable'; id: string; status: string }
+    | { kind: 'archived'; id: string }
     | { kind: 'overQty'; id: string; have: number }
     | { kind: 'alreadyThere'; id: string }
     | { kind: 'ok'; transferOrderId: string; result: ResultLine[] };
@@ -1398,7 +1413,8 @@ inventory.post('/transfer', async (c) => {
              l.rank, l.speed, l.interface, l.form_factor, l.description, l.item_type, l.part_number,
              l.condition, l.qty, l.unit_cost, l.sell_price, l.status, l.position,
              l.health, l.rpm, l.scan_image_id, l.scan_confidence,
-             COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh
+             COALESCE(l.warehouse_id, o.warehouse_id) AS effective_wh,
+             o.archived_at
       FROM order_lines l
       JOIN orders o ON o.id = l.order_id
       WHERE l.id = ANY(${ids}::uuid[])
@@ -1416,6 +1432,7 @@ inventory.post('/transfer', async (c) => {
       if (s.status !== 'Reviewing' && s.status !== 'Done') {
         return { kind: 'notSellable', id: r.id, status: s.status };
       }
+      if (s.archived_at !== null) return { kind: 'archived', id: r.id };
       if (r.qty > s.qty) return { kind: 'overQty', id: r.id, have: s.qty };
       if (s.effective_wh === toWarehouseId) return { kind: 'alreadyThere', id: r.id };
     }
@@ -1506,6 +1523,7 @@ inventory.post('/transfer', async (c) => {
   if (outcome.kind === 'notSellable') {
     return c.json({ error: `line ${outcome.id} is ${outcome.status}; only Reviewing/Done can be transferred` }, 400);
   }
+  if (outcome.kind === 'archived') return c.json({ error: `line ${outcome.id} belongs to an archived order` }, 400);
   if (outcome.kind === 'overQty') return c.json({ error: `line ${outcome.id} only has ${outcome.have} units` }, 400);
   if (outcome.kind === 'alreadyThere') return c.json({ error: `line ${outcome.id} is already in ${toWarehouseId}` }, 400);
   return c.json({ ok: true, transferOrderId: outcome.transferOrderId, lines: outcome.result });
@@ -1545,9 +1563,17 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
       // round-trips inside the tx — under load that's a slow request and
       // unnecessary lock duration on the order_lines rows.
       const lineIds = lines.map(l => l.id);
+      // A line received into an archived PO lands at Archived, not Done: the
+      // PO's goods are out of stock, and a Done line behind the archive flag
+      // is hidden from every list yet unknown to unarchive. Only a line 0122
+      // put back at In Transit gets here — the archive button refuses a PO
+      // with a pending transfer. The status row is what unarchive restores
+      // from, so it names Done; reopen 409s on such a transfer until then.
       await tx`
-        UPDATE order_lines SET status = 'Done'
-        WHERE id = ANY(${lineIds}::uuid[])
+        UPDATE order_lines l
+           SET status = CASE WHEN o.archived_at IS NULL THEN 'Done' ELSE ${ARCHIVED_LINE_STATUS} END
+          FROM orders o
+         WHERE l.id = ANY(${lineIds}::uuid[]) AND o.id = l.order_id
       `;
       const detail = tx.json({ at: ord.to_warehouse_id, transfer_order_id: id });
       await tx`
@@ -1555,6 +1581,13 @@ inventory.post('/transfer-orders/:id/receive', async (c) => {
         SELECT id, ${u.id}::uuid, 'received', ${detail}::jsonb
         FROM order_lines
         WHERE id = ANY(${lineIds}::uuid[])
+      `;
+      const archivedDetail = tx.json({ field: 'status', from: 'Done', to: ARCHIVED_LINE_STATUS });
+      await tx`
+        INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+        SELECT id, ${u.id}::uuid, 'status', ${archivedDetail}::jsonb
+        FROM order_lines
+        WHERE id = ANY(${lineIds}::uuid[]) AND status = ${ARCHIVED_LINE_STATUS}
       `;
     }
     await tx`
@@ -1663,16 +1696,17 @@ inventory.delete('/transfer-orders/:id', async (c) => {
     }
 
     const lines = (await tx`
-      SELECT l.id, l.status, l.qty,
+      SELECT l.id, l.status, l.qty, (o.archived_at IS NOT NULL) AS archived,
              (SELECT COUNT(*)::int
                 FROM sell_order_lines sl
                 JOIN sell_orders so ON so.id = sl.sell_order_id
                WHERE sl.inventory_id = l.id
                  AND so.status = ANY(${committedSellStatuses()}::text[])) AS sell_count
       FROM order_lines l
+      JOIN orders o ON o.id = l.order_id
       WHERE l.transfer_order_id = ${id}
       FOR UPDATE OF l
-    `) as unknown as Array<{ id: string; status: string; qty: number; sell_count: number }>;
+    `) as unknown as Array<{ id: string; status: string; qty: number; archived: boolean; sell_count: number }>;
 
     const bad = lines.filter((l) => l.status !== 'In Transit' || l.sell_count > 0);
     if (bad.length > 0) {
@@ -1747,9 +1781,12 @@ inventory.delete('/transfer-orders/:id', async (c) => {
         }
       }
       if (!merged) {
+        // Same rule as receive: back onto an archived PO means Archived, with
+        // the status row unarchive reads to restore the pre-transfer status.
         await tx`
           UPDATE order_lines
-             SET warehouse_id = ${origin}, status = ${priorStatus}, transfer_order_id = NULL
+             SET warehouse_id = ${origin}, status = ${l.archived ? ARCHIVED_LINE_STATUS : priorStatus},
+                 transfer_order_id = NULL
            WHERE id = ${l.id}
         `;
         await tx`
@@ -1757,6 +1794,13 @@ inventory.delete('/transfer-orders/:id', async (c) => {
           VALUES (${l.id}, ${u.id}, 'transfer_discarded',
                   ${tx.json({ transfer_order_id: id, returned_to: origin, qty: l.qty })})
         `;
+        if (l.archived) {
+          await tx`
+            INSERT INTO inventory_events (order_line_id, actor_id, kind, detail)
+            VALUES (${l.id}, ${u.id}, 'status',
+                    ${tx.json({ field: 'status', from: priorStatus, to: ARCHIVED_LINE_STATUS })})
+          `;
+        }
       }
     }
 

@@ -3451,3 +3451,24 @@ html.desktop, body.desktop, .desktop #root {
 @media (prefers-reduced-motion: reduce) {
   .pay-sec { transition: none; }
 }
+
+/* The expanded row.  Its actions are real `.btn.sm`, not ghosts: the rail
+   above can afford ghosts because the row reveals them on hover and supplies
+   the context, while this panel sits on --bg-soft with nothing to reveal,
+   and a ghost there is just a word.  The hairline splits facts from actions;
+   the two groups (what the money is / whose it is) are told apart by the
+   wider column gap alone. */
+.pay-detail { display: grid; gap: 10px; font-size: 12.5px; }
+.pay-detail-actions {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px 20px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.pay-detail-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* Every child of a group is conditional, so an empty one is a real empty
+   element — and it must not keep a gap slot, nor the bar its hairline.
+   Done here rather than with booleans in the JSX that would have to mirror
+   four render conditions. */
+.pay-detail-group:empty { display: none; }
+.pay-detail-actions:not(:has(.pay-detail-group:not(:empty))) { display: none; }

@@ -17,6 +17,111 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.4] - 2026-09-13
+
+### Fixed
+
+- **The dev-to-main review findings, before the prod cut.**  A `high`-effort
+  review of everything v1.138.0 – v1.138.3 would ship returned ten findings;
+  none had reached `main`, so they are fixed here first (RS-044, the way
+  RS-038 preceded the previous release).  A confirmed vendor price import now
+  records a bid per (part, condition) the way the sheet prices them — X/New
+  at $100 no longer blends with an untouched X/Used line into an $80 "bid"
+  the customer never quoted — and the editor forgets its pending bids the
+  moment the save lands, so a retry after a failed status step records
+  nothing twice.  The Analysis tab keeps counting the Sold lines of an
+  archived PO (they are the sales record, as the list already treated them).
+  A transfer received or discarded into an archived PO now joins the archive
+  with the audit row unarchive reads, instead of sitting at Done behind the
+  flag where no list showed it.  On the Payments page a PO's focus banner
+  says the net paid — the figure the PO list's chip showed — next to the rows
+  it is made of, reversed legs included; leaving focus re-arms the
+  auto-expand, and the PO id in the hash is decoded once.  Grouping a Mercury
+  leg with a PayPal one refuses an ignored leg, the one path that let a row be
+  both linked and ignored.  Negative money reads `-$120` everywhere instead of
+  `$-120`.  The `ARCHIVED_LINE_STATUS` comment now states the two-authority
+  rule (line status plus the order's archive flag) rather than denying the
+  join every reader makes.  Also carried: the launcher fix from RS-042 (#307)
+  shipped on 2026-09-12 without a version bump, since CI only gates `apps/`,
+  `packages/` and `deploy/`; this is its release.  [RS-044, RS-042]
+
+## [1.138.3] - 2026-09-12
+
+### Fixed
+
+- **A vendor price import now updates the Market value board.**  The
+  bid-sheet round-trip on a sell order filled the edit form's prices and
+  stopped there; the Market value page learned a part's price only when the
+  order reached Done, because the completed sale was the one sell-order
+  event that wrote a data point.  A 135-line CNY deal can sit in Draft or
+  Awaiting payment for weeks, so the customer's accepted quote — the freshest
+  price signal the desk has — never reached the board while it mattered.
+  Saving an edit after a confirmed import now records each confirmed
+  product's saved price on the board as a `bid:<order>` data point, in USD
+  at the rate the lines were saved at, rolled up per part the same way the
+  sale data point is.  Plain price edits with no import stay silent, a
+  discarded import records nothing, and Done still writes its `sale:` point
+  when the deal closes.  (RS-043)
+
+## [1.138.2] - 2026-09-12
+
+### Fixed
+
+- **Archived PO items never show in inventory.**  v1.137.0 took an archived
+  PO's goods out of stock by moving its lines to the `Archived` status, and
+  every stock reader keyed on that status alone.  Two things slipped through.
+  Migration `0121` had backfilled POs archived before the release but left
+  any line an open sell order still named, so prod PO-1390 kept five
+  `Reviewing` lines on a draft sell order — still listed in Inventory, still
+  offered by the sellable picker, still addable to new sell orders.  And no
+  inventory-facing query looked at the order's own `archived_at`, even though
+  `0122` deliberately leaves a transfer-stranded line at a stock status on an
+  archived PO.  Now the inventory list, products view, export, Analysis, the
+  sellable picker and MCP search, the vendor catalog and bids, sell-order
+  validation and transfers all exclude a line whose PO is archived whatever
+  its status says, Sold lines aside (they are the sales record and keep their
+  own rules).  Migration `0124` finishes what `0121` started: the remaining
+  lines of pre-release archived POs are pulled off open sell orders with the
+  same `line_removed` audit the Archive button writes, then archived — a
+  no-op in prod, where PO-1390 had already been cleared by hand.  [RS-041]
+
+## [1.138.1] - 2026-09-12
+
+### Fixed
+
+- **The expanded payment row's actions look like buttons.**  Opening a row
+  on the Payments page showed its actions — Group with…, Mark as transfer,
+  Add to internal…, Unassign and their counterparts — as bare words with
+  nothing to click on.  They carried the ghost style the collapsed row's
+  rail uses, where the buttons stay hidden until hover and the row supplies
+  the context; the expanded panel has no hover reveal and sits on the soft
+  grey row background, so a ghost there was just text.  The actions are now
+  the same outlined buttons the rest of the desktop uses, in one bar under a
+  hairline that separates them from the row's facts, spaced into the two
+  groups the code already kept — what the money is, then which record or
+  owner it belongs to.  The two that open a picker carry a chevron that
+  turns while it is open, and the Assign to… select sits level with its
+  neighbours.  A row with nothing to offer shows no bar at all.  (RS-040)
+
+## [1.138.0] - 2026-09-12
+
+### Added
+
+- **The PO list links back to the payments that paid it.**  The Payment
+  column's `Company` / `Self` chip was a label and nothing more; the money
+  behind a PO lived only on the Payments page, reachable from the list by
+  opening the PO, then Payments, then searching.  A manager now reads
+  `Company | $1,279` on every PO with linked bank payments — the ledger's net,
+  refunds subtracted, failed and reversed left out — and clicking it opens
+  the Payments page pinned to that PO: a banner names it, only its payment
+  groups are listed, the first is already expanded, and the tiles and filter
+  bar step aside until "Show all payments" hands the page back with the
+  manager's own filters exactly as they were.  The list endpoint carries the
+  figure as `linkedPaid` (null when nothing is linked, and for anyone who is
+  not a manager, since the page it opens is manager-only), and the feed gained
+  an exact `orderId` filter so the deep link can never pick up `PO-10001` for
+  `PO-1000` or a note that happens to mention the id.  [RS-039]
+
 ## [1.137.1] - 2026-09-11
 
 ### Fixed

@@ -144,11 +144,17 @@ export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/activity') return 'activity';
   // A tab under Payments, like Analysis under Inventory.
   if (path === '/payments/internal') return 'internaltx';
-  if (path === '/payments') return 'payments';
+  if (path === '/payments' || match('/payments/po/:id', path)) return 'payments';
   if (path === '/tracker') return 'tracker';
   if (path === '/fleet') return 'coordinator';
   if (path === '/settings') return 'settings';
   return 'dashboard';
+}
+
+// The Payments page focused on one PO's linked payments. A path for
+// navigate(); the page reads the id back with match('/payments/po/:id').
+export function paymentsForOrderPath(orderId: string): string {
+  return `/payments/po/${encodeURIComponent(orderId)}`;
 }
 
 // Deep link from an activity row back to the record it describes. Anchors —

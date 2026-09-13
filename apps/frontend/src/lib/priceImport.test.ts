@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyPriceRows } from './priceImport';
+import { applyPriceRows, mergeBidParts } from './priceImport';
 
 type Line = {
   partNumber: string | null;
@@ -60,5 +60,26 @@ describe('applyPriceRows', () => {
     expect(out).not.toBe(lines);
     expect(lines[0].unitPrice).toBe(0);
     expect(out[0].unitPrice).toBe(42);
+  });
+});
+
+describe('mergeBidParts', () => {
+  it('keys on (part, normalised condition) so a re-import replaces, not repeats', () => {
+    const first = mergeBidParts([], [
+      { canonPart: 'ABC123', condition: 'New', price: 10 },
+      { canonPart: 'ABC123', condition: 'Used', price: 5 },
+    ]);
+    expect(first).toHaveLength(2);
+    const again = mergeBidParts(first, [{ canonPart: 'ABC123', condition: ' new ', price: 12 }]);
+    expect(again).toHaveLength(2);
+    expect(again.find(p => p.condition?.trim().toLowerCase() === 'new')?.condition).toBe(' new ');
+  });
+  it('keeps a null-condition row distinct from a conditioned one', () => {
+    const out = mergeBidParts([{ partNumber: 'ABC123', condition: null }],
+      [{ canonPart: 'ABC123', condition: 'New', price: 10 }]);
+    expect(out).toEqual([
+      { partNumber: 'ABC123', condition: null },
+      { partNumber: 'ABC123', condition: 'New' },
+    ]);
   });
 });

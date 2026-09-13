@@ -2,9 +2,13 @@ import type { TransactionSql } from 'postgres';
 import { canonPartCol, canonPartNumberJs } from './part-number';
 import { autoTrackParts, type TrackablePart } from './marketAutoTrack';
 import { appendPriceEvent } from './refPriceEvents';
+import { normCondition } from '../services/sellOrderPriceImport';
+
+export type BidPart = { partNumber: string; condition: string | null };
 
 type LineRow = {
   part_number: string | null;
+  condition: string | null;
   unit_price: number;
   qty: number;
   category: string;
@@ -21,17 +25,28 @@ type Group = {
   qty: number;      // Σ qty
 };
 
-// On sell-order completion, append one market data point per distinct sold
-// product (canonical part number). Price is the qty-weighted average of the
-// line unit_price, which is already USD (see migration 0065). Runs inside the
-// caller's Done tx so it commits with the sale or not at all.
-export async function recordSaleDataPoints(
+type RecordOptions = {
+  source: string;
+  // Lines to record, by `canon|normCondition` key; a key with an empty
+  // condition admits every line of that part. Absent = every line.
+  only?: Set<string>;
+};
+
+const lineKey = (canon: string, condition: string | null | undefined) =>
+  `${canon}|${normCondition(condition)}`;
+
+// One market data point per distinct product (canonical part number) on a
+// sell order. Price is the qty-weighted average of the line unit_price, which
+// is already USD (see migration 0065). Runs inside the caller's tx so it
+// commits with the write that triggered it or not at all.
+async function recordSellOrderDataPoints(
   tx: TransactionSql,
   sellOrderId: string,
   actorUserId: string,
+  opts: RecordOptions,
 ): Promise<{ recorded: number }> {
   const lines = await tx<LineRow[]>`
-    SELECT part_number, unit_price::float AS unit_price, qty, category, label, sub_label
+    SELECT part_number, condition, unit_price::float AS unit_price, qty, category, label, sub_label
     FROM sell_order_lines
     WHERE sell_order_id = ${sellOrderId}
   `;
@@ -42,6 +57,7 @@ export async function recordSaleDataPoints(
     if (!raw) continue;
     const canon = canonPartNumberJs(raw);
     if (!canon) continue;
+    if (opts.only && !opts.only.has(lineKey(canon, null)) && !opts.only.has(lineKey(canon, l.condition))) continue;
     const g = byCanon.get(canon);
     if (g) {
       g.priceQty += l.unit_price * l.qty;
@@ -55,7 +71,7 @@ export async function recordSaleDataPoints(
   }
   if (byCanon.size === 0) return { recorded: 0 };
 
-  // Ensure a ref_prices row exists for every sold product.
+  // Ensure a ref_prices row exists for every product being recorded.
   const parts: TrackablePart[] = Array.from(byCanon.values()).map(g => ({
     category: g.category, partNumber: g.raw, label: g.label, subLabel: g.subLabel,
   }));
@@ -79,11 +95,49 @@ export async function recordSaleDataPoints(
     await appendPriceEvent(tx, {
       refPriceId,
       price,
-      source: `sale:${sellOrderId}`,
+      source: opts.source,
       note: null,
       actorUserId,
     });
     recorded++;
   }
   return { recorded };
+}
+
+// On sell-order completion: a completed sale is the most authoritative price
+// signal we have, so every sold product gets a data point. Runs inside the
+// caller's Done tx.
+export async function recordSaleDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+  actorUserId: string,
+): Promise<{ recorded: number }> {
+  return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
+    source: `sale:${sellOrderId}`,
+  });
+}
+
+// On a line save whose prices came from a confirmed vendor price import: the
+// customer's accepted quote is a market signal weeks before the deal closes.
+// `parts` are the products the manager confirmed in the preview, each a
+// (part, condition) the way the sheet prices them — the order's other lines,
+// the same part in a condition the sheet did not price included, keep
+// whatever price they had and are not a bid. Runs inside the save's tx, after
+// the lines are rewritten, so it reads the saved USD values.
+export async function recordBidDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+  actorUserId: string,
+  parts: BidPart[],
+): Promise<{ recorded: number }> {
+  const only = new Set<string>();
+  for (const p of parts) {
+    const canon = canonPartNumberJs(p.partNumber);
+    if (canon) only.add(lineKey(canon, p.condition));
+  }
+  if (only.size === 0) return { recorded: 0 };
+  return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
+    source: `bid:${sellOrderId}`,
+    only,
+  });
 }
