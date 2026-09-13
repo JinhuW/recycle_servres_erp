@@ -32,7 +32,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, recordBidDataPoints } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import type { Env, User } from '../types';
@@ -506,7 +506,9 @@ sellOrders.get('/:id/packing-list', async (c) => {
 // Vendor price import, step 1 of 2: parse an uploaded bid sheet and report how
 // its rows match this order's products — by canonical part number, never by
 // cell position. Writes nothing; the manager applies the matched prices
-// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit.
+// through the edit form, whose save (PATCH /:id) owns FX, guards, and audit —
+// and, when the client names the confirmed products in `bidParts`, records
+// their saved prices on the Market board as `bid:<order>` data points.
 const PRICE_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 
 sellOrders.post('/:id/price-import/preview', async (c) => {
@@ -648,7 +650,7 @@ sellOrders.patch('/:id', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
         customerId?: string; lines?: LineIn[]; currency?: string;
-        paymentReceivedBy?: string | null }
+        paymentReceivedBy?: string | null; bidParts?: string[] }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   // Status transitions are owned exclusively by POST /:id/status — that route
@@ -713,6 +715,19 @@ sellOrders.patch('/:id', async (c) => {
       if (!Number.isFinite(l.unitPrice) || l.unitPrice < 0) {
         return c.json({ error: 'unitPrice must be ≥ 0' }, 400);
       }
+    }
+  }
+
+  // A confirmed vendor price import names the products whose saved prices
+  // are the customer's bid. It only means something alongside the lines it
+  // prices, so it is refused on its own.
+  if (body.bidParts !== undefined) {
+    if (!Array.isArray(body.bidParts) || body.bidParts.length > 1000
+        || body.bidParts.some(p => typeof p !== 'string' || p.trim() === '' || p.length > 200)) {
+      return c.json({ error: 'bidParts must be an array of part numbers' }, 400);
+    }
+    if (body.lines === undefined) {
+      return c.json({ error: 'bidParts requires lines' }, 400);
     }
   }
 
@@ -790,6 +805,9 @@ sellOrders.patch('/:id', async (c) => {
              ${isNonUsd ? l.unitPrice : null},
              ${isNonUsd ? fx.rate : null})
         `;
+      }
+      if (body.bidParts?.length) {
+        await recordBidDataPoints(tx, id, u.id, body.bidParts);
       }
     }
 

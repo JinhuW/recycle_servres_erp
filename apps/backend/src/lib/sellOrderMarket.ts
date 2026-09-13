@@ -21,14 +21,21 @@ type Group = {
   qty: number;      // Σ qty
 };
 
-// On sell-order completion, append one market data point per distinct sold
-// product (canonical part number). Price is the qty-weighted average of the
-// line unit_price, which is already USD (see migration 0065). Runs inside the
-// caller's Done tx so it commits with the sale or not at all.
-export async function recordSaleDataPoints(
+type RecordOptions = {
+  source: string;
+  // Canonical part numbers to record; absent = every product on the order.
+  onlyCanon?: Set<string>;
+};
+
+// One market data point per distinct product (canonical part number) on a
+// sell order. Price is the qty-weighted average of the line unit_price, which
+// is already USD (see migration 0065). Runs inside the caller's tx so it
+// commits with the write that triggered it or not at all.
+async function recordSellOrderDataPoints(
   tx: TransactionSql,
   sellOrderId: string,
   actorUserId: string,
+  opts: RecordOptions,
 ): Promise<{ recorded: number }> {
   const lines = await tx<LineRow[]>`
     SELECT part_number, unit_price::float AS unit_price, qty, category, label, sub_label
@@ -42,6 +49,7 @@ export async function recordSaleDataPoints(
     if (!raw) continue;
     const canon = canonPartNumberJs(raw);
     if (!canon) continue;
+    if (opts.onlyCanon && !opts.onlyCanon.has(canon)) continue;
     const g = byCanon.get(canon);
     if (g) {
       g.priceQty += l.unit_price * l.qty;
@@ -55,7 +63,7 @@ export async function recordSaleDataPoints(
   }
   if (byCanon.size === 0) return { recorded: 0 };
 
-  // Ensure a ref_prices row exists for every sold product.
+  // Ensure a ref_prices row exists for every product being recorded.
   const parts: TrackablePart[] = Array.from(byCanon.values()).map(g => ({
     category: g.category, partNumber: g.raw, label: g.label, subLabel: g.subLabel,
   }));
@@ -79,11 +87,43 @@ export async function recordSaleDataPoints(
     await appendPriceEvent(tx, {
       refPriceId,
       price,
-      source: `sale:${sellOrderId}`,
+      source: opts.source,
       note: null,
       actorUserId,
     });
     recorded++;
   }
   return { recorded };
+}
+
+// On sell-order completion: a completed sale is the most authoritative price
+// signal we have, so every sold product gets a data point. Runs inside the
+// caller's Done tx.
+export async function recordSaleDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+  actorUserId: string,
+): Promise<{ recorded: number }> {
+  return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
+    source: `sale:${sellOrderId}`,
+  });
+}
+
+// On a line save whose prices came from a confirmed vendor price import: the
+// customer's accepted quote is a market signal weeks before the deal closes.
+// `parts` are the products the manager confirmed in the preview — the order's
+// other lines keep whatever price they had and are not a bid. Runs inside the
+// save's tx, after the lines are rewritten, so it reads the saved USD values.
+export async function recordBidDataPoints(
+  tx: TransactionSql,
+  sellOrderId: string,
+  actorUserId: string,
+  parts: string[],
+): Promise<{ recorded: number }> {
+  const onlyCanon = new Set(parts.map(canonPartNumberJs).filter(Boolean));
+  if (onlyCanon.size === 0) return { recorded: 0 };
+  return recordSellOrderDataPoints(tx, sellOrderId, actorUserId, {
+    source: `bid:${sellOrderId}`,
+    onlyCanon,
+  });
 }

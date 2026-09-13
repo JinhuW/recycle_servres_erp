@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import ExcelJS from 'exceljs';
 import {
   parsePriceWorkbook,
@@ -7,7 +7,7 @@ import {
   type PriceImportPreview,
 } from '../src/services/sellOrderPriceImport';
 import app from '../src/index';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
@@ -446,5 +446,151 @@ describe('POST /api/sell-orders/:id/price-import/preview', () => {
 
     const missing = await multipart('/api/sell-orders/SO-nope/price-import/preview', { file }, { token: mgr.token });
     expect(missing.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/sell-orders/:id with bidParts — the save that follows a confirmed
+// import records the accepted prices on the Market board (ref_prices) as
+// `bid:<order>` data points, USD at the rate the lines were saved at.
+// ---------------------------------------------------------------------------
+
+type RefPriceRow = {
+  id: string; last_price: number | null; last_price_source: string | null;
+  samples: number; label: string;
+};
+
+async function refPrice(pn: string): Promise<RefPriceRow | undefined> {
+  const sql = getTestDb();
+  return (await sql<RefPriceRow[]>`
+    SELECT id, last_price::float AS last_price, last_price_source, samples, label
+    FROM ref_prices WHERE part_number = ${pn} LIMIT 1
+  `)[0];
+}
+
+async function eventsFor(refPriceId: string) {
+  const sql = getTestDb();
+  return sql<{ price: number; source: string }[]>`
+    SELECT price::float AS price, source FROM ref_price_events WHERE ref_price_id = ${refPriceId}
+  `;
+}
+
+const BID_LINES = [
+  { category: 'RAM', label: 'DIMM A', partNumber: 'BID-A1', qty: 2, unitPrice: 40, warehouseId: 'WH-LA1' },
+  { category: 'SSD', label: 'Drive B', partNumber: 'BID-B2', qty: 1, unitPrice: 90, warehouseId: 'WH-LA1' },
+];
+const repriced = (a: number, b: number) => [
+  { ...BID_LINES[0], unitPrice: a }, { ...BID_LINES[1], unitPrice: b },
+];
+
+describe('PATCH /api/sell-orders/:id with bidParts', () => {
+  beforeEach(async () => { await resetDb(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('records one bid data point per confirmed product, at the saved price', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: repriced(55, 120), bidParts: ['bid-a1', 'BID-B2'] },
+    });
+    expect(res.status).toBe(200);
+
+    const a = await refPrice('BID-A1');
+    expect(a).toMatchObject({ last_price: 55, last_price_source: `bid:${id}`, label: 'DIMM A', samples: 0 });
+    const b = await refPrice('BID-B2');
+    expect(b).toMatchObject({ last_price: 120, last_price_source: `bid:${id}` });
+    expect(await eventsFor(a!.id)).toEqual([{ price: 55, source: `bid:${id}` }]);
+    expect(await eventsFor(b!.id)).toEqual([{ price: 120, source: `bid:${id}` }]);
+
+    const detail = await api<{ order: { lines: { unitPrice: number }[] } }>(
+      'GET', `/api/sell-orders/${id}`, { token });
+    expect(detail.body.order.lines.map(l => l.unitPrice).sort((x, y) => x - y)).toEqual([55, 120]);
+  });
+
+  it('records only the products the manager confirmed', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: repriced(55, 120), bidParts: ['BID-A1'] },
+    });
+    expect(res.status).toBe(200);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(55);
+    expect(await refPrice('BID-B2')).toBeUndefined();
+  });
+
+  it('rolls the same part on two lines into one qty-weighted point', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: {
+        lines: [
+          { ...BID_LINES[0], qty: 2, unitPrice: 100 },
+          { ...BID_LINES[0], qty: 3, unitPrice: 50 },
+        ],
+        bidParts: ['BID-A1'],
+      },
+    });
+    expect(res.status).toBe(200);
+    const a = await refPrice('BID-A1');
+    // (2·100 + 3·50) / 5 = 70
+    expect(a?.last_price).toBe(70);
+    expect(await eventsFor(a!.id)).toHaveLength(1);
+  });
+
+  it('ignores a confirmed part that is not on the order', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: repriced(55, 120), bidParts: ['NOPE-9'] },
+    });
+    expect(res.status).toBe(200);
+    expect(await refPrice('NOPE-9')).toBeUndefined();
+    expect(await refPrice('BID-A1')).toBeUndefined();
+  });
+
+  it('stays silent on a plain price edit', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: repriced(55, 120) },
+    });
+    expect(res.status).toBe(200);
+    expect((await refPrice('BID-A1'))?.last_price ?? null).toBeNull();
+    expect((await refPrice('BID-B2'))?.last_price ?? null).toBeNull();
+  });
+
+  it('converts a CNY bid to USD at the rate the lines were saved at', async () => {
+    // 1 USD = 7.2 CNY, so ¥720 → $100 and ¥1,440 → $200 exactly.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ amount: 1, base: 'USD', date: '2026-09-12', rates: { CNY: 7.2 } }),
+      { status: 200 },
+    )));
+    const { token } = await loginAs(ALEX);
+    const cust = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token });
+    const create = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token, body: { customerId: cust.body.items[0].id, currency: 'CNY', lines: BID_LINES },
+    });
+    expect(create.status).toBe(201);
+    const res = await api('PATCH', `/api/sell-orders/${create.body.id}`, {
+      token, body: { lines: repriced(720, 1440), bidParts: ['BID-A1', 'BID-B2'] },
+    });
+    expect(res.status).toBe(200);
+    expect((await refPrice('BID-A1'))?.last_price).toBe(100);
+    expect((await refPrice('BID-B2'))?.last_price).toBe(200);
+  });
+
+  it('rejects bidParts without lines, and a non-array', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, BID_LINES);
+    const noLines = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { bidParts: ['BID-A1'] },
+    });
+    expect(noLines.status).toBe(400);
+    const notArray = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: repriced(55, 120), bidParts: 'BID-A1' },
+    });
+    expect(notArray.status).toBe(400);
+    expect(await refPrice('BID-A1')).toBeUndefined();
   });
 });

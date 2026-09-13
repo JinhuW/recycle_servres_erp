@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.3] - 2026-09-12
+
+### Fixed
+
+- **A vendor price import now updates the Market value board.**  The
+  bid-sheet round-trip on a sell order filled the edit form's prices and
+  stopped there; the Market value page learned a part's price only when the
+  order reached Done, because the completed sale was the one sell-order
+  event that wrote a data point.  A 135-line CNY deal can sit in Draft or
+  Awaiting payment for weeks, so the customer's accepted quote — the freshest
+  price signal the desk has — never reached the board while it mattered.
+  Saving an edit after a confirmed import now records each confirmed
+  product's saved price on the board as a `bid:<order>` data point, in USD
+  at the rate the lines were saved at, rolled up per part the same way the
+  sale data point is.  Plain price edits with no import stay silent, a
+  discarded import records nothing, and Done still writes its `sale:` point
+  when the deal closes.  (RS-043)
+
 ## [1.138.2] - 2026-09-12
 
 ### Fixed
