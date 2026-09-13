@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-047](./RS-047-3ds-and-dual-die-ram-ranks-are-missing-from-the-rank.md) | in-review | story | P3 | 3DS and dual-die RAM ranks are missing from the Rank dropdown | — |
 | [RS-046](./RS-046-group-with-popover-is-clipped-off-the-bottom-of-the.md) | done | bug | P2 | Group-with popover is clipped off the bottom of the Payments table | 1.138.6 |
 | [RS-045](./RS-045-draft-sell-order-blocks-a-po-s-move-back-to-reviewin.md) | done | bug | P2 | Draft sell order blocks a PO's move back to Reviewing | 1.138.5 |
 | [RS-044](./RS-044-dev-to-main-review-findings-before-the-prod-cut-v1-1.md) | done | bug | P2 | Dev-to-main review findings before the prod cut (v1.138) | 1.138.4 |
