@@ -17,6 +17,30 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.140.0] - 2026-09-13
+
+### Features
+
+- **Facebook tracker shows the fleet's accounts, coverage and search phrases.**
+  The `/fleet` page answered "is a worker alive?" and nothing else; it now
+  answers the question the operator actually asks — which Facebook account is
+  searching which cities for which phrases, and is it alive.  One row per
+  account with liveness, state, session days left, last search, heartbeat and
+  the alerts its cities produced this week — and who the account is: the
+  vault's Facebook login and the session's Facebook user id on the row,
+  expandable to the city list, vault account, stored secrets (names only),
+  browser identity, backup age, proxy env var, session file and pacing.  Beside it: the literal search-bar
+  phrases per item with their title gate and reject rules, the shared search
+  settings, and a coverage map of every centre lit by whichever worker is
+  searching it now.  A search box on the page head filters accounts, cities
+  and phrases at once.  The data is one document the rs-console facade
+  composes (`/v1/fleet`), forwarded by the existing manager-only
+  `/api/coordinator` proxy along with the alert-hit stats; the cards are the
+  React form of the standalone dashboard that facade serves, built on the same
+  tokens so the two stay in step.  Written as #282 on 2026-09-06 under
+  v1.129.0 and rebased here after that version was taken while it waited
+  ([RS-048](docs/tickets/RS-048-facebook-tracker-shows-the-fleet-s-accounts-coverage-and.md)).
+
 ## [1.139.0] - 2026-09-13
 
 ### Features
