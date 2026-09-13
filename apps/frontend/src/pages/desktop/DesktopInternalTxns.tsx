@@ -57,8 +57,8 @@ const SOURCE_LABEL: Record<Member['source'], string> = {
   paired: 'PayPal + Mercury',
 };
 
-// The sign carries meaning here (out of one account, into another), so it is
-// always explicit rather than fmtUSD's "$-5,000.00".
+// The sign carries meaning here (out of one account, into another), so a plus
+// is rendered too, where fmtUSD shows only a minus.
 function fmtSigned(n: number, locale: string): string {
   return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
 }

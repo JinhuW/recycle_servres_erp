@@ -508,6 +508,10 @@ bankTx.post('/:id/pair', async (c) => {
   const [b] = await groupOf(sql, body.otherId);
   if (!a || !b) return c.json({ error: 'Not found' }, 404);
   if (a.pair_id || b.pair_id) return c.json({ error: 'Already paired' }, 400);
+  // Pairing spreads the other leg's link onto this one; /link refuses ignored
+  // rows and /ignore refuses linked ones, so this is the one path to a row
+  // that is both — which the PO's paid figure would then count.
+  if (a.ignored || b.ignored) return c.json({ error: 'Unignore the transaction before grouping it' }, 400);
   if (a.source === b.source) return c.json({ error: 'A pair needs one Mercury and one PayPal leg' }, 400);
   // A pending leg is a real half of a payment; a failed or reversed one is a
   // record of money that never moved, or came back. Same rule autoPair and

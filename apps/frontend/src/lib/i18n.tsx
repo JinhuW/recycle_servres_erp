@@ -474,6 +474,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLinkOpen: "Open this PO's payments",
     payFocusOrder: 'Payments for {id}',
     payFocusClear: 'Show all payments',
+    payFocusNet: 'Net paid {amt}',
     // Internal transactions — the record that groups an internal movement's
     // bank rows and carries the note explaining it.
     payIntTitle: 'Internal transactions',

@@ -557,6 +557,13 @@ describe('bank transactions API', () => {
     const m2 = await idOf('m-2');
     const m3 = await idOf('m-3');
 
+    // An ignored leg is out of the queue; pairing it would carry the other
+    // leg's link onto it — the one path to a row both linked and ignored.
+    expect((await api('POST', `/api/bank-transactions/${m2}/ignore`, { token })).status).toBe(200);
+    expect((await api('POST', `/api/bank-transactions/${p}/pair`, { token, body: { otherId: m2 } })).status).toBe(400); // other leg ignored
+    expect((await api('POST', `/api/bank-transactions/${m2}/pair`, { token, body: { otherId: p } })).status).toBe(400); // own leg ignored
+    expect((await api('POST', `/api/bank-transactions/${m2}/unignore`, { token })).status).toBe(200);
+
     // Ambiguity kept these unpaired; a human resolves it.
     expect((await api('POST', `/api/bank-transactions/${m1}/pair`, { token, body: { otherId: m2 } })).status).toBe(400); // same source
     expect((await api('POST', `/api/bank-transactions/${p}/pair`, { token, body: { otherId: m3 } })).status).toBe(400); // amounts differ
