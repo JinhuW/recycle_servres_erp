@@ -58,6 +58,12 @@ function canonChipNumber(v: string | null | undefined): string | null {
   return v == null ? null : v.trim().toUpperCase();
 }
 
+// "sell order SO-4056" / "sell orders SO-4056, SO-4057" for a committed-line
+// refusal: the ids are what the manager needs to go and cancel.
+function describeSellOrders(ids: string[]): string {
+  return `sell order${ids.length === 1 ? '' : 's'} ${ids.join(', ')}`;
+}
+
 // Serial rules (shared with the frontend forms via @recycle-erp/shared):
 // DDR5 RAM must carry serials, and any entered serials must match qty.
 // Enforced here too so no client can write a violating line.
@@ -1403,6 +1409,7 @@ orders.patch('/:id', async (c) => {
   // can refresh the PO's payments ledger without a reload.
   let paymentsLinked = 0;
   let committedLineIds: string[] = [];
+  let blockingSellOrderIds: string[] = [];
 
   try {
     await sql.begin(async (tx) => {
@@ -1513,6 +1520,7 @@ orders.patch('/:id', async (c) => {
         const outcome = await revertOrderToDraftTx(tx, id, u, orderBefore.lifecycle);
         if (outcome.kind === 'committedLines') {
           committedLineIds = outcome.offendingLineIds;
+          blockingSellOrderIds = outcome.sellOrderIds;
           throw new Error('__REVERT_COMMITTED__');
         }
         if (outcome.kind === 'transferClaimed') {
@@ -1908,8 +1916,9 @@ orders.patch('/:id', async (c) => {
     }
     if (msg.includes('__REVERT_COMMITTED__')) {
       return c.json({
-        error: 'Lines in this order are committed to open sell orders. Cancel those sell orders before editing it.',
+        error: `Lines in this order are committed to ${describeSellOrders(blockingSellOrderIds)}. Cancel those sell orders before editing it.`,
         offendingLineIds: committedLineIds,
+        sellOrderIds: blockingSellOrderIds,
       }, 409);
     }
     if (msg.includes('__REVERT_TRANSFER__')) {
@@ -2521,8 +2530,9 @@ orders.post('/:id/advance', async (c) => {
   if (outcome.kind === 'finalStage') return c.json({ error: 'Already at the final stage' }, 409);
   if (outcome.kind === 'committedLines') {
     return c.json({
-      error: 'Lines committed to open sell orders — cancel those sell orders first.',
+      error: `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
       offendingLineIds: outcome.offendingLineIds,
+      sellOrderIds: outcome.sellOrderIds,
     }, 409);
   }
   if (outcome.kind === 'transferClaimed') {

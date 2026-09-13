@@ -28,3 +28,14 @@ export const OPEN_SELL_STATUSES = ['Draft', ...COMMITTED_SELL_STATUSES] as const
 export function openSellStatuses(): string[] {
   return [...OPEN_SELL_STATUSES];
 }
+
+// The line statuses a sell order may hold — what validateSellLines accepts.
+// Also the boundary at which a Draft stops caring about a PO stage move: a
+// cascade that lands lines inside this set leaves every draft promotable, so
+// only committed orders may refuse it; one that lands outside (Draft, In
+// Transit) would strand a draft at promotion, so there a Draft refuses too.
+export const SELLABLE_LINE_STATUSES = ['Reviewing', 'Done'] as const;
+
+export function isSellableLineStatus(status: string): boolean {
+  return (SELLABLE_LINE_STATUSES as readonly string[]).includes(status);
+}

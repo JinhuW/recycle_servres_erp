@@ -112,7 +112,9 @@ describe('Ready to Pay sits between Reviewing and Done', () => {
 describe('moves between Reviewing, Ready to Pay and Done', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('Ready to Pay ↔ Done both succeed while a Done line sits on an open sell order; back to Reviewing refuses', async () => {
+  // A Draft reserves nothing and is re-validated on promotion, which accepts
+  // Reviewing lines — so a draft naming a Done line must not stop the move.
+  it('a Draft sell order on a Done line blocks neither Ready to Pay ↔ Done nor the move back to Reviewing', async () => {
     const { id, alex } = await orderAt('ready_to_pay');
     const order = await getOrder(alex.token, id);
     const customerId = await firstCustomerId(alex.token);
@@ -126,8 +128,40 @@ describe('moves between Reviewing, Ready to Pay and Done', () => {
     expect((await advance(alex.token, id)).body.lifecycle).toBe('done');
     expect((await advance(alex.token, id, 'ready_to_pay')).body.lifecycle).toBe('ready_to_pay');
     const back = await advance(alex.token, id, 'reviewing');
+    expect(back.status).toBe(200);
+    expect(back.body.lifecycle).toBe('reviewing');
+    expect((await getOrder(alex.token, id)).lines[0].status).toBe('Reviewing');
+
+    // The draft is not stranded: it still promotes against the Reviewing line.
+    const promoted = await api<{ error?: string }>('POST', `/api/sell-orders/${so.body.id}/status`, {
+      token: alex.token, body: { to: 'Awaiting payment', note: 'a' },
+    });
+    expect(promoted.status).toBe(200);
+  });
+
+  it('Ready to Pay ↔ Done both succeed while a Done line sits on a committed sell order; back to Reviewing refuses and names it', async () => {
+    const { id, alex } = await orderAt('ready_to_pay');
+    const order = await getOrder(alex.token, id);
+    const customerId = await firstCustomerId(alex.token);
+    const so = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token: alex.token,
+      body: { customerId, lines: [{ inventoryId: order.lines[0].id, category: 'RAM', label: 'x',
+        partNumber: 'pn', qty: 1, unitPrice: 50 }] },
+    });
+    expect(so.status).toBe(201);
+    expect((await api('POST', `/api/sell-orders/${so.body.id}/status`, {
+      token: alex.token, body: { to: 'Awaiting payment', note: 'a' },
+    })).status).toBe(200);
+
+    expect((await advance(alex.token, id)).body.lifecycle).toBe('done');
+    expect((await advance(alex.token, id, 'ready_to_pay')).body.lifecycle).toBe('ready_to_pay');
+    const back = await api<{ error: string; sellOrderIds: string[] }>('POST', `/api/orders/${id}/advance`, {
+      token: alex.token, body: { toStage: 'reviewing' },
+    });
     expect(back.status).toBe(409);
     expect(back.body.error).toMatch(/committed/i);
+    expect(back.body.error).toContain(so.body.id);
+    expect(back.body.sellOrderIds).toEqual([so.body.id]);
     expect((await getOrder(alex.token, id)).lines[0].status).toBe('Done');
   });
 

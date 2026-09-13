@@ -12,7 +12,7 @@ import { notify, notifyManagers } from '../lib/notify';
 import { companyPayTxnMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
-import { openSellStatuses } from '../lib/sellCommitment';
+import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
 
 // Canonical lifecycle ordering. The workflow_stages table was removed; this
 // map's key order (draft → in_transit → reviewing → ready_to_pay → done) is
@@ -81,7 +81,7 @@ export type AdvanceOutcome =
   | { kind: 'badStage'; msg: string }
   | { kind: 'archived' }
   | { kind: 'finalStage' }
-  | { kind: 'committedLines'; offendingLineIds: string[] }
+  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'missingTxnId' }
   | { kind: 'ok'; nextStageId: string };
@@ -100,25 +100,29 @@ function statusesAheadOf(lineStatus: string): string[] {
   return i < 0 ? [] : LINE_STATUS_ORDER.slice(i + 1);
 }
 
-// Lines of this order that sit at one of `lineStatuses` and are claimed by an
-// open sell order. Moving them off that status leaves the sell order holding
-// inventory validateSellLines rejects, so both the backward advance and the
-// purchaser-edit revert refuse rather than strand it.
-async function committedLineIds(
+// Lines of this order that sit at one of `lineStatuses` and are claimed by a
+// sell order in one of `sellStatuses`, with the sell orders involved so the
+// refusal can name them — a bare list of line UUIDs sent a manager hunting
+// through Closed sell orders for a Draft they had made a minute earlier.
+async function committedLines(
   tx: SqlLike,
   orderId: string,
   lineStatuses: string[],
-): Promise<string[]> {
+  sellStatuses: string[],
+): Promise<{ lineIds: string[]; sellOrderIds: string[] }> {
   const rows = await tx`
-    SELECT DISTINCT ol.id
+    SELECT DISTINCT ol.id, so.id AS so_id
     FROM order_lines ol
     JOIN sell_order_lines sol ON sol.inventory_id = ol.id
     JOIN sell_orders so ON so.id = sol.sell_order_id
     WHERE ol.order_id = ${orderId}
       AND ol.status = ANY(${lineStatuses})
-      AND so.status = ANY(${openSellStatuses()}::text[])
-  ` as unknown as { id: string }[];
-  return rows.map(r => r.id);
+      AND so.status = ANY(${sellStatuses}::text[])
+  ` as unknown as { id: string; so_id: string }[];
+  return {
+    lineIds: [...new Set(rows.map(r => r.id))],
+    sellOrderIds: [...new Set(rows.map(r => r.so_id))].sort(),
+  };
 }
 
 // Lines this order has out on an open transfer order. Receive looks for them
@@ -139,15 +143,29 @@ async function transferClaimedLineIds(tx: SqlLike, orderId: string): Promise<str
 
 // Every guard a status cascade has to clear, for both the backward advance and
 // the purchaser-edit revert. Returns null when the cascade is safe.
+//
+// Which sell orders may refuse depends on where the lines land. A committed
+// order (Shipped, Awaiting payment) was raised against confirmed stock and
+// must never find it unconfirmed again, so it refuses any backward move. A
+// Draft reserves nothing and is re-validated on promotion, so it only refuses
+// a landing status that validation would reject (Draft, In Transit) — a move
+// back to Reviewing leaves it promotable and must not be stopped by it.
 async function cascadeBlockers(
   tx: SqlLike,
   orderId: string,
   newLineStatus: string,
-): Promise<{ kind: 'committedLines' | 'transferClaimed'; offendingLineIds: string[] } | null> {
+): Promise<
+  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
+  | { kind: 'transferClaimed'; offendingLineIds: string[] }
+  | null
+> {
   const movingBack = statusesAheadOf(newLineStatus);
   if (movingBack.length > 0) {
-    const committed = await committedLineIds(tx, orderId, movingBack);
-    if (committed.length > 0) return { kind: 'committedLines', offendingLineIds: committed };
+    const sellStatuses = isSellableLineStatus(newLineStatus) ? committedSellStatuses() : openSellStatuses();
+    const committed = await committedLines(tx, orderId, movingBack, sellStatuses);
+    if (committed.lineIds.length > 0) {
+      return { kind: 'committedLines', offendingLineIds: committed.lineIds, sellOrderIds: committed.sellOrderIds };
+    }
   }
   if (newLineStatus !== 'In Transit') {
     const claimed = await transferClaimedLineIds(tx, orderId);
@@ -192,7 +210,7 @@ async function cascadeLineStatusesTx(
 }
 
 export type RevertOutcome =
-  | { kind: 'committedLines'; offendingLineIds: string[] }
+  | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'ok'; from: string };
 

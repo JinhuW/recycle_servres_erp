@@ -229,10 +229,14 @@ describe('revert guards', () => {
     });
     expect(so.status).toBe(201);
 
-    const blocked = await api<{ error: string; offendingLineIds: string[] }>(
+    // The revert lands the line at Draft, which a sell order cannot hold —
+    // so even a Draft sell order blocks it, unlike a move back to Reviewing.
+    const blocked = await api<{ error: string; offendingLineIds: string[]; sellOrderIds: string[] }>(
       'PATCH', `/api/orders/${id}`, { token: pur, body: { lines: [{ id: lineId, qty: 6 }] } });
     expect(blocked.status).toBe(409);
     expect(blocked.body.offendingLineIds).toContain(lineId);
+    expect(blocked.body.sellOrderIds).toEqual([so.body.id]);
+    expect(blocked.body.error).toContain(so.body.id);
 
     // Nothing moved: the order is still Reviewing with its original qty.
     const after = await api<{ order: { lifecycle: string; lines: { qty: number }[] } }>(
@@ -315,21 +319,24 @@ describe('revert guards', () => {
     })).status).toBe(200);
 
     const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
-    expect((await api('POST', '/api/sell-orders', {
+    const so = await api<{ id: string }>('POST', '/api/sell-orders', {
       token: mgr,
       body: {
         customerId: customers.body.items[0].id,
         lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: 'pn', qty: 1, unitPrice: 90 }],
       },
-    })).status).toBe(201);
+    });
+    expect(so.status).toBe(201);
 
     // A sell order may claim a Reviewing line, so the backward guard has to
     // look at Reviewing as well as Done or it strands exactly that sell order.
-    const back = await api<{ offendingLineIds: string[] }>('POST', `/api/orders/${id}/advance`, {
+    // In Transit is not a sellable status, so a Draft blocks this move too.
+    const back = await api<{ offendingLineIds: string[]; sellOrderIds: string[] }>('POST', `/api/orders/${id}/advance`, {
       token: mgr, body: { toStage: 'in_transit' },
     });
     expect(back.status).toBe(409);
     expect(back.body.offendingLineIds).toContain(lineId);
+    expect(back.body.sellOrderIds).toEqual([so.body.id]);
   });
 
   it('treats a manager stage-jump out of Draft as a submission', async () => {
