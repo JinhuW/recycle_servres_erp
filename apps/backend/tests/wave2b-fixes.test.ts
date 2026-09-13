@@ -214,13 +214,46 @@ describe('Wave 2B backend fixes', () => {
 
   // ─── Fix 3: Backward-advance guard on committed inventory ─────────────────
 
-  it('Fix 3a — 409 with offendingLineIds when back-advance would break open sell orders', async () => {
+  it('Fix 3a — 409 with offendingLineIds and sellOrderIds when back-advance would break committed sell orders', async () => {
     const { token: mgr } = await loginAs(ALEX);
     const { token: pur } = await loginAs(MARCUS);
 
     const { orderId, lineId } = await makeDoneOrder(mgr, pur);
 
-    // Create a sell order referencing the Done line
+    // Create a sell order referencing the Done line and commit it
+    const customerId = await firstCustomerId(mgr);
+    const soRes = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token: mgr,
+      body: {
+        customerId,
+        lines: [{
+          inventoryId: lineId, category: 'RAM', label: 'x', partNumber: 'pn',
+          qty: 1, unitPrice: 80,
+        }],
+      },
+    });
+    expect(soRes.status).toBe(201);
+    expect((await api('POST', `/api/sell-orders/${soRes.body.id}/status`, {
+      token: mgr, body: { to: 'Awaiting payment', note: 'a' },
+    })).status).toBe(200);
+
+    // Try to back-advance from done → reviewing — should 409
+    const r = await api<{ error: string; offendingLineIds: string[]; sellOrderIds: string[] }>(
+      'POST', `/api/orders/${orderId}/advance`, {
+        token: mgr, body: { toStage: 'reviewing' },
+      });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/cancel those sell orders/i);
+    expect(r.body.offendingLineIds).toContain(lineId);
+    expect(r.body.sellOrderIds).toEqual([soRes.body.id]);
+  });
+
+  it('Fix 3a′ — a Draft sell order does not block done → reviewing (the line stays sellable)', async () => {
+    const { token: mgr } = await loginAs(ALEX);
+    const { token: pur } = await loginAs(MARCUS);
+
+    const { orderId, lineId } = await makeDoneOrder(mgr, pur);
+
     const customerId = await firstCustomerId(mgr);
     const soRes = await api<{ id: string }>('POST', '/api/sell-orders', {
       token: mgr,
@@ -234,14 +267,11 @@ describe('Wave 2B backend fixes', () => {
     });
     expect(soRes.status).toBe(201);
 
-    // Try to back-advance from done → reviewing — should 409
-    const r = await api<{ error: string; offendingLineIds: string[] }>(
-      'POST', `/api/orders/${orderId}/advance`, {
-        token: mgr, body: { toStage: 'reviewing' },
-      });
-    expect(r.status).toBe(409);
-    expect(r.body.error).toMatch(/cancel those sell orders/i);
-    expect(r.body.offendingLineIds).toContain(lineId);
+    const r = await api<{ lifecycle: string }>('POST', `/api/orders/${orderId}/advance`, {
+      token: mgr, body: { toStage: 'reviewing' },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.lifecycle).toBe('reviewing');
   });
 
   it('Fix 3b — forward advance is not blocked even with lines on sell orders', async () => {

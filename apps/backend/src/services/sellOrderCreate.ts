@@ -1,7 +1,7 @@
 import type postgres from 'postgres';
 import type { Sql } from 'postgres';
 import { nextHumanId } from '../lib/id-seq';
-import { committedSellStatuses } from '../lib/sellCommitment';
+import { committedSellStatuses, isSellableLineStatus } from '../lib/sellCommitment';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import {
   convertToUsd, getLatestRateToUsd, type SupportedCurrency,
@@ -43,7 +43,7 @@ export async function validateSellLines(
       WHERE l.id = ${inventoryId} LIMIT 1 FOR UPDATE OF l
     `)[0];
     if (!inv) return `inventory line ${inventoryId} not found`;
-    if (inv.status !== 'Reviewing' && inv.status !== 'Done')
+    if (!isSellableLineStatus(inv.status))
       return `inventory line not sellable (status=${inv.status})`;
     if (inv.archived_at !== null) return `inventory line's order is archived`;
     if (qty > inv.qty) return `qty ${qty} exceeds inventory available ${inv.qty}`;

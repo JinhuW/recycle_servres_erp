@@ -77,9 +77,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   focused on that PO. A PO nothing is linked to keeps the plain chip, and so
   does every purchaser, since the page it opens is manager-only.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
-  v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing; any move
-  that pulls lines off Done is refused while a line sits on an open sell
-  order.
+  v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. Since
+  v1.138.5 a move back to Reviewing is refused only while a line sits on a
+  Shipped or Awaiting-payment sell order — a Draft naming the line no longer
+  blocks it, since the draft still promotes against a Reviewing line. A move
+  to In Transit or Draft (including the purchaser-edit revert) is still
+  refused by a Draft. The refusal names the sell orders involved.
 - **Costs split into a goods total and other fees** (v1.43.0); a goods overflow
   can be moved into Other fees (v1.45.0). Fees amortize per line, which is what
   commission is calculated from. `orders.category` and `orders.total_cost` are
