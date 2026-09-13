@@ -168,7 +168,9 @@ function findHeaders(wb: ExcelJS.Workbook): HeaderHit[] {
   return hits;
 }
 
-const normCondition = (s: string | null) =>
+// Condition is free text on both the order and the sheet; the match ignores
+// case and whitespace the way the edit form's setPrice key does.
+export const normCondition = (s: string | null | undefined) =>
   (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 export type SellOrderLineRow = {

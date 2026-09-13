@@ -21,6 +21,21 @@ export type PriceApplyRow = {
 const normCondition = (s: string | null) =>
   (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+// What the save sends the backend as a confirmed bid: the products the sheet
+// priced, by (part, condition) — a null condition covers every line of the
+// part. Keyed the way applyPriceRows matches, so a second import of the same
+// product replaces rather than repeats it.
+export type BidPart = { partNumber: string; condition: string | null };
+
+export function mergeBidParts(current: BidPart[], rows: PriceApplyRow[]): BidPart[] {
+  const byKey = new Map<string, BidPart>();
+  for (const p of current) byKey.set(`${p.partNumber}|${normCondition(p.condition)}`, p);
+  for (const r of rows) {
+    byKey.set(`${r.canonPart}|${normCondition(r.condition)}`, { partNumber: r.canonPart, condition: r.condition });
+  }
+  return [...byKey.values()];
+}
+
 export function applyPriceRows<L extends PriceApplyLine>(
   lines: L[],
   rows: PriceApplyRow[],

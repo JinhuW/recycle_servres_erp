@@ -145,4 +145,52 @@ describe('GET /api/inventory/analysis and archived POs', () => {
     expect(ram(after.body)).toBe(ram(before.body) - 7);
     expect(after.body.subtypes.RAM?.units).toBe(ram(after.body));
   });
+
+  it('keeps the Sold lines of an archived PO — they are the sales record, not stock', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const created = await api<{ id: string }>('POST', '/api/orders', {
+      token: pur,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000002',
+        category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+        lines: [
+          { category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4', classification: 'RDIMM',
+            speed: '3200', partNumber: 'ANLYS-SOLD-PN', condition: 'Pulled — Tested', qty: 3, unitCost: 50, sellPrice: 80 },
+          { category: 'RAM', brand: 'Samsung', capacity: '16GB', type: 'DDR4', classification: 'RDIMM',
+            speed: '3200', partNumber: 'ANLYS-KEPT-PN', condition: 'Pulled — Tested', qty: 4, unitCost: 20, sellPrice: 40 },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: pur })).status).toBe(200);
+    expect((await api('POST', `/api/orders/${id}/advance`, { token: mgr, body: { toStage: 'reviewing' } })).status).toBe(200);
+    const lines = await api<{ order: { lines: { id: string; partNumber: string }[] } }>('GET', `/api/orders/${id}`, { token: mgr });
+    const soldLine = lines.body.order.lines.find(l => l.partNumber === 'ANLYS-SOLD-PN')!;
+
+    // Selling a line's last unit flips it to Sold with its qty kept.
+    const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
+    const so = await api<{ id: string }>('POST', '/api/sell-orders', {
+      token: mgr,
+      body: { customerId: customers.body.items[0].id,
+        lines: [{ inventoryId: soldLine.id, category: 'RAM', label: 'x', partNumber: 'ANLYS-SOLD-PN', qty: 3, unitPrice: 80 }] },
+    });
+    expect(so.status).toBe(201);
+    for (const to of ['Shipped', 'Awaiting payment', 'Done']) {
+      expect((await api('POST', `/api/sell-orders/${so.body.id}/status`, { token: mgr, body: { to, note: 'x' } })).status).toBe(200);
+    }
+    const sold = await api<{ item: { status: string } }>('GET', `/api/inventory/${soldLine.id}`, { token: mgr });
+    expect(sold.body.item.status).toBe('Sold');
+
+    const before = await api<Analysis>('GET', '/api/inventory/analysis', { token: mgr });
+    expect((await api('POST', `/api/orders/${id}/archive`, { token: mgr })).status).toBe(200);
+    const after = await api<Analysis>('GET', '/api/inventory/analysis', { token: mgr });
+
+    const soldUnits = (b: Analysis) => b.byStatus.find(r => r.status === 'Sold')?.units ?? 0;
+    expect(soldUnits(after.body)).toBe(soldUnits(before.body));
+    expect(after.body.totals.units).toBe(before.body.totals.units - 4);
+    expect(after.body.totals.lines).toBe(before.body.totals.lines - 1);
+    expect(after.body.byStatus.find(r => r.status === 'Archived')).toBeUndefined();
+  });
 });

@@ -116,11 +116,15 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   first; the removal is audited on the sell order and is not undone by
   unarchiving. That question, and the removal, are the manager's: a
   purchaser who owns the PO gets a plain refusal naming no sell orders
-  (v1.137.1). A line out on a pending transfer refuses the archive. An
+  (v1.137.1). A line out on a pending transfer refuses the archive; one that
+  was already out when the PO was archived (migration 0122's case) joins the
+  archive on receive or discard, with the audit row unarchive reads, rather
+  than landing at a stock status behind the flag (v1.138.4). An
   archived PO is frozen — edits, stage moves, delete and inventory line edits
   (Sold lines included) all refuse until it is unarchived — and both edit
   shells render it locked and say so. The Analysis tab leaves archived goods
-  out of every aggregate (v1.137.1).
+  out of every aggregate (v1.137.1), Sold lines excepted — they are the sales
+  record and keep counting (v1.138.4).
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -220,8 +224,8 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   (v1.51.2). Its header text is load-bearing for the import parser — don't
   move it. **Saving after a confirmed import records the accepted prices on
   the Market value board** as `bid:<order>` data points, USD at the saved
-  rate, one per confirmed part (v1.138.3); hand-typed price edits record
-  nothing.
+  rate, one per confirmed part (v1.138.3) from the lines in the condition the
+  sheet priced (v1.138.4); hand-typed price edits record nothing.
 - The price template splits into one worksheet per category with per-attribute
   spec columns and image URLs (v1.25.0, v1.27.0). **The RAM tab groups its rows
   with merged label columns left of `#`** — "Desktop & laptop" / "Server", then
@@ -317,7 +321,9 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - **A PO's payments have an address** (v1.138.0): `#/payments/po/<id>` opens
   the page pinned to that PO — a banner names it, the feed holds only its
   payment groups (an exact `orderId` filter, not the substring search), the
-  first is expanded, and the tiles and filter bar step aside. The manager's own
+  first is expanded, and the tiles and filter bar step aside. The banner also
+  says the net paid — the chip's figure — so the rows below, reversed legs
+  included, can be reconciled against it (v1.138.4). The manager's own
   filters are untouched; "Show all payments" hands the page back as it was.
   The PO list's Payment cell is what links here.
 - **Internal transactions** (v1.119.0) are records that group the bank rows of
@@ -398,8 +404,9 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
     is badged *Pending* while any leg is, the settlement filter agrees with the
     badge, and the expanded row says which leg. A pair whose leg later *fails*
     lets go of it on the next sync — no tombstone — so the retried pull can
-    take its place. Only failed and reversed legs never pair; transfer pairing
-    still wants both legs settled. The PO ledger reads the PayPal leg alone, so
+    take its place. Only failed and reversed legs never pair, and neither
+    does an ignored one (v1.138.4); transfer pairing still wants both legs
+    settled. The PO ledger reads the PayPal leg alone, so
     it says cleared while the pull is still pending.
   - **Failed and reversed are records, not tasks.** Out of the queue, out of
     every tile, no actions at all. Choosing one in the filter widens the tab to

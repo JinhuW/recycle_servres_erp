@@ -284,8 +284,8 @@ const SOURCE_LABEL: Record<PaymentRow['source'], string> = {
   paired: 'PayPal + Mercury',
 };
 
-// Signed money: the sign carries meaning here (out vs back in), so it is
-// always rendered explicitly instead of fmtUSD's "$-1,240.00".
+// Signed money: the sign carries meaning here (out vs back in), so a plus is
+// rendered too, where fmtUSD shows only a minus.
 function fmtSigned(n: number, locale: string): string {
   return (n < 0 ? '−' : '+') + fmtUSD(Math.abs(n), locale);
 }
@@ -332,8 +332,21 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   // payments and nothing else; the persisted filters are left as the manager
   // set them, so clearing the focus hands the page back exactly as it was.
   const { path } = useRoute();
-  const focusRaw = match('/payments/po/:id', path)?.id;
-  const focusOrder = focusRaw ? decodeURIComponent(focusRaw) : null;
+  const focusOrder = match('/payments/po/:id', path)?.id ?? null;
+  // What the PO list's chip showed — the ledger's net with failed and
+  // reversed legs left out — so the manager can reconcile it against the rows
+  // below, which list every linked leg, dead ones badged. by-order reports
+  // outgoing money negative; the chip and this banner show it as paid.
+  const [focusNet, setFocusNet] = useState<number | null>(null);
+  useEffect(() => {
+    setFocusNet(null);
+    if (!focusOrder) return;
+    let alive = true;
+    api.get<{ net: number }>(`/api/bank-transactions/by-order/${encodeURIComponent(focusOrder)}`)
+      .then(r => { if (alive) setFocusNet(-r.net); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [focusOrder]);
 
   const params = useCallback((cursor?: string) => {
     const p = new URLSearchParams();
@@ -386,7 +399,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
   // reload every mutation triggers.
   const expandedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusOrder || !feed || expandedFor.current === focusOrder) return;
+    // Leaving focus re-arms it, so coming back to the same PO expands again.
+    if (!focusOrder) { expandedFor.current = null; return; }
+    if (!feed || expandedFor.current === focusOrder) return;
     expandedFor.current = focusOrder;
     setOpenId(feed.rows[0]?.id ?? null);
   }, [focusOrder, feed]);
@@ -535,6 +550,11 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
         <div className="card" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
           <Icon name="cash" size={14} style={{ color: 'var(--fg-subtle)' }} />
           <span style={{ fontSize: 13, fontWeight: 600 }}>{t('payFocusOrder', { id: focusOrder })}</span>
+          {focusNet != null && (
+            <span className="mono" style={{ fontSize: 13, color: 'var(--fg-subtle)' }}>
+              {t('payFocusNet', { amt: fmtUSD(focusNet, locale) })}
+            </span>
+          )}
           <button
             type="button"
             className="btn sm ghost"

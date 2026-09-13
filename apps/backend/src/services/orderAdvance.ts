@@ -48,10 +48,17 @@ export function isClosedBook(lifecycle: string): boolean {
 }
 
 // An archived PO's goods are gone from the business, so its lines leave every
-// stock and sellable bucket the same way a sold lot does: by status. A filter
-// on orders.archived_at could not do this — the vendor catalog, bid submit and
-// bid availability never join `orders`. Never a lifecycle status: unarchive
-// puts each line back where it was.
+// stock and sellable bucket the same way a sold lot does: by status. Two
+// authorities, on purpose: the status is what the archive cascade writes and
+// unarchive restores, and every stock reader (inventory list and analysis,
+// sellable picker, vendor catalog, bid submit and availability) also joins
+// `orders` and requires `archived_at IS NULL`, because status alone is not
+// airtight — 0122 legitimately leaves a transfer-stranded line at In Transit
+// on an archived PO. The readers spell the join out rather than share a
+// fragment: each admits a different status set (Reviewing+Done, Done only,
+// everything but Archived, everything but Sold), and Sold lines are exempt
+// from the flag where they are the sales record. Never a lifecycle status:
+// unarchive puts each line back where it was.
 export const ARCHIVED_LINE_STATUS = 'Archived';
 
 // Stages whose entry belongs to the PO's warehouse manager. A move from an

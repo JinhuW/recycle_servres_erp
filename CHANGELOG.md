@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.138.4] - 2026-09-13
+
+### Fixed
+
+- **The dev-to-main review findings, before the prod cut.**  A `high`-effort
+  review of everything v1.138.0 – v1.138.3 would ship returned ten findings;
+  none had reached `main`, so they are fixed here first (RS-044, the way
+  RS-038 preceded the previous release).  A confirmed vendor price import now
+  records a bid per (part, condition) the way the sheet prices them — X/New
+  at $100 no longer blends with an untouched X/Used line into an $80 "bid"
+  the customer never quoted — and the editor forgets its pending bids the
+  moment the save lands, so a retry after a failed status step records
+  nothing twice.  The Analysis tab keeps counting the Sold lines of an
+  archived PO (they are the sales record, as the list already treated them).
+  A transfer received or discarded into an archived PO now joins the archive
+  with the audit row unarchive reads, instead of sitting at Done behind the
+  flag where no list showed it.  On the Payments page a PO's focus banner
+  says the net paid — the figure the PO list's chip showed — next to the rows
+  it is made of, reversed legs included; leaving focus re-arms the
+  auto-expand, and the PO id in the hash is decoded once.  Grouping a Mercury
+  leg with a PayPal one refuses an ignored leg, the one path that let a row be
+  both linked and ignored.  Negative money reads `-$120` everywhere instead of
+  `$-120`.  The `ARCHIVED_LINE_STATUS` comment now states the two-authority
+  rule (line status plus the order's archive flag) rather than denying the
+  join every reader makes.  Also carried: the launcher fix from RS-042 (#307)
+  shipped on 2026-09-12 without a version bump, since CI only gates `apps/`,
+  `packages/` and `deploy/`; this is its release.  [RS-044, RS-042]
+
 ## [1.138.3] - 2026-09-12
 
 ### Fixed

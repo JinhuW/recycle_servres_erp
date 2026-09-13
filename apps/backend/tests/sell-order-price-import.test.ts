@@ -482,6 +482,13 @@ const BID_LINES = [
 const repriced = (a: number, b: number) => [
   { ...BID_LINES[0], unitPrice: a }, { ...BID_LINES[1], unitPrice: b },
 ];
+// A confirmed product with no condition: the row covers every line of the part.
+const bid = (...parts: string[]) => parts.map(partNumber => ({ partNumber, condition: null }));
+// The same part in two conditions — the import prices each separately.
+const COND_LINES = [
+  { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 10, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'New' },
+  { category: 'RAM', label: 'DIMM C', partNumber: 'BID-C3', qty: 5, unitPrice: 40, warehouseId: 'WH-LA1', condition: 'Used' },
+];
 
 describe('PATCH /api/sell-orders/:id with bidParts', () => {
   beforeEach(async () => { await resetDb(); });
@@ -491,7 +498,7 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
     const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: ['bid-a1', 'BID-B2'] },
+      token, body: { lines: repriced(55, 120), bidParts: bid('bid-a1', 'BID-B2') },
     });
     expect(res.status).toBe(200);
 
@@ -511,7 +518,7 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
     const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: ['BID-A1'] },
+      token, body: { lines: repriced(55, 120), bidParts: bid('BID-A1') },
     });
     expect(res.status).toBe(200);
     expect((await refPrice('BID-A1'))?.last_price).toBe(55);
@@ -528,7 +535,7 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
           { ...BID_LINES[0], qty: 2, unitPrice: 100 },
           { ...BID_LINES[0], qty: 3, unitPrice: 50 },
         ],
-        bidParts: ['BID-A1'],
+        bidParts: bid('BID-A1'),
       },
     });
     expect(res.status).toBe(200);
@@ -538,11 +545,43 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     expect(await eventsFor(a!.id)).toHaveLength(1);
   });
 
+  it('records only the confirmed condition of a part sold in two conditions', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, COND_LINES);
+    // The sheet priced the New units at $100; the Used line keeps its $40.
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: {
+        lines: [{ ...COND_LINES[0], unitPrice: 100 }, COND_LINES[1]],
+        bidParts: [{ partNumber: 'bid-c3', condition: ' new ' }],
+      },
+    });
+    expect(res.status).toBe(200);
+    const c = await refPrice('BID-C3');
+    // Not the qty-weighted blend (10·100 + 5·40)/15 = 80: the vendor never quoted that.
+    expect(c?.last_price).toBe(100);
+    expect(await eventsFor(c!.id)).toEqual([{ price: 100, source: `bid:${id}` }]);
+  });
+
+  it('a null condition covers every line of the part', async () => {
+    const { token } = await loginAs(ALEX);
+    const id = await createOrder(token, COND_LINES);
+    const res = await api('PATCH', `/api/sell-orders/${id}`, {
+      token,
+      body: {
+        lines: [{ ...COND_LINES[0], unitPrice: 100 }, { ...COND_LINES[1], unitPrice: 40 }],
+        bidParts: bid('BID-C3'),
+      },
+    });
+    expect(res.status).toBe(200);
+    expect((await refPrice('BID-C3'))?.last_price).toBe(80);
+  });
+
   it('ignores a confirmed part that is not on the order', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
     const res = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { lines: repriced(55, 120), bidParts: ['NOPE-9'] },
+      token, body: { lines: repriced(55, 120), bidParts: bid('NOPE-9') },
     });
     expect(res.status).toBe(200);
     expect(await refPrice('NOPE-9')).toBeUndefined();
@@ -573,24 +612,28 @@ describe('PATCH /api/sell-orders/:id with bidParts', () => {
     });
     expect(create.status).toBe(201);
     const res = await api('PATCH', `/api/sell-orders/${create.body.id}`, {
-      token, body: { lines: repriced(720, 1440), bidParts: ['BID-A1', 'BID-B2'] },
+      token, body: { lines: repriced(720, 1440), bidParts: bid('BID-A1', 'BID-B2') },
     });
     expect(res.status).toBe(200);
     expect((await refPrice('BID-A1'))?.last_price).toBe(100);
     expect((await refPrice('BID-B2'))?.last_price).toBe(200);
   });
 
-  it('rejects bidParts without lines, and a non-array', async () => {
+  it('rejects bidParts without lines, a non-array, and bare strings', async () => {
     const { token } = await loginAs(ALEX);
     const id = await createOrder(token, BID_LINES);
     const noLines = await api('PATCH', `/api/sell-orders/${id}`, {
-      token, body: { bidParts: ['BID-A1'] },
+      token, body: { bidParts: bid('BID-A1') },
     });
     expect(noLines.status).toBe(400);
     const notArray = await api('PATCH', `/api/sell-orders/${id}`, {
       token, body: { lines: repriced(55, 120), bidParts: 'BID-A1' },
     });
     expect(notArray.status).toBe(400);
+    const bare = await api('PATCH', `/api/sell-orders/${id}`, {
+      token, body: { lines: repriced(55, 120), bidParts: ['BID-A1'] },
+    });
+    expect(bare.status).toBe(400);
     expect(await refPrice('BID-A1')).toBeUndefined();
   });
 });

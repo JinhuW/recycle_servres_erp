@@ -2051,6 +2051,7 @@ const zh: Record<string, string> = {
   payLinkOpen: '打开此采购单的付款记录',
   payFocusOrder: '{id} 的付款记录',
   payFocusClear: '显示全部付款',
+  payFocusNet: '净付款 {amt}',
   payIntTitle: '内部交易',
   payIntSub: '在自有账户之间流动的资金，归类并附上说明',
   payIntOpen: '内部交易',

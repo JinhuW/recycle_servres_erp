@@ -32,7 +32,7 @@ import {
   convertToUsd, getLatestRateToUsd, isSupportedCurrency,
   type SupportedCurrency, type FxLookup,
 } from '../lib/fx';
-import { recordSaleDataPoints, recordBidDataPoints } from '../lib/sellOrderMarket';
+import { recordSaleDataPoints, recordBidDataPoints, type BidPart } from '../lib/sellOrderMarket';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import type { Env, User } from '../types';
@@ -650,7 +650,7 @@ sellOrders.patch('/:id', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | { status?: string; notes?: string;
         customerId?: string; lines?: LineIn[]; currency?: string;
-        paymentReceivedBy?: string | null; bidParts?: string[] }
+        paymentReceivedBy?: string | null; bidParts?: BidPart[] }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
   // Status transitions are owned exclusively by POST /:id/status — that route
@@ -719,12 +719,19 @@ sellOrders.patch('/:id', async (c) => {
   }
 
   // A confirmed vendor price import names the products whose saved prices
-  // are the customer's bid. It only means something alongside the lines it
-  // prices, so it is refused on its own.
+  // are the customer's bid — a product being a (part, condition), since the
+  // sheet prices New and Used separately. It only means something alongside
+  // the lines it prices, so it is refused on its own.
   if (body.bidParts !== undefined) {
-    if (!Array.isArray(body.bidParts) || body.bidParts.length > 1000
-        || body.bidParts.some(p => typeof p !== 'string' || p.trim() === '' || p.length > 200)) {
-      return c.json({ error: 'bidParts must be an array of part numbers' }, 400);
+    const badPart = (p: unknown) => {
+      if (typeof p !== 'object' || p === null) return true;
+      const { partNumber, condition } = p as { partNumber?: unknown; condition?: unknown };
+      if (typeof partNumber !== 'string' || partNumber.trim() === '' || partNumber.length > 200) return true;
+      return !(condition === null || condition === undefined
+        || (typeof condition === 'string' && condition.length > 0 && condition.length <= 200));
+    };
+    if (!Array.isArray(body.bidParts) || body.bidParts.length > 1000 || body.bidParts.some(badPart)) {
+      return c.json({ error: 'bidParts must be an array of { partNumber, condition } objects' }, 400);
     }
     if (body.lines === undefined) {
       return c.json({ error: 'bidParts requires lines' }, 400);
