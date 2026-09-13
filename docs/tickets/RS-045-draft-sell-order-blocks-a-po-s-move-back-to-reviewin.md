@@ -2,13 +2,13 @@
 id: RS-045
 title: Draft sell order blocks a PO's move back to Reviewing
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-13
 reporter: Jinhu
 branch: session/20260913-001639
-pr:
-version:
+pr: 315
+version: 1.138.5
 related: []
 ---
 
