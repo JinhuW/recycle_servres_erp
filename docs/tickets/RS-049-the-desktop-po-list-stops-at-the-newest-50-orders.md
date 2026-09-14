@@ -2,12 +2,12 @@
 id: RS-049
 title: The desktop PO list stops at the newest 50 orders
 type: bug
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-14
 reporter: Jinhu
 branch: fix/po-table-pagination
-pr:
+pr: 324
 version: 1.140.1
 related: []
 ---
