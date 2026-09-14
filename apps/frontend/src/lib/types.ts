@@ -369,6 +369,10 @@ export type Notification = {
   time: string;
 };
 
+// The leaderboard's ranking metric, sent as `?lb=` — the server sorts because
+// a purchaser cannot see the peer figures it would take to sort locally.
+export type LeaderboardSort = 'cost' | 'commission';
+
 export type DashboardData = {
   role: Role;
   kpis: {
@@ -376,9 +380,12 @@ export type DashboardData = {
     prev: { revenue: number; profit: number };
   };
   weeks: { label: string; profit: number }[];
+  // Money fields are null on every row but the caller's own for a purchaser
+  // (PRD §6.8); a manager sees them all.
   leaderboard: {
-    id: string; name: string; initials: string; email: string; role: Role;
-    count: number; revenue: number; profit: number; commission: number;
+    id: string; name: string; initials: string; email: string | null; role: Role;
+    count: number;
+    cost: number | null; revenue: number | null; profit: number | null; commission: number | null;
   }[];
   byCat: Record<Category, { count: number; revenue: number; profit: number }>;
   recent: {

@@ -19,6 +19,13 @@ dashboard.get('/', async (c) => {
   const isManager = role === 'manager';
   const range = c.req.query('range') ?? '30d';
   const days = RANGE_DAYS[range] ?? 30;
+  // The leaderboard's ranking metric. It has to be chosen here, not in the
+  // client: a purchaser receives every peer row's money as null, so the SPA
+  // cannot re-sort. Column aliases only — the query value never reaches SQL.
+  const lbSort = c.req.query('lb') === 'commission' ? 'commission' : 'cost';
+  const lbOrder = lbSort === 'commission'
+    ? sql`commission DESC, cost DESC, u.name`
+    : sql`cost DESC, commission DESC, u.name`;
 
   // Two financial lenses, never mixed on one screen — keyed off effectiveRole:
   //  - Managers see REALIZED sales: revenue/profit/commission from
@@ -172,17 +179,29 @@ dashboard.get('/', async (c) => {
             LEFT JOIN order_lines ol ON ol.order_id = po.id
             GROUP BY s.week_start ORDER BY s.week_start
           `,
-      // Leaderboard — projected per purchaser (the PO owner), same lens as the
-      // purchaser dashboard: (sell_price - unit_cost) * qty over each purchaser's
-      // reviewed PO lines, windowed on the PO created_at. LEFT JOIN keeps
-      // purchasers with no such POs on the board with 0s.
+      // Leaderboard — per purchaser (the PO owner) over their reviewed POs,
+      // windowed on the PO created_at, ranked by what they bought (cost) or
+      // what it earned (commission). Two CTEs because the metrics live at
+      // different grains: cost is a PO-header figure — goods total plus
+      // other_fees, the same stack the PO pages call "Total cost" — and would
+      // be multiplied by the line count if summed through order_lines; the
+      // projected revenue/profit/commission are line-level, same lens as the
+      // purchaser dashboard. LEFT JOIN keeps purchasers with no such POs on
+      // the board with 0s.
       sql<{
         id: string; name: string; initials: string; email: string; role: string;
-        count: number; revenue: number; profit: number; commission: number;
+        count: number; cost: number; revenue: number; profit: number; commission: number;
       }[]>`
-        WITH per_user AS (
+        WITH per_order AS (
           SELECT po.user_id,
-                 COUNT(*)::int                                                                          AS count,
+                 COUNT(*)::int                                                                AS count,
+                 COALESCE(SUM(COALESCE(po.total_cost, fee.goods) + po.other_fees), 0)::float AS cost
+          FROM orders po
+          ${feeBasis}
+          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= NOW() - (${days} || ' days')::interval
+          GROUP BY po.user_id
+        ), per_line AS (
+          SELECT po.user_id,
                  COALESCE(SUM(ol.sell_price * ol.qty), 0)::float                AS revenue,
                  COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float     AS profit,
                  COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty
@@ -194,14 +213,16 @@ dashboard.get('/', async (c) => {
           GROUP BY po.user_id
         )
         SELECT u.id, u.name, u.initials, u.email, u.role,
-               COALESCE(pu.count,      0)::int   AS count,
-               COALESCE(pu.revenue,    0)::float AS revenue,
-               COALESCE(pu.profit,     0)::float AS profit,
-               COALESCE(pu.commission, 0)::float AS commission
+               COALESCE(po.count,      0)::int   AS count,
+               COALESCE(po.cost,       0)::float AS cost,
+               COALESCE(pl.revenue,    0)::float AS revenue,
+               COALESCE(pl.profit,     0)::float AS profit,
+               COALESCE(pl.commission, 0)::float AS commission
         FROM users u
-        LEFT JOIN per_user pu ON pu.user_id = u.id
+        LEFT JOIN per_order po ON po.user_id = u.id
+        LEFT JOIN per_line  pl ON pl.user_id = u.id
         WHERE u.role = 'purchaser'
-        ORDER BY profit DESC
+        ORDER BY ${lbOrder}
       `,
       // Per-category rollup — realized by sale-time snapshot (manager) or
       // projected from Done PO lines (purchaser).
@@ -259,6 +280,7 @@ dashboard.get('/', async (c) => {
       id: row.id, name: row.name, initials: row.initials,
       email: showFinancials ? row.email : null, role: row.role,
       count: row.count,
+      cost: showFinancials ? r2dp(row.cost) : null,
       revenue: showFinancials ? r2dp(row.revenue) : null,
       profit: showFinancials ? r2dp(row.profit) : null,
       commission: showFinancials ? r2dp(row.commission) : null,
