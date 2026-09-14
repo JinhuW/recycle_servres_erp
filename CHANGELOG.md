@@ -17,6 +17,36 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.142.0] - 2026-09-14
+
+### Added
+
+- **Leaving Draft is now a hand-off asked in one dialog** (RS-050). The
+  desktop stepper's In Transit step and the phone's advance button open
+  *Mark as In Transit*: receiving warehouse, the order's source, local pickup
+  (who collected it, from a member picker) or a pasted tracking number
+  (carrier recognised from the number), then who paid. Company card names a
+  method — PayPal keeps the transaction-ID rule and the optional screenshot
+  that reads the ID, Cash lifts it. Self-paid asks for neither, but must attach
+  the chat with the seller as a Submission attachment before the order can
+  leave Draft; the rule is enforced in the advance itself (stage-jumps and the
+  carrier poll included) and grandfathered by a cutoff stamped when the
+  release reaches each environment, like the transaction-ID rule. Confirming
+  writes the fields, creates the tracked package for a label already linked to
+  the PO, and advances, in one transaction — `POST /api/orders/:id/handoff`;
+  a refusal leaves nothing behind. Every changed field lands on the activity
+  log beside a *Handed off* entry. Migration 0126 adds `orders.source`,
+  `handoff_method`, `handoff_by` and a nullable `payment_method`.
+- `GET /api/members/names` — active members' ids and names, readable by every
+  role, for the collector picker. The full members list stays manager-only.
+
+### Changed
+
+- **The Shipping page is unlisted**: gone from the desktop sidebar and the phone
+  tab bar. It still answers at `#/shipping`, and the PO page's *Shipping labels*
+  button still reaches the prepaid-label wizard.
+- A PO minted from a delivered package inherits the package's source.
+
 ## [1.141.0] - 2026-09-14
 
 ### Features

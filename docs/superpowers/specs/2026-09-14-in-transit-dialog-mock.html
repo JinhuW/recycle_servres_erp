@@ -1,0 +1,973 @@
+<meta charset="utf-8">
+<title>In Transit Handoff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Tokens copied from apps/frontend/src/styles/tokens.css so the mock reads
+     as the ERP itself. The app has no dark theme; the dark block below exists
+     so the artifact stays legible on a dark viewer. */
+  :root {
+    --bg: oklch(0.99 0.003 100);
+    --bg-soft: oklch(0.975 0.004 100);
+    --bg-elev: #ffffff;
+    --border: oklch(0.92 0.005 240);
+    --border-strong: oklch(0.86 0.006 240);
+    --fg: oklch(0.22 0.012 250);
+    --fg-muted: oklch(0.48 0.012 250);
+    --fg-subtle: oklch(0.62 0.012 250);
+    --accent: oklch(0.62 0.13 165);
+    --accent-soft: oklch(0.95 0.04 165);
+    --accent-strong: oklch(0.52 0.14 165);
+    --neg: oklch(0.62 0.16 22);
+    --neg-soft: oklch(0.96 0.04 22);
+    --warn-soft: oklch(0.97 0.05 85);
+    --warn-strong: oklch(0.45 0.13 75);
+    --info-soft: oklch(0.96 0.035 250);
+    --backdrop: rgba(15, 23, 42, 0.42);
+    --shadow-modal: 0 24px 60px rgba(15,23,42,0.22);
+    --proto: oklch(0.55 0.12 300);
+    --proto-soft: oklch(0.96 0.03 300);
+    --ups: #b8860b; --fedex: #7b3fd4; --usps: #2f6fb5;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: oklch(0.17 0.01 250);
+      --bg-soft: oklch(0.21 0.01 250);
+      --bg-elev: oklch(0.24 0.01 250);
+      --border: oklch(0.32 0.01 250);
+      --border-strong: oklch(0.40 0.012 250);
+      --fg: oklch(0.95 0.005 250);
+      --fg-muted: oklch(0.76 0.01 250);
+      --fg-subtle: oklch(0.62 0.01 250);
+      --accent: oklch(0.70 0.12 165);
+      --accent-soft: oklch(0.30 0.05 165);
+      --accent-strong: oklch(0.80 0.12 165);
+      --neg: oklch(0.72 0.14 22);
+      --neg-soft: oklch(0.30 0.06 22);
+      --warn-soft: oklch(0.30 0.06 80);
+      --warn-strong: oklch(0.82 0.13 80);
+      --info-soft: oklch(0.30 0.05 250);
+      --backdrop: rgba(0, 0, 0, 0.6);
+      --shadow-modal: 0 24px 60px rgba(0,0,0,0.6);
+      --proto: oklch(0.78 0.10 300);
+      --proto-soft: oklch(0.28 0.05 300);
+      --ups: #e0b23a; --fedex: #b08cf0; --usps: #7fb0ea;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: oklch(0.17 0.01 250);
+    --bg-soft: oklch(0.21 0.01 250);
+    --bg-elev: oklch(0.24 0.01 250);
+    --border: oklch(0.32 0.01 250);
+    --border-strong: oklch(0.40 0.012 250);
+    --fg: oklch(0.95 0.005 250);
+    --fg-muted: oklch(0.76 0.01 250);
+    --fg-subtle: oklch(0.62 0.01 250);
+    --accent: oklch(0.70 0.12 165);
+    --accent-soft: oklch(0.30 0.05 165);
+    --accent-strong: oklch(0.80 0.12 165);
+    --neg: oklch(0.72 0.14 22);
+    --neg-soft: oklch(0.30 0.06 22);
+    --warn-soft: oklch(0.30 0.06 80);
+    --warn-strong: oklch(0.82 0.13 80);
+    --info-soft: oklch(0.30 0.05 250);
+    --backdrop: rgba(0, 0, 0, 0.6);
+    --shadow-modal: 0 24px 60px rgba(0,0,0,0.6);
+    --proto: oklch(0.78 0.10 300);
+    --proto-soft: oklch(0.28 0.05 300);
+    --ups: #e0b23a; --fedex: #b08cf0; --usps: #7fb0ea;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  /* Sections toggle via the hidden attribute; the display rules below must not win over it. */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    padding-block: 20px 60px;
+    padding-inline: 16px;
+    min-height: 100vh;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: 'tnum'; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── Prototype controls (not part of the app) ────────────────────────── */
+  .proto {
+    max-width: 1100px; margin: 0 auto 18px;
+    border: 1px dashed var(--proto);
+    border-radius: 10px;
+    background: var(--proto-soft);
+    padding: 10px 14px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+    font-size: 12.5px;
+  }
+  .proto-name { color: var(--proto); font-weight: 600; margin-right: 4px; }
+  .proto-group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .proto-group > span { color: var(--fg-muted); }
+  .proto .btn { padding: 4px 10px; font-size: 12px; }
+  .proto .btn.on { background: var(--proto); color: white; border-color: var(--proto); }
+
+  /* ── App chrome copied from tokens.css / desktop.css ─────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elev);
+    color: var(--fg);
+    font-size: 13px; font-weight: 500;
+    transition: background 0.12s, border-color 0.12s, transform 0.05s;
+  }
+  .btn:hover { background: var(--bg-soft); }
+  .btn:active { transform: translateY(1px); }
+  .btn.accent { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn.accent:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .input, .select {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background-color: var(--bg-elev);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13.5px;
+  }
+  .select {
+    appearance: none; -webkit-appearance: none;
+    padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%238b93a3' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+  .input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .input.mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  .input.ai-filled { background-color: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev)); border-color: var(--accent); }
+  .input:disabled { opacity: 0.6; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
+  .label .req { color: var(--neg); }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field-row.pay { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .hint { min-height: 18px; font-size: 12px; color: var(--fg-muted); }
+  .hint.warn { color: var(--warn-strong); }
+  .linkish { border: none; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; margin-left: 4px; }
+  .linkish:hover { color: var(--accent); }
+
+  /* The app's .seg, sized to its column here: each option takes an equal share
+     of the control, so a two-way switch reads as two halves, not a pill floating
+     in empty track. */
+  .seg {
+    display: flex;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px; gap: 2px;
+  }
+  .seg button {
+    flex: 1 1 0; min-width: 0;
+    border: none; background: transparent;
+    padding: 7px 10px; border-radius: 6px;
+    font-size: 12.5px; font-weight: 500;
+    color: var(--fg-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+  }
+  .seg button:hover { color: var(--fg); }
+  .seg button.active { background: var(--bg-elev); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 0 0 1px var(--border); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--border); background: var(--bg-soft); color: var(--fg-muted);
+    white-space: nowrap;
+  }
+  .chip.accent { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
+  .chip.info { background: var(--info-soft); color: var(--fg); border-color: transparent; }
+
+  /* ── Faux PO page behind the dialog ──────────────────────────────────── */
+  .page { max-width: 1100px; margin: 0 auto; display: grid; gap: 14px; }
+  .page > * { min-width: 0; }
+  .table-wrap { overflow-x: auto; }
+  .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .page-head h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .page-head .meta { color: var(--fg-muted); font-size: 13px; }
+  .card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; }
+  .card-title { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card-title .sub { margin-left: auto; font-weight: 400; color: var(--fg-subtle); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 16px; border-bottom: 1px solid var(--border); }
+  th { font-weight: 500; color: var(--fg-muted); font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  .stepper-wrap { padding: 12px 16px; }
+  .so-stepper { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; padding: 4px 0; overflow-x: auto; }
+  .so-step {
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elev);
+    color: var(--fg-subtle); font: inherit; white-space: nowrap;
+  }
+  .so-step:hover { border-color: var(--border-strong); color: var(--fg); }
+  .so-step.reached { color: var(--fg); }
+  .so-step.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); box-shadow: 0 0 0 3px var(--accent-soft); font-weight: 500; }
+  .so-step-dot { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--bg-soft); color: var(--fg-subtle); font-size: 10.5px; font-weight: 600; }
+  .so-step.reached .so-step-dot { background: var(--fg-muted); color: var(--bg-elev); }
+  .so-step.active .so-step-dot { background: var(--accent); color: white; }
+  .so-step-label { font-size: 12px; }
+  .so-step-bar { flex: 1 1 auto; min-width: 8px; height: 2px; background: var(--border); border-radius: 1px; }
+  .so-step-bar.reached { background: var(--fg-muted); }
+  .so-step.locked { opacity: 0.55; cursor: not-allowed; background: var(--bg-soft); }
+  .so-step.locked .so-step-dot { background: var(--bg-soft); color: var(--fg-subtle); border: 1px dashed var(--border-strong); }
+
+  /* ── Modal (desktop.css .modal-*) ────────────────────────────────────── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: var(--backdrop);
+    backdrop-filter: blur(2px);
+    z-index: 100;
+    display: grid; place-items: center;
+    padding: 30px 16px;
+    animation: bd-in 0.16s ease;
+  }
+  .modal-backdrop[hidden] { display: none; }
+  @keyframes bd-in { from { opacity: 0; } to { opacity: 1; } }
+  .modal-shell {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow-modal);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    width: 100%; max-width: 600px; max-height: 92vh;
+    animation: ms-in 0.18s ease;
+  }
+  @keyframes ms-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .modal-backdrop, .modal-shell { animation: none; } .tile, .carrier { transition: none; } }
+  .modal-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .modal-title { font-size: 16px; font-weight: 600; }
+  .modal-sub { font-size: 12.5px; color: var(--fg-subtle); margin-top: 2px; }
+  .modal-close { border: none; background: transparent; color: var(--fg-subtle); font-size: 18px; line-height: 1; padding: 4px 6px; border-radius: 6px; }
+  .modal-close:hover { background: var(--bg-soft); color: var(--fg); }
+  .modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+  .modal-foot { padding: 12px 20px; border-top: 1px solid var(--border); background: var(--bg-soft); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .modal-foot .actions { margin-left: auto; display: flex; gap: 8px; }
+
+  .sec { display: flex; flex-direction: column; gap: 10px; }
+  .sec + .sec { border-top: 1px solid var(--border); padding-top: 16px; }
+  .sec-title { font-size: 13px; font-weight: 600; }
+  .sec-title small { font-weight: 400; color: var(--fg-subtle); margin-left: 6px; font-size: 12px; }
+
+  /* The one bold element: the delivery tiles. */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .tile {
+    display: grid; grid-template-columns: 22px 1fr; gap: 4px 10px; align-items: start;
+    text-align: left; font: inherit; color: inherit;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 14px 14px 13px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  .tile:hover { border-color: var(--fg-subtle); }
+  .tile[aria-checked="true"] { border-color: var(--accent); background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev)); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .tile .radio { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-strong); margin-top: 2px; display: grid; place-items: center; background: var(--bg-elev); }
+  .tile[aria-checked="true"] .radio { border-color: var(--accent); }
+  .tile[aria-checked="true"] .radio::after { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .tile .t-name { font-size: 14px; font-weight: 600; }
+  .tile .t-desc { grid-column: 2; font-size: 12.5px; color: var(--fg-muted); line-height: 1.4; }
+  .tile .t-icon { grid-column: 1; grid-row: 1; }
+  .tile-fields { display: flex; flex-direction: column; gap: 10px; }
+
+  /* Carrier chips — compact strip so they don't compete with the tiles. */
+  .carriers { display: flex; gap: 8px; flex-wrap: wrap; }
+  .carrier {
+    --tile: var(--fg-subtle);
+    display: inline-flex; align-items: center; gap: 8px;
+    font: inherit; color: inherit;
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 5px 12px 5px 10px;
+    font-size: 12.5px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .carrier[data-carrier='UPS'] { --tile: var(--ups); }
+  .carrier[data-carrier='FedEx'] { --tile: var(--fedex); }
+  .carrier[data-carrier='USPS'] { --tile: var(--usps); }
+  .carrier.lit { border-color: color-mix(in srgb, var(--tile) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 14%, transparent); }
+  .carrier.selected { border-color: var(--tile); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 22%, transparent); }
+  .carrier.selected .c-name { color: var(--tile); }
+  .c-name { font-weight: 700; letter-spacing: 0.01em; }
+  .c-fmt { font-size: 10.5px; color: var(--fg-subtle); }
+  .c-check { color: var(--tile); display: none; }
+  .carrier.selected .c-check { display: inline; }
+
+  /* Screenshot dropzone (components/AttachmentDropzone compact) */
+  .drop {
+    border: 1.5px dashed var(--border-strong); border-radius: 10px;
+    padding: 11px 16px; text-align: center; background: var(--bg-soft);
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    cursor: pointer;
+  }
+  .drop:hover { border-color: var(--accent); }
+  .drop .d-main { font-size: 13px; }
+  .drop .d-main b { font-weight: 500; color: var(--accent-strong); }
+  .drop .d-hint { font-size: 11.5px; color: var(--fg-subtle); }
+  .shot { display: flex; align-items: flex-start; gap: 12px; }
+  .shot img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid var(--border-strong); object-fit: contain; background: var(--bg-soft); }
+  .shot .s-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+
+  .blockers { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--warn-strong); flex: 1 1 260px; }
+  .blockers div { display: flex; gap: 6px; align-items: flex-start; }
+  .blockers svg { flex-shrink: 0; margin-top: 2px; }
+
+  .pct { position: relative; }
+  .pct .input { padding-right: 30px; }
+  .pct::after { content: '%'; position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--fg-subtle); font-size: 13px; }
+
+  .toast-wrap { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 120; }
+  .toast { background: var(--fg); color: var(--bg-elev); padding: 10px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); display: flex; gap: 8px; align-items: center; }
+
+  @media (max-width: 560px) {
+    .tiles { grid-template-columns: 1fr; }
+    .field-row { grid-template-columns: 1fr; }
+    .modal-backdrop { padding: 12px; }
+    .modal-body { padding: 14px 16px; }
+    .modal-head, .modal-foot { padding-inline: 16px; }
+  }
+</style>
+
+<!-- Prototype controls: presets set state; every control in the dialog stays live. -->
+<div class="proto" role="region" aria-label="Prototype controls">
+  <span class="proto-name">Prototype controls</span>
+  <span class="proto-group"><span>Viewing as</span>
+    <button class="btn" id="role-manager" data-role="manager">Manager</button>
+    <button class="btn" id="role-purchaser" data-role="purchaser">Purchaser</button>
+  </span>
+  <span class="proto-group"><span>Preset</span>
+    <button class="btn" data-preset="pickup">Pickup</button>
+    <button class="btn" data-preset="label">Label</button>
+    <button class="btn" data-preset="blocked">Company + PayPal, no ID</button>
+    <button class="btn" data-preset="selfnochat">Self-paid, no chat screenshot</button>
+    <button class="btn" data-preset="cash">Cash</button>
+    <button class="btn" data-preset="shot">Screenshot attached</button>
+  </span>
+  <span class="proto-group">
+    <button class="btn" id="proto-reopen">Reopen dialog</button>
+  </span>
+</div>
+
+<!-- Faux PO edit page, enough to place the dialog in context -->
+<div class="page" aria-hidden="false">
+  <div class="page-head">
+    <h1 id="po-title">PO-1431</h1>
+    <span class="chip" id="po-chip">Draft</span>
+    <span class="meta">Mike R. (Facebook) · created Sep 12 · <span id="po-owner">Tim Wu</span></span>
+  </div>
+  <div class="card">
+    <div class="card-title">Lines <span class="sub">3 lines · 46 units · $1,279.00</span></div>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Part number</th><th>Spec</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead>
+      <tbody class="tabular">
+        <tr><td>1</td><td class="mono">M393A4K40DB3-CWE</td><td>32 GB DDR4-3200 2Rx4 RDIMM</td><td class="num">32</td><td class="num">$29.00</td><td class="num">$928.00</td></tr>
+        <tr><td>2</td><td class="mono">HMA84GR7CJR4N-XN</td><td>32 GB DDR4-3200 2Rx4 RDIMM</td><td class="num">12</td><td class="num">$27.50</td><td class="num">$330.00</td></tr>
+        <tr><td>3</td><td class="mono">MTA18ASF2G72PZ-3G2</td><td>16 GB DDR4-3200 1Rx8 RDIMM</td><td class="num">2</td><td class="num">$10.50</td><td class="num">$21.00</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Order status <span class="sub">Advance as the order progresses</span></div>
+    <div class="stepper-wrap">
+      <div class="so-stepper" id="stepper"></div>
+    </div>
+  </div>
+</div>
+
+<!-- The dialog -->
+<div class="modal-backdrop" id="backdrop">
+  <div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-sub" id="dialog">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="dlg-title">Mark as In Transit</div>
+        <div class="modal-sub" id="dlg-sub">How is it getting to the warehouse, and who paid?</div>
+      </div>
+      <button class="modal-close" id="btn-close" aria-label="Close">×</button>
+    </div>
+
+    <div class="modal-body">
+      <section class="sec">
+        <div class="field-row">
+          <div class="field">
+            <label class="label" for="f-warehouse">Receiving warehouse</label>
+            <select class="select" id="f-warehouse">
+              <option value="den-broom">Denver — Broomfield</option>
+              <option value="den-dt">Denver — Downtown</option>
+              <option value="de-fra">Frankfurt</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="f-source">Source <span class="req">*</span></label>
+            <select class="select" id="f-source">
+              <option value="" disabled>Where the order came from</option>
+              <option value="Facebook">Facebook</option>
+              <option value="Local">Local</option>
+              <option value="Reddit">Reddit</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-title">Delivery</div>
+        <div class="tiles" role="radiogroup" aria-label="Delivery" id="tiles">
+          <button class="tile" role="radio" aria-checked="false" data-delivery="pickup" id="tile-pickup">
+            <span class="radio" aria-hidden="true"></span>
+            <span class="t-name">Local pickup</span>
+            <span class="t-desc">Collected in person, or dropped off by the seller.</span>
+          </button>
+          <button class="tile" role="radio" aria-checked="false" data-delivery="label" id="tile-label">
+            <span class="radio" aria-hidden="true"></span>
+            <span class="t-name">Shipping label</span>
+            <span class="t-desc">The seller ships it — paste the tracking number.</span>
+          </button>
+        </div>
+
+        <div class="tile-fields" id="fields-pickup" hidden>
+          <div class="field">
+            <label class="label" for="f-pickedby">Picked up by</label>
+            <select class="select" id="f-pickedby">
+              <option>Tim Wu</option>
+              <option>Sara Lin</option>
+              <option>Jinhu Wang</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="tile-fields" id="fields-label" hidden>
+          <div class="field">
+            <label class="label" for="f-tracking">Tracking number <span class="req">*</span></label>
+            <input class="input mono" id="f-tracking" placeholder="1Z 999 AA1 01 2345 6784" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="carriers" role="radiogroup" aria-label="Carrier" id="carriers">
+            <button class="carrier" role="radio" aria-checked="false" data-carrier="UPS"><span class="c-name">UPS</span><span class="c-fmt mono">1Z…</span><span class="c-check" aria-hidden="true">✓</span></button>
+            <button class="carrier" role="radio" aria-checked="false" data-carrier="FedEx"><span class="c-name">FedEx</span><span class="c-fmt mono">12 or 15 digits</span><span class="c-check" aria-hidden="true">✓</span></button>
+            <button class="carrier" role="radio" aria-checked="false" data-carrier="USPS"><span class="c-name">USPS</span><span class="c-fmt mono">9…, 20–22 digits</span><span class="c-check" aria-hidden="true">✓</span></button>
+          </div>
+          <div class="hint" id="carrier-hint" aria-live="polite"> </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-title">Payment</div>
+        <div class="field-row pay">
+          <div class="field">
+            <span class="label" id="lbl-paidby">Paid by</span>
+            <div class="seg" role="radiogroup" aria-labelledby="lbl-paidby" id="seg-paidby">
+              <button role="radio" aria-checked="false" data-paidby="company">Company card</button>
+              <button role="radio" aria-checked="false" data-paidby="self">Self-paid (reimburse)</button>
+            </div>
+          </div>
+          <div class="field" id="field-method">
+            <span class="label" id="lbl-method">Method</span>
+            <div class="seg" role="radiogroup" aria-labelledby="lbl-method" id="seg-method">
+              <button role="radio" aria-checked="false" data-method="paypal">PayPal</button>
+              <button role="radio" aria-checked="false" data-method="cash">Cash</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tile-fields" id="fields-self" hidden>
+          <div class="field">
+            <span class="label">Chat history screenshot <span class="req">*</span></span>
+            <div class="drop" id="drop-chat" role="button" tabindex="0" aria-label="Choose the chat history screenshot">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color: var(--fg-subtle)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <div class="d-main">Drop the chat with the seller here, or <b>Choose file</b></div>
+              <div class="d-hint">Show what was agreed and what you paid — it is what your reimbursement is checked against.</div>
+            </div>
+            <div class="shot" id="chat-shot" hidden>
+              <img id="chat-shot-img" alt="Chat history screenshot">
+              <div class="s-side">
+                <div class="hint">Attached. Add more later from the order's attachments.</div>
+                <button class="btn ghost sm" id="btn-remove-chat">Remove screenshot</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tile-fields" id="fields-paypal" hidden>
+          <div class="field">
+            <label class="label" for="f-txn">PayPal transaction ID <span class="req" id="txn-req" hidden>*</span></label>
+            <input class="input mono" id="f-txn" placeholder="8XY12345AB678901C" autocomplete="off" spellcheck="false">
+            <div class="hint" id="txn-hint"></div>
+          </div>
+          <div class="field">
+            <span class="label">Payment screenshot <span style="color: var(--fg-subtle); font-weight: 400;">optional</span></span>
+            <div class="drop" id="drop" role="button" tabindex="0" aria-label="Choose the PayPal screenshot">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color: var(--fg-subtle)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <div class="d-main">Drop the PayPal screenshot here, or <b>Choose file</b></div>
+              <div class="d-hint">One image — PNG or JPG. The transaction ID is read for you.</div>
+            </div>
+            <div class="shot" id="shot" hidden>
+              <img id="shot-img" alt="PayPal payment screenshot">
+              <div class="s-side">
+                <div class="hint" id="shot-hint">Read the transaction ID from the screenshot — check it against the image.</div>
+                <button class="btn ghost sm" id="btn-remove-shot">Remove screenshot</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="hint" id="cash-hint" hidden>Nothing else to add.</div>
+      </section>
+
+      <section class="sec" id="sec-manager">
+        <div class="sec-title">Manager <small>only you see this</small></div>
+        <div class="field-row">
+          <div class="field">
+            <label class="label" for="f-purchaser">Purchaser</label>
+            <select class="select" id="f-purchaser">
+              <option>Tim Wu</option>
+              <option>Sara Lin</option>
+              <option>Jinhu Wang</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="f-commission">Commission rate</label>
+            <div class="pct"><input class="input tabular" id="f-commission" inputmode="decimal" value="10"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-foot">
+      <div class="blockers" id="blockers" aria-live="polite"></div>
+      <div class="actions">
+        <button class="btn" id="btn-cancel">Cancel</button>
+        <button class="btn accent" id="btn-confirm">Mark as In Transit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap" hidden><div class="toast" id="toast"></div></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Carrier rules, copied from packages/shared/src/carriers.ts ──────────
+  const CARRIERS = ['UPS', 'FedEx', 'USPS'];
+  const normalize = (s) => s.replace(/[-\s\u0000-\u001F\u007F\u200B-\u200F\u2060\uFEFF]+/g, "").toUpperCase();
+  const isValidTracking = (n) => /^[A-Z0-9]{8,30}$/.test(n);
+  function detectCarriers(n) {
+    if (/^1Z[A-Z0-9]{16}$/.test(n)) return ['UPS'];
+    if (/^[A-Z]{2}\d{9}US$/.test(n)) return ['USPS'];
+    if (/^\d{12}$/.test(n) || /^\d{15}$/.test(n)) return ['FedEx'];
+    if (/^\d{20,22}$/.test(n) && n.startsWith('9')) return n.startsWith('96') ? ['FedEx', 'USPS'] : ['USPS'];
+    return [];
+  }
+  const HINTS = {
+    auto: 'Carrier recognized from the number.',
+    pick: 'This shape fits more than one carrier — pick the right one.',
+    unknown: 'Number shape not recognized — pick the carrier yourself.',
+    invalid: 'Not a tracking number — letters and digits only, up to 30 characters.',
+  };
+
+  // Sample "PayPal receipt" for the screenshot preset — an inline SVG so the
+  // mock ships as one file.
+  const SAMPLE_TXN = '8XY12345AB678901C';
+  const SAMPLE_SHOT = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="320" viewBox="0 0 440 320">
+      <rect width="440" height="320" fill="#f5f7fa"/>
+      <rect x="0" y="0" width="440" height="56" fill="#003087"/>
+      <text x="24" y="36" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700" fill="#fff">PayPal</text>
+      <text x="24" y="96" font-family="Inter, Arial, sans-serif" font-size="14" fill="#5a6270">You sent</text>
+      <text x="24" y="136" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700" fill="#1a1f2b">$1,279.00 USD</text>
+      <text x="24" y="166" font-family="Inter, Arial, sans-serif" font-size="14" fill="#5a6270">to Mike Reyes</text>
+      <line x1="24" y1="196" x2="416" y2="196" stroke="#dde2ea"/>
+      <text x="24" y="226" font-family="Inter, Arial, sans-serif" font-size="12" fill="#5a6270">Transaction ID</text>
+      <text x="24" y="250" font-family="JetBrains Mono, Menlo, monospace" font-size="15" fill="#1a1f2b">${SAMPLE_TXN}</text>
+      <text x="24" y="286" font-family="Inter, Arial, sans-serif" font-size="12" fill="#5a6270">Sep 12, 2026 · Friends and family</text>
+    </svg>`);
+
+  const SAMPLE_CHAT = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="330" viewBox="0 0 360 330">
+      <rect width="360" height="330" fill="#ffffff"/>
+      <rect x="0" y="0" width="360" height="48" fill="#f0f2f5"/>
+      <circle cx="28" cy="24" r="14" fill="#c9ced6"/>
+      <text x="50" y="29" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600" fill="#1c1e21">Mike R.</text>
+      <rect x="14" y="66" width="230" height="44" rx="16" fill="#e4e6eb"/>
+      <text x="26" y="84" font-family="Inter, Arial, sans-serif" font-size="12" fill="#1c1e21">46 sticks DDR4-3200 like we said,</text>
+      <text x="26" y="100" font-family="Inter, Arial, sans-serif" font-size="12" fill="#1c1e21">$1,279 for the lot?</text>
+      <rect x="150" y="122" width="196" height="44" rx="16" fill="#0084ff"/>
+      <text x="162" y="140" font-family="Inter, Arial, sans-serif" font-size="12" fill="#ffffff">Deal. Sending $1,279 on PayPal</text>
+      <text x="162" y="156" font-family="Inter, Arial, sans-serif" font-size="12" fill="#ffffff">now, pickup Saturday 10am.</text>
+      <rect x="14" y="178" width="150" height="28" rx="14" fill="#e4e6eb"/>
+      <text x="26" y="196" font-family="Inter, Arial, sans-serif" font-size="12" fill="#1c1e21">Got it, thanks! 👍</text>
+      <rect x="196" y="218" width="150" height="28" rx="14" fill="#0084ff"/>
+      <text x="208" y="236" font-family="Inter, Arial, sans-serif" font-size="12" fill="#ffffff">See you Saturday.</text>
+      <text x="14" y="300" font-family="Inter, Arial, sans-serif" font-size="11" fill="#65676b">Sep 12, 2026 · Messenger</text>
+    </svg>`);
+
+  // ── State ───────────────────────────────────────────────────────────────
+  const USERS = { manager: 'Jinhu Wang', purchaser: 'Tim Wu' };
+  const state = {
+    role: 'manager',
+    open: true,
+    stage: 'Draft',
+    warehouse: 'den-broom',
+    delivery: null,          // 'pickup' | 'label'
+    pickedBy: '',
+    tracking: '',
+    carrierPick: null,
+    paidBy: 'self',          // 'company' | 'self'
+    method: 'paypal',        // 'paypal' | 'cash'
+    txn: '',
+    txnFromShot: false,
+    shot: false,
+    chatShot: false,         // self-paid: the chat with the seller, required
+    source: 'Facebook',      // Facebook | Local | Reddit | Other — on the order, and what a new package inherits
+    purchaser: 'Tim Wu',
+    commission: '10',
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    backdrop: $('backdrop'), dialog: $('dialog'),
+    warehouse: $('f-warehouse'), source: $('f-source'), tiles: $('tiles'),
+    fieldsPickup: $('fields-pickup'), pickedBy: $('f-pickedby'),
+    fieldsLabel: $('fields-label'), tracking: $('f-tracking'), carriers: $('carriers'), carrierHint: $('carrier-hint'),
+    segPaidBy: $('seg-paidby'), segMethod: $('seg-method'),
+    fieldsSelf: $('fields-self'), dropChat: $('drop-chat'), chatShot: $('chat-shot'), chatShotImg: $('chat-shot-img'), removeChat: $('btn-remove-chat'),
+    fieldMethod: $('field-method'), fieldsPaypal: $('fields-paypal'), txn: $('f-txn'), txnReq: $('txn-req'), txnHint: $('txn-hint'),
+    drop: $('drop'), shot: $('shot'), shotImg: $('shot-img'), shotHint: $('shot-hint'), removeShot: $('btn-remove-shot'),
+    cashHint: $('cash-hint'),
+    secManager: $('sec-manager'), purchaser: $('f-purchaser'), commission: $('f-commission'),
+    blockers: $('blockers'), confirm: $('btn-confirm'), cancel: $('btn-cancel'), close: $('btn-close'),
+    stepper: $('stepper'), poChip: $('po-chip'), poOwner: $('po-owner'),
+    toastWrap: $('toast-wrap'), toast: $('toast'),
+  };
+
+  // ── Derived ─────────────────────────────────────────────────────────────
+  function trackingInfo() {
+    const norm = normalize(state.tracking);
+    const valid = isValidTracking(norm);
+    const detected = valid ? detectCarriers(norm) : [];
+    const invalidShape = norm.length >= 8 && !valid;
+    const unknownShape = norm.length >= 10 && valid && detected.length === 0;
+    let hint = ' ';
+    if (invalidShape) hint = HINTS.invalid;
+    else if (detected.length === 1 && !state.carrierPick) hint = HINTS.auto;
+    else if (detected.length > 1) hint = HINTS.pick;
+    else if (unknownShape) hint = HINTS.unknown;
+    const carrier = state.carrierPick ?? (detected.length === 1 ? detected[0] : null);
+    return { norm, valid, detected, hint, carrier };
+  }
+
+  function blockers() {
+    const out = [];
+    if (!state.source) out.push('Pick where the order came from.');
+    if (state.delivery === null) out.push('Choose how the order is getting here — local pickup or a shipping label.');
+    if (state.delivery === 'label') {
+      const t = trackingInfo();
+      if (!t.valid) out.push('Paste the tracking number before marking this order as In Transit.');
+      else if (!t.carrier) out.push('Pick the carrier for this tracking number.');
+    }
+    if (state.paidBy === 'self' && !state.chatShot) {
+      out.push('Attach the chat history with the seller — a self-paid order is reimbursed against it.');
+    }
+    if (state.paidBy === 'company' && state.method === 'paypal' && !state.txn.trim()) {
+      out.push('This PO was paid by the company — add the payment transaction ID before submitting it.');
+    }
+    return out;
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────
+  const WARN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+  function render() {
+    // prototype strip
+    document.querySelectorAll('[data-role]').forEach((b) => b.classList.toggle('on', b.dataset.role === state.role));
+
+    // page
+    el.poChip.textContent = state.stage;
+    el.poChip.className = 'chip' + (state.stage === 'In Transit' ? ' accent' : '');
+    el.poOwner.textContent = state.purchaser;
+    renderStepper();
+
+    // dialog visibility
+    el.backdrop.hidden = !state.open;
+
+    el.warehouse.value = state.warehouse;
+    el.source.value = state.source;
+
+    // delivery tiles
+    el.tiles.querySelectorAll('.tile').forEach((t) => {
+      const on = t.dataset.delivery === state.delivery;
+      t.setAttribute('aria-checked', on ? 'true' : 'false');
+      t.tabIndex = (state.delivery === null ? t.dataset.delivery === 'pickup' : on) ? 0 : -1;
+    });
+    el.fieldsPickup.hidden = state.delivery !== 'pickup';
+    el.fieldsLabel.hidden = state.delivery !== 'label';
+    el.pickedBy.value = state.pickedBy;
+    if (document.activeElement !== el.tracking) el.tracking.value = state.tracking;
+
+    const t = trackingInfo();
+    el.carriers.querySelectorAll('.carrier').forEach((c) => {
+      const name = c.dataset.carrier;
+      c.classList.toggle('lit', t.detected.includes(name));
+      const sel = t.carrier === name;
+      c.classList.toggle('selected', sel);
+      c.setAttribute('aria-checked', sel ? 'true' : 'false');
+    });
+    el.carrierHint.textContent = t.hint;
+
+    // payment
+    el.segPaidBy.querySelectorAll('button').forEach((b) => {
+      const on = b.dataset.paidby === state.paidBy;
+      b.classList.toggle('active', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    el.segMethod.querySelectorAll('button').forEach((b) => {
+      const on = b.dataset.method === state.method;
+      b.classList.toggle('active', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    // Method belongs to the company card. A self-paid order is reimbursed from
+    // commission against the chat with the seller, so it asks for neither a
+    // method nor a transaction ID.
+    const self = state.paidBy === 'self';
+    const paypal = !self && state.method === 'paypal';
+    el.fieldMethod.hidden = self;
+    el.fieldsSelf.hidden = !self;
+    el.dropChat.hidden = state.chatShot;
+    el.chatShot.hidden = !state.chatShot;
+    if (state.chatShot) el.chatShotImg.src = SAMPLE_CHAT;
+    el.fieldsPaypal.hidden = !paypal;
+    el.cashHint.hidden = !(!self && state.method === 'cash');
+    el.cashHint.textContent = 'Paid in cash — nothing else to add.';
+    el.txnReq.hidden = false;
+    el.txnHint.textContent = 'Required — it is how the bank payment finds this order.';
+    if (document.activeElement !== el.txn) el.txn.value = state.txn;
+    el.txn.classList.toggle('ai-filled', state.txnFromShot && state.txn === SAMPLE_TXN);
+    el.drop.hidden = state.shot;
+    el.shot.hidden = !state.shot;
+    if (state.shot) el.shotImg.src = SAMPLE_SHOT;
+
+    // manager group
+    el.secManager.hidden = state.role !== 'manager';
+    el.purchaser.value = state.purchaser;
+    if (document.activeElement !== el.commission) el.commission.value = state.commission;
+
+    // footer
+    const b = blockers();
+    el.blockers.innerHTML = b.map((m) => `<div>${WARN_ICON}<span>${m}</span></div>`).join('');
+    el.confirm.disabled = b.length > 0;
+  }
+
+  const STAGES = ['Draft', 'In Transit', 'Reviewing', 'Ready to Pay', 'Done'];
+  function renderStepper() {
+    const cur = STAGES.indexOf(state.stage);
+    const purchaser = state.role === 'purchaser';
+    el.stepper.innerHTML = STAGES.map((s, i) => {
+      const reached = i <= cur;
+      const active = i === cur;
+      const locked = purchaser && i > 1;
+      const cls = 'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '') + (locked ? ' locked' : '');
+      const dot = locked ? '🔒' : String(i + 1);
+      const btn = `<button type="button" class="${cls}" data-stage="${s}" ${locked ? 'disabled' : ''} title="${locked ? 'Manager-only — purchasers can only hand off Draft → In Transit' : 'Set status to ' + s}"><span class="so-step-dot">${dot}</span><span class="so-step-label">${s}</span></button>`;
+      const bar = i < STAGES.length - 1 ? `<span class="so-step-bar${i < cur ? ' reached' : ''}"></span>` : '';
+      return btn + bar;
+    }).join('');
+  }
+
+  // ── Presets ─────────────────────────────────────────────────────────────
+  function base() {
+    return {
+      open: true, stage: 'Draft', warehouse: 'den-broom',
+      delivery: null, pickedBy: USERS[state.role], tracking: '', carrierPick: null,
+      paidBy: 'self', method: 'paypal', txn: '', txnFromShot: false, shot: false, chatShot: false, source: 'Facebook',
+      purchaser: 'Tim Wu', commission: '10',
+    };
+  }
+  const PRESETS = {
+    pickup:  () => ({ delivery: 'pickup', paidBy: 'self', method: 'paypal', chatShot: true }),
+    selfnochat: () => ({ delivery: 'pickup', paidBy: 'self', method: 'paypal', chatShot: false }),
+    label:   () => ({ delivery: 'label', tracking: '1Z 999 AA1 01 2345 6784', paidBy: 'company', method: 'paypal', txn: '8XY12345AB678901C' }),
+    blocked: () => ({ delivery: 'pickup', paidBy: 'company', method: 'paypal', txn: '' }),
+    cash:    () => ({ delivery: 'pickup', paidBy: 'self', method: 'cash', chatShot: true }),
+    shot:    () => ({ delivery: 'label', tracking: '9405 5036 9930 0104 5673 12', paidBy: 'company', method: 'paypal', shot: true, txn: SAMPLE_TXN, txnFromShot: true }),
+  };
+  function applyPreset(name) {
+    Object.assign(state, base(), PRESETS[name]());
+    render();
+    focusFirst();
+  }
+
+  // ── Dialog open / close / confirm ───────────────────────────────────────
+  let lastFocus = null;
+  function openDialog() {
+    lastFocus = document.activeElement;
+    state.open = true;
+    render();
+    focusFirst();
+  }
+  function focusFirst() {
+    const first = state.delivery ? el.tiles.querySelector(`[data-delivery="${state.delivery}"]`) : el.tiles.querySelector('.tile');
+    if (first) first.focus({ preventScroll: true });
+    document.querySelector('.modal-body').scrollTop = 0;
+  }
+  function closeDialog() {
+    state.open = false;
+    render();
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  function confirm() {
+    if (blockers().length) return;
+    state.stage = 'In Transit';
+    state.open = false;
+    render();
+    toast('PO-1431 is In Transit');
+  }
+  let toastTimer = null;
+  function toast(msg) {
+    el.toast.textContent = msg;
+    el.toastWrap.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.toastWrap.hidden = true; }, 3200);
+  }
+
+  // ── Wiring ──────────────────────────────────────────────────────────────
+  document.querySelectorAll('[data-role]').forEach((b) => b.addEventListener('click', () => {
+    state.role = b.dataset.role;
+    if (!state.pickedBy || Object.values(USERS).includes(state.pickedBy)) state.pickedBy = USERS[state.role];
+    render();
+  }));
+  document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+  $('proto-reopen').addEventListener('click', () => { state.stage = 'Draft'; openDialog(); });
+
+  el.stepper.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-stage]');
+    if (!btn || btn.disabled) return;
+    if (btn.dataset.stage === 'In Transit' && state.stage === 'Draft') openDialog();
+    else if (state.role === 'manager') { state.stage = btn.dataset.stage; render(); }
+  });
+
+  el.warehouse.addEventListener('change', () => { state.warehouse = el.warehouse.value; render(); });
+
+  // Delivery tiles: radio semantics with arrow keys.
+  el.tiles.addEventListener('click', (e) => {
+    const t = e.target.closest('.tile'); if (!t) return;
+    state.delivery = t.dataset.delivery;
+    if (state.delivery === 'pickup' && !state.pickedBy) state.pickedBy = USERS[state.role];
+    render();
+    t.focus();
+  });
+  el.tiles.addEventListener('keydown', (e) => {
+    const order = ['pickup', 'label'];
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Enter'].includes(e.key)) return;
+    e.preventDefault();
+    const cur = state.delivery ?? 'pickup';
+    let next = cur;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = order[(order.indexOf(cur) + 1) % 2];
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = order[(order.indexOf(cur) + 1) % 2];
+    state.delivery = next;
+    if (next === 'pickup' && !state.pickedBy) state.pickedBy = USERS[state.role];
+    render();
+    el.tiles.querySelector(`[data-delivery="${next}"]`).focus();
+  });
+
+  el.pickedBy.addEventListener('change', () => { state.pickedBy = el.pickedBy.value; });
+  el.source.addEventListener('change', () => { state.source = el.source.value; render(); });
+  el.tracking.addEventListener('input', () => {
+    state.tracking = el.tracking.value;
+    state.carrierPick = null;   // a new paste clears the manual pick, as in the app
+    render();
+  });
+  el.carriers.addEventListener('click', (e) => {
+    const c = e.target.closest('.carrier'); if (!c) return;
+    state.carrierPick = c.dataset.carrier;
+    render();
+    c.focus();
+  });
+
+  el.segPaidBy.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    state.paidBy = b.dataset.paidby; render();
+  });
+  el.segMethod.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    state.method = b.dataset.method; render();
+  });
+  el.txn.addEventListener('input', () => { state.txn = el.txn.value; state.txnFromShot = false; render(); });
+
+  // "Choose file" in the mock attaches the bundled sample and reads its ID.
+  function attachShot() {
+    state.shot = true;
+    state.txn = SAMPLE_TXN;
+    state.txnFromShot = true;
+    render();
+    el.txn.focus();
+  }
+  el.drop.addEventListener('click', attachShot);
+  el.drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); attachShot(); } });
+  el.drop.addEventListener('dragover', (e) => { e.preventDefault(); el.drop.style.borderColor = 'var(--accent)'; });
+  el.drop.addEventListener('dragleave', () => { el.drop.style.borderColor = ''; });
+  el.drop.addEventListener('drop', (e) => { e.preventDefault(); el.drop.style.borderColor = ''; attachShot(); });
+  el.removeShot.addEventListener('click', () => {
+    state.shot = false;
+    if (state.txnFromShot) { state.txn = ''; state.txnFromShot = false; }
+    render();
+    el.drop.focus();
+  });
+
+  function attachChat() { state.chatShot = true; render(); el.removeChat.focus(); }
+  el.dropChat.addEventListener('click', attachChat);
+  el.dropChat.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); attachChat(); } });
+  el.dropChat.addEventListener('dragover', (e) => { e.preventDefault(); el.dropChat.style.borderColor = 'var(--accent)'; });
+  el.dropChat.addEventListener('dragleave', () => { el.dropChat.style.borderColor = ''; });
+  el.dropChat.addEventListener('drop', (e) => { e.preventDefault(); el.dropChat.style.borderColor = ''; attachChat(); });
+  el.removeChat.addEventListener('click', () => { state.chatShot = false; render(); el.dropChat.focus(); });
+
+  el.purchaser.addEventListener('change', () => { state.purchaser = el.purchaser.value; render(); });
+  el.commission.addEventListener('input', () => { state.commission = el.commission.value; });
+
+  el.confirm.addEventListener('click', confirm);
+  el.cancel.addEventListener('click', closeDialog);
+  el.close.addEventListener('click', closeDialog);
+  el.backdrop.addEventListener('mousedown', (e) => { if (e.target === el.backdrop) closeDialog(); });
+
+  // Esc closes; Tab stays inside the dialog.
+  document.addEventListener('keydown', (e) => {
+    if (!state.open) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeDialog(); return; }
+    if (e.key !== 'Tab') return;
+    const focusables = Array.from(el.dialog.querySelectorAll('button, input, select, [tabindex="0"]'))
+      .filter((n) => !n.disabled && n.tabIndex !== -1 && n.offsetParent !== null);
+    if (!focusables.length) return;
+    const first = focusables[0], last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  // First paint: the manager's view, pickup chosen, so the dialog reads at rest.
+  applyPreset('pickup');
+})();
+</script>

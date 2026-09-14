@@ -11,14 +11,13 @@ type Props = {
 
 export function PhTabBar({ view, setView, onCenterPress }: Props) {
   const { t } = useT();
-  // Shipping for every role: purchasers track the boxes they buy, managers
-  // receive them at the dock (and scan labels there). Market and Inventory
-  // both live as quick links on Home instead.
+  // Shipping is unlisted for now: a box is handed off from the order itself
+  // (the In Transit sheet), so the tab had nothing left to start. The screen
+  // still resolves by URL. Market and Inventory live as quick links on Home.
   const tabs: { id: View; label: string; icon: IconName; center?: boolean }[] = [
     { id: 'dashboard', label: t('tabHome'),    icon: 'dashboard' },
     { id: 'history',   label: t('tabOrders'),  icon: 'history' },
     { id: 'submit',    label: t('tabCapture'), icon: 'camera', center: true },
-    { id: 'shipping',  label: t('tabShipping'), icon: 'truck' },
     { id: 'me',        label: t('tabProfile'), icon: 'user' },
   ];
 

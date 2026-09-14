@@ -3564,3 +3564,85 @@ html.desktop, body.desktop, .desktop #root {
 @media (max-width: 1000px) {
   .fl-detail-inner { grid-template-columns: 1fr; padding-left: 18px; }
 }
+
+/* ── Hand-off dialog (Draft → In Transit) ─────────────────────────────────
+   The one bold element is the delivery choice: two tiles, the same device the
+   carrier tiles use. Everything else is the form's ordinary controls. Shared
+   with the phone sheet (class names, not layout), so the rules are here and the
+   phone file only overrides sizes. */
+.ho-shell { max-width: 600px; }
+.ho-body { display: flex; flex-direction: column; gap: 18px; }
+.ho-sec { display: flex; flex-direction: column; gap: 10px; }
+.ho-sec + .ho-sec { border-top: 1px solid var(--border); padding-top: 16px; }
+.ho-sec-title { font-size: 13px; font-weight: 600; }
+.ho-sec-title small { font-weight: 400; color: var(--fg-subtle); margin-left: 6px; font-size: 12px; }
+.ho-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ho-row-pay { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.ho-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ho-tile {
+  display: grid; grid-template-columns: 22px 1fr; gap: 4px 10px; align-items: start;
+  text-align: left; font: inherit; color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 14px 14px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.ho-tile:hover { border-color: var(--fg-subtle); }
+.ho-tile.selected {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ho-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ho-radio {
+  width: 18px; height: 18px; border-radius: 50%; margin-top: 2px;
+  border: 1.5px solid var(--border-strong); background: var(--bg-elev);
+  display: grid; place-items: center;
+}
+.ho-tile.selected .ho-radio { border-color: var(--accent); }
+.ho-tile.selected .ho-radio::after { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+.ho-tile-name { font-size: 14px; font-weight: 600; }
+.ho-tile-desc { grid-column: 2; font-size: 12.5px; color: var(--fg-muted); line-height: 1.4; }
+/* Carriers as a compact chip strip, so they don't compete with the tiles. */
+.ho-carriers { display: flex; gap: 8px; flex-wrap: wrap; }
+.ho-carrier {
+  --tile: var(--fg-subtle);
+  display: inline-flex; align-items: center; gap: 8px;
+  font: inherit; color: inherit;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 5px 12px 5px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ho-carrier[data-carrier='UPS'] { --tile: #b8860b; }
+.ho-carrier[data-carrier='FedEx'] { --tile: #7b3fd4; }
+.ho-carrier[data-carrier='USPS'] { --tile: #2f6fb5; }
+.ho-carrier.lit { border-color: color-mix(in srgb, var(--tile) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 14%, transparent); }
+.ho-carrier.selected { border-color: var(--tile); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile) 22%, transparent); }
+.ho-carrier.selected .ho-carrier-name { color: var(--tile); }
+.ho-carrier .icon { color: var(--tile); }
+.ho-carrier-name { font-weight: 700; letter-spacing: 0.01em; }
+.ho-carrier-fmt { font-size: 10.5px; color: var(--fg-subtle); }
+/* Each option takes an equal share of the switch: two halves, not a pill
+   floating in an empty track. */
+.ho-seg { display: flex; width: 100%; }
+.ho-seg button { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 7px 10px; }
+.ho-optional { color: var(--fg-subtle); font-weight: 400; }
+.ho-shot-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.ho-chips { display: flex; flex-direction: column; gap: 6px; }
+.ho-foot { align-items: center; flex-wrap: wrap; gap: 12px; }
+.ho-actions { margin-left: auto; display: flex; gap: 8px; }
+.ho-blockers { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--warn-strong); flex: 1 1 260px; }
+.ho-blockers div { display: flex; gap: 6px; align-items: flex-start; }
+.ho-blockers .icon { flex-shrink: 0; margin-top: 2px; }
+@media (max-width: 560px) {
+  .ho-tiles, .ho-row, .ho-row-pay { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ho-tile, .ho-carrier { transition: none; }
+}

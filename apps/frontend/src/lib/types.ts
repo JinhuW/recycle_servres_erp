@@ -3,6 +3,7 @@
 // LinePhoto is declared next to the accessor that reads it, and re-exported
 // here because OrderLine carries one.
 import type { LinePhoto } from './linePhotos';
+import type { PackageSource } from './packageSource';
 export type { LinePhoto };
 
 export type Role = 'manager' | 'purchaser';
@@ -156,6 +157,16 @@ export type OrderSummary = {
   // sees it undefined and must read that as "not required". The backend's 409
   // is the real gate either way.
   txnRequired?: boolean;
+  // The self-paid twin of `txnRequired`: whether the chat with the seller
+  // (a Submission attachment) must be on file before the PO leaves Draft.
+  chatShotRequired?: boolean;
+  // The hand-off, written when the PO leaves Draft through the In Transit
+  // dialog. All optional for the deploy-skew reason above; null on orders that
+  // predate it.
+  source?: PackageSource | null;
+  paymentMethod?: 'paypal' | 'cash' | null;
+  handoffMethod?: 'pickup' | 'label' | null;
+  handoffBy?: { id: string; name: string } | null;
   // Net of the bank payments linked to this PO on the Payments page (refunds
   // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
   // nothing is linked or the caller is not a manager; either way there is no
@@ -235,6 +246,7 @@ export type OrderEventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  | 'handoff'
   | 'owner_changed'
   | 'status_meta_changed'
   | 'line_photo_added'

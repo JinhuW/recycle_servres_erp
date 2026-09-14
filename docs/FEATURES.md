@@ -70,6 +70,28 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   included. Self-pay POs are unaffected. The rule governs only orders created
   after it reached the environment, so POs already on file stay exempt. Mobile
   gained the field as an input; it used to be read-only there.
+- **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0). Clicking
+  In Transit on a Draft — the desktop stepper or the phone's advance button —
+  opens *Mark as In Transit*: the receiving warehouse, the order's **source**
+  (Facebook / Local / Reddit / Other, the same set tracked packages use), and
+  how the goods get here: **Local pickup** (who collected it, from a member
+  picker) or **Shipping label** (paste the tracking number; the carrier is
+  recognised from its shape, as on Add-package). Then who paid. **Company
+  card** names a method, PayPal or Cash: PayPal keeps the transaction-ID rule
+  and offers the optional screenshot that reads the ID; Cash lifts the rule.
+  **Self-paid** asks for no method and no ID — it is reimbursed from
+  commission, not matched against the bank — but **requires the chat with the
+  seller** as a Submission attachment (any Submission file on the order
+  counts). Managers also see the purchaser and commission rate in the dialog.
+  Confirming writes everything, creates the tracked package for a label
+  (linked to the PO, carrying its source), and advances, in one transaction —
+  a refusal leaves nothing behind. The hand-off is the owner's or a manager's;
+  the desktop asks for unsaved page edits to be saved first. Every field it
+  changes is on the activity log, beside a *Handed off* entry naming the
+  collector or the package. The chat rule is enforced in the advance itself,
+  so a manager stage-jump and the carrier poll hold to it too, and it is
+  grandfathered by a cutoff stamped when the release reached the environment,
+  exactly like the transaction-ID rule.
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,
@@ -282,6 +304,12 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   `shippo`.
 - Mobile label scan: look up, note, create a PO; managers get a Shipping tab
   (v1.95.0).
+- **The Shipping page is unlisted** (v1.142.0): it left the desktop sidebar and
+  the phone tab bar, because a tracking number is now pasted in the PO's own
+  In Transit dialog, which creates the package already linked. The page still
+  answers at `#/shipping`, the prepaid-label wizard is still reached from the
+  PO page's *Shipping labels* button, and a PO minted from a delivered package
+  now inherits the package's source.
 - Owners get a default warehouse, and managers can create a package PO at any
   status (v1.85.0).
 

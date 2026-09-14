@@ -1,5 +1,6 @@
-// Manager-only members admin. Persistence + business logic lives in
-// `services/members.ts`; this file owns the HTTP shape only.
+// Members admin — manager-only except `/names`, the bare picker list every
+// role may read. Persistence + business logic lives in `services/members.ts`;
+// this file owns the HTTP shape only.
 
 import { Hono } from 'hono';
 import { MIN_PASSWORD_LEN } from '@recycle-erp/shared';
@@ -40,6 +41,18 @@ function validateMemberFields(f: {
   }
   return null;
 }
+
+// Registered before the manager guard on purpose: the "Picked up by" picker on
+// the hand-off dialog is for every role, and a purchaser collecting a colleague's
+// order needs the names. Ids and names only — `listMembers` also computes each
+// member's lifetime profit, which is neither theirs to see nor cheap.
+members.get('/names', async (c) => {
+  const sql = getDb(c.env);
+  const items = await sql<{ id: string; name: string }[]>`
+    SELECT id, name FROM users WHERE COALESCE(active, TRUE) ORDER BY name
+  `;
+  return c.json({ items });
+});
 
 members.use('*', async (c, next) => {
   if (c.var.user.role !== 'manager') return c.json({ error: 'Forbidden' }, 403);

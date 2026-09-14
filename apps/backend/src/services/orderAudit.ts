@@ -26,6 +26,10 @@ export type EventKind =
   | 'line_removed'
   | 'line_edited'
   | 'meta_changed'
+  // The Draft → In Transit hand-off: how the goods reach the warehouse (a
+  // local pickup, or the tracked package it created). The field changes it
+  // makes ride on a meta_changed beside it.
+  | 'handoff'
   | 'owner_changed'
   | 'status_meta_changed'
   | 'line_photo_added'
