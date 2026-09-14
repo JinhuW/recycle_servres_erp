@@ -34,6 +34,7 @@ const KIND_ICON: Record<OrderEvent['kind'], IconName> = {
   line_removed: 'trash',
   line_edited:  'edit',
   meta_changed: 'settings',
+  handoff:      'truck',
   owner_changed: 'user',
   status_meta_changed: 'paperclip',
   line_photo_added:   'image',
@@ -58,6 +59,8 @@ const KIND_TONE: Record<OrderEvent['kind'], Tone> = {
   line_removed: 'warn',
   line_edited:  'info',
   meta_changed: 'muted',
+  // The goods started moving — the same weight as the submit it rides with.
+  handoff:      'pos',
   owner_changed: 'info',
   status_meta_changed: 'muted',
   // A photo is evidence hung off a line, so it tones like the attachment
@@ -140,6 +143,17 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
     case 'meta_changed': {
       const changes = (d.changes as OrderEventChange[]) ?? [];
       return { title: 'Updated order details', lines: changes.map(c => changeLine(c, locale)) };
+    }
+    case 'handoff': {
+      // The details are what the hand-off recorded: who collected it, or the
+      // package a pasted tracking number became.
+      if (d.method === 'pickup') {
+        return { title: t('acHandoffPickup'), lines: [String(d.byName ?? '')].filter(Boolean) };
+      }
+      return {
+        title: t('acHandoffLabel'),
+        lines: [[d.carrier, d.trackingNumber].filter(Boolean).join(' ')].filter(Boolean),
+      };
     }
     case 'owner_changed': {
       return { title: t('acOwnerChanged'), lines: [ownerChangedLine(d)] };

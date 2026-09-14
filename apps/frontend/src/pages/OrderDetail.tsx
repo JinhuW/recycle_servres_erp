@@ -5,6 +5,7 @@ import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
 import { StatusChangeDialog, type StatusAttachment } from '../components/StatusChangeDialog';
+import { PhHandoffSheet } from '../components/PhHandoffSheet';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { AttachmentDropzone } from '../components/AttachmentDropzone';
 import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
@@ -146,6 +147,7 @@ export function OrderDetail({
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
@@ -324,14 +326,10 @@ export function OrderDetail({
 
   const advance = async () => {
     if (!canAdvance) return;
-    // A company-paid PO names the payment that funded it before it leaves
-    // Draft. Read against the *saved* order, not the field on screen: an id
-    // typed but not yet saved is not one the backend would accept either.
-    // `=== true` deliberately — an older backend omits the field entirely.
-    if (order.txnRequired === true && effectiveStatus === 'Draft' && !order.paypalTxnId) {
-      showErrorDialog(t('poTxnRequired'));
-      return;
-    }
+    // Leaving Draft is the hand-off sheet's job: how the goods get here and
+    // who paid, saved and advanced in one call. It is seeded from the fields
+    // on screen, so an edit typed here is what it writes.
+    if (effectiveStatus === 'Draft') { setHandoffOpen(true); return; }
     // Moving to Done first offers the optional evidence dialog (note +
     // attachments); confirming there fires the actual advance.
     if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
@@ -1207,6 +1205,25 @@ export function OrderDetail({
         <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
       )}
 
+      {handoffOpen && user && (
+        <PhHandoffSheet
+          init={{
+            order,
+            warehouseId: warehouseId || (order.warehouse?.id ?? ''),
+            payment,
+            paypalTxnId,
+            ...(isPurchaser ? {} : { ownerId: order.userId, commissionRate: order.commissionRate }),
+            isManager: !isPurchaser,
+            currentUser: { id: user.id, name: user.name },
+          }}
+          onClose={() => setHandoffOpen(false)}
+          onDone={async () => {
+            setHandoffOpen(false);
+            await refetchOrder();
+            setActivityRefreshKey(k => k + 1);
+          }}
+        />
+      )}
       {doneDialogOpen && (
         <StatusChangeDialog
           orderId={order.id}

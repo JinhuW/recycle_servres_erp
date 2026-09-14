@@ -91,13 +91,26 @@ export const FIELD_LABEL: Record<string, string> = {
   other_fees:      'Other fees',
   other_fees_note: 'Other fees note',
   paypal_txn_id:   'PayPal transaction ID',
+  source:          'Source',
+  handoff_method:  'Delivery',
+  handoff_by:      'Picked up by',
+  payment_method:  'Payment method',
 };
 
 const MONEY_FIELDS = new Set(['sell_price', 'unit_cost', 'total_cost', 'other_fees']);
 
+// The hand-off writes lower-case ids; the timeline reads them as words.
+const ENUM_VALUE_LABEL: Record<string, Record<string, string>> = {
+  source:         { facebook: 'Facebook', local: 'Local', reddit: 'Reddit', other: 'Other' },
+  handoff_method: { pickup: 'Local pickup', label: 'Shipping label' },
+  payment_method: { paypal: 'PayPal', cash: 'Cash' },
+  payment:        { company: 'Company card', self: 'Self-paid' },
+};
+
 /** One side of a field change, in the units that field is read in. */
 export function renderValue(field: string, v: unknown, locale: string): string {
   if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'string' && ENUM_VALUE_LABEL[field]?.[v]) return ENUM_VALUE_LABEL[field][v];
   if (field === 'commission_rate' && typeof v === 'number') return (v * 100).toFixed(2) + '%';
   if (MONEY_FIELDS.has(field) && typeof v === 'number') return fmtUSD(v, locale);
   return String(v);

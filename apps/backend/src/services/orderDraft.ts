@@ -21,6 +21,8 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
   notes?: string | null;
   /** Payment reference carried over from a tracked package's screenshot scan. */
   paypalTxnId?: string | null;
+  /** The buying channel, carried over from the tracked package that knew it. */
+  source?: string | null;
   /** The client this was bought from, when a tracked package's seller name
    *  already matches one. Keeps the package -> PO path attributed. */
   supplierId?: string | null;
@@ -29,11 +31,11 @@ export async function insertDraftOrderTx(tx: SqlLike, opts: {
 }): Promise<string> {
   const orderId = await nextHumanId(tx, 'PO', 'PO');
   await tx`
-    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, paypal_txn_id, supplier_id)
+    INSERT INTO orders (id, user_id, category, warehouse_id, payment, notes, total_cost, lifecycle, paypal_txn_id, supplier_id, source)
     VALUES (
       ${orderId}, ${opts.ownerId}, ${opts.category ?? 'Mixed'}, ${opts.warehouseId},
       ${opts.payment ?? 'company'}, ${opts.notes ?? null}, ${null}, 'draft', ${opts.paypalTxnId ?? null},
-      ${opts.supplierId ?? null}
+      ${opts.supplierId ?? null}, ${opts.source ?? null}
     )
   `;
   await writeOrderEvent(tx, orderId, opts.actorId, 'created', {

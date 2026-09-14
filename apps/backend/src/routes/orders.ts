@@ -18,15 +18,21 @@ import {
   advanceOrderTx, revertOrderToDraftTx, archiveOrderLinesTx, unarchiveOrderLinesTx,
   LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
-import { txnRequiredFor } from '../services/orderTxnRule';
+import { txnRequiredFor, chatShotRequiredFor } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
+import {
+  handoffOrderTx, activeMember, HandoffRefused, type HandoffInput,
+} from '../services/orderHandoff';
+import { pickTrackingClient } from '../shipping';
+import { registerPackageTracking } from '../shipping/track';
 import { linkPaypalTxnToOrder } from '../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
   synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, LINE_PHOTO_CAP,
-  type SerialIssue,
+  CARRIERS, PACKAGE_SOURCES, isValidTracking, normalizeTracking,
+  type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
 import { maybeRenameReceipt } from '../ai/receipt';
@@ -488,6 +494,8 @@ orders.get('/:id', async (c) => {
            o.other_fees::float AS other_fees,
            o.other_fees_note,
            o.paypal_txn_id,
+           o.source, o.handoff_method, o.handoff_by, o.payment_method,
+           hb.name AS handoff_by_name,
            o.supplier_id, sup.name AS supplier_name,
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
@@ -495,6 +503,7 @@ orders.get('/:id', async (c) => {
            (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count
     FROM orders o
     JOIN users u ON u.id = o.user_id
+    LEFT JOIN users hb ON hb.id = o.handoff_by
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${effectiveRole(u) === 'manager'} OR sup.owner_id IS NULL
@@ -555,7 +564,10 @@ orders.get('/:id', async (c) => {
   // Whether the company-pay transaction-id rule governs this order. The cutoff
   // it depends on lives in the DB, so a shell that decided for itself would
   // block exactly the pre-cutoff drafts the rule exempts.
-  const txnRequired = await txnRequiredFor(sql, order as { payment: string; created_at: Date });
+  const txnRequired = await txnRequiredFor(
+    sql, order as { payment: string; payment_method: string | null; created_at: Date });
+  const chatShotRequired = await chatShotRequiredFor(
+    sql, order as { payment: string; created_at: Date });
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
@@ -617,6 +629,13 @@ orders.get('/:id', async (c) => {
       otherFeesNote: order.other_fees_note,
       paypalTxnId: order.paypal_txn_id,
       txnRequired,
+      chatShotRequired,
+      source: order.source,
+      paymentMethod: order.payment_method,
+      handoffMethod: order.handoff_method,
+      handoffBy: order.handoff_by
+        ? { id: order.handoff_by, name: order.handoff_by_name ?? '' }
+        : null,
       supplier: order.supplier_name
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
@@ -2523,30 +2542,177 @@ orders.post('/:id/advance', async (c) => {
   const outcome = await sql.begin(async (tx) =>
     advanceOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, body?.toStage));
 
-  if (outcome.kind === 'notFound') return c.json({ error: 'Not found' }, 404);
-  if (outcome.kind === 'forbidden') return c.json({ error: outcome.msg }, 403);
-  if (outcome.kind === 'badStage') return c.json({ error: outcome.msg }, 400);
-  if (outcome.kind === 'archived') return c.json({ error: 'Order is archived — unarchive it first' }, 409);
-  if (outcome.kind === 'finalStage') return c.json({ error: 'Already at the final stage' }, 409);
-  if (outcome.kind === 'committedLines') {
-    return c.json({
-      error: `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
-      offendingLineIds: outcome.offendingLineIds,
-      sellOrderIds: outcome.sellOrderIds,
-    }, 409);
-  }
-  if (outcome.kind === 'transferClaimed') {
-    return c.json({
-      error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
-      offendingLineIds: outcome.offendingLineIds,
-    }, 409);
-  }
-  if (outcome.kind === 'missingTxnId') {
-    return c.json({
-      error: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
-    }, 409);
-  }
+  if (outcome.kind !== 'ok') return advanceRefusedResponse(c, outcome);
   return c.json({ ok: true, lifecycle: outcome.nextStageId });
+});
+
+// One response per refusal, shared by /advance and /handoff so a rule reads
+// the same whichever door the order came through.
+function advanceRefusedResponse(
+  c: Context<{ Bindings: Env; Variables: { user: User } }>,
+  outcome: Exclude<Awaited<ReturnType<typeof advanceOrderTx>>, { kind: 'ok' }>,
+) {
+  switch (outcome.kind) {
+    case 'notFound': return c.json({ error: 'Not found' }, 404);
+    case 'forbidden': return c.json({ error: outcome.msg }, 403);
+    case 'badStage': return c.json({ error: outcome.msg }, 400);
+    case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+    case 'finalStage': return c.json({ error: 'Already at the final stage' }, 409);
+    case 'committedLines':
+      return c.json({
+        error: `Lines committed to ${describeSellOrders(outcome.sellOrderIds)} — cancel those sell orders first.`,
+        offendingLineIds: outcome.offendingLineIds,
+        sellOrderIds: outcome.sellOrderIds,
+      }, 409);
+    case 'transferClaimed':
+      return c.json({
+        error: 'Lines are out on an open transfer order — receive or discard that transfer first.',
+        offendingLineIds: outcome.offendingLineIds,
+      }, 409);
+    case 'missingTxnId':
+      return c.json({
+        error: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
+      }, 409);
+    case 'missingChatShot':
+      return c.json({
+        error: 'This order was self-paid — attach the chat history with the seller before submitting it.',
+      }, 409);
+  }
+}
+
+// The Draft → In Transit hand-off: the dialog's answers, the package a pasted
+// tracking number becomes, and the advance, in one transaction
+// (services/orderHandoff.ts). Validation runs here on the pool first, like
+// PATCH, so a bad body never opens the lock.
+orders.post('/:id/handoff', async (c) => {
+  const u = c.var.user;
+  const id = c.req.param('id');
+  const sql = getDb(c.env);
+  const body = (await c.req.json().catch(() => null)) as {
+    warehouseId?: unknown; source?: unknown;
+    handoff?: { method?: unknown; byUserId?: unknown; trackingNumber?: unknown; carrier?: unknown } | null;
+    payment?: unknown; paymentMethod?: unknown;
+    paypalTxnId?: unknown; paymentScreenshotKey?: unknown; paymentScreenshotUrl?: unknown;
+    onBehalfOfUserId?: unknown; commissionRate?: unknown;
+  } | null;
+  if (!body) return c.json({ error: 'invalid body' }, 400);
+
+  if (typeof body.warehouseId !== 'string' || !body.warehouseId) {
+    return c.json({ error: 'warehouseId is required' }, 400);
+  }
+  const whErr = await warehouseErr(sql, body.warehouseId);
+  if (whErr) return c.json({ error: whErr }, 400);
+  if (!PACKAGE_SOURCES.includes(body.source as PackageSource)) {
+    return c.json({ error: 'source must be facebook, local, reddit, or other' }, 400);
+  }
+  if (body.payment !== 'company' && body.payment !== 'self') {
+    return c.json({ error: 'payment must be company or self' }, 400);
+  }
+  // A self-paid order has no method: it is reimbursed from commission. The
+  // company card names one, and cash is what lifts the transaction-id rule.
+  let paymentMethod: 'paypal' | 'cash' | null = null;
+  if (body.payment === 'company') {
+    if (body.paymentMethod !== 'paypal' && body.paymentMethod !== 'cash') {
+      return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+    }
+    paymentMethod = body.paymentMethod;
+  }
+  const paypalTxnId = typeof body.paypalTxnId === 'string'
+    ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
+    : null;
+  if (paypalTxnId && paypalTxnId.length > 64) {
+    return c.json({ error: 'PayPal transaction ID is too long' }, 400);
+  }
+  const opt = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+  const h = body.handoff;
+  let handoff: HandoffInput['handoff'];
+  if (h?.method === 'pickup') {
+    if (typeof h.byUserId !== 'string' || !UUID_RE.test(h.byUserId)) {
+      return c.json({ error: 'handoff.byUserId must be a user id' }, 400);
+    }
+    const member = await activeMember(sql, h.byUserId);
+    if (!member) return c.json({ error: 'handoff.byUserId must name an active member' }, 400);
+    handoff = { method: 'pickup', byUserId: member.id, byName: member.name };
+  } else if (h?.method === 'label') {
+    // Same boundary as POST /api/packages: the unique index is what keeps one
+    // row per box, so the number must collide there, not mint a twin.
+    const tn = typeof h.trackingNumber === 'string' ? normalizeTracking(h.trackingNumber) : '';
+    if (tn.length < 8) return c.json({ error: 'A tracking number is required' }, 400);
+    if (!isValidTracking(tn)) {
+      return c.json({ error: 'A tracking number is letters and digits, at most 30 characters' }, 400);
+    }
+    if (!CARRIERS.includes(h.carrier as Carrier)) {
+      return c.json({ error: 'carrier must be UPS, FedEx, or USPS' }, 400);
+    }
+    handoff = { method: 'label', trackingNumber: tn, carrier: h.carrier as Carrier };
+  } else {
+    return c.json({ error: 'handoff.method must be pickup or label' }, 400);
+  }
+
+  if (body.commissionRate !== undefined && u.role !== 'manager') {
+    return c.json({ error: 'Only managers can set the commission rate' }, 403);
+  }
+  if (body.commissionRate !== undefined && body.commissionRate !== null
+      && !Number.isFinite(Number(body.commissionRate))) {
+    return c.json({ error: 'commissionRate must be a number or null' }, 400);
+  }
+  const commissionRate =
+    body.commissionRate === undefined ? undefined
+    : body.commissionRate === null ? null
+    : Math.min(1, Math.max(0, Number(body.commissionRate)));
+  if (body.onBehalfOfUserId !== undefined && u.role !== 'manager') {
+    return c.json({ error: 'Only managers can change the order owner' }, 403);
+  }
+  let newOwner: HandoffInput['newOwner'];
+  if (body.onBehalfOfUserId !== undefined) {
+    const resolved = await resolveOrderOwner(sql, u, body.onBehalfOfUserId);
+    if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+    newOwner = resolved;
+  }
+
+  const input: HandoffInput = {
+    warehouseId: body.warehouseId,
+    source: body.source as PackageSource,
+    handoff,
+    payment: body.payment,
+    paymentMethod,
+    paypalTxnId,
+    paymentScreenshotKey: opt(body.paymentScreenshotKey),
+    paymentScreenshotUrl: opt(body.paymentScreenshotUrl),
+    newOwner,
+    commissionRate,
+  };
+  let result: Awaited<ReturnType<typeof handoffOrderTx>>;
+  try {
+    result = await sql.begin(async (tx) =>
+      handoffOrderTx(tx, id, { id: u.id, name: u.name, role: u.role }, input));
+  } catch (e) {
+    if (!(e instanceof HandoffRefused)) throw e;
+    const r = e.refusal;
+    switch (r.kind) {
+      case 'notFound': return c.json({ error: 'Not found' }, 404);
+      case 'forbidden': return c.json({ error: 'Forbidden' }, 403);
+      case 'archived': return c.json({ error: 'Order is archived — unarchive it first' }, 409);
+      case 'notDraft':
+        return c.json({ error: `Order is already ${LIFECYCLE_LABEL[r.lifecycle] ?? r.lifecycle}` }, 409);
+      case 'trackingTaken':
+        return c.json({ error: 'This tracking number is already being tracked' }, 409);
+      case 'advance': return advanceRefusedResponse(c, r.outcome);
+    }
+  }
+  // Detached on purpose, as POST /api/packages does: the row is committed and
+  // the registration carries its own timeout; the sweep covers what this misses.
+  if (result.package) {
+    const tracking = pickTrackingClient(c.env);
+    if (tracking.register) void registerPackageTracking(sql, tracking.register, result.package);
+  }
+  return c.json({
+    ok: true,
+    lifecycle: 'in_transit',
+    packageId: result.package?.id ?? null,
+    paymentsLinked: result.paymentsLinked,
+  });
 });
 
 export default orders;

@@ -32,6 +32,7 @@ import { lineRequirements, missingFieldNames } from '../../lib/lineRequirements'
 import { SerialCheckDialog, type SerialLineIssue } from '../../components/SerialCheckDialog';
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
+import { HandoffDialog } from '../../components/HandoffDialog';
 import { navigate } from '../../lib/route';
 import { listShipments } from '../../lib/api';
 
@@ -158,6 +159,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // Optional Done evidence (note + attachments). The dialog live-saves to the
   // backend; these mirror its latest confirmed state for the read-only block.
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
+  // The Draft → In Transit hand-off: opened from the stepper, it saves its own
+  // fields and advances in one call, so it wants a clean page underneath.
+  const [handoffOpen, setHandoffOpen] = useState(false);
   const [doneNote, setDoneNote] = useState(order.statusMeta?.['Done']?.note ?? '');
   const [doneAttachments, setDoneAttachments] = useState<StatusAttachment[]>(
     order.statusMeta?.['Done']?.attachments ?? [],
@@ -1317,6 +1321,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       // Purchasers never reach here for Done (allowedStatuses
                       // keeps it locked).
                       if (s === 'Done') { setDoneDialogOpen(true); return; }
+                      // Leaving Draft is the hand-off dialog's job: it writes
+                      // its own fields and advances in one call, so unsaved
+                      // page edits would be left behind by the navigation
+                      // that follows — ask for the save first.
+                      if (s === 'In Transit' && savedStatus === 'Draft') {
+                        if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
+                        setHandoffOpen(true);
+                        return;
+                      }
                       setStatus(s);
                     }}
                     disabled={stepDisabled}
@@ -1890,6 +1903,30 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
       )}
 
+      {handoffOpen && user && (
+        <HandoffDialog
+          init={{
+            order,
+            warehouseId,
+            payment,
+            paypalTxnId: paypalTxn,
+            // The saved rate, not the input's display value: the page shows
+            // 0% for an unset rate, and sending that would log null → 0.
+            ...(isPurchaser ? {} : { ownerId, commissionRate: order.commissionRate }),
+            isManager: !isPurchaser,
+            currentUser: { id: user.id, name: user.name },
+          }}
+          onCancel={() => setHandoffOpen(false)}
+          onDone={() => {
+            setHandoffOpen(false);
+            setSavedStatus('In Transit');
+            setStatus('In Transit');
+            applyLifecycle('in_transit');
+            setActivityKey(k => k + 1);
+            onSaved(t('hoDone', { id: order.id }));
+          }}
+        />
+      )}
       {doneDialogOpen && (
         <StatusChangeDialog
           orderId={order.id}

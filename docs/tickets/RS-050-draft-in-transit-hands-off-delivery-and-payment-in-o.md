@@ -2,13 +2,13 @@
 id: RS-050
 title: Draft → In Transit hands off delivery and payment in one dialog
 type: story
-status: backlog
+status: in-review
 priority: P2
 created: 2026-09-14
 reporter: Jinhu
 branch: session/20260914-024945
-pr:
-version:
+pr: 327
+version: 1.142.0
 related: []
 ---
 
@@ -73,21 +73,21 @@ mobile sheet — gets its own plan once the mock is signed off.
 
 Phase A:
 
-- [ ] A self-contained mock at `docs/superpowers/specs/2026-09-14-in-transit-dialog-mock.html`, published as an artifact, shows the dialog in the app's own visual language with both delivery paths, both payment types, the company card's PayPal / Cash method, the optional PayPal screenshot, the required chat-history screenshot for self-paid orders, and the manager-only fields.
-- [ ] The mock's blocked states: a label with no valid tracking number, company card + PayPal with no transaction ID, and a self-paid order with no chat-history screenshot.
+- [x] A self-contained mock at `docs/superpowers/specs/2026-09-14-in-transit-dialog-mock.html`, published as an artifact, shows the dialog in the app's own visual language with both delivery paths, both payment types, the company card's PayPal / Cash method, the optional PayPal screenshot, the required chat-history screenshot for self-paid orders, and the manager-only fields.
+- [x] The mock's blocked states: a label with no valid tracking number, company card + PayPal with no transaction ID, and a self-paid order with no chat-history screenshot.
 
 Phase B:
 
-- [ ] Clicking In Transit from Draft on the desktop PO page opens the dialog; confirming saves its fields and advances the PO in one action.
-- [ ] Local pickup is recorded on the PO (method + who collected it) and the PO reads In Transit.
-- [ ] A tracking number entered in the dialog creates the tracked package linked to this PO.
-- [ ] A company-paid PO whose payment method is Cash advances without a transaction ID; PayPal still requires it.
-- [ ] A self-paid PO asks for no method and no transaction ID, and refuses to advance without a chat-history screenshot attached.
-- [ ] The PayPal screenshot stays optional; when attached it still fills the transaction ID.
-- [ ] The dialog asks for the order's source (Facebook / Local / Reddit / Other); it is saved on the PO and a package created from the dialog carries it.
-- [ ] "Picked up by" is a member picker.
-- [ ] The Shipping entry is hidden from the navigation.
-- [ ] Mobile offers the same choices when advancing from Draft.
+- [x] Clicking In Transit from Draft on the desktop PO page opens the dialog; confirming saves its fields and advances the PO in one action.
+- [x] Local pickup is recorded on the PO (method + who collected it) and the PO reads In Transit.
+- [x] A tracking number entered in the dialog creates the tracked package linked to this PO.
+- [x] A company-paid PO whose payment method is Cash advances without a transaction ID; PayPal still requires it.
+- [x] A self-paid PO asks for no method and no transaction ID, and refuses to advance without a chat-history screenshot attached.
+- [x] The PayPal screenshot stays optional; when attached it still fills the transaction ID.
+- [x] The dialog asks for the order's source (Facebook / Local / Reddit / Other); it is saved on the PO and a package created from the dialog carries it.
+- [x] "Picked up by" is a member picker.
+- [x] The Shipping entry is hidden from the navigation.
+- [x] Mobile offers the same choices when advancing from Draft.
 
 ## Out of scope
 
@@ -97,7 +97,8 @@ Phase B:
 
 ## Notes
 
-- Plan: `~/.claude/plans/playful-wishing-whisper.md` (session 2026-09-14).
+- Plan: `~/.claude/plans/playful-wishing-whisper.md` (session 2026-09-14). Phase A shipped in #327 (docs-only); phase B is the release below.
+- Every hand-off change is logged (Jinhu, after plan review: "the update to the table should also log in the events/activities") — a `meta_changed` per field plus a `handoff` event.
 - Artifact (clickable mock): https://claude.ai/code/artifact/b54f9175-82fe-4d1f-9186-868a15396372
 - Open questions surfaced with the mock, answered by Jinhu on 2026-09-14:
   1. Package source (Facebook / Local / Reddit / Other) → **"add a source for the order"**: the dialog asks for it and it is stored on the PO; a package created from the dialog inherits it.
