@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.143.0] - 2026-09-14
+
+### Features
+
+- **Inventory search finds a PO by its number** (RS-052).  The desktop
+  Inventory search box has said "Search part #, serial #, brand, ID…" since
+  v1.42.0, but the query behind it only ever matched the line's own fields —
+  brand, part number, serial number, description, item type — so typing
+  `PO-1442` to see what a purchase brought in returned nothing.  The PO id
+  is now one more field in that match, whole or partial and case-insensitive
+  like the others (`1442` and `po-1442` both land), on the flat list, the
+  grouped view and the xlsx export alike, because the three now share one
+  search fragment instead of two copies that had to be kept identical by
+  hand.  The placeholder says "PO #" in both languages.  The vendor portal's
+  catalog search, which had been borrowing the same placeholder, keeps its
+  old wording under its own key: it filters in the browser and its data
+  carries no PO ids.  A short all-digit search now also matches PO ids that
+  contain those digits, on top of the part numbers it matched before.
+
 ## [1.142.0] - 2026-09-14
 
 ### Added

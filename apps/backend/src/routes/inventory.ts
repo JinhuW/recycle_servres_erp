@@ -130,14 +130,21 @@ function inventoryWhereFrag(
   // order's warehouse. Lets a manager transfer a line to a different warehouse
   // without rewriting the order.
   const whFrag       = warehouse ? sql`COALESCE(l.warehouse_id, o.warehouse_id) = ${warehouse}` : sql`TRUE`;
-  const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%')`
-    : sql`TRUE`;
+  const searchFrag   = lineSearchFrag(sql, search);
   const attrFrag     = attrFragments(sql, attrs);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
   const archivedFrag = archivedOrderFrag(sql);
 
   return sql`${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${soldFrag} AND ${archivedFrag} AND ${whFrag} AND ${searchFrag} AND ${attrFrag} AND ${pendingFrag}`;
+}
+
+// The search box's one query matched against every identifying field on the
+// line, plus the PO id the line came in on — all substring, all
+// case-insensitive (`search` arrives lowercased). Shared by the flat list,
+// the export and the grouped view so the three can never disagree.
+function lineSearchFrag(sql: ReturnType<typeof getDb>, search: string | undefined) {
+  if (!search) return sql`TRUE`;
+  return sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%' OR LOWER(o.id) LIKE '%' || ${search} || '%')`;
 }
 
 // An archived PO's goods are not in stock whatever its lines' status says:
@@ -780,9 +787,7 @@ inventory.get('/products', async (c) => {
   // Warehouse is intentionally NOT pushed into SQL here — keeping every
   // warehouse's rows in the working set lets the warehouse pill counts use the
   // same drop-self facet semantics as the attribute chips.
-  const searchFrag   = search
-    ? sql`(LOWER(COALESCE(l.brand,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.part_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.serial_number,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.description,'')) LIKE '%' || ${search} || '%' OR LOWER(COALESCE(l.item_type,'')) LIKE '%' || ${search} || '%')`
-    : sql`TRUE`;
+  const searchFrag   = lineSearchFrag(sql, search);
   const pendingFrag  = pendingSellOrderFrag(sql, hidePending);
 
   const canonCol = canonPartCol(sql, sql`l.part_number`);

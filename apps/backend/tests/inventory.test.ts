@@ -407,3 +407,58 @@ describe('PATCH /api/inventory/:id — clearing a numeric spec', () => {
     expect(after[0].n).toBeLessThanOrEqual(before[0].n + 1);
   });
 });
+
+describe('GET /api/inventory — search by PO number', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // A PO whose brand appears nowhere in the seed, so any hit on it is the
+  // PO-id clause and not a part-number or brand coincidence.
+  async function createPo(token: string): Promise<string> {
+    const r = await api<{ id: string }>('POST', '/api/orders', {
+      token,
+      body: {
+        paypalTxnId: 'TESTPAYTXN0000052',
+        category: 'RAM',
+        lines: [{
+          category: 'RAM', brand: 'Zebrastripe', capacity: '32GB', type: 'DDR4',
+          classification: 'RDIMM', speed: '3200', partNumber: 'ZS-32G-3200',
+          condition: 'Pulled — Tested', qty: 2, unitCost: 40,
+        }],
+      },
+    });
+    expect(r.status).toBe(201);
+    return r.body.id;
+  }
+
+  type Item = { id: string; order_id: string };
+  async function list(token: string, q: string) {
+    return api<{ items: Item[] }>('GET', `/api/inventory?q=${encodeURIComponent(q)}`, { token });
+  }
+
+  it('the full PO id narrows the list to that PO', async () => {
+    const { token } = await loginAs(ALEX);
+    const poId = await createPo(token);
+    const r = await list(token, poId);
+    expect(r.status).toBe(200);
+    expect(r.body.items.length).toBeGreaterThan(0);
+    for (const it of r.body.items) expect(it.order_id).toBe(poId);
+  });
+
+  it('matches case-insensitively and on the digits alone', async () => {
+    const { token } = await loginAs(ALEX);
+    const poId = await createPo(token);
+    const lower = await list(token, poId.toLowerCase());
+    expect(lower.body.items.some(it => it.order_id === poId)).toBe(true);
+    const digits = await list(token, poId.replace(/^PO-/, ''));
+    expect(digits.body.items.some(it => it.order_id === poId)).toBe(true);
+  });
+
+  it('the grouped products view matches the PO id too', async () => {
+    const { token } = await loginAs(ALEX);
+    const poId = await createPo(token);
+    const r = await api<{ products: { lines: Item[] }[] }>(
+      'GET', `/api/inventory/products?q=${encodeURIComponent(poId)}`, { token });
+    expect(r.status).toBe(200);
+    expect(r.body.products.some(g => g.lines.some(l => l.order_id === poId))).toBe(true);
+  });
+});
