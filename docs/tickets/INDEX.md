@@ -6,7 +6,7 @@ See [README.md](./README.md) for what the fields mean.
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
 | [RS-051](./RS-051-rank-the-contributor-leaderboard-by-po-total-cost-or.md) | done | story | P2 | Rank the contributor leaderboard by PO total cost or commission | 1.141.0 |
-| [RS-050](./RS-050-draft-in-transit-hands-off-delivery-and-payment-in-o.md) | in-review | story | P2 | Draft → In Transit hands off delivery and payment in one dialog | 1.142.0 |
+| [RS-050](./RS-050-draft-in-transit-hands-off-delivery-and-payment-in-o.md) | done | story | P2 | Draft → In Transit hands off delivery and payment in one dialog | 1.142.0 |
 | [RS-049](./RS-049-the-desktop-po-list-stops-at-the-newest-50-orders.md) | done | bug | P2 | The desktop PO list stops at the newest 50 orders | 1.140.1 |
 | [RS-048](./RS-048-facebook-tracker-shows-the-fleet-s-accounts-coverage-and.md) | done | story | P2 | Facebook tracker shows the fleet's accounts, coverage and search phrases | 1.140.0 |
 | [RS-047](./RS-047-3ds-and-dual-die-ram-ranks-are-missing-from-the-rank.md) | done | story | P3 | 3DS and dual-die RAM ranks are missing from the Rank dropdown | 1.139.0 |
