@@ -369,7 +369,6 @@
     <button class="btn" data-preset="selfnochat">Self-paid, no chat screenshot</button>
     <button class="btn" data-preset="cash">Cash</button>
     <button class="btn" data-preset="shot">Screenshot attached</button>
-    <button class="btn" data-preset="clientpref">Client prefers pickup</button>
   </span>
   <span class="proto-group">
     <button class="btn" id="proto-reopen">Reopen dialog</button>
@@ -417,13 +416,25 @@
 
     <div class="modal-body">
       <section class="sec">
-        <div class="field">
-          <label class="label" for="f-warehouse">Receiving warehouse</label>
-          <select class="select" id="f-warehouse">
-            <option value="den-broom">Denver — Broomfield</option>
-            <option value="den-dt">Denver — Downtown</option>
-            <option value="de-fra">Frankfurt</option>
-          </select>
+        <div class="field-row">
+          <div class="field">
+            <label class="label" for="f-warehouse">Receiving warehouse</label>
+            <select class="select" id="f-warehouse">
+              <option value="den-broom">Denver — Broomfield</option>
+              <option value="den-dt">Denver — Downtown</option>
+              <option value="de-fra">Frankfurt</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="f-source">Source <span class="req">*</span></label>
+            <select class="select" id="f-source">
+              <option value="" disabled>Where the order came from</option>
+              <option value="Facebook">Facebook</option>
+              <option value="Local">Local</option>
+              <option value="Reddit">Reddit</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
         </div>
       </section>
 
@@ -441,12 +452,15 @@
             <span class="t-desc">The seller ships it — paste the tracking number.</span>
           </button>
         </div>
-        <div class="hint" id="client-pref-hint" hidden></div>
 
         <div class="tile-fields" id="fields-pickup" hidden>
           <div class="field">
             <label class="label" for="f-pickedby">Picked up by</label>
-            <input class="input" id="f-pickedby" autocomplete="off">
+            <select class="select" id="f-pickedby">
+              <option>Tim Wu</option>
+              <option>Sara Lin</option>
+              <option>Jinhu Wang</option>
+            </select>
           </div>
         </div>
 
@@ -631,7 +645,7 @@
     txnFromShot: false,
     shot: false,
     chatShot: false,         // self-paid: the chat with the seller, required
-    clientPref: null,        // 'pickup' | null
+    source: 'Facebook',      // Facebook | Local | Reddit | Other — on the order, and what a new package inherits
     purchaser: 'Tim Wu',
     commission: '10',
   };
@@ -639,7 +653,7 @@
   const $ = (id) => document.getElementById(id);
   const el = {
     backdrop: $('backdrop'), dialog: $('dialog'),
-    warehouse: $('f-warehouse'), tiles: $('tiles'), clientPrefHint: $('client-pref-hint'),
+    warehouse: $('f-warehouse'), source: $('f-source'), tiles: $('tiles'),
     fieldsPickup: $('fields-pickup'), pickedBy: $('f-pickedby'),
     fieldsLabel: $('fields-label'), tracking: $('f-tracking'), carriers: $('carriers'), carrierHint: $('carrier-hint'),
     segPaidBy: $('seg-paidby'), segMethod: $('seg-method'),
@@ -671,6 +685,7 @@
 
   function blockers() {
     const out = [];
+    if (!state.source) out.push('Pick where the order came from.');
     if (state.delivery === null) out.push('Choose how the order is getting here — local pickup or a shipping label.');
     if (state.delivery === 'label') {
       const t = trackingInfo();
@@ -703,6 +718,7 @@
     el.backdrop.hidden = !state.open;
 
     el.warehouse.value = state.warehouse;
+    el.source.value = state.source;
 
     // delivery tiles
     el.tiles.querySelectorAll('.tile').forEach((t) => {
@@ -710,11 +726,9 @@
       t.setAttribute('aria-checked', on ? 'true' : 'false');
       t.tabIndex = (state.delivery === null ? t.dataset.delivery === 'pickup' : on) ? 0 : -1;
     });
-    el.clientPrefHint.hidden = !state.clientPref;
-    if (state.clientPref) el.clientPrefHint.textContent = 'Pre-selected from the client — Mike R. usually has us pick up.';
     el.fieldsPickup.hidden = state.delivery !== 'pickup';
     el.fieldsLabel.hidden = state.delivery !== 'label';
-    if (document.activeElement !== el.pickedBy) el.pickedBy.value = state.pickedBy;
+    el.pickedBy.value = state.pickedBy;
     if (document.activeElement !== el.tracking) el.tracking.value = state.tracking;
 
     const t = trackingInfo();
@@ -789,7 +803,7 @@
     return {
       open: true, stage: 'Draft', warehouse: 'den-broom',
       delivery: null, pickedBy: USERS[state.role], tracking: '', carrierPick: null,
-      paidBy: 'self', method: 'paypal', txn: '', txnFromShot: false, shot: false, chatShot: false, clientPref: null,
+      paidBy: 'self', method: 'paypal', txn: '', txnFromShot: false, shot: false, chatShot: false, source: 'Facebook',
       purchaser: 'Tim Wu', commission: '10',
     };
   }
@@ -800,7 +814,6 @@
     blocked: () => ({ delivery: 'pickup', paidBy: 'company', method: 'paypal', txn: '' }),
     cash:    () => ({ delivery: 'pickup', paidBy: 'self', method: 'cash', chatShot: true }),
     shot:    () => ({ delivery: 'label', tracking: '9405 5036 9930 0104 5673 12', paidBy: 'company', method: 'paypal', shot: true, txn: SAMPLE_TXN, txnFromShot: true }),
-    clientpref: () => ({ delivery: 'pickup', clientPref: 'pickup', paidBy: 'self', method: 'cash', chatShot: true }),
   };
   function applyPreset(name) {
     Object.assign(state, base(), PRESETS[name]());
@@ -881,7 +894,8 @@
     el.tiles.querySelector(`[data-delivery="${next}"]`).focus();
   });
 
-  el.pickedBy.addEventListener('input', () => { state.pickedBy = el.pickedBy.value; });
+  el.pickedBy.addEventListener('change', () => { state.pickedBy = el.pickedBy.value; });
+  el.source.addEventListener('change', () => { state.source = el.source.value; render(); });
   el.tracking.addEventListener('input', () => {
     state.tracking = el.tracking.value;
     state.carrierPick = null;   // a new paste clears the manual pick, as in the app

@@ -84,6 +84,9 @@ Phase B:
 - [ ] A company-paid PO whose payment method is Cash advances without a transaction ID; PayPal still requires it.
 - [ ] A self-paid PO asks for no method and no transaction ID, and refuses to advance without a chat-history screenshot attached.
 - [ ] The PayPal screenshot stays optional; when attached it still fills the transaction ID.
+- [ ] The dialog asks for the order's source (Facebook / Local / Reddit / Other); it is saved on the PO and a package created from the dialog carries it.
+- [ ] "Picked up by" is a member picker.
+- [ ] The Shipping entry is hidden from the navigation.
 - [ ] Mobile offers the same choices when advancing from Draft.
 
 ## Out of scope
@@ -96,10 +99,10 @@ Phase B:
 
 - Plan: `~/.claude/plans/playful-wishing-whisper.md` (session 2026-09-14).
 - Artifact (clickable mock): https://claude.ai/code/artifact/b54f9175-82fe-4d1f-9186-868a15396372
-- Open questions surfaced with the mock:
-  1. `POST /api/packages` requires a source (Facebook / Local / Reddit / Other). Ask in the dialog, or derive from the PO's client?
-  2. "Picked up by" as free text, or a member picker?
-  3. A tracking number entered here links the package to this PO and advances immediately — confirm.
-  4. Clients already record *they ship / we send a label / we pick up / they drop off*. Pre-select the tile from the client, and is "they drop off" a third tile or part of Local pickup?
+- Open questions surfaced with the mock, answered by Jinhu on 2026-09-14:
+  1. Package source (Facebook / Local / Reddit / Other) → **"add a source for the order"**: the dialog asks for it and it is stored on the PO; a package created from the dialog inherits it.
+  2. "Picked up by" → **member picker**.
+  3. A tracking number entered here links the package to this PO and advances immediately → **yes**.
+  4. Client ship-preference prefill / drop-off tile → **"hide the shipping menu for now"**: no prefill, drop-off stays part of Local pickup, and phase B hides the Shipping entry from the navigation.
 - Confirm commits immediately (saves + advances), unlike the Done dialog which only stages the status for Save. A hand-off that merely staged would let a purchaser close the tab with the PO still Draft.
 - Phase B column names: `handoff_method`, `handoff_by`, `payment_method` — not `delivery_method`, which the Facebook-listing coordinator already uses.
