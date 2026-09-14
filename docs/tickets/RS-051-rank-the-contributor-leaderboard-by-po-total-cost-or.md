@@ -2,13 +2,13 @@
 id: RS-051
 title: Rank the contributor leaderboard by PO total cost or commission
 type: story
-status: in_progress
+status: done
 priority: P2
 created: 2026-09-14
 reporter: Jinhu
 branch: feat/leaderboard-po-cost
-pr:
-version:
+pr: 328
+version: 1.141.0
 related: []
 ---
 
