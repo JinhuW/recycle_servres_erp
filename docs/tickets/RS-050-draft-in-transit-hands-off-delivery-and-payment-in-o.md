@@ -2,7 +2,7 @@
 id: RS-050
 title: Draft → In Transit hands off delivery and payment in one dialog
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-14
 reporter: Jinhu
