@@ -41,7 +41,7 @@ export const EXPECTED_FIELD_COUNT: Record<LineCategory, number> = {
 
 export const PROMPT_BY_CATEGORY: Record<LineCategory, string> = {
   RAM: `You are reading a server/desktop/laptop RAM module label. Respond with a single minified JSON object and nothing else — no markdown, no code fences, no prose:
-{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"4GB|8GB|16GB|32GB|64GB|128GB","generation":"DDR2|DDR3|DDR4|DDR5","type":"Desktop|Server|Laptop","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx4|1Rx8|1Rx16|1Rx32|2Rx4|2Rx8|2Rx16|2Rx32|4Rx4|4Rx8|4Rx16|8Rx4|8Rx8","speed":"MT/s number only","partNumber":"…","_confidence":0.0}
+{"brand":"Samsung|SK Hynix|Micron|Kingston|Other","capacity":"4GB|8GB|16GB|32GB|64GB|128GB","generation":"DDR2|DDR3|DDR4|DDR5","type":"Desktop|Server|Laptop","classification":"UDIMM|RDIMM|LRDIMM|SODIMM","rank":"1Rx4|1Rx8|1Rx16|1Rx32|2Rx4|2Rx8|2Rx16|2Rx32|4Rx4|4Rx8|4Rx16|8Rx4|8Rx8|4DRx4|8DRx4|2S2Rx4|2S4Rx4|4S2Rx4","speed":"MT/s number only","partNumber":"…","_confidence":0.0}
 CAPACITY — number immediately followed by "GB", NO space and no other text. Write "32GB", never "32 GB".
 GENERATION and TYPE are SEPARATE fields — never put a DDR value in "type".
   generation = the DDR family. Use the "PC" code printed on the label, never infer from speed alone:
@@ -49,6 +49,7 @@ GENERATION and TYPE are SEPARATE fields — never put a DDR value in "type".
   type = the machine the module goes in: Desktop, Server, or Laptop.
 CLASSIFICATION — the module form factor: SODIMM, UDIMM, RDIMM, or LRDIMM.
 TYPE — derive from the form factor: SODIMM = Laptop, UDIMM = Desktop, RDIMM/LRDIMM/ECC = Server. Always emit BOTH generation and type when the form factor is readable.
+RANK — copy the organisation code exactly as printed, keeping any letter between the digits: "4DRx4" (dual-die package) and "2S2Rx4" (3DS stack) are NOT "4Rx4" and "2Rx4". Never drop a D or an Sn to reach a shorter code.
 SPEED — emit the digits printed on the label, no conversion. The label gives you the speed in one of these forms; copy the number verbatim, do NOT divide, multiply, or interpret:
   - "NNNN MT/s" or "NNNN MHz" → NNNN.
   - "DDRx-NNNN…" → the digits after the dash (ignore any trailing letters).

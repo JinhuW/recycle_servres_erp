@@ -66,9 +66,13 @@ function normGeneration(v: string): string | undefined {
   return undefined;
 }
 
-// "2RX4" / "2 Rx 4" → "2Rx4".
+// "2RX4" / "2 Rx 4" → "2Rx4". The prefix also carries the packaging letter on
+// high-density modules — "4DRX4" (dual-die) and "2S2RX4" (3DS stack) — which
+// only the lower-case x distinguishes from the catalog spelling; without them
+// here an upper-case read falls through unchanged and scanValidation drops it
+// as off-catalog.
 function normRank(v: string): string {
-  const m = v.toUpperCase().replace(/\s+/g, '').match(/^(\d)RX(\d+)$/);
+  const m = v.toUpperCase().replace(/\s+/g, '').match(/^(\d(?:D|S\d)?)RX(\d+)$/);
   return m ? `${m[1]}Rx${m[2]}` : v.trim();
 }
 

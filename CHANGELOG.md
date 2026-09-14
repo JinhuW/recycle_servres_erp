@@ -17,6 +17,99 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.140.1] - 2026-09-14
+
+### Fixed
+
+- **The desktop PO list no longer stops at the newest 50 orders** (RS-049).
+  The stage chips on the Purchase orders page summed to exactly 50 whatever
+  the org held, because the page made one bare request to an API that has
+  been keyset-paginated since before the first tagged release — default page
+  50, `nextCursor` in the reply — and read only the first page.  Older POs were unreachable
+  from the desktop, and every figure the page derives in the browser (the
+  chip counts, the KPI cards, search, the twelve sortable columns, the Done
+  prune) was computed over that slice.  Infinite scroll would have kept those
+  figures partial, so the list now follows the API's pages to the end the
+  way the Shipping table does, progressively: the first 200 paint at once
+  and older pages append behind a "Loading older orders…" row until the
+  last one lands.  A filter change mid-stream stops the superseded stream's
+  fetching, not just its rendering, and the scroll position restored on
+  the way back from an order now waits for the whole list so a position
+  beyond page one isn't clipped.  The walk lives in `lib/keysetPages.ts`
+  with its own tests.  The mobile PO list and the sell-order list carry the
+  same cap and are recorded as follow-ups on the ticket.
+
+## [1.140.0] - 2026-09-13
+
+### Features
+
+- **Facebook tracker shows the fleet's accounts, coverage and search phrases.**
+  The `/fleet` page answered "is a worker alive?" and nothing else; it now
+  answers the question the operator actually asks — which Facebook account is
+  searching which cities for which phrases, and is it alive.  One row per
+  account with liveness, state, session days left, last search, heartbeat and
+  the alerts its cities produced this week — and who the account is: the
+  vault's Facebook login and the session's Facebook user id on the row,
+  expandable to the city list, vault account, stored secrets (names only),
+  browser identity, backup age, proxy env var, session file and pacing.  Beside it: the literal search-bar
+  phrases per item with their title gate and reject rules, the shared search
+  settings, and a coverage map of every centre lit by whichever worker is
+  searching it now.  A search box on the page head filters accounts, cities
+  and phrases at once.  The data is one document the rs-console facade
+  composes (`/v1/fleet`), forwarded by the existing manager-only
+  `/api/coordinator` proxy along with the alert-hit stats; the cards are the
+  React form of the standalone dashboard that facade serves, built on the same
+  tokens so the two stay in step.  Written as #282 on 2026-09-06 under
+  v1.129.0 and rebased here after that version was taken while it waited
+  ([RS-048](docs/tickets/RS-048-facebook-tracker-shows-the-fleet-s-accounts-coverage-and.md)).
+
+## [1.139.0] - 2026-09-13
+
+### Features
+
+- **The Rank dropdown on RAM lines covers dual-die and 3DS markings.**  It
+  only ever offered the plain JEDEC grid (`1Rx4` through `8Rx8`), which leaves
+  out how high-density modules are actually marked.  Two notations were
+  missing, and they describe different constructions rather than two vendors'
+  spellings of one thing: a dual-die package (`4DRx4`, `8DRx4`) and an n-high
+  3DS stack (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`).  Samsung, SK Hynix and Micron each
+  print both.  All five are now in the catalog (migration 0125), after the
+  plain grid so the common ranks stay at the top of the list.
+- **A label scan keeps those codes instead of losing them.**  The OCR prompt
+  had been handed the old thirteen values as a closed set, so it was
+  instructed to flatten `4DRx4` to `4Rx4`; and an upper-case read of `4DRX4`
+  failed rank normalisation, fell through unchanged, and was then dropped for
+  not matching the catalog — which showed up as the scanner simply not reading
+  the rank.
+
+Production already held three purchase-order lines reading `4DRx4`, entered
+past a dropdown that never offered it; they need no correction, as the value
+added is spelled exactly the way they store it.  An open tab keeps the old
+list until it is reloaded.  Written as #248 on 2026-09-03 and re-cut here after
+its ticket, version and migration numbers were taken while it waited
+([RS-047](docs/tickets/RS-047-3ds-and-dual-die-ram-ranks-are-missing-from-the-rank.md)).
+
+## [1.138.6] - 2026-09-13
+
+### Fixed
+
+- **The "Group with…" picker on Payments is no longer clipped off the bottom
+  of the table.**  The candidate list rendered `position: absolute` inside
+  the expanded row's `<td colSpan>`, which sits in `.table-scroll`
+  (`overflow-x: auto; overflow-y: hidden`) — so for any row in the lower part
+  of the list the candidates were drawn somewhere unclickable and manual
+  grouping could not be completed at all.  It had been that way since the
+  feature shipped in v1.103.0, and it was live on production.  The PO picker
+  hit the same trap in the same release and was moved to `position: fixed`
+  then; the pair picker was written from its shape and did not inherit the
+  fix, and the record picker later copied the arithmetic a third time.  All
+  three pickers now place themselves against the viewport through one pure
+  helper, `placePopover` — below the button when it fits, flipped above when
+  it does not, clamped to the viewport — tracking their anchor on scroll and
+  resize, at the z-index the PO picker already used.  Covered by unit tests
+  that fail if a flip or clamp clause is removed
+  ([RS-046](docs/tickets/RS-046-group-with-popover-is-clipped-off-the-bottom-of-the.md)).
+
 ## [1.138.5] - 2026-09-13
 
 ### Fixed

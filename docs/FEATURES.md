@@ -76,6 +76,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   failed and reversed left out — and clicking it opens the Payments page
   focused on that PO. A PO nothing is linked to keeps the plain chip, and so
   does every purchaser, since the page it opens is manager-only.
+- **The desktop list holds every PO in scope** (v1.140.1). It used to stop
+  silently at the API's first page — the newest 50 — so older orders were
+  unreachable and the stage counts, KPI cards, search and sort all ran over
+  that slice. It now follows the API's pages to the end: the first page
+  paints at once and older pages append behind a "Loading older orders…"
+  row until the last one lands. The mobile PO list and the sell-order list
+  still stop at 50.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
   v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. Since
   v1.138.5 a move back to Reviewing is refused only while a line sits on a
@@ -90,6 +97,10 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 - Line specs are per-category: RAM carries Part #, Chip #, Brand, Capacity,
   Generation, Type, Class, Rank and Speed; SSD/HDD carry Interface, Form
   factor, Health % and RPM; Other carries a free item type (v1.47.0).
+  Rank covers the plain JEDEC grid plus the high-density packaging codes —
+  dual-die (`4DRx4`, `8DRx4`) and 3DS stacks (`2S2Rx4`, `2S4Rx4`, `4S2Rx4`),
+  which a label scan now keeps instead of flattening to the plain rank
+  (v1.139.0).
 - **Validation is shared between shells**, so desktop, mobile and the backend
   can't drift: all RAM spec fields required (v1.29.0); Chip # required only for
   Micron and Other, whose part numbers don't identify the module (v1.36.0);
@@ -482,7 +493,17 @@ count a PO from Ready to Pay on, when its commission becomes owed
 - **Tracker** — admin page and API proxy for the Reddit listing monitor, with a
   fleet status filter and infinite scroll (v1.64.0, v1.65.0).
 - **Coordinator** — Facebook tracker page with live fleet, review stats and a
-  filter prompt (v1.83.1).
+  filter prompt (v1.83.1).  The fleet view shows one row per Facebook account
+  (liveness, state, session days left, last search, heartbeat, the week's
+  alerts from its cities, the vault login and Facebook user id, expandable to
+  cities, secrets by name, browser identity, backup age, proxy, session file
+  and pacing), the literal search phrases per item with their title gate and
+  reject rules, the shared search settings, a coverage map of every centre
+  lit by whichever worker searches it now, and each worker's build; one
+  search box filters accounts, cities and phrases at once.  The data is the
+  rs-console facade's `/v1/fleet` document through the manager-only
+  `/api/coordinator` proxy — until that facade is deployed the cards read
+  "fleet view unavailable" and the rest of the page works (v1.140.0).
 
 ## MCP and OAuth connectors
 

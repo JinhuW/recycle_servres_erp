@@ -77,7 +77,17 @@ coordinator.get('/stats/reviews', (c) => {
   return forward(c, 'GET', `/v1/stats/reviews${query}`);
 });
 
+coordinator.get('/stats/alert-hits', (c) => {
+  const query = new URL(c.req.url).search;
+  return forward(c, 'GET', `/v1/stats/alert-hits${query}`);
+});
+
 coordinator.get('/filter-prompt', (c) => forward(c, 'GET', '/v1/config/filter-prompt'));
+
+// The composed fleet view: fleet.toml + master.toml + the live monitor config
+// joined to worker health, assembled by the facade so the browser never sees
+// a config file. Proxies arrive as env-var names only.
+coordinator.get('/fleet', (c) => forward(c, 'GET', '/v1/fleet'));
 
 coordinator.get('/challenges', (c) => {
   // Pass the status filter through untouched; the coordinator validates it.
