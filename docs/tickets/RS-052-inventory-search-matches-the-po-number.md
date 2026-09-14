@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-14
 reporter: jinhu
 branch: feat/inventory-po-search
-pr:
+pr: 330
 version: 1.143.0
 related: []
 ---
