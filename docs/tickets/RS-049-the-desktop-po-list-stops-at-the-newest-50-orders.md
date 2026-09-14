@@ -8,7 +8,7 @@ created: 2026-09-14
 reporter: Jinhu
 branch: fix/po-table-pagination
 pr:
-version:
+version: 1.140.1
 related: []
 ---
 

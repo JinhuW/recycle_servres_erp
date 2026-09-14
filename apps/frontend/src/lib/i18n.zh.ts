@@ -15,6 +15,7 @@ const zh: Record<string, string> = {
   activity: '活动记录',
   activityEmpty: '暂无活动记录 — 对此订单的更改会在此显示。',
   anyStatus: '所有状态', noOrdersMatch: '没有符合筛选的订单。',
+  ordersLoadingOlder: '正在加载更早的订单…',
   scanWithAI: '使用 AI 扫描零件', scanWithAISub: '对准 RAM 标签,我们自动填充其余信息',
   teamPerformance: '团队业绩', yourNumbers: '我的业绩',
   last30Team: '最近 30 天 · 团队共 {n} 笔订单', last30Mine: '最近 30 天 · 我提交了 {n} 笔订单',

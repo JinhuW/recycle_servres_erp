@@ -6,6 +6,7 @@ import { useT } from '../../lib/i18n';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { usePreference } from '../../lib/preferences';
 import { usePersisted, useScrollMemory } from '../../lib/listMemory';
+import { forEachKeysetPage } from '../../lib/keysetPages';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
@@ -130,6 +131,9 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const [showDone, setShowDone] = usePersisted<boolean>('desktop.orders.showDone', false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  // True once the last page has landed (or the stream failed) — the loading
+  // row, the empty state and the scroll restore all wait on it.
+  const [loadedAll, setLoadedAll] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [openLines, setOpenLines] = useState<Order | null>(null);
 
@@ -160,7 +164,9 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
   const [sort, setSort] = usePersisted<SortState>('desktop.orders.sort', { col: 'date', dir: 'desc' });
 
   // Restore the list scroll position when returning from an order's edit page.
-  const tableScrollRef = useScrollMemory('desktop.orders', loadedOnce);
+  // Waits for the whole list: the hook restores once, and a position beyond
+  // the first page would clip against a table that isn't tall enough yet.
+  const tableScrollRef = useScrollMemory('desktop.orders', loadedAll);
   const cycleSort = (col: string) => setSort(s => {
     if (s.col !== col) return { col, dir: 'desc' };
     if (s.dir === 'desc') return { col, dir: 'asc' };
@@ -175,10 +181,28 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
     const params = new URLSearchParams();
     if (filter !== 'all') params.set('category', filter);
     if (showArchived) params.set('includeArchived', 'true');
-    api.get<{ orders: OrderSummary[] }>(`/api/orders?${params}`)
-      .then(r => { if (alive) setOrders(r.orders); })
+    // Every figure on this page — chip counts, KPIs, search, the sort — is
+    // computed client-side over the array, so the list has to hold every PO
+    // in scope, not the API's default first page. Pages append as they land
+    // so the first one paints before the rest arrive.
+    params.set('limit', '200');
+    setLoadedAll(false);
+    forEachKeysetPage<OrderSummary>(
+      cursor => api.get<{ orders: OrderSummary[]; nextCursor: string | null }>(
+        `/api/orders?${params}${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`,
+      ).then(r => ({ items: r.orders, nextCursor: r.nextCursor })),
+      (items, { first, done }) => {
+        // A filter change mid-stream: stop fetching, not just rendering.
+        if (!alive) return false;
+        setOrders(prev => first ? items : [...prev, ...items]);
+        setLoadedOnce(true);
+        if (done) setLoadedAll(true);
+      },
+    )
       .catch(handleFetchError)
-      .finally(() => { if (alive) setLoadedOnce(true); });
+      // A page that failed still ends the stream — the loading row and the
+      // scroll restore wait on this flag.
+      .finally(() => { if (alive) { setLoadedOnce(true); setLoadedAll(true); } });
     return () => { alive = false; };
     // isManager depends on the role-preview tweak; refetch so the list
     // re-scopes (to all POs / to the user's own) when preview toggles.
@@ -499,7 +523,7 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
               </tr>
             </thead>
             <tbody>
-              {sorted.length === 0 && (
+              {loadedAll && sorted.length === 0 && (
                 <tr><td colSpan={totalCols} style={{ textAlign: 'center', padding: 32, color: 'var(--fg-subtle)' }}>
                   {t('noOrdersMatch')}
                 </td></tr>
@@ -706,6 +730,17 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                   </Fragment>
                 );
               })}
+              {!loadedAll && (
+                <tr aria-live="polite">
+                  <td colSpan={totalCols} style={{ padding: 12 }}>
+                    {/* The spinner sizes itself only inside a flex parent. */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--fg-subtle)', fontSize: 12.5 }}>
+                      <span className="busy-spinner" />
+                      {t('ordersLoadingOlder')}
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
           )}

@@ -76,6 +76,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   failed and reversed left out — and clicking it opens the Payments page
   focused on that PO. A PO nothing is linked to keeps the plain chip, and so
   does every purchaser, since the page it opens is manager-only.
+- **The desktop list holds every PO in scope** (v1.140.1). It used to stop
+  silently at the API's first page — the newest 50 — so older orders were
+  unreachable and the stage counts, KPI cards, search and sort all ran over
+  that slice. It now follows the API's pages to the end: the first page
+  paints at once and older pages append behind a "Loading older orders…"
+  row until the last one lands. The mobile PO list and the sell-order list
+  still stop at 50.
 - Managers can reopen a Done PO back to Reviewing (v1.81.0), and since
   v1.132.0 also Done → Ready to Pay and Ready to Pay → Reviewing. Since
   v1.138.5 a move back to Reviewing is refused only while a line sits on a

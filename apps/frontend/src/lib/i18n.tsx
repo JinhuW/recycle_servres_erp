@@ -41,6 +41,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     activityEmpty: 'No activity yet — changes to this order appear here.',
     anyStatus: 'Any status',
     noOrdersMatch: 'No orders match these filters.',
+    ordersLoadingOlder: 'Loading older orders…',
     scanWithAI: 'Scan a part with AI',
     scanWithAISub: 'Point at a RAM label, we fill the rest',
     teamPerformance: 'Team performance',
