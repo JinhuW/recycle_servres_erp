@@ -7,7 +7,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { fmtUSD0, relTime } from '../../lib/format';
 import { categoryFilterOptions } from '../../lib/lookups';
-import type { Category, DashboardData } from '../../lib/types';
+import type { Category, DashboardData, LeaderboardSort } from '../../lib/types';
 import { DashboardSkeleton } from '../../components/Skeleton';
 
 const CAT_COLOR: Record<Category, string> = {
@@ -26,16 +26,23 @@ export function DesktopDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [lbCategory, setLbCategory] = useState<string>('all');
   const [range, setRange] = useState<Range>('30d');
+  const [lbSort, setLbSort] = useState<LeaderboardSort>('cost');
 
   // The role-preview tweak flips `user.role`; refetch so the dashboard
   // re-scopes (own work vs. team-wide) when a manager toggles preview, matching
-  // the backend's effectiveRole scoping.
+  // the backend's effectiveRole scoping. The `alive` guard keeps a slower
+  // response from an earlier range/sort from landing under the active buttons.
   const effRole = user?.role;
   useEffect(() => {
+    let alive = true;
     const params = new URLSearchParams();
     if (range !== '30d') params.set('range', range);
-    api.get<DashboardData>(`/api/dashboard?${params}`).then(setData).catch(handleFetchError);
-  }, [range, effRole]);
+    if (lbSort !== 'cost') params.set('lb', lbSort);
+    api.get<DashboardData>(`/api/dashboard?${params}`)
+      .then(r => { if (alive) setData(r); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, [range, lbSort, effRole]);
 
   if (!user) return null;
   const isManager = user.role === 'manager';
@@ -142,19 +149,34 @@ export function DesktopDashboard() {
           <div>
             <div className="card-title">{t('contributorLeaderboard')}</div>
             <div className="card-sub">
-              {t('rankedByProfit')} · {lbCategory === 'all' ? t('allItemTypes') : `${lbCategory} only`}
+              {lbSort === 'cost' ? t('rankedByTotalCost') : t('rankedByCommission')}
+              {' · '}
+              {lbCategory === 'all' ? t('allItemTypes') : `${lbCategory} only`}
             </div>
           </div>
-          <div className="seg" role="tablist" aria-label={t('dashFilterItemTypeAriaLabel')}>
-            {categoryFilterOptions().map(c => (
-              <button
-                key={c}
-                className={lbCategory === c ? 'active' : ''}
-                onClick={() => setLbCategory(c)}
-              >
-                {c === 'all' ? t('all') : c}
-              </button>
-            ))}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div className="seg" role="tablist" aria-label={t('dashLbSortAriaLabel')}>
+              {(['cost', 'commission'] as const).map(s => (
+                <button
+                  key={s}
+                  className={lbSort === s ? 'active' : ''}
+                  onClick={() => setLbSort(s)}
+                >
+                  {s === 'cost' ? t('totalCost') : t('commission')}
+                </button>
+              ))}
+            </div>
+            <div className="seg" role="tablist" aria-label={t('dashFilterItemTypeAriaLabel')}>
+              {categoryFilterOptions().map(c => (
+                <button
+                  key={c}
+                  className={lbCategory === c ? 'active' : ''}
+                  onClick={() => setLbCategory(c)}
+                >
+                  {c === 'all' ? t('all') : c}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="card-body" style={{ padding: 0 }}>
@@ -164,7 +186,8 @@ export function DesktopDashboard() {
                 <tr>
                   <th style={{ width: 50 }}>#</th>
                   <th>{t('contributor')}</th>
-                  <th className="num">{t('entries')}</th>
+                  <th className="num">{t('orders')}</th>
+                  <th className="num">{t('totalCost')}</th>
                   <th className="num">{t('revenue')}</th>
                   <th className="num">{t('profit')}</th>
                   <th className="num">{t('commission')}</th>
@@ -173,7 +196,7 @@ export function DesktopDashboard() {
               <tbody>
                 {leaderboard.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
+                    <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
                       {lbCategory === 'all' ? t('dashNoContributorsAll') : t('dashNoContributorsCat', { cat: lbCategory })}
                       {lbCategory !== 'all' && (
                         <>
@@ -207,6 +230,7 @@ export function DesktopDashboard() {
                       </div>
                     </td>
                     <td className="num mono">{row.count}</td>
+                    <td className="num mono">{fmtUSD0(row.cost, locale)}</td>
                     <td className="num mono">{fmtUSD0(row.revenue, locale)}</td>
                     <td className="num mono pos">{fmtUSD0(row.profit, locale)}</td>
                     <td className="num mono">{fmtUSD0(row.commission, locale)}</td>

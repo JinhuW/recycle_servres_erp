@@ -25,14 +25,17 @@ async function clearWindow() {
 async function insertDonePO(
   id: string,
   ownerEmail: string,
-  opts: { rate: number | null; lifecycle?: string; otherFees?: number },
+  opts: { rate: number | null; lifecycle?: string; otherFees?: number; totalCost?: number },
   lines: { unitCost: number; sellPrice: number | null; qty: number; category?: string }[],
 ) {
   const db = getTestDb();
   const owner = await userId(ownerEmail);
+  // total_cost stays NULL unless given — the legacy shape, which the
+  // leaderboard's cost column must fall back from to the line goods subtotal.
   await db`
-    INSERT INTO orders (id, user_id, category, lifecycle, commission_rate, other_fees, created_at)
-    VALUES (${id}, ${owner}, 'HDD', ${opts.lifecycle ?? 'done'}, ${opts.rate}, ${opts.otherFees ?? 0}, NOW())
+    INSERT INTO orders (id, user_id, category, lifecycle, commission_rate, other_fees, total_cost, created_at)
+    VALUES (${id}, ${owner}, 'HDD', ${opts.lifecycle ?? 'done'}, ${opts.rate}, ${opts.otherFees ?? 0},
+            ${opts.totalCost ?? null}, NOW())
   `;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -77,33 +80,63 @@ describe('GET /api/dashboard — projected financials (purchaser)', () => {
     expect(r.body.kpis.count).toBe(1);
   });
 
-  it('contributor leaderboard ranks purchasers by projected Done-PO profit', async () => {
+  // Marcus earns the larger commission, Priya spends the larger total — so the
+  // two rankings disagree and each test below can tell which one it got.
+  //   Marcus: one PO, NULL header, two lines of 100 → cost 200 (line fallback),
+  //           profit 2 × (200 − 100) = 200, commission 20.
+  //   Priya:  one PO, header 900 + 50 fee → cost 950; the fee amortises into
+  //           her single line so profit = 150 − 100 − 50 = 0, commission 0.
+  async function seedLeaderboard() {
     await clearWindow();
-    // Marcus: 2 * (200-100) = 200 profit; Priya: 1 * (150-100) = 50 profit.
-    await insertDonePO('PO-LB-MARCUS', MARCUS, { rate: 0.1 }, [{ unitCost: 100, sellPrice: 200, qty: 2 }]);
-    await insertDonePO('PO-LB-PRIYA',  PRIYA,  { rate: 0.2 }, [{ unitCost: 100, sellPrice: 150, qty: 1 }]);
+    await insertDonePO('PO-LB-MARCUS', MARCUS, { rate: 0.1 }, [
+      { unitCost: 100, sellPrice: 200, qty: 1 },
+      { unitCost: 100, sellPrice: 200, qty: 1 },
+    ]);
+    await insertDonePO('PO-LB-PRIYA', PRIYA, { rate: 0.2, totalCost: 900, otherFees: 50 },
+      [{ unitCost: 100, sellPrice: 150, qty: 1 }]);
+    return { marcus: await userId(MARCUS), priya: await userId(PRIYA) };
+  }
 
-    const marcus = await userId(MARCUS);
-    const priya  = await userId(PRIYA);
+  type LbRow = { id: string; count: number; cost: number; profit: number; revenue: number; commission: number };
+
+  it('contributor leaderboard ranks purchasers by PO total cost by default', async () => {
+    const { marcus, priya } = await seedLeaderboard();
 
     // Viewed by a manager so all rows' financials are visible.
     const { token } = await loginAs(ALEX);
-    const r = await api<{
-      leaderboard: { id: string; profit: number; revenue: number; commission: number }[];
-    }>('GET', '/api/dashboard?range=30d', { token });
+    const r = await api<{ leaderboard: LbRow[] }>('GET', '/api/dashboard?range=30d', { token });
 
     const m = r.body.leaderboard.find(x => x.id === marcus)!;
     const p = r.body.leaderboard.find(x => x.id === priya)!;
+    // A PO count, not a line count: Marcus's two lines are one order.
+    expect(m.count).toBe(1);
+    expect(m.cost).toBeCloseTo(200, 2);
     expect(m.profit).toBeCloseTo(200, 2);
     expect(m.revenue).toBeCloseTo(400, 2);
     expect(m.commission).toBeCloseTo(200 * 0.1, 2);
-    expect(p.profit).toBeCloseTo(50, 2);
-    expect(p.commission).toBeCloseTo(50 * 0.2, 2);
+    expect(p.count).toBe(1);
+    expect(p.cost).toBeCloseTo(950, 2);
+    expect(p.profit).toBeCloseTo(0, 2);
+    expect(p.commission).toBeCloseTo(0, 2);
 
-    // Ranked by projected profit DESC → Marcus ahead of Priya.
+    // Ranked by cost DESC → Priya ahead of Marcus despite the smaller margin.
     const idxM = r.body.leaderboard.findIndex(x => x.id === marcus);
     const idxP = r.body.leaderboard.findIndex(x => x.id === priya);
-    expect(idxM).toBeLessThan(idxP);
+    expect(idxP).toBeLessThan(idxM);
+  });
+
+  it('?lb=commission ranks by commission instead; an unknown value falls back to cost', async () => {
+    const { marcus, priya } = await seedLeaderboard();
+    const { token } = await loginAs(ALEX);
+
+    const byCommission = await api<{ leaderboard: LbRow[] }>(
+      'GET', '/api/dashboard?range=30d&lb=commission', { token });
+    const order = byCommission.body.leaderboard.map(x => x.id);
+    expect(order.indexOf(marcus)).toBeLessThan(order.indexOf(priya));
+
+    const bogus = await api<{ leaderboard: LbRow[] }>('GET', '/api/dashboard?range=30d&lb=bogus', { token });
+    const fallback = bogus.body.leaderboard.map(x => x.id);
+    expect(fallback.indexOf(priya)).toBeLessThan(fallback.indexOf(marcus));
   });
 
   it('purchaser KPI matches their own leaderboard row (same projected lens)', async () => {

@@ -65,8 +65,8 @@ describe('GET /api/dashboard — realized financials', () => {
     expect(r.body.kpis.count).toBe(1); // one Done sell order in window
   });
 
-  // The contributor leaderboard is the PROJECTED lens (per-purchaser Done-PO
-  // margin), independent of role — see dashboard-projected.test.ts.
+  // The contributor leaderboard is PO-based (per-purchaser total cost or
+  // projected commission), independent of role — see dashboard-projected.test.ts.
 
   it('no Done sell orders → revenue/profit/commission are all 0', async () => {
     const db = getTestDb();

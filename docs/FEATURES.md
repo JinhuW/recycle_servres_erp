@@ -483,10 +483,16 @@ over MCP.
 
 ## Dashboard
 
-Per-role. Purchasers see projected profit from their own Done POs (v0.1.10);
-the contributor leaderboard uses projected Done-PO profit (v1.0.1). Both
-count a PO from Ready to Pay on, when its commission becomes owed
-(v1.132.0).
+Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
+The contributor leaderboard ranks purchasers by the total cost of their POs
+in the selected range — goods total plus other fees, the figure the PO pages
+call "Total cost" — or, on a toggle, by the commission those POs earned
+(`?lb=cost|commission` on `GET /api/dashboard`, cost by default); its
+"Orders" column counts POs, and projected revenue, profit and commission
+stay on the row as context (v1.141.0; it ranked by projected profit from
+v1.0.1). Both lenses count a PO from Ready to Pay on, when its commission
+becomes owed (v1.132.0). A purchaser sees every peer's rank but only their
+own money, so the ranking is computed server-side.
 
 ## Oversight extras
 

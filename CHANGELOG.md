@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.141.0] - 2026-09-14
+
+### Features
+
+- **The contributor leaderboard ranks by PO total cost, or by commission on
+  a toggle** (RS-051).  Since v1.0.1 the dashboard's board ordered purchasers
+  by the projected margin set on their PO lines, and its "Entries" column was
+  a line count that the mobile card captioned as orders.  The board now
+  answers the question the team asks of it — who bought the most — by
+  ranking on the total cost of each purchaser's Ready-to-Pay and Done POs in
+  the range: goods total plus other fees, the same "Total cost" the PO pages
+  show, falling back to the line subtotal on a legacy PO with no header
+  figure.  A two-way control on the card (desktop card head, a full-width
+  segment row on mobile) switches the ranking to the commission those POs
+  earned; the choice travels as `?lb=` on `GET /api/dashboard` because a
+  purchaser only receives their own row's money and cannot re-sort locally.
+  The count is now a real PO count, a "Total cost" column sits beside it,
+  and projected revenue, profit and commission remain on the row as context.
+  The mobile "Your rank" card drops its "behind by $X" line: the figure it
+  subtracted was masked to null for every purchaser, so it had only ever
+  printed a negative number.
+
 ## [1.140.1] - 2026-09-14
 
 ### Fixed
