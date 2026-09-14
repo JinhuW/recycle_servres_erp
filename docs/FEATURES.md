@@ -228,7 +228,8 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
-- Search matches part number, serial number, brand and id (v1.42.0).
+- Search matches part number, serial number, brand, description and item type
+  (v1.42.0), and the PO number, whole or partial (v1.143.0).
 - Export honours the row selection, one worksheet per category, with designed
   workbook styling (v1.30.0, v1.31.0). Select/unselect all lots in the current
   filter (v1.19.0).
