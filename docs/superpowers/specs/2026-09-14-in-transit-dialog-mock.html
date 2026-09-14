@@ -474,7 +474,7 @@
               <button role="radio" aria-checked="false" data-paidby="self">Self-paid (reimburse)</button>
             </div>
           </div>
-          <div class="field">
+          <div class="field" id="field-method">
             <span class="label" id="lbl-method">Method</span>
             <div class="seg" role="radiogroup" aria-labelledby="lbl-method" id="seg-method">
               <button role="radio" aria-checked="false" data-method="paypal">PayPal</button>
@@ -498,10 +498,6 @@
                 <button class="btn ghost sm" id="btn-remove-chat">Remove screenshot</button>
               </div>
             </div>
-          </div>
-          <div class="hint" id="self-paypal-hint" hidden>
-            No PayPal transaction ID needed — a self-paid order is not matched against the bank.
-            <button class="linkish" id="btn-txn-open" type="button">Add it anyway</button>
           </div>
         </div>
         <div class="tile-fields" id="fields-paypal" hidden>
@@ -631,7 +627,6 @@
     carrierPick: null,
     paidBy: 'self',          // 'company' | 'self'
     method: 'paypal',        // 'paypal' | 'cash'
-    txnOpen: false,          // self-paid: the optional ID field is collapsed until asked for
     txn: '',
     txnFromShot: false,
     shot: false,
@@ -649,7 +644,7 @@
     fieldsLabel: $('fields-label'), tracking: $('f-tracking'), carriers: $('carriers'), carrierHint: $('carrier-hint'),
     segPaidBy: $('seg-paidby'), segMethod: $('seg-method'),
     fieldsSelf: $('fields-self'), dropChat: $('drop-chat'), chatShot: $('chat-shot'), chatShotImg: $('chat-shot-img'), removeChat: $('btn-remove-chat'),
-    fieldsPaypal: $('fields-paypal'), selfPaypalHint: $('self-paypal-hint'), txnOpen: $('btn-txn-open'), txn: $('f-txn'), txnReq: $('txn-req'), txnHint: $('txn-hint'),
+    fieldMethod: $('field-method'), fieldsPaypal: $('fields-paypal'), txn: $('f-txn'), txnReq: $('txn-req'), txnHint: $('txn-hint'),
     drop: $('drop'), shot: $('shot'), shotImg: $('shot-img'), shotHint: $('shot-hint'), removeShot: $('btn-remove-shot'),
     cashHint: $('cash-hint'),
     secManager: $('sec-manager'), purchaser: $('f-purchaser'), commission: $('f-commission'),
@@ -741,24 +736,21 @@
       const on = b.dataset.method === state.method;
       b.classList.toggle('active', on); b.setAttribute('aria-checked', on ? 'true' : 'false');
     });
-    const paypal = state.method === 'paypal';
-    const txnRequired = paypal && state.paidBy === 'company';
-    // A self-paid order is reimbursed from commission, not matched against the
-    // bank, so the ID is never asked for — the field stays behind a link.
+    // Method belongs to the company card. A self-paid order is reimbursed from
+    // commission against the chat with the seller, so it asks for neither a
+    // method nor a transaction ID.
     const self = state.paidBy === 'self';
-    const showTxn = paypal && (txnRequired || state.txnOpen || !!state.txn || state.shot);
+    const paypal = !self && state.method === 'paypal';
+    el.fieldMethod.hidden = self;
     el.fieldsSelf.hidden = !self;
     el.dropChat.hidden = state.chatShot;
     el.chatShot.hidden = !state.chatShot;
     if (state.chatShot) el.chatShotImg.src = SAMPLE_CHAT;
-    el.selfPaypalHint.hidden = !(self && paypal && !showTxn);
-    el.fieldsPaypal.hidden = !showTxn;
-    el.cashHint.hidden = !(state.method === 'cash' && !self);
+    el.fieldsPaypal.hidden = !paypal;
+    el.cashHint.hidden = !(!self && state.method === 'cash');
     el.cashHint.textContent = 'Paid in cash — nothing else to add.';
-    el.txnReq.hidden = !txnRequired;
-    el.txnHint.textContent = txnRequired
-      ? 'Required when the company paid — it is how the bank payment finds this order.'
-      : 'Optional — a self-paid order is not matched against the bank.';
+    el.txnReq.hidden = false;
+    el.txnHint.textContent = 'Required — it is how the bank payment finds this order.';
     if (document.activeElement !== el.txn) el.txn.value = state.txn;
     el.txn.classList.toggle('ai-filled', state.txnFromShot && state.txn === SAMPLE_TXN);
     el.drop.hidden = state.shot;
@@ -797,7 +789,7 @@
     return {
       open: true, stage: 'Draft', warehouse: 'den-broom',
       delivery: null, pickedBy: USERS[state.role], tracking: '', carrierPick: null,
-      paidBy: 'self', method: 'paypal', txnOpen: false, txn: '', txnFromShot: false, shot: false, chatShot: false, clientPref: null,
+      paidBy: 'self', method: 'paypal', txn: '', txnFromShot: false, shot: false, chatShot: false, clientPref: null,
       purchaser: 'Tim Wu', commission: '10',
     };
   }
@@ -911,7 +903,6 @@
     state.method = b.dataset.method; render();
   });
   el.txn.addEventListener('input', () => { state.txn = el.txn.value; state.txnFromShot = false; render(); });
-  el.txnOpen.addEventListener('click', () => { state.txnOpen = true; render(); el.txn.focus(); });
 
   // "Choose file" in the mock attaches the bundled sample and reads its ID.
   function attachShot() {

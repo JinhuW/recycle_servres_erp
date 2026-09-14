@@ -56,13 +56,14 @@ Decisions taken with Jinhu on 2026-09-14:
 
 Corrections from the first look at the mock (Jinhu, same day):
 
-- **Self-paid orders never ask for a PayPal transaction ID** — they are
-  reimbursed from commission, not matched against the bank.  The field stays
-  behind an "add it anyway" link.
+- **Self-paid orders ask for no payment method and no PayPal transaction
+  ID** — they are reimbursed from commission, not matched against the bank.
 - **Self-paid orders require a chat-history screenshot** — the conversation
   with the seller showing what was agreed and paid, which is what the
   reimbursement is checked against.
-- **No "Other" payment method** — PayPal or Cash.
+- **Method (PayPal / Cash) belongs to the company card only**, and there is no
+  "Other".  Company + PayPal requires the transaction ID; Company + Cash needs
+  nothing more.
 
 The work is in two phases.  **Phase A** (this ticket's first PR) is the mock
 and this record.  **Phase B** — migration, backend rule change, desktop dialog,
@@ -72,16 +73,17 @@ mobile sheet — gets its own plan once the mock is signed off.
 
 Phase A:
 
-- [ ] A self-contained mock at `docs/superpowers/specs/2026-09-14-in-transit-dialog-mock.html`, published as an artifact, shows the dialog in the app's own visual language with both delivery paths, both payment types, the three payment methods, the optional screenshot, and the manager-only fields.
-- [ ] The mock's blocked states match the backend's: a label with no valid tracking number, and company card + PayPal with no transaction ID.
+- [ ] A self-contained mock at `docs/superpowers/specs/2026-09-14-in-transit-dialog-mock.html`, published as an artifact, shows the dialog in the app's own visual language with both delivery paths, both payment types, the company card's PayPal / Cash method, the optional PayPal screenshot, the required chat-history screenshot for self-paid orders, and the manager-only fields.
+- [ ] The mock's blocked states: a label with no valid tracking number, company card + PayPal with no transaction ID, and a self-paid order with no chat-history screenshot.
 
 Phase B:
 
 - [ ] Clicking In Transit from Draft on the desktop PO page opens the dialog; confirming saves its fields and advances the PO in one action.
 - [ ] Local pickup is recorded on the PO (method + who collected it) and the PO reads In Transit.
 - [ ] A tracking number entered in the dialog creates the tracked package linked to this PO.
-- [ ] A company-paid PO whose payment method is Cash or Other advances without a transaction ID; PayPal still requires it.
-- [ ] The screenshot is optional on every path; when attached it still fills the transaction ID.
+- [ ] A company-paid PO whose payment method is Cash advances without a transaction ID; PayPal still requires it.
+- [ ] A self-paid PO asks for no method and no transaction ID, and refuses to advance without a chat-history screenshot attached.
+- [ ] The PayPal screenshot stays optional; when attached it still fills the transaction ID.
 - [ ] Mobile offers the same choices when advancing from Draft.
 
 ## Out of scope
