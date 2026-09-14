@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-049](./RS-049-the-desktop-po-list-stops-at-the-newest-50-orders.md) | in-review | bug | P2 | The desktop PO list stops at the newest 50 orders | 1.140.1 |
 | [RS-048](./RS-048-facebook-tracker-shows-the-fleet-s-accounts-coverage-and.md) | done | story | P2 | Facebook tracker shows the fleet's accounts, coverage and search phrases | 1.140.0 |
 | [RS-047](./RS-047-3ds-and-dual-die-ram-ranks-are-missing-from-the-rank.md) | done | story | P3 | 3DS and dual-die RAM ranks are missing from the Rank dropdown | 1.139.0 |
 | [RS-046](./RS-046-group-with-popover-is-clipped-off-the-bottom-of-the.md) | done | bug | P2 | Group-with popover is clipped off the bottom of the Payments table | 1.138.6 |

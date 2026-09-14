@@ -17,6 +17,28 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.140.1] - 2026-09-14
+
+### Fixed
+
+- **The desktop PO list no longer stops at the newest 50 orders** (RS-049).
+  The stage chips on the Purchase orders page summed to exactly 50 whatever
+  the org held, because the page made one bare request to an API that has
+  been keyset-paginated since before the first tagged release — default page
+  50, `nextCursor` in the reply — and read only the first page.  Older POs were unreachable
+  from the desktop, and every figure the page derives in the browser (the
+  chip counts, the KPI cards, search, the twelve sortable columns, the Done
+  prune) was computed over that slice.  Infinite scroll would have kept those
+  figures partial, so the list now follows the API's pages to the end the
+  way the Shipping table does, progressively: the first 200 paint at once
+  and older pages append behind a "Loading older orders…" row until the
+  last one lands.  A filter change mid-stream stops the superseded stream's
+  fetching, not just its rendering, and the scroll position restored on
+  the way back from an order now waits for the whole list so a position
+  beyond page one isn't clipped.  The walk lives in `lib/keysetPages.ts`
+  with its own tests.  The mobile PO list and the sell-order list carry the
+  same cap and are recorded as follow-ups on the ticket.
+
 ## [1.140.0] - 2026-09-13
 
 ### Features
