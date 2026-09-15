@@ -902,7 +902,7 @@ function Shell() {
           It is a focused task screen like the capture flow, and the header's
           back button is the way out of it. */}
       {!orderDetailOpen && !shippingTaskOpen && (
-        <PhTabBar view={view} setView={setView} onCenterPress={startSubmit} />
+        <PhTabBar view={view} onCenterPress={startSubmit} />
       )}
 
       {overlayEl}

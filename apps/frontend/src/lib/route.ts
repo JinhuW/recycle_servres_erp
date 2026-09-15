@@ -157,18 +157,52 @@ export function paymentsForOrderPath(orderId: string): string {
   return `/payments/po/${encodeURIComponent(orderId)}`;
 }
 
-// Deep link from an activity row back to the record it describes. Anchors —
-// unlike navigate() — need the `#` written out: a bare `/purchase-orders/<id>`
-// is a real navigation, and the index.html served back has no hash, so the
-// shell resolves it to the dashboard instead of the record.
+// An in-app anchor's href. Anchors — unlike navigate() — need the `#` written
+// out: a bare `/purchase-orders/<id>` is a real navigation, and the index.html
+// served back has no hash, so the shell resolves it to the dashboard instead
+// of the record.
+export function hrefFor(path: string): string {
+  return '#' + (path.startsWith('/') ? path : '/' + path);
+}
+
+// Structural, so this module stays free of React types.
+export type LinkClick = {
+  button: number;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  defaultPrevented: boolean;
+  preventDefault(): void;
+  stopPropagation(): void;
+};
+
+// Click handler for an in-app anchor. A plain left-click routes through
+// navigate() so the back-button depth stamp stays right; ⌘/ctrl/shift/alt or
+// a non-left button is left to the browser, which opens the tab or window
+// like it would for any link. Propagation stops either way — a link inside a
+// clickable row must never also toggle the row. `onNavigate` is for in-page
+// side effects (closing a sheet) that must not run when the link opens
+// elsewhere.
+export function onLinkClick(path: string, onNavigate?: () => void): (e: LinkClick) => void {
+  return (e) => {
+    e.stopPropagation();
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onNavigate?.();
+    navigate(path);
+  };
+}
+
+// Deep link from an activity row back to the record it describes.
 // Null when the event has no target to open.
 export function activityRecordHref(area: ActivityArea, targetRef: string | null): string | null {
-  if (area === 'price') return '#/market';
+  if (area === 'price') return hrefFor('/market');
   if (!targetRef) return null;
   const base = area === 'po' ? '/purchase-orders/'
     : area === 'so' ? '/sell-orders/'
     : '/inventory/';
-  return '#' + base + encodeURIComponent(targetRef);
+  return hrefFor(base + encodeURIComponent(targetRef));
 }
 
 // OAuth consent screen — a real-path route (not hash) because the backend

@@ -83,6 +83,7 @@
   font-weight: 500;
   height: 100%;
   position: relative;
+  text-decoration: none;
 }
 .ph-tab.active { color: var(--accent-strong); }
 .ph-tab.center {
