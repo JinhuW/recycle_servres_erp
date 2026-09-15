@@ -9,7 +9,7 @@
 import { writeOrderEvent } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
-import { companyPayTxnMissing } from './orderTxnRule';
+import { companyPayTxnMissing, selfPayChatMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
@@ -84,6 +84,7 @@ export type AdvanceOutcome =
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'missingTxnId' }
+  | { kind: 'missingChatShot' }
   | { kind: 'ok'; nextStageId: string };
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
@@ -388,11 +389,12 @@ export async function advanceOrderTx(
   const stages = Object.keys(LINE_STATUS_FOR_LIFECYCLE);
 
   const cur = (await tx`
-    SELECT user_id, lifecycle, payment, paypal_txn_id, created_at, warehouse_id, archived_at
+    SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
+           warehouse_id, archived_at
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
-    | { user_id: string; lifecycle: string; payment: string;
-        paypal_txn_id: string | null; created_at: Date; warehouse_id: string | null;
-        archived_at: Date | null } | undefined;
+    | { id: string; user_id: string; lifecycle: string; payment: string;
+        payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
+        warehouse_id: string | null; archived_at: Date | null } | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
   // behind the archive's back. The tracking poll lands here too and treats
@@ -445,6 +447,12 @@ export async function advanceOrderTx(
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
       && await companyPayTxnMissing(tx, cur)) {
     return { kind: 'missingTxnId' };
+  }
+  // Its self-paid twin: the chat with the seller is what the reimbursement is
+  // checked against, so a self-paid PO leaves Draft only once it is attached.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
+      && await selfPayChatMissing(tx, cur)) {
+    return { kind: 'missingChatShot' };
   }
 
   // Guard: a cascade that moves lines off a sellable status breaks any sell

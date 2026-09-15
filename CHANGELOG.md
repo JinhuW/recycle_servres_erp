@@ -17,6 +17,77 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.143.0] - 2026-09-14
+
+### Features
+
+- **Inventory search finds a PO by its number** (RS-052).  The desktop
+  Inventory search box has said "Search part #, serial #, brand, ID…" since
+  v1.42.0, but the query behind it only ever matched the line's own fields —
+  brand, part number, serial number, description, item type — so typing
+  `PO-1442` to see what a purchase brought in returned nothing.  The PO id
+  is now one more field in that match, whole or partial and case-insensitive
+  like the others (`1442` and `po-1442` both land), on the flat list, the
+  grouped view and the xlsx export alike, because the three now share one
+  search fragment instead of two copies that had to be kept identical by
+  hand.  The placeholder says "PO #" in both languages.  The vendor portal's
+  catalog search, which had been borrowing the same placeholder, keeps its
+  old wording under its own key: it filters in the browser and its data
+  carries no PO ids.  A short all-digit search now also matches PO ids that
+  contain those digits, on top of the part numbers it matched before.
+
+## [1.142.0] - 2026-09-14
+
+### Added
+
+- **Leaving Draft is now a hand-off asked in one dialog** (RS-050). The
+  desktop stepper's In Transit step and the phone's advance button open
+  *Mark as In Transit*: receiving warehouse, the order's source, local pickup
+  (who collected it, from a member picker) or a pasted tracking number
+  (carrier recognised from the number), then who paid. Company card names a
+  method — PayPal keeps the transaction-ID rule and the optional screenshot
+  that reads the ID, Cash lifts it. Self-paid asks for neither, but must attach
+  the chat with the seller as a Submission attachment before the order can
+  leave Draft; the rule is enforced in the advance itself (stage-jumps and the
+  carrier poll included) and grandfathered by a cutoff stamped when the
+  release reaches each environment, like the transaction-ID rule. Confirming
+  writes the fields, creates the tracked package for a label already linked to
+  the PO, and advances, in one transaction — `POST /api/orders/:id/handoff`;
+  a refusal leaves nothing behind. Every changed field lands on the activity
+  log beside a *Handed off* entry. Migration 0126 adds `orders.source`,
+  `handoff_method`, `handoff_by` and a nullable `payment_method`.
+- `GET /api/members/names` — active members' ids and names, readable by every
+  role, for the collector picker. The full members list stays manager-only.
+
+### Changed
+
+- **The Shipping page is unlisted**: gone from the desktop sidebar and the phone
+  tab bar. It still answers at `#/shipping`, and the PO page's *Shipping labels*
+  button still reaches the prepaid-label wizard.
+- A PO minted from a delivered package inherits the package's source.
+
+## [1.141.0] - 2026-09-14
+
+### Features
+
+- **The contributor leaderboard ranks by PO total cost, or by commission on
+  a toggle** (RS-051).  Since v1.0.1 the dashboard's board ordered purchasers
+  by the projected margin set on their PO lines, and its "Entries" column was
+  a line count that the mobile card captioned as orders.  The board now
+  answers the question the team asks of it — who bought the most — by
+  ranking on the total cost of each purchaser's Ready-to-Pay and Done POs in
+  the range: goods total plus other fees, the same "Total cost" the PO pages
+  show, falling back to the line subtotal on a legacy PO with no header
+  figure.  A two-way control on the card (desktop card head, a full-width
+  segment row on mobile) switches the ranking to the commission those POs
+  earned; the choice travels as `?lb=` on `GET /api/dashboard` because a
+  purchaser only receives their own row's money and cannot re-sort locally.
+  The count is now a real PO count, a "Total cost" column sits beside it,
+  and projected revenue, profit and commission remain on the row as context.
+  The mobile "Your rank" card drops its "behind by $X" line: the figure it
+  subtracted was masked to null for every purchaser, so it had only ever
+  printed a negative number.
+
 ## [1.140.1] - 2026-09-14
 
 ### Fixed

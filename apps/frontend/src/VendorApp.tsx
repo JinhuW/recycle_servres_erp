@@ -349,7 +349,7 @@ function CatalogSearch({ vm, style }: { vm: VM; style?: React.CSSProperties }) {
       }} />
       <input
         className="input"
-        placeholder={t('invSearchPlaceholder')}
+        placeholder={t('vendorSearchPlaceholder')}
         style={{ paddingLeft: 30, width: '100%' }}
         value={search}
         onChange={e => setSearch(e.target.value)}

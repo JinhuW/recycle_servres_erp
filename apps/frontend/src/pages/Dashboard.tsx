@@ -10,7 +10,7 @@ import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
 import { navigate } from '../lib/route';
-import type { DashboardData } from '../lib/types';
+import type { DashboardData, LeaderboardSort } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
 type Props = {
@@ -25,6 +25,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [lbSort, setLbSort] = useState<LeaderboardSort>('cost');
 
   // The role-preview tweak flips `user.role`; refetch so the dashboard
   // re-scopes (own work vs. team-wide) when a manager toggles preview, matching
@@ -32,9 +33,23 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
   const effRole = user?.role;
   useEffect(() => {
     let alive = true;
-    api.get<DashboardData>('/api/dashboard').then(r => { if (alive) setData(r); }).catch(handleFetchError);
+    const url = lbSort === 'cost' ? '/api/dashboard' : `/api/dashboard?lb=${lbSort}`;
+    api.get<DashboardData>(url).then(r => { if (alive) setData(r); }).catch(handleFetchError);
     return () => { alive = false; };
-  }, [effRole]);
+  }, [effRole, lbSort]);
+
+  // Rank by what was bought or what it earned. Full-width, like every other
+  // mobile segment row — the section caption above it is too small to host it.
+  const lbSortRow = (
+    <div className="seg" role="tablist" aria-label={t('dashLbSortAriaLabel')}
+         style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', marginBottom: 8 }}>
+      {(['cost', 'commission'] as const).map(s => (
+        <button key={s} className={lbSort === s ? 'active' : ''} onClick={() => setLbSort(s)}>
+          {s === 'cost' ? t('totalCost') : t('commission')}
+        </button>
+      ))}
+    </div>
+  );
 
   // Inbound counts for the shipping card — the card is also the manager's only
   // tab-bar-free entry to /shipping, so both roles load it. Silent on failure:
@@ -229,6 +244,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
         {!isManager && myRank >= 0 && (
           <>
             <div className="ph-section-h"><span>{t('yourRank')}</span></div>
+            {lbSortRow}
             <div className="ph-card">
               <div style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span className={'lb-rank ' + (myRank === 0 ? 'gold' : myRank === 1 ? 'silver' : myRank === 2 ? 'bronze' : '')} style={{ width: 32, height: 32, fontSize: 14 }}>
@@ -237,8 +253,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{t('youreRank', { n: myRank + 1, total: lb.length })}</div>
                   <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-                    {myRank > 0 && t('behindBy', { amt: fmtUSD0(lb[myRank - 1].profit - lb[myRank].profit, locale), name: lb[myRank - 1].name.split(' ')[0] })}
-                    {myRank === 0 && t('leadingTeam')}
+                    {myRank === 0
+                      ? t('leadingTeam')
+                      : (lbSort === 'cost' ? t('rankedByTotalCost') : t('rankedByCommission'))}
                   </div>
                 </div>
                 <Icon name="medal" size={20} style={{ color: 'var(--accent)' }} />
@@ -249,7 +266,8 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
 
         {isManager && lb.length > 0 && (
           <>
-            <div className="ph-section-h"><span>{t('topContributors')}</span><span className="more">{t('seeAll')}</span></div>
+            <div className="ph-section-h"><span>{t('topContributors')}</span></div>
+            {lbSortRow}
             <div className="ph-card" style={{ padding: '4px 0' }}>
               {lb.slice(0, 3).map((row, i) => (
                 <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: i < 2 ? '1px solid var(--border)' : 'none' }}>
@@ -259,7 +277,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{row.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('nOrders', { n: row.count })}</div>
                   </div>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos)' }}>{fmtUSD0(row.profit, locale)}</div>
+                  <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: lbSort === 'commission' ? 'var(--pos)' : undefined }}>
+                    {fmtUSD0(lbSort === 'cost' ? row.cost : row.commission, locale)}
+                  </div>
                 </div>
               ))}
             </div>

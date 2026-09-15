@@ -20,18 +20,19 @@ describe('GET /api/dashboard', () => {
     const { token, user } = await loginAs(MARCUS);
     const r = await api<{
       kpis: { revenue: number };
-      leaderboard: { id: string; commission: number | null }[];
+      leaderboard: { id: string; cost: number | null; commission: number | null }[];
     }>('GET', '/api/dashboard', { token });
     expect(r.status).toBe(200);
     for (const row of r.body.leaderboard) {
       if (row.id !== user.id) {
         expect(row.commission == null).toBe(true);
+        expect(row.cost == null).toBe(true);
       }
     }
   });
 
-  // The contributor leaderboard is the PROJECTED lens (per-purchaser Done-PO
-  // margin); its numbers and the purchaser-KPI consistency are covered in
+  // The contributor leaderboard ranks by PO total cost or commission
+  // (`?lb=`); its numbers and the purchaser-KPI consistency are covered in
   // dashboard-projected.test.ts.
 
   it('an order with a NULL commission_rate contributes $0', async () => {

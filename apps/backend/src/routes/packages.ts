@@ -312,6 +312,7 @@ packages.post('/:id/create-po', async (c) => {
       warehouseId,
       notes,
       paypalTxnId: row.paypal_txn_id,
+      source: row.source,
       supplierId: client?.id ?? null,
       onBehalfOfName: ownerRow?.name ?? null,
     });
