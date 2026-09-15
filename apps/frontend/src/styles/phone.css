@@ -43,6 +43,7 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  text-decoration: none;
 }
 
 .ph-scroll {
@@ -131,6 +132,9 @@
   background: var(--bg-elev);
   border-radius: 12px;
   border: 1px solid var(--border);
+  /* Some rows are links (Home quick links). */
+  color: inherit;
+  text-decoration: none;
 }
 .ph-row + .ph-row { margin-top: 8px; }
 .ph-row .arrow { color: var(--fg-subtle); }
@@ -636,6 +640,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
+  text-decoration: none;
 }
 .ph-btn.accent {
   background: var(--accent);
@@ -1103,6 +1108,7 @@
   font-family: inherit;
   font-size: 13.5px;
   font-weight: 600;
+  text-decoration: none;
   text-decoration: none;
   cursor: pointer;
 }

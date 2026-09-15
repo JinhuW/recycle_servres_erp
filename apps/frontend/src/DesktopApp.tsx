@@ -184,7 +184,7 @@ export function DesktopApp() {
       />
     : loadingOrderId
       ? <FormSkeleton fields={8} />
-      : <DesktopOrders onEdit={(o) => { navigate('/purchase-orders/' + o.id); setEditingOrder(o); }} onToast={(m) => showToast(m)} />;
+      : <DesktopOrders onToast={(m) => showToast(m)} />;
 
   return (
     <div className="app">

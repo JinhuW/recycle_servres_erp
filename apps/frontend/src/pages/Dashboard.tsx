@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtUSD0 } from '../lib/format';
 import { relTime } from '../lib/format';
-import { navigate } from '../lib/route';
+import { RouteLink } from '../components/RouteLink';
 import type { DashboardData, LeaderboardSort } from '../lib/types';
 import { Skeleton, PhoneKpiSkeleton, PhoneListSkeleton } from '../components/Skeleton';
 
@@ -183,9 +183,9 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             Managers always see it — they receive the boxes — while for
             purchasers it appears once there's something to glance at. */}
         {inbound && (isManager || inbound.moving + inbound.needs > 0) && (
-          <button
+          <RouteLink
+            to="/shipping"
             className="ph-row"
-            onClick={() => navigate('/shipping')}
             style={{ width: '100%', marginTop: 10, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
           >
             <div className="ph-cat-icon" style={{ width: 36, height: 36, borderRadius: 10 }}>
@@ -208,13 +208,13 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
               }}>{inbound.needs}</span>
             )}
             <Icon name="chevronRight" size={15} className="arrow" />
-          </button>
+          </RouteLink>
         )}
 
         {!isManager && (
-          <button
+          <RouteLink
+            to="/market"
             className="ph-row"
-            onClick={() => navigate('/market')}
             style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
           >
             <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
@@ -222,15 +222,15 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             </div>
             <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeMarketLink')}</div>
             <Icon name="chevronRight" size={15} className="arrow" />
-          </button>
+          </RouteLink>
         )}
 
         {/* Inventory left the manager tab bar when Shipping took its slot;
             this row is its home now, mirroring the Market link above. */}
         {isManager && (
-          <button
+          <RouteLink
+            to="/inventory"
             className="ph-row"
-            onClick={() => navigate('/inventory')}
             style={{ width: '100%', marginTop: 8, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
           >
             <div className="ph-inv-thumb" style={{ width: 36, height: 36 }}>
@@ -238,7 +238,7 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             </div>
             <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{t('homeInventoryLink')}</div>
             <Icon name="chevronRight" size={15} className="arrow" />
-          </button>
+          </RouteLink>
         )}
 
         {!isManager && myRank >= 0 && (

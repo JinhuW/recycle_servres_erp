@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { ImageLightbox } from '../../components/ImageLightbox';
+import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD, fmtUSD0, fmtDateShort } from '../../lib/format';
 import { statusTone } from '../../lib/status';
 import { useT } from '../../lib/i18n';
@@ -304,7 +305,9 @@ export function InventoryProductTable({
                                       }}
                                     />
                                   )}
-                                  {l.order_id}
+                                  <RouteLink to={'/purchase-orders/' + l.order_id} className="rec-link">
+                                    {l.order_id}
+                                  </RouteLink>
                                 </span>
                                 {l.serial_number && (
                                   <div style={{ marginTop: 5 }}>

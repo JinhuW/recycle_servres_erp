@@ -19,3 +19,18 @@ type Props = {
 export function RouteLink({ to, onNavigate, ...rest }: Props) {
   return <a href={hrefFor(to)} onClick={onLinkClick(to, onNavigate)} {...rest} />;
 }
+
+// A translated sentence with the record id linked. `template` is the raw
+// i18n string, still holding its `{id}` placeholder (call t() without vars),
+// so both languages keep one key and the parity test keeps its placeholder
+// check.
+export function linkedSentence(template: string, id: string, to: string, className = 'mono rec-link') {
+  const [before, after] = template.split('{id}');
+  return (
+    <>
+      {before}
+      <RouteLink to={to} className={className}>{id}</RouteLink>
+      {after}
+    </>
+  );
+}

@@ -6,7 +6,8 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtDateShort, fmtMoney, fmtUSD, relTime } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
-import { match, navigate, useRoute } from '../../lib/route';
+import { match, useRoute } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 import { PAYMENT_NOTE_MAX } from '@recycle-erp/shared';
 import { placePopover } from './popoverPlacement';
 
@@ -524,10 +525,10 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
           <div className="page-sub">{t('paySub')}</div>
         </div>
         <div className="page-actions" style={{ alignItems: 'center', gap: 10 }}>
-          <button type="button" className="btn ghost" onClick={() => navigate('/payments/internal')}>
+          <RouteLink to="/payments/internal" className="btn ghost">
             <Icon name="book" size={13} />
             {t('payIntOpen')}
-          </button>
+          </RouteLink>
           <span style={{ fontSize: 12, color: 'var(--fg-subtle)' }}>
             {lastSynced ? t('payLastSynced', { when: relTime(lastSynced, locale) }) : t('payNeverSynced')}
           </span>
@@ -559,14 +560,9 @@ export function DesktopPayments({ onToast }: { onToast: (msg: string) => void })
               {t('payFocusNet', { amt: fmtUSD(focusNet, locale) })}
             </span>
           )}
-          <button
-            type="button"
-            className="btn sm ghost"
-            style={{ marginLeft: 'auto' }}
-            onClick={() => navigate('/payments')}
-          >
+          <RouteLink to="/payments" className="btn sm ghost" style={{ marginLeft: 'auto' }}>
             {t('payFocusClear')}
-          </button>
+          </RouteLink>
         </div>
       ) : (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
@@ -770,7 +766,6 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
   const actionsRef = useRef<HTMLSpanElement>(null);
   const [pairDismissed, setPairDismissed] = useState(false);
 
-  const stop = (e: React.MouseEvent) => e.stopPropagation();
   const link = async (orderId: string) => {
     const r = await act(`${row.id}/link`, { orderId });
     if (r) {
@@ -876,9 +871,9 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
           <span className="pay-link-in">
             {row.orderId ? (
               <>
-                <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${row.orderId}`); }}>
+                <RouteLink to={`/purchase-orders/${row.orderId}`} className="ship-po-pill">
                   {row.orderId}
-                </button>
+                </RouteLink>
                 {/* What the PO cost, beside what was paid for it — the row is
                     otherwise unreadable against its own amount. */}
                 {row.orderCost != null && (
@@ -908,7 +903,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
                   </span>
                 ) : likely ? (
                   <>
-                    <span className="chip dot pos" style={{ fontSize: 10.5 }}>{likely.best.id}</span>
+                    <RouteLink to={`/purchase-orders/${likely.best.id}`} className="chip dot pos" style={{ fontSize: 10.5 }}>{likely.best.id}</RouteLink>
                     {likely.best.dayGap !== null && (
                       <span className="muted" style={{ fontSize: 12 }}>{gapLabel(likely.best.dayGap, t)}</span>
                     )}
@@ -1139,9 +1134,9 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
         <span className="pay-detail-group">
           {row.internalTxn ? (
             <>
-              <button type="button" className="btn sm" onClick={() => navigate('/payments/internal')}>
+              <RouteLink to="/payments/internal" className="btn sm">
                 {t('payIntOpen')}
-              </button>
+              </RouteLink>
               <button
                 type="button" className="btn sm"
                 onClick={() => {
@@ -1392,7 +1387,7 @@ function MatchList({ txnId, locale, onLink }: {
             background: 'var(--bg-elev)', border: '1px solid var(--border)',
           }}
         >
-          <span className="mono" style={{ fontWeight: 600 }}>{s.id}</span>
+          <RouteLink to={`/purchase-orders/${s.id}`} className="mono rec-link" style={{ fontWeight: 600 }}>{s.id}</RouteLink>
           <span className="mono">{fmtUSD(s.totalCost, locale)}</span>
           <span className="muted">{fmtDateShort(s.createdAt, locale)}</span>
           {s.dayGap !== null && (

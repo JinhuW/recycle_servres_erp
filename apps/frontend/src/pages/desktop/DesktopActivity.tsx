@@ -9,7 +9,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { createdEventParts, linePhotoEventDetail } from '../../lib/orderPresentation';
-import { activityRecordHref } from '../../lib/route';
+import { activityRecordHref, onLinkClick } from '../../lib/route';
 
 // The global audit register — every change made across all four ledgers, in
 // one record. Read-only; the source tables are append-only by trigger.
@@ -445,7 +445,7 @@ export function DesktopActivity() {
                             )}
                             {recordHref && (
                               <div>
-                                <a className="btn sm" href={recordHref}>
+                                <a className="btn sm" href={recordHref} onClick={onLinkClick(recordHref.slice(1))}>
                                   <Icon name={AREA_ICON[e.area]} size={12} />
                                   {t('acOpenRecord')}
                                 </a>

@@ -6,7 +6,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtDate, fmtDateShort, fmtUSD } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
-import { navigate } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 
 // The records that explain internal money movement — a Mercury→PayPal
 // transfer, a card-funding chain — and the note that says why. A row expands in
@@ -101,10 +101,10 @@ export function DesktopInternalTxns({ onToast }: { onToast: (msg: string) => voi
           <div className="page-sub">{t('payIntSub')}</div>
         </div>
         <div className="page-actions" style={{ alignItems: 'center', gap: 10 }}>
-          <button type="button" className="btn ghost" onClick={() => navigate('/payments')}>
+          <RouteLink to="/payments" className="btn ghost">
             <Icon name="chevronRight" size={13} style={{ transform: 'rotate(180deg)' }} />
             {t('payIntBack')}
-          </button>
+          </RouteLink>
           <button type="button" className="btn primary" onClick={create} disabled={creating}>
             <Icon name="plus" size={13} />
             {t('payIntNew')}

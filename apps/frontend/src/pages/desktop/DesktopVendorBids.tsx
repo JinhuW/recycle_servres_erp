@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../../components/Icon';
+import { linkedSentence } from '../../components/RouteLink';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
@@ -522,7 +523,7 @@ function VendorBidDetail({
                           )}
                           {promoted && (
                             <div style={{ fontSize: 11, color: 'var(--accent-strong)' }}>
-                              {t('vbAlreadyPromoted', { id: l.sell_order_id! })}
+                              {linkedSentence(t('vbAlreadyPromoted'), l.sell_order_id!, '/sell-orders/' + l.sell_order_id!)}
                             </div>
                           )}
                         </td>

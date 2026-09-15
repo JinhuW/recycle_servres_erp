@@ -5,6 +5,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtMoney } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { navigate } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 import { needsCompletePo, waitingSeller } from '../../lib/shippingInbound';
 import { STATUS_CHIP, fmtEta } from '../../lib/shippingList';
 import type { Shipment, ShipmentStatus } from '../../lib/types';
@@ -209,9 +210,9 @@ export function ShippingPanel({ orderId, canEdit, onMutated, orderLifecycle }: P
               <div className="ship-delivered-cta">
                 <Icon name="check2" size={15} />
                 <span>{t('shipDeliveredCtaHint')}</span>
-                <button className="btn accent sm" onClick={() => navigate(`/purchase-orders/${orderId}`)}>
+                <RouteLink to={`/purchase-orders/${orderId}`} className="btn accent sm">
                   {t('shipCompletePo')}
-                </button>
+                </RouteLink>
               </div>
             )}
 
