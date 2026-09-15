@@ -3,11 +3,9 @@ import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
 import type { Role } from '../lib/types';
+import { DESKTOP_VIEW_TO_PATH, hrefFor, onLinkClick, type DesktopViewId } from '../lib/route';
 
-export type DesktopView =
-  | 'dashboard' | 'submit' | 'history' | 'shipping' | 'clients' | 'market'
-  | 'inventory' | 'analysis' | 'sellorders' | 'vendorbids' | 'transfers'
-  | 'activity' | 'payments' | 'internaltx' | 'tracker' | 'coordinator' | 'settings';
+export type DesktopView = DesktopViewId;
 
 type NavItem = { id: DesktopView; tKey: string; icon: IconName; roles: Role[]; badge?: string };
 
@@ -47,10 +45,11 @@ const NAV: { tKey: string; items: NavItem[] }[] = [
 
 type Props = {
   view: DesktopView;
-  setView: (v: DesktopView) => void;
 };
 
-export function Sidebar({ view, setView }: Props) {
+// Nav items are real anchors so ⌘-click / middle-click open a tab; a plain
+// click still routes through navigate() (see onLinkClick).
+export function Sidebar({ view }: Props) {
   const { t } = useT();
   const { logout } = useAuth();
   const user = useEffectiveUser();
@@ -77,17 +76,20 @@ export function Sidebar({ view, setView }: Props) {
               const active = view === n.id
                 || (n.id === 'inventory' && view === 'analysis')
                 || (n.id === 'payments' && view === 'internaltx');
+              const path = DESKTOP_VIEW_TO_PATH[n.id];
               return (
-                <button
+                <a
                   key={n.id}
                   className={'nav-item ' + (active ? 'active' : '')}
-                  onClick={() => setView(n.id)}
+                  href={hrefFor(path)}
+                  onClick={onLinkClick(path)}
+                  aria-current={active ? 'page' : undefined}
                   title={t(n.tKey)}
                 >
                   <Icon name={n.icon} size={15} className="nav-icon" />
                   <span>{t(n.tKey)}</span>
                   {n.badge && <span className="badge">{n.badge}</span>}
-                </button>
+                </a>
               );
             })}
           </div>

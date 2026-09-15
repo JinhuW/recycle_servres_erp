@@ -597,6 +597,16 @@ One bundle, three lazy-loaded shells chosen in `App.tsx`: a vendor token in
   64px icon rail** (v1.134.0) — brand mark, nav icons with their names on
   hover, avatar and sign-out — where it used to disappear and leave a
   split-screen window with no navigation at all.
+- **Menus and record references are real links** (v1.144.0). The sidebar,
+  the Inventory ▸ Analysis strip, the phone tab bar and Home quick links, and
+  every PO, sell-order or payment id shown on another page — the inventory
+  lots table, the item page, payments rows and match suggestions, shipping,
+  vendor bids, the sell-order list, the client drawer — are anchors with the
+  hash written out. A plain click still routes in place (the back button keeps
+  working); ⌘/ctrl/middle-click and "Open in new tab" open the record in a
+  new tab. The PO page's "Open payments" lands on the list focused on that
+  PO. Sell-order links stay desktop-only: the phone shell has no sell-order
+  route.
 - The mobile shell is a **PWA** with install onboarding, a service worker and a
   share target, scoped to mobile only (v0.1.1).
 - Mobile PO lists colour-code warehouse, status and owner with stable hashed

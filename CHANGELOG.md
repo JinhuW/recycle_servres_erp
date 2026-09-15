@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.144.0] - 2026-09-15
+
+### Features
+
+- **Menus and record references are real links** (RS-053).  Every sidebar
+  item, the Inventory ▸ Analysis strip, the phone tab bar and Home quick
+  links, and every PO, sell-order or payment id shown on another page were
+  buttons that called the router, so holding ⌘ and clicking one just
+  re-rendered the current tab, and a PO id in the inventory lots table was not
+  clickable at all.  They are now anchors with the hash written out: a plain
+  click still routes in place — through `navigate()`, so the back button's
+  depth stamp holds — while ⌘/ctrl/shift/alt or a middle click is left to the
+  browser, which opens the tab the way it does for any link, and "Copy link
+  address" works.  A link inside a clickable row stops the click so the row
+  does not also toggle.  The inventory lots table, the item page (source PO,
+  archived-order banner, linked and blocking sell orders), payments rows and
+  match suggestions, desktop and phone shipping, vendor bids' "Promoted to",
+  the sell-order list, the client drawer and the activity feed's "Open
+  record" all use the one `RouteLink`.  The PO page's "Open payments" now lands
+  on the list focused on that PO, the same screen the PO row's payment chip
+  already opened.  Sell-order links stay desktop-only because the phone shell
+  has no sell-order route.
+
 ## [1.143.0] - 2026-09-14
 
 ### Features

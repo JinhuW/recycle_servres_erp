@@ -10,7 +10,8 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { navigate, paymentsForOrderPath } from '../../lib/route';
+import { paymentsForOrderPath } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { profitTone } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
@@ -107,11 +108,10 @@ function SortTh({ col, sort, onSort, align, className, children }: {
 }
 
 type Props = {
-  onEdit: (o: Order) => void;
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
 
-export function DesktopOrders({ onEdit, onToast }: Props) {
+export function DesktopOrders({ onToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   // Effective user honours the manager's role-preview tweak — toggling
@@ -623,14 +623,9 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                             group; a manager only, since that page is. The row's
                             own click toggles the line drawer, hence the stop. */}
                         {isManager && typeof o.linkedPaid === 'number' ? (
-                          <button
-                            type="button"
-                            className="chip chip-link"
-                            title={t('payLinkOpen')}
-                            onClick={(e) => { e.stopPropagation(); navigate(paymentsForOrderPath(o.id)); }}
-                          >
+                          <RouteLink to={paymentsForOrderPath(o.id)} className="chip chip-link" title={t('payLinkOpen')}>
                             {o.payment === 'company' ? 'Company' : 'Self'} | {fmtUSD0(o.linkedPaid, locale)}
-                          </button>
+                          </RouteLink>
                         ) : (
                           <span className="chip">{o.payment === 'company' ? 'Company' : 'Self'}</span>
                         )}
@@ -650,17 +645,13 @@ export function DesktopOrders({ onEdit, onToast }: Props) {
                           >
                             <Icon name="download" size={12} />
                           </button>
-                          <button
+                          <RouteLink
+                            to={'/purchase-orders/' + o.id}
                             className="btn icon sm"
                             title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (openLines && openLines.id === o.id) onEdit(openLines);
-                              else api.get<{ order: Order }>(`/api/orders/${o.id}`).then(r => onEdit(r.order));
-                            }}
                           >
                             <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={12} />
-                          </button>
+                          </RouteLink>
                         </div>
                       </td>
                     </tr>

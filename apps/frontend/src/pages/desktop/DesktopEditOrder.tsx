@@ -33,7 +33,8 @@ import { SerialCheckDialog, type SerialLineIssue } from '../../components/Serial
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
 import { HandoffDialog } from '../../components/HandoffDialog';
-import { navigate } from '../../lib/route';
+import { navigate, paymentsForOrderPath } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 import { listShipments } from '../../lib/api';
 
 // The backend folds prepaid-label costs into orders.other_fees and appends
@@ -1772,7 +1773,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
             {archiveConflict && (
                 <div className="modal-body" style={{ paddingTop: 0 }}>
-                  <ArchiveConflictList conflict={archiveConflict} />
+                  <ArchiveConflictList conflict={archiveConflict} linkSellOrders />
                 </div>
             )}
             <div className="modal-foot">
@@ -2081,14 +2082,9 @@ function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale: string
     <div className="card" style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{t('payLedgerTitle')}</div>
-        <button
-          type="button"
-          className="btn sm ghost"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => navigate('/payments')}
-        >
+        <RouteLink to={paymentsForOrderPath(orderId)} className="btn sm ghost" style={{ marginLeft: 'auto' }}>
           {t('payLedgerOpen')}
-        </button>
+        </RouteLink>
       </div>
       <div style={{ marginTop: 10, display: 'grid', gap: 6, fontSize: 12.5 }}>
         {ledger.payments.map(p => (

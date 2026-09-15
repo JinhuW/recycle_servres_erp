@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '../../../components/Icon';
+import { RouteLink } from '../../../components/RouteLink';
 import { Modal } from '../../../components/Modal';
 import { RhythmStrip } from '../../../components/RhythmStrip';
 import { api } from '../../../lib/api';
@@ -198,14 +199,14 @@ export function ClientDrawer({ id, onClose, onChanged, showToast }: {
             <h3 className="cli-sec-h">{t('cliOrdersH', { n: c.orders.length })}</h3>
             <div className="cli-orders">
               {c.orders.slice(0, 8).map((o) => (
-                <a className="cli-order" key={o.id} href={`#/purchase-orders/${o.id}`}>
+                <RouteLink className="cli-order" key={o.id} to={`/purchase-orders/${o.id}`}>
                   <span className="cli-order-id">{o.id}</span>
                   <span className="cli-order-date">
                     {new Date(o.created_at).toLocaleDateString(locale,
                       { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                   <span className="cli-order-total">{o.total_cost ? fmtUSD0(o.total_cost) : '—'}</span>
-                </a>
+                </RouteLink>
               ))}
             </div>
           </section>

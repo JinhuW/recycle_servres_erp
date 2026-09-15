@@ -9,7 +9,7 @@ import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
   useRoute, match, navigate, parseShippingRoute,
-  DESKTOP_VIEW_TO_PATH, pathToDesktopView, isAuthorizePath, readSafeNext,
+  pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
 import { showErrorDialog } from './lib/errorToast';
@@ -59,7 +59,6 @@ export function DesktopApp() {
 
   const { path } = useRoute();
   const view: DesktopView = pathToDesktopView(path);
-  const setView = (v: DesktopView) => navigate(DESKTOP_VIEW_TO_PATH[v]);
   // /inventory/:id opens the edit page; otherwise no item is being edited.
   // /inventory/analysis is the Analysis tab, not an item id — exclude it.
   const editingItemId = path === '/inventory/analysis' ? null : (match('/inventory/:id', path)?.id ?? null);
@@ -185,11 +184,11 @@ export function DesktopApp() {
       />
     : loadingOrderId
       ? <FormSkeleton fields={8} />
-      : <DesktopOrders onEdit={(o) => { navigate('/purchase-orders/' + o.id); setEditingOrder(o); }} onToast={(m) => showToast(m)} />;
+      : <DesktopOrders onToast={(m) => showToast(m)} />;
 
   return (
     <div className="app">
-      <Sidebar view={view2} setView={setView} />
+      <Sidebar view={view2} />
       <main className="main">
         <Topbar />
         <RolePreviewBanner />
@@ -206,16 +205,16 @@ export function DesktopApp() {
               analysis tab, but not while editing a single item. */}
           {((view2 === 'inventory' && !editingItemId) || view2 === 'analysis') && (
             <div className="seg inv-tabs" role="tablist" aria-label={t('nav_inventory')}>
-              <button
-                type="button" role="tab" aria-selected={view2 === 'inventory'}
+              <a
+                role="tab" aria-selected={view2 === 'inventory'}
                 className={view2 === 'inventory' ? 'active' : ''}
-                onClick={() => navigate('/inventory')}
-              >{t('nav_inventory')}</button>
-              <button
-                type="button" role="tab" aria-selected={view2 === 'analysis'}
+                href={hrefFor('/inventory')} onClick={onLinkClick('/inventory')}
+              >{t('nav_inventory')}</a>
+              <a
+                role="tab" aria-selected={view2 === 'analysis'}
                 className={view2 === 'analysis' ? 'active' : ''}
-                onClick={() => navigate('/inventory/analysis')}
-              >{t('nav_analysis')}</button>
+                href={hrefFor('/inventory/analysis')} onClick={onLinkClick('/inventory/analysis')}
+              >{t('nav_analysis')}</a>
             </div>
           )}
           {/* One boundary for the whole page area: every view below except the

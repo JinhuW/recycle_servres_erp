@@ -8,6 +8,7 @@ import { fmtDateShort, fmtMoney } from '../../lib/format';
 import { useT } from '../../lib/i18n';
 import { usePersisted } from '../../lib/listMemory';
 import { navigate, type ShippingRoute } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 import {
   createPoFromPackage, listPackages, refreshPackage, removePackage,
   type TrackedPackage,
@@ -89,9 +90,9 @@ function FocusedShipping({ orderId }: { orderId: string }) {
   return (
     <div className="ship-focus">
       <div className="ship-focus-head">
-        <button className="btn ghost sm" onClick={() => navigate(`/purchase-orders/${orderId}`)}>
+        <RouteLink to={`/purchase-orders/${orderId}`} className="btn ghost sm">
           ← {orderId}
-        </button>
+        </RouteLink>
         <span className="ship-focus-title">{t('shipPageTitle')}</span>
       </div>
       {failed && <div className="ship-focus-missing">{t('shipPageOrderMissing')}</div>}
@@ -423,9 +424,9 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
     <tr>
       <td>
         {pkg.orderId ? (
-          <button className="ship-po-pill" onClick={() => navigate(`/purchase-orders/${pkg.orderId}`)}>
+          <RouteLink to={`/purchase-orders/${pkg.orderId}`} className="ship-po-pill">
             {pkg.orderId}
-          </button>
+          </RouteLink>
         ) : (
           <span className="chip muted" style={{ fontSize: 11 }}>{t('shipColNoPo')}</span>
         )}
@@ -527,9 +528,9 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
   return (
     <tr className="row-hover" style={{ cursor: 'pointer' }} onClick={() => navigate(`/shipping/${order.id}`)}>
       <td>
-        <button className="ship-po-pill" onClick={(e) => { stop(e); navigate(`/purchase-orders/${order.id}`); }}>
+        <RouteLink to={`/purchase-orders/${order.id}`} className="ship-po-pill">
           {order.id}
-        </button>
+        </RouteLink>
         <div className="ship-cell-sub">
           {fmtDateShort(s.createdAt, locale)}{isManager ? ` · ${order.userName}` : ''}
         </div>
@@ -604,13 +605,13 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
       <td className="num" onClick={stop} style={{ cursor: 'default' }}>
         <div style={{ display: 'inline-flex', gap: 6 }}>
           {showDeliveredCta && (
-            <button className="btn accent sm" onClick={() => navigate(`/purchase-orders/${order.id}`)}>
+            <RouteLink to={`/purchase-orders/${order.id}`} className="btn accent sm">
               {t('shipCompletePo')}
-            </button>
+            </RouteLink>
           )}
-          <button className="btn ghost sm" onClick={() => navigate(`/shipping/${order.id}`)}>
+          <RouteLink to={`/shipping/${order.id}`} className="btn ghost sm">
             {t('shipViewDetails')}
-          </button>
+          </RouteLink>
         </div>
       </td>
     </tr>

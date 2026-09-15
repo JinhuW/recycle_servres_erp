@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { fmtDate, relTime, fmtUSD, fmtMoney } from '../lib/format';
 import { useT } from '../lib/i18n';
+import { linkedSentence } from './RouteLink';
 import type { SellOrderEvent } from '../lib/types';
 
 type Props = {
@@ -158,7 +159,7 @@ function summarize(event: SellOrderEvent, locale: string, t: TFn): React.ReactNo
             ? <> · {fmtUSD(snap.unit_price, locale)}</>
             : null}
           {d.reason === 'po_archived'
-            ? <> · {t('historyRemovedLinePoArchived', { id: String(d.orderId ?? '') })}</>
+            ? <> · {linkedSentence(t('historyRemovedLinePoArchived'), String(d.orderId ?? ''), '/purchase-orders/' + String(d.orderId ?? ''))}</>
             : null}
         </>
       );

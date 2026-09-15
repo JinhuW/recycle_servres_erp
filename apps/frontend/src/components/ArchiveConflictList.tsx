@@ -5,15 +5,20 @@
 import { useT } from '../lib/i18n';
 import { statusTone } from '../lib/status';
 import type { ArchiveConflict } from '../lib/archiveConflict';
+import { RouteLink } from './RouteLink';
 
-export function ArchiveConflictList({ conflict }: { conflict: ArchiveConflict }) {
+// `linkSellOrders` is desktop-only: the phone shell has no /sell-orders route,
+// so a link there would land on Home.
+export function ArchiveConflictList({ conflict, linkSellOrders }: { conflict: ArchiveConflict; linkSellOrders?: boolean }) {
   const { t } = useT();
   return (
     <>
       {conflict.sellOrders.map(so => (
         <div key={so.id} style={{ fontSize: 12.5, lineHeight: 1.5 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span className="mono" style={{ fontWeight: 600 }}>{so.id}</span>
+            {linkSellOrders
+              ? <RouteLink to={'/sell-orders/' + so.id} className="mono rec-link" style={{ fontWeight: 600 }}>{so.id}</RouteLink>
+              : <span className="mono" style={{ fontWeight: 600 }}>{so.id}</span>}
             <span className={'chip ' + statusTone(so.status)} style={{ fontSize: 10.5 }}>{so.status}</span>
             {so.emptied && (
               <span style={{ color: 'var(--neg)' }}>{t('archiveConflictEmptied')}</span>

@@ -17,6 +17,7 @@ import {
 } from '../lib/packages';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { navigate, navigateBack, type ShippingRoute } from '../lib/route';
+import { RouteLink } from '../components/RouteLink';
 import { shareOrCopy } from '../lib/shareOrCopy';
 import { STATUS_CHIP, fmtEta, mergeInbound, type InboundRow, type ShipOrder } from '../lib/shippingList';
 import { canCreatePo, groupInbound, inboundAction, journeyPos, needsCompletePo, type InboundAction } from '../lib/shippingInbound';
@@ -272,13 +273,9 @@ function PackageSheet({ pkg, busy, canCreate, onCreatePo, onClose }: {
 
         <div style={{ marginTop: 16 }}>
           {pkg.orderId ? (
-            <button
-              className="ph-btn"
-              style={{ width: '100%' }}
-              onClick={() => { onClose(); navigate(`/purchase-orders/${pkg.orderId}`); }}
-            >
+            <RouteLink to={`/purchase-orders/${pkg.orderId}`} onNavigate={onClose} className="ph-btn" style={{ width: '100%' }}>
               {pkg.orderId} →
-            </button>
+            </RouteLink>
           ) : canCreate ? (
             <button className="ph-btn accent" style={{ width: '100%' }} disabled={busy} onClick={() => onCreatePo(pkg)}>
               {busy ? '…' : t('shipCreatePo')}
@@ -437,7 +434,7 @@ function InboundCard({ row, showToast, onCreatedPo, onRefreshed }: {
           <span className="chip muted">{t(packageSourceLabelKey(row.pkg.source))}</span>
         )}
         {poId
-          ? <button className="ship-po-pill" onClick={(e) => { e.stopPropagation(); navigate(`/purchase-orders/${poId}`); }}>{poId}</button>
+          ? <RouteLink to={`/purchase-orders/${poId}`} className="ship-po-pill">{poId}</RouteLink>
           : <span className="chip muted">{t('shipColNoPo')}</span>}
         <span className="ph-ship-when">{when}</span>
       </div>
@@ -484,9 +481,9 @@ function CardCta({ action, busy, onCreatePo, onShare }: {
       );
     case 'complete-po':
       return (
-        <button className="ph-ship-cta accent" onClick={(e) => { stop(e); navigate(`/purchase-orders/${action.orderId}`); }}>
+        <RouteLink to={`/purchase-orders/${action.orderId}`} className="ph-ship-cta accent">
           {t('shipCompletePo')}
-        </button>
+        </RouteLink>
       );
     case 'reshare-link':
       return (
@@ -703,9 +700,9 @@ function PoShippingScreen({ orderId, showToast }: { orderId: string; showToast: 
           </button>
         }
         trailing={
-          <button className="ph-icon-btn" onClick={() => navigate(`/purchase-orders/${orderId}`)} aria-label={t('shipMobViewPo')}>
+          <RouteLink to={`/purchase-orders/${orderId}`} className="ph-icon-btn" aria-label={t('shipMobViewPo')}>
             <Icon name="box" size={15} />
-          </button>
+          </RouteLink>
         }
       />
       <div className="ph-scroll">
@@ -780,9 +777,9 @@ function PoShippingScreen({ orderId, showToast }: { orderId: string; showToast: 
                 </button>
               )}
               {needsCompletePo(s.status, order.lifecycle) && (
-                <button className="ph-ship-cta accent" onClick={() => navigate(`/purchase-orders/${order.id}`)}>
+                <RouteLink to={`/purchase-orders/${order.id}`} className="ph-ship-cta accent">
                   {t('shipCompletePo')}
-                </button>
+                </RouteLink>
               )}
               {s.complete && (s.status === 'draft' || s.status === 'quoted') && (
                 <div className="ph-ship-hint">{t('shipMobBuyDesktop')}</div>

@@ -207,6 +207,9 @@ button { font-family: inherit; cursor: pointer; }
   color: var(--fg);
   font-size: 13px; font-weight: 500;
   transition: background 0.12s, border-color 0.12s, transform 0.05s;
+  /* Some .btn are anchors (record links); keep them looking like the buttons. */
+  text-decoration: none;
+  cursor: pointer;
 }
 .btn:hover { background: var(--bg-soft); }
 .btn:active { transform: translateY(1px); }
@@ -268,15 +271,17 @@ button { font-family: inherit; cursor: pointer; }
   padding: 3px;
   gap: 2px;
 }
-.seg button {
+.seg button, .seg a {
   border: none;
   background: transparent;
   padding: 6px 12px;
   border-radius: 6px;
   font-size: 12.5px; font-weight: 500;
   color: var(--fg-muted);
+  text-decoration: none;
+  cursor: pointer;
 }
-.seg button.active { background: var(--bg-elev); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.seg button.active, .seg a.active { background: var(--bg-elev); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 
 /* ===== Chips / pills ===== */
 .chip {
@@ -288,6 +293,7 @@ button { font-family: inherit; cursor: pointer; }
   border: 1px solid var(--border);
   background: var(--bg-soft);
   color: var(--fg-muted);
+  text-decoration: none;
   white-space: nowrap;
 }
 .chip.pos    { background: var(--pos-soft);    color: var(--accent-strong);     border-color: transparent; }
@@ -302,6 +308,11 @@ button { font-family: inherit; cursor: pointer; }
    the shorthand would reset both. */
 .chip-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .chip-link:hover { border-color: var(--border-strong); color: var(--fg); }
+/* A record id that goes somewhere, rendered as an anchor in running text or a
+   table cell: keeps the surrounding colour so the row stays quiet, the dotted
+   underline says it is a link. */
+.rec-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
+.rec-link:hover { color: var(--accent-strong); }
 .chip.dot::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: currentColor; display: inline-block;

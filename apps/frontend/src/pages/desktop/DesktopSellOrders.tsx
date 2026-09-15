@@ -10,6 +10,7 @@ import { useT } from '../../lib/i18n';
 import { api, archiveSellOrder, unarchiveSellOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
 import { useRoute, navigate, match } from '../../lib/route';
+import { RouteLink } from '../../components/RouteLink';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { shareOrCopy } from '../../lib/shareOrCopy';
 import { fmtUSD, fmtUSD0, fmtMoney, fmtDate, fmtDateShort, CURRENCY_SYMBOL } from '../../lib/format';
@@ -384,7 +385,7 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                 >
                   <td className="mono" style={{ fontWeight: 600, fontSize: 11.5 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {o.id}
+                      <RouteLink to={'/sell-orders/' + o.id} className="rec-link">{o.id}</RouteLink>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -436,21 +437,13 @@ export function DesktopSellOrders({ onNewFromInventory, onToast }: SellOrdersPro
                   <td><span className={'chip dot ' + toneFor(o.status)}>{o.status}</span></td>
                   <td onClick={e => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button
-                        className="btn icon sm"
-                        title={t('soViewTooltip')}
-                        onClick={() => navigate('/sell-orders/' + o.id)}
-                      >
+                      <RouteLink to={'/sell-orders/' + o.id} className="btn icon sm" title={t('soViewTooltip')}>
                         <Icon name="eye" size={12} />
-                      </button>
+                      </RouteLink>
                       {o.status !== 'Done' && o.status !== 'Closed' && (
-                        <button
-                          className="btn icon sm"
-                          title={`Edit ${o.status.toLowerCase()} order`}
-                          onClick={() => navigate('/sell-orders/' + o.id + '/edit')}
-                        >
+                        <RouteLink to={'/sell-orders/' + o.id + '/edit'} className="btn icon sm" title={t('editOrder')}>
                           <Icon name="edit" size={12} />
-                        </button>
+                        </RouteLink>
                       )}
                     </div>
                   </td>
