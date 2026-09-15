@@ -13,6 +13,7 @@ import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
 import { useRoute, match, navigate } from '../lib/route';
+import { RouteLink } from '../components/RouteLink';
 import type { OrderSummary, Order } from '../lib/types';
 import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
 import { ImageLightbox } from '../components/ImageLightbox';
@@ -327,17 +328,14 @@ export function Orders({ onEdit, onToast }: Props) {
                     </div>
                   ))}
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button
+                    <RouteLink
+                      to={'/purchase-orders/' + o.id}
                       className="btn sm"
                       style={{ flex: 1, justifyContent: 'center' }}
                       title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate('/purchase-orders/' + o.id);
-                      }}
                     >
                       <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={11} /> {isCompleted(o.status) ? t('done') : t('edit')}
-                    </button>
+                    </RouteLink>
                   </div>
                 </div>
               )}

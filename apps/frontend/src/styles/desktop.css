@@ -72,6 +72,7 @@ html.desktop, body.desktop, .desktop #root {
   background: transparent;
   width: 100%;
   text-align: left;
+  text-decoration: none;
 }
 .nav-item:hover { background: rgba(0,0,0,0.04); color: var(--fg); }
 .nav-item.active {
@@ -2718,6 +2719,8 @@ html.desktop, body.desktop, .desktop #root {
   border-radius: 6px;
   padding: 2px 8px;
   color: var(--fg);
+  display: inline-block;
+  text-decoration: none;
 }
 .ship-po-pill:hover { border-color: var(--border-strong); }
 

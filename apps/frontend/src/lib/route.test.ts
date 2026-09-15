@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { navigate, navigateBack, parseShippingRoute, pathToDesktopView, readSafeNext } from './route';
+import { hrefFor, navigate, navigateBack, onLinkClick, parseShippingRoute, pathToDesktopView, readSafeNext, type LinkClick } from './route';
 
 // `/shipping/new` shares a shape with `/shipping/:orderId`, so the parser's
 // check order is what keeps the wizard from being read as a PO id.
@@ -122,5 +122,57 @@ describe('navigateBack', () => {
     const w = installFakeWindow('#/purchase-orders/PO-1372');
     navigateBack('/purchase-orders');
     expect(w.hash()).toBe('#/purchase-orders');
+  });
+});
+
+describe('hrefFor', () => {
+  it('writes the hash out so the anchor stays in-app', () => {
+    expect(hrefFor('/purchase-orders/PO-1438')).toBe('#/purchase-orders/PO-1438');
+    expect(hrefFor('inventory')).toBe('#/inventory');
+  });
+});
+
+// An anchor routes in place on a plain click and is left to the browser
+// otherwise, so ⌘-click / middle-click open a tab the way any link does.
+describe('onLinkClick', () => {
+  afterEach(() => { delete (globalThis as { window?: unknown }).window; });
+
+  function click(over: Partial<LinkClick> = {}) {
+    const calls = { prevented: 0, stopped: 0 };
+    const e: LinkClick = {
+      button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false,
+      defaultPrevented: false,
+      preventDefault() { calls.prevented++; },
+      stopPropagation() { calls.stopped++; },
+      ...over,
+    };
+    return { e, calls };
+  }
+
+  it('routes a plain left-click through navigate()', () => {
+    const w = installFakeWindow();
+    const { e, calls } = click();
+    let sideEffects = 0;
+    onLinkClick('/inventory', () => { sideEffects++; })(e);
+    expect(w.hash()).toBe('#/inventory');
+    expect(calls).toEqual({ prevented: 1, stopped: 1 });
+    expect(sideEffects).toBe(1);
+  });
+
+  it.each([
+    ['meta', { metaKey: true }],
+    ['ctrl', { ctrlKey: true }],
+    ['shift', { shiftKey: true }],
+    ['alt', { altKey: true }],
+    ['middle button', { button: 1 }],
+    ['already handled', { defaultPrevented: true }],
+  ] as const)('leaves a %s click to the browser', (_label, over) => {
+    const w = installFakeWindow('#/dashboard');
+    const { e, calls } = click(over);
+    let sideEffects = 0;
+    onLinkClick('/inventory', () => { sideEffects++; })(e);
+    expect(w.hash()).toBe('#/dashboard');
+    expect(calls).toEqual({ prevented: 0, stopped: 1 });
+    expect(sideEffects).toBe(0);
   });
 });

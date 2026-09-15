@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon, type IconName } from '../../components/Icon';
+import { RouteLink, linkedSentence } from '../../components/RouteLink';
 import { useT } from '../../lib/i18n';
 import { api, ApiError } from '../../lib/api';
 import { handleFetchError, showErrorDialog } from '../../lib/errorToast';
@@ -373,7 +374,7 @@ export function DesktopInventoryEdit({ itemId, onCancel, onSaved }: Props) {
             <Icon name="box" size={14} />
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--fg-muted)', lineHeight: 1.45 }}>
-            <strong style={{ color: 'var(--fg)' }}>{t('ieArchivedTitle')}</strong> · {t('ieArchivedBody', { id: item.order_id })}
+            <strong style={{ color: 'var(--fg)' }}>{t('ieArchivedTitle')}</strong> · {linkedSentence(t('ieArchivedBody'), item.order_id, '/purchase-orders/' + item.order_id)}
           </div>
         </div>
       )}
@@ -682,7 +683,7 @@ function DetailsPanel({
               <tbody>
                 {linkedSellOrders.map(so => (
                   <tr key={so.id}>
-                    <td><span className="mono" style={{ fontSize: 12.5 }}>{so.id}</span></td>
+                    <td><RouteLink to={'/sell-orders/' + so.id} className="mono rec-link" style={{ fontSize: 12.5 }}>{so.id}</RouteLink></td>
                     <td style={{ fontSize: 13 }}>{so.customer_name ?? '—'}</td>
                     <td>
                       <span className={'chip ' + (
@@ -737,7 +738,7 @@ function Spec({ label, children }: { label: string; children: React.ReactNode })
 // Deliberately NOT dressed as an `.input`: a box that looks like a text field
 // but ignores every click reads as a broken form, which is exactly what sent
 // the spec fields above down that road.
-function Row({ label, value }: { label: string; value: string | null }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="field">
       <label className="label">{label}</label>
@@ -903,7 +904,7 @@ function PricingPanel({
         <div className="card-body">
           <div className="grid-2">
             <Row label={t('warehouse')} value={item.warehouse_short ? `${item.warehouse_short} · ${item.warehouse_region ?? ''}` : null} />
-            <Row label={t('ieOrder')}     value={item.order_id} />
+            <Row label={t('ieOrder')}     value={<RouteLink to={'/purchase-orders/' + item.order_id} className="mono rec-link">{item.order_id}</RouteLink>} />
           </div>
         </div>
       </div>
@@ -1028,7 +1029,7 @@ function SummaryColumn({
           <div className="card-title">{t('submittedBy')}</div>
         </div>
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <SummaryRow label={t('ieOrder')} value={<span className="mono">{item.order_id}</span>} />
+          <SummaryRow label={t('ieOrder')} value={<RouteLink to={'/purchase-orders/' + item.order_id} className="mono rec-link">{item.order_id}</RouteLink>} />
           <SummaryRow label={t('warehouse')} value={item.warehouse_short ?? '—'} />
           <SummaryRow label={t('submitter')} value={
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1183,7 +1184,7 @@ function BlockedByOpenOrdersBanner({
                 }}
               >
                 <Icon name="invoice" size={13} style={{ color: 'var(--fg-subtle)' }} />
-                <span className="mono" style={{ fontSize: 12 }}>{so.id.slice(0, 8)}</span>
+                <RouteLink to={'/sell-orders/' + so.id} className="mono rec-link" style={{ fontSize: 12 }}>{so.id.slice(0, 8)}</RouteLink>
                 <span className={'chip ' + (so.status === 'Draft' ? 'muted' : 'accent')} style={{ fontSize: 10.5 }}>
                   {so.status}
                 </span>
