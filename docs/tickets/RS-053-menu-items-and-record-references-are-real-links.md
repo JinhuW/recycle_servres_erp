@@ -2,13 +2,13 @@
 id: RS-053
 title: Menu items and record references are real links
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-15
 reporter: jinhu
 branch: feat/record-links
 pr:
-version:
+version: 1.144.0
 related: []
 ---
 
@@ -33,25 +33,25 @@ sell orders linked to an inventory item.
 
 ## Acceptance criteria
 
-- [ ] Every desktop sidebar item, both Inventory tabs and the phone tab bar's
+- [x] Every desktop sidebar item, both Inventory tabs and the phone tab bar's
       route tabs are `<a href="#/…">`: ⌘/ctrl/middle-click opens a new tab,
       plain click routes in place and the browser Back button still works.
-- [ ] The PO id in the inventory lots table opens `#/purchase-orders/<id>`;
+- [x] The PO id in the inventory lots table opens `#/purchase-orders/<id>`;
       the thumbnail next to it still opens the lightbox.
-- [ ] Every PO id shown on another page is a link: inventory item page
+- [x] Every PO id shown on another page is a link: inventory item page
       (location card, summary, archived banner), payments rows and match
       suggestions, shipping rows and "Complete PO" buttons, sell-order history,
       the PO list's open icon, mobile shipping cards.
-- [ ] Every sell-order id shown on a desktop page is a link: vendor bid
+- [x] Every sell-order id shown on a desktop page is a link: vendor bid
       "Promoted to", inventory item's linked and blocking sell orders, the
       archive-conflict dialog, the sell-order list's id cell and view/edit icons.
-- [ ] Every payment reference is a link: the PO list's payment chip and the
+- [x] Every payment reference is a link: the PO list's payment chip and the
       PO page's "Open payments" both land on `#/payments/po/<id>`.
-- [ ] A link inside a clickable row (payments, shipping, mobile cards) does not
+- [x] A link inside a clickable row (payments, shipping, mobile cards) does not
       also toggle or open the row.
-- [ ] Right-click on any of them offers "Open link in new tab" / "Copy link
+- [x] Right-click on any of them offers "Open link in new tab" / "Copy link
       address"; no anchor shows the browser's default blue underline.
-- [ ] `hrefFor` / `onLinkClick` are unit-tested in `src/lib/route.test.ts`.
+- [x] `hrefFor` / `onLinkClick` are unit-tested in `src/lib/route.test.ts`.
 
 ## Out of scope
 
