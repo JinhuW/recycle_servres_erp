@@ -2,12 +2,12 @@
 id: RS-053
 title: Menu items and record references are real links
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-15
 reporter: jinhu
 branch: feat/record-links
-pr:
+pr: 332
 version: 1.144.0
 related: []
 ---

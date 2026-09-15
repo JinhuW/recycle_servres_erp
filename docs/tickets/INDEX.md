@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-053](./RS-053-menu-items-and-record-references-are-real-links.md) | in-review | story | P2 | Menu items and record references are real links | 1.144.0 |
+| [RS-053](./RS-053-menu-items-and-record-references-are-real-links.md) | done | story | P2 | Menu items and record references are real links | 1.144.0 |
 | [RS-052](./RS-052-inventory-search-matches-the-po-number.md) | done | story | P2 | Inventory search matches the PO number | 1.143.0 |
 | [RS-051](./RS-051-rank-the-contributor-leaderboard-by-po-total-cost-or.md) | done | story | P2 | Rank the contributor leaderboard by PO total cost or commission | 1.141.0 |
 | [RS-050](./RS-050-draft-in-transit-hands-off-delivery-and-payment-in-o.md) | done | story | P2 | Draft → In Transit hands off delivery and payment in one dialog | 1.142.0 |
