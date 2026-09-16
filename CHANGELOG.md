@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.144.1] - 2026-09-15
+
+### Fixes
+
+- **Removing a PO line is no longer blocked by an archived sell order**
+  (RS-054).  The line-removal path had no sell-order check of its own: it
+  deleted the row and let the database's foreign key from sell-order lines
+  refuse, which it did for every sell order that had ever named the line —
+  archived ones included, because a foreign key cannot see the archive flag —
+  and the 409 named nothing.  The decision now lives in the route: a sell
+  order holds a line only while it is not archived, and a refusal lists the
+  sell orders in the way.  Migration 0127 makes the foreign key `ON DELETE
+  SET NULL`, so an archived sell order keeps its line as the snapshot it
+  already carried and just loses the link to the source.  Two consequences
+  worth knowing: a sale whose source line was removed drops out of the
+  cost-based dashboard totals (the weekly series keeps its revenue but loses
+  its profit), and an archived sell order is hidden, not frozen, so one moved
+  to Done afterwards consumes no stock — the same as a manual line today.
+  The fallback message for the remaining foreign key into PO lines now says
+  "vendor bid" instead of blaming a sell order.
+
 ## [1.144.0] - 2026-09-15
 
 ### Features

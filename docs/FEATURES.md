@@ -161,6 +161,16 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   shells render it locked and say so. The Analysis tab leaves archived goods
   out of every aggregate (v1.137.1), Sold lines excepted — they are the sales
   record and keep counting (v1.138.4).
+- **Removing a PO line is refused while a non-archived sell order names it**
+  (v1.144.1), whatever that sell order's status, and the refusal names the
+  sell orders. An archived sell order lets the line go: it keeps its own line
+  as the snapshot it already carried (label, part number, qty, price) with
+  the link to the source cleared. Until v1.144.1 the refusal was the database
+  foreign key itself, so archived sell orders blocked too and the message
+  named nothing. This is a different rule from the archive dialog's
+  status-based one above: a Closed-but-not-archived sell order still holds
+  its lines here. A sale whose source line is gone drops out of the
+  cost-based dashboard figures.
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
