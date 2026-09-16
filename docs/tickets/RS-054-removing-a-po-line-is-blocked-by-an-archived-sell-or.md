@@ -2,13 +2,13 @@
 id: RS-054
 title: Removing a PO line is blocked by an archived sell order
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-15
 reporter: jinhu
 branch: fix/remove-line-archived-sell-order
-pr:
-version:
+pr: 334
+version: 1.144.1
 related: []
 ---
 

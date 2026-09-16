@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-054](./RS-054-removing-a-po-line-is-blocked-by-an-archived-sell-or.md) | done | bug | P2 | Removing a PO line is blocked by an archived sell order | 1.144.1 |
 | [RS-053](./RS-053-menu-items-and-record-references-are-real-links.md) | done | story | P2 | Menu items and record references are real links | 1.144.0 |
 | [RS-052](./RS-052-inventory-search-matches-the-po-number.md) | done | story | P2 | Inventory search matches the PO number | 1.143.0 |
 | [RS-051](./RS-051-rank-the-contributor-leaderboard-by-po-total-cost-or.md) | done | story | P2 | Rank the contributor leaderboard by PO total cost or commission | 1.141.0 |
