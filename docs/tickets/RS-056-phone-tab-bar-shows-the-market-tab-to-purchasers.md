@@ -2,13 +2,13 @@
 id: RS-056
 title: Phone tab bar shows the Market tab to purchasers
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-16
 reporter: jinhu
 branch: feat/phone-market-tab
-pr:
-version:
+pr: 336
+version: 1.145.0
 related: [RS-050, RS-055]
 ---
 
