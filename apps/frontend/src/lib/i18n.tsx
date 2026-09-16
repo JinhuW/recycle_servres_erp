@@ -18,6 +18,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     tabHome: 'Home',
     tabOrders: 'Orders',
     tabCapture: 'Capture',
+    tabMarket: 'Market',
     tabInventory: 'Inventory',
     tabShipping: 'Shipping',
     tabProfile: 'Profile',

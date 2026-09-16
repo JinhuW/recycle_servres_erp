@@ -1,5 +1,6 @@
 import { Icon, type IconName } from './Icon';
 import { useT } from '../lib/i18n';
+import { useEffectiveUser } from '../lib/tweaks';
 import { MOBILE_VIEW_TO_PATH, hrefFor, onLinkClick, type MobileViewId } from '../lib/route';
 
 export type View = 'dashboard' | 'history' | 'submit' | 'shipping' | 'market' | 'inventory' | 'me';
@@ -17,13 +18,21 @@ type Tab =
 
 export function PhTabBar({ view, onCenterPress }: Props) {
   const { t } = useT();
+  // Effective, not auth, user: a manager previewing as a purchaser gets the
+  // purchaser's bar, the same way the desktop sidebar does.
+  const user = useEffectiveUser();
   // Shipping is unlisted for now: a box is handed off from the order itself
   // (the In Transit sheet), so the tab had nothing left to start. The screen
-  // still resolves by URL. Market and Inventory live as quick links on Home.
+  // still resolves by URL. Market takes the purchaser's fourth slot back —
+  // their field work is checking a price before a buy. Inventory stays a
+  // quick link on Home for managers.
   const tabs: Tab[] = [
     { id: 'dashboard', label: t('tabHome'),    icon: 'dashboard' },
     { id: 'history',   label: t('tabOrders'),  icon: 'history' },
     { id: 'submit',    label: t('tabCapture'), icon: 'camera', center: true },
+    ...(user?.role === 'purchaser'
+      ? [{ id: 'market' as const, label: t('tabMarket'), icon: 'tag' as const }]
+      : []),
     { id: 'me',        label: t('tabProfile'), icon: 'user' },
   ];
 
