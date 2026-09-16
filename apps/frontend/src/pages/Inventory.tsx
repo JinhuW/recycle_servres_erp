@@ -151,7 +151,7 @@ export function Inventory({ onNewEntry }: Props) {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <span className={'chip ' + statusTone(r.status) + ' dot'} style={{ fontSize: 10 }}>{r.status}</span>
-                {isManager && r.sell_price != null && (
+                {r.sell_price != null && (
                   <div className="mono" style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>{fmtUSD0(r.sell_price, locale)}</div>
                 )}
               </div>
