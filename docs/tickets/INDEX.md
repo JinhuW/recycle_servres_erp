@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-056](./RS-056-phone-tab-bar-shows-the-market-tab-to-purchasers.md) | done | story | P2 | Phone tab bar shows the Market tab to purchasers | — |
+| [RS-057](./RS-057-ignore-on-the-payments-page-fails-with-failed-to-fet.md) | in-progress | bug | P1 | Ignore on the Payments page fails with Failed to fetch | — |
+| [RS-056](./RS-056-phone-tab-bar-shows-the-market-tab-to-purchasers.md) | done | story | P2 | Phone tab bar shows the Market tab to purchasers | 1.145.0 |
 | [RS-055](./RS-055-phone-inventory-shows-the-sell-price-to-purchasers.md) | done | task | P3 | Phone Inventory shows the sell price to purchasers | 1.144.2 |
 | [RS-054](./RS-054-removing-a-po-line-is-blocked-by-an-archived-sell-or.md) | done | bug | P2 | Removing a PO line is blocked by an archived sell order | 1.144.1 |
 | [RS-053](./RS-053-menu-items-and-record-references-are-real-links.md) | done | story | P2 | Menu items and record references are real links | 1.144.0 |

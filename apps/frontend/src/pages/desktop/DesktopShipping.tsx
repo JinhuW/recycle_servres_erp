@@ -378,7 +378,7 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
   const chip = STATUS_CHIP[pkg.status];
   const eta = fmtEta(pkg.trackingEta, locale);
   const trackUrl = pkg.trackingUrl;
-  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const stopClick = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   const createPo = async () => {
     setBusy(true);
@@ -462,7 +462,7 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
             type="button"
             className="ship-copy-btn mono"
             title={t('shipCopyTracking')}
-            onClick={(e) => { stop(e); onCopy(pkg.trackingNumber); }}
+            onClick={(e) => { stopClick(e); onCopy(pkg.trackingNumber); }}
           >
             {pkg.trackingNumber}
             <span className={'ship-copy-hint' + (copied === pkg.trackingNumber ? ' done' : '')}>
@@ -474,7 +474,7 @@ function PackageTableRow({ pkg, locale, isManager, copied, onCopy, onMutated, sh
               href={trackUrl}
               target="_blank"
               rel="noreferrer"
-              onClick={stop}
+              onClick={stopClick}
               title={t('shipTrackOnCarrier', { carrier: pkg.carrier })}
             >
               ↗
@@ -523,7 +523,7 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
   const eta = fmtEta(s.trackingEta, locale);
   const waiting = waitingSeller(s);
   const showDeliveredCta = needsCompletePo(s.status, order.lifecycle);
-  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const stopClick = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   return (
     <tr className="row-hover" style={{ cursor: 'pointer' }} onClick={() => navigate(`/shipping/${order.id}`)}>
@@ -587,7 +587,7 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
               type="button"
               className="ship-copy-btn mono"
               title={t('shipCopyTracking')}
-              onClick={(e) => { stop(e); onCopy(s.trackingNumber!); }}
+              onClick={(e) => { stopClick(e); onCopy(s.trackingNumber!); }}
             >
               {s.trackingNumber}
               <span className={'ship-copy-hint' + (copied === s.trackingNumber ? ' done' : '')}>
@@ -595,14 +595,14 @@ function ShipTableRow({ row, locale, isManager, copied, onCopy }: {
               </span>
             </button>
             {s.trackingUrl && (
-              <a href={s.trackingUrl} target="_blank" rel="noreferrer" onClick={stop} title={t('shipTrackOnCarrier', { carrier: s.carrier ?? '' })}>
+              <a href={s.trackingUrl} target="_blank" rel="noreferrer" onClick={stopClick} title={t('shipTrackOnCarrier', { carrier: s.carrier ?? '' })}>
                 ↗
               </a>
             )}
           </div>
         )}
       </td>
-      <td className="num" onClick={stop} style={{ cursor: 'default' }}>
+      <td className="num" onClick={stopClick} style={{ cursor: 'default' }}>
         <div style={{ display: 'inline-flex', gap: 6 }}>
           {showDeliveredCta && (
             <RouteLink to={`/purchase-orders/${order.id}`} className="btn accent sm">
