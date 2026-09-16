@@ -471,11 +471,11 @@ function CardCta({ action, busy, onCreatePo, onShare }: {
 }) {
   const { t } = useT();
   if (!action) return null;
-  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const stopClick = (e: { stopPropagation: () => void }) => e.stopPropagation();
   switch (action.kind) {
     case 'create-po':
       return (
-        <button className="ph-ship-cta accent" disabled={busy} onClick={(e) => { stop(e); onCreatePo(); }}>
+        <button className="ph-ship-cta accent" disabled={busy} onClick={(e) => { stopClick(e); onCreatePo(); }}>
           {busy ? '…' : t('shipCreatePo')}
         </button>
       );
@@ -487,7 +487,7 @@ function CardCta({ action, busy, onCreatePo, onShare }: {
       );
     case 'reshare-link':
       return (
-        <button className="ph-ship-cta" onClick={(e) => { stop(e); onShare(action.token); }}>
+        <button className="ph-ship-cta" onClick={(e) => { stopClick(e); onShare(action.token); }}>
           <Icon name="mail" size={14} /> {t('shipMobShareLink')}
         </button>
       );
