@@ -161,6 +161,16 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   shells render it locked and say so. The Analysis tab leaves archived goods
   out of every aggregate (v1.137.1), Sold lines excepted — they are the sales
   record and keep counting (v1.138.4).
+- **Removing a PO line is refused while a non-archived sell order names it**
+  (v1.144.1), whatever that sell order's status, and the refusal names the
+  sell orders. An archived sell order lets the line go: it keeps its own line
+  as the snapshot it already carried (label, part number, qty, price) with
+  the link to the source cleared. Until v1.144.1 the refusal was the database
+  foreign key itself, so archived sell orders blocked too and the message
+  named nothing. This is a different rule from the archive dialog's
+  status-based one above: a Closed-but-not-archived sell order still holds
+  its lines here. A sale whose source line is gone drops out of the
+  cost-based dashboard figures.
 - **Every change is audited**, drafts included (v1.33.0), and each timeline
   opens with an "Order created" entry.
 - Excel export carries the category's full spec set per line, one tab per
@@ -228,6 +238,10 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **The phone Inventory list shows each line's sell price to every role**
+  (v1.144.2), under the status chip, the way the desktop table and the phone
+  Orders list already did. Unit cost, profit and margin stay manager-only
+  everywhere — the API does not send them to purchasers.
 - Search matches part number, serial number, brand, description and item type
   (v1.42.0), and the PO number, whole or partial (v1.143.0).
 - Export honours the row selection, one worksheet per category, with designed
@@ -310,7 +324,9 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   In Transit dialog, which creates the package already linked. The page still
   answers at `#/shipping`, the prepaid-label wizard is still reached from the
   PO page's *Shipping labels* button, and a PO minted from a delivered package
-  now inherits the package's source.
+  now inherits the package's source.  The purchaser's slot in the phone tab
+  bar went back to Market in v1.145.0 (it had been Market until v1.80.0);
+  managers keep Home · Orders · Capture · Profile.
 - Owners get a default warehouse, and managers can create a package PO at any
   status (v1.85.0).
 
