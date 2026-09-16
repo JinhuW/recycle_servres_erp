@@ -2,13 +2,13 @@
 id: RS-055
 title: Phone Inventory shows the sell price to purchasers
 type: task
-status: in-progress
+status: done
 priority: P3
 created: 2026-09-15
 reporter: jinhu
 branch: feat/mobile-inventory-sell-price
-pr:
-version:
+pr: 335
+version: 1.144.2
 related: []
 ---
 
