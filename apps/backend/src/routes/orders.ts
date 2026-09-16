@@ -1085,7 +1085,8 @@ orders.post('/', async (c) => {
 // Line shape on the wire:
 //   lines:          updates for existing lines (each carries `id`)
 //   addLines:       new line rows to INSERT (no `id`)
-//   removeLineIds:  ids to DELETE (will 409 if referenced by sell_order_lines)
+//   removeLineIds:  ids to DELETE (409 while a non-archived sell order or a
+//                   vendor bid names one)
 type LineFields = {
   // Editable: a line filed under the wrong category is corrected in place
   // rather than deleted and retyped. Switching clears the spec fields the old
@@ -1639,6 +1640,25 @@ orders.patch('/:id', async (c) => {
           WHERE order_line_id = ANY(${doomed.map(r => r.id)}::uuid[])
         ` as { storage_key: string }[] : [];
         for (const p of doomedPhotos) removedScanKeys.push(p.storage_key);
+
+        // A sell order holds a line only while it is not archived. Archive is
+        // the manager's "this one is history" flag, so an archived sell order
+        // keeps its snapshot and lets the source line go (the FK is SET NULL
+        // since 0127); anything else — Draft, Shipped, Done, Closed — still
+        // names the line and refuses. Status is deliberately not consulted:
+        // that is the archive dialog's rule, not this one's.
+        const stillNamed = doomed.length ? await tx`
+          SELECT DISTINCT sol.inventory_id AS line_id, sol.sell_order_id
+          FROM sell_order_lines sol
+          JOIN sell_orders so ON so.id = sol.sell_order_id
+          WHERE sol.inventory_id = ANY(${doomed.map(r => r.id)}::uuid[])
+            AND so.archived_at IS NULL
+        ` as { line_id: string; sell_order_id: string }[] : [];
+        if (stillNamed.length) {
+          committedLineIds = [...new Set(stillNamed.map(r => r.line_id))];
+          blockingSellOrderIds = [...new Set(stillNamed.map(r => r.sell_order_id))].sort();
+          throw new Error('__REMOVE_REFERENCED__');
+        }
         await tx`DELETE FROM order_lines WHERE order_id = ${id} AND id = ANY(${body.removeLineIds}::uuid[])`;
 
         // A scan key is NOT owned by the line that carries it: a partial
@@ -1949,8 +1969,17 @@ orders.patch('/:id', async (c) => {
     if (msg.includes('__ORDER_WOULD_BE_EMPTY__')) {
       return c.json({ error: 'An order must keep at least one line. Delete the order instead.' }, 409);
     }
+    if (msg.includes('__REMOVE_REFERENCED__')) {
+      return c.json({
+        error: `A line you tried to remove is on ${describeSellOrders(blockingSellOrderIds)} and cannot be deleted. Archive or cancel those sell orders first.`,
+        offendingLineIds: committedLineIds,
+        sellOrderIds: blockingSellOrderIds,
+      }, 409);
+    }
+    // Sell orders are handled above; the only other NO ACTION FK into
+    // order_lines is vendor_bid_lines.inventory_id.
     if (/foreign key|violates|referenced/i.test(msg)) {
-      return c.json({ error: 'A line you tried to remove is referenced by a sell-order and cannot be deleted' }, 409);
+      return c.json({ error: 'A line you tried to remove is still referenced by a vendor bid and cannot be deleted' }, 409);
     }
     throw e;
   }
