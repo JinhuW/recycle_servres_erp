@@ -2,13 +2,13 @@
 id: RS-057
 title: Ignore on the Payments page fails with Failed to fetch
 type: bug
-status: in-progress
+status: done
 priority: P1
 created: 2026-09-16
 reporter: jinhu
 branch: fix/payments-rail-window-stop
-pr:
-version:
+pr: 338
+version: 1.145.1
 related: [RS-053]
 ---
 
