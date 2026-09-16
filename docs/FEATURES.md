@@ -324,7 +324,9 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
   In Transit dialog, which creates the package already linked. The page still
   answers at `#/shipping`, the prepaid-label wizard is still reached from the
   PO page's *Shipping labels* button, and a PO minted from a delivered package
-  now inherits the package's source.
+  now inherits the package's source.  The purchaser's slot in the phone tab
+  bar went back to Market in v1.145.0 (it had been Market until v1.80.0);
+  managers keep Home · Orders · Capture · Profile.
 - Owners get a default warehouse, and managers can create a package PO at any
   status (v1.85.0).
 

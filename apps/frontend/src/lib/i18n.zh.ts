@@ -2,7 +2,7 @@
 // English-only ones — used to download it in the entry chunk. Loaded on
 // demand by loadDictionary() in i18n.tsx.
 const zh: Record<string, string> = {
-  tabHome: '首页', tabOrders: '订单', tabCapture: '扫描',
+  tabHome: '首页', tabOrders: '订单', tabCapture: '扫描', tabMarket: '市场',
   tabInventory: '库存', tabShipping: '运输', tabProfile: '个人',
   cancel: '取消', submitOrder: '提交订单', addToOrder: '加入订单',
   addItem: '添加项目',

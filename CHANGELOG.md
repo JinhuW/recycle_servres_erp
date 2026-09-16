@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.145.0] - 2026-09-16
+
+### Features
+
+- **The phone tab bar shows Market to purchasers again** (RS-056).  The
+  purchaser's fourth tab was Market from the first commit; v1.80.0 gave the
+  slot to Shipping and left Market as a Home quick link, then v1.142.0
+  unlisted Shipping without refilling the slot, so a purchaser's bar had
+  read Home · Orders · Capture · Profile since.  Market sits between Capture
+  and Profile again and lights up on `#/market`; a manager previewing as a
+  purchaser sees it too.  The manager's bar is unchanged, and the Home quick
+  link stays.
+
 ## [1.144.2] - 2026-09-15
 
 ### Fixes
