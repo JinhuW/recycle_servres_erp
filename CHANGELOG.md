@@ -17,6 +17,17 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.144.2] - 2026-09-15
+
+### Fixes
+
+- **The phone Inventory list shows the sell price to purchasers** (RS-055).
+  The price under each line's status chip was rendered for managers only, a
+  gate left over from the first commit, while the desktop table, the phone
+  Orders list and the phone Market page all showed theirs to every role and
+  the API was already sending the value.  Unit cost, profit and margin stay
+  manager-only.
+
 ## [1.144.1] - 2026-09-15
 
 ### Fixes

@@ -238,6 +238,10 @@ Transit, and a line's qty can never be 0. Lines of an archived PO sit at the
 - Flat and grouped views. Grouped is what goes outward to vendors and buyers,
   so it carries no cost, sell price or submitter (v1.51.0); flat keeps them for
   internal use.
+- **The phone Inventory list shows each line's sell price to every role**
+  (v1.144.2), under the status chip, the way the desktop table and the phone
+  Orders list already did. Unit cost, profit and margin stay manager-only
+  everywhere — the API does not send them to purchasers.
 - Search matches part number, serial number, brand, description and item type
   (v1.42.0), and the PO number, whole or partial (v1.143.0).
 - Export honours the row selection, one worksheet per category, with designed
