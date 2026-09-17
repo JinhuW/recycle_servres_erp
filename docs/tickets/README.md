@@ -68,3 +68,9 @@ prints a warning: rename one file and edit its `id:` line.
    section references the ticket.
 
 See the "Tickets, changelog & features" section of the root `CLAUDE.md`.
+
+## Reference images
+
+A request that arrives as a screenshot keeps the screenshot: copy it to
+`docs/tickets/assets/RS-<nnn>-<n>.png` and link it from the Ask.  The
+`[Image #n]` markers in the quoted words then point at something.
