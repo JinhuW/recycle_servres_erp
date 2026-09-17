@@ -2,13 +2,13 @@
 id: RS-059
 title: Dashboard time-range brush and contribution tables
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: feat/dashboard-insights
 pr:
-version:
+version: 1.146.0
 related: [RS-051]
 ---
 
@@ -76,27 +76,27 @@ Definitions, so that every figure that shares a name shares a meaning:
 
 ## Acceptance criteria
 
-- [ ] `GET /api/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD` scopes every figure
+- [x] `GET /api/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD` scopes every figure
       to that inclusive window in the business time zone; `?range=` presets
       still work; `range=ytd` means since 1 January; a malformed or inverted
       `from`/`to` is a 400.
-- [ ] The response carries `window`, `bounds.first`, `series` (bucketed
+- [x] The response carries `window`, `bounds.first`, `series` (bucketed
       revenue / cost / profit — `weeks` is gone) and `contrib`.
-- [ ] Desktop: a range chip opens presets and custom dates; a month strip
+- [x] Desktop: a range chip opens presets and custom dates; a month strip
       under the page head lets you drag a day-precise window, move it, and
       resize it by handle, with the date under the handle while dragging and
       the range label inside the band.
-- [ ] Chart: revenue up, cost down, profit line, a legend, a crosshair
+- [x] Chart: revenue up, cost down, profit line, a legend, a crosshair
       tooltip, a Day / Week / Month control; the series' revenue and profit
       sum to the KPI tiles and its cost to the Cost card for the same window.
-- [ ] Three contribution cards (Cost, Sell orders, Profit): dimension tabs,
+- [x] Three contribution cards (Cost, Sell orders, Profit): dimension tabs,
       the top 7 rows with a % of total bar and the amount, a "Remaining N …"
       row; the tabs of one card share one total; the Sell orders total equals
       the revenue tile and the Profit total equals the gross-profit tile.
-- [ ] Purchaser lens: own POs only, Supplier | Category dimensions only, peer
+- [x] Purchaser lens: own POs only, Supplier | Category dimensions only, peer
       money never sent.
-- [ ] Phone dashboard unchanged apart from its sparkline reading `series`.
-- [ ] `en` and `zh` strings are in parity.
+- [x] Phone dashboard unchanged apart from its sparkline reading `series`.
+- [x] `en` and `zh` strings are in parity.
 
 ## Out of scope
 
