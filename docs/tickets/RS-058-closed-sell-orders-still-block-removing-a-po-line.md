@@ -2,13 +2,13 @@
 id: RS-058
 title: Closed sell orders still block removing a PO line
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: fix/remove-line-closed-sell-order
-pr:
-version:
+pr: 340
+version: 1.145.2
 related: [RS-054]
 ---
 
