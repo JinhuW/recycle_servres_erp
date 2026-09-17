@@ -2,12 +2,12 @@
 id: RS-059
 title: Dashboard time-range brush and contribution tables
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: feat/dashboard-insights
-pr:
+pr: 342
 version: 1.146.0
 related: [RS-051]
 ---
