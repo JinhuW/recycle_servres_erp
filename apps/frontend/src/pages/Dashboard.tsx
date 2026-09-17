@@ -138,7 +138,8 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
             </div>
           )}
           <PhSparkline data={(data?.series ?? []).map(s => ({
-            label: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+            // Numeric, so the edge labels fit inside the 360-unit sparkline.
+            label: new Intl.DateTimeFormat(locale, { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
               .format(new Date(s.start + 'T00:00:00Z')),
             profit: s.profit,
           }))} />

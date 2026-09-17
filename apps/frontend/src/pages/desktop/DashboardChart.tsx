@@ -56,7 +56,8 @@ export function CashflowChart({ series, bucket, from, to, locale }: {
     const yMax = Math.max(step, Math.ceil(up / step) * step);
     const yMin = -Math.ceil(down / step) * step;
     const ticks: number[] = [];
-    for (let v = yMin; v <= yMax + 1e-9; v += step) ticks.push(v);
+    // `-0` would print as "-$0"; a tick that close to zero is zero.
+    for (let v = yMin; v <= yMax + 1e-9; v += step) ticks.push(Math.abs(v) < 1e-9 ? 0 : v);
     return { yMin, yMax, ticks };
   }, [series]);
 
@@ -66,7 +67,7 @@ export function CashflowChart({ series, bucket, from, to, locale }: {
   const bw = Math.min(24, slot * 0.6);
 
   const compact = useMemo(() => new Intl.NumberFormat(locale, {
-    notation: 'compact', style: 'currency', currency: 'USD', maximumFractionDigits: 1,
+    notation: 'compact', style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', maximumFractionDigits: 1,
   }), [locale]);
   const dayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }), [locale]);
   const monthFmt = useMemo(() => new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' }), [locale]);
@@ -90,7 +91,11 @@ export function CashflowChart({ series, bucket, from, to, locale }: {
     else if (e.key === 'Escape') setHover(null);
   };
 
-  if (n === 0) return <div className="dash-chart-empty">{t('dashNoDataYet')}</div>;
+  // Nothing in the window: say so rather than draw a flat line against a
+  // made-up "$1" axis.
+  if (n === 0 || series.every(s => s.revenue === 0 && s.cost === 0 && s.profit === 0)) {
+    return <div className="dash-chart-empty">{t('dashNoDataYet')}</div>;
+  }
 
   const linePath = series.map((s, i) => `${i === 0 ? 'M' : 'L'}${cx(i)},${y(s.profit)}`).join(' ');
   const h = hover;
@@ -130,9 +135,9 @@ export function CashflowChart({ series, bucket, from, to, locale }: {
           </g>
         ))}
         <path className="dash-chart-line" d={linePath} />
-        {series.map((s, i) => (
+        {series.map((s, i) => (n <= 16 || h === i) ? (
           <circle key={s.start} className="dash-chart-dot" cx={cx(i)} cy={y(s.profit)} r={4} />
-        ))}
+        ) : null)}
         {series.map((s, i) => (i % labelEvery === 0 || i === n - 1) && (i % labelEvery === 0 || n - 1 - i >= labelEvery / 2) ? (
           <text key={s.start} className="dash-chart-xlabel" x={cx(i)} y={H - 8} textAnchor="middle">{xLabel(s, i)}</text>
         ) : null)}

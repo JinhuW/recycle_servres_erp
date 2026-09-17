@@ -92,7 +92,7 @@ export function DashboardSkeleton() {
   const loadingAria = t('loadingAria');
   return (
     <div className="skeleton-dashboard" role="status" aria-label={loadingAria}>
-      <Skeleton width="100%" height={56} radius={8} />
+      <Skeleton width="100%" height={66} radius={8} />
       <div className="skeleton-tiles">
         {Array.from({ length: 4 }).map((_, i) => (
           <div className="skeleton-tile" key={i}>

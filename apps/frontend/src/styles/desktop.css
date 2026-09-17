@@ -3710,7 +3710,7 @@ html.desktop, body.desktop, .desktop #root {
 
 /* The brush strip */
 .dash-brush { position: relative; user-select: none; touch-action: none; }
-.dash-brush svg { display: block; width: 100%; height: 56px; overflow: visible; }
+.dash-brush svg { display: block; width: 100%; height: 66px; overflow: visible; }
 .dash-brush .dash-brush-year { font-size: 11px; fill: var(--fg-subtle); }
 .dash-brush .dash-brush-month { font-size: 11.5px; fill: var(--fg-muted); }
 .dash-brush .dash-brush-month.is-selected { fill: var(--fg); }
@@ -3720,7 +3720,8 @@ html.desktop, body.desktop, .desktop #root {
 .dash-brush .dash-brush-today { stroke: var(--warn); stroke-width: 2; }
 .dash-brush .dash-brush-track { fill: transparent; cursor: crosshair; }
 .dash-brush .dash-brush-band {
-  fill: var(--info-soft); stroke: var(--info); stroke-width: 1.5;
+  /* A wash, not a block: the month names underneath stay readable. */
+  fill: var(--info); fill-opacity: 0.09; stroke: var(--info); stroke-width: 1.5;
   cursor: grab;
 }
 .dash-brush .dash-brush-band.is-dragging { cursor: grabbing; }
@@ -3731,14 +3732,15 @@ html.desktop, body.desktop, .desktop #root {
 .dash-brush .dash-brush-handle:focus { outline: none; }
 .dash-brush .dash-brush-handle:focus-visible { stroke: var(--accent); stroke-width: 2.5; }
 .dash-brush-label {
-  position: absolute; top: 22px; transform: translateX(6px);
+  position: absolute; top: 21px; transform: translateX(6px);
   padding: 1px 6px; border-radius: 4px;
   background: var(--info); color: #fff;
   font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums;
   white-space: nowrap; pointer-events: none;
 }
+.dash-brush-label.is-right { transform: translateX(-6px); }
 .dash-brush-tip {
-  position: absolute; top: 60px; transform: translateX(-50%);
+  position: absolute; top: 70px; transform: translateX(-50%);
   padding: 4px 8px; border-radius: 6px;
   background: var(--fg); color: var(--bg);
   font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
@@ -3803,11 +3805,12 @@ html.desktop, body.desktop, .desktop #root {
 .dash-contrib-table td { padding: 8px 0; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .dash-contrib-table tr:last-child td { border-bottom: none; }
 .dash-contrib-table th.num, .dash-contrib-table td.num { text-align: right; }
-.dash-contrib-name { max-width: 0; width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; }
+.dash-contrib-name { max-width: 0; width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
 .dash-contrib-bar { display: flex; align-items: center; gap: 10px; }
-.dash-contrib-pct { width: 44px; flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--fg-muted); }
+.dash-contrib-pct { width: 42px; flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--fg-muted); }
+.dash-contrib-bar .bar-track { flex: 1; min-width: 60px; }
 .dash-contrib-bar .bar-track { height: 6px; border: none; }
-.dash-contrib-table td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; padding-left: 12px; white-space: nowrap; }
+.dash-contrib-table td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; padding-left: 12px; white-space: nowrap; width: 1%; }
 .dash-contrib-others td { color: var(--fg-subtle); }
 .dash-contrib-empty { padding: 24px 0; text-align: center; color: var(--fg-subtle); font-size: 13px; }
 

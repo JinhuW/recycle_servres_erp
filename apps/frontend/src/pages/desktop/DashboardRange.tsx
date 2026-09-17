@@ -127,14 +127,17 @@ export function RangeChip({ value, today, first, locale, onChange }: {
 
 // ── Brush ───────────────────────────────────────────────────────────────────
 
-const H = 56;
+// Rows, top to bottom: year, the band's label chip, month names, ticks. The
+// band covers the last three so the chip sits inside it, above the months.
+const H = 66;
 const PAD_L = 4;
 const PAD_R = 4;
-const BAND_TOP = 20;
-const BAND_BOTTOM = 56;
+const BAND_TOP = 18;
+const BAND_BOTTOM = 66;
+const MONTH_Y = 52;
 const HANDLE_W = 5;
-const HANDLE_H = 20;
-const HANDLE_Y = 30;
+const HANDLE_H = 22;
+const HANDLE_Y = 31;
 
 type Drag =
   | { kind: 'new'; anchor: number }
@@ -193,7 +196,8 @@ export function RangeBrush({ value, today, first, locale, onChange }: {
       setDraft({ a: anchor, b: anchor + 1 });
     }
     setDrag(next);
-    (e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
+    // A synthetic pointer (tests, automation) has no capture to take.
+    try { (e.currentTarget as SVGElement).setPointerCapture(e.pointerId); } catch { /* fine */ }
     e.preventDefault();
   };
 
@@ -300,7 +304,7 @@ export function RangeBrush({ value, today, first, locale, onChange }: {
               {m.year && <text className="dash-brush-year" x={x0 + 3} y={12}>{m.year}</text>}
               {x1 - x0 > 26 && (
                 <text className={'dash-brush-month' + (selected ? ' is-selected' : '')}
-                      x={(x0 + x1) / 2} y={36} textAnchor="middle">{m.label}</text>
+                      x={(x0 + x1) / 2} y={MONTH_Y} textAnchor="middle">{m.label}</text>
               )}
             </g>
           );
@@ -328,8 +332,13 @@ export function RangeBrush({ value, today, first, locale, onChange }: {
           onKeyDown={nudge('end')}
         />
       </svg>
-      {width > 0 && xB - xA > 60 && (
-        <div className="dash-brush-label" style={{ left: xA }}>{fmtRange(from, to, today, locale)}</div>
+      {width > 0 && (
+        <div
+          className={'dash-brush-label' + (xA > width - 150 ? ' is-right' : '')}
+          style={xA > width - 150 ? { right: width - xB } : { left: xA }}
+        >
+          {fmtRange(from, to, today, locale)}
+        </div>
       )}
       {tip && <div className="dash-brush-tip" style={{ left: tip.x }}>{tip.text}</div>}
     </div>
