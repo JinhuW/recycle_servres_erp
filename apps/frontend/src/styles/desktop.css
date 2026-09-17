@@ -1706,6 +1706,14 @@ html.desktop, body.desktop, .desktop #root {
 }
 .skeleton-list-row:last-child { border-bottom: none; }
 
+.skeleton-contrib {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 1280px) {
+  .skeleton-contrib { grid-template-columns: 1fr; }
+}
 @media (max-width: 1100px) {
   .skeleton-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .skeleton-grid  { grid-template-columns: 1fr; }
@@ -3648,4 +3656,165 @@ html.desktop, body.desktop, .desktop #root {
 }
 @media (prefers-reduced-motion: reduce) {
   .ho-tile, .ho-carrier { transition: none; }
+}
+
+/* ===== Dashboard: range brush, cashflow chart, contribution cards ===== */
+/* The page's figures share one window, so the brush is the first thing under
+   the head and spans the full width — a control that scopes everything sits
+   above everything. */
+.page.page-dashboard > .page-head { margin-bottom: 12px; }
+.dash-body { display: flex; flex-direction: column; gap: var(--gap); }
+/* A refetch keeps the previous render in place, dimmed, instead of a skeleton
+   — the layout never jumps under a brush drag. */
+.dash-body.is-loading { opacity: 0.55; transition: opacity 0.15s; }
+.dash-body.is-loading * { pointer-events: none; }
+
+/* Range chip + preset popover */
+.dash-range-wrap { position: relative; }
+.dash-range-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 10px 0 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); color: var(--fg);
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer;
+}
+.dash-range-chip:hover { border-color: var(--border-strong); }
+.dash-range-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dash-range-chip .dash-range-chip-label { font-variant-numeric: tabular-nums; }
+.dash-range-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  width: 240px; padding: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+.dash-range-pop-row {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 7px 10px;
+  border: none; border-radius: 6px; background: transparent;
+  font-family: inherit; font-size: 13px; color: var(--fg); text-align: left;
+  cursor: pointer;
+}
+.dash-range-pop-row:hover { background: var(--bg-soft); }
+.dash-range-pop-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dash-range-pop-row[aria-checked="true"] { font-weight: 600; }
+.dash-range-pop-row .dash-range-check { color: var(--accent-strong); }
+.dash-range-pop-custom {
+  margin-top: 6px; padding: 10px 10px 6px;
+  border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.dash-range-pop-custom label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--fg-subtle); }
+.dash-range-pop-custom .input { height: 30px; font-size: 12.5px; padding: 0 8px; }
+.dash-range-pop-custom .btn { grid-column: 1 / -1; height: 30px; }
+
+/* The brush strip */
+.dash-brush { position: relative; user-select: none; touch-action: none; }
+.dash-brush svg { display: block; width: 100%; height: 66px; overflow: visible; }
+.dash-brush .dash-brush-year { font-size: 11px; fill: var(--fg-subtle); }
+.dash-brush .dash-brush-month { font-size: 11.5px; fill: var(--fg-muted); }
+.dash-brush .dash-brush-month.is-selected { fill: var(--fg); }
+.dash-brush .dash-brush-tick { stroke: var(--border); stroke-width: 1; }
+.dash-brush .dash-brush-tick.is-month { stroke: var(--border-strong); }
+.dash-brush .dash-brush-baseline { stroke: var(--border); stroke-width: 1; }
+.dash-brush .dash-brush-today { stroke: var(--warn); stroke-width: 2; }
+.dash-brush .dash-brush-track { fill: transparent; cursor: crosshair; }
+.dash-brush .dash-brush-band {
+  /* A wash, not a block: the month names underneath stay readable. */
+  fill: var(--info); fill-opacity: 0.09; stroke: var(--info); stroke-width: 1.5;
+  cursor: grab;
+}
+.dash-brush .dash-brush-band.is-dragging { cursor: grabbing; }
+.dash-brush .dash-brush-handle {
+  fill: var(--info); stroke: var(--bg-elev); stroke-width: 1.5;
+  cursor: ew-resize;
+}
+.dash-brush .dash-brush-handle:focus { outline: none; }
+.dash-brush .dash-brush-handle:focus-visible { stroke: var(--accent); stroke-width: 2.5; }
+.dash-brush-label {
+  position: absolute; top: 21px; transform: translateX(6px);
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--info); color: #fff;
+  font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none;
+}
+.dash-brush-label.is-right { transform: translateX(-6px); }
+.dash-brush-tip {
+  position: absolute; top: 70px; transform: translateX(-50%);
+  padding: 4px 8px; border-radius: 6px;
+  background: var(--fg); color: var(--bg);
+  font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
+  white-space: nowrap; pointer-events: none; z-index: 5;
+}
+
+/* Cashflow chart */
+.dash-chart { position: relative; }
+.dash-chart svg { display: block; width: 100%; height: 260px; overflow: visible; }
+.dash-chart .dash-chart-grid { stroke: var(--border); stroke-width: 1; }
+.dash-chart .dash-chart-zero { stroke: var(--border-strong); stroke-width: 1; }
+.dash-chart .dash-chart-tick { font-size: 10.5px; fill: var(--fg-subtle); font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.dash-chart .dash-chart-xlabel { font-size: 10.5px; fill: var(--fg-subtle); }
+.dash-chart .dash-chart-in { fill: var(--info); }
+.dash-chart .dash-chart-out { fill: var(--chart-out); }
+.dash-chart .dash-chart-bar.is-hover { opacity: 0.8; }
+.dash-chart .dash-chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.dash-chart .dash-chart-dot { fill: var(--accent); stroke: var(--bg-elev); stroke-width: 2; }
+.dash-chart .dash-chart-crosshair { stroke: var(--fg-subtle); stroke-width: 1; }
+.dash-chart .dash-chart-hit { fill: transparent; }
+.dash-chart .dash-chart-hit:focus { outline: none; }
+.dash-chart .dash-chart-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dash-chart-legend {
+  display: flex; gap: 16px; align-items: center;
+  font-size: 12px; color: var(--fg-muted); margin-bottom: 8px;
+}
+.dash-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dash-chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.dash-chart-legend i.is-line { height: 2px; width: 14px; border-radius: 1px; }
+.dash-chart-tip {
+  position: absolute; top: 8px; z-index: 5;
+  min-width: 150px; padding: 8px 10px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  font-size: 12px; pointer-events: none;
+}
+.dash-chart-tip-title { color: var(--fg-subtle); margin-bottom: 6px; font-size: 11.5px; }
+.dash-chart-tip-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.dash-chart-tip-row i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+.dash-chart-tip-row b { font-family: 'JetBrains Mono', monospace; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dash-chart-tip-row span { color: var(--fg-muted); }
+.dash-chart-empty { padding: 32px; text-align: center; color: var(--fg-subtle); }
+
+/* Contribution cards */
+.dash-contrib-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap);
+}
+@media (max-width: 1280px) {
+  .dash-contrib-grid { grid-template-columns: 1fr; }
+}
+.dash-contrib .card-head { align-items: flex-start; }
+.dash-contrib-total { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-top: 2px; }
+.dash-contrib-tabs { padding: 12px 18px 0; }
+.dash-contrib-tabs .seg { display: grid; width: 100%; }
+.dash-contrib-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.dash-contrib-table th {
+  text-align: left; font-size: 11px; font-weight: 500; color: var(--fg-subtle);
+  padding: 10px 0 6px; border-bottom: 1px solid var(--border);
+}
+.dash-contrib-table td { padding: 8px 0; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.dash-contrib-table tr:last-child td { border-bottom: none; }
+.dash-contrib-table th.num, .dash-contrib-table td.num { text-align: right; }
+.dash-contrib-name { max-width: 0; width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+.dash-contrib-bar { display: flex; align-items: center; gap: 10px; }
+.dash-contrib-pct { width: 42px; flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--fg-muted); }
+.dash-contrib-bar .bar-track { flex: 1; min-width: 60px; }
+.dash-contrib-bar .bar-track { height: 6px; border: none; }
+.dash-contrib-table td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; padding-left: 12px; white-space: nowrap; width: 1%; }
+.dash-contrib-others td { color: var(--fg-subtle); }
+.dash-contrib-empty { padding: 24px 0; text-align: center; color: var(--fg-subtle); font-size: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-body.is-loading { transition: none; }
+  .dash-contrib-bar .bar-fill { transition: none; }
 }

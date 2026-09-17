@@ -92,6 +92,7 @@ export function DashboardSkeleton() {
   const loadingAria = t('loadingAria');
   return (
     <div className="skeleton-dashboard" role="status" aria-label={loadingAria}>
+      <Skeleton width="100%" height={66} radius={8} />
       <div className="skeleton-tiles">
         {Array.from({ length: 4 }).map((_, i) => (
           <div className="skeleton-tile" key={i}>
@@ -118,6 +119,21 @@ export function DashboardSkeleton() {
             </div>
           ))}
         </div>
+      </div>
+      <div className="skeleton-contrib">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div className="skeleton-card" key={i}>
+            <Skeleton width={90} height={14} />
+            <div style={{ height: 12 }} />
+            {Array.from({ length: 5 }).map((_, j) => (
+              <div className="skeleton-lb-row" key={j}>
+                <Skeleton width="40%" height={12} />
+                <Skeleton width="30%" height={8} radius={999} />
+                <Skeleton width={56} height={12} />
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );

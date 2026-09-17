@@ -385,13 +385,42 @@ export type Notification = {
 // a purchaser cannot see the peer figures it would take to sort locally.
 export type LeaderboardSort = 'cost' | 'commission';
 
+import type { Bucket, RangePreset, IsoDate } from '@recycle-erp/shared';
+export type { Bucket, RangePreset, IsoDate };
+
+// Who drove a dashboard figure in the window, one grouping at a time. `rows`
+// are the top few by amount; `others` folds the rest so the tab still sums to
+// the metric's total. A null id is the unattributed row (a PO with no
+// supplier). Which dimensions come back depends on the lens: a purchaser
+// never receives a purchaser or customer grouping.
+export type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
+export type ContribMetric = 'cost' | 'revenue' | 'profit';
+export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
+export type ContribRows = { rows: ContribRow[]; others: { n: number; amount: number } | null };
+export type ContribMetricData = {
+  total: number;
+  count: number;
+  byDim: Partial<Record<ContribDim, ContribRows>>;
+};
+
 export type DashboardData = {
   role: Role;
   kpis: {
     count: number; cost: number; revenue: number; profit: number; commission: number;
     prev: { revenue: number; profit: number };
   };
-  weeks: { label: string; profit: number }[];
+  // The window every figure below was computed over — calendar dates in the
+  // business time zone — and the bucket the series is cut in.
+  window: {
+    from: string; to: string; prevFrom: string; prevTo: string;
+    bucket: Bucket; bucketAuto: boolean; tz: string;
+  };
+  // The first day there is anything to report; the range strip's left edge.
+  bounds: { first: string | null };
+  // Sales in, spend out, and the gross profit on what sold, per bucket. Each
+  // bucket holds only the window's rows, so the series sums to the tiles.
+  series: { start: string; revenue: number; cost: number; profit: number }[];
+  contrib: Record<ContribMetric, ContribMetricData>;
   // Money fields are null on every row but the caller's own for a purchaser
   // (PRD §6.8); a manager sees them all.
   leaderboard: {
