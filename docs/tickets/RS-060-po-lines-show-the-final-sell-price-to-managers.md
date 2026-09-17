@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: feat/po-final-sell-price
-pr:
+pr: 343
 version: 1.147.0
 related: [RS-051, RS-054]
 ---
