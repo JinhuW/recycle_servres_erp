@@ -3,11 +3,11 @@ import { isPricedSellPrice } from '@recycle-erp/shared';
 import { getDb } from '../db';
 import { effectiveRole } from '../lib/role';
 import { effUnitCost, poFeeBasis } from '../lib/po-cost';
+import { parseReportingWindow, windowBounds } from '../lib/reporting-window';
+import { contributions } from '../services/contributions';
 import type { Env, User } from '../types';
 
 const dashboard = new Hono<{ Bindings: Env; Variables: { user: User } }>();
-
-const RANGE_DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, 'ytd': 365 };
 
 dashboard.get('/', async (c) => {
   const u = c.var.user;
@@ -17,8 +17,16 @@ dashboard.get('/', async (c) => {
   // and the recent-activity feed key off this so the two layers can't disagree.
   const role = effectiveRole(u);
   const isManager = role === 'manager';
-  const range = c.req.query('range') ?? '30d';
-  const days = RANGE_DAYS[range] ?? 30;
+
+  const win = parseReportingWindow({
+    from: c.req.query('from'), to: c.req.query('to'),
+    range: c.req.query('range'), bucket: c.req.query('bucket'),
+  });
+  if (!win) return c.json({ error: 'invalid_range' }, 400);
+  const { start, end, prevStart, prevEnd } = windowBounds(sql, win);
+  const tz = win.tz;
+  const bucket = win.bucket;
+
   // The leaderboard's ranking metric. It has to be chosen here, not in the
   // client: a purchaser receives every peer row's money as null, so the SPA
   // cannot re-sort. Column aliases only — the query value never reaches SQL.
@@ -38,31 +46,46 @@ dashboard.get('/', async (c) => {
   // out of every SUM below, and the recent-activity rows state no profit rather
   // than $0 — the strip sits directly under the KPI tiles, so a row claiming a
   // margin the tiles never counted would answer one question two ways.
-  const saleDateWin = sql`so.status = 'Done' AND so.updated_at >= NOW() - (${days} || ' days')::interval`;
-  // Previous equal-length window, immediately before the current one — used for
-  // KPI trend deltas. Half-open: [-2d, -d) so the boundary day isn't counted twice.
-  const salePrevWin = sql`so.status = 'Done'
-                          AND so.updated_at >= NOW() - (${days * 2} || ' days')::interval
-                          AND so.updated_at <  NOW() - (${days}     || ' days')::interval`;
+  //
+  // Every window is half-open on business-zone calendar days, and the previous
+  // window is the equal-length one ending the day before, so a boundary day is
+  // never counted twice.
+  const saleDateWin = sql`so.status = 'Done' AND so.updated_at >= ${start} AND so.updated_at < ${end}`;
+  const salePrevWin = sql`so.status = 'Done' AND so.updated_at >= ${prevStart} AND so.updated_at < ${prevEnd}`;
   // Projected windows key off the PO's own created_at; only the purchaser's reviewed POs count.
   const projDateWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
-                          AND po.created_at >= NOW() - (${days} || ' days')::interval`;
+                          AND po.created_at >= ${start} AND po.created_at < ${end}`;
   const projPrevWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
-                          AND po.created_at >= NOW() - (${days * 2} || ' days')::interval
-                          AND po.created_at <  NOW() - (${days}     || ' days')::interval`;
+                          AND po.created_at >= ${prevStart} AND po.created_at < ${prevEnd}`;
+  // Spend — what the PO pages call "Total cost" — over every reviewed PO in the
+  // window (the leaderboard's rule), scoped to the caller for the purchaser lens.
+  const spendWin = isManager
+    ? sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= ${start} AND po.created_at < ${end}`
+    : projDateWin;
   // The "Recent activity" panel always tracks ingest (the purchasing pipeline).
   const poScopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
-  const poDateWin   = sql`o.created_at >= NOW() - (${days} || ' days')::interval`;
-  // Weekly chart spans the selected range, in weekly buckets.
-  const chartWeeksBack = Math.max(1, Math.ceil(days / 7)) - 1;
+  const poDateWin   = sql`o.created_at >= ${start} AND o.created_at < ${end}`;
 
   // A PO's order-level other_fees, pushed down to the line so the cost/profit/
   // commission formulas below stay line-level. Revenue is never touched — a fee
   // is a cost. See lib/po-cost.ts for the allocation rule.
   const feeBasis = poFeeBasis(sql);
   const eff = effUnitCost(sql);
+  const headerCost = sql`COALESCE(po.total_cost, fee.goods) + po.other_fees`;
 
-  const [totals, prevTotals, cntRows, weeks, leaderboardRaw, byCatRows, recentRows] =
+  // Chart buckets are business-zone calendar units. Each row is keyed by the
+  // bucket its own timestamp falls in, and the rows are the window's rows, so a
+  // partial first or last bucket carries only what the tiles counted.
+  const bucketOf = (col: ReturnType<typeof sql>) =>
+    sql`date_trunc(${bucket}, ${col} AT TIME ZONE ${tz})`;
+  const seriesFrag = sql`
+    SELECT generate_series(
+      date_trunc(${bucket}, ${win.from}::date::timestamp),
+      date_trunc(${bucket}, ${win.to}::date::timestamp),
+      ${'1 ' + bucket}::interval
+    ) AS b`;
+
+  const [totals, prevTotals, cntRows, series, leaderboardRaw, byCatRows, recentRows, boundsRows, contrib] =
     await Promise.all([
       // KPI totals — realized (manager) or projected from Done POs (purchaser).
       isManager
@@ -135,49 +158,67 @@ dashboard.get('/', async (c) => {
             FROM orders po
             WHERE ${projDateWin}
           `,
-      // Profit per week — realized by Done date (manager) or projected by PO
-      // created_at (purchaser).
+      // Cashflow series — sales in, spend out, gross profit on what sold; realized
+      // by sale date (manager) or projected by PO created_at (purchaser). Spend
+      // is the PO header figure, so it is summed at the order grain.
       isManager
-        ? sql<{ label: string; profit: number }[]>`
-            WITH series AS (
-              SELECT generate_series(
-                date_trunc('week', NOW()) - (${chartWeeksBack} || ' weeks')::interval,
-                date_trunc('week', NOW()),
-                INTERVAL '1 week'
-              ) AS week_start
+        ? sql<{ start: string; revenue: number; cost: number; profit: number }[]>`
+            WITH series AS (${seriesFrag}),
+            sales AS (
+              SELECT ${bucketOf(sql`so.updated_at`)} AS b,
+                     SUM(sol.unit_price * sol.qty)            AS revenue,
+                     SUM((sol.unit_price - ${eff}) * sol.qty) AS profit
+              FROM sell_order_lines sol
+              JOIN sell_orders so ON so.id = sol.sell_order_id
+              JOIN order_lines ol ON ol.id = sol.inventory_id
+              JOIN orders po      ON po.id = ol.order_id
+              ${feeBasis}
+              WHERE ${saleDateWin}
+              GROUP BY 1
+            ),
+            spend AS (
+              SELECT ${bucketOf(sql`po.created_at`)} AS b, SUM(${headerCost}) AS cost
+              FROM orders po
+              ${feeBasis}
+              WHERE ${spendWin}
+              GROUP BY 1
             )
-            SELECT to_char(s.week_start,'IW') AS label,
-                   COALESCE(SUM((sol.unit_price - ${eff}) * sol.qty), 0)::float AS profit
+            SELECT to_char(s.b, 'YYYY-MM-DD')  AS start,
+                   COALESCE(sa.revenue, 0)::float AS revenue,
+                   COALESCE(sp.cost,    0)::float AS cost,
+                   COALESCE(sa.profit,  0)::float AS profit
             FROM series s
-            LEFT JOIN sell_orders so
-              ON so.status = 'Done'
-             AND so.updated_at >= s.week_start
-             AND so.updated_at <  s.week_start + INTERVAL '1 week'
-            LEFT JOIN sell_order_lines sol ON sol.sell_order_id = so.id
-            LEFT JOIN order_lines ol ON ol.id = sol.inventory_id
-            LEFT JOIN orders po ON po.id = ol.order_id
-            ${feeBasis}
-            GROUP BY s.week_start ORDER BY s.week_start
+            LEFT JOIN sales sa ON sa.b = s.b
+            LEFT JOIN spend sp ON sp.b = s.b
+            ORDER BY s.b
           `
-        : sql<{ label: string; profit: number }[]>`
-            WITH series AS (
-              SELECT generate_series(
-                date_trunc('week', NOW()) - (${chartWeeksBack} || ' weeks')::interval,
-                date_trunc('week', NOW()),
-                INTERVAL '1 week'
-              ) AS week_start
+        : sql<{ start: string; revenue: number; cost: number; profit: number }[]>`
+            WITH series AS (${seriesFrag}),
+            sales AS (
+              SELECT ${bucketOf(sql`po.created_at`)} AS b,
+                     SUM(ol.sell_price * ol.qty)            AS revenue,
+                     SUM((ol.sell_price - ${eff}) * ol.qty) AS profit
+              FROM order_lines ol
+              JOIN orders po ON po.id = ol.order_id
+              ${feeBasis}
+              WHERE ${projDateWin}
+              GROUP BY 1
+            ),
+            spend AS (
+              SELECT ${bucketOf(sql`po.created_at`)} AS b, SUM(${headerCost}) AS cost
+              FROM orders po
+              ${feeBasis}
+              WHERE ${spendWin}
+              GROUP BY 1
             )
-            SELECT to_char(s.week_start,'IW') AS label,
-                   COALESCE(SUM((ol.sell_price - ${eff}) * ol.qty), 0)::float AS profit
+            SELECT to_char(s.b, 'YYYY-MM-DD')  AS start,
+                   COALESCE(sa.revenue, 0)::float AS revenue,
+                   COALESCE(sp.cost,    0)::float AS cost,
+                   COALESCE(sa.profit,  0)::float AS profit
             FROM series s
-            LEFT JOIN orders po
-              ON po.lifecycle IN ('ready_to_pay', 'done')
-             AND po.user_id = ${u.id}
-             AND po.created_at >= s.week_start
-             AND po.created_at <  s.week_start + INTERVAL '1 week'
-            ${feeBasis}
-            LEFT JOIN order_lines ol ON ol.order_id = po.id
-            GROUP BY s.week_start ORDER BY s.week_start
+            LEFT JOIN sales sa ON sa.b = s.b
+            LEFT JOIN spend sp ON sp.b = s.b
+            ORDER BY s.b
           `,
       // Leaderboard — per purchaser (the PO owner) over their reviewed POs,
       // windowed on the PO created_at, ranked by what they bought (cost) or
@@ -194,11 +235,11 @@ dashboard.get('/', async (c) => {
       }[]>`
         WITH per_order AS (
           SELECT po.user_id,
-                 COUNT(*)::int                                                                AS count,
-                 COALESCE(SUM(COALESCE(po.total_cost, fee.goods) + po.other_fees), 0)::float AS cost
+                 COUNT(*)::int                          AS count,
+                 COALESCE(SUM(${headerCost}), 0)::float AS cost
           FROM orders po
           ${feeBasis}
-          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= NOW() - (${days} || ' days')::interval
+          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= ${start} AND po.created_at < ${end}
           GROUP BY po.user_id
         ), per_line AS (
           SELECT po.user_id,
@@ -209,7 +250,7 @@ dashboard.get('/', async (c) => {
           FROM order_lines ol
           JOIN orders po ON po.id = ol.order_id
           ${feeBasis}
-          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= NOW() - (${days} || ' days')::interval
+          WHERE po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= ${start} AND po.created_at < ${end}
           GROUP BY po.user_id
         )
         SELECT u.id, u.name, u.initials, u.email, u.role,
@@ -260,6 +301,14 @@ dashboard.get('/', async (c) => {
         FROM order_lines l JOIN orders o ON o.id = l.order_id JOIN users u ON u.id = o.user_id
         WHERE ${poDateWin} AND ${poScopeFrag} ORDER BY o.created_at DESC, l.position ASC LIMIT 4
       `,
+      // The first day there is anything to report — the left edge of the range
+      // strip. LEAST skips a NULL side, so one empty table doesn't blank it.
+      sql<{ first: string | null }[]>`
+        SELECT to_char(LEAST((SELECT MIN(created_at) FROM orders),
+                             (SELECT MIN(created_at) FROM sell_orders)) AT TIME ZONE ${tz},
+                       'YYYY-MM-DD') AS first
+      `,
+      contributions(sql, { role, userId: u.id, start, end }),
     ]);
 
   const t = totals[0];
@@ -305,9 +354,16 @@ dashboard.get('/', async (c) => {
 
   return c.json({
     role,
+    window: {
+      from: win.from, to: win.to, prevFrom: win.prevFrom, prevTo: win.prevTo,
+      bucket: win.bucket, bucketAuto: win.bucketAuto, tz: win.tz,
+    },
+    bounds: { first: boundsRows[0].first },
     kpis: { count: cnt, cost, revenue, profit, commission, prev },
-    weeks: weeks.map(w => ({ ...w, profit: r2dp(w.profit) })),
-    leaderboard, byCat, recent,
+    series: series.map(s => ({
+      start: s.start, revenue: r2dp(s.revenue), cost: r2dp(s.cost), profit: r2dp(s.profit),
+    })),
+    leaderboard, byCat, recent, contrib,
   });
 });
 
