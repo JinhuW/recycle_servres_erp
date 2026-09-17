@@ -4,11 +4,14 @@ import { useT } from '../../lib/i18n';
 import { useEffectiveUser } from '../../lib/tweaks';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
-import { isPricedSellPrice } from '@recycle-erp/shared';
+import { isPricedSellPrice, REPORTING_TZ, resolvePreset, todayIn } from '@recycle-erp/shared';
 import { fmtUSD0, relTime } from '../../lib/format';
 import { categoryFilterOptions } from '../../lib/lookups';
-import type { Category, DashboardData, LeaderboardSort } from '../../lib/types';
+import type { Bucket, Category, DashboardData, LeaderboardSort } from '../../lib/types';
 import { DashboardSkeleton } from '../../components/Skeleton';
+import { RangeBrush, RangeChip, fmtRange, type RangeValue } from './DashboardRange';
+import { CashflowChart } from './DashboardChart';
+import { ContribCard } from './DashboardContrib';
 
 const CAT_COLOR: Record<Category, string> = {
   RAM:   'var(--info)',
@@ -17,16 +20,21 @@ const CAT_COLOR: Record<Category, string> = {
   Other: 'var(--warn)',
 };
 
-type Range = '7d' | '30d' | '90d' | 'ytd';
+const BUCKET_KEY: Record<Bucket, string> = { day: 'bucketDay', week: 'bucketWeek', month: 'bucketMonth' };
 
 export function DesktopDashboard() {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(false);
   const [lbCategory, setLbCategory] = useState<string>('all');
-  const [range, setRange] = useState<Range>('30d');
   const [lbSort, setLbSort] = useState<LeaderboardSort>('cost');
+  // "Today" is the business day, not the viewer's — the brush's right edge and
+  // every preset are anchored to it so two offices see one calendar.
+  const today = useMemo(() => todayIn(REPORTING_TZ), []);
+  const [range, setRange] = useState<RangeValue>(() => ({ ...resolvePreset('30d', today, null), preset: '30d' }));
+  const [bucket, setBucket] = useState<Bucket | 'auto'>('auto');
 
   // The role-preview tweak flips `user.role`; refetch so the dashboard
   // re-scopes (own work vs. team-wide) when a manager toggles preview, matching
@@ -35,14 +43,15 @@ export function DesktopDashboard() {
   const effRole = user?.role;
   useEffect(() => {
     let alive = true;
-    const params = new URLSearchParams();
-    if (range !== '30d') params.set('range', range);
+    const params = new URLSearchParams({ from: range.from, to: range.to });
+    if (bucket !== 'auto') params.set('bucket', bucket);
     if (lbSort !== 'cost') params.set('lb', lbSort);
+    setLoading(true);
     api.get<DashboardData>(`/api/dashboard?${params}`)
-      .then(r => { if (alive) setData(r); })
-      .catch(handleFetchError);
+      .then(r => { if (alive) { setData(r); setLoading(false); } })
+      .catch(e => { if (alive) setLoading(false); handleFetchError(e); });
     return () => { alive = false; };
-  }, [range, lbSort, effRole]);
+  }, [range.from, range.to, bucket, lbSort, effRole]);
 
   if (!user) return null;
   const isManager = user.role === 'manager';
@@ -50,9 +59,13 @@ export function DesktopDashboard() {
     count: 0, cost: 0, revenue: 0, profit: 0, commission: 0,
     prev: { revenue: 0, profit: 0 },
   };
-  const weeks = data?.weeks ?? [];
   const byCat = data?.byCat ?? ({} as DashboardData['byCat']);
   const rawLb = data?.leaderboard ?? [];
+  const first = data?.bounds.first ?? null;
+  const rangeLabel = fmtRange(range.from, range.to, today, locale);
+  const activeBucket: Bucket = bucket === 'auto' ? (data?.window.bucket ?? 'day') : bucket;
+  const countCaption = (n: number, sales: boolean) =>
+    isManager && sales ? t('nSellOrders', { n }) : t('nPOs', { n });
 
   const commissionPct = k.profit > 0 ? (k.commission / k.profit) * 100 : 0;
   const netProfit = k.profit - k.commission;
@@ -68,28 +81,20 @@ export function DesktopDashboard() {
         <div>
           <h1 className="page-title">{isManager ? t('teamDashboard') : t('yourNumbers')}</h1>
           <div className="page-sub">
-            {isManager ? t('teamDashboardSub') : t('last30Mine', { n: k.count })}
+            {isManager ? t('teamDashboardSub') : t('dashRangeMine', { range: rangeLabel, n: k.count })}
           </div>
         </div>
         <div className="page-actions">
-          <div className="seg" role="tablist" aria-label={t('dashRangeAriaLabel')}>
-            {(['7d', '30d', '90d', 'ytd'] as const).map(r => (
-              <button
-                key={r}
-                className={range === r ? 'active' : ''}
-                onClick={() => setRange(r)}
-              >
-                {r === 'ytd' ? 'YTD' : r}
-              </button>
-            ))}
-          </div>
+          <RangeChip value={range} today={today} first={first} locale={locale} onChange={setRange} />
         </div>
       </div>
+
+      <RangeBrush value={range} today={today} first={first} locale={locale} onChange={setRange} />
 
       {!data ? (
         <DashboardSkeleton />
       ) : (
-      <>
+      <div className={'dash-body' + (loading ? ' is-loading' : '')}>
       <div className="kpi-grid">
         <div className="kpi">
           <div className="kpi-label">{t('totalRevenue')}</div>
@@ -121,15 +126,21 @@ export function DesktopDashboard() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 'var(--gap)' }}>
         <div className="card">
-          <div className="card-head">
+          <div className="card-head" style={{ gap: 16 }}>
             <div>
-              <div className="card-title">{t('profitTrend')}</div>
-              <div className="card-sub">{t('profitTrendSub')}</div>
+              <div className="card-title">{t('chartCashflow')}</div>
+              <div className="card-sub">{t('chartCashflowSub')} · {rangeLabel}</div>
             </div>
-            <span className="chip pos dot">{t('trackingUp')}</span>
+            <div className="seg" role="tablist" aria-label={t('chartBucketAriaLabel')}>
+              {(['day', 'week', 'month'] as const).map(b => (
+                <button key={b} className={activeBucket === b ? 'active' : ''} onClick={() => setBucket(b)}>
+                  {t(BUCKET_KEY[b])}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="card-body">
-            <TrendChart weeks={weeks} locale={locale} />
+            <CashflowChart series={data.series} bucket={data.window.bucket} from={data.window.from} to={data.window.to} locale={locale} />
           </div>
         </div>
 
@@ -142,6 +153,15 @@ export function DesktopDashboard() {
             <CategoryBreakdown byCat={byCat} totalRevenue={k.revenue} locale={locale} />
           </div>
         </div>
+      </div>
+
+      <div className="dash-contrib-grid">
+        <ContribCard title={t('contribCost')} caption={countCaption(data.contrib.cost.count, false)}
+                     data={data.contrib.cost} locale={locale} />
+        <ContribCard title={t('contribSales')} caption={countCaption(data.contrib.revenue.count, true)}
+                     data={data.contrib.revenue} locale={locale} />
+        <ContribCard title={t('contribProfit')} caption={countCaption(data.contrib.profit.count, true)}
+                     data={data.contrib.profit} locale={locale} />
       </div>
 
       <div className="card">
@@ -293,7 +313,7 @@ export function DesktopDashboard() {
           </div>
         </div>
       </div>
-      </>
+      </div>
       )}
     </>
   );
@@ -316,67 +336,6 @@ function TrendChip({ current, prev, label }: { current: number; prev: number; la
   );
 }
 
-function TrendChart({ weeks, locale = 'en-US' }: { weeks: { label: string; profit: number }[]; locale?: string }) {
-  // Sub-component — re-pull t() since props pre-date the i18n migration and
-  // adding an explicit translator prop would ripple through every caller.
-  const { t } = useT();
-  if (weeks.length === 0) {
-    return <div style={{ padding: 32, textAlign: 'center', color: 'var(--fg-subtle)' }}>{t('dashNoDataYet')}</div>;
-  }
-  const max = Math.max(1, ...weeks.map(w => w.profit));
-  const min = 0;
-  const w = 700, h = 220;
-  const pad = { l: 44, r: 16, t: 16, b: 28 };
-  const innerW = w - pad.l - pad.r;
-  const innerH = h - pad.t - pad.b;
-  const x = (i: number) =>
-    pad.l + (weeks.length === 1 ? innerW / 2 : (i / (weeks.length - 1)) * innerW);
-  const y = (v: number) => pad.t + innerH - ((v - min) / (max - min || 1)) * innerH;
-  const linePath = weeks.map((d, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(d.profit)}`).join(' ');
-  const areaPath = linePath + ` L ${x(weeks.length - 1)} ${pad.t + innerH} L ${x(0)} ${pad.t + innerH} Z`;
-  const grid = [0, 0.25, 0.5, 0.75, 1];
-  const yTicks = [0, 0.5, 1];
-
-  return (
-    <svg className="trend-svg" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="dashSpark" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor="var(--accent)" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0"    />
-        </linearGradient>
-      </defs>
-      {grid.map((p, i) => (
-        <line
-          key={i}
-          x1={pad.l} x2={w - pad.r}
-          y1={pad.t + p * innerH} y2={pad.t + p * innerH}
-          stroke="var(--border)" strokeDasharray="3 3"
-        />
-      ))}
-      {yTicks.map((p, i) => (
-        <text
-          key={i}
-          x={pad.l - 8} y={pad.t + p * innerH + 4}
-          fill="var(--fg-subtle)" fontSize="10" textAnchor="end"
-          fontFamily="JetBrains Mono, monospace"
-        >
-          {fmtUSD0(max - p * (max - min), locale)}
-        </text>
-      ))}
-      <path d={areaPath} fill="url(#dashSpark)" />
-      <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth={2} />
-      {weeks.map((d, i) => (
-        <circle key={i} cx={x(i)} cy={y(d.profit)} r={3} fill="white" stroke="var(--accent)" strokeWidth={2} />
-      ))}
-      {weeks.map((d, i) => (
-        <text key={`l-${i}`} x={x(i)} y={h - 8} fill="var(--fg-subtle)" fontSize={10} textAnchor="middle">
-          {d.label}
-        </text>
-      ))}
-    </svg>
-  );
-}
-
 function CategoryBreakdown({
   byCat,
   totalRevenue,
@@ -386,6 +345,7 @@ function CategoryBreakdown({
   totalRevenue: number;
   locale?: string;
 }) {
+  const { t } = useT();
   const cats: Category[] = ['RAM', 'SSD', 'HDD', 'Other'];
   return (
     <>
@@ -409,8 +369,8 @@ function CategoryBreakdown({
               fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4,
               display: 'flex', justifyContent: 'space-between',
             }}>
-              <span>{pct.toFixed(1)}% of revenue</span>
-              <span>Profit {fmtUSD0(c.profit, locale)}</span>
+              <span>{t('pctOfRevenue', { pct: pct.toFixed(1) })}</span>
+              <span>{t('profitOf', { amount: fmtUSD0(c.profit, locale) })}</span>
             </div>
           </div>
         );

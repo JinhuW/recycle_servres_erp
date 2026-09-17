@@ -137,7 +137,11 @@ export function Dashboard({ goSubmit, goHistory, onOpenNotifications, unreadCoun
               {' '}{t('vsLast30', { pct: `${profitDelta >= 0 ? '+' : '−'}${Math.abs(profitDelta).toFixed(1)}%` })}
             </div>
           )}
-          <PhSparkline data={data?.weeks ?? []} />
+          <PhSparkline data={(data?.series ?? []).map(s => ({
+            label: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+              .format(new Date(s.start + 'T00:00:00Z')),
+            profit: s.profit,
+          }))} />
         </div>
         )}
 
