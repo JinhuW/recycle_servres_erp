@@ -17,6 +17,41 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.145.2] - 2026-09-17
+
+### Fixes
+
+- **Closed sell orders no longer block removing a PO line** (RS-058).  The
+  v1.144.1 guard refused while any non-archived sell order named the line,
+  whatever its status — the only sell-order guard in the system that ignored
+  status, while the archive dialog and stage revert already keyed on the
+  shared open set (Draft, Shipped, Awaiting payment).  So closing a sell
+  order unblocked archiving the PO but not removing one of its lines, and
+  the dialog's advice to "archive or cancel" was half false.  The guard now
+  uses that same open set alongside the archive flag: a Closed, Done or
+  archived sell order keeps its line as the snapshot it already carried and
+  lets the source line go; Draft, Shipped and Awaiting-payment sell orders
+  still hold it.  Done releasing without an archive is the one widening
+  beyond the literal ask — it matches the archive dialog, which never
+  counted Sold lines, and the dashboards never read the archive flag, so
+  it costs nothing v1.144.1 had not already accepted.
+
+## [1.145.1] - 2026-09-16
+
+### Fixes
+
+- **Every button on the Payments action rail failed with "Failed to fetch"**
+  (RS-057). Since v1.144.0, Ignore, Unignore, Not the same and Group started
+  their request and cancelled it a millisecond later, and the click also
+  toggled the row open. RS-053 had deleted the row's local `stop` helper as
+  unused while the rail's `onClick={stop}` remained — with no local name in
+  scope, `stop` is the DOM global `window.stop()`, which aborts every in-flight
+  request in the page, and TypeScript accepts it as a click handler. The helper
+  is back under a name that is not a `window` global (`stopClick`), here and
+  in the two shipping pages that carried the same helper, so the next
+  accidental deletion is a compile error rather than a silent production bug.
+  Debug note: `docs/debug-notes/2026-09-16-bare-stop-handler-aborts-every-request.md`.
+
 ## [1.145.0] - 2026-09-16
 
 ### Features

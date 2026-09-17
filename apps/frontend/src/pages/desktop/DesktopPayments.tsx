@@ -766,6 +766,11 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
   const actionsRef = useRef<HTMLSpanElement>(null);
   const [pairDismissed, setPairDismissed] = useState(false);
 
+  // Not `stop`: that name is also window.stop(), so a deleted declaration
+  // would leave the rail cancelling every in-flight request instead of
+  // failing to compile.
+  const stopClick = (e: React.MouseEvent) => e.stopPropagation();
+
   const link = async (orderId: string) => {
     const r = await act(`${row.id}/link`, { orderId });
     if (r) {
@@ -936,7 +941,7 @@ function PaymentTr({ row, open, onToggle, locale, act, onToast, members, refresh
             every row shape — right-alignment pins only the right-most item, and
             rows carry two, three or no secondary buttons. */}
         <td className="pay-actions">
-          <span ref={actionsRef} className="pay-rail" onClick={stop}>
+          <span ref={actionsRef} className="pay-rail" onClick={stopClick}>
             {row.orderId || dead ? null : row.ignored ? (
               <button type="button" className="btn sm ghost" onClick={() => void act(`${row.id}/unignore`)}>
                 {t('payUnignore')}

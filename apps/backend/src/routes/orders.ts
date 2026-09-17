@@ -8,6 +8,7 @@ import {
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
+import { openSellStatuses } from '../lib/sellCommitment';
 import { getUploadLimits } from '../lib/settings';
 import { buildXlsxWorkbook, xlsxResponse, type XlsxColumn } from '../lib/xlsx';
 import {
@@ -1085,8 +1086,8 @@ orders.post('/', async (c) => {
 // Line shape on the wire:
 //   lines:          updates for existing lines (each carries `id`)
 //   addLines:       new line rows to INSERT (no `id`)
-//   removeLineIds:  ids to DELETE (409 while a non-archived sell order or a
-//                   vendor bid names one)
+//   removeLineIds:  ids to DELETE (409 while an open, non-archived sell order
+//                   or a vendor bid names one)
 type LineFields = {
   // Editable: a line filed under the wrong category is corrected in place
   // rather than deleted and retyped. Switching clears the spec fields the old
@@ -1641,18 +1642,19 @@ orders.patch('/:id', async (c) => {
         ` as { storage_key: string }[] : [];
         for (const p of doomedPhotos) removedScanKeys.push(p.storage_key);
 
-        // A sell order holds a line only while it is not archived. Archive is
-        // the manager's "this one is history" flag, so an archived sell order
-        // keeps its snapshot and lets the source line go (the FK is SET NULL
-        // since 0127); anything else — Draft, Shipped, Done, Closed — still
-        // names the line and refuses. Status is deliberately not consulted:
-        // that is the archive dialog's rule, not this one's.
+        // A sell order holds a line only while it is open — the shared
+        // OPEN_SELL_STATUSES rule the archive dialog uses — and not archived.
+        // Closed released the stock, Done consumed it, archive is the manager's
+        // "this one is history" flag: all three keep their snapshot and let the
+        // source line go (the FK is SET NULL since 0127). Both halves matter —
+        // a Shipped sell order can be archived, and an archived one releases.
         const stillNamed = doomed.length ? await tx`
           SELECT DISTINCT sol.inventory_id AS line_id, sol.sell_order_id
           FROM sell_order_lines sol
           JOIN sell_orders so ON so.id = sol.sell_order_id
           WHERE sol.inventory_id = ANY(${doomed.map(r => r.id)}::uuid[])
             AND so.archived_at IS NULL
+            AND so.status = ANY(${openSellStatuses()}::text[])
         ` as { line_id: string; sell_order_id: string }[] : [];
         if (stillNamed.length) {
           committedLineIds = [...new Set(stillNamed.map(r => r.line_id))];
