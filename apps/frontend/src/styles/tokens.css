@@ -162,6 +162,9 @@
   /* Fourth category tone (HDD). The other three ride on info / pos / warn. */
   --cool: oklch(0.62 0.13 295);
   --cool-soft: oklch(0.96 0.04 295);
+  /* Money-out bars on the cashflow chart: the de-emphasis tone, so the
+     revenue hue and the profit line stay the only two colours in play. */
+  --chart-out: oklch(0.55 0.02 250);
 
   /* Sizing */
   --radius: 10px;
@@ -818,9 +821,6 @@ button { font-family: inherit; cursor: pointer; }
   font-size: 11px;
   color: var(--fg-subtle);
 }
-
-/* ===== Trend chart sizing ===== */
-.trend-svg { width: 100%; height: 220px; display: block; }
 
 /* ===== Mobile preview wrapper (camera in larger containers) ===== */
 .mobile-preview { width: 100%; max-width: 380px; margin: 0 auto; }

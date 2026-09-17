@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-058](./RS-058-closed-sell-orders-still-block-removing-a-po-line.md) | done | bug | P2 | Closed sell orders still block removing a PO line | — |
+| [RS-060](./RS-060-po-lines-show-the-final-sell-price-to-managers.md) | done | story | P2 | PO lines show the final sell price to managers | 1.147.0 |
+| [RS-059](./RS-059-dashboard-time-range-brush-and-contribution-tables.md) | done | story | P2 | Dashboard time-range brush and contribution tables | 1.146.0 |
+| [RS-058](./RS-058-closed-sell-orders-still-block-removing-a-po-line.md) | done | bug | P2 | Closed sell orders still block removing a PO line | 1.145.2 |
 | [RS-057](./RS-057-ignore-on-the-payments-page-fails-with-failed-to-fet.md) | done | bug | P1 | Ignore on the Payments page fails with Failed to fetch | 1.145.1 |
 | [RS-056](./RS-056-phone-tab-bar-shows-the-market-tab-to-purchasers.md) | done | story | P2 | Phone tab bar shows the Market tab to purchasers | 1.145.0 |
 | [RS-055](./RS-055-phone-inventory-shows-the-sell-price-to-purchasers.md) | done | task | P3 | Phone Inventory shows the sell price to purchasers | 1.144.2 |

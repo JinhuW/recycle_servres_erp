@@ -17,6 +17,65 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.147.0] - 2026-09-17
+
+### Features
+
+- **PO lines show what their units actually sold for, to managers**
+  (RS-060).  A PO line's "Sell / Unit" is a projection: it feeds the
+  purchaser's commission and says nothing about whether the units sold.
+  The price they did sell for lived only on the sell order, and no PO view
+  joined it.  `GET /api/orders/:id` now returns a **Final sell price** per
+  line — the qty-weighted unit price over the Done sell orders that name it,
+  plus how many units that covers, because a partial sale leaves the
+  remainder in the line's qty — and the desktop PO table, the list's
+  expanded lines and the phone detail card and list show it.  Managers
+  only: the API nulls both figures for everyone else, including the PO's
+  owner and a manager previewing as purchaser, and the column is absent
+  rather than dashed.  The value is computed on read and never stored, so
+  no edit surface can touch it.
+
+## [1.146.0] - 2026-09-17
+
+### Features
+
+- **The dashboard's window is chosen on a month strip, to the day** (RS-059).
+  Since the first release the only range control was four buttons — 7d,
+  30d, 90d and a "YTD" that was really 365 rolling days — and nothing in
+  the app accepted a start and an end date.  The desktop dashboard now has
+  a strip of months under the page head that you drag across for a new
+  window, drag by its band to move, and drag by a handle to resize, day by
+  day, with the date under the handle while dragging and the window's
+  label inside the band; a chip beside the title lists the presets (last 7,
+  30 and 90 days, this month, year to date, last 12 months, all time) and
+  takes a custom pair of dates.  The window travels as
+  `?from=YYYY-MM-DD&to=YYYY-MM-DD`, two calendar dates in the business
+  time zone (America/Denver) so a manager in Denver and a purchaser in
+  Shenzhen see one calendar; `?range=` presets resolve to the same two
+  dates, and `ytd` starts on 1 January.  A preset is now whole calendar
+  days ending today rather than a rolling number of hours.  The window is
+  not remembered between visits, the same call RS-051 made for the sort
+  toggle.  The phone dashboard keeps its 30-day view.
+- **The chart is a cashflow chart.**  Sales in above the baseline, purchases
+  out below it, and the gross profit on what sold as a line, in day, week or
+  month buckets that follow the span and can be overridden.  Buckets are cut
+  in the business time zone and clipped to the window, so the series sums to
+  the tiles above it; hovering a bucket gives one tooltip with all three
+  figures.  The down-bars are PO spend, not cost of goods sold, so that
+  "cost" means one thing on the screen — the same figure as the leaderboard's
+  Total cost column and the new Cost card.  It replaces a profit-only weekly
+  area chart labelled by ISO week number, and the "Tracking up" chip that
+  never said anything else; `weeks` in the payload became `series`.
+- **Three contribution cards say who drove cost, sales and profit.**  Cost by
+  supplier, purchaser or category; sell orders and profit by customer,
+  purchaser or category — each the top seven with a share-of-total bar and a
+  "Remaining" row, and each card's tabs summing to the same total.  Cost is
+  the PO header total, so a mixed PO shows as "Mixed" under Category; the
+  Sell orders total equals the revenue tile and the Profit total the
+  gross-profit tile, which means a sell line with no inventory link is in
+  neither, exactly as the tiles have always excluded it.  A purchaser sees
+  their own POs by supplier and category only, keeping the peer-money mask.
+
 ## [1.145.2] - 2026-09-17
 
 ### Fixes

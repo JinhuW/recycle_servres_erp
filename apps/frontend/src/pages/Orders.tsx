@@ -314,6 +314,9 @@ export function Orders({ onEdit, onToast }: Props) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5 }}>
                         <span style={{ color: 'var(--fg-subtle)' }}>
                           Qty {l.qty} · {fmtUSD(l.unitCost, locale)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice, locale)}</>}
+                          {effRole === 'manager' && l.finalSellPrice != null && (
+                            <> · {t('finalSellPrice')} {fmtUSD(l.finalSellPrice, locale)}{l.finalSoldQty != null && l.finalSoldQty !== l.qty && <>×{l.finalSoldQty}</>}</>
+                          )}
                         </span>
                         {l.sellPrice != null && (
                           <span className="mono" style={{

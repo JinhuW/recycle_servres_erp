@@ -44,6 +44,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **Managers see each line's final sell price** (v1.147.0): the qty-weighted
+  unit price over the Done sell orders that name the line, with the sold
+  count after it when a partial sale left units on the PO. It sits beside
+  "Sell / Unit", which stays the projection that feeds commission. Computed
+  on read from sell orders, never stored or editable; purchasers and a
+  manager previewing as purchaser get neither the column nor the value.
 - **Purchasers edit until the review closes.** A material edit sends the PO
   back to Draft and raises a change-review dialog for the manager, showing the
   full field and line diff (v1.97.0). Notes, photos and attachments don't
@@ -530,15 +536,42 @@ over MCP.
 ## Dashboard
 
 Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
-The contributor leaderboard ranks purchasers by the total cost of their POs
-in the selected range — goods total plus other fees, the figure the PO pages
-call "Total cost" — or, on a toggle, by the commission those POs earned
-(`?lb=cost|commission` on `GET /api/dashboard`, cost by default); its
-"Orders" column counts POs, and projected revenue, profit and commission
-stay on the row as context (v1.141.0; it ranked by projected profit from
-v1.0.1). Both lenses count a PO from Ready to Pay on, when its commission
-becomes owed (v1.132.0). A purchaser sees every peer's rank but only their
-own money, so the ranking is computed server-side.
+
+- **The reporting window is two calendar dates in the business time zone**
+  (America/Denver), chosen on the desktop by a chip with presets (last 7 /
+  30 / 90 days, this month, year to date, last 12 months, all time, or a
+  custom pair of dates) or by dragging on the month strip under the page
+  head: drag across it for a new window, drag the band to move it, drag a
+  handle to resize it, to the day, with the date under the handle while
+  dragging. Every tile, the chart, the contribution cards and the
+  leaderboard re-scope to it. `GET /api/dashboard?from=YYYY-MM-DD&to=…`;
+  the `?range=` presets still resolve to the same dates, and `ytd` means
+  since 1 January (it was 365 rolling days). The phone dashboard stays on
+  the last 30 days (v1.146.0).
+- **The cashflow chart** shows sales in above the baseline, purchases out
+  below it, and the gross profit on what sold as a line, in day, week or
+  month buckets that follow the span (overridable). Buckets are clipped to
+  the window, so the series sums to the tiles. Hovering gives one tooltip
+  with all three figures for the bucket (v1.146.0; it was a profit-only
+  weekly chart labelled by ISO week number).
+- **Three contribution cards** — Cost, Sell orders, Profit — say who drove
+  each figure: cost by supplier, purchaser or category; sales and profit by
+  customer, purchaser or category. Each shows the top seven with their share
+  of the total and folds the rest into a "Remaining" row. Cost is the PO
+  header total the leaderboard ranks by, so a mixed PO shows as "Mixed"
+  under Category; the Sell orders total is the revenue tile and the Profit
+  total the gross-profit tile, so a sell line with no inventory link is in
+  neither. A purchaser sees their own POs by supplier and category only
+  (v1.146.0).
+- The contributor leaderboard ranks purchasers by the total cost of their POs
+  in the selected range — goods total plus other fees, the figure the PO pages
+  call "Total cost" — or, on a toggle, by the commission those POs earned
+  (`?lb=cost|commission` on `GET /api/dashboard`, cost by default); its
+  "Orders" column counts POs, and projected revenue, profit and commission
+  stay on the row as context (v1.141.0; it ranked by projected profit from
+  v1.0.1). Both lenses count a PO from Ready to Pay on, when its commission
+  becomes owed (v1.132.0). A purchaser sees every peer's rank but only their
+  own money, so the ranking is computed server-side.
 
 ## Oversight extras
 
