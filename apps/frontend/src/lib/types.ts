@@ -116,6 +116,12 @@ export type OrderLine = {
   qty: number;
   unitCost: number;
   sellPrice: number | null;
+  // What the units actually sold for: the qty-weighted unit price over Done
+  // sell orders naming this line, and how many units that covers (a partial
+  // sale leaves the remainder in `qty`). Null when nothing has sold or the
+  // caller is not a manager. Optional for deploy skew, like `linkedPaid`.
+  finalSellPrice?: number | null;
+  finalSoldQty?: number | null;
   status: string;
   scanImageId: string | null;
   scanConfidence: number | null;

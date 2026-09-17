@@ -670,6 +670,7 @@ export function DesktopOrders({ onToast }: Props) {
                                 <th className="num">{t('qty')}</th>
                                 <th className="num">{t('unitCost')}</th>
                                 <th className="num">{t('sellUnit')}</th>
+                                {isManager && <th className="num">{t('finalSellPrice')}</th>}
                                 <th className="num">{t('revenue')}</th>
                                 <th className="num">{t('profit')}</th>
                               </tr>
@@ -706,6 +707,14 @@ export function DesktopOrders({ onToast }: Props) {
                                     <td className="num">{l.qty}</td>
                                     <td className="num mono">{fmtUSD0(l.unitCost, locale)}</td>
                                     <td className="num mono">{l.sellPrice != null ? fmtUSD0(l.sellPrice, locale) : '—'}</td>
+                                    {isManager && (
+                                      <td className="num mono">
+                                        {l.finalSellPrice != null ? fmtUSD0(l.finalSellPrice, locale) : '—'}
+                                        {l.finalSellPrice != null && l.finalSoldQty != null && l.finalSoldQty !== l.qty && (
+                                          <span className="muted" style={{ marginLeft: 4, fontSize: 11 }}>×{l.finalSoldQty}</span>
+                                        )}
+                                      </td>
+                                    )}
                                     <td className="num mono">{revenue != null ? fmtUSD0(revenue, locale) : '—'}</td>
                                     <td className={'num mono' + (profit != null ? ' ' + profitTone(profit) : '')}>
                                       {profit != null ? fmtUSD0(profit, locale) : '—'}

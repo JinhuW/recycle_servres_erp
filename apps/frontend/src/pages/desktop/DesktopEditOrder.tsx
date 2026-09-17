@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { useT } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
+import { useEffectiveUser } from '../../lib/tweaks';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../../lib/archiveConflict';
 import { ArchiveConflictList } from '../../components/ArchiveConflictList';
@@ -94,6 +95,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
   const isPurchaser = user?.role !== 'manager';
+  // The final-sell column follows the role-preview tweak (the API nulls the
+  // figure under it); edit rights above stay on the real role.
+  const isManager = useEffectiveUser()?.role === 'manager';
   // Edit-gating keys off the authoritative lifecycle, not the 'Mixed'-prone
   // derived status, so an owner is never locked out of their own draft.
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
@@ -465,7 +469,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     if (!g) return null;
     return (
       <tr className="grp-row" style={catTone(category)}>
-        <td colSpan={canEditOrder ? 9 : 8}>
+        <td colSpan={8 + (canEditOrder ? 1 : 0) + (isManager ? 1 : 0)}>
           <button
             type="button"
             className="grp-hd"
@@ -648,6 +652,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     for (const ol of order.lines) m.set(ol.id, orderLineToEditLine(ol));
     return m;
   }, [order.lines]);
+  // The final sell price is read straight off the server line: it is derived
+  // from sell orders, never edited here, so it stays out of EditLine.
+  const serverLineById = useMemo(
+    () => new Map(order.lines.map(ol => [ol.id, ol] as const)),
+    [order.lines],
+  );
   const changesSerialFields = (l: EditLine): boolean => {
     const o = l._id ? originalById.get(l._id) : undefined;
     if (!o) return true;
@@ -995,6 +1005,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 <th className="num">{t('qty')}</th>
                 <th className="num">{t('unitCost')}</th>
                 <th className="num">{t('sellUnit')}</th>
+                {isManager && <th className="num">{t('finalSellPrice')}</th>}
                 <th className="num">{t('revenue')}</th>
                 <th className="num">{t('profit')}</th>
                 {canEditOrder && <th style={{ width: 40 }}></th>}
@@ -1007,6 +1018,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 const sp = l.sellPrice == null || l.sellPrice === '' ? 0 : Number(l.sellPrice);
                 const profit = qty * (sp - lCost);
                 const lossy = sp > 0 && sp < lCost;
+                const server = l._id ? serverLineById.get(l._id) : undefined;
+                const finalPrice = server?.finalSellPrice ?? null;
+                const finalQty = server?.finalSoldQty ?? null;
                 const filled = !!l.brand || !!l.description;
                 const isActive = i === activeIdx;
                 // A folded group still emits its header row, just none of its
@@ -1082,6 +1096,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     <td className="num mono">{qty}</td>
                     <td className="num mono">{lCost ? fmtUSD(lCost, locale) : '—'}</td>
                     <td className="num mono">{sp ? fmtUSD(sp, locale) : '—'}</td>
+                    {isManager && (
+                      <td className="num mono">
+                        {finalPrice != null ? fmtUSD(finalPrice, locale) : '—'}
+                        {finalPrice != null && finalQty != null && finalQty !== qty && (
+                          <span className="muted" style={{ marginLeft: 4, fontSize: 11 }}>×{finalQty}</span>
+                        )}
+                      </td>
+                    )}
                     <td className="num mono">{sp && qty ? fmtUSD(sp * qty, locale) : '—'}</td>
                     <td className={'num mono ' + (sp ? (profit >= 0 ? 'pos' : 'neg') : 'muted')}>
                       {sp ? fmtUSD(profit, locale) : '—'}
