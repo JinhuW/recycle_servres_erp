@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.147.0] - 2026-09-17
+
+### Features
+
+- **PO lines show what their units actually sold for, to managers**
+  (RS-060).  A PO line's "Sell / Unit" is a projection: it feeds the
+  purchaser's commission and says nothing about whether the units sold.
+  The price they did sell for lived only on the sell order, and no PO view
+  joined it.  `GET /api/orders/:id` now returns a **Final sell price** per
+  line — the qty-weighted unit price over the Done sell orders that name it,
+  plus how many units that covers, because a partial sale leaves the
+  remainder in the line's qty — and the desktop PO table, the list's
+  expanded lines and the phone detail card and list show it.  Managers
+  only: the API nulls both figures for everyone else, including the PO's
+  owner and a manager previewing as purchaser, and the column is absent
+  rather than dashed.  The value is computed on read and never stored, so
+  no edit surface can touch it.
+
 ## [1.146.0] - 2026-09-17
 
 ### Features

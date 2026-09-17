@@ -515,7 +515,12 @@ orders.get('/:id', async (c) => {
 
   if (!order) return c.json({ error: 'Not found' }, 404);
   if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
+  const isManager = effectiveRole(u) === 'manager';
 
+  // `fs` is what the units actually sold for — the qty-weighted unit price
+  // over Done sell orders naming the line — as opposed to `sell_price`, the
+  // projection that feeds commission. A partial sale leaves the remainder in
+  // `qty`, so the sold count travels with the price.
   const lines = await sql`
     SELECT ol.id, ol.category, ol.brand, ol.capacity, ol.generation, ol.type, ol.classification,
            ol.rank, ol.speed, ol.interface, ol.form_factor, ol.description, ol.item_type,
@@ -523,9 +528,17 @@ orders.get('/:id', async (c) => {
            ol.unit_cost::float AS unit_cost, ol.sell_price::float AS sell_price,
            ol.status, ol.scan_image_id, ol.scan_confidence, ol.position,
            ol.health::float AS health, ol.rpm,
-           ls.delivery_url AS scan_image_url
+           ls.delivery_url AS scan_image_url,
+           fs.final_sell_price, fs.sold_qty
     FROM order_lines ol
     LEFT JOIN label_scans ls ON ls.cf_image_id = ol.scan_image_id
+    LEFT JOIN LATERAL (
+      SELECT SUM(sol.qty)::int AS sold_qty,
+             (SUM(sol.qty * sol.unit_price) / SUM(sol.qty))::float AS final_sell_price
+      FROM sell_order_lines sol
+      JOIN sell_orders so ON so.id = sol.sell_order_id
+      WHERE sol.inventory_id = ol.id AND so.status = 'Done'
+    ) fs ON TRUE
     WHERE ol.order_id = ${id}
     ORDER BY ol.position ASC
   `;
@@ -669,6 +682,8 @@ orders.get('/:id', async (c) => {
         qty: l.qty,
         unitCost: l.unit_cost,
         sellPrice: l.sell_price,
+        finalSellPrice: isManager ? l.final_sell_price : null,
+        finalSoldQty: isManager ? l.sold_qty : null,
         status: l.status,
         scanImageId: l.scan_image_id,
         scanConfidence: l.scan_confidence,

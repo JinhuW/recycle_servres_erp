@@ -12,6 +12,7 @@ import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
+import { useEffectiveUser } from '../lib/tweaks';
 import { linePhotos } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
@@ -71,6 +72,8 @@ export function OrderDetail({
   useEffect(() => { setOrder(initialOrder); }, [initialOrder]);
 
   const isPurchaser = user?.role !== 'manager';
+  // The final-sell row follows the role-preview tweak, like the API does.
+  const showFinalSell = useEffectiveUser()?.role === 'manager';
   const effectiveStatus = LIFECYCLE_STATUS[order.lifecycle] ?? order.status;
   // Locked from Ready to Pay on: the review is over and the figure is what
   // the purchaser gets paid on.
@@ -683,6 +686,17 @@ export function OrderDetail({
                 <span>{t('qty')} <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
                 <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.qty * l.unitCost, locale)}</span>
               </div>
+              {showFinalSell && l.finalSellPrice != null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
+                  <span>{t('finalSellPrice')}</span>
+                  <span className="mono" style={{ fontWeight: 600 }}>
+                    {fmtUSD(l.finalSellPrice, locale)}
+                    {l.finalSoldQty != null && l.finalSoldQty !== l.qty && (
+                      <span style={{ marginLeft: 4, fontWeight: 400 }}>×{l.finalSoldQty}</span>
+                    )}
+                  </span>
+                </div>
+              )}
             </div>
             );
           })}

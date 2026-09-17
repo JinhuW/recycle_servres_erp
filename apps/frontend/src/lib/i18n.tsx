@@ -727,6 +727,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     advanceAsProgresses: 'Manually advance as the order progresses',
     lineItemsIn: 'Products in',
     sellUnit: 'Sell / Unit',
+    finalSellPrice: 'Final sell price',
     submittedBy: 'Submitted by',
     submitNewOrder: 'Submit a new order',
     submitNewOrderSub: 'Add items of any category — they can be mixed on one order.',

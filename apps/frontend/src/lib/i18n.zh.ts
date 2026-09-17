@@ -308,7 +308,7 @@ const zh: Record<string, string> = {
   searchOrderPart: '搜索订单号或零件号',
   editOrderSub: '更新明细、售价与状态', orderStatus: '订单状态',
   advanceAsProgresses: '订单进展后手动推进', lineItemsIn: '订单明细',
-  sellUnit: '售价 / 单位', submittedBy: '提交人',
+  sellUnit: '售价 / 单位', finalSellPrice: '最终售价', submittedBy: '提交人',
   submitNewOrder: '提交新订单',
   submitNewOrderSub: '添加任意类别的物品——同一笔订单可以混装。',
   limitedView: '受限视图', margin: '毛利率',

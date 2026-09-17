@@ -1,0 +1,151 @@
+// A PO line's final sell price is the qty-weighted average unit price over
+// the Done sell orders that name it — the price the units actually sold for,
+// distinct from the projected `sellPrice` that feeds commission. Managers
+// only: everyone else, including the PO's owner and a manager previewing as
+// purchaser, gets null.
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import { resetDb } from './helpers/db';
+import { api } from './helpers/app';
+import { loginAs, ALEX, MARCUS } from './helpers/auth';
+
+type Line = {
+  id: string; status: string; qty: number;
+  finalSellPrice: number | null; finalSoldQty: number | null;
+};
+type Detail = { order: { lines: Line[] } };
+
+const PN = 'FSP-TEST-PN';
+
+async function createReviewing(pur: string, mgr: string): Promise<{ id: string; lineIds: string[] }> {
+  const created = await api<{ id: string }>('POST', '/api/orders', {
+    token: pur,
+    body: {
+      paypalTxnId: 'TESTPAYTXN0000003',
+      category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+      lines: [
+        { category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4', classification: 'RDIMM',
+          speed: '3200', partNumber: PN, condition: 'Pulled — Tested', qty: 4, unitCost: 78.5 },
+        { category: 'RAM', brand: 'Samsung', capacity: '16GB', type: 'DDR4', classification: 'RDIMM',
+          speed: '3200', partNumber: PN, condition: 'Pulled — Tested', qty: 2, unitCost: 40 },
+      ],
+    },
+  });
+  expect(created.status).toBe(201);
+  const id = created.body.id;
+  expect((await api('POST', `/api/orders/${id}/advance`, { token: pur })).status).toBe(200);
+  expect((await api('POST', `/api/orders/${id}/advance`, {
+    token: mgr, body: { toStage: 'reviewing' },
+  })).status).toBe(200);
+  const got = await api<Detail>('GET', `/api/orders/${id}`, { token: mgr });
+  return { id, lineIds: got.body.order.lines.map(l => l.id) };
+}
+
+async function lineOf(id: string, token: string, lineId: string): Promise<Line> {
+  const res = await api<Detail>('GET', `/api/orders/${id}`, { token });
+  expect(res.status).toBe(200);
+  const line = res.body.order.lines.find(l => l.id === lineId);
+  expect(line).toBeDefined();
+  return line!;
+}
+
+async function createSellOrderOn(mgr: string, lineId: string, qty: number, unitPrice: number): Promise<string> {
+  const customers = await api<{ items: { id: string }[] }>('GET', '/api/customers', { token: mgr });
+  const so = await api<{ id: string }>('POST', '/api/sell-orders', {
+    token: mgr,
+    body: {
+      customerId: customers.body.items[0].id,
+      lines: [{ inventoryId: lineId, category: 'RAM', label: 'x', partNumber: PN, qty, unitPrice }],
+    },
+  });
+  expect(so.status).toBe(201);
+  return so.body.id;
+}
+
+async function moveSellOrder(mgr: string, soId: string, to: string): Promise<void> {
+  const body = to === 'Closed' ? { to, note: 'x', closeReasonId: 'customer_cancelled' } : { to, note: 'x' };
+  expect((await api('POST', `/api/sell-orders/${soId}/status`, { token: mgr, body })).status).toBe(200);
+}
+
+describe('final sell price on PO lines', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it('is null until a sell order naming the line is Done', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+
+    let line = await lineOf(id, mgr, lineIds[0]);
+    expect(line.finalSellPrice).toBeNull();
+    expect(line.finalSoldQty).toBeNull();
+
+    const soId = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    line = await lineOf(id, mgr, lineIds[0]);
+    expect(line.finalSellPrice).toBeNull();
+
+    await moveSellOrder(mgr, soId, 'Shipped');
+    line = await lineOf(id, mgr, lineIds[0]);
+    expect(line.finalSellPrice).toBeNull();
+
+    await moveSellOrder(mgr, soId, 'Done');
+    line = await lineOf(id, mgr, lineIds[0]);
+    expect(line.finalSellPrice).toBe(90);
+    expect(line.finalSoldQty).toBe(1);
+    // A partial sale leaves the remainder on the line — the sold count is
+    // what the price is read against.
+    expect(line.qty).toBe(3);
+    expect(line.status).not.toBe('Sold');
+  });
+
+  it('averages across several Done sell orders by qty and ignores Closed ones', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+
+    const first = await createSellOrderOn(mgr, lineIds[0], 1, 90);
+    await moveSellOrder(mgr, first, 'Done');
+    const second = await createSellOrderOn(mgr, lineIds[0], 2, 100);
+    await moveSellOrder(mgr, second, 'Done');
+    const cancelled = await createSellOrderOn(mgr, lineIds[0], 1, 500);
+    await moveSellOrder(mgr, cancelled, 'Closed');
+
+    const line = await lineOf(id, mgr, lineIds[0]);
+    expect(line.finalSellPrice).toBeCloseTo((90 + 200) / 3, 2);
+    expect(line.finalSoldQty).toBe(3);
+
+    // The untouched sibling line is still unsold.
+    const other = await lineOf(id, mgr, lineIds[1]);
+    expect(other.finalSellPrice).toBeNull();
+    expect(other.finalSoldQty).toBeNull();
+  });
+
+  it('is null for the owning purchaser and for a manager previewing as purchaser', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr);
+    const soId = await createSellOrderOn(mgr, lineIds[1], 2, 60);
+    await moveSellOrder(mgr, soId, 'Done');
+
+    const asManager = await lineOf(id, mgr, lineIds[1]);
+    expect(asManager.finalSellPrice).toBe(60);
+    expect(asManager.status).toBe('Sold');
+
+    const asOwner = await lineOf(id, pur, lineIds[1]);
+    expect(asOwner.finalSellPrice).toBeNull();
+    expect(asOwner.finalSoldQty).toBeNull();
+
+    // Previewing as purchaser also narrows reads to the manager's own POs,
+    // so the preview case needs a PO the manager owns.
+    const own = await createReviewing(mgr, mgr);
+    const ownSo = await createSellOrderOn(mgr, own.lineIds[0], 1, 75);
+    await moveSellOrder(mgr, ownSo, 'Done');
+    expect((await lineOf(own.id, mgr, own.lineIds[0])).finalSellPrice).toBe(75);
+
+    expect((await api('PATCH', '/api/me/preferences', {
+      token: mgr, body: { 'tweaks.rolePreview': 'as_purchaser' },
+    })).status).toBe(200);
+    const previewing = await lineOf(own.id, mgr, own.lineIds[0]);
+    expect(previewing.finalSellPrice).toBeNull();
+    expect(previewing.finalSoldQty).toBeNull();
+  });
+});
