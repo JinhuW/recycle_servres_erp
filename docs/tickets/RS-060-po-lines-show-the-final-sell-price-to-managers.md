@@ -2,13 +2,13 @@
 id: RS-060
 title: PO lines show the final sell price to managers
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: feat/po-final-sell-price
 pr:
-version:
+version: 1.147.0
 related: [RS-051, RS-054]
 ---
 
@@ -50,19 +50,19 @@ PATCH payload builders are untouched.
 
 ## Acceptance criteria
 
-- [ ] `GET /api/orders/:id` returns `finalSellPrice` and `finalSoldQty` on
+- [x] `GET /api/orders/:id` returns `finalSellPrice` and `finalSoldQty` on
       every line: the qty-weighted average `unit_price` and unit count over
       Done sell orders naming the line, `null` when nothing has sold.
-- [ ] Both are `null` for a purchaser (including the PO's owner) and for a
+- [x] Both are `null` for a purchaser (including the PO's owner) and for a
       manager previewing as purchaser.
-- [ ] Draft, Shipped, Awaiting payment and Closed sell orders do not count.
-- [ ] Desktop PO detail table and the PO list's expanded lines show a
+- [x] Draft, Shipped, Awaiting payment and Closed sell orders do not count.
+- [x] Desktop PO detail table and the PO list's expanded lines show a
       manager-only "Final sell price" column; purchasers see no column.
-- [ ] Phone PO detail line cards and the phone PO list's expanded lines show
+- [x] Phone PO detail line cards and the phone PO list's expanded lines show
       the figure to managers only, and only on lines that have one.
-- [ ] Partial sales show a muted `×n` after the price when the sold count
+- [x] Partial sales show a muted `×n` after the price when the sold count
       differs from the line's current qty.
-- [ ] No edit surface exposes the field.
+- [x] No edit surface exposes the field.
 
 ## Out of scope
 

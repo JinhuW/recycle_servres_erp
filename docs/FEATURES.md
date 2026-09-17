@@ -44,6 +44,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **Managers see each line's final sell price** (v1.147.0): the qty-weighted
+  unit price over the Done sell orders that name the line, with the sold
+  count after it when a partial sale left units on the PO. It sits beside
+  "Sell / Unit", which stays the projection that feeds commission. Computed
+  on read from sell orders, never stored or editable; purchasers and a
+  manager previewing as purchaser get neither the column nor the value.
 - **Purchasers edit until the review closes.** A material edit sends the PO
   back to Draft and raises a change-review dialog for the manager, showing the
   full field and line diff (v1.97.0). Notes, photos and attachments don't
