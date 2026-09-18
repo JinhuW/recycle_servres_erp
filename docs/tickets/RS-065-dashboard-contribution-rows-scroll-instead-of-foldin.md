@@ -2,13 +2,13 @@
 id: RS-065
 title: Dashboard contribution rows scroll instead of folding
 type: story
-status: in-progress
+status: done
 priority: P3
 created: 2026-09-17
 reporter: jinhu
 branch: feat/contrib-scroll
 pr: 349
-version:
+version: 1.149.1
 related: [RS-059, RS-061]
 ---
 
