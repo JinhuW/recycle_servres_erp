@@ -242,8 +242,8 @@ html.desktop, body.desktop, .desktop #root {
 .page > .page-head { margin-bottom: 0; }
 .page > .tabs { margin-bottom: 0; }
 
-/* Orders page variant — page-head, pipeline, KPIs and the orders card's
-   header stay put; only the inner .table-scroll scrolls. */
+/* Orders page variant — page-head and the orders card's header stay put;
+   only the inner .table-scroll scrolls. */
 .page.page-history {
   overflow: hidden;
   padding-bottom: 8px;
@@ -282,9 +282,6 @@ html.desktop, body.desktop, .desktop #root {
 .orders-toolbar-l .card-title { white-space: nowrap; }
 .page-history .toolbar-search { flex: 1 1 140px; max-width: 220px; }
 .page-history .toolbar-search > .input { width: 100%; }
-/* Four tiles while four fit; the grid decides, not a breakpoint. 140px is
-   what four need at the 720px floor once the sidebar is a rail. */
-.page.page-history .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .page.page-history .table .col-id { white-space: nowrap; }
 
 /* Narrow window: the table keeps its width and scrolls sideways, but the
@@ -299,9 +296,6 @@ html.desktop, body.desktop, .desktop #root {
 }
 @media (max-width: 1100px) {
   .page.page-history { padding: 10px 16px 16px; }
-  .page.page-history > .page-head .page-sub { display: none; }
-  .page.page-history .kpi { padding: 12px 14px; }
-  .page.page-history .kpi-value { font-size: 22px; margin-top: 4px; }
   .page.page-history .table .col-id {
     position: sticky;
     left: 0;

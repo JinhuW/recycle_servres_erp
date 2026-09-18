@@ -252,19 +252,9 @@ export function DesktopOrders({ onToast }: Props) {
     });
   }, [stageFiltered, sort]);
 
-  // KPI totals across the visible scope — matches design/dashboard.jsx#HistoryView.
-  const totals = useMemo(() => stageFiltered.reduce(
-    (acc, o) => {
-      acc.orders++;
-      acc.revenue += o.revenue;
-      acc.profit  += o.profit;
-      acc.commission += commissionFor(o);
-      acc.lines   += o.lineCount;
-      acc.unpriced += o.unpricedLineCount ?? 0;
-      return acc;
-    },
-    { orders: 0, revenue: 0, profit: 0, commission: 0, lines: 0, unpriced: 0 },
-  ), [stageFiltered]);
+  // Line count across the visible scope, for the card head's caption.
+  const visibleLines = useMemo(
+    () => stageFiltered.reduce((n, o) => n + o.lineCount, 0), [stageFiltered]);
 
   // Aggregate count + revenue per workflow stage for the pipeline cards.
   const stageAgg = useMemo(() => {
@@ -288,41 +278,8 @@ export function DesktopOrders({ onToast }: Props) {
       <div className="page-head">
         <div>
           <h1 className="page-title">{t('purchaseOrders')}</h1>
-          <div className="page-sub">{isManager ? t('purchaseOrdersMgr') : t('purchaseOrdersPurch')}</div>
         </div>
         <div className="page-actions" />
-      </div>
-
-      <div className="kpi-grid">
-        <div className="kpi">
-          <div className="kpi-label">{isManager ? t('totalOrders') : t('ordersSubmitted', { n: totals.orders })}</div>
-          <div className="kpi-value mono">{totals.orders}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">{t('totalRevenue')}</div>
-          <div className="kpi-value mono">{fmtUSD0(totals.revenue, locale)}</div>
-          {totals.unpriced > 0 && (
-            <div
-              className="kpi-trend"
-              style={{ color: 'var(--warn)' }}
-              title={t('unpricedRevenueHint', { n: totals.unpriced, total: totals.lines })}
-            >
-              <Icon name="info" size={11} />
-              {t('grpUnpriced', { n: totals.unpriced })}
-            </div>
-          )}
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">{t('grossProfit')}</div>
-          <div
-            className="kpi-value mono"
-            style={{ color: totals.profit < 0 ? 'var(--neg)' : 'var(--pos)' }}
-          >{fmtUSD0(totals.profit, locale)}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
-          <div className="kpi-value mono">{fmtUSD0(totals.commission, locale)}</div>
-        </div>
       </div>
 
       <div className="card orders-card">
@@ -336,7 +293,7 @@ export function DesktopOrders({ onToast }: Props) {
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(visibleLines, locale)} {t('lines').toLowerCase()}</div>
           </div>
           <div className="orders-toolbar-r">
             <button

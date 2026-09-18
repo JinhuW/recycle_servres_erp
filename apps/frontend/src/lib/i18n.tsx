@@ -710,8 +710,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     role: 'Role',
     commission: 'Commission',
     purchaseOrders: 'Purchase orders',
-    purchaseOrdersMgr: 'Set the actual sell price on each order, then walk it through the workflow. Profit (sell − cost) is split with the purchaser as commission.',
-    purchaseOrdersPurch: "Orders you've submitted, with profit and commission attribution. Expand any order to see its products.",
     allOrders: 'All orders',
     mineOnly: 'Mine only',
     statusFilters: 'Status filters',

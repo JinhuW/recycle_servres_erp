@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.147.2] - 2026-09-17
+
+### Changes
+
+- **The Purchase orders page no longer carries a KPI strip** (RS-062).  The
+  four tiles above the list — Total orders, Total revenue, Gross profit,
+  Commission paid — and the subtitle under the title were computed in the
+  browser over whatever the stage and category filters happened to show,
+  with no reporting window, so they were a second copy of the dashboard's
+  figures that disagreed with it whenever a filter was on.  With the
+  dashboard's windowed tiles and contribution cards (v1.146.0, v1.147.1)
+  there is one place to read these numbers; the list now opens on the
+  orders card.  The card head's "{n} lines" caption and each row's unpriced
+  badge are unchanged, as is the phone Orders page.
+
 ## [1.147.1] - 2026-09-17
 
 ### Fixes
