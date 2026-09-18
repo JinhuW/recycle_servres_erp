@@ -47,6 +47,7 @@ export const META_FIELDS = [
   'notes',
   'warehouse_id',
   'payment',
+  'payment_method',
   'total_cost',
   'commission_rate',
   'other_fees',

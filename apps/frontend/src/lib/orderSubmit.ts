@@ -21,6 +21,7 @@ import type { DraftLine } from './types';
 export type SubmitMeta = {
   warehouseId: string;
   payment: 'company' | 'self';
+  paymentMethod: 'paypal' | 'cash' | null;
   notes: string;
   // No goods total. It is the sum of the lines, and the backend derives it from
   // them on every write that moves them (services/orderGoodsTotal) — a figure
@@ -82,6 +83,7 @@ export function buildOrderSubmit(
   const metaBody = {
     warehouseId: meta.warehouseId,
     payment: meta.payment,
+    paymentMethod: meta.payment === 'company' ? meta.paymentMethod : null,
     notes: meta.notes || null,
     otherFees: meta.otherFees,
     otherFeesNote: meta.otherFeesNote,

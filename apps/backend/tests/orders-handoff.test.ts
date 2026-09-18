@@ -32,6 +32,12 @@ async function attachChat(token: string, id: string): Promise<void> {
   expect(up.status).toBe(200);
 }
 
+async function attachPaymentShot(token: string, id: string): Promise<void> {
+  const up = await multipart(`/api/orders/${id}/status-meta/Payment/attachments`,
+    { file: PNG() }, { token });
+  expect(up.status).toBe(200);
+}
+
 type OrderRead = {
   order: {
     lifecycle: string; source: string | null; paymentMethod: string | null;
@@ -107,7 +113,7 @@ describe('hand-off — local pickup', () => {
     expect(evs.map(e => e.kind)).toContain('submitted');
   });
 
-  it('company card + PayPal needs the transaction ID; cash does not', async () => {
+  it('company card + PayPal needs the transaction ID; cash needs the amount screenshot', async () => {
     const { token, user } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
     const base = { warehouseId: 'WH-LA1', source: 'local', handoff: pickup(user.id), payment: 'company' };
@@ -119,6 +125,15 @@ describe('hand-off — local pickup', () => {
     expect(noId.body.error).toMatch(/transaction ID/i);
     expect((await readOrder(token, id)).lifecycle).toBe('draft');
 
+    const noShot = await api<{ error: string }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: { ...base, paymentMethod: 'cash' },
+    });
+    expect(noShot.status).toBe(409);
+    expect(noShot.body.error).toMatch(/paid in cash/i);
+    // The refusal rolled the method back with everything else.
+    expect((await readOrder(token, id)).paymentMethod).toBeNull();
+
+    await attachPaymentShot(token, id);
     const cash = await api('POST', `/api/orders/${id}/handoff`, {
       token, body: { ...base, paymentMethod: 'cash' },
     });
@@ -174,6 +189,7 @@ describe('hand-off — shipping label', () => {
   it('creates the package linked to the PO, carrying its source, and advances', async () => {
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token, 'company');
+    await attachPaymentShot(token, id);
     const r = await api<{ packageId: string | null }>('POST', `/api/orders/${id}/handoff`, {
       token, body: {
         warehouseId: 'WH-LA1', source: 'facebook', handoff: label,
@@ -200,12 +216,14 @@ describe('hand-off — shipping label', () => {
   it('a tracking number already on file refuses and leaves the PO in Draft', async () => {
     const { token } = await loginAs(MARCUS);
     const first = await createOrder(token, 'company');
+    await attachPaymentShot(token, first);
     const body = {
       warehouseId: 'WH-LA1', source: 'facebook', handoff: label, payment: 'company', paymentMethod: 'cash',
     };
     expect((await api('POST', `/api/orders/${first}/handoff`, { token, body })).status).toBe(200);
 
     const second = await createOrder(token, 'company');
+    await attachPaymentShot(token, second);
     const r = await api<{ error: string }>('POST', `/api/orders/${second}/handoff`, { token, body });
     expect(r.status).toBe(409);
     expect(r.body.error).toMatch(/already being tracked/i);

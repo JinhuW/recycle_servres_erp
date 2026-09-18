@@ -1,6 +1,5 @@
-import { AttachmentChip } from './AttachmentChip';
-import { AttachmentDropzone } from './AttachmentDropzone';
 import { Icon } from './Icon';
+import { PaymentFields } from './PaymentFields';
 import { useT } from '../lib/i18n';
 import { PACKAGE_SOURCES, packageSourceLabelKey } from '../lib/packageSource';
 import { CARRIERS } from '../lib/carrierDetect';
@@ -21,8 +20,6 @@ type Props = {
 export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHandoffForm>; phone?: boolean }) {
   const { t } = useT();
   const selectCls = phone ? 'input' : 'select';
-  const self = f.paidBy === 'self';
-  const paypal = !self && f.method === 'paypal';
 
   return (
     <div className="ho-body">
@@ -116,90 +113,15 @@ export function HandoffFields({ f, phone = false }: { f: ReturnType<typeof useHa
 
       <section className="ho-sec">
         <div className="ho-sec-title">{t('hoPayment')}</div>
-        <div className="ho-row ho-row-pay">
-          <div className="field">
-            <span className="label" id="ho-paidby">{t('hoPaidBy')}</span>
-            <div className="seg ho-seg" role="radiogroup" aria-labelledby="ho-paidby">
-              <button type="button" role="radio" aria-checked={f.paidBy === 'company'} className={f.paidBy === 'company' ? 'active' : ''} onClick={() => f.setPaidBy('company')}>{t('payCompany')}</button>
-              <button type="button" role="radio" aria-checked={f.paidBy === 'self'} className={f.paidBy === 'self' ? 'active' : ''} onClick={() => f.setPaidBy('self')}>{t('paySelf')}</button>
-            </div>
-          </div>
-          {!self && (
-            <div className="field">
-              <span className="label" id="ho-method">{t('hoMethod')}</span>
-              <div className="seg ho-seg" role="radiogroup" aria-labelledby="ho-method">
-                <button type="button" role="radio" aria-checked={f.method === 'paypal'} className={f.method === 'paypal' ? 'active' : ''} onClick={() => f.setMethod('paypal')}>{t('hoMethodPaypal')}</button>
-                <button type="button" role="radio" aria-checked={f.method === 'cash'} className={f.method === 'cash' ? 'active' : ''} onClick={() => f.setMethod('cash')}>{t('hoMethodCash')}</button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {paypal && (
-          <>
-            <div className="field">
-              <label className="label" htmlFor="ho-txn">{t('shipPayTxnLabel')} <span className="req">*</span></label>
-              <input
-                id="ho-txn"
-                className={'input mono' + (f.scanNoticeKey === 'hoShotRead' ? ' ai-filled' : '')}
-                value={f.txnId}
-                onChange={e => f.setTxnId(e.target.value)}
-                placeholder={t('shipPayTxnPh')}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <div className="ship-add-hint">{f.txnLooksOdd ? t('shipPayTxnFormatHint') : t('hoTxnHint')}</div>
-            </div>
-            <div className="field">
-              <span className="label">{t('hoShotLabel')} <span className="ho-optional">{t('hoOptional')}</span></span>
-              {f.screenshot ? (
-                <div className="ship-pay-shot">
-                  <img src={f.screenshot.preview} alt={t('hoShotLabel')} />
-                  <div className="ho-shot-side">
-                    {f.scanNoticeKey && <div className="ship-add-hint" role="status">{t(f.scanNoticeKey)}</div>}
-                    <button type="button" className="btn ghost sm" onClick={f.removeScreenshot}>{t('shipPayRemoveShot')}</button>
-                  </div>
-                </div>
-              ) : (
-                <AttachmentDropzone
-                  onFiles={files => void f.handlePaymentFile(files)}
-                  uploading={f.scanBusy}
-                  accept="image/*"
-                  multiple={false}
-                  compact
-                  boxHint={t('hoShotHint')}
-                />
-              )}
-              {f.scanError && (
-                <div className="ship-add-hint" role="alert">
-                  {'text' in f.scanError ? f.scanError.text : t(f.scanError.key)}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-        {!self && f.method === 'cash' && <div className="ship-add-hint">{t('hoCashHint')}</div>}
-
-        {self && (
-          <div className="field">
-            <span className="label">{t('hoChatShot')} <span className="req">*</span></span>
-            {f.chatAtts.length > 0 && (
-              <div className="ho-chips">
-                {f.chatAtts.map(a => <AttachmentChip key={a.id} a={a} onRemove={() => void f.removeChatAtt(a)} />)}
-              </div>
-            )}
-            <AttachmentDropzone
-              onFiles={files => void f.addChatFiles(files)}
-              uploading={f.chatUploading}
-              accept="image/*,application/pdf"
-              compact
-              boxHint={t('hoChatHint')}
-            />
-            {f.chatAtts.length > 0 && (
-              <div className="ship-add-hint">{t('hoChatOnFile', { n: String(f.chatAtts.length) })}</div>
-            )}
-          </div>
-        )}
+        <PaymentFields
+          paidBy={f.paidBy} onPaidBy={f.setPaidBy}
+          method={f.method} onMethod={f.setMethod}
+          txnId={f.txnId} onTxnId={f.setTxnId}
+          txnRequired
+          phone={phone}
+          proof={f.proof}
+          idPrefix="ho"
+        />
       </section>
     </div>
   );

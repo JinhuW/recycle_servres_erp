@@ -9,7 +9,7 @@
 import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
-import { companyPayTxnMissing, companyPayTxnUnknown, selfPayChatMissing } from './orderTxnRule';
+import { companyCashShotMissing, companyPayTxnMissing, companyPayTxnUnknown, selfPayChatMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
@@ -86,6 +86,7 @@ export type AdvanceOutcome =
   | { kind: 'missingTxnId' }
   | { kind: 'unknownTxnId'; paypalTxnId: string }
   | { kind: 'missingChatShot' }
+  | { kind: 'missingCashShot' }
   | { kind: 'noCost' }
   | { kind: 'ok'; nextStageId: string };
 
@@ -482,6 +483,12 @@ export async function advanceOrderTx(
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
       && await selfPayChatMissing(tx, cur)) {
     return { kind: 'missingChatShot' };
+  }
+  // And the cash twin: cash lifts the transaction-id rule, so the screenshot
+  // of the amount handed over is the only record of what the company paid.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
+      && await companyCashShotMissing(tx, cur)) {
+    return { kind: 'missingCashShot' };
   }
 
   // Guard: a cascade that moves lines off a sellable status breaks any sell

@@ -102,10 +102,12 @@ export async function applyShipmentTracking(
       // only a human adding the id un-sticks it. Unlogged, the rule looks like
       // it simply stopped applying.
       if (outcome.kind === 'missingTxnId' || outcome.kind === 'unknownTxnId'
-          || outcome.kind === 'missingChatShot' || outcome.kind === 'noCost') {
+          || outcome.kind === 'missingChatShot' || outcome.kind === 'missingCashShot'
+          || outcome.kind === 'noCost') {
         const missing = outcome.kind === 'missingTxnId' ? 'transaction id'
           : outcome.kind === 'unknownTxnId' ? 'a transaction id our PayPal account knows'
           : outcome.kind === 'missingChatShot' ? 'chat screenshot'
+          : outcome.kind === 'missingCashShot' ? 'cash screenshot'
           : 'cost';
         log.warn('carrier movement could not advance the PO', {
           orderId: cur.order_id,

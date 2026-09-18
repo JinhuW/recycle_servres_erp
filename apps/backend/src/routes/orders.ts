@@ -19,7 +19,7 @@ import {
   advanceOrderTx, revertOrderToDraftTx, archiveOrderLinesTx, unarchiveOrderLinesTx,
   LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
-import { txnRequiredFor, chatShotRequiredFor, companyPayTxnUnknown } from '../services/orderTxnRule';
+import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, companyPayTxnUnknown } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import {
@@ -233,6 +233,11 @@ function badFees(b: { otherFees?: unknown; otherFeesNote?: unknown }): string | 
 // save — so store NULL rather than an empty string.
 function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
+}
+
+// Absent and null both mean "not said"; only a third value is a bad request.
+function isPaymentMethod(v: unknown): v is 'paypal' | 'cash' | null | undefined {
+  return v === undefined || v === null || v === 'paypal' || v === 'cash';
 }
 
 // A `reverted` event stays pending until a `revert_ack` names its id. A
@@ -587,6 +592,8 @@ orders.get('/:id', async (c) => {
     sql, order as { payment: string; payment_method: string | null; created_at: Date });
   const chatShotRequired = await chatShotRequiredFor(
     sql, order as { payment: string; created_at: Date });
+  const cashShotRequired = await cashShotRequiredFor(
+    sql, order as { payment: string; payment_method: string | null; created_at: Date });
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
@@ -649,6 +656,7 @@ orders.get('/:id', async (c) => {
       paypalTxnId: order.paypal_txn_id,
       txnRequired,
       chatShotRequired,
+      cashShotRequired,
       source: order.source,
       paymentMethod: order.payment_method,
       handoffMethod: order.handoff_method,
@@ -952,6 +960,9 @@ orders.post('/', async (c) => {
         category?: LineCategory;
         warehouseId?: string;
         payment?: 'company' | 'self';
+        /** How the company card paid. Meaningless — and dropped — for a
+         *  self-paid PO. */
+        paymentMethod?: 'paypal' | 'cash' | null;
         notes?: string;
         totalCost?: number;
         otherFees?: number;
@@ -981,6 +992,10 @@ orders.post('/', async (c) => {
   const newPaypalTxnId = typeof body.paypalTxnId === 'string'
     ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
     : null;
+  if (!isPaymentMethod(body.paymentMethod)) {
+    return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+  }
+  const newPaymentMethod = (body.payment ?? 'company') === 'company' ? (body.paymentMethod ?? null) : null;
   const supErr = await supplierErr(sql, u, body.supplierId ?? null);
   if (supErr) return c.json({ error: supErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
@@ -1022,12 +1037,12 @@ orders.post('/', async (c) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
       INSERT INTO orders (
-        id, user_id, category, warehouse_id, payment, notes, total_cost,
+        id, user_id, category, warehouse_id, payment, payment_method, notes, total_cost,
         other_fees, other_fees_note, lifecycle, supplier_id, paypal_txn_id
       )
       VALUES (
         ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
-        ${warehouseId}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+        ${warehouseId}, ${body.payment ?? 'company'}, ${newPaymentMethod}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft',
         ${body.supplierId ?? null}, ${newPaypalTxnId}
@@ -1167,7 +1182,8 @@ function changesMaterialField(
   body: {
     lines?: LinePatch[]; addLines?: unknown[]; removeLineIds?: string[];
     totalCost?: number | null; otherFees?: number | null; otherFeesNote?: string | null;
-    warehouseId?: string | null; payment?: string; paypalTxnId?: string | null;
+    warehouseId?: string | null; payment?: string; paymentMethod?: string | null;
+    paypalTxnId?: string | null;
   },
   before: Record<string, unknown>,
   linesBefore: Map<string, Record<string, unknown>>,
@@ -1201,6 +1217,8 @@ function changesMaterialField(
   if (body.warehouseId !== undefined
       && !sameStoredValue(before.warehouse_id, body.warehouseId)) return true;
   if (body.payment !== undefined && body.payment !== before.payment) return true;
+  if (body.paymentMethod !== undefined
+      && !sameStoredValue(before.payment_method, body.paymentMethod)) return true;
   if (body.paypalTxnId !== undefined) {
     const norm = typeof body.paypalTxnId === 'string'
       ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
@@ -1246,12 +1264,16 @@ orders.patch('/:id', async (c) => {
         notes?: string | null;
         warehouseId?: string | null;
         payment?: 'company' | 'self';
+        paymentMethod?: 'paypal' | 'cash' | null;
         commissionRate?: number | null;
         paypalTxnId?: string | null;
         onBehalfOfUserId?: string | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  if (!isPaymentMethod(body.paymentMethod)) {
+    return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+  }
 
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
@@ -1267,7 +1289,8 @@ orders.patch('/:id', async (c) => {
     !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
     body.totalCost !== undefined || body.otherFees !== undefined ||
     body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
-    body.payment !== undefined || body.paypalTxnId !== undefined;
+    body.payment !== undefined || body.paymentMethod !== undefined ||
+    body.paypalTxnId !== undefined;
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
     // Past review the PO is a closed book to the purchaser, note included.
     if (isClosedBook(existing.lifecycle)) {
@@ -1463,7 +1486,7 @@ orders.patch('/:id', async (c) => {
       // a concurrent advance from changing lifecycle between our pre/post
       // snapshots, so the diff describes one settled state transition.
       const orderBefore = (await tx`
-        SELECT id, user_id, lifecycle, notes, warehouse_id, payment,
+        SELECT id, user_id, lifecycle, notes, warehouse_id, payment, payment_method,
                total_cost::float AS total_cost,
                commission_rate::float AS commission_rate,
                other_fees::float AS other_fees,
@@ -1475,7 +1498,8 @@ orders.patch('/:id', async (c) => {
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
-            payment: string; total_cost: number | null; commission_rate: number | null;
+            payment: string; payment_method: string | null;
+            total_cost: number | null; commission_rate: number | null;
             other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null;
             supplier_id: string | null; archived_at: Date | null }
         | undefined;
@@ -1503,6 +1527,7 @@ orders.patch('/:id', async (c) => {
           body.commissionRate !== undefined ||
           // The payment reference is part of the closed book too.
           body.paypalTxnId !== undefined ||
+          body.paymentMethod !== undefined ||
           // Ownership decides whose closed book this is — commission and
           // "my orders" both key off it, so it freezes with the rest.
           body.onBehalfOfUserId !== undefined;
@@ -1586,6 +1611,7 @@ orders.patch('/:id', async (c) => {
         body.notes !== undefined ||
         body.warehouseId !== undefined ||
         body.payment !== undefined ||
+        body.paymentMethod !== undefined ||
         body.commissionRate !== undefined ||
         body.paypalTxnId !== undefined ||
         body.supplierId !== undefined;
@@ -1602,6 +1628,11 @@ orders.patch('/:id', async (c) => {
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         const setPaypal    = body.paypalTxnId   !== undefined ? 1 : 0;
         const setSupplier  = body.supplierId    !== undefined ? 1 : 0;
+        // A self-paid order has no method: flipping to self clears it whether
+        // or not the request said so, and a method sent alongside is dropped.
+        const paymentAfter = body.payment ?? orderBefore.payment;
+        const setMethod    = paymentAfter === 'self' || body.paymentMethod !== undefined ? 1 : 0;
+        const newMethod    = paymentAfter === 'self' ? null : (body.paymentMethod ?? null);
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
         const normPaypal = typeof body.paypalTxnId === 'string'
@@ -1621,7 +1652,8 @@ orders.patch('/:id', async (c) => {
             -- same clear-with-null contract as notes/warehouse_id.
             other_fees      = CASE WHEN ${setOtherFees}::int = 1 THEN ${Number(body.otherFees ?? 0)}    ELSE other_fees      END,
             other_fees_note = CASE WHEN ${setFeesNote}::int  = 1 THEN ${normFeeNote(body.otherFeesNote)} ELSE other_fees_note END,
-            payment      = COALESCE(${body.payment ?? null}, payment)
+            payment      = COALESCE(${body.payment ?? null}, payment),
+            payment_method = CASE WHEN ${setMethod}::int = 1 THEN ${newMethod} ELSE payment_method END
           WHERE id = ${id}
         `;
         // The id names a payment that has very likely already synced, so link
@@ -1879,7 +1911,7 @@ orders.patch('/:id', async (c) => {
 
       if (touchesOrder || touchesLines) {
         const orderAfter = (await tx`
-          SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
+          SELECT notes, warehouse_id, payment, payment_method, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
                  other_fees::float AS other_fees, other_fees_note, paypal_txn_id,
                  supplier_id
@@ -2253,7 +2285,7 @@ orders.post('/:id/unarchive', c => setArchived(c, false));
 // directly here, so files survive a cancelled status change. Statuses are a
 // hardcoded map (no needs_meta table like sell orders), so the valid set is
 // a constant.
-const PO_META_STATUSES = new Set(['Submission', 'Done']);
+const PO_META_STATUSES = new Set(['Submission', 'Done', 'Payment']);
 
 // Submission evidence (receipts attached at submit time) is owner-editable: the
 // purchaser who owns the order may add/remove files while it is still a Draft.
@@ -2264,7 +2296,10 @@ function canWriteMeta(u: User, status: string, order: { user_id: string; lifecyc
   // theirs until the review closes — a receipt or a photo of the goods
   // routinely shows up after the order has already moved to In Transit or
   // Reviewing.
-  return status === 'Submission' && order.user_id === u.id && !isClosedBook(order.lifecycle);
+  // Payment proof — the cash screenshot — is the purchaser's on the same
+  // terms: it is what lets their own order leave Draft.
+  return (status === 'Submission' || status === 'Payment')
+    && order.user_id === u.id && !isClosedBook(order.lifecycle);
 }
 
 // Upsert the text note for a single (order, status).
@@ -2671,6 +2706,10 @@ function advanceRefusedResponse(
     case 'missingChatShot':
       return c.json({
         error: 'This order was self-paid — attach the chat history with the seller before submitting it.',
+      }, 409);
+    case 'missingCashShot':
+      return c.json({
+        error: 'This order was paid in cash — attach a screenshot showing the total amount paid before submitting it.',
       }, 409);
     case 'noCost':
       return c.json({

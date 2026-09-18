@@ -117,11 +117,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   picker) or **Shipping label** (paste the tracking number; the carrier is
   recognised from its shape, as on Add-package). Then who paid. **Company
   card** names a method, PayPal or Cash: PayPal keeps the transaction-ID rule
-  and offers the optional screenshot that reads the ID; Cash lifts the rule.
-  **Self-paid** asks for no method and no ID — it is reimbursed from
-  commission, not matched against the bank — but **requires the chat with the
-  seller** as a Submission attachment (any Submission file on the order
-  counts). Managers also see the purchaser and commission rate in the dialog.
+  and offers the optional screenshot that reads the ID; Cash lifts that rule
+  but needs its own proof (v1.153.0, below). **Self-paid** asks for no method
+  and no ID — it is reimbursed from commission, not matched against the bank
+  — but **requires the chat with the seller** as a Submission attachment (any
+  Submission file on the order counts). Managers also see the purchaser and
+  commission rate in the dialog.
   Confirming writes everything, creates the tracked package for a label
   (linked to the PO, carrying its source), and advances, in one transaction —
   a refusal leaves nothing behind. The hand-off is the owner's or a manager's;
@@ -131,6 +132,27 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
   exactly like the transaction-ID rule.
+- **One payment picker on every surface, and a cash payment needs a
+  screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
+  the phone's Review and Detail screens, and the hand-off dialog and sheet
+  all share one component: *Paid by* (Company card / Self-paid), then, under
+  Company card, *Method* (PayPal / Cash), then a proof panel whose heading
+  states what the chosen path needs before anything is typed — the
+  transaction ID plus the optional screenshot that reads it; a **screenshot
+  of the total amount handed over** for cash (the receipt, the counted cash,
+  or the chat where the amount was agreed); the chat with the seller for a
+  self-paid order. A company PO whose method was never asked is asked in the
+  hand-off rather than assumed to be PayPal. The cash screenshot is the third
+  proof-of-payment rule: a company-cash PO created after the release refuses
+  to leave Draft — hand-off, manager stage-jump, carrier poll — until one is
+  attached, with a 409 that names the fix; earlier POs are exempt by the same
+  cutoff mechanism as the other two rules. Cash proof lives in a **`Payment`
+  attachment bucket** of its own (the activity log calls it *Payment proof*),
+  apart from Submission receipts and manifests, so a lot manifest cannot
+  stand in for it. The method is saved from the create and edit pages
+  (`paymentMethod` on POST / PATCH), logged, and cleared when the PO flips to
+  Self-paid; `GET /api/orders/:id` reports `cashShotRequired` beside
+  `txnRequired` and `chatShotRequired`.
 - **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
   refused while the order's goods cost is zero, through every door — the
   hand-off, a manager stage-jump, the carrier poll. The rule is per order,
