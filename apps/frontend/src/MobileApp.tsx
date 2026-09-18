@@ -439,19 +439,14 @@ function Shell() {
     scanConfidence: l.scanConfidence ?? null,
   });
 
-  // Returns the reason a line can't be auto-saved to the server yet, or null
-  // when it's ready (identity — brand, or description for Other — a positive
-  // qty, and a non-negative unit cost). Surfaced to the user so a line never
-  // fails to sync silently.
   // The backstop before a line is written to the server. The form gates on the
   // same shared rule first, so reaching this with something missing means the
   // line arrived from somewhere else — a resumed draft, or a category switch
-  // that emptied the fields the new category needs.
+  // that emptied the fields the new category needs. Surfaced to the user so a
+  // line never fails to sync silently.
   const lineSyncBlock = (l: DraftLine): string | null => {
     const fields = missingFieldNames(lineRequirements(l).missingKeys, t, lang);
-    if (fields) return t('drawerStillNeeded', { fields });
-    if (!(Number(l.unitCost) >= 0)) return t('syncNeedCost');
-    return null;
+    return fields ? t('drawerStillNeeded', { fields }) : null;
   };
 
   const onSaveLine = async (line: DraftLine) => {
@@ -682,6 +677,13 @@ function Shell() {
 
   const submitOrder = async (meta: SubmitMeta) => {
     if (capture.phase !== 'review') return;
+
+    // A line whose sync was refused stays on the list unconfirmed and would
+    // ship from here without ever passing the rule — the phone's last door.
+    for (const l of capture.lines) {
+      const blocked = l.id ? null : lineSyncBlock(l);
+      if (blocked) { showToast(blocked, 'error'); return; }
+    }
 
     // A draft that exists is PATCHed; a session whose lines never synced (so
     // no order was ever created) POSTs the whole thing at once — atomic, so an

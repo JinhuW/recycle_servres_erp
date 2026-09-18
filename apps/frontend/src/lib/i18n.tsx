@@ -1791,7 +1791,6 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     // Per-line autosave (mobile): every reason a line can't sync to the server
     // is surfaced — the row never fails silently. It stays local and is re-sent
     // on final submit.
-    syncNeedCost: 'Unit cost must be 0 or more before this line can save to the server. Kept locally — it will be sent when you submit.',
     syncNoDraft: "Couldn't reach the draft order — this line wasn't saved. It will be sent when you submit.",
     syncFailed: "Couldn't save this line to the server. It will be sent when you submit.",
     draftStartFailed: 'Could not start a draft order — retry.',
