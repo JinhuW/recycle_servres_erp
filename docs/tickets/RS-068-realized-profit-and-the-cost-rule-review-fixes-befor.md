@@ -2,13 +2,13 @@
 id: RS-068
 title: Realized profit and the cost rule: review fixes before the 1.149 release
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: jinhu
 branch: fix/review-findings-1.149.4
-pr:
-version:
+pr: 352
+version: 1.149.4
 related: [RS-063, RS-064]
 ---
 
