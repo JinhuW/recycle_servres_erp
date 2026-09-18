@@ -4,7 +4,7 @@
 // before the round-trip. Split out because a second copy of a predicate is
 // how the client ends up blocking an order the server would have let through.
 //
-// Two rules, by who paid:
+// Three rules, by who paid and how:
 //   company card — the PayPal transaction id, unless the seller was paid in
 //                  cash (payment_method 'cash'). NULL method is the historical
 //                  row that was never asked: still required. And the id must
@@ -13,6 +13,9 @@
 //                  then (a dev box, the test suite) the synced table says
 //                  nothing about the world and the rule stays off, in the
 //                  same fail-open spirit as an absent cutoff key.
+//   company cash — a screenshot of the amount handed over, as a Payment
+//                  attachment. Its own bucket, not Submission: a receipt or a
+//                  lot manifest left there is not proof of what was paid.
 //   self-paid    — the chat with the seller, as a Submission attachment. No
 //                  transaction id: a self-paid order is reimbursed from
 //                  commission, not matched against the bank.
@@ -20,12 +23,13 @@
 import { getWorkspaceSetting } from '../lib/settings';
 import type { SqlLike } from './orderAudit';
 
-// Stamped as NOW() by migrations 0115 / 0126, so every environment
+// Stamped as NOW() by migrations 0115 / 0126 / 0128, so every environment
 // grandfathers the orders it already had when each rule reached it. An absent
 // key means the rule is off — a workspace that somehow lost the row fails
 // open, never closed.
 const TXN_CUTOFF_KEY = 'po_company_txn_required_from';
 const CHAT_CUTOFF_KEY = 'po_self_pay_chat_required_from';
+const CASH_CUTOFF_KEY = 'po_cash_shot_required_from';
 
 export type TxnRuleOrder = {
   payment: string;
@@ -98,6 +102,28 @@ export async function selfPayChatMissing(
   const rows = await tx`
     SELECT 1 FROM order_status_attachments
     WHERE order_id = ${order.id} AND status = 'Submission' LIMIT 1
+  `;
+  return rows.length === 0;
+}
+
+export type CashRuleOrder = { payment: string; payment_method: string | null; created_at: Date };
+
+/** Whether the cash-screenshot rule governs this order at all. */
+export async function cashShotRequiredFor(tx: SqlLike, order: CashRuleOrder): Promise<boolean> {
+  if (order.payment !== 'company' || order.payment_method !== 'cash') return false;
+  return afterCutoff(tx, CASH_CUTOFF_KEY, order.created_at);
+}
+
+/** Whether this order is governed by the cash rule AND still fails it. */
+export async function companyCashShotMissing(
+  tx: SqlLike,
+  order: CashRuleOrder & { id: string },
+): Promise<boolean> {
+  if (order.payment !== 'company' || order.payment_method !== 'cash') return false;
+  if (!await afterCutoff(tx, CASH_CUTOFF_KEY, order.created_at)) return false;
+  const rows = await tx`
+    SELECT 1 FROM order_status_attachments
+    WHERE order_id = ${order.id} AND status = 'Payment' LIMIT 1
   `;
   return rows.length === 0;
 }
