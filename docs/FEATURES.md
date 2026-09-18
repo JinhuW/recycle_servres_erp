@@ -118,7 +118,7 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   recognised from its shape, as on Add-package). Then who paid. **Company
   card** names a method, PayPal or Cash: PayPal keeps the transaction-ID rule
   and offers the optional screenshot that reads the ID; Cash lifts that rule
-  but needs its own proof (v1.152.0, below). **Self-paid** asks for no method
+  but needs its own proof (v1.153.0, below). **Self-paid** asks for no method
   and no ID — it is reimbursed from commission, not matched against the bank
   — but **requires the chat with the seller** as a Submission attachment (any
   Submission file on the order counts). Managers also see the purchaser and
@@ -133,7 +133,7 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   grandfathered by a cutoff stamped when the release reached the environment,
   exactly like the transaction-ID rule.
 - **One payment picker on every surface, and a cash payment needs a
-  screenshot of the amount** (v1.152.0). The desktop Submit and Edit pages,
+  screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet
   all share one component: *Paid by* (Company card / Self-paid), then, under
   Company card, *Method* (PayPal / Cash), then a proof panel whose heading

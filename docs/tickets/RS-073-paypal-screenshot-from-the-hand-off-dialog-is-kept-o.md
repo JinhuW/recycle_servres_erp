@@ -1,5 +1,5 @@
 ---
-id: RS-072
+id: RS-073
 title: PayPal screenshot from the hand-off dialog is kept on the order
 type: bug
 status: backlog

@@ -62,7 +62,7 @@ offered as proof of payment satisfies the rule.
 
 - Persisting the PayPal screenshot dropped into the hand-off dialog on the
   order (today it survives only on a label's package row) — the 2026-09-14
-  review finding, now RS-072.
+  review finding, now RS-073.
 - Moving self-paid chat screenshots out of Submission.
 - The 14 prod POs carrying `CASH*` placeholder transaction IDs with no
   method — a separate data fix.
@@ -75,7 +75,7 @@ offered as proof of payment satisfies the rule.
 - Migration `0128` widens the status-meta CHECKs to add `Payment` and stamps
   `po_cash_shot_required_from`.
 - Plan review cut two things from the first draft: persisting the PayPal
-  screenshot on the order (→ RS-072) and moving self-paid chat uploads to the
+  screenshot on the order (→ RS-073) and moving self-paid chat uploads to the
   `Payment` bucket (no rule change, only a legacy branch). Reusing
   `Submission` for cash proof was rejected because a lot manifest would have
   satisfied the rule.
