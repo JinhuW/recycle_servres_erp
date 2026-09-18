@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.147.1] - 2026-09-17
+
+### Fixes
+
+- **The dashboard's Cost card counts every PO past Draft** (RS-061).
+  v1.146.0 built the card and the cashflow chart's purchases-out bars on
+  the leaderboard's Ready-to-Pay/Done rule, so a month of In Transit and
+  Reviewing purchases showed as no spend at all.  Both now sum every PO
+  with a lifecycle past Draft — money is committed when a PO is submitted —
+  and the two still agree with each other.  This reverses v1.146.0's note
+  that the card was "the same figure as the leaderboard's Total cost
+  column": the leaderboard keeps the narrower rule on purpose, because its
+  figure is the commission basis and commission is owed only from Ready to
+  Pay.  A purchaser's own Cost card follows the same rule; the projected
+  revenue and profit cards still count reviewed POs only.
+- **The sale cards' Purchaser tab is now "Sourced by".**  It credits each
+  sold line to the purchaser whose PO supplied the units — the leaderboard's
+  revenue and profit attribution — and purchasers never create sell orders,
+  so the old name read as a claim the data does not make.  The Cost card's
+  tab, where the purchaser really is the purchaser, keeps its name.
+
 ## [1.147.0] - 2026-09-17
 
 ### Features

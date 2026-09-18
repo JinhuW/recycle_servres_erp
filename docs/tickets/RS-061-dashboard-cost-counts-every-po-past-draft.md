@@ -2,13 +2,13 @@
 id: RS-061
 title: Dashboard cost counts every PO past Draft
 type: bug
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: fix/dashboard-cost-all-statuses
 pr:
-version:
+version: 1.147.1
 related: [RS-059, RS-051]
 ---
 
@@ -49,19 +49,19 @@ label is not.
 
 ## Acceptance criteria
 
-- [ ] The Cost card and the chart's down-bars sum every PO with
+- [x] The Cost card and the chart's down-bars sum every PO with
       `lifecycle <> 'draft'` (In Transit, Reviewing, Ready to Pay, Done) in
       the window, by `created_at`; the chart's cost series sums to the Cost
       card's total.
-- [ ] The purchaser lens's Cost card follows the same rule over the caller's
+- [x] The purchaser lens's Cost card follows the same rule over the caller's
       own POs; its Sell orders and Profit cards (projected) still count only
       Ready to Pay and Done.
-- [ ] The leaderboard's Total cost column and ranking are unchanged
+- [x] The leaderboard's Total cost column and ranking are unchanged
       (Ready to Pay and Done).
-- [ ] The Purchaser tab on the Sell orders and Profit cards reads "Sourced
+- [x] The Purchaser tab on the Sell orders and Profit cards reads "Sourced
       by" (zh: 采购来源), including its column header and "Remaining" row;
       the Cost card's tab still reads "Purchaser".
-- [ ] `en` and `zh` in parity.
+- [x] `en` and `zh` in parity.
 
 ## Out of scope
 
