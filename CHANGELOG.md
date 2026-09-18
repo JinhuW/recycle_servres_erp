@@ -17,6 +17,27 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.148.0] - 2026-09-17
+
+### Features
+
+- **A PO cannot be submitted without a cost** (RS-063).  Leaving Draft —
+  the hand-off dialog, a manager stage-jump, or the carrier tracking poll —
+  is now refused while the order's goods cost is zero.  Nothing checked the
+  money before: every client sends a blank unit cost as 0, the database
+  has no such constraint, and 43 of the 125 submitted POs in production
+  carried a total cost of $0.  The rule is per order, read off the derived
+  `orders.total_cost`, so a $0 line thrown in with a priced lot and a
+  negotiated lot price over unpriced lines both still pass; other fees do
+  not count, so freight on free goods is still a PO without a cost.  There
+  is no creation-date cutoff, unlike the transaction-id rule: a cost can
+  always be added to an old Draft, and orders already past Draft are
+  untouched.  On the desktop stepper and the phone's advance button,
+  clicking In Transit on a $0 Draft raises a *Can't submit yet* dialog
+  naming the fix instead of opening the hand-off; the server's 409 is the
+  real gate behind it, and the tracking poll logs the missing cost the way
+  it logs a missing transaction id.
+
 ## [1.147.2] - 2026-09-17
 
 ### Changes
