@@ -584,8 +584,11 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   weekly chart labelled by ISO week number).
 - **Three contribution cards** — Cost, Sell orders, Profit — say who drove
   each figure: cost by supplier, purchaser or category; sales and profit by
-  customer, "sourced by" or category. Each shows the top seven with their
-  share of the total and folds the rest into a "Remaining" row. Cost is the
+  customer, "sourced by" or category. Each lists every contributor, largest
+  first, with its share of the total; past eight rows the list scrolls inside
+  the card with the header pinned, so the three cards stay level (v1.149.1;
+  before it the server kept the top seven and folded the rest into a
+  "Remaining" row). Cost is the
   PO header total — goods plus other fees — over **every PO past Draft** (In
   Transit, Reviewing, Ready to Pay, Done), the same figure as the chart's
   purchases-out bars; money is committed when a PO is submitted, so the card

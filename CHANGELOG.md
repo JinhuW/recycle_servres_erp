@@ -17,6 +17,19 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.149.1] - 2026-09-17
+
+### Fixes
+
+- **Dashboard contribution cards list every contributor and scroll**
+  (RS-065).  Each card's tab used to show the top seven rows and fold the
+  rest into a single "Remaining n …" line — a fold done by the server, so
+  the eighth purchaser was a number with no name and no way to reach it.
+  The API now returns every row, largest first, and the card scrolls inside
+  its fixed height once a list passes eight rows, header pinned, the way
+  the contributor leaderboard already does.  Up to eight rows the cards look
+  exactly as before, so the three stay level.
+
 ## [1.149.0] - 2026-09-17
 
 ### Features

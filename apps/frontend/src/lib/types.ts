@@ -411,14 +411,13 @@ import type { Bucket, RangePreset, IsoDate } from '@recycle-erp/shared';
 export type { Bucket, RangePreset, IsoDate };
 
 // Who drove a dashboard figure in the window, one grouping at a time. `rows`
-// are the top few by amount; `others` folds the rest so the tab still sums to
-// the metric's total. A null id is the unattributed row (a PO with no
-// supplier). Which dimensions come back depends on the lens: a purchaser
+// is every contributor, largest first — the card scrolls rather than folding
+// a tail. A null id is the unattributed row (a PO with no supplier). Which dimensions come back depends on the lens: a purchaser
 // never receives a purchaser or customer grouping.
 export type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
 export type ContribMetric = 'cost' | 'revenue' | 'profit';
 export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
-export type ContribRows = { rows: ContribRow[]; others: { n: number; amount: number } | null };
+export type ContribRows = { rows: ContribRow[] };
 export type ContribMetricData = {
   total: number;
   count: number;
