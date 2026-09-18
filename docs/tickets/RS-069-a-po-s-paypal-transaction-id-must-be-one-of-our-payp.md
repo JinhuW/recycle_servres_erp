@@ -2,13 +2,13 @@
 id: RS-069
 title: A PO's PayPal transaction ID must be one of our PayPal account's transactions
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: jinhu
 branch: session/20260918-064949
-pr:
-version:
+pr: 354
+version: 1.150.0
 related: [RS-006, RS-010, RS-050]
 ---
 
@@ -36,15 +36,15 @@ a payment PayPal already reports does not wait for the six-hourly sync.
 
 ## Acceptance criteria
 
-- [ ] A company-paid, PayPal-method PO whose `paypal_txn_id` matches no
+- [x] A company-paid, PayPal-method PO whose `paypal_txn_id` matches no
       synced PayPal transaction is refused at Draft → In Transit with a 409
       naming the id, through `/advance`, `/handoff` and the carrier poll.
-- [ ] A matching synced transaction lets it through (linked/ignored/pending
+- [x] A matching synced transaction lets it through (linked/ignored/pending
       state does not matter).
-- [ ] On a miss, when PayPal is configured, the backend pulls PayPal once
+- [x] On a miss, when PayPal is configured, the backend pulls PayPal once
       before deciding.
-- [ ] Environments with no synced PayPal account (dev, tests) are unaffected.
-- [ ] Cash, self-paid and pre-cutoff POs are unaffected.
+- [x] Environments with no synced PayPal account (dev, tests) are unaffected.
+- [x] Cash, self-paid and pre-cutoff POs are unaffected.
 
 ## Out of scope
 
@@ -64,3 +64,13 @@ a payment PayPal already reports does not wait for the six-hourly sync.
   exercise is prod. Before the dev → main release, read prod for post-cutoff
   company/PayPal Draft POs whose id matches no synced row — each becomes
   unsubmittable the moment the rule ships.
+- Prod read on 2026-09-18 (before any release): every real 17-character
+  PayPal id on a post-cutoff company PO is in the synced table; the two
+  post-cutoff company Drafts (PO-1417, PO-1446) carry no id at all, so the
+  presence rule already holds them and this one changes nothing for them.
+  Fourteen POs past Draft carry a placeholder typed before the Cash method
+  existed (`CASH`, `CASH_JINHU`, `LOCALCASH5600`, `WAIT`, `TIM`; all with
+  `payment_method` NULL). None is blocked today; one of the Reviewing ones
+  would be if a purchaser's material edit sent it back to Draft. The clean
+  fix is a data migration setting `payment_method = 'cash'` and clearing the
+  placeholder — a follow-up, not part of this ticket.
