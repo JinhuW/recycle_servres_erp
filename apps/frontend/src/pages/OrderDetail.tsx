@@ -332,7 +332,16 @@ export function OrderDetail({
     // Leaving Draft is the hand-off sheet's job: how the goods get here and
     // who paid, saved and advanced in one call. It is seeded from the fields
     // on screen, so an edit typed here is what it writes.
-    if (effectiveStatus === 'Draft') { setHandoffOpen(true); return; }
+    if (effectiveStatus === 'Draft') {
+      // The cost lives on this page, not in the sheet, so it is asked for
+      // here; the server refuses a $0 PO as well.
+      if (!(cost.goods > 0)) {
+        showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
+        return;
+      }
+      setHandoffOpen(true);
+      return;
+    }
     // Moving to Done first offers the optional evidence dialog (note +
     // attachments); confirming there fires the actual advance.
     if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }

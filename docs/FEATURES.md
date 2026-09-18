@@ -104,6 +104,15 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
   exactly like the transaction-ID rule.
+- **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
+  refused while the order's goods cost is zero, through every door — the
+  hand-off, a manager stage-jump, the carrier poll. The rule is per order,
+  read off the derived `orders.total_cost`: a $0 line inside a priced lot and
+  a negotiated lot price over unpriced lines both pass; other fees do not
+  count. No cutoff — a cost can always be added to an old Draft — and orders
+  already past Draft are left alone. Clicking In Transit on a $0 Draft, on
+  the desktop stepper or the phone's advance button, raises a *Can't submit
+  yet* dialog naming the fix instead of opening the hand-off.
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,

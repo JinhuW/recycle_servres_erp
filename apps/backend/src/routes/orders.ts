@@ -2623,6 +2623,16 @@ function advanceRefusedResponse(
       return c.json({
         error: 'This order was self-paid — attach the chat history with the seller before submitting it.',
       }, 409);
+    case 'noCost':
+      return c.json({
+        error: 'This PO has no cost — enter the unit cost on its lines before submitting it.',
+      }, 409);
+    // Hono lets a handler return nothing, so without this a new outcome kind
+    // would fall out of the switch as an implicit undefined and a 200.
+    default: {
+      const exhaustive: never = outcome;
+      return exhaustive;
+    }
   }
 }
 

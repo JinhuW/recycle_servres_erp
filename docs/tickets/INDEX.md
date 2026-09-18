@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-063](./RS-063-po-cannot-be-submitted-without-a-cost.md) | in-progress | story | P2 | PO cannot be submitted without a cost | — |
 | [RS-062](./RS-062-purchase-orders-page-drops-its-kpi-strip.md) | done | task | P3 | Purchase orders page drops its KPI strip | 1.147.2 |
 | [RS-061](./RS-061-dashboard-cost-counts-every-po-past-draft.md) | done | bug | P2 | Dashboard cost counts every PO past Draft | 1.147.1 |
 | [RS-060](./RS-060-po-lines-show-the-final-sell-price-to-managers.md) | done | story | P2 | PO lines show the final sell price to managers | 1.147.0 |
