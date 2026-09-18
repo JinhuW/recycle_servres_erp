@@ -598,7 +598,10 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   revenue tile and the Profit total the gross-profit tile, so a sell line
   with no inventory link is in neither; their "Sourced by" tab credits each
   sold line to the purchaser whose PO supplied it — purchasers never create
-  sell orders, which is why the tab is not called Purchaser (v1.147.1). A
+  sell orders, which is why the tab is not called Purchaser (v1.147.1). Each
+  card states what it sums in a line under its title — realized wording for
+  managers, "your … / projected …" for purchasers — because the Cost card
+  and the leaderboard beside it count different sets of POs (v1.149.2). A
   purchaser sees their own POs by supplier and category only (v1.146.0).
 - The contributor leaderboard ranks purchasers by the total cost of their POs
   in the selected range — goods total plus other fees, the figure the PO pages

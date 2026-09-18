@@ -156,12 +156,15 @@ export function DesktopDashboard() {
       </div>
 
       <div className="dash-contrib-grid">
-        <ContribCard title={t('contribCost')} caption={countCaption(data.contrib.cost.count, false)}
+        <ContribCard title={t('contribCost')} note={t(isManager ? 'contribCostNote' : 'contribCostNoteMine')}
+                     caption={countCaption(data.contrib.cost.count, false)}
                      data={data.contrib.cost} locale={locale} />
-        <ContribCard title={t('contribSales')} caption={countCaption(data.contrib.revenue.count, true)}
+        <ContribCard title={t('contribSales')} note={t(isManager ? 'contribSalesNote' : 'contribSalesNoteMine')}
+                     caption={countCaption(data.contrib.revenue.count, true)}
                      data={data.contrib.revenue} locale={locale}
                      purchaserAs={{ dim: 'dimSourcedBy' }} />
-        <ContribCard title={t('contribProfit')} caption={countCaption(data.contrib.profit.count, true)}
+        <ContribCard title={t('contribProfit')} note={t(isManager ? 'contribProfitNote' : 'contribProfitNoteMine')}
+                     caption={countCaption(data.contrib.profit.count, true)}
                      data={data.contrib.profit} locale={locale}
                      purchaserAs={{ dim: 'dimSourcedBy' }} />
       </div>

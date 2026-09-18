@@ -17,6 +17,21 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.149.2] - 2026-09-17
+
+### Changes
+
+- **The dashboard's contribution cards say what they sum** (RS-066).  A
+  line under each title states the rule — "Purchase orders past Draft, by
+  order date — goods plus other fees", "Revenue of Done sell orders, by
+  their last update", "Sell price minus PO cost and fees on what sold" —
+  and a purchaser's cards say "your …" and "projected …" instead, since
+  theirs are projections from reviewed POs.  The Cost card counts a wider
+  set of POs than the leaderboard beside it (v1.147.1), so a total without
+  its definition invited the wrong comparison.  "Last update" rather than
+  "the date they closed" because the sale window is the order's
+  `updated_at`, which a later note edit also moves.
+
 ## [1.149.1] - 2026-09-17
 
 ### Fixes

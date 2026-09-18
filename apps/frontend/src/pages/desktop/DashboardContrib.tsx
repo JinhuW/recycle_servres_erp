@@ -14,8 +14,12 @@ const DIM_LABEL: Record<ContribDim, string> = {
 // `purchaserAs` renames the purchaser dimension. On the sale-side cards the
 // grouping is the purchaser whose PO supplied the sold units — purchasers never
 // create sell orders — so "Purchaser" there reads as the wrong claim.
-export function ContribCard({ title, caption, data, locale, purchaserAs }: {
-  title: string; caption: string; data: ContribMetricData; locale: string;
+// `note` says what the total sums — the cards next to each other use
+// different rules (Cost counts every PO past Draft, the leaderboard only
+// reviewed ones; a purchaser's sale cards are projections), so a figure
+// without its definition invites the wrong comparison.
+export function ContribCard({ title, note, caption, data, locale, purchaserAs }: {
+  title: string; note: string; caption: string; data: ContribMetricData; locale: string;
   purchaserAs?: { dim: string };
 }) {
   const { t } = useT();
@@ -32,7 +36,8 @@ export function ContribCard({ title, caption, data, locale, purchaserAs }: {
     <div className="card dash-contrib">
       <div className="card-head">
         <div>
-          <div className="card-title">{title}</div>
+          <div className="card-title" title={note}>{title}</div>
+          <div className="dash-contrib-note">{note}</div>
           <div className="dash-contrib-total mono">{fmtUSD0(total, locale)}</div>
         </div>
         <span className="card-sub">{caption}</span>
