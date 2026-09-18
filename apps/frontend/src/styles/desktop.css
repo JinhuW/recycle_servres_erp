@@ -614,8 +614,8 @@ html.desktop, body.desktop, .desktop #root {
 .table-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; }
 .table-scroll .table { min-width: 1080px; }
 
-/* Contributor leaderboard — cap height so long lists scroll inside the card
-   instead of stretching the dashboard. Header stays pinned while rows scroll. */
+/* A long table inside a card (the FX rate history) — cap its height so it
+   scrolls in place instead of stretching the page. Header stays pinned. */
 .table-scroll.lb-scroll { max-height: 360px; overflow-y: auto; }
 .table-scroll.lb-scroll .table thead th {
   position: sticky;

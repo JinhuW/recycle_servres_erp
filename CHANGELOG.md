@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.149.3] - 2026-09-17
+
+### Changes
+
+- **The desktop Dashboard no longer carries the Contributor leaderboard**
+  (RS-067).  The full-width table under the contribution cards — Total cost /
+  Commission sort, All / RAM / SSD / HDD / Other filter, Orders, Total cost,
+  Revenue, Profit and Commission per purchaser — repeated, per person and
+  under a narrower rule, what the tiles, the cashflow chart and the
+  contribution cards now state with a reporting window (RS-059, RS-061).
+  Jinhu asked for it to go, as he did for the Purchase orders KPI strip in
+  v1.147.2.  The page reads tiles, chart, category breakdown, contribution
+  cards, recent activity; the manager subtitle no longer promises a
+  "contributor ranking".  The phone dashboard's "Top contributors" and "Your
+  rank" cards and the `leaderboard` field on `GET /api/dashboard` are
+  unchanged.  Seven i18n keys only that card used are gone from both
+  dictionaries.
+
 ## [1.149.2] - 2026-09-17
 
 ### Changes

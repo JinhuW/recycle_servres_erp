@@ -571,8 +571,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   custom pair of dates) or by dragging on the month strip under the page
   head: drag across it for a new window, drag the band to move it, drag a
   handle to resize it, to the day, with the date under the handle while
-  dragging. Every tile, the chart, the contribution cards and the
-  leaderboard re-scope to it. `GET /api/dashboard?from=YYYY-MM-DD&to=…`;
+  dragging. Every tile, the chart, the contribution cards and the phone's
+  ranking re-scope to it. `GET /api/dashboard?from=YYYY-MM-DD&to=…`;
   the `?range=` presets still resolve to the same dates, and `ytd` means
   since 1 January (it was 365 rolling days). The phone dashboard stays on
   the last 30 days (v1.146.0).
@@ -592,8 +592,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   PO header total — goods plus other fees — over **every PO past Draft** (In
   Transit, Reviewing, Ready to Pay, Done), the same figure as the chart's
   purchases-out bars; money is committed when a PO is submitted, so the card
-  is wider than the leaderboard's Total cost, which counts a PO only once
-  commission is owed (v1.147.1; v1.146.0 used the leaderboard's rule). A
+  is wider than the phone ranking's Total cost, which counts a PO only once
+  commission is owed (v1.147.1; v1.146.0 used the ranking's rule). A
   mixed PO shows as "Mixed" under Category. The Sell orders total is the
   revenue tile and the Profit total the gross-profit tile, so a sell line
   with no inventory link is in neither; their "Sourced by" tab credits each
@@ -603,15 +603,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   managers, "your … / projected …" for purchasers — because the Cost card
   and the leaderboard beside it count different sets of POs (v1.149.2). A
   purchaser sees their own POs by supplier and category only (v1.146.0).
-- The contributor leaderboard ranks purchasers by the total cost of their POs
-  in the selected range — goods total plus other fees, the figure the PO pages
-  call "Total cost" — or, on a toggle, by the commission those POs earned
-  (`?lb=cost|commission` on `GET /api/dashboard`, cost by default); its
-  "Orders" column counts POs, and projected revenue, profit and commission
-  stay on the row as context (v1.141.0; it ranked by projected profit from
-  v1.0.1). Both lenses count a PO from Ready to Pay on, when its commission
-  becomes owed (v1.132.0). A purchaser sees every peer's rank but only their
-  own money, so the ranking is computed server-side.
+- **The purchaser ranking lives on the phone dashboard only** (v1.149.3): the
+  manager's "Top contributors" and the purchaser's "Your rank" cards. The
+  desktop's full-width "Contributor leaderboard" table — sort toggle, category
+  toggle, Orders / Total cost / Revenue / Profit / Commission columns — was
+  removed at Jinhu's request, since the tiles, the chart and the contribution
+  cards state the same figures with a reporting window. The ranking itself is
+  unchanged: purchasers by the total cost of their POs in the selected range —
+  goods total plus other fees, the figure the PO pages call "Total cost" — or,
+  on a toggle, by the commission those POs earned (`?lb=cost|commission` on
+  `GET /api/dashboard`, cost by default; v1.141.0, ranked by projected profit
+  from v1.0.1). Both lenses count a PO from Ready to Pay on, when its
+  commission becomes owed (v1.132.0). A purchaser sees every peer's rank but
+  only their own money, so the ranking is computed server-side.
 
 ## Oversight extras
 
