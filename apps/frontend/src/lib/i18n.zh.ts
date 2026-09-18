@@ -300,8 +300,6 @@ const zh: Record<string, string> = {
   allItemTypes: '所有品类', contributor: '贡献者', role: '角色',
   commission: '佣金',
   purchaseOrders: '采购订单',
-  purchaseOrdersMgr: '设置每笔订单的实际售价并推进流程。利润(售价 − 成本)以佣金形式与采购员分成。',
-  purchaseOrdersPurch: '您已提交的订单,含利润与佣金归属。展开订单可查看产品。',
   allOrders: '全部订单', mineOnly: '仅自己', statusFilters: '状态筛选',
   orderId: '订单号', date: '日期', submitter: '提交人',
   lines: '明细', qty: '数量', actions: '操作',
