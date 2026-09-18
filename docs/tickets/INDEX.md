@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-061](./RS-061-dashboard-cost-counts-every-po-past-draft.md) | in-progress | bug | P2 | Dashboard cost counts every PO past Draft | — |
 | [RS-060](./RS-060-po-lines-show-the-final-sell-price-to-managers.md) | done | story | P2 | PO lines show the final sell price to managers | 1.147.0 |
 | [RS-059](./RS-059-dashboard-time-range-brush-and-contribution-tables.md) | done | story | P2 | Dashboard time-range brush and contribution tables | 1.146.0 |
 | [RS-058](./RS-058-closed-sell-orders-still-block-removing-a-po-line.md) | done | bug | P2 | Closed sell orders still block removing a PO line | 1.145.2 |
