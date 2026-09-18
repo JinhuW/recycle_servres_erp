@@ -24,6 +24,11 @@ each, every row carrying a chevron). Then, after the design was agreed:
 
 > yes. also refine the edit page. to make it more user friendly and info clear.
 
+And, with a screenshot of the Payment fields (Paid by / Method / PayPal
+transaction ID / Payment screenshot) on the order screen:
+
+> The entire payment section can be foldable. and it should fold by default
+
 ## Context
 
 Purchasers manage their POs on the phone. The list expanded a row inline,
@@ -49,6 +54,9 @@ Decisions:
   the line form round-trip.  One component renders both screens so a line
   removed on one is already gone on the other and the "this sends the PO back
   to Draft" warning is asked once per visit, not once per screen.
+- **The payment fields fold by default.** They were answered when the PO was
+  raised; the fold's header reads back the answer (`Company · PayPal · 8XY…`
+  or `Self-paid`), and a readiness row that names a payment gap opens it.
 - **The info screen says what still blocks Submit.**  A readiness list under
   the stepper (Draft only) is derived from the same `handoffBlockerKeys` the
   hand-off sheet uses, plus the products/cost rule the page already enforced,
@@ -70,6 +78,9 @@ Decisions:
 - [ ] Removing a line on the products screen, then going back, shows the new
       count and goods total on the info screen; a fee typed on the info screen
       survives a trip to the products screen and back.
+- [ ] The Payment fields on the info screen are folded by default behind a
+      header that summarises paid-by / method / transaction id; tapping the
+      header or an unmet payment row in the readiness list opens them.
 - [ ] The readiness list flips rows as the unsaved Paid-by / method / txn id
       change, and shows the products row unmet for a never-submitted PO with
       no goods cost.

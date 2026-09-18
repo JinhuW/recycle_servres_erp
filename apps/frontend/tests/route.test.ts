@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { pathToDesktopView, match, activityRecordHref } from '../src/lib/route';
+import {
+  pathToDesktopView, pathToMobileView, matchPurchaseOrder, poProductsPath, match, activityRecordHref,
+} from '../src/lib/route';
 
 describe('match', () => {
   it('matches a single param segment', () => {
@@ -28,6 +30,9 @@ describe('pathToDesktopView — sell orders', () => {
 describe('pathToDesktopView — unchanged behaviour', () => {
   it('still resolves purchase-order deep links', () => {
     expect(pathToDesktopView('/purchase-orders/SO-1')).toBe('history');
+  });
+  it('opens the PO when handed the phone products link', () => {
+    expect(pathToDesktopView('/purchase-orders/PO-1444/products')).toBe('history');
   });
   it('defaults unknown paths to dashboard', () => {
     expect(pathToDesktopView('/nope')).toBe('dashboard');
@@ -71,5 +76,18 @@ describe('activityRecordHref', () => {
   });
   it('has no link when the event carries no target', () => {
     expect(activityRecordHref('po', null)).toBeNull();
+  });
+});
+
+describe('purchase-order screens', () => {
+  it('names the screen for both PO paths and nothing else', () => {
+    expect(matchPurchaseOrder('/purchase-orders/PO-1444')).toEqual({ id: 'PO-1444', screen: 'info' });
+    expect(matchPurchaseOrder(poProductsPath('PO-1444'))).toEqual({ id: 'PO-1444', screen: 'products' });
+    expect(matchPurchaseOrder('/purchase-orders')).toBeNull();
+    expect(matchPurchaseOrder('/purchase-orders/PO-1444/lines')).toBeNull();
+  });
+  it('keeps both PO screens on the phone history tab', () => {
+    expect(pathToMobileView('/purchase-orders/PO-1444')).toBe('history');
+    expect(pathToMobileView('/purchase-orders/PO-1444/products')).toBe('history');
   });
 });

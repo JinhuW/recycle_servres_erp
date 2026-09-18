@@ -44,6 +44,22 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **On the phone a PO is two screens** (v1.154.0). The Orders list no longer
+  unfolds a row in place: tapping the card, or the pencil on its right (an
+  eye once the PO is Ready to Pay, Done or archived), opens
+  `/purchase-orders/:id` — the order itself: the id as the title with the
+  stage under it, the stepper, on a Draft a *Before you submit* list of what
+  still blocks the hand-off (products and their cost, then whichever of
+  paid-by / method / transaction ID / cash or chat screenshot the hand-off
+  sheet would ask for, from the same rule, each row a link), a *Products · n*
+  row, shipping, the cost card, warehouse, the **payment fields folded behind
+  a header that reads back the answer**, notes, attachments and the activity
+  log. The *Products* row opens `/purchase-orders/:id/products`: the line
+  cards, the add-category dock and the goods total; the line form opens from
+  there and returns there. A line removed on one screen is already gone on
+  the other, unsaved fields survive the round trip, and the "back to Draft"
+  warning is asked once per visit. Desktop keeps its single edit page; a
+  products link opened there lands on the PO.
 - **The desktop list opens on the orders card** (v1.147.2). The four KPI
   tiles and the subtitle that sat above it since the first release are gone:
   they were computed in the browser over whatever the stage and category

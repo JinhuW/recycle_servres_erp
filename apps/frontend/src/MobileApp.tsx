@@ -33,7 +33,7 @@ import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
-  navigate, navigateBack, useRoute, match, parseShippingRoute,
+  navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
@@ -164,7 +164,7 @@ function Shell() {
   // because opening a line form unmounts that screen — typing a fee and then
   // adding the line it is for used to blank the fee.
   const [detailMeta, setDetailMeta] = useState<OrderMetaDraft | null>(null);
-  const orderDetailMatch = match('/purchase-orders/:id', path);
+  const orderDetailMatch = matchPurchaseOrder(path);
 
   // Load notifications when the user is signed in.
   useEffect(() => {
@@ -467,9 +467,10 @@ function Shell() {
     // refetch ahead of the write, and so a failure leaves the user somewhere
     // they can retry from rather than back on a screen with no save button.
     const backToDetail = returnTo === 'detail' && !!editingId;
+    // Back to the products screen, the only place the form opens from.
     const doneToDetail = () => {
       setCapture({ phase: 'idle' });
-      navigate('/purchase-orders/' + editingId);
+      if (editingId) navigate(poProductsPath(editingId));
       showToast(t('savedShort'));
     };
 
@@ -646,7 +647,7 @@ function Shell() {
     ) {
       const id = capture.editingId;
       setCapture({ phase: 'idle' });
-      navigate('/purchase-orders/' + id);
+      navigate(poProductsPath(id));
       return;
     }
     setCapture(c => {
@@ -831,9 +832,14 @@ function Shell() {
       {orderDetailOpen && (
         <OrderDetail
           order={detailOrder}
+          section={orderDetailMatch.screen}
           meta={detailMeta}
           onMetaChange={setDetailMeta}
-          onCancel={() => navigateBack('/purchase-orders')}
+          // The products screen backs out to the order, the order to the
+          // list — the fallback only matters when the screen was deep-linked.
+          onCancel={() => navigateBack(orderDetailMatch.screen === 'products'
+            ? '/purchase-orders/' + orderDetailMatch.id
+            : '/purchase-orders')}
           onSaved={(msg) => showToast(msg)}
           onDeleted={() => navigate('/purchase-orders')}
           onEditLine={startEditLine}
@@ -841,7 +847,7 @@ function Shell() {
         />
       )}
       {view === 'history' && (!orderDetailMatch || !detailOrder) && (
-        <Orders onEdit={(o) => navigate('/purchase-orders/' + o.id)} onToast={showToast} />
+        <Orders onToast={showToast} />
       )}
       {view === 'shipping' && shippingRoute && (
         <MobileShipping
