@@ -63,6 +63,8 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   qty:        o => o.qty,
   revenue:    o => o.revenue,
   profit:     o => o.profit,
+  // Unsold POs sort below every realized figure, loss or gain.
+  realized:   o => o.realized?.profit ?? Number.NEGATIVE_INFINITY,
   commission: o => commissionFor(o),
   payment:    o => o.payment,
   status:     o => o.status,
@@ -271,7 +273,9 @@ export function DesktopOrders({ onToast }: Props) {
 
   // colSpan for the expanded row — covers chevron + every toggleable col + actions,
   // regardless of which are currently hidden via display:none.
-  const totalCols = 1 + TOGGLEABLE_COLS.length + 1 + 1; // chevron + toggleable + submitter + actions
+  // chevron + toggleable + submitter + actions, plus the manager's Realized
+  // column, which rides on the Profit toggle rather than owning one.
+  const totalCols = 1 + TOGGLEABLE_COLS.length + 1 + 1 + (isManager ? 1 : 0);
 
   return (
     <>
@@ -472,7 +476,11 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('lines') && <SortTh col="lines" sort={sort} onSort={cycleSort} align="right">{t('lines')}</SortTh>}
                 {isVis('qty') && <SortTh col="qty" sort={sort} onSort={cycleSort} align="right">{t('qty')}</SortTh>}
                 {isVis('revenue') && <SortTh col="revenue" sort={sort} onSort={cycleSort} align="right">{t('revenue')}</SortTh>}
-                {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{t('profit')}</SortTh>}
+                {/* One toggle, two columns for a manager: the projection and
+                    what the units actually earned. A purchaser has only the
+                    projection, so it keeps its plain name. */}
+                {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{isManager ? t('unrealizedShort') : t('profit')}</SortTh>}
+                {isVis('profit') && isManager && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
@@ -574,6 +582,17 @@ export function DesktopOrders({ onToast }: Props) {
                         )}
                       </td>
                       <td className={'num mono ' + profitTone(o.profit)} style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
+                      {isManager && (
+                        <td className={'num mono' + (o.realized ? ' ' + profitTone(o.realized.profit) : ' muted')} style={{ display: isVis('profit') ? undefined : 'none' }}>
+                          {o.realized ? fmtUSD0(o.realized.profit, locale) : '—'}
+                          {/* A partial figure says how much of the PO it speaks for. */}
+                          {o.realized && o.realized.soldQty !== o.realized.boughtQty && (
+                            <div className="muted" style={{ fontSize: 10.5, fontWeight: 500 }}>
+                              {t('soldShort', { n: o.realized.soldQty, of: o.realized.boughtQty })}
+                            </div>
+                          )}
+                        </td>
+                      )}
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         {/* A PO the bank has paid says so and opens its payment

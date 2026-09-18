@@ -131,12 +131,28 @@ export type OrderLine = {
   rpm: number | null;
 };
 
+// What a PO's units earned on Done sell orders, net of the commission paid
+// to the purchaser. `soldQty` of `boughtQty` says how much of the PO it
+// covers. Managers only; null until something has sold.
+export type OrderRealized = {
+  soldQty: number;
+  boughtQty: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  commission: number;
+  profit: number;
+};
+
 export type OrderSummary = {
   id: string;
   userId: string;
   userName: string;
   userInitials: string;
   commissionRate: number | null;
+  // Optional for deploy skew, like `linkedPaid`; null for non-managers and
+  // for a PO nothing has sold from.
+  realized?: OrderRealized | null;
   // Derived from the lines: the sole category when they agree, 'Mixed' when
   // they don't. Widened from `Category` for that reason — render chips from
   // `categories` rather than switching on this.

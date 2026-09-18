@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useT } from '../lib/i18n';
 import { fmtUSD } from '../lib/format';
 import { catTone, type LineGroup } from '../lib/lineGroups';
+import type { OrderRealized } from '../lib/types';
 
 // The PO's money, as a receipt.
 //
@@ -14,6 +15,11 @@ import { catTone, type LineGroup } from '../lib/lineGroups';
 // Two blocks, deliberately separated. Above the tear: what was paid. Below it:
 // what it is projected to return, computed over the PRICED lines only, because
 // an unpriced line isn't a loss — it's a line nobody has priced.
+//
+// A third block, for managers: what the units actually earned on completed
+// sell orders, net of the commission paid. It opens with a sold meter because
+// the figure only speaks for the units that have sold — a partly sold PO reads
+// low until the rest goes, and the meter is what says so.
 
 type Props = {
   /** Per-category goods subtotals. Rendered only when the PO spans categories. */
@@ -44,6 +50,14 @@ type Props = {
    * as an addition that doesn't come out.
    */
   goodsNote?: ReactNode;
+  /**
+   * Realized block — managers only, so the page says whether to show it.
+   * `realized` is null until something has sold; `commissionRate` is the
+   * stored rate the figure was computed with, not a form value mid-edit.
+   */
+  showRealized?: boolean;
+  realized?: OrderRealized | null;
+  commissionRate?: number | null;
 };
 
 function Row({
@@ -67,6 +81,7 @@ export function CostTape({
   groups, grouped, lineCount, units, goods, fees, total,
   revenue, pricedCost, pricedProfit, pricedCount,
   locale, feeField, feeNoteField, goodsNote, shippingFees = 0,
+  showRealized = false, realized = null, commissionRate = null,
 }: Props) {
   const { t } = useT();
   const margin = revenue > 0 ? (pricedProfit / revenue) * 100 : 0;
@@ -138,6 +153,41 @@ export function CostTape({
             </>
           )}
         </div>
+
+        {showRealized && (
+          <div className="tape-block">
+            <div className="tape-block-cap">{t('tapeRealizedCap')}</div>
+            {realized == null ? (
+              <>
+                <Row label={t('nothingSoldYet')} value="—" />
+                <div className="tape-foot">{t('nothingSoldYetHint')}</div>
+              </>
+            ) : (
+              <>
+                <div className="tape-meter">
+                  <span
+                    className="tape-meter-bar"
+                    style={{ ['--fill' as string]: `${realized.boughtQty > 0 ? Math.min(100, (realized.soldQty / realized.boughtQty) * 100) : 0}%` }}
+                    aria-hidden="true"
+                  />
+                  <span className="tape-v mono">{t('soldOfUnits', { n: realized.soldQty, of: realized.boughtQty })}</span>
+                </div>
+                <Row label={t('revenue')} value={fmtUSD(realized.revenue, locale)} />
+                <Row label={t('costOfSoldUnits')} value={'−' + fmtUSD(realized.cost, locale)} />
+                <Row label={t('grossProfit')} value={fmtUSD(realized.grossProfit, locale)} />
+                <Row
+                  label={t('commissionPaidAt', { pct: ((commissionRate ?? 0) * 100).toFixed(2) })}
+                  value={'−' + fmtUSD(realized.commission, locale)}
+                />
+                <Row
+                  cls="profit"
+                  label={t('realizedProfit')}
+                  value={<span className={realized.profit >= 0 ? 'pos' : 'neg'}>{fmtUSD(realized.profit, locale)}</span>}
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
