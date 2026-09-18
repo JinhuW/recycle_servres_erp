@@ -17,6 +17,40 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.149.0] - 2026-09-17
+
+### Features
+
+- **A PO carries two profits for managers: Unrealized and Realized**
+  (RS-064).  Unrealized is the figure every PO already had — the projection
+  from the "Sell / Unit" a manager fills in — and it is unchanged, name and
+  formula, in the purchaser's view.  Realized is what the units actually
+  earned on the sell orders that reached Done: sell-order price less the
+  fee-amortized unit cost, net of the commission the company pays the
+  purchaser — the projected commission on the PO as bought, not one
+  recomputed on the realized margin, so a partly sold PO reads low until the
+  rest sells.  It is null until something sells, and null for purchasers
+  and for a manager previewing as purchaser.  `GET /api/orders` and
+  `GET /api/orders/:id` return it as `realized` with the sold and bought
+  counts.  On the desktop list the Profit toggle shows an Unrealized /
+  Realized pair to managers; the PO edit page's cost tape gains a realized
+  block that opens with a sold meter (`6 of 8 units sold`) and ends in the
+  realized profit; the phone detail's money card gains the pair and the phone
+  list a Realized line under the revenue.
+
+### Fixes
+
+- **Other fees amortize over the PO as bought.**  The per-line fee share
+  (`lib/po-cost.ts`) weighted by the line's current qty, which a partial sale
+  decrements, so every sale shifted the fee onto the units still on the
+  shelf and repriced sales already made.  It now weights by `qty_purchased`
+  where a sale set it — the basis the goods total already used — which also
+  steadies the dashboard, profile and members realized figures on partly
+  sold POs.
+- The cost tape's projected-profit row is now coloured like the rest of the
+  money in the app; it carried the tone class but no rule painted it outside
+  a table.
+
 ## [1.148.0] - 2026-09-17
 
 ### Features

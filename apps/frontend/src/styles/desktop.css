@@ -2499,6 +2499,24 @@ html.desktop, body.desktop, .desktop #root {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 11.5px; color: var(--fg-subtle); margin-top: 10px; line-height: 1.5;
 }
+/* Money tone on the tape. `.pos`/`.neg` colour text only inside `.table`, so
+   the receipt's profit rows carried the class and painted nothing. */
+.tape .pos { color: var(--pos); }
+.tape .neg { color: var(--neg); }
+/* Sold meter: how much of the PO the realized block speaks for. A hairline,
+   not a chart — one fact (units sold of units bought) on a receipt row. The
+   count sits in the figure column so it lines up with the money below it. No
+   transition: the width is a fact on load, nothing to animate. */
+.tape-meter { display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 3px 0 5px; }
+.tape-meter .tape-k { color: var(--fg-muted); }
+.tape-meter-bar {
+  flex: 1; height: 2px; min-width: 40px; background: var(--border);
+  position: relative; transform: translateY(1px);
+}
+.tape-meter-bar::after {
+  content: ''; position: absolute; inset: 0; width: var(--fill, 0%);
+  background: var(--pos);
+}
 
 /* The tape's torn edge only reads if there is something behind it to reveal.
    Inside the items card it was cutting white out of white, so the strip below

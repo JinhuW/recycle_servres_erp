@@ -29,6 +29,8 @@ import { pickTrackingClient } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
 import { linkPaypalTxnToOrder } from '../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
+import { poRealizedLateral } from '../lib/po-cost';
+import { realizedFromRow } from '../services/poRealized';
 import { linePhotos, type LinePhoto } from '../lib/linePhotos';
 import {
   synthesizePartNumber, serialIssue, staleSpecDbCols, normSellPrice, LINE_PHOTO_CAP,
@@ -398,6 +400,8 @@ orders.get('/', async (c) => {
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
+      rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
+      rz.projected_revenue, rz.goods_bought,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
       -- A line with no sell price contributes nothing: NULL drops out of SUM.
       -- It used to fall back to unit_cost, which invented revenue equal to the
@@ -425,9 +429,11 @@ orders.get('/', async (c) => {
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
+    ${poRealizedLateral(sql)}
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
-    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name
+    GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name,
+             rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_revenue, rz.goods_bought
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
   `;
@@ -471,6 +477,12 @@ orders.get('/', async (c) => {
       qty: r.qty,
       revenue: r.revenue,
       profit: r.profit,
+      // What the units earned on Done sell orders, net of the commission paid
+      // — managers only, null until something sells. Optional and additive.
+      realized: isManager ? realizedFromRow({
+        sold_qty: r.sold_qty, bought_qty: r.bought_qty, revenue: r.rz_revenue, cost: r.rz_cost,
+        projected_revenue: r.projected_revenue, goods_bought: r.goods_bought,
+      }, { total_cost: r.total_cost, other_fees: r.other_fees, commission_rate: r.commission_rate }) : null,
       lineCount: r.line_count,
       unpricedLineCount: r.unpriced_line_count,
       // PO status is authoritative — derive from o.lifecycle, not from line
@@ -501,7 +513,9 @@ orders.get('/:id', async (c) => {
            o.commission_rate::float AS commission_rate,
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
-           (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count
+           (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count,
+           rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
+           rz.projected_revenue, rz.goods_bought
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN users hb ON hb.id = o.handoff_by
@@ -509,6 +523,7 @@ orders.get('/:id', async (c) => {
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${effectiveRole(u) === 'manager'} OR sup.owner_id IS NULL
                                OR sup.owner_id = ${u.id})
+    ${poRealizedLateral(sql)}
     WHERE o.id = ${id}
     LIMIT 1
   `)[0];
@@ -654,6 +669,11 @@ orders.get('/:id', async (c) => {
         ? { id: order.supplier_id, name: order.supplier_name }
         : null,
       commissionRate: order.commission_rate,
+      realized: isManager ? realizedFromRow({
+        sold_qty: order.sold_qty, bought_qty: order.bought_qty,
+        revenue: order.rz_revenue, cost: order.rz_cost,
+        projected_revenue: order.projected_revenue, goods_bought: order.goods_bought,
+      }, { total_cost: order.total_cost, other_fees: order.other_fees, commission_rate: order.commission_rate }) : null,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
         : null,

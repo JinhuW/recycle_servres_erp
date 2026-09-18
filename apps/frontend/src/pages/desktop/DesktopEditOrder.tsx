@@ -1146,6 +1146,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             pricedProfit={totals.pricedProfit}
             pricedCount={totals.pricedCount}
             locale={locale}
+            showRealized={isManager}
+            realized={order.realized ?? null}
+            commissionRate={order.commissionRate}
             goodsNote={goodsOverridden ? (
               <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
             ) : undefined}
