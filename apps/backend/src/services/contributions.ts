@@ -21,10 +21,9 @@ type SqlLike = Sql | TransactionSql;
 type Frag = postgres.Fragment;
 
 export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
-export type ContribRows = {
-  rows: ContribRow[];
-  others: { n: number; amount: number } | null;
-};
+// Every contributor, largest first; the card scrolls rather than folding a
+// tail, so nothing is aggregated away here.
+export type ContribRows = { rows: ContribRow[] };
 export type ContribMetric = 'cost' | 'revenue' | 'profit';
 export type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
 export type Contributions = Record<ContribMetric, {
@@ -32,10 +31,6 @@ export type Contributions = Record<ContribMetric, {
   count: number;
   byDim: Partial<Record<ContribDim, ContribRows>>;
 }>;
-
-// Mercury's tables show this many before "remaining"; past it the bars are
-// too short to read and the tail belongs in one row.
-const TOP_N = 7;
 
 const r2dp = (v: number) => Math.round(v * 100) / 100;
 
@@ -61,15 +56,7 @@ async function grouped(sql: SqlLike, g: Grouping): Promise<ContribRow[]> {
   return rows.map(r => ({ id: r.id, name: r.name, amount: r2dp(r.amount), count: r.count }));
 }
 
-function fold(rows: ContribRow[]): ContribRows & { total: number } {
-  const total = r2dp(rows.reduce((s, r) => s + r.amount, 0));
-  const head = rows.slice(0, TOP_N);
-  const tail = rows.slice(TOP_N);
-  const others = tail.length
-    ? { n: tail.length, amount: r2dp(tail.reduce((s, r) => s + r.amount, 0)) }
-    : null;
-  return { rows: head, others, total };
-}
+const sumOf = (rows: ContribRow[]) => r2dp(rows.reduce((s, r) => s + r.amount, 0));
 
 export async function contributions(
   sql: SqlLike,
@@ -175,9 +162,8 @@ function shape(count: number, dims: Partial<Record<ContribDim, ContribRow[]>>) {
   let total = 0;
   let first = true;
   for (const [dim, rows] of Object.entries(dims) as [ContribDim, ContribRow[]][]) {
-    const folded = fold(rows);
-    if (first) { total = folded.total; first = false; }
-    byDim[dim] = { rows: folded.rows, others: folded.others };
+    if (first) { total = sumOf(rows); first = false; }
+    byDim[dim] = { rows };
   }
   return { total, count, byDim };
 }

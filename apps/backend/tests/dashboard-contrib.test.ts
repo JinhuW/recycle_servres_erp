@@ -9,7 +9,7 @@ import { loginAs, MARCUS, PRIYA, ALEX } from './helpers/auth';
 // dimension tab of a card must sum to the same total.
 
 type Row = { id: string | null; name: string | null; amount: number; count: number };
-type Rows = { rows: Row[]; others: { n: number; amount: number } | null };
+type Rows = { rows: Row[] };
 type Metric = { total: number; count: number; byDim: Partial<Record<'supplier' | 'purchaser' | 'customer' | 'category', Rows>> };
 type Body = {
   kpis: { count: number; revenue: number; profit: number };
@@ -17,7 +17,7 @@ type Body = {
   contrib: { cost: Metric; revenue: Metric; profit: Metric };
 };
 
-const sum = (r: Rows) => r.rows.reduce((s, x) => s + x.amount, 0) + (r.others?.amount ?? 0);
+const sum = (r: Rows) => r.rows.reduce((s, x) => s + x.amount, 0);
 const byName = (r: Rows, name: string | null) => r.rows.find(x => x.name === name)!;
 
 async function userId(email: string): Promise<string> {
@@ -157,7 +157,7 @@ describe('GET /api/dashboard — contributions', () => {
     expect(Object.keys(revenue.byDim).sort()).toEqual(['category', 'customer', 'purchaser']);
   });
 
-  it('keeps the top seven rows and folds the rest into "others"', async () => {
+  it('returns every row, largest first — the card scrolls, nothing is folded', async () => {
     await clearWindow();
     for (let i = 1; i <= 9; i++) {
       const sid = await supplier(`S${i}`);
@@ -167,9 +167,9 @@ describe('GET /api/dashboard — contributions', () => {
     const { token } = await loginAs(ALEX);
     const r = await api<Body>('GET', '/api/dashboard?range=7d', { token });
     const s = r.body.contrib.cost.byDim.supplier!;
-    expect(s.rows).toHaveLength(7);
-    expect(s.rows.map(x => x.name)).toEqual(['S9', 'S8', 'S7', 'S6', 'S5', 'S4', 'S3']);
-    expect(s.others).toEqual({ n: 2, amount: 30 });
+    expect(s.rows).toHaveLength(9);
+    expect(s.rows.map(x => x.name)).toEqual(['S9', 'S8', 'S7', 'S6', 'S5', 'S4', 'S3', 'S2', 'S1']);
+    expect(s).not.toHaveProperty('others');
     expect(sum(s)).toBeCloseTo(r.body.contrib.cost.total, 2);
   });
 
