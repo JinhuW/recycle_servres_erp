@@ -2,13 +2,13 @@
 id: RS-070
 title: PO suggestions honour the payment's owner
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: jinhu
 branch: feat/match-honours-assignee
-pr:
-version:
+pr: 355
+version: 1.151.0
 related: []
 ---
 
@@ -48,15 +48,15 @@ Decisions:
 
 ## Acceptance criteria
 
-- [ ] `GET /api/bank-transactions/:id/suggestions` on a payment assigned to
+- [x] `GET /api/bank-transactions/:id/suggestions` on a payment assigned to
       Priya offers Priya's same-amount PO and not Marcus's; `total` counts
       only the offered one. Unassigned, both are offered.
-- [ ] A PO carrying the payment's PayPal transaction id is offered even when
+- [x] A PO carrying the payment's PayPal transaction id is offered even when
       it belongs to another member, with `reason: 'txn'`.
-- [ ] A payment assigned to Priya whose only same-amount PO is Marcus's has
+- [x] A payment assigned to Priya whose only same-amount PO is Marcus's has
       `match: null` in the list, is omitted by `?hasMatch=1`, and is not in
       `stats.suggested.count`.
-- [ ] On the Payments page, assigning or unassigning an expanded row
+- [x] On the Payments page, assigning or unassigning an expanded row
       refreshes its "Suggested purchase orders" block without collapsing it.
 
 ## Out of scope
