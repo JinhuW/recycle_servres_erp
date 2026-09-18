@@ -2,12 +2,12 @@
 id: RS-061
 title: Dashboard cost counts every PO past Draft
 type: bug
-status: in-review
+status: done
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: fix/dashboard-cost-all-statuses
-pr:
+pr: 345
 version: 1.147.1
 related: [RS-059, RS-051]
 ---
