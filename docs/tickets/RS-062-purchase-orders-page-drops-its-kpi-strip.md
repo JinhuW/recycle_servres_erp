@@ -2,13 +2,13 @@
 id: RS-062
 title: Purchase orders page drops its KPI strip
 type: task
-status: in-progress
+status: in-review
 priority: P3
 created: 2026-09-17
 reporter: jinhu
 branch: chore/orders-page-no-kpis
 pr:
-version:
+version: 1.147.2
 related: [RS-059, RS-061]
 ---
 
@@ -34,13 +34,13 @@ orders card at the top of the page.
 
 ## Acceptance criteria
 
-- [ ] The desktop Purchase orders page opens with the title and, directly
+- [x] The desktop Purchase orders page opens with the title and, directly
       under it, the orders card; no subtitle, no KPI tiles.
-- [ ] The card head's "{n} lines" caption and the per-row unpriced badge are
+- [x] The card head's "{n} lines" caption and the per-row unpriced badge are
       unchanged.
-- [ ] No dead CSS or i18n keys are left behind for the removed strip;
+- [x] No dead CSS or i18n keys are left behind for the removed strip;
       `en` and `zh` in parity.
-- [ ] The phone Orders page is unchanged.
+- [x] The phone Orders page is unchanged.
 
 ## Out of scope
 

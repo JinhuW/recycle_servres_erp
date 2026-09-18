@@ -44,6 +44,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **The desktop list opens on the orders card** (v1.147.2). The four KPI
+  tiles and the subtitle that sat above it since the first release are gone:
+  they were computed in the browser over whatever the stage and category
+  filters showed, with no reporting window, and the dashboard now states
+  those figures properly. The card head's line count and the per-row
+  unpriced badge stay.
 - **Managers see each line's final sell price** (v1.147.0): the qty-weighted
   unit price over the Done sell orders that name the line, with the sold
   count after it when a partial sale left units on the PO. It sits beside
