@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resetDb } from './helpers/db';
+import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
 
@@ -7,6 +7,8 @@ import { loginAs, ALEX, MARCUS } from './helpers/auth';
 // every door out of Draft is covered, and read off orders.total_cost, which is
 // the goods figure every line write re-derives (or the negotiated lot price).
 // Per order, not per line: a $0 line thrown in with a priced lot stays legal.
+// First submission only: a PO that already left Draft once re-submits as it
+// was accepted, so the $0 POs from before the rule are not stuck by an edit.
 
 const LINE = {
   category: 'RAM', brand: 'Samsung', capacity: '32GB', type: 'DDR4',
@@ -120,6 +122,47 @@ describe('a PO needs a goods cost to leave Draft', () => {
     const r = await api('POST', `/api/orders/${id}/advance`, { token });
     expect(r.status).toBe(200);
     expect((await readOrder(token, id)).lifecycle).toBe('in_transit');
+  });
+
+  // A PO submitted before the rule existed: pushed past Draft underneath the
+  // guard, as those were. The first case above is the counterpart — the same
+  // $0 Draft with no history is still refused.
+  async function legacySubmitted(token: string): Promise<{ id: string; lineId: string }> {
+    const id = await createOrder(token);
+    const sql = getTestDb();
+    await sql`UPDATE orders SET lifecycle = 'in_transit' WHERE id = ${id}`;
+    await sql`UPDATE order_lines SET status = 'In Transit' WHERE order_id = ${id}`;
+    return { id, lineId: (await readOrder(token, id)).lines[0].id };
+  }
+
+  it('lets a $0 PO that already left Draft re-submit after an edit sent it back', async () => {
+    const { token } = await loginAs(MARCUS);
+    const { id, lineId } = await legacySubmitted(token);
+
+    // A material purchaser edit reverts the PO to Draft, cost still $0.
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token, body: { lines: [{ id: lineId, qty: 3 }] },
+    })).status).toBe(200);
+    expect((await readOrder(token, id)).lifecycle).toBe('draft');
+
+    const r = await api('POST', `/api/orders/${id}/advance`, { token });
+    expect(r.status).toBe(200);
+    expect((await readOrder(token, id)).lifecycle).toBe('in_transit');
+  });
+
+  it('lets a manager stage-jump such a PO forward as well', async () => {
+    const { token: pTok } = await loginAs(MARCUS);
+    const { id, lineId } = await legacySubmitted(pTok);
+    expect((await api('PATCH', `/api/orders/${id}`, {
+      token: pTok, body: { lines: [{ id: lineId, qty: 3 }] },
+    })).status).toBe(200);
+
+    const { token: mTok } = await loginAs(ALEX);
+    const r = await api('POST', `/api/orders/${id}/advance`, {
+      token: mTok, body: { toStage: 'in_transit' },
+    });
+    expect(r.status).toBe(200);
+    expect((await readOrder(pTok, id)).lifecycle).toBe('in_transit');
   });
 
   it('accepts a negotiated lot price over $0 lines', async () => {

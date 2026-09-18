@@ -17,6 +17,42 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.149.4] - 2026-09-18
+
+### Fixes
+
+Four findings from the pre-release review of v1.147.1 – v1.149.3 (RS-068),
+none of which had reached `main`.
+
+- **Realized profit prices a sold unit at what the company paid for it.**
+  The "cost of sold units" behind the manager-only Realized figure (v1.149.0)
+  was the line's unit cost plus fee share, so a negotiated lot price — the
+  header pinned apart from the line sum, typically a price over `$0` lines,
+  eleven such POs in production — never reached it, and a lot bought for
+  $500 over free lines showed its sales as near-pure profit.  A unit now
+  costs its share of the header price when one is stated, spread the way the
+  fee already is; a PO whose header mirrors its lines is unchanged.  A header
+  pinned at `$0` over priced lines (five in production) is read as "no
+  stated price", not as a price of nothing.
+- **The commission Realized nets out is the one the purchaser is shown.**  It
+  subtracted every line's cost from a projection that only priced lines
+  contribute revenue to, so a PO with an unpriced line netted less commission
+  than the dashboard and the spreadsheet promise the purchaser, and its
+  realized profit read high.  It is now the same per-line margin over priced
+  lines those screens use — still on the PO as bought and clamped at zero.
+- **A `$0` PO that already left Draft is no longer stuck by an edit.**  The
+  no-cost rule (v1.148.0) fired on every move out of Draft, so a legacy `$0`
+  PO that a purchaser's edit — or the carrier poll's next scan — sent back
+  to Draft could not go forward again: the manager's change-review got a raw
+  409 and the tracking poll warned on every scan.  The rule now governs the
+  first submission only; a PO with a submission history re-submits as it was
+  accepted, and the desktop stepper and phone button no longer raise the
+  dialog for it.  A never-submitted `$0` Draft is still refused.
+- **Purchaser PO lists stop computing a figure they never receive.**  The
+  realized-profit subquery joined every list row for every role and was
+  thrown away for non-managers in the response mapper; it is now a stub of
+  NULLs in SQL for them.
+
 ## [1.149.3] - 2026-09-17
 
 ### Changes

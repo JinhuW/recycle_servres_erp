@@ -6,10 +6,14 @@
 // The commission is the one actually paid — the purchaser's projected
 // commission on the whole PO as bought — not one recomputed on the realized
 // margin. A partly sold PO therefore reads low until the rest sells; that is
-// the figure the business asked for. It is taken on `qty_purchased` where a
-// partial sale set it, because today's `qty` no longer says what the PO was
-// paid on, and clamped at zero: a lot priced below cost pays no commission,
-// and a negative one would inflate the profit it is netted from.
+// the figure the business asked for. Its basis is the same per-line margin
+// the dashboard and the spreadsheet show, so an unpriced line contributes
+// nothing — neither its revenue nor its cost — rather than dragging the
+// projection below what the purchaser is told they earn. It is taken on
+// `qty_purchased` where a partial sale set it, because today's `qty` no longer
+// says what the PO was paid on, and clamped at zero: a lot projected below
+// cost pays no commission, and a negative one would inflate the profit it is
+// netted from.
 
 export type PoRealized = {
   soldQty: number;
@@ -26,13 +30,10 @@ export type PoRealizedRow = {
   bought_qty: number | null;
   revenue: number | null;
   cost: number | null;
-  projected_revenue: number | null;
-  goods_bought: number | null;
+  projected_profit: number | null;
 };
 
 export type PoRealizedHeader = {
-  total_cost: number | null;
-  other_fees: number | null;
   commission_rate: number | null;
 };
 
@@ -45,10 +46,7 @@ export function realizedFromRow(row: PoRealizedRow, po: PoRealizedHeader): PoRea
   if (soldQty <= 0) return null;
   const revenue = row.revenue ?? 0;
   const cost = row.cost ?? 0;
-  const goods = po.total_cost ?? row.goods_bought ?? 0;
-  const fees = po.other_fees ?? 0;
-  const projectedProfit = (row.projected_revenue ?? 0) - goods - fees;
-  const commission = Math.max(0, projectedProfit) * (po.commission_rate ?? 0);
+  const commission = Math.max(0, row.projected_profit ?? 0) * (po.commission_rate ?? 0);
   const grossProfit = revenue - cost;
   return {
     soldQty,

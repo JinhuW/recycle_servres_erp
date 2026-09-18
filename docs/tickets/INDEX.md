@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-068](./RS-068-realized-profit-and-the-cost-rule-review-fixes-befor.md) | in-progress | bug | P2 | Realized profit and the cost rule: review fixes before the 1.149 release | — |
 | [RS-067](./RS-067-dashboard-drops-the-contributor-leaderboard.md) | done | task | P3 | Dashboard drops the contributor leaderboard | 1.149.3 |
 | [RS-066](./RS-066-contribution-cards-state-where-their-figure-comes-fr.md) | done | task | P3 | Contribution cards state where their figure comes from | 1.149.2 |
 | [RS-065](./RS-065-dashboard-contribution-rows-scroll-instead-of-foldin.md) | done | story | P3 | Dashboard contribution rows scroll instead of folding | 1.149.1 |

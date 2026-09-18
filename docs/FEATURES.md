@@ -54,10 +54,14 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   projection the PO always had — margin on the priced lines at "Sell / Unit",
   less other fees — and is what a purchaser still sees as plain "Profit".
   **Realized** is what the units earned on Done sell orders, at the
-  sell-order price less the fee-amortized unit cost, net of the commission
-  actually paid to the purchaser (the projected commission on the PO as
-  bought, clamped at zero); null until something sells, so a partly sold PO
-  reads low until the rest goes and says so with a sold count. Desktop list:
+  sell-order price less what the unit cost — its share of a negotiated lot
+  price when the header states one, else its unit cost, plus the fee share
+  (v1.149.4) — net of the commission actually paid to the purchaser: the
+  projected commission as the dashboard and spreadsheet show it, over priced
+  lines, on the PO as bought and clamped at zero (v1.149.4 — an unpriced line
+  contributes nothing to it, cost included); null until something sells, so
+  a partly sold PO reads low until the rest goes and says so with a sold
+  count. Desktop list:
   the Profit column toggle shows the pair. PO edit page: a realized block on
   the cost tape with a sold meter. Phone: the money card carries both and the
   list row a Realized line. Purchasers and a manager previewing as purchaser
@@ -122,10 +126,13 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   hand-off, a manager stage-jump, the carrier poll. The rule is per order,
   read off the derived `orders.total_cost`: a $0 line inside a priced lot and
   a negotiated lot price over unpriced lines both pass; other fees do not
-  count. No cutoff — a cost can always be added to an old Draft — and orders
-  already past Draft are left alone. Clicking In Transit on a $0 Draft, on
-  the desktop stepper or the phone's advance button, raises a *Can't submit
-  yet* dialog naming the fix instead of opening the hand-off.
+  count. No cutoff — a cost can always be added to an old Draft — but first
+  submission only (v1.149.4): a PO that already left Draft and was sent back
+  by a purchaser's edit re-submits as it was accepted, through every door,
+  and the manager judges the edit in the change-review dialog. Clicking In
+  Transit on a $0 Draft with no submission history, on the desktop stepper
+  or the phone's advance button, raises a *Can't submit yet* dialog naming
+  the fix instead of opening the hand-off.
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,

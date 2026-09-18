@@ -1,8 +1,10 @@
 // A PO's realized profit: what its units earned on Done sell orders, at the
-// sell-order price and the fee-amortized unit cost, net of the commission
-// actually paid — the purchaser's projected commission on the PO as bought.
-// Managers only; null until something sells. The projection (`profit`) is
-// untouched by any of it.
+// sell-order price less what the unit cost — its share of a negotiated lot
+// price when the header states one, else its unit cost, plus the fee share —
+// net of the commission actually paid: the purchaser's projected commission
+// on the PO as bought, over priced lines, as the dashboard shows it. Managers
+// only; null until something sells. The projection (`profit`) is untouched by
+// any of it.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from './helpers/db';
@@ -30,14 +32,18 @@ const COMMISSION = (PROJECTED - GOODS - FEES) * RATE;                     // 18.
 // Other fees amortize cost-weighted over the PO as bought.
 const eff = (unitCost: number) => unitCost * (1 + FEES / GOODS);
 
+type Line = { qty: number; unitCost: number; sellPrice: number | null };
+
 async function createReviewing(
-  pur: string, mgr: string, lines = LINES,
+  pur: string, mgr: string, lines: Line[] = LINES, totalCost?: number,
 ): Promise<{ id: string; lineIds: string[] }> {
   const created = await api<{ id: string }>('POST', '/api/orders', {
     token: pur,
     body: {
       paypalTxnId: 'TESTPAYTXN0000004',
       category: 'RAM', warehouseId: 'WH-LA1', payment: 'company',
+      // A stated total pins a negotiated lot price against the lines.
+      ...(totalCost !== undefined ? { totalCost } : {}),
       lines: lines.map((l, i) => ({
         category: 'RAM', brand: 'Samsung', capacity: i === 0 ? '32GB' : '16GB', type: 'DDR4',
         classification: 'RDIMM', speed: '3200', partNumber: PN, condition: 'Pulled — Tested',
@@ -181,6 +187,45 @@ describe('realized profit on POs', () => {
     const r = (await detail(id, mgr)).realized!;
     expect(r.commission).toBe(0);
     expect(r.profit).toBeCloseTo(r.grossProfit, 2);
+  });
+
+  it('nets the commission on priced lines only: an unpriced line keeps its cost but earns nothing', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    const { id, lineIds } = await createReviewing(pur, mgr, [
+      { qty: 4, unitCost: 78.5, sellPrice: 120 },
+      { qty: 2, unitCost: 40, sellPrice: null },
+    ]);
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+
+    const r = (await detail(id, mgr)).realized!;
+    // What B sold for and cost is real money and counts in full...
+    expect(r.revenue).toBeCloseTo(110, 2);
+    expect(r.cost).toBeCloseTo(2 * eff(40), 2);
+    // ...but the commission is the purchaser's projection, which B never
+    // entered: the dashboard and the spreadsheet drop an unpriced line
+    // whole, cost included, and so must this.
+    const commission = 4 * (120 - eff(78.5)) * RATE;
+    expect(r.commission).toBeCloseTo(commission, 2);
+    expect(r.profit).toBeCloseTo(r.grossProfit - commission, 2);
+  });
+
+  it('costs a sold unit its share of the negotiated lot price, and leaves the commission alone', async () => {
+    const { token: pur } = await loginAs(MARCUS);
+    const { token: mgr } = await loginAs(ALEX);
+    // The lot was talked down to $300 for lines that list at $394.
+    const LOT = 300;
+    const { id, lineIds } = await createReviewing(pur, mgr, LINES, LOT);
+    await moveSellOrder(mgr, await createSellOrderOn(mgr, lineIds[1], 2, 55), 'Done');
+
+    const r = (await detail(id, mgr)).realized!;
+    // The price and the fee are both spread cost-weighted over the lines.
+    expect(r.cost).toBeCloseTo(2 * 40 * (LOT + FEES) / GOODS, 2);
+    expect(r.grossProfit).toBeCloseTo(110 - r.cost, 2);
+    // The commission is line-level everywhere else too; a header price
+    // never entered it.
+    expect(r.commission).toBeCloseTo(COMMISSION, 2);
+    expect((await listed(id, mgr)).realized).toEqual(r);
   });
 
   it('is null for the owning purchaser and for a manager previewing as purchaser', async () => {

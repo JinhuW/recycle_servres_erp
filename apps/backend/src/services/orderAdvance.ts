@@ -6,7 +6,7 @@
 // Must run inside the caller's transaction: the lifecycle read, every guard,
 // and all writes happen under one FOR UPDATE lock on the orders row.
 
-import { writeOrderEvent } from './orderAudit';
+import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
 import { companyPayTxnMissing, selfPayChatMissing } from './orderTxnRule';
@@ -447,7 +447,16 @@ export async function advanceOrderTx(
   // line — a $0 line thrown in with a priced lot is legitimate — and fees don't
   // count: freight on free goods is still a PO without a cost. No cutoff,
   // unlike the two rules below: a cost can always be added to an old Draft.
-  if (cur.lifecycle === 'draft' && nextStageId !== 'draft' && !(Number(cur.total_cost) > 0)) {
+  //
+  // First submission only. A PO that has left Draft before is back here
+  // because a purchaser edited it (or the carrier poll is about to pull it
+  // forward again), and the manager's change-review dialog is where that edit
+  // is judged — holding a $0 PO that was accepted months ago to a rule that
+  // did not exist then leaves it stuck behind a 409 and a warning on every
+  // scan. The history read only runs for a $0 Draft, so the common advance
+  // pays nothing for it.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft' && !(Number(cur.total_cost) > 0)
+      && !(await wasEverSubmitted(tx, id))) {
     return { kind: 'noCost' };
   }
   // Guard: a company-paid PO leaves Draft only once it names the payment that
