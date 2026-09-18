@@ -63,6 +63,8 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   qty:        o => o.qty,
   revenue:    o => o.revenue,
   profit:     o => o.profit,
+  // Unsold POs sort below every realized figure, loss or gain.
+  realized:   o => o.realized?.profit ?? Number.NEGATIVE_INFINITY,
   commission: o => commissionFor(o),
   payment:    o => o.payment,
   status:     o => o.status,
@@ -252,19 +254,9 @@ export function DesktopOrders({ onToast }: Props) {
     });
   }, [stageFiltered, sort]);
 
-  // KPI totals across the visible scope — matches design/dashboard.jsx#HistoryView.
-  const totals = useMemo(() => stageFiltered.reduce(
-    (acc, o) => {
-      acc.orders++;
-      acc.revenue += o.revenue;
-      acc.profit  += o.profit;
-      acc.commission += commissionFor(o);
-      acc.lines   += o.lineCount;
-      acc.unpriced += o.unpricedLineCount ?? 0;
-      return acc;
-    },
-    { orders: 0, revenue: 0, profit: 0, commission: 0, lines: 0, unpriced: 0 },
-  ), [stageFiltered]);
+  // Line count across the visible scope, for the card head's caption.
+  const visibleLines = useMemo(
+    () => stageFiltered.reduce((n, o) => n + o.lineCount, 0), [stageFiltered]);
 
   // Aggregate count + revenue per workflow stage for the pipeline cards.
   const stageAgg = useMemo(() => {
@@ -281,48 +273,17 @@ export function DesktopOrders({ onToast }: Props) {
 
   // colSpan for the expanded row — covers chevron + every toggleable col + actions,
   // regardless of which are currently hidden via display:none.
-  const totalCols = 1 + TOGGLEABLE_COLS.length + 1 + 1; // chevron + toggleable + submitter + actions
+  // chevron + toggleable + submitter + actions, plus the manager's Realized
+  // column, which rides on the Profit toggle rather than owning one.
+  const totalCols = 1 + TOGGLEABLE_COLS.length + 1 + 1 + (isManager ? 1 : 0);
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1 className="page-title">{t('purchaseOrders')}</h1>
-          <div className="page-sub">{isManager ? t('purchaseOrdersMgr') : t('purchaseOrdersPurch')}</div>
         </div>
         <div className="page-actions" />
-      </div>
-
-      <div className="kpi-grid">
-        <div className="kpi">
-          <div className="kpi-label">{isManager ? t('totalOrders') : t('ordersSubmitted', { n: totals.orders })}</div>
-          <div className="kpi-value mono">{totals.orders}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">{t('totalRevenue')}</div>
-          <div className="kpi-value mono">{fmtUSD0(totals.revenue, locale)}</div>
-          {totals.unpriced > 0 && (
-            <div
-              className="kpi-trend"
-              style={{ color: 'var(--warn)' }}
-              title={t('unpricedRevenueHint', { n: totals.unpriced, total: totals.lines })}
-            >
-              <Icon name="info" size={11} />
-              {t('grpUnpriced', { n: totals.unpriced })}
-            </div>
-          )}
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">{t('grossProfit')}</div>
-          <div
-            className="kpi-value mono"
-            style={{ color: totals.profit < 0 ? 'var(--neg)' : 'var(--pos)' }}
-          >{fmtUSD0(totals.profit, locale)}</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">{isManager ? t('commissionPaid') : t('commissionEarned')}</div>
-          <div className="kpi-value mono">{fmtUSD0(totals.commission, locale)}</div>
-        </div>
       </div>
 
       <div className="card orders-card">
@@ -336,7 +297,7 @@ export function DesktopOrders({ onToast }: Props) {
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(totals.lines, locale)} {t('lines').toLowerCase()}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{fmt0(visibleLines, locale)} {t('lines').toLowerCase()}</div>
           </div>
           <div className="orders-toolbar-r">
             <button
@@ -515,7 +476,11 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('lines') && <SortTh col="lines" sort={sort} onSort={cycleSort} align="right">{t('lines')}</SortTh>}
                 {isVis('qty') && <SortTh col="qty" sort={sort} onSort={cycleSort} align="right">{t('qty')}</SortTh>}
                 {isVis('revenue') && <SortTh col="revenue" sort={sort} onSort={cycleSort} align="right">{t('revenue')}</SortTh>}
-                {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{t('profit')}</SortTh>}
+                {/* One toggle, two columns for a manager: the projection and
+                    what the units actually earned. A purchaser has only the
+                    projection, so it keeps its plain name. */}
+                {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{isManager ? t('unrealizedShort') : t('profit')}</SortTh>}
+                {isVis('profit') && isManager && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
                 {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
                 {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
@@ -617,6 +582,17 @@ export function DesktopOrders({ onToast }: Props) {
                         )}
                       </td>
                       <td className={'num mono ' + profitTone(o.profit)} style={{ display: isVis('profit') ? undefined : 'none' }}>{fmtUSD0(o.profit, locale)}</td>
+                      {isManager && (
+                        <td className={'num mono' + (o.realized ? ' ' + profitTone(o.realized.profit) : ' muted')} style={{ display: isVis('profit') ? undefined : 'none' }}>
+                          {o.realized ? fmtUSD0(o.realized.profit, locale) : '—'}
+                          {/* A partial figure says how much of the PO it speaks for. */}
+                          {o.realized && o.realized.soldQty !== o.realized.boughtQty && (
+                            <div className="muted" style={{ fontSize: 10.5, fontWeight: 500 }}>
+                              {t('soldShort', { n: o.realized.soldQty, of: o.realized.boughtQty })}
+                            </div>
+                          )}
+                        </td>
+                      )}
                       <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
                       <td style={{ display: isVis('payment') ? undefined : 'none' }}>
                         {/* A PO the bank has paid says so and opens its payment

@@ -5,6 +5,14 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-068](./RS-068-realized-profit-and-the-cost-rule-review-fixes-befor.md) | done | bug | P2 | Realized profit and the cost rule: review fixes before the 1.149 release | 1.149.4 |
+| [RS-067](./RS-067-dashboard-drops-the-contributor-leaderboard.md) | done | task | P3 | Dashboard drops the contributor leaderboard | 1.149.3 |
+| [RS-066](./RS-066-contribution-cards-state-where-their-figure-comes-fr.md) | done | task | P3 | Contribution cards state where their figure comes from | 1.149.2 |
+| [RS-065](./RS-065-dashboard-contribution-rows-scroll-instead-of-foldin.md) | done | story | P3 | Dashboard contribution rows scroll instead of folding | 1.149.1 |
+| [RS-064](./RS-064-po-profit-splits-into-unrealized-and-realized-for-ma.md) | done | story | P2 | PO profit splits into Unrealized and Realized for managers | 1.149.0 |
+| [RS-063](./RS-063-po-cannot-be-submitted-without-a-cost.md) | done | story | P2 | PO cannot be submitted without a cost | 1.148.0 |
+| [RS-062](./RS-062-purchase-orders-page-drops-its-kpi-strip.md) | done | task | P3 | Purchase orders page drops its KPI strip | 1.147.2 |
+| [RS-061](./RS-061-dashboard-cost-counts-every-po-past-draft.md) | done | bug | P2 | Dashboard cost counts every PO past Draft | 1.147.1 |
 | [RS-060](./RS-060-po-lines-show-the-final-sell-price-to-managers.md) | done | story | P2 | PO lines show the final sell price to managers | 1.147.0 |
 | [RS-059](./RS-059-dashboard-time-range-brush-and-contribution-tables.md) | done | story | P2 | Dashboard time-range brush and contribution tables | 1.146.0 |
 | [RS-058](./RS-058-closed-sell-orders-still-block-removing-a-po-line.md) | done | bug | P2 | Closed sell orders still block removing a PO line | 1.145.2 |

@@ -17,6 +17,179 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.149.4] - 2026-09-18
+
+### Fixes
+
+Four findings from the pre-release review of v1.147.1 – v1.149.3 (RS-068),
+none of which had reached `main`.
+
+- **Realized profit prices a sold unit at what the company paid for it.**
+  The "cost of sold units" behind the manager-only Realized figure (v1.149.0)
+  was the line's unit cost plus fee share, so a negotiated lot price — the
+  header pinned apart from the line sum, typically a price over `$0` lines,
+  eleven such POs in production — never reached it, and a lot bought for
+  $500 over free lines showed its sales as near-pure profit.  A unit now
+  costs its share of the header price when one is stated, spread the way the
+  fee already is; a PO whose header mirrors its lines is unchanged.  A header
+  pinned at `$0` over priced lines (five in production) is read as "no
+  stated price", not as a price of nothing.
+- **The commission Realized nets out is the one the purchaser is shown.**  It
+  subtracted every line's cost from a projection that only priced lines
+  contribute revenue to, so a PO with an unpriced line netted less commission
+  than the dashboard and the spreadsheet promise the purchaser, and its
+  realized profit read high.  It is now the same per-line margin over priced
+  lines those screens use — still on the PO as bought and clamped at zero.
+- **A `$0` PO that already left Draft is no longer stuck by an edit.**  The
+  no-cost rule (v1.148.0) fired on every move out of Draft, so a legacy `$0`
+  PO that a purchaser's edit — or the carrier poll's next scan — sent back
+  to Draft could not go forward again: the manager's change-review got a raw
+  409 and the tracking poll warned on every scan.  The rule now governs the
+  first submission only; a PO with a submission history re-submits as it was
+  accepted, and the desktop stepper and phone button no longer raise the
+  dialog for it.  A never-submitted `$0` Draft is still refused.
+- **Purchaser PO lists stop computing a figure they never receive.**  The
+  realized-profit subquery joined every list row for every role and was
+  thrown away for non-managers in the response mapper; it is now a stub of
+  NULLs in SQL for them.
+
+## [1.149.3] - 2026-09-17
+
+### Changes
+
+- **The desktop Dashboard no longer carries the Contributor leaderboard**
+  (RS-067).  The full-width table under the contribution cards — Total cost /
+  Commission sort, All / RAM / SSD / HDD / Other filter, Orders, Total cost,
+  Revenue, Profit and Commission per purchaser — repeated, per person and
+  under a narrower rule, what the tiles, the cashflow chart and the
+  contribution cards now state with a reporting window (RS-059, RS-061).
+  Jinhu asked for it to go, as he did for the Purchase orders KPI strip in
+  v1.147.2.  The page reads tiles, chart, category breakdown, contribution
+  cards, recent activity; the manager subtitle no longer promises a
+  "contributor ranking".  The phone dashboard's "Top contributors" and "Your
+  rank" cards and the `leaderboard` field on `GET /api/dashboard` are
+  unchanged.  Seven i18n keys only that card used are gone from both
+  dictionaries.
+
+## [1.149.2] - 2026-09-17
+
+### Changes
+
+- **The dashboard's contribution cards say what they sum** (RS-066).  A
+  line under each title states the rule — "Purchase orders past Draft, by
+  order date — goods plus other fees", "Revenue of Done sell orders, by
+  their last update", "Sell price minus PO cost and fees on what sold" —
+  and a purchaser's cards say "your …" and "projected …" instead, since
+  theirs are projections from reviewed POs.  The Cost card counts a wider
+  set of POs than the leaderboard beside it (v1.147.1), so a total without
+  its definition invited the wrong comparison.  "Last update" rather than
+  "the date they closed" because the sale window is the order's
+  `updated_at`, which a later note edit also moves.
+
+## [1.149.1] - 2026-09-17
+
+### Fixes
+
+- **Dashboard contribution cards list every contributor and scroll**
+  (RS-065).  Each card's tab used to show the top seven rows and fold the
+  rest into a single "Remaining n …" line — a fold done by the server, so
+  the eighth purchaser was a number with no name and no way to reach it.
+  The API now returns every row, largest first, and the card scrolls inside
+  its fixed height once a list passes eight rows, header pinned, the way
+  the contributor leaderboard already does.  Up to eight rows the cards look
+  exactly as before, so the three stay level.
+
+## [1.149.0] - 2026-09-17
+
+### Features
+
+- **A PO carries two profits for managers: Unrealized and Realized**
+  (RS-064).  Unrealized is the figure every PO already had — the projection
+  from the "Sell / Unit" a manager fills in — and it is unchanged, name and
+  formula, in the purchaser's view.  Realized is what the units actually
+  earned on the sell orders that reached Done: sell-order price less the
+  fee-amortized unit cost, net of the commission the company pays the
+  purchaser — the projected commission on the PO as bought, not one
+  recomputed on the realized margin, so a partly sold PO reads low until the
+  rest sells.  It is null until something sells, and null for purchasers
+  and for a manager previewing as purchaser.  `GET /api/orders` and
+  `GET /api/orders/:id` return it as `realized` with the sold and bought
+  counts.  On the desktop list the Profit toggle shows an Unrealized /
+  Realized pair to managers; the PO edit page's cost tape gains a realized
+  block that opens with a sold meter (`6 of 8 units sold`) and ends in the
+  realized profit; the phone detail's money card gains the pair and the phone
+  list a Realized line under the revenue.
+
+### Fixes
+
+- **Other fees amortize over the PO as bought.**  The per-line fee share
+  (`lib/po-cost.ts`) weighted by the line's current qty, which a partial sale
+  decrements, so every sale shifted the fee onto the units still on the
+  shelf and repriced sales already made.  It now weights by `qty_purchased`
+  where a sale set it — the basis the goods total already used — which also
+  steadies the dashboard, profile and members realized figures on partly
+  sold POs.
+- The cost tape's projected-profit row is now coloured like the rest of the
+  money in the app; it carried the tone class but no rule painted it outside
+  a table.
+
+## [1.148.0] - 2026-09-17
+
+### Features
+
+- **A PO cannot be submitted without a cost** (RS-063).  Leaving Draft —
+  the hand-off dialog, a manager stage-jump, or the carrier tracking poll —
+  is now refused while the order's goods cost is zero.  Nothing checked the
+  money before: every client sends a blank unit cost as 0, the database
+  has no such constraint, and 43 of the 125 submitted POs in production
+  carried a total cost of $0.  The rule is per order, read off the derived
+  `orders.total_cost`, so a $0 line thrown in with a priced lot and a
+  negotiated lot price over unpriced lines both still pass; other fees do
+  not count, so freight on free goods is still a PO without a cost.  There
+  is no creation-date cutoff, unlike the transaction-id rule: a cost can
+  always be added to an old Draft, and orders already past Draft are
+  untouched.  On the desktop stepper and the phone's advance button,
+  clicking In Transit on a $0 Draft raises a *Can't submit yet* dialog
+  naming the fix instead of opening the hand-off; the server's 409 is the
+  real gate behind it, and the tracking poll logs the missing cost the way
+  it logs a missing transaction id.
+
+## [1.147.2] - 2026-09-17
+
+### Changes
+
+- **The Purchase orders page no longer carries a KPI strip** (RS-062).  The
+  four tiles above the list — Total orders, Total revenue, Gross profit,
+  Commission paid — and the subtitle under the title were computed in the
+  browser over whatever the stage and category filters happened to show,
+  with no reporting window, so they were a second copy of the dashboard's
+  figures that disagreed with it whenever a filter was on.  With the
+  dashboard's windowed tiles and contribution cards (v1.146.0, v1.147.1)
+  there is one place to read these numbers; the list now opens on the
+  orders card.  The card head's "{n} lines" caption and each row's unpriced
+  badge are unchanged, as is the phone Orders page.
+
+## [1.147.1] - 2026-09-17
+
+### Fixes
+
+- **The dashboard's Cost card counts every PO past Draft** (RS-061).
+  v1.146.0 built the card and the cashflow chart's purchases-out bars on
+  the leaderboard's Ready-to-Pay/Done rule, so a month of In Transit and
+  Reviewing purchases showed as no spend at all.  Both now sum every PO
+  with a lifecycle past Draft — money is committed when a PO is submitted —
+  and the two still agree with each other.  This reverses v1.146.0's note
+  that the card was "the same figure as the leaderboard's Total cost
+  column": the leaderboard keeps the narrower rule on purpose, because its
+  figure is the commission basis and commission is owed only from Ready to
+  Pay.  A purchaser's own Cost card follows the same rule; the projected
+  revenue and profit cards still count reviewed POs only.
+- **The sale cards' Purchaser tab is now "Sourced by".**  It credits each
+  sold line to the purchaser whose PO supplied the units — the leaderboard's
+  revenue and profit attribution — and purchasers never create sell orders,
+  so the old name read as a claim the data does not make.  The Cost card's
+  tab, where the purchaser really is the purchaser, keeps its name.
+
 ## [1.147.0] - 2026-09-17
 
 ### Features

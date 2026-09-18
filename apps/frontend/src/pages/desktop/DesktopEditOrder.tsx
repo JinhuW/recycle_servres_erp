@@ -1146,6 +1146,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             pricedProfit={totals.pricedProfit}
             pricedCount={totals.pricedCount}
             locale={locale}
+            showRealized={isManager}
+            realized={order.realized ?? null}
+            commissionRate={order.commissionRate}
             goodsNote={goodsOverridden ? (
               <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
             ) : undefined}
@@ -1350,6 +1353,15 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                       // that follows — ask for the save first.
                       if (s === 'In Transit' && savedStatus === 'Draft') {
                         if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
+                        // The cost is fixed on this page, not in the dialog,
+                        // so it is asked for here — as a dialog, like an
+                        // unsaved edit — and the server refuses it too. Only
+                        // on the first submission: a PO an edit sent back to
+                        // Draft re-submits as it was accepted.
+                        if (!(cost.goods > 0) && !order.everSubmitted) {
+                          showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
+                          return;
+                        }
                         setHandoffOpen(true);
                         return;
                       }

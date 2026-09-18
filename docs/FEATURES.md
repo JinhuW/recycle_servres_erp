@@ -44,6 +44,29 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **The desktop list opens on the orders card** (v1.147.2). The four KPI
+  tiles and the subtitle that sat above it since the first release are gone:
+  they were computed in the browser over whatever the stage and category
+  filters showed, with no reporting window, and the dashboard now states
+  those figures properly. The card head's line count and the per-row
+  unpriced badge stay.
+- **Two profits per PO for managers** (v1.149.0): **Unrealized** is the
+  projection the PO always had — margin on the priced lines at "Sell / Unit",
+  less other fees — and is what a purchaser still sees as plain "Profit".
+  **Realized** is what the units earned on Done sell orders, at the
+  sell-order price less what the unit cost — its share of a negotiated lot
+  price when the header states one, else its unit cost, plus the fee share
+  (v1.149.4) — net of the commission actually paid to the purchaser: the
+  projected commission as the dashboard and spreadsheet show it, over priced
+  lines, on the PO as bought and clamped at zero (v1.149.4 — an unpriced line
+  contributes nothing to it, cost included); null until something sells, so
+  a partly sold PO reads low until the rest goes and says so with a sold
+  count. Desktop list:
+  the Profit column toggle shows the pair. PO edit page: a realized block on
+  the cost tape with a sold meter. Phone: the money card carries both and the
+  list row a Realized line. Purchasers and a manager previewing as purchaser
+  get none of it. Other fees amortize over the PO as bought (`qty_purchased`)
+  from the same release, so a partial sale no longer moves the fee share.
 - **Managers see each line's final sell price** (v1.147.0): the qty-weighted
   unit price over the Done sell orders that name the line, with the sold
   count after it when a partial sale left units on the PO. It sits beside
@@ -98,6 +121,18 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
   exactly like the transaction-ID rule.
+- **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
+  refused while the order's goods cost is zero, through every door — the
+  hand-off, a manager stage-jump, the carrier poll. The rule is per order,
+  read off the derived `orders.total_cost`: a $0 line inside a priced lot and
+  a negotiated lot price over unpriced lines both pass; other fees do not
+  count. No cutoff — a cost can always be added to an old Draft — but first
+  submission only (v1.149.4): a PO that already left Draft and was sent back
+  by a purchaser's edit re-submits as it was accepted, through every door,
+  and the manager judges the edit in the change-review dialog. Clicking In
+  Transit on a $0 Draft with no submission history, on the desktop stepper
+  or the phone's advance button, raises a *Can't submit yet* dialog naming
+  the fix instead of opening the hand-off.
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,
@@ -543,8 +578,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   custom pair of dates) or by dragging on the month strip under the page
   head: drag across it for a new window, drag the band to move it, drag a
   handle to resize it, to the day, with the date under the handle while
-  dragging. Every tile, the chart, the contribution cards and the
-  leaderboard re-scope to it. `GET /api/dashboard?from=YYYY-MM-DD&to=…`;
+  dragging. Every tile, the chart, the contribution cards and the phone's
+  ranking re-scope to it. `GET /api/dashboard?from=YYYY-MM-DD&to=…`;
   the `?range=` presets still resolve to the same dates, and `ytd` means
   since 1 January (it was 365 rolling days). The phone dashboard stays on
   the last 30 days (v1.146.0).
@@ -556,22 +591,38 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   weekly chart labelled by ISO week number).
 - **Three contribution cards** — Cost, Sell orders, Profit — say who drove
   each figure: cost by supplier, purchaser or category; sales and profit by
-  customer, purchaser or category. Each shows the top seven with their share
-  of the total and folds the rest into a "Remaining" row. Cost is the PO
-  header total the leaderboard ranks by, so a mixed PO shows as "Mixed"
-  under Category; the Sell orders total is the revenue tile and the Profit
-  total the gross-profit tile, so a sell line with no inventory link is in
-  neither. A purchaser sees their own POs by supplier and category only
-  (v1.146.0).
-- The contributor leaderboard ranks purchasers by the total cost of their POs
-  in the selected range — goods total plus other fees, the figure the PO pages
-  call "Total cost" — or, on a toggle, by the commission those POs earned
-  (`?lb=cost|commission` on `GET /api/dashboard`, cost by default); its
-  "Orders" column counts POs, and projected revenue, profit and commission
-  stay on the row as context (v1.141.0; it ranked by projected profit from
-  v1.0.1). Both lenses count a PO from Ready to Pay on, when its commission
-  becomes owed (v1.132.0). A purchaser sees every peer's rank but only their
-  own money, so the ranking is computed server-side.
+  customer, "sourced by" or category. Each lists every contributor, largest
+  first, with its share of the total; past eight rows the list scrolls inside
+  the card with the header pinned, so the three cards stay level (v1.149.1;
+  before it the server kept the top seven and folded the rest into a
+  "Remaining" row). Cost is the
+  PO header total — goods plus other fees — over **every PO past Draft** (In
+  Transit, Reviewing, Ready to Pay, Done), the same figure as the chart's
+  purchases-out bars; money is committed when a PO is submitted, so the card
+  is wider than the phone ranking's Total cost, which counts a PO only once
+  commission is owed (v1.147.1; v1.146.0 used the ranking's rule). A
+  mixed PO shows as "Mixed" under Category. The Sell orders total is the
+  revenue tile and the Profit total the gross-profit tile, so a sell line
+  with no inventory link is in neither; their "Sourced by" tab credits each
+  sold line to the purchaser whose PO supplied it — purchasers never create
+  sell orders, which is why the tab is not called Purchaser (v1.147.1). Each
+  card states what it sums in a line under its title — realized wording for
+  managers, "your … / projected …" for purchasers — because the Cost card
+  and the leaderboard beside it count different sets of POs (v1.149.2). A
+  purchaser sees their own POs by supplier and category only (v1.146.0).
+- **The purchaser ranking lives on the phone dashboard only** (v1.149.3): the
+  manager's "Top contributors" and the purchaser's "Your rank" cards. The
+  desktop's full-width "Contributor leaderboard" table — sort toggle, category
+  toggle, Orders / Total cost / Revenue / Profit / Commission columns — was
+  removed at Jinhu's request, since the tiles, the chart and the contribution
+  cards state the same figures with a reporting window. The ranking itself is
+  unchanged: purchasers by the total cost of their POs in the selected range —
+  goods total plus other fees, the figure the PO pages call "Total cost" — or,
+  on a toggle, by the commission those POs earned (`?lb=cost|commission` on
+  `GET /api/dashboard`, cost by default; v1.141.0, ranked by projected profit
+  from v1.0.1). Both lenses count a PO from Ready to Pay on, when its
+  commission becomes owed (v1.132.0). A purchaser sees every peer's rank but
+  only their own money, so the ranking is computed server-side.
 
 ## Oversight extras
 

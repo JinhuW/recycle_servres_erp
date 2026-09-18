@@ -131,12 +131,28 @@ export type OrderLine = {
   rpm: number | null;
 };
 
+// What a PO's units earned on Done sell orders, net of the commission paid
+// to the purchaser. `soldQty` of `boughtQty` says how much of the PO it
+// covers. Managers only; null until something has sold.
+export type OrderRealized = {
+  soldQty: number;
+  boughtQty: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  commission: number;
+  profit: number;
+};
+
 export type OrderSummary = {
   id: string;
   userId: string;
   userName: string;
   userInitials: string;
   commissionRate: number | null;
+  // Optional for deploy skew, like `linkedPaid`; null for non-managers and
+  // for a PO nothing has sold from.
+  realized?: OrderRealized | null;
   // Derived from the lines: the sole category when they agree, 'Mixed' when
   // they don't. Widened from `Category` for that reason — render chips from
   // `categories` rather than switching on this.
@@ -395,14 +411,13 @@ import type { Bucket, RangePreset, IsoDate } from '@recycle-erp/shared';
 export type { Bucket, RangePreset, IsoDate };
 
 // Who drove a dashboard figure in the window, one grouping at a time. `rows`
-// are the top few by amount; `others` folds the rest so the tab still sums to
-// the metric's total. A null id is the unattributed row (a PO with no
-// supplier). Which dimensions come back depends on the lens: a purchaser
+// is every contributor, largest first — the card scrolls rather than folding
+// a tail. A null id is the unattributed row (a PO with no supplier). Which dimensions come back depends on the lens: a purchaser
 // never receives a purchaser or customer grouping.
 export type ContribDim = 'supplier' | 'purchaser' | 'customer' | 'category';
 export type ContribMetric = 'cost' | 'revenue' | 'profit';
 export type ContribRow = { id: string | null; name: string | null; amount: number; count: number };
-export type ContribRows = { rows: ContribRow[]; others: { n: number; amount: number } | null };
+export type ContribRows = { rows: ContribRow[] };
 export type ContribMetricData = {
   total: number;
   count: number;

@@ -6,7 +6,7 @@
 // Must run inside the caller's transaction: the lifecycle read, every guard,
 // and all writes happen under one FOR UPDATE lock on the orders row.
 
-import { writeOrderEvent } from './orderAudit';
+import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
 import { companyPayTxnMissing, selfPayChatMissing } from './orderTxnRule';
@@ -85,6 +85,7 @@ export type AdvanceOutcome =
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'missingTxnId' }
   | { kind: 'missingChatShot' }
+  | { kind: 'noCost' }
   | { kind: 'ok'; nextStageId: string };
 
 // Line statuses in lifecycle order, so a cascade can tell which lines it would
@@ -390,11 +391,12 @@ export async function advanceOrderTx(
 
   const cur = (await tx`
     SELECT id, user_id, lifecycle, payment, payment_method, paypal_txn_id, created_at,
-           warehouse_id, archived_at
+           warehouse_id, archived_at, total_cost::float AS total_cost
     FROM orders WHERE id = ${id} LIMIT 1 FOR UPDATE`)[0] as
     | { id: string; user_id: string; lifecycle: string; payment: string;
         payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
-        warehouse_id: string | null; archived_at: Date | null } | undefined;
+        warehouse_id: string | null; archived_at: Date | null; total_cost: number | null }
+    | undefined;
   if (!cur) return { kind: 'notFound' };
   // The lines sit at 'Archived'; a cascade here would put them back in stock
   // behind the archive's back. The tracking poll lands here too and treats
@@ -439,6 +441,24 @@ export async function advanceOrderTx(
     }
   }
 
+  // Guard: a PO leaves Draft only once its goods cost something. total_cost is
+  // the figure every line write re-derives (or the negotiated lot price), so
+  // reading it covers both; NULL is the empty draft shell. Per order, not per
+  // line — a $0 line thrown in with a priced lot is legitimate — and fees don't
+  // count: freight on free goods is still a PO without a cost. No cutoff,
+  // unlike the two rules below: a cost can always be added to an old Draft.
+  //
+  // First submission only. A PO that has left Draft before is back here
+  // because a purchaser edited it (or the carrier poll is about to pull it
+  // forward again), and the manager's change-review dialog is where that edit
+  // is judged — holding a $0 PO that was accepted months ago to a rule that
+  // did not exist then leaves it stuck behind a 409 and a warning on every
+  // scan. The history read only runs for a $0 Draft, so the common advance
+  // pays nothing for it.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft' && !(Number(cur.total_cost) > 0)
+      && !(await wasEverSubmitted(tx, id))) {
+    return { kind: 'noCost' };
+  }
   // Guard: a company-paid PO leaves Draft only once it names the payment that
   // funded it. Held against every actor — a manager stage-jump and the carrier
   // poll included — because a rule the two commonest paths can route around is

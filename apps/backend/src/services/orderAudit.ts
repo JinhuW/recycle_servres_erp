@@ -102,3 +102,14 @@ export async function writeOrderEvent(
     VALUES (${orderId}, ${actorId}, ${kind}, ${tx.json(detail as never)})
   `;
 }
+
+// A purchaser edit puts a submitted order back in Draft, so "is a draft" no
+// longer means "was never submitted". Delete, Archive, the cost rule and the
+// client all read the history instead of the stage — and they must agree, or
+// an order lands in a state that refuses both.
+export async function wasEverSubmitted(sql: SqlLike, id: string): Promise<boolean> {
+  return !!(await sql`
+    SELECT 1 FROM order_events
+    WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
+  `)[0];
+}

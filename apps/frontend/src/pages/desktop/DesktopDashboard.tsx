@@ -6,8 +6,7 @@ import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { isPricedSellPrice, REPORTING_TZ, resolvePreset, todayIn } from '@recycle-erp/shared';
 import { fmtUSD0, relTime } from '../../lib/format';
-import { categoryFilterOptions } from '../../lib/lookups';
-import type { Bucket, Category, DashboardData, LeaderboardSort } from '../../lib/types';
+import type { Bucket, Category, DashboardData } from '../../lib/types';
 import { DashboardSkeleton } from '../../components/Skeleton';
 import { RangeBrush, RangeChip, fmtRange, type RangeValue } from './DashboardRange';
 import { CashflowChart } from './DashboardChart';
@@ -28,8 +27,6 @@ export function DesktopDashboard() {
   const user = useEffectiveUser();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [lbCategory, setLbCategory] = useState<string>('all');
-  const [lbSort, setLbSort] = useState<LeaderboardSort>('cost');
   // "Today" is the business day, not the viewer's — the brush's right edge and
   // every preset are anchored to it so two offices see one calendar.
   const today = useMemo(() => todayIn(REPORTING_TZ), []);
@@ -39,19 +36,18 @@ export function DesktopDashboard() {
   // The role-preview tweak flips `user.role`; refetch so the dashboard
   // re-scopes (own work vs. team-wide) when a manager toggles preview, matching
   // the backend's effectiveRole scoping. The `alive` guard keeps a slower
-  // response from an earlier range/sort from landing under the active buttons.
+  // response from an earlier range from landing under the active buttons.
   const effRole = user?.role;
   useEffect(() => {
     let alive = true;
     const params = new URLSearchParams({ from: range.from, to: range.to });
     if (bucket !== 'auto') params.set('bucket', bucket);
-    if (lbSort !== 'cost') params.set('lb', lbSort);
     setLoading(true);
     api.get<DashboardData>(`/api/dashboard?${params}`)
       .then(r => { if (alive) { setData(r); setLoading(false); } })
       .catch(e => { if (alive) setLoading(false); handleFetchError(e); });
     return () => { alive = false; };
-  }, [range.from, range.to, bucket, lbSort, effRole]);
+  }, [range.from, range.to, bucket, effRole]);
 
   if (!user) return null;
   const isManager = user.role === 'manager';
@@ -60,7 +56,6 @@ export function DesktopDashboard() {
     prev: { revenue: 0, profit: 0 },
   };
   const byCat = data?.byCat ?? ({} as DashboardData['byCat']);
-  const rawLb = data?.leaderboard ?? [];
   const first = data?.bounds.first ?? null;
   const rangeLabel = fmtRange(range.from, range.to, today, locale);
   const activeBucket: Bucket = bucket === 'auto' ? (data?.window.bucket ?? 'day') : bucket;
@@ -69,11 +64,6 @@ export function DesktopDashboard() {
 
   const commissionPct = k.profit > 0 ? (k.commission / k.profit) * 100 : 0;
   const netProfit = k.profit - k.commission;
-
-  // Filter leaderboard by category — at the moment the backend doesn't break
-  // leaderboard rows down per-category, so the filter only narrows the visible
-  // header label. (Follow-up: extend the API to return per-cat rollups per user.)
-  const leaderboard = useMemo(() => rawLb, [rawLb]);
 
   return (
     <>
@@ -156,110 +146,17 @@ export function DesktopDashboard() {
       </div>
 
       <div className="dash-contrib-grid">
-        <ContribCard title={t('contribCost')} caption={countCaption(data.contrib.cost.count, false)}
+        <ContribCard title={t('contribCost')} note={t(isManager ? 'contribCostNote' : 'contribCostNoteMine')}
+                     caption={countCaption(data.contrib.cost.count, false)}
                      data={data.contrib.cost} locale={locale} />
-        <ContribCard title={t('contribSales')} caption={countCaption(data.contrib.revenue.count, true)}
-                     data={data.contrib.revenue} locale={locale} />
-        <ContribCard title={t('contribProfit')} caption={countCaption(data.contrib.profit.count, true)}
-                     data={data.contrib.profit} locale={locale} />
-      </div>
-
-      <div className="card">
-        <div className="card-head" style={{ gap: 16 }}>
-          <div>
-            <div className="card-title">{t('contributorLeaderboard')}</div>
-            <div className="card-sub">
-              {lbSort === 'cost' ? t('rankedByTotalCost') : t('rankedByCommission')}
-              {' · '}
-              {lbCategory === 'all' ? t('allItemTypes') : `${lbCategory} only`}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <div className="seg" role="tablist" aria-label={t('dashLbSortAriaLabel')}>
-              {(['cost', 'commission'] as const).map(s => (
-                <button
-                  key={s}
-                  className={lbSort === s ? 'active' : ''}
-                  onClick={() => setLbSort(s)}
-                >
-                  {s === 'cost' ? t('totalCost') : t('commission')}
-                </button>
-              ))}
-            </div>
-            <div className="seg" role="tablist" aria-label={t('dashFilterItemTypeAriaLabel')}>
-              {categoryFilterOptions().map(c => (
-                <button
-                  key={c}
-                  className={lbCategory === c ? 'active' : ''}
-                  onClick={() => setLbCategory(c)}
-                >
-                  {c === 'all' ? t('all') : c}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          <div className="table-scroll lb-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 50 }}>#</th>
-                  <th>{t('contributor')}</th>
-                  <th className="num">{t('orders')}</th>
-                  <th className="num">{t('totalCost')}</th>
-                  <th className="num">{t('revenue')}</th>
-                  <th className="num">{t('profit')}</th>
-                  <th className="num">{t('commission')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leaderboard.length === 0 && (
-                  <tr>
-                    <td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--fg-subtle)', fontSize: 13 }}>
-                      {lbCategory === 'all' ? t('dashNoContributorsAll') : t('dashNoContributorsCat', { cat: lbCategory })}
-                      {lbCategory !== 'all' && (
-                        <>
-                          {' '}
-                          <button
-                            onClick={() => setLbCategory('all')}
-                            style={{
-                              background: 'none', border: 'none', cursor: 'pointer',
-                              color: 'var(--accent-strong)', textDecoration: 'underline',
-                              fontFamily: 'inherit', fontSize: 13, padding: 0,
-                            }}
-                          >
-                            {t('dashShowAllItemTypes')}
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                )}
-                {leaderboard.map((row, i) => (
-                  <tr key={row.id} className="row-hover">
-                    <td>
-                      <span className={'lb-rank ' + (i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '')}>
-                        {i + 1}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div className="avatar">{row.initials}</div>
-                        <div style={{ fontWeight: 500 }}>{row.name}</div>
-                      </div>
-                    </td>
-                    <td className="num mono">{row.count}</td>
-                    <td className="num mono">{fmtUSD0(row.cost, locale)}</td>
-                    <td className="num mono">{fmtUSD0(row.revenue, locale)}</td>
-                    <td className="num mono pos">{fmtUSD0(row.profit, locale)}</td>
-                    <td className="num mono">{fmtUSD0(row.commission, locale)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ContribCard title={t('contribSales')} note={t(isManager ? 'contribSalesNote' : 'contribSalesNoteMine')}
+                     caption={countCaption(data.contrib.revenue.count, true)}
+                     data={data.contrib.revenue} locale={locale}
+                     purchaserAs={{ dim: 'dimSourcedBy' }} />
+        <ContribCard title={t('contribProfit')} note={t(isManager ? 'contribProfitNote' : 'contribProfitNoteMine')}
+                     caption={countCaption(data.contrib.profit.count, true)}
+                     data={data.contrib.profit} locale={locale}
+                     purchaserAs={{ dim: 'dimSourcedBy' }} />
       </div>
 
       <div className="card">

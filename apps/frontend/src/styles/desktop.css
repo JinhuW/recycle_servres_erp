@@ -242,8 +242,8 @@ html.desktop, body.desktop, .desktop #root {
 .page > .page-head { margin-bottom: 0; }
 .page > .tabs { margin-bottom: 0; }
 
-/* Orders page variant — page-head, pipeline, KPIs and the orders card's
-   header stay put; only the inner .table-scroll scrolls. */
+/* Orders page variant — page-head and the orders card's header stay put;
+   only the inner .table-scroll scrolls. */
 .page.page-history {
   overflow: hidden;
   padding-bottom: 8px;
@@ -282,9 +282,6 @@ html.desktop, body.desktop, .desktop #root {
 .orders-toolbar-l .card-title { white-space: nowrap; }
 .page-history .toolbar-search { flex: 1 1 140px; max-width: 220px; }
 .page-history .toolbar-search > .input { width: 100%; }
-/* Four tiles while four fit; the grid decides, not a breakpoint. 140px is
-   what four need at the 720px floor once the sidebar is a rail. */
-.page.page-history .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .page.page-history .table .col-id { white-space: nowrap; }
 
 /* Narrow window: the table keeps its width and scrolls sideways, but the
@@ -299,9 +296,6 @@ html.desktop, body.desktop, .desktop #root {
 }
 @media (max-width: 1100px) {
   .page.page-history { padding: 10px 16px 16px; }
-  .page.page-history > .page-head .page-sub { display: none; }
-  .page.page-history .kpi { padding: 12px 14px; }
-  .page.page-history .kpi-value { font-size: 22px; margin-top: 4px; }
   .page.page-history .table .col-id {
     position: sticky;
     left: 0;
@@ -620,8 +614,8 @@ html.desktop, body.desktop, .desktop #root {
 .table-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; }
 .table-scroll .table { min-width: 1080px; }
 
-/* Contributor leaderboard — cap height so long lists scroll inside the card
-   instead of stretching the dashboard. Header stays pinned while rows scroll. */
+/* A long table inside a card (the FX rate history) — cap its height so it
+   scrolls in place instead of stretching the page. Header stays pinned. */
 .table-scroll.lb-scroll { max-height: 360px; overflow-y: auto; }
 .table-scroll.lb-scroll .table thead th {
   position: sticky;
@@ -2505,6 +2499,24 @@ html.desktop, body.desktop, .desktop #root {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 11.5px; color: var(--fg-subtle); margin-top: 10px; line-height: 1.5;
 }
+/* Money tone on the tape. `.pos`/`.neg` colour text only inside `.table`, so
+   the receipt's profit rows carried the class and painted nothing. */
+.tape .pos { color: var(--pos); }
+.tape .neg { color: var(--neg); }
+/* Sold meter: how much of the PO the realized block speaks for. A hairline,
+   not a chart — one fact (units sold of units bought) on a receipt row. The
+   count sits in the figure column so it lines up with the money below it. No
+   transition: the width is a fact on load, nothing to animate. */
+.tape-meter { display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 3px 0 5px; }
+.tape-meter .tape-k { color: var(--fg-muted); }
+.tape-meter-bar {
+  flex: 1; height: 2px; min-width: 40px; background: var(--border);
+  position: relative; transform: translateY(1px);
+}
+.tape-meter-bar::after {
+  content: ''; position: absolute; inset: 0; width: var(--fill, 0%);
+  background: var(--pos);
+}
 
 /* The tape's torn edge only reads if there is something behind it to reveal.
    Inside the items card it was cutting white out of white, so the strip below
@@ -3794,9 +3806,19 @@ html.desktop, body.desktop, .desktop #root {
   .dash-contrib-grid { grid-template-columns: 1fr; }
 }
 .dash-contrib .card-head { align-items: flex-start; }
-.dash-contrib-total { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-top: 2px; }
+.dash-contrib-note { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; max-width: 34ch; line-height: 1.35; }
+.dash-contrib-total { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-top: 4px; }
 .dash-contrib-tabs { padding: 12px 18px 0; }
 .dash-contrib-tabs .seg { display: grid; width: 100%; }
+/* Every contributor comes back; past this height (the header plus eight rows,
+   which is what the folded list used to show) the list scrolls inside the card
+   instead of stretching the dashboard, header pinned. */
+.dash-contrib-scroll { max-height: 320px; overflow-y: auto; }
+.dash-contrib-scroll .dash-contrib-table thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--bg-elev);
+  /* the collapsed border stays with the grid, not the pinned cell */
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 .dash-contrib-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .dash-contrib-table th {
   text-align: left; font-size: 11px; font-weight: 500; color: var(--fg-subtle);
@@ -3811,7 +3833,6 @@ html.desktop, body.desktop, .desktop #root {
 .dash-contrib-bar .bar-track { flex: 1; min-width: 60px; }
 .dash-contrib-bar .bar-track { height: 6px; border: none; }
 .dash-contrib-table td.num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; padding-left: 12px; white-space: nowrap; width: 1%; }
-.dash-contrib-others td { color: var(--fg-subtle); }
 .dash-contrib-empty { padding: 24px 0; text-align: center; color: var(--fg-subtle); font-size: 13px; }
 
 @media (prefers-reduced-motion: reduce) {

@@ -20,6 +20,8 @@ import { ArchiveConflictList } from '../components/ArchiveConflictList';
 import { navigate } from '../lib/route';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
+import { profitTone } from '../lib/orderPresentation';
+import { isPricedSellPrice } from '@recycle-erp/shared';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
 import { normalizePaypalTxnInput } from '../lib/paypalTxn';
 import {
@@ -190,12 +192,14 @@ export function OrderDetail({
   }, []);
 
   const totals = useMemo(() => {
-    let qty = 0, cost = 0;
+    let qty = 0, cost = 0, margin = 0;
     for (const l of order.lines) {
       qty += l.qty;
       cost += l.qty * l.unitCost;
+      // Priced lines only, the way the PO list's Profit column counts it.
+      if (isPricedSellPrice(l.sellPrice)) margin += l.qty * (Number(l.sellPrice) - l.unitCost);
     }
-    return { qty, cost };
+    return { qty, cost, margin };
   }, [order.lines]);
 
   // Reads the fee being typed, not the saved one, so the total tracks the box.
@@ -332,7 +336,18 @@ export function OrderDetail({
     // Leaving Draft is the hand-off sheet's job: how the goods get here and
     // who paid, saved and advanced in one call. It is seeded from the fields
     // on screen, so an edit typed here is what it writes.
-    if (effectiveStatus === 'Draft') { setHandoffOpen(true); return; }
+    if (effectiveStatus === 'Draft') {
+      // The cost lives on this page, not in the sheet, so it is asked for
+      // here; the server refuses a $0 PO as well. Only on the first
+      // submission: a PO an edit sent back to Draft re-submits as it was
+      // accepted.
+      if (!(cost.goods > 0) && !order.everSubmitted) {
+        showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
+        return;
+      }
+      setHandoffOpen(true);
+      return;
+    }
     // Moving to Done first offers the optional evidence dialog (note +
     // attachments); confirming there fires the actual advance.
     if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
@@ -780,6 +795,44 @@ export function OrderDetail({
               {fmtUSD(cost.total, locale)}
             </span>
           </div>
+
+          {/* The two profits, managers only. Unrealized is the list column's
+              figure — margin on priced lines less the fee; Realized is what
+              the units earned on completed sell orders, net of the commission
+              paid, and only speaks for the units that sold. */}
+          {showFinalSell && (() => {
+            const unrealized = totals.margin - (order.otherFees ?? 0);
+            const rz = order.realized ?? null;
+            const fill = rz && rz.boughtQty > 0 ? Math.min(100, (rz.soldQty / rz.boughtQty) * 100) : 0;
+            return (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                  <span style={{ color: 'var(--fg-subtle)' }}>{t('unrealizedProfit')}</span>
+                  <span className="mono" style={{ fontWeight: 600, color: `var(--${profitTone(unrealized)})` }}>
+                    {fmtUSD(unrealized, locale)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 6 }}>
+                  <span style={{ color: 'var(--fg-subtle)' }}>{t('realizedProfit')}</span>
+                  {rz ? (
+                    <span className="mono" style={{ fontWeight: 600, color: `var(--${profitTone(rz.profit)})` }}>
+                      {fmtUSD(rz.profit, locale)}
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--fg-subtle)' }}>{t('nothingSoldYet')}</span>
+                  )}
+                </div>
+                {rz && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: 11, color: 'var(--fg-subtle)' }}>
+                    <span aria-hidden="true" style={{ flex: 1, height: 2, background: 'var(--border)', position: 'relative' }}>
+                      <span style={{ position: 'absolute', inset: 0, width: `${fill}%`, background: 'var(--pos)' }} />
+                    </span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{t('soldOfUnits', { n: rz.soldQty, of: rz.boughtQty })}</span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         <div className="ph-section-h"><span>{t('orderDetails')}</span></div>

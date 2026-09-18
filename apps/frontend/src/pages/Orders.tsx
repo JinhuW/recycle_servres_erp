@@ -260,6 +260,13 @@ export function Orders({ onEdit, onToast }: Props) {
                     color: `var(--${profitTone(o.profit)})`,
                   }}>{signedUSD0(o.profit, locale)}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', marginTop: 1 }}>{fmtUSD0(o.revenue, locale)}</div>
+                  {/* What the units actually earned, once any have — the
+                      figure above stays the projection. Managers only. */}
+                  {effRole === 'manager' && o.realized && (
+                    <div className="mono" style={{ fontSize: 10.5, marginTop: 1, color: `var(--${profitTone(o.realized.profit)})` }}>
+                      {t('realizedShort')} {signedUSD0(o.realized.profit, locale)}
+                    </div>
+                  )}
                   {/* Revenue counts priced lines only, so a PO nobody has
                       priced reads $0 against a real cost. Say why. */}
                   {unpriced > 0 && (
