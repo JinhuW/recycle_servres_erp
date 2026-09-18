@@ -1355,8 +1355,10 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                         if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
                         // The cost is fixed on this page, not in the dialog,
                         // so it is asked for here — as a dialog, like an
-                        // unsaved edit — and the server refuses it too.
-                        if (!(cost.goods > 0)) {
+                        // unsaved edit — and the server refuses it too. Only
+                        // on the first submission: a PO an edit sent back to
+                        // Draft re-submits as it was accepted.
+                        if (!(cost.goods > 0) && !order.everSubmitted) {
                           showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
                           return;
                         }

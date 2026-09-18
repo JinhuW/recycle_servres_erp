@@ -4,7 +4,7 @@ import { uploadAttachment, deleteAttachment, deleteAttachments } from '../r2';
 import { clampLimit, decodeCursor, encodeCursor, parseSort } from '../lib/pagination';
 import { nextHumanId } from '../lib/id-seq';
 import {
-  diff, writeOrderEvent, META_FIELDS, LINE_FIELDS, type AuditChange, type SqlLike,
+  diff, writeOrderEvent, wasEverSubmitted, META_FIELDS, LINE_FIELDS, type AuditChange, type SqlLike,
 } from '../services/orderAudit';
 import { autoTrackParts } from '../lib/marketAutoTrack';
 import { effectiveRole } from '../lib/role';
@@ -234,17 +234,6 @@ function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
 }
 
-// A purchaser edit puts a submitted order back in Draft, so "is a draft" no
-// longer means "was never submitted". Delete, Archive and the client all read
-// the history instead of the stage — and they must agree, or an order lands in
-// a state that refuses both.
-async function wasEverSubmitted(sql: SqlLike, id: string): Promise<boolean> {
-  return !!(await sql`
-    SELECT 1 FROM order_events
-    WHERE order_id = ${id} AND kind IN ('submitted', 'reverted') LIMIT 1
-  `)[0];
-}
-
 // A `reverted` event stays pending until a `revert_ack` names its id. A
 // timestamp watermark loses any revert whose PATCH commits after the ack:
 // order_events.created_at is transaction-START time, and the ack cannot see
@@ -401,7 +390,7 @@ orders.get('/', async (c) => {
       o.commission_rate::float AS commission_rate,
       w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
       rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
-      rz.projected_revenue, rz.goods_bought,
+      rz.projected_profit,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
       -- A line with no sell price contributes nothing: NULL drops out of SUM.
       -- It used to fall back to unit_cost, which invented revenue equal to the
@@ -429,11 +418,11 @@ orders.get('/', async (c) => {
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
-    ${poRealizedLateral(sql)}
+    ${poRealizedLateral(sql, isManager)}
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name,
-             rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_revenue, rz.goods_bought
+             rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
   `;
@@ -481,8 +470,8 @@ orders.get('/', async (c) => {
       // — managers only, null until something sells. Optional and additive.
       realized: isManager ? realizedFromRow({
         sold_qty: r.sold_qty, bought_qty: r.bought_qty, revenue: r.rz_revenue, cost: r.rz_cost,
-        projected_revenue: r.projected_revenue, goods_bought: r.goods_bought,
-      }, { total_cost: r.total_cost, other_fees: r.other_fees, commission_rate: r.commission_rate }) : null,
+        projected_profit: r.projected_profit,
+      }, { commission_rate: r.commission_rate }) : null,
       lineCount: r.line_count,
       unpricedLineCount: r.unpriced_line_count,
       // PO status is authoritative — derive from o.lifecycle, not from line
@@ -499,6 +488,7 @@ orders.get('/:id', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
+  const isManager = effectiveRole(u) === 'manager';
 
   const order = (await sql`
     SELECT o.id, o.user_id, o.category, o.payment, o.notes, o.lifecycle, o.created_at,
@@ -515,22 +505,21 @@ orders.get('/:id', async (c) => {
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
            (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count,
            rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
-           rz.projected_revenue, rz.goods_bought
+           rz.projected_profit
     FROM orders o
     JOIN users u ON u.id = o.user_id
     LEFT JOIN users hb ON hb.id = o.handoff_by
     LEFT JOIN warehouses w ON w.id = o.warehouse_id
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
-                          AND (${effectiveRole(u) === 'manager'} OR sup.owner_id IS NULL
+                          AND (${isManager} OR sup.owner_id IS NULL
                                OR sup.owner_id = ${u.id})
-    ${poRealizedLateral(sql)}
+    ${poRealizedLateral(sql, isManager)}
     WHERE o.id = ${id}
     LIMIT 1
   `)[0];
 
   if (!order) return c.json({ error: 'Not found' }, 404);
-  if (effectiveRole(u) !== 'manager' && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
-  const isManager = effectiveRole(u) === 'manager';
+  if (!isManager && order.user_id !== u.id) return c.json({ error: 'Forbidden' }, 403);
 
   // `fs` is what the units actually sold for — the qty-weighted unit price
   // over Done sell orders naming the line — as opposed to `sell_price`, the
@@ -672,8 +661,8 @@ orders.get('/:id', async (c) => {
       realized: isManager ? realizedFromRow({
         sold_qty: order.sold_qty, bought_qty: order.bought_qty,
         revenue: order.rz_revenue, cost: order.rz_cost,
-        projected_revenue: order.projected_revenue, goods_bought: order.goods_bought,
-      }, { total_cost: order.total_cost, other_fees: order.other_fees, commission_rate: order.commission_rate }) : null,
+        projected_profit: order.projected_profit,
+      }, { commission_rate: order.commission_rate }) : null,
       warehouse: order.warehouse_id
         ? { id: order.warehouse_id, short: order.warehouse_short, region: order.warehouse_region }
         : null,

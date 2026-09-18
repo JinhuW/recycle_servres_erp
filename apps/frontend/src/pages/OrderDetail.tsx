@@ -338,8 +338,10 @@ export function OrderDetail({
     // on screen, so an edit typed here is what it writes.
     if (effectiveStatus === 'Draft') {
       // The cost lives on this page, not in the sheet, so it is asked for
-      // here; the server refuses a $0 PO as well.
-      if (!(cost.goods > 0)) {
+      // here; the server refuses a $0 PO as well. Only on the first
+      // submission: a PO an edit sent back to Draft re-submits as it was
+      // accepted.
+      if (!(cost.goods > 0) && !order.everSubmitted) {
         showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
         return;
       }
