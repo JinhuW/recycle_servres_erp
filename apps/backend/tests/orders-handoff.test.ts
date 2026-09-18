@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, multipart } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { syncBankTransactions } from '../src/banktx/sync';
+import { stubPaypalProvider } from '../src/banktx/stub';
 
 // POST /api/orders/:id/handoff — the Draft → In Transit hand-off as one
 // transaction: the dialog's fields, the package a tracking number becomes, and
@@ -140,6 +142,29 @@ describe('hand-off — local pickup', () => {
     const o = await readOrder(token, id);
     expect(o.paypalTxnId).toBe('7AB12345CD678901E');
     expect(o.paymentMethod).toBe('paypal');
+  });
+
+  it('company card + PayPal refuses an ID our PayPal account never made, leaving nothing behind', async () => {
+    // Once a PayPal account has synced, the id is checked against its rows —
+    // the advance inside the hand-off holds to it, so the package the label
+    // would have created is rolled back with everything else.
+    await syncBankTransactions(testEnv, [stubPaypalProvider()]);
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    const r = await api<{ error: string; paypalTxnId: string }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: {
+        warehouseId: 'WH-LA1', source: 'other', handoff: label,
+        payment: 'company', paymentMethod: 'paypal', paypalTxnId: 'NOSUCHTXN00000001',
+      },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/PayPal account/i);
+    expect(r.body.paypalTxnId).toBe('NOSUCHTXN00000001');
+    const o = await readOrder(token, id);
+    expect(o.lifecycle).toBe('draft');
+    expect(o.paypalTxnId).toBeNull();
+    const sql = getTestDb();
+    expect((await sql`SELECT 1 FROM packages WHERE order_id = ${id}`).length).toBe(0);
   });
 });
 

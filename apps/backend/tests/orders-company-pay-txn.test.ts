@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, multipart } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { syncBankTransactions } from '../src/banktx/sync';
+import { stubPaypalProvider } from '../src/banktx/stub';
 
 // "A company-paid PO must carry a payment transaction id before it can leave
 // Draft" — enforced in advanceOrderTx, so every caller is covered, and scoped
@@ -132,6 +134,117 @@ describe('company-pay POs need a transaction ID to leave Draft', () => {
     const b = await api<{ order: { txnRequired: boolean } }>(
       'GET', `/api/orders/${self}`, { token });
     expect(b.body.order.txnRequired).toBe(false);
+  });
+});
+
+// "…and it must be one of our PayPal account's transactions" — the id is
+// checked against the synced PayPal rows in bank_transactions, at the same
+// door. The rule is live only once a PayPal account has synced into the
+// environment, which is why the block above passes any id at all.
+describe('company-pay POs need a transaction ID we synced from PayPal', () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The stub provider's canned rows, no PayPal keys needed.
+  const KNOWN = '7AB12345CD678901E';
+  const UNKNOWN = 'NOSUCHTXN00000001';
+
+  async function seedPaypal(): Promise<void> {
+    await syncBankTransactions(testEnv, [stubPaypalProvider()]);
+  }
+
+  async function setTxn(token: string, id: string, txn: string): Promise<void> {
+    const r = await api('PATCH', `/api/orders/${id}`, { token, body: { paypalTxnId: txn } });
+    expect(r.status).toBe(200);
+  }
+
+  it('refuses an ID that is not among the synced PayPal transactions', async () => {
+    await seedPaypal();
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await setTxn(token, id, UNKNOWN);
+
+    const r = await api<{ error: string; paypalTxnId: string }>(
+      'POST', `/api/orders/${id}/advance`, { token });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/PayPal account/i);
+    expect(r.body.paypalTxnId).toBe(UNKNOWN);
+    expect(await lifecycleOf(token, id)).toBe('draft');
+  });
+
+  it('advances on an ID that a synced PayPal row carries', async () => {
+    await seedPaypal();
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await setTxn(token, id, KNOWN);
+
+    const r = await api('POST', `/api/orders/${id}/advance`, { token });
+    expect(r.status).toBe(200);
+    expect(await lifecycleOf(token, id)).toBe('in_transit');
+  });
+
+  it('holds a manager stage-jump to the same rule', async () => {
+    await seedPaypal();
+    const { token: pTok } = await loginAs(MARCUS);
+    const id = await createOrder(pTok, 'company');
+    await setTxn(pTok, id, UNKNOWN);
+
+    const { token: mTok } = await loginAs(ALEX);
+    const r = await api<{ error: string }>('POST', `/api/orders/${id}/advance`, {
+      token: mTok, body: { toStage: 'done' },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/PayPal account/i);
+    expect(await lifecycleOf(mTok, id)).toBe('draft');
+  });
+
+  it('is off until a PayPal account has synced into the environment', async () => {
+    // No sync at all: the table is empty, as on a dev box without PayPal
+    // keys, and any id passes — the case every other test file relies on.
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await setTxn(token, id, UNKNOWN);
+
+    const r = await api('POST', `/api/orders/${id}/advance`, { token });
+    expect(r.status).toBe(200);
+    expect(await lifecycleOf(token, id)).toBe('in_transit');
+  });
+
+  // An account has synced but the payment has not arrived yet — the
+  // six-hourly gap. Whether the advance pulls PayPal first depends on whether
+  // PayPal is configured; two orders, because the one that advanced is no
+  // longer a Draft to refuse.
+  async function seedAccountOnly(): Promise<void> {
+    const sql = getTestDb();
+    await sql`INSERT INTO bank_accounts (source, external_id, name) VALUES ('paypal', 'primary', 'stub')`;
+  }
+
+  it('refuses without pulling when PayPal is not configured', async () => {
+    await seedAccountOnly();
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await setTxn(token, id, KNOWN);
+
+    const r = await api<{ error: string }>('POST', `/api/orders/${id}/advance`, { token });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/PayPal account/i);
+    expect(await lifecycleOf(token, id)).toBe('draft');
+  });
+
+  it('pulls PayPal once before deciding when it is configured', async () => {
+    await seedAccountOnly();
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await setTxn(token, id, KNOWN);
+
+    const r = await api('POST', `/api/orders/${id}/advance`, {
+      token, env: { BANKTX_STUB: '1' },
+    });
+    expect(r.status).toBe(200);
+    expect(await lifecycleOf(token, id)).toBe('in_transit');
+    const sql = getTestDb();
+    const rows = await sql`
+      SELECT 1 FROM bank_transactions WHERE source = 'paypal' AND paypal_txn_id = ${KNOWN}`;
+    expect(rows.length).toBe(1);
   });
 });
 
