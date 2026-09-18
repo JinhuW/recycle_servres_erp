@@ -2,13 +2,13 @@
 id: RS-071
 title: Company pay asks PayPal or Cash; cash needs a screenshot of the amount paid
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: Jinhu
 branch: session/20260918-102150
 pr: 357
-version:
+version: 1.153.0
 related: [RS-050, RS-069]
 ---
 

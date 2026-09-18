@@ -7,7 +7,7 @@ See [README.md](./README.md) for what the fields mean.
 |---|---|---|---|---|---|
 | [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | backlog | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | — |
 | [RS-072](./RS-072-unit-cost-is-required-when-a-product-line-is-saved.md) | done | story | P2 | Unit cost is required when a product line is saved | 1.152.0 |
-| [RS-071](./RS-071-company-pay-asks-paypal-or-cash-cash-needs-a-screens.md) | in-progress | story | P2 | Company pay asks PayPal or Cash; cash needs a screenshot of the amount paid | — |
+| [RS-071](./RS-071-company-pay-asks-paypal-or-cash-cash-needs-a-screens.md) | done | story | P2 | Company pay asks PayPal or Cash; cash needs a screenshot of the amount paid | — |
 | [RS-070](./RS-070-po-suggestions-honour-the-payment-s-owner.md) | done | story | P2 | PO suggestions honour the payment's owner | 1.151.0 |
 | [RS-069](./RS-069-a-po-s-paypal-transaction-id-must-be-one-of-our-payp.md) | done | story | P2 | A PO's PayPal transaction ID must be one of our PayPal account's transactions | 1.150.0 |
 | [RS-068](./RS-068-realized-profit-and-the-cost-rule-review-fixes-befor.md) | done | bug | P2 | Realized profit and the cost rule: review fixes before the 1.149 release | 1.149.4 |
