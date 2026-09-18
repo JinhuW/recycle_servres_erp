@@ -6,17 +6,14 @@ import { api } from '../lib/api';
 import { handleFetchError } from '../lib/errorToast';
 import { useEffectiveUser } from '../lib/tweaks';
 import { shareOrCopy } from '../lib/shareOrCopy';
-import { fmtUSD, fmtUSD0, fmtDateShort } from '../lib/format';
+import { fmtUSD0, fmtDateShort } from '../lib/format';
 import { profitTone, signedUSD0 } from '../lib/orderPresentation';
-import { isRealPhotoUrl } from '../lib/linePhotos';
-import { ORDER_STATUSES, isCompleted, statusTone } from '../lib/status';
+import { ORDER_STATUSES, isCompleted, isClosedBook, statusTone } from '../lib/status';
 import { categoryFilterOptions } from '../lib/lookups';
 import { usePhScrolled } from '../lib/usePhScrolled';
-import { useRoute, match, navigate } from '../lib/route';
-import { RouteLink } from '../components/RouteLink';
-import type { OrderSummary, Order } from '../lib/types';
-import { Skeleton, PhoneListSkeleton } from '../components/Skeleton';
-import { ImageLightbox } from '../components/ImageLightbox';
+import { navigate } from '../lib/route';
+import type { OrderSummary } from '../lib/types';
+import { PhoneListSkeleton } from '../components/Skeleton';
 import { OrderCategoryChips } from '../components/OrderCategoryChips';
 
 
@@ -29,11 +26,10 @@ const hueFromId = (s: string): number => {
 };
 
 type Props = {
-  onEdit: (o: Order) => void;
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
 
-export function Orders({ onEdit, onToast }: Props) {
+export function Orders({ onToast }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   // Backend scopes the list by effectiveRole; track it here so toggling the
@@ -44,16 +40,10 @@ export function Orders({ onEdit, onToast }: Props) {
   const [showArchived, setShowArchived] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [loadedOnce, setLoadedOnce] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [openLines, setOpenLines] = useState<Order | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolled = usePhScrolled(scrollRef);
-  const { path } = useRoute();
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const lastHandledRouteId = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -77,52 +67,13 @@ export function Orders({ onEdit, onToast }: Props) {
     return () => { alive = false; };
   }, [filter, statusFilter, showArchived, effRole]);
 
-  // When a row is expanded, fetch its lines lazily.
-  useEffect(() => {
-    if (!openId) { setOpenLines(null); return; }
-    let alive = true;
-    api.get<{ order: Order }>(`/api/orders/${openId}`)
-      .then(r => { if (alive) setOpenLines(r.order); })
-      .catch(handleFetchError);
-    return () => { alive = false; };
-  }, [openId]);
-
   // The all-status view hides Done POs — the "Done" chip is the explicit way
-  // to see them. A deep-linked done order stays visible while expanded so
-  // /purchase-orders/:id links keep working.
+  // to see them. A /purchase-orders/:id link opens the PO's own screen (the
+  // shell drives that from the URL), so the list needs no exception for it.
   const visibleOrders = useMemo(
-    () => statusFilter === 'all'
-      ? orders.filter(o => !isCompleted(o.status) || o.id === openId)
-      : orders,
-    [orders, statusFilter, openId],
+    () => statusFilter === 'all' ? orders.filter(o => !isCompleted(o.status)) : orders,
+    [orders, statusFilter],
   );
-
-  // CC-5: when the URL matches /purchase-orders/:id, expand that row and (if
-  // editable) push to the review screen. Fires whenever route or the
-  // currently-loaded list changes. We track the last-handled id in a
-  // ref so that orders re-fetches (e.g. chip filter change) don't yank
-  // the user back into edit unexpectedly.
-  useEffect(() => {
-    const m = match('/purchase-orders/:id', path);
-    if (!m) {
-      lastHandledRouteId.current = null;
-      return;
-    }
-    if (lastHandledRouteId.current === m.id) return; // already handled this id
-    lastHandledRouteId.current = m.id;
-    setOpenId(m.id);
-    const node = rowRefs.current[m.id];
-    if (node) {
-      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    const summary = orders.find(o => o.id === m.id);
-    if (summary && !isCompleted(summary.status)) {
-      // Fetch the full order to pass to onEdit (it expects the lines).
-      api.get<{ order: Order }>(`/api/orders/${m.id}`).then(r => onEdit(r.order)).catch(handleFetchError);
-    }
-    // Eslint: omitting onEdit on purpose — the parent provides a stable callback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, orders]);
 
   return (
     <>
@@ -197,11 +148,16 @@ export function Orders({ onEdit, onToast }: Props) {
               )
             : visibleOrders;
           return filtered.slice(0, 30).map(o => {
-          const isOpen = openId === o.id;
           const unpriced = o.unpricedLineCount ?? 0;
+          // Rows open the PO rather than expanding: an 18-line PO unfolded
+          // taller than the phone, and the edit button sat at the bottom of
+          // it. The icon on the right says whether the PO is still the
+          // purchaser's to change before they open it.
+          const locked = isClosedBook(o.status) || !!o.archivedAt;
+          const open = () => navigate('/purchase-orders/' + o.id);
           return (
-            <div key={o.id} className="ph-order" ref={el => { rowRefs.current[o.id] = el; }} style={o.archivedAt ? { opacity: 0.6 } : undefined}>
-              <div className="ph-order-head" onClick={() => setOpenId(isOpen ? null : o.id)} style={{ cursor: 'pointer' }}>
+            <div key={o.id} className="ph-order" style={o.archivedAt ? { opacity: 0.6 } : undefined}>
+              <div className="ph-order-head" onClick={open} style={{ cursor: 'pointer' }}>
                 <OrderCategoryChips categories={o.categories} max={1} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -278,92 +234,23 @@ export function Orders({ onEdit, onToast }: Props) {
                     </div>
                   )}
                 </div>
-                <Icon name="chevronDown" size={16} style={{ color: 'var(--fg-subtle)', transition: 'transform 0.18s', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+                <button
+                  type="button"
+                  className="ph-icon-btn"
+                  onClick={(e) => { e.stopPropagation(); open(); }}
+                  aria-label={locked ? t('viewOrder') : t('editOrder')}
+                  // Compact and borderless: it sits where the chevron was, and
+                  // the meta row to its left is already fighting for width.
+                  style={{ width: 30, height: 30, marginRight: -4, border: 'none', background: 'var(--bg-soft)', color: locked ? 'var(--fg-subtle)' : 'var(--fg)' }}
+                >
+                  <Icon name={locked ? 'eye' : 'edit'} size={14} />
+                </button>
               </div>
-              {isOpen && openLines && openLines.id === o.id && (
-                <div className="ph-order-body">
-                  {openLines.lines.map(l => (
-                    <div key={l.id} className="ph-line" style={{ display: 'flex', gap: 10 }}>
-                      {isRealPhotoUrl(l.scanImageUrl) && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setLightboxUrl(l.scanImageUrl!); }}
-                          title={t('aiPhotoLabel')}
-                          style={{
-                            width: 52, height: 52, borderRadius: 10, flexShrink: 0,
-                            border: '1px solid var(--border)', overflow: 'hidden',
-                            padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                          }}
-                        >
-                          <img
-                            src={l.scanImageUrl}
-                            alt={t('aiPhotoLabel')}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                          />
-                        </button>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {l.category === 'RAM' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`}
-                          {l.category === 'SSD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`}
-                          {l.category === 'HDD' && `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`}
-                          {l.category === 'Other' && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {!!(l.itemType ?? '').trim() && <span className="chip">{l.itemType}</span>}
-                              {l.description ?? ''}
-                            </span>
-                          )}
-                        </div>
-                        <span className={'chip ' + statusTone(l.status) + ' dot'} style={{ fontSize: 10 }}>{l.status}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4, fontFamily: 'JetBrains Mono, monospace' }}>{l.partNumber}</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5 }}>
-                        <span style={{ color: 'var(--fg-subtle)' }}>
-                          Qty {l.qty} · {fmtUSD(l.unitCost, locale)} {l.sellPrice != null && <>→ {fmtUSD(l.sellPrice, locale)}</>}
-                          {effRole === 'manager' && l.finalSellPrice != null && (
-                            <> · {t('finalSellPrice')} {fmtUSD(l.finalSellPrice, locale)}{l.finalSoldQty != null && l.finalSoldQty !== l.qty && <>×{l.finalSoldQty}</>}</>
-                          )}
-                        </span>
-                        {l.sellPrice != null && (
-                          <span className="mono" style={{
-                            fontWeight: 600,
-                            color: `var(--${profitTone(l.sellPrice - l.unitCost)})`,
-                          }}>
-                            {signedUSD0((l.sellPrice - l.unitCost) * l.qty, locale)}
-                          </span>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                  ))}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <RouteLink
-                      to={'/purchase-orders/' + o.id}
-                      className="btn sm"
-                      style={{ flex: 1, justifyContent: 'center' }}
-                      title={isCompleted(o.status) ? t('viewOrder') : t('editOrder')}
-                    >
-                      <Icon name={isCompleted(o.status) ? 'eye' : 'edit'} size={11} /> {isCompleted(o.status) ? t('done') : t('edit')}
-                    </RouteLink>
-                  </div>
-                </div>
-              )}
-              {isOpen && (!openLines || openLines.id !== o.id) && (
-                <div className="ph-order-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <Skeleton width="80%" height={13} />
-                  <Skeleton width="60%" height={11} />
-                  <Skeleton width="40%" height={11} />
-                </div>
-              )}
             </div>
           );
           });
         })()}
       </div>
-      {lightboxUrl && (
-        <ImageLightbox url={lightboxUrl} alt={t('aiPhotoLabel')} onClose={() => setLightboxUrl(null)} />
-      )}
     </>
   );
 }

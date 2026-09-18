@@ -65,6 +65,27 @@ export function useRoute(): { path: string } {
  * matches `path`, or null otherwise. Trailing segments in `path` are not
  * allowed unless the template's last segment is a param.
  */
+/**
+ * The phone shows a PO on two screens: the order itself at
+ * `/purchase-orders/:id` and its lines at `/purchase-orders/:id/products`.
+ * Both map to the same PO; `matchPurchaseOrder` answers "which PO, which
+ * screen" for every shell so the desktop, which has one page, still opens the
+ * PO when handed the products link.
+ */
+export type PoScreen = 'info' | 'products';
+
+export function poProductsPath(id: string): string {
+  return '/purchase-orders/' + id + '/products';
+}
+
+export function matchPurchaseOrder(path: string): { id: string; screen: PoScreen } | null {
+  const info = match('/purchase-orders/:id', path);
+  if (info) return { id: info.id!, screen: 'info' };
+  const products = match('/purchase-orders/:id/products', path);
+  if (products) return { id: products.id!, screen: 'products' };
+  return null;
+}
+
 export function match(template: string, path: string): Record<string, string> | null {
   const t = template.split('/').filter(Boolean);
   const p = path.split('/').filter(Boolean);
@@ -130,7 +151,7 @@ export type DesktopViewId = keyof typeof DESKTOP_VIEW_TO_PATH;
 export function pathToDesktopView(path: string): DesktopViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
   if (path === '/submit') return 'submit';
-  if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
+  if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/clients' || match('/clients/:id', path)) return 'clients';
   if (path === '/market') return 'market';
@@ -241,7 +262,7 @@ export type MobileViewId = keyof typeof MOBILE_VIEW_TO_PATH;
 
 export function pathToMobileView(path: string): MobileViewId {
   if (path === '/' || path === '/dashboard') return 'dashboard';
-  if (path === '/purchase-orders' || match('/purchase-orders/:id', path)) return 'history';
+  if (path === '/purchase-orders' || matchPurchaseOrder(path)) return 'history';
   if (parseShippingRoute(path)) return 'shipping';
   if (path === '/market') return 'market';
   if (path === '/inventory') return 'inventory';

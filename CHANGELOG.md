@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.154.0] - 2026-09-18
+
+### Features
+
+- **The phone PO is two screens, and the list opens them** (RS-074). A row
+  on the phone's Orders list used to unfold in place, lazily fetching its
+  lines, with the only way in — a small *Edit* — at the foot of that body;
+  on an 18-line PO that sat more than a screen below the row. Rows no longer
+  expand: the whole card opens the PO, and the chevron is now a pencil (still
+  the purchaser's to change) or an eye (Ready to Pay, Done or archived). The
+  PO page itself is split. `/purchase-orders/:id` is the **order**: the id as
+  its title with the stage under it, the stepper, a **Before you submit**
+  list on a Draft naming what still blocks the hand-off — products and their
+  cost, then whichever of paid-by / method / transaction ID / cash or chat
+  screenshot the hand-off sheet would ask for, derived from the same rule so
+  the two cannot disagree, each row a link to the thing it names — a
+  *Products · n* row, shipping, the cost card, the fields and the activity
+  log. `/purchase-orders/:id/products` is the **products** screen: the line
+  cards, the add-category dock and the goods total; the line form opens from
+  here and returns here. One component renders both, so a line removed on one
+  screen is already gone on the other, a fee typed on the order survives a
+  trip to the products, and the "this sends the PO back to Draft" warning is
+  asked once per visit. The **payment fields fold by default** behind a
+  header that reads back the answer (`Company · PayPal · 8XY…`, `Self-paid`);
+  a readiness row that names a payment gap opens them. The phone shell is
+  sized in `dvh`, so the docked action bar is no longer hidden under a
+  mobile browser's toolbar. Desktop is unchanged, except that a products
+  link opened on a laptop lands on that PO rather than the dashboard.
+
 ## [1.153.0] - 2026-09-18
 
 ### Features
