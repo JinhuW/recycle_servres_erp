@@ -19,7 +19,7 @@ import {
   advanceOrderTx, revertOrderToDraftTx, archiveOrderLinesTx, unarchiveOrderLinesTx,
   LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
-import { txnRequiredFor, chatShotRequiredFor } from '../services/orderTxnRule';
+import { txnRequiredFor, chatShotRequiredFor, companyPayTxnUnknown } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import {
@@ -27,7 +27,8 @@ import {
 } from '../services/orderHandoff';
 import { pickTrackingClient } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
-import { linkPaypalTxnToOrder } from '../banktx/sync';
+import { pickBankProviders } from '../banktx';
+import { linkPaypalTxnToOrder, syncBankTransactions } from '../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { poRealizedLateral } from '../lib/po-cost';
 import { realizedFromRow } from '../services/poRealized';
@@ -2583,11 +2584,44 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   return c.json({ ok: true });
 });
 
+// The transaction-id rule's second half — the id must be a payment our
+// PayPal account made — is judged inside the advance tx against the synced
+// rows. A miss there may just be the six-hourly sync running behind PayPal,
+// and purchasers cannot press Sync-now (the Payments page is a manager's), so
+// an unknown id pulls PayPal once *before* the tx. The tx guard stays the
+// verdict; this only makes sure it reads a fresh table. Two things to know:
+// the sync is single-flighted per process, so a miss during the six-hourly
+// run joins that run — which may have queried PayPal before the payment
+// landed, in which case the guard refuses and the next attempt pulls again;
+// and a miss costs one Transaction Search plus the dispute list, with no
+// throttle beyond that single flight. PayPal itself reports a payment up to
+// three hours late, which no pull can shorten.
+async function pullPaypalIfUnknown(
+  env: Env,
+  sql: ReturnType<typeof getDb>,
+  order: Parameters<typeof companyPayTxnUnknown>[1],
+): Promise<void> {
+  const paypal = pickBankProviders(env).providers.find((p) => p.source === 'paypal');
+  if (!paypal) return;
+  if (!await companyPayTxnUnknown(sql, order)) return;
+  await syncBankTransactions(env, [paypal]);
+}
+
+type TxnRuleRow = {
+  payment: string; payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
+};
+
 orders.post('/:id/advance', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
+
+  // Only a Draft meets the guard, so only a Draft is worth a pull.
+  const [rule] = await sql<(TxnRuleRow & { lifecycle: string })[]>`
+    SELECT lifecycle, payment, payment_method, paypal_txn_id, created_at
+    FROM orders WHERE id = ${id}`;
+  if (rule?.lifecycle === 'draft') await pullPaypalIfUnknown(c.env, sql, rule);
 
   // The lifecycle read, all stage guards and the writes run inside one tx
   // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —
@@ -2627,6 +2661,12 @@ function advanceRefusedResponse(
     case 'missingTxnId':
       return c.json({
         error: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
+      }, 409);
+    case 'unknownTxnId':
+      return c.json({
+        error: `PayPal transaction ${outcome.paypalTxnId} isn't in our PayPal account — check the ID. `
+          + 'PayPal reports a new payment up to 3 hours late; if it was just sent, try again later.',
+        paypalTxnId: outcome.paypalTxnId,
       }, 409);
     case 'missingChatShot':
       return c.json({
@@ -2748,6 +2788,17 @@ orders.post('/:id/handoff', async (c) => {
     newOwner,
     commissionRate,
   };
+  // What the hand-off is about to write is what the advance inside it judges,
+  // so the pull reads the request, not the row — only the cutoff is the row's.
+  const [rule] = await sql<Pick<TxnRuleRow, 'created_at'>[]>`
+    SELECT created_at FROM orders WHERE id = ${id}`;
+  if (rule) {
+    await pullPaypalIfUnknown(c.env, sql, {
+      payment: body.payment, payment_method: paymentMethod, paypal_txn_id: paypalTxnId,
+      created_at: rule.created_at,
+    });
+  }
+
   let result: Awaited<ReturnType<typeof handoffOrderTx>>;
   try {
     result = await sql.begin(async (tx) =>

@@ -17,6 +17,25 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.150.0] - 2026-09-18
+
+### Features
+
+- **A company-paid PO's PayPal transaction ID must be a payment our PayPal
+  account actually made** (RS-069). Since v1.115.0 the ID was required before
+  a PO left Draft, but only its presence was checked: a typo or an invented ID
+  passed, linked nothing, and the PO never reconciled. The advance — through
+  the hand-off dialog, a manager stage-jump and the carrier poll alike — now
+  also looks the ID up among the PayPal transactions the Payments sync holds
+  and refuses with the ID named when none carries it. An unknown ID pulls
+  PayPal once before the transaction is judged, so a payment PayPal already
+  reports does not wait out the six-hourly sync; the refusal explains that
+  PayPal reports a new payment up to three hours late. The rule is live only
+  once a PayPal account has synced into the environment — a dev box without
+  keys and the test suite are untouched — and any synced PayPal row counts,
+  linked or ignored or pending, because the question is whether the payment
+  exists, not whether it is free.
+
 ## [1.149.4] - 2026-09-18
 
 ### Fixes

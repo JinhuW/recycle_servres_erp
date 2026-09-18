@@ -98,7 +98,17 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   refused without it for every actor, a manager stage-jump and carrier movement
   included. Self-pay POs are unaffected. The rule governs only orders created
   after it reached the environment, so POs already on file stay exempt. Mobile
-  gained the field as an input; it used to be read-only there.
+  gained the field as an input; it used to be read-only there. **The ID must
+  also be a payment our PayPal account made** (v1.150.0): at the same door,
+  it is checked against the PayPal transactions the Payments sync holds, and
+  an ID none of them carries is refused with the ID named — a typo or an
+  invented ID used to be accepted and left the PO unable to reconcile. An
+  unknown ID first pulls PayPal once, so a payment PayPal already reports
+  does not wait for the six-hourly sync; PayPal itself reports a payment up
+  to three hours late, and the refusal says so. The check is live only once a
+  PayPal account has synced into the environment, so a dev box without keys
+  is unaffected; a linked, ignored, pending or reversed row still counts as
+  existing, and Mercury legs do not.
 - **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0). Clicking
   In Transit on a Draft — the desktop stepper or the phone's advance button —
   opens *Mark as In Transit*: the receiving warehouse, the order's **source**
@@ -410,7 +420,9 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - Since v1.115.0 a company-paid PO cannot be submitted without its transaction
   ID — which is the key auto-link matches on — so those POs arrive already able
   to reconcile themselves, instead of landing in the unlinked queue for a
-  manager to match by amount and date.
+  manager to match by amount and date. Since v1.150.0 the ID must also be one
+  of the synced PayPal transactions, so a PO cannot leave Draft naming a
+  payment this table has never seen.
 - **The link is made when a human makes it, in either direction** (v1.118.0).
   Saving a transaction ID on a PO — on edit, on create, or on the draft PO
   minted from a delivered package — claims the matching transaction on the

@@ -9,7 +9,7 @@
 import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
-import { companyPayTxnMissing, selfPayChatMissing } from './orderTxnRule';
+import { companyPayTxnMissing, companyPayTxnUnknown, selfPayChatMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
@@ -84,6 +84,7 @@ export type AdvanceOutcome =
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'missingTxnId' }
+  | { kind: 'unknownTxnId'; paypalTxnId: string }
   | { kind: 'missingChatShot' }
   | { kind: 'noCost' }
   | { kind: 'ok'; nextStageId: string };
@@ -467,6 +468,14 @@ export async function advanceOrderTx(
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
       && await companyPayTxnMissing(tx, cur)) {
     return { kind: 'missingTxnId' };
+  }
+  // And the id has to be a payment our PayPal account actually made: a typo
+  // or an invented id links nothing and the PO never reconciles. The routes
+  // pull PayPal once before this tx when the id is unknown, so a payment
+  // PayPal already reports does not wait for the six-hourly sync.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
+      && await companyPayTxnUnknown(tx, cur)) {
+    return { kind: 'unknownTxnId', paypalTxnId: cur.paypal_txn_id!.trim() };
   }
   // Its self-paid twin: the chat with the seller is what the reimbursement is
   // checked against, so a self-paid PO leaves Draft only once it is attached.
