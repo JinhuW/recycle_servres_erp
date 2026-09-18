@@ -159,9 +159,11 @@ export function DesktopDashboard() {
         <ContribCard title={t('contribCost')} caption={countCaption(data.contrib.cost.count, false)}
                      data={data.contrib.cost} locale={locale} />
         <ContribCard title={t('contribSales')} caption={countCaption(data.contrib.revenue.count, true)}
-                     data={data.contrib.revenue} locale={locale} />
+                     data={data.contrib.revenue} locale={locale}
+                     purchaserAs={{ dim: 'dimSourcedBy', remaining: 'contribRemainingSourcedBy' }} />
         <ContribCard title={t('contribProfit')} caption={countCaption(data.contrib.profit.count, true)}
-                     data={data.contrib.profit} locale={locale} />
+                     data={data.contrib.profit} locale={locale}
+                     purchaserAs={{ dim: 'dimSourcedBy', remaining: 'contribRemainingSourcedBy' }} />
       </div>
 
       <div className="card">

@@ -2090,6 +2090,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     contribRemainingCategory: 'Remaining {n} categories',
     dimSupplier: 'Supplier',
     dimPurchaser: 'Purchaser',
+    dimSourcedBy: 'Sourced by',
+    contribRemainingSourcedBy: 'Remaining {n} purchasers',
     dimCustomer: 'Customer',
     dimCategory: 'Category',
     nPOs: '{n} purchase orders',

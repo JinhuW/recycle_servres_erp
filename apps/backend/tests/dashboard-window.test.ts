@@ -22,12 +22,14 @@ async function clearWindow() {
 }
 
 // A Done PO created one hour into the given business-zone calendar day.
-async function insertPOOn(id: string, ownerEmail: string, day: string, unitCost = 100, sellPrice = 150) {
+async function insertPOOn(
+  id: string, ownerEmail: string, day: string, unitCost = 100, sellPrice = 150, lifecycle = 'done',
+) {
   const db = getTestDb();
   const owner = await userId(ownerEmail);
   await db`
     INSERT INTO orders (id, user_id, category, lifecycle, commission_rate, other_fees, created_at)
-    VALUES (${id}, ${owner}, 'HDD', 'done', 0.1, 0,
+    VALUES (${id}, ${owner}, 'HDD', ${lifecycle}, 0.1, 0,
             (${day}::date::timestamp AT TIME ZONE ${TZ}) + INTERVAL '1 hour')
   `;
   await db`
@@ -42,6 +44,7 @@ type Body = {
   bounds: { first: string | null };
   series: { start: string; revenue: number; cost: number; profit: number }[];
   leaderboard: { cost: number | null }[];
+  contrib: { cost: { total: number } };
 };
 
 describe('GET /api/dashboard — reporting window', () => {
@@ -120,12 +123,14 @@ describe('GET /api/dashboard — reporting window', () => {
     expect(forced.body.series[0].start).toBe('2026-03-09');
   });
 
-  it('a partial first bucket is clipped: the series sums to the tiles and the board', async () => {
-    // Two POs in the same March week; the window starts mid-week and includes
-    // only the second, so an unclipped week bucket would count both.
+  it('a partial first bucket is clipped: the series sums to the tiles and the Cost card', async () => {
+    // Three POs in the same March week; the window starts mid-week and includes
+    // only the last two, so an unclipped week bucket would count all three.
+    // The Reviewing one is spend but not yet a projection.
     await clearWindow();
     await insertPOOn('PO-CLIP-A', MARCUS, '2026-03-10', 100, 150);
     await insertPOOn('PO-CLIP-B', MARCUS, '2026-03-12', 100, 180);
+    await insertPOOn('PO-CLIP-C', MARCUS, '2026-03-13', 60, 90, 'reviewing');
     const { token } = await loginAs(MARCUS);
     const r = await api<Body>('GET', '/api/dashboard?from=2026-03-11&to=2026-03-15&bucket=week', { token });
     expect(r.body.kpis.count).toBe(1);
@@ -133,9 +138,8 @@ describe('GET /api/dashboard — reporting window', () => {
     expect(sum('revenue')).toBeCloseTo(r.body.kpis.revenue, 2);
     expect(sum('profit')).toBeCloseTo(r.body.kpis.profit, 2);
     expect(sum('revenue')).toBeCloseTo(180, 2);
-    const boardCost = r.body.leaderboard.reduce((s, row) => s + (row.cost ?? 0), 0);
-    expect(sum('cost')).toBeCloseTo(boardCost, 2);
-    expect(sum('cost')).toBeCloseTo(100, 2);
+    expect(sum('cost')).toBeCloseTo(r.body.contrib.cost.total, 2);
+    expect(sum('cost')).toBeCloseTo(160, 2);
   });
 
   it('bounds.first is the earliest order day in the business zone', async () => {

@@ -57,11 +57,14 @@ dashboard.get('/', async (c) => {
                           AND po.created_at >= ${start} AND po.created_at < ${end}`;
   const projPrevWin = sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.user_id = ${u.id}
                           AND po.created_at >= ${prevStart} AND po.created_at < ${prevEnd}`;
-  // Spend — what the PO pages call "Total cost" — over every reviewed PO in the
-  // window (the leaderboard's rule), scoped to the caller for the purchaser lens.
+  // Spend — what the PO pages call "Total cost" — over every PO past Draft in
+  // the window, scoped to the caller for the purchaser lens. Money is committed
+  // the moment a PO is submitted; the leaderboard's narrower Ready-to-Pay/Done
+  // rule is about when commission is owed, not about what was spent.
   const spendWin = isManager
-    ? sql`po.lifecycle IN ('ready_to_pay', 'done') AND po.created_at >= ${start} AND po.created_at < ${end}`
-    : projDateWin;
+    ? sql`po.lifecycle <> 'draft' AND po.created_at >= ${start} AND po.created_at < ${end}`
+    : sql`po.lifecycle <> 'draft' AND po.user_id = ${u.id}
+          AND po.created_at >= ${start} AND po.created_at < ${end}`;
   // The "Recent activity" panel always tracks ingest (the purchasing pipeline).
   const poScopeFrag = isManager ? sql`TRUE` : sql`o.user_id = ${u.id}`;
   const poDateWin   = sql`o.created_at >= ${start} AND o.created_at < ${end}`;
