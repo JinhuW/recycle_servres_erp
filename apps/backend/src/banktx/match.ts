@@ -46,6 +46,7 @@ export type MatchLeg = {
   posted_at: Date;
   counterparty: string | null;
   paypal_txn_id: string | null;
+  assignee_id: string | null;
 };
 
 export type CandidateRow = {
@@ -124,6 +125,14 @@ export function tolFrag(sql: SqlClient, legAlias: string) {
 //     from the lines); other_fees — PayPal fees, freight, a bought label —
 //     is a separate column the bank very much did charge. Matching only the
 //     goods total misses every PO with a fee bigger than TOL_MAX, i.e. most.
+//
+// An assigned payment is gated to its owner's POs. Assigning is the manager's
+// verdict on whose payment this is, so another member's same-amount PO is the
+// noise, not a candidate. It sits here, in the one predicate both the pool and
+// hasMatchFrag share, so the badge, the filter and the tile cannot disagree
+// with the list. The txn-id branch is deliberately not gated: an identifier
+// written on a PO outranks a guess about who paid, and if it lands on another
+// member's PO it is the assignment that is probably wrong.
 function amountDateFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
   const a = sql(legAlias);
   const o = sql(orderAlias);
@@ -135,7 +144,8 @@ function amountDateFrag(sql: SqlClient, legAlias: string, orderAlias = 'o') {
       ${o}.total_cost BETWEEN ABS(${a}.amount) - ${tol} AND ABS(${a}.amount) + ${tol}
       OR ${o}.total_cost + ${o}.other_fees
            BETWEEN ABS(${a}.amount) - ${tol} AND ABS(${a}.amount) + ${tol}
-    )`;
+    )
+    AND (${a}.assignee_id IS NULL OR ${o}.user_id = ${a}.assignee_id)`;
 }
 
 // The PayPal txn id is an exact identifier, so it qualifies a PO on its own —
@@ -445,8 +455,10 @@ export async function fetchCandidatesBatch(
         posted_at: x.posted_at,
         counterparty: x.counterparty ?? '',
         paypal_txn_id: x.paypal_txn_id ?? '',
+        assignee_id: x.assignee_id,
       })))}::jsonb)
-      AS t(id text, amount numeric, posted_at timestamptz, counterparty text, paypal_txn_id text)
+      AS t(id text, amount numeric, posted_at timestamptz, counterparty text,
+           paypal_txn_id text, assignee_id uuid)
     )
     SELECT l.id AS leg_id,
            o.id,

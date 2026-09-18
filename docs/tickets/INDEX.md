@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-069](./RS-069-a-po-s-paypal-transaction-id-must-be-one-of-our-payp.md) | done | story | P2 | A PO's PayPal transaction ID must be one of our PayPal account's transactions | — |
+| [RS-070](./RS-070-po-suggestions-honour-the-payment-s-owner.md) | in-progress | story | P2 | PO suggestions honour the payment's owner | — |
+| [RS-069](./RS-069-a-po-s-paypal-transaction-id-must-be-one-of-our-payp.md) | done | story | P2 | A PO's PayPal transaction ID must be one of our PayPal account's transactions | 1.150.0 |
 | [RS-068](./RS-068-realized-profit-and-the-cost-rule-review-fixes-befor.md) | done | bug | P2 | Realized profit and the cost rule: review fixes before the 1.149 release | 1.149.4 |
 | [RS-067](./RS-067-dashboard-drops-the-contributor-leaderboard.md) | done | task | P3 | Dashboard drops the contributor leaderboard | 1.149.3 |
 | [RS-066](./RS-066-contribution-cards-state-where-their-figure-comes-fr.md) | done | task | P3 | Contribution cards state where their figure comes from | 1.149.2 |

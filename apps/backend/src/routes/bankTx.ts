@@ -242,6 +242,7 @@ bankTx.get('/', async (c) => {
       posted_at: r.posted_at as Date,
       counterparty: (r.counterparty as string | null) ?? null,
       paypal_txn_id: (r.paypal_txn_id as string | null) ?? null,
+      assignee_id: (r.assignee_id as string | null) ?? null,
     }));
   const matches = await matchSummaries(sql, openLegs);
 
@@ -786,6 +787,7 @@ bankTx.get('/:id/suggestions', async (c) => {
       posted_at: leg.posted_at,
       counterparty: leg.counterparty,
       paypal_txn_id: leg.paypal_txn_id,
+      assignee_id: leg.assignee_id,
     });
     // `total` is the uncapped pool: the list is truncated and saying so is the
     // difference between "these are all of them" and "keep looking".
