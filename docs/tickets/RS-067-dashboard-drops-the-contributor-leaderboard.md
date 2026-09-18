@@ -2,13 +2,13 @@
 id: RS-067
 title: Dashboard drops the contributor leaderboard
 type: task
-status: in-progress
+status: done
 priority: P3
 created: 2026-09-17
 reporter: jinhu
 branch: chore/dashboard-no-leaderboard
-pr:
-version:
+pr: 351
+version: 1.149.3
 related: [RS-062, RS-059, RS-061]
 ---
 
