@@ -17,6 +17,26 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.152.0] - 2026-09-18
+
+### Features
+
+- **Unit cost is required when a product line is saved** (RS-072). The cost
+  rule from 1.148.0 ran when a PO left Draft, so a purchaser could fill in a
+  whole order at $0 and only hear about it at the hand-off. Both line forms
+  already marked Unit cost with an asterisk; now the shared line rule
+  enforces it, and every door that writes a line refuses a blank or $0 cost
+  with "Still needed: Unit cost" — the desktop drawer's Confirm and the
+  auto-confirm when the next line is added, the Submit Order blocker list,
+  the phone's add-item form and its draft sync, and the edit page's Confirm
+  and Save. The edit page asks only of a line that is new or that the user
+  touched: hundreds of production lines sit at $0 (some under a negotiated lot
+  price), and a Save that checks every line would otherwise lock those orders
+  against any edit. The per-order leave-Draft check stays as the backstop, and
+  the backend still accepts `unit_cost >= 0` so legacy lines remain editable.
+  The phone's "will be sent when you submit" message for a cost-less line is
+  gone, since that is no longer true.
+
 ## [1.151.0] - 2026-09-18
 
 ### Features

@@ -143,6 +143,16 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   Transit on a $0 Draft with no submission history, on the desktop stepper
   or the phone's advance button, raises a *Can't submit yet* dialog naming
   the fix instead of opening the hand-off.
+- **Unit cost is required when a product line is saved** (v1.152.0). The
+  shared line rule (`lib/lineRequirements.ts`) names Unit cost alongside the
+  identity fields and quantity, so a blank or $0 cost is refused where the
+  line is entered: the desktop drawer's Confirm (and the auto-confirm when
+  the next line is added), the Submit Order blocker dialog, the phone's
+  add-item form and draft sync, and the edit page's Confirm and Save. The
+  edit page asks only of a line that is new or that the user touched — an
+  untouched legacy $0 line does not block Save or a stage change. The
+  per-order leave-Draft check above stays as the backstop, and the backend
+  still accepts `unit_cost >= 0`.
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,

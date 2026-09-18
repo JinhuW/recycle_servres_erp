@@ -628,7 +628,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const txnBlocked =
     order.txnRequired === true && statusDirty && status !== 'Draft' && !paypalTxn.trim();
 
-  const lineReady = (l: EditLine) => lineRequirements(l).ready;
+  // A cost is asked of a line that is new or that the user touched. Hundreds
+  // of legacy lines sit at $0 (and lot-priced POs keep theirs there on
+  // purpose); Save checks every line, so demanding a cost of an untouched
+  // one would lock those orders against any edit.
+  const costRequired = (l: EditLine) => !l._id || !!l._dirty;
+  const lineReady = (l: EditLine) => lineRequirements(l, { requireCost: costRequired(l) }).ready;
   // A note-only save (purchaser past In Transit) sends no lines, so an
   // incomplete legacy line must not block it — they can't fix it at that stage.
   // Line readiness gates only the saves that actually write lines. A note-only
@@ -642,7 +647,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // capture screen asks the same question, and used to name the same blank
   // field by a different word.
   const missingNamesFor = (l: EditLine): string | null =>
-    missingFieldNames(lineRequirements(l).missingKeys, t, lang);
+    missingFieldNames(lineRequirements(l, { requireCost: costRequired(l) }).missingKeys, t, lang);
 
   // Serial rules fire only where the backend's will: on new lines, and on
   // edits that change serial/qty/generation from what the server holds.

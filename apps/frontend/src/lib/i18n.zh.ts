@@ -1382,7 +1382,6 @@ const zh: Record<string, string> = {
   subTargetMeta: '{n} 项明细 · {cost}',
   subLinesAddedToPo: '明细已加入 {id}',
   subMergePhotosLost: '明细已加入 {id}，但有 {n} 张照片未能一并转移，请在订单页面重新上传。',
-  syncNeedCost: '保存到服务器前单位成本须为 0 或以上。已暂存本地 —— 将在提交时发送。',
   syncNoDraft: '无法连接草稿订单 —— 此项未保存。将在提交时发送。',
   syncFailed: '无法将此项保存到服务器。将在提交时发送。',
   draftStartFailed: '无法创建草稿订单，请重试。',
