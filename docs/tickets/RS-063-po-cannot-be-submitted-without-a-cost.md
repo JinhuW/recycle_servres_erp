@@ -2,13 +2,13 @@
 id: RS-063
 title: PO cannot be submitted without a cost
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: feat/po-cost-required
 pr: 347
-version:
+version: 1.148.0
 related: [RS-050]
 ---
 
