@@ -478,6 +478,14 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   someone to explain it. Linking that payment to a PO clears the owner, since
   the PO is the answer the tag stood in for; a row filed under an internal
   transaction refuses the link instead, because a note is attached to it.
+- **An assigned payment's suggestions are the owner's POs** (v1.151.0). The
+  owner gates the amount-and-date pool, so the expanded row's suggestion
+  block, the `possible PO` badge, the `Has match` filter and the Suggested tile
+  all agree; an unassigned payment still sees every PO. A PO carrying the
+  payment's PayPal transaction id is offered whoever owns it — an identifier
+  on a PO outranks a guess about who paid — and the picker's typed search is
+  never gated. Assigning or unassigning an expanded row refreshes its
+  suggestions in place.
 - **A payment can carry a note** (v1.136.0). The expanded row has a note box
   with Save and Clear; the collapsed row shows the note under the payee, and
   a caption names who wrote it and when. Search matches note text. A note is

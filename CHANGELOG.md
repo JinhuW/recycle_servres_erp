@@ -17,6 +17,24 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.151.0] - 2026-09-18
+
+### Features
+
+- **PO suggestions honour the payment's owner** (RS-070). A payment assigned
+  to a member offered every same-amount PO regardless of whose it was — a
+  payment marked as Harrison's still suggested Stefen's already-paid PO. The
+  matcher now takes the owner as a gate on the amount-and-date pool: an
+  assigned payment's suggestions, its `possible PO` badge, the `Has match`
+  filter and the Suggested tile all read only the owner's POs, and an
+  unassigned payment is unchanged. Two things deliberately stay outside the
+  gate: a PO carrying the payment's PayPal transaction id, because an
+  identifier written on a PO outranks a guess about who paid (and if it lands
+  on another member's PO it is the assignment that is probably wrong), and
+  the picker's typed search, because a manager who types knows something the
+  ranking doesn't. Assigning or unassigning an expanded row refreshes its
+  suggestion block in place.
+
 ## [1.150.0] - 2026-09-18
 
 ### Features
