@@ -1207,5 +1207,9 @@
 .ph-ho-sub { font-size: 12.5px; color: var(--fg-subtle); margin-top: 2px; }
 .ph-ho-close { background: transparent; border: none; color: var(--accent-strong); font-size: 14px; font-weight: 600; font-family: inherit; padding: 4px; cursor: pointer; }
 .ph-ho-sheet .ho-tiles, .ph-ho-sheet .ho-row, .ph-ho-sheet .ho-row-pay { grid-template-columns: 1fr; }
+/* The phone stacks the payment picker and gives the proof panel the shell's
+   field label weight, same as the rest of the sheet. */
+.ph-ho-sheet .pay-row, .ph-pay .pay-row { grid-template-columns: 1fr; }
+.ph-pay .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); }
 .ph-ho-sheet .ho-blockers { margin-top: 12px; }
 .ph-ho-sheet .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); }

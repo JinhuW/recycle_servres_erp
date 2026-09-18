@@ -61,7 +61,7 @@ type CaptureState =
 
 type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
-type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; notes: string };
+type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; paymentMethod: 'paypal' | 'cash' | null; notes: string };
 
 // An order's line as the capture form wants it. Shared by the draft-resume
 // path and the detail screen's line edits so the two can't drift.
@@ -383,6 +383,7 @@ function Shell() {
       setReviewMeta({
         warehouseId: order.warehouse?.id ?? '',
         payment: order.payment,
+        paymentMethod: order.paymentMethod ?? null,
         notes: order.notes ?? '',
       });
       setCapture({

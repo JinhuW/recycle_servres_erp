@@ -12,7 +12,6 @@ import {
   ORDER_STATUSES, LIFECYCLE_STATUS, isClosedBook, warehouseGateLockedStatuses,
 } from '../../lib/status';
 import { poEffectiveCost, parseFeeInput, feeEq, readStoredGoodsTotal } from '../../lib/poTotals';
-import { normalizePaypalTxnInput } from '../../lib/paypalTxn';
 import type { Category, Order, OrderLine, Warehouse } from '../../lib/types';
 import {
   LineDrawer, blankLine, findDuplicatePartNumbers, brandConfirmPending,
@@ -34,6 +33,9 @@ import { SerialCheckDialog, type SerialLineIssue } from '../../components/Serial
 import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
 import { HandoffDialog } from '../../components/HandoffDialog';
+import { PaymentFields } from '../../components/PaymentFields';
+import type { HandoffMethod } from '../../lib/handoff';
+import { usePaymentProof } from '../../lib/usePaymentProof';
 import { navigate, paymentsForOrderPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { listShipments } from '../../lib/api';
@@ -171,46 +173,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [doneAttachments, setDoneAttachments] = useState<StatusAttachment[]>(
     order.statusMeta?.['Done']?.attachments ?? [],
   );
-  const [submissionAtts, setSubmissionAtts] = useState<StatusAttachment[]>(
-    order.statusMeta?.['Submission']?.attachments ?? [],
-  );
-  const [submissionUploading, setSubmissionUploading] = useState(false);
   // Owner may edit until the order is Done; managers always. Mirrors the
   // backend gate.
   const canEditSubmission = canAnnotate;
-
-  const addSubmissionFiles = async (fl: FileList | null) => {
-    const files = Array.from(fl || []);
-    if (!files.length) return;
-    setSubmissionUploading(true);
-    try {
-      for (const f of files) {
-        // 50 MiB server hard cap; oversized images are shrunk server-side.
-        if (f.size > 50 * 1024 * 1024) {
-          showErrorDialog(t('fileTooLarge', { name: f.name }));
-          continue;
-        }
-        const form = new FormData();
-        form.append('file', f);
-        const r = await api.upload<{ attachment: StatusAttachment }>(
-          `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
-        setSubmissionAtts(prev => [...prev, r.attachment]);
-      }
-    } catch (e) {
-      handleFetchError(e);
-    } finally {
-      setSubmissionUploading(false);
-    }
-  };
-
-  const removeSubmissionAtt = async (att: StatusAttachment) => {
-    try {
-      await api.delete<{ ok: true }>(`/api/orders/${order.id}/status-meta/Submission/attachments/${att.id}`);
-      setSubmissionAtts(prev => prev.filter(a => a.id !== att.id));
-    } catch (e) {
-      handleFetchError(e);
-    }
-  };
+  // Kept in the server's canon (uppercase, no spaces) so dirty-compare is
+  // exact against what a save round-trips.
+  const [paypalTxn, setPaypalTxn] = useState<string>(order.paypalTxnId ?? '');
+  // The payment proof — chat (Submission) and cash screenshot (Payment)
+  // attachments plus the PayPal scan — shared with the hand-off dialog.
+  const proof = usePaymentProof({
+    orderId: order.id,
+    chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
+    proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
+    setTxnId: setPaypalTxn,
+  });
+  const submissionAtts = proof.chatAtts;
 
   // Done evidence stays editable after the transition — the dialog only opens
   // on the way into Done, so without this a wrong photo was stuck forever.
@@ -287,6 +264,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [persistedIds, setPersistedIds] = useState<string[]>(() => order.lines.map(l => l.id));
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
+  const [paymentMethod, setPaymentMethod] = useState<HandoffMethod | null>(order.paymentMethod ?? null);
   // Default to 0% when no rate has been set on the order yet, so the field
   // and the side commission summary show a concrete value out of the gate
   // instead of a blank input. Saving 0 against a still-null DB rate is
@@ -299,9 +277,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     order.otherFees > 0 ? order.otherFees.toFixed(2) : '',
   );
   const [otherFeesNote, setOtherFeesNote] = useState<string>(order.otherFeesNote ?? '');
-  // Kept in the server's canon (uppercase, no spaces) so dirty-compare is
-  // exact against what a save round-trips.
-  const [paypalTxn, setPaypalTxn] = useState<string>(order.paypalTxnId ?? '');
   // null until the PO's shipments load; the fee inputs then re-seed to the
   // user-only remainder. Clamped to the stored column so the tape's rows
   // always sum to exactly what the server holds, even after manual fee edits.
@@ -536,6 +511,9 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
+  // Only a company order carries a method; the server clears it on a flip to
+  // self, so the local value is not a change until the order is company again.
+  const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
   // '' = explicitly unset (null). Non-numeric intermediate input (e.g. "5e")
   // must NOT be treated as a change — the same guard the other-fees field uses.
   const parsedCommission =
@@ -613,20 +591,28 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
 
   const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty
+    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || methodDirty
     || commissionDirty || otherFeesDirty || otherFeesNoteDirty || paypalDirty || ownerDirty;
   // What the backend reads as a change to the order itself — the set that
   // sends a purchaser's submitted order back to Draft. A note is not one.
   const materialDirty =
-    linesDirty || warehouseDirty || paymentDirty || otherFeesDirty
+    linesDirty || warehouseDirty || paymentDirty || methodDirty || otherFeesDirty
     || otherFeesNoteDirty || paypalDirty;
 
   // A company-paid PO names the payment that funded it before it leaves Draft.
   // The server decides whether the rule governs this order (its cutoff lives in
   // the DB), and refuses the advance regardless — this only saves the
   // round-trip. `=== true` deliberately: an older backend omits the field.
+  // The local method decides, not only the saved one: a manager who picks
+  // Cash and stage-jumps in one Save must not be held for an id the server
+  // will not ask for once the PATCH lands.
+  const leavingDraft = statusDirty && status !== 'Draft';
   const txnBlocked =
-    order.txnRequired === true && statusDirty && status !== 'Draft' && !paypalTxn.trim();
+    order.txnRequired === true && leavingDraft
+    && payment === 'company' && paymentMethod !== 'cash' && !paypalTxn.trim();
+  const cashShotBlocked =
+    order.cashShotRequired !== false && leavingDraft
+    && payment === 'company' && paymentMethod === 'cash' && proof.proofAtts.length === 0;
 
   // A cost is asked of a line that is new or that the user touched. Hundreds
   // of legacy lines sit at $0 (and lot-priced POs keep theirs there on
@@ -640,7 +626,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // save sends none, so an incomplete legacy line must not block it — the
   // purchaser can't fix that line at this stage anyway.
   const canSave =
-    dirty && !saving && !txnBlocked && (!orderLocked || (canReopen && statusDirty))
+    dirty && !saving && !txnBlocked && !cashShotBlocked && (!orderLocked || (canReopen && statusDirty))
     && (!canEditOrder || !(linesDirty || statusDirty) || lines.every(lineReady));
 
   // Localized "Brand, Quantity" list of what a line is still waiting on. The
@@ -681,6 +667,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
   : txnBlocked         ? [t('poTxnRequired')]
+  : cashShotBlocked    ? [t('poCashShotRequired')]
   : lines.flatMap((l, i) => {
       if (brandConfirmPending(l)) {
         return [lines.length === 1
@@ -732,6 +719,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         notes:         notesDirty     ? notes                  : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)  : undefined,
         payment:       paymentDirty   ? payment                : undefined,
+        paymentMethod: methodDirty    ? paymentMethod          : undefined,
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         paypalTxnId:   paypalDirty     ? (paypalTxn || null)   : undefined,
         onBehalfOfUserId: ownerDirty ? ownerId : undefined,
@@ -1519,25 +1507,6 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('payment')}</label>
-              <div className="seg" style={{ width: '100%' }}>
-                <button
-                  type="button"
-                  className={payment === 'company' ? 'active' : ''}
-                  style={{ flex: 1, whiteSpace: 'nowrap' }}
-                  onClick={() => canEditOrder && setPayment('company')}
-                  disabled={!canEditOrder}
-                >{t('payCompanyShort')}</button>
-                <button
-                  type="button"
-                  className={payment === 'self' ? 'active' : ''}
-                  style={{ flex: 1, whiteSpace: 'nowrap' }}
-                  onClick={() => canEditOrder && setPayment('self')}
-                  disabled={!canEditOrder}
-                >{t('paySelfShort')}</button>
-              </div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
               <label className="label">{t('commissionRate')}</label>
               <input
                 className="input"
@@ -1571,19 +1540,19 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 </select>
               </div>
             )}
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">
-                {t('poPaypalTxn')}
-                {order.txnRequired === true && <span className="req">*</span>}
-              </label>
-              <input
-                className="input mono"
-                value={paypalTxn}
-                onChange={e => setPaypalTxn(normalizePaypalTxnInput(e.target.value))}
-                placeholder={canEditOrder ? t('shipPayTxnPh') : '—'}
+            {/* Payment spans the grid: paid by, method, and the proof the
+                chosen path needs, in one panel. */}
+            <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+              <label className="label">{t('payment')}</label>
+              <PaymentFields
+                paidBy={payment} onPaidBy={setPayment}
+                method={paymentMethod} onMethod={setPaymentMethod}
+                txnId={paypalTxn} onTxnId={setPaypalTxn}
+                txnRequired={order.txnRequired === true}
                 disabled={!canEditOrder}
-                autoComplete="off"
-                spellCheck={false}
+                proof={proof}
+                canEditProof={canEditSubmission}
+                idPrefix="eo"
               />
             </div>
             {/* Notes gets its own row and spans the full grid so there's
@@ -1610,14 +1579,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                     <AttachmentChip
                       key={a.id}
                       a={a}
-                      onRemove={canEditSubmission ? () => removeSubmissionAtt(a) : undefined}
+                      onRemove={canEditSubmission ? () => void proof.removeChatAtt(a) : undefined}
                     />
                   ))}
                   {canEditSubmission && (
                     <AttachmentDropzone
                       boxHint={t('poSubmitAttachHint')}
-                      uploading={submissionUploading}
-                      onFiles={addSubmissionFiles}
+                      uploading={proof.chatUploading}
+                      onFiles={files => void proof.addChatFiles(files)}
                     />
                   )}
                 </div>
@@ -1949,6 +1918,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             order,
             warehouseId,
             payment,
+            paymentMethod,
             paypalTxnId: paypalTxn,
             // The saved rate, not the input's display value: the page shows
             // 0% for an unset rate, and sending that would log null → 0.

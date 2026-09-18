@@ -1,25 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import { detectCarriers, isValidTracking, normalizeTracking, type Carrier } from './carrierDetect';
-import { handleFetchError, showErrorDialog } from './errorToast';
+import { handleFetchError } from './errorToast';
 import { buildHandoffBody, handoffBlockerKeys, type HandoffDelivery, type HandoffMethod } from './handoff';
-import { useT } from './i18n';
-import { blobToDataUrl, compressForUpload } from './image-compress';
-import { scanPaymentScreenshot } from './packages';
 import type { PackageSource } from './packageSource';
-import { normalizePaypalTxnInput, isStrictPaypalTxnId } from './paypalTxn';
-import { scanErrorBanner, type ScanErrorBanner } from './scanError';
-import { AI_CONFIDENCE_FLOOR, AI_UNREADABLE_FLOOR } from './status';
+import { normalizePaypalTxnInput } from './paypalTxn';
 import type { Order, Warehouse } from './types';
-import type { PaymentShot } from './useAddPackageForm';
+import { usePaymentProof } from './usePaymentProof';
 import { loadWarehouses } from './warehouses';
 
 // The hand-off dialog's whole non-JSX state, shared by the desktop dialog and
 // the phone sheet so the two shells can't drift on what a complete hand-off is.
-// Each shell keeps only its markup. Tracking detection and the PayPal
-// screenshot scan follow useAddPackageForm exactly — same rules, same hints.
-
-export type ChatAttachment = { id: string; filename: string; size: number; mime: string; url: string };
+// Each shell keeps only its markup. Tracking detection follows
+// useAddPackageForm exactly; the payment proof is usePaymentProof, the same
+// hook the PO pages use.
 
 export type HandoffInit = {
   order: Order;
@@ -27,6 +21,7 @@ export type HandoffInit = {
    *  the page is clean (the desktop asks for a save first otherwise). */
   warehouseId: string;
   payment: 'company' | 'self';
+  paymentMethod: HandoffMethod | null;
   paypalTxnId: string;
   /** Manager-only seeds; a purchaser's shell passes neither. */
   ownerId?: string;
@@ -36,7 +31,6 @@ export type HandoffInit = {
 };
 
 export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: string | null }) => void) {
-  const { t } = useT();
   const { order } = init;
 
   const [warehouseId, setWarehouseId] = useState(init.warehouseId);
@@ -46,16 +40,16 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   const [raw, setRawState] = useState('');
   const [pick, setPick] = useState<Carrier | null>(null);
   const [paidBy, setPaidBy] = useState<'company' | 'self'>(init.payment);
-  const [method, setMethod] = useState<HandoffMethod>(order.paymentMethod ?? 'paypal');
+  // A company order that was never asked stays null and the dialog asks —
+  // defaulting to PayPal here is how a cash deal ended up chasing an id.
+  const [method, setMethod] = useState<HandoffMethod | null>(init.paymentMethod);
   const [txnId, setTxnIdState] = useState(init.paypalTxnId);
-  const [screenshot, setScreenshot] = useState<PaymentShot | null>(null);
-  const [scanBusy, setScanBusy] = useState(false);
-  const [scanNoticeKey, setScanNoticeKey] = useState<string | null>(null);
-  const [scanError, setScanError] = useState<ScanErrorBanner | null>(null);
-  const [chatAtts, setChatAtts] = useState<ChatAttachment[]>(
-    order.statusMeta?.['Submission']?.attachments ?? [],
-  );
-  const [chatUploading, setChatUploading] = useState(false);
+  const proof = usePaymentProof({
+    orderId: order.id,
+    chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
+    proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
+    setTxnId: setTxnIdState,
+  });
   const [ownerId, setOwnerId] = useState(init.ownerId ?? order.userId);
   const [commissionPct, setCommissionPct] = useState(
     init.commissionRate != null ? String(+(init.commissionRate * 100).toFixed(2)) : '',
@@ -89,78 +83,18 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   const setRaw = (v: string) => { setRawState(v); setPick(null); };
 
   const setTxnId = (v: string) => setTxnIdState(normalizePaypalTxnInput(v));
-  const txnLooksOdd = txnId !== '' && !isStrictPaypalTxnId(txnId);
-
-  // ── PayPal screenshot → OCR, as useAddPackageForm does it ────────────────
-  const handlePaymentFile = async (files: FileList | File[] | null) => {
-    const file = Array.from(files ?? []).find(f => f.type.startsWith('image/'));
-    if (!file) { setScanError({ key: 'aiOnlyImages' }); return; }
-    setScanBusy(true);
-    setScanError(null);
-    setScanNoticeKey(null);
-    let local: { compressed: Blob; preview: string };
-    try {
-      const compressed = await compressForUpload(file);
-      local = { compressed, preview: await blobToDataUrl(compressed) };
-    } catch {
-      setScanError({ key: 'shipPayScanFailed' });
-      setScanBusy(false);
-      return;
-    }
-    try {
-      const r = await scanPaymentScreenshot(local.compressed, file.name);
-      setScreenshot({ key: r.storageKey, url: r.deliveryUrl, preview: local.preview });
-      if (r.txnId && r.confidence >= AI_UNREADABLE_FLOOR) {
-        setTxnIdState(normalizePaypalTxnInput(r.txnId));
-        setScanNoticeKey(r.provider === 'stub' ? 'stubScanWarn'
-          : r.confidence < AI_CONFIDENCE_FLOOR ? 'shipPayVerifyTxn' : 'hoShotRead');
-      } else {
-        setScanNoticeKey('shipPayNoTxnFound');
-      }
-    } catch (e) {
-      setScanError(scanErrorBanner(e));
-    } finally {
-      setScanBusy(false);
-    }
-  };
-  const removeScreenshot = () => { setScreenshot(null); setScanNoticeKey(null); setScanError(null); };
-
-  // ── Chat history → the order's Submission attachments ────────────────────
-  const addChatFiles = async (fl: FileList | File[] | null) => {
-    const files = Array.from(fl ?? []);
-    if (!files.length) return;
-    setChatUploading(true);
-    try {
-      for (const f of files) {
-        if (f.size > 50 * 1024 * 1024) { showErrorDialog(t('fileTooLarge', { name: f.name })); continue; }
-        const form = new FormData();
-        form.append('file', f);
-        const r = await api.upload<{ attachment: ChatAttachment }>(
-          `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
-        setChatAtts(prev => [...prev, r.attachment]);
-      }
-    } catch (e) {
-      handleFetchError(e);
-    } finally {
-      setChatUploading(false);
-    }
-  };
-  const removeChatAtt = async (att: ChatAttachment) => {
-    try {
-      await api.delete(`/api/orders/${order.id}/status-meta/Submission/attachments/${att.id}`);
-      setChatAtts(prev => prev.filter(a => a.id !== att.id));
-    } catch (e) {
-      handleFetchError(e);
-    }
-  };
 
   // ── Blockers and submit ──────────────────────────────────────────────────
   const blockerKeys = handoffBlockerKeys({
     source, delivery, trackingValid: isValidTracking(tn), carrier, paidBy, method, txnId,
-    chatAttachmentCount: chatAtts.length,
-    saved: { payment: order.payment, txnRequired: order.txnRequired, chatShotRequired: order.chatShotRequired },
+    chatAttachmentCount: proof.chatAtts.length,
+    proofAttachmentCount: proof.proofAtts.length,
+    saved: {
+      payment: order.payment, txnRequired: order.txnRequired,
+      chatShotRequired: order.chatShotRequired, cashShotRequired: order.cashShotRequired,
+    },
   });
-  const canSubmit = blockerKeys.length === 0 && !busy && !scanBusy && !chatUploading;
+  const canSubmit = blockerKeys.length === 0 && !busy && !proof.busy;
 
   const submitting = useRef(false);
   const submit = async () => {
@@ -172,7 +106,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
       const body = buildHandoffBody({
         warehouseId, source: source!, delivery: delivery!, byUserId, trackingNumber: tn, carrier,
         paidBy, method, txnId,
-        screenshot: screenshot ? { key: screenshot.key, url: screenshot.url } : null,
+        screenshot: proof.screenshot ? { key: proof.screenshot.key, url: proof.screenshot.url } : null,
         ...(init.isManager ? {
           ownerId: ownerId !== order.userId ? ownerId : undefined,
           commissionRate: pct === null || !Number.isFinite(pct) ? undefined : pct / 100,
@@ -195,9 +129,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     byUserId, setByUserId, members,
     raw, setRaw, pick, setPick, tn, detected, carrier, hintKey,
     paidBy, setPaidBy, method, setMethod,
-    txnId, setTxnId, txnLooksOdd,
-    screenshot, scanBusy, scanNoticeKey, scanError, handlePaymentFile, removeScreenshot,
-    chatAtts, chatUploading, addChatFiles, removeChatAtt,
+    txnId, setTxnId, proof,
     ownerId, setOwnerId, commissionPct, setCommissionPct,
     blockerKeys, canSubmit, busy, submit,
   };

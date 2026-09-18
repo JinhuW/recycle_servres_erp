@@ -182,6 +182,9 @@ export type OrderSummary = {
   // The self-paid twin of `txnRequired`: whether the chat with the seller
   // (a Submission attachment) must be on file before the PO leaves Draft.
   chatShotRequired?: boolean;
+  // The cash twin: whether a screenshot of the amount paid (a Payment
+  // attachment) must be on file before a company-cash PO leaves Draft.
+  cashShotRequired?: boolean;
   // The hand-off, written when the PO leaves Draft through the In Transit
   // dialog. All optional for the deploy-skew reason above; null on orders that
   // predate it.

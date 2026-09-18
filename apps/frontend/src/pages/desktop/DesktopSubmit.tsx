@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
+import { PaymentFields } from '../../components/PaymentFields';
+import type { HandoffMethod } from '../../lib/handoff';
 import { useT } from '../../lib/i18n';
 import { api, createOrder, deleteOrder } from '../../lib/api';
 import { handleFetchError, showErrorDialog, showWarnToast } from '../../lib/errorToast';
@@ -111,6 +113,7 @@ const SUBMIT_ATTACH_ACCEPT = [
 type OrderMeta = {
   warehouseId: string;
   payment: 'Company' | 'Self';
+  paymentMethod: HandoffMethod | null;
   notes: string;
   // Charged on top of the goods total, so it is its own field rather than
   // something folded into the override.
@@ -237,6 +240,7 @@ function OrderForm({
   const [meta, setMeta] = useState<OrderMeta>({
     warehouseId: '',
     payment: 'Company',
+    paymentMethod: null,
     notes: '',
     otherFees: '',
     otherFeesNote: '',
@@ -528,6 +532,7 @@ function OrderForm({
   type WireMeta = {
     warehouseId?: string;
     payment: 'company' | 'self';
+    paymentMethod: HandoffMethod | null;
     notes: string | null;
     otherFees: number;
     otherFeesNote: string | null;
@@ -560,6 +565,7 @@ function OrderForm({
   const wireMeta = (): WireMeta => ({
     ...(meta.warehouseId ? { warehouseId: meta.warehouseId } : {}),
     payment: meta.payment === 'Company' ? 'company' : 'self',
+    paymentMethod: meta.payment === 'Company' ? meta.paymentMethod : null,
     notes: meta.notes || null,
     otherFees: parseFeeInput(meta.otherFees),
     otherFeesNote: meta.otherFeesNote.trim() || null,
@@ -1040,19 +1046,15 @@ function OrderForm({
             </select>
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label">{t('payment')} <span className="req">*</span></label>
-            <div className="seg">
-              <button
-                className={meta.payment === 'Company' ? 'active' : ''}
-                style={{ whiteSpace: 'nowrap' }}
-                onClick={() => setMeta(m => ({ ...m, payment: 'Company' }))}
-              >{t('payCompanyShort')}</button>
-              <button
-                className={meta.payment === 'Self' ? 'active' : ''}
-                style={{ whiteSpace: 'nowrap' }}
-                onClick={() => setMeta(m => ({ ...m, payment: 'Self' }))}
-              >{t('paySelfShort')}</button>
-            </div>
+            <PaymentFields
+              paidBy={meta.payment === 'Company' ? 'company' : 'self'}
+              onPaidBy={v => setMeta(m => ({ ...m, payment: v === 'company' ? 'Company' : 'Self' }))}
+              method={meta.paymentMethod}
+              onMethod={v => setMeta(m => ({ ...m, paymentMethod: v }))}
+              txnId="" onTxnId={() => {}}
+              compact
+              idPrefix="sub"
+            />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="label" htmlFor="sub-notes">{t('orderNotes')}</label>

@@ -50,19 +50,19 @@ offered as proof of payment satisfies the rule.
 
 ## Acceptance criteria
 
-- [ ] Every place a PO's payment is chosen (desktop Submit, desktop Edit, phone Review, phone Detail, the In-Transit dialog and phone sheet) shows the same picker: Paid by, then PayPal / Cash under Company card.
-- [ ] Under Company · Cash the proof panel asks for a screenshot showing the total amount paid; under Company · PayPal it asks for the transaction ID with the optional screenshot that reads it; under Self-paid it asks for the chat with the seller. Each names its requirement before anything is typed.
-- [ ] A Company · Cash PO created after the release refuses to leave Draft — hand-off, manager stage-jump, carrier poll — until a `Payment` attachment is on file; the refusal names the fix. A Submission attachment does not satisfy it.
-- [ ] A company PO with no method yet is asked for one in the hand-off dialog instead of being treated as PayPal.
-- [ ] `paymentMethod` is saved from the PO pages and create pages (POST / PATCH), logged on the activity log, and cleared when the PO flips to Self-paid.
-- [ ] GET `/api/orders/:id` reports `cashShotRequired` beside `txnRequired` and `chatShotRequired`.
-- [ ] POs on file before the release are exempt from the cash rule.
+- [x] Every place a PO's payment is chosen (desktop Submit, desktop Edit, phone Review, phone Detail, the In-Transit dialog and phone sheet) shows the same picker: Paid by, then PayPal / Cash under Company card.
+- [x] Under Company · Cash the proof panel asks for a screenshot showing the total amount paid; under Company · PayPal it asks for the transaction ID with the optional screenshot that reads it; under Self-paid it asks for the chat with the seller. Each names its requirement before anything is typed.
+- [x] A Company · Cash PO created after the release refuses to leave Draft — hand-off, manager stage-jump, carrier poll — until a `Payment` attachment is on file; the refusal names the fix. A Submission attachment does not satisfy it.
+- [x] A company PO with no method yet is asked for one in the hand-off dialog instead of being treated as PayPal.
+- [x] `paymentMethod` is saved from the PO pages and create pages (POST / PATCH), logged on the activity log, and cleared when the PO flips to Self-paid.
+- [x] GET `/api/orders/:id` reports `cashShotRequired` beside `txnRequired` and `chatShotRequired`.
+- [x] POs on file before the release are exempt from the cash rule.
 
 ## Out of scope
 
 - Persisting the PayPal screenshot dropped into the hand-off dialog on the
-  order (today it survives only on a label's package row) — the unticketed
-  2026-09-14 review finding; its own ticket.
+  order (today it survives only on a label's package row) — the 2026-09-14
+  review finding, now RS-072.
 - Moving self-paid chat screenshots out of Submission.
 - The 14 prod POs carrying `CASH*` placeholder transaction IDs with no
   method — a separate data fix.
@@ -74,3 +74,12 @@ offered as proof of payment satisfies the rule.
 - Plan: `~/.claude/plans/vivid-sprouting-milner.md` (session 2026-09-18).
 - Migration `0128` widens the status-meta CHECKs to add `Payment` and stamps
   `po_cash_shot_required_from`.
+- Plan review cut two things from the first draft: persisting the PayPal
+  screenshot on the order (→ RS-072) and moving self-paid chat uploads to the
+  `Payment` bucket (no rule change, only a legacy branch). Reusing
+  `Submission` for cash proof was rejected because a lot manifest would have
+  satisfied the rule.
+- Verified in the browser on 2026-09-18: desktop Submit / Edit, phone Review /
+  Detail, the dialog and the sheet; a cash PO refused the hand-off until a
+  screenshot was attached, then advanced with the file in the `Payment`
+  bucket.

@@ -17,6 +17,33 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.153.0] - 2026-09-18
+
+### Features
+
+- **One payment picker everywhere, and cash pays with a screenshot** (RS-071).
+  A PO's payment was chosen in five places and each asked a different
+  question: the create pages offered Company / Self-paid and nothing more,
+  the PO pages added a PayPal-ID box that was always there, and only the
+  In-Transit dialog knew about PayPal versus Cash — where Cash needed
+  "nothing more", so a cash deal left no record of what was handed over. All
+  six surfaces (desktop Submit and Edit, the phone's Review and Detail, the
+  hand-off dialog and sheet) now share one component: *Paid by*, then, under
+  Company card, *Method* (PayPal / Cash), then a proof panel whose heading
+  names exactly what the chosen path needs — the transaction ID with the
+  optional screenshot that reads it, a **screenshot of the total amount paid
+  in cash**, or the chat with the seller. A company PO whose method was never
+  asked is asked instead of being treated as PayPal. The cash screenshot is
+  required to leave Draft through every door — hand-off, manager stage-jump,
+  carrier poll — with a 409 that names the fix, and is grandfathered by a
+  cutoff stamped when the release reaches the environment, like the two
+  rules before it. Cash proof lives in its own `Payment` attachment bucket,
+  apart from Submission receipts and manifests, so only a file offered as
+  proof of payment satisfies the rule; `paymentMethod` is saved from the
+  create and edit pages, logged on the activity log, and cleared when a PO
+  flips to Self-paid; `GET /api/orders/:id` reports `cashShotRequired`
+  beside the two flags it already had.
+
 ## [1.152.0] - 2026-09-18
 
 ### Features

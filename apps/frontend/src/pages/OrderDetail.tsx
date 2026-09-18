@@ -4,7 +4,7 @@ import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
-import { StatusChangeDialog, type StatusAttachment } from '../components/StatusChangeDialog';
+import { StatusChangeDialog } from '../components/StatusChangeDialog';
 import { PhHandoffSheet } from '../components/PhHandoffSheet';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { AttachmentDropzone } from '../components/AttachmentDropzone';
@@ -23,7 +23,9 @@ import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
-import { normalizePaypalTxnInput } from '../lib/paypalTxn';
+import type { HandoffMethod } from '../lib/handoff';
+import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
+import { PaymentFields } from '../components/PaymentFields';
 import {
   ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
 } from '../lib/status';
@@ -45,6 +47,7 @@ export type OrderMetaDraft = {
   version: string;
   warehouseId: string;
   payment: 'company' | 'self';
+  paymentMethod: HandoffMethod | null;
   paypalTxnId: string;
   notes: string;
   fees: { amount: string; note: string };
@@ -110,11 +113,13 @@ export function OrderDetail({
     order.id,
     order.warehouse?.id ?? '',
     order.payment,
+    order.paymentMethod ?? '',
     order.paypalTxnId ?? '',
     order.notes ?? '',
     order.otherFees,
     order.otherFeesNote ?? '',
     ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
+    ...(order.statusMeta?.['Payment']?.attachments ?? []).map(a => a.id),
   ]);
   // Edits made against an older server state are stale: the order moved on, so
   // the fields show what it now holds.
@@ -122,6 +127,7 @@ export function OrderDetail({
     version: serverVersion,
     warehouseId: order.warehouse?.id ?? '',
     payment: order.payment,
+    paymentMethod: order.paymentMethod ?? null,
     paypalTxnId: order.paypalTxnId ?? '',
     notes: order.notes ?? '',
     fees: {
@@ -129,7 +135,7 @@ export function OrderDetail({
       note: order.otherFeesNote ?? '',
     },
   };
-  const { warehouseId, payment, paypalTxnId, notes, fees } = meta;
+  const { warehouseId, payment, paymentMethod, paypalTxnId, notes, fees } = meta;
   const setMeta = (patch: Partial<OrderMetaDraft>) => onMetaChange({ ...meta, ...patch });
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Which lines have their whole photo row open. Collapsed, a line shows the
@@ -157,10 +163,15 @@ export function OrderDetail({
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const [submissionAtts, setSubmissionAtts] = useState<StatusAttachment[]>(
-    order.statusMeta?.['Submission']?.attachments ?? [],
-  );
-  const [submissionUploading, setSubmissionUploading] = useState(false);
+  // The payment proof — chat (Submission) and cash screenshot (Payment)
+  // attachments plus the PayPal scan — shared with the hand-off sheet.
+  const proof = usePaymentProof({
+    orderId: order.id,
+    chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
+    proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
+    setTxnId: v => setMeta({ paypalTxnId: v }),
+  });
+  const submissionAtts = proof.chatAtts;
 
   // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
   // archive is reversible so we keep the gesture short, matching the
@@ -179,7 +190,10 @@ export function OrderDetail({
   // Re-read the evidence list when the server's own version of it moves —
   // never on a mere refetch that returned the same thing.
   useEffect(() => {
-    setSubmissionAtts(order.statusMeta?.['Submission']?.attachments ?? []);
+    proof.sync(
+      order.statusMeta?.['Submission']?.attachments ?? [],
+      order.statusMeta?.['Payment']?.attachments ?? [],
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverVersion]);
 
@@ -213,11 +227,14 @@ export function OrderDetail({
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
+  // Only a company order carries a method; the server clears it on a flip to
+  // self, so the local value is not a change until the order is company again.
+  const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
   const paypalDirty = paypalTxnId !== (order.paypalTxnId ?? '');
   const feesDirty =
     feesValue !== (order.otherFees ?? 0) ||
     (fees.note.trim() || null) !== (order.otherFeesNote || null);
-  const dirty = notesDirty || warehouseDirty || paymentDirty || paypalDirty || feesDirty;
+  const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty;
 
   const refetchOrder = async () => {
     try {
@@ -259,7 +276,7 @@ export function OrderDetail({
   const save = async () => {
     if (!canAnnotate) return;
     // A note is not a change to the order itself and leaves the stage alone.
-    const material = warehouseDirty || paymentDirty || paypalDirty || feesDirty;
+    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty;
     if (material && !(await askRevert())) return;
     setSaving(true);
     try {
@@ -272,6 +289,7 @@ export function OrderDetail({
         notes:         notesDirty     ? notes                       : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)       : undefined,
         payment:       paymentDirty   ? payment                     : undefined,
+        paymentMethod: methodDirty    ? paymentMethod               : undefined,
         paypalTxnId:   paypalDirty    ? (paypalTxnId || null)       : undefined,
         otherFees:     feesDirty      ? feesValue                   : undefined,
         otherFeesNote: feesDirty      ? (fees.note.trim() || null)  : undefined,
@@ -354,39 +372,15 @@ export function OrderDetail({
     await doAdvance();
   };
 
+  // Uploads through the proof hook; the activity log is nudged here because
+  // the hook does not know this page has one.
   const addSubmissionFiles = async (fl: FileList | null) => {
-    const files = Array.from(fl || []);
-    if (!files.length) return;
-    setSubmissionUploading(true);
-    try {
-      for (const f of files) {
-        // 50 MiB server hard cap; oversized images are shrunk server-side.
-        if (f.size > 50 * 1024 * 1024) {
-          showErrorDialog(t('fileTooLarge', { name: f.name }));
-          continue;
-        }
-        const form = new FormData();
-        form.append('file', f);
-        const r = await api.upload<{ attachment: StatusAttachment }>(
-          `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
-        setSubmissionAtts(prev => [...prev, r.attachment]);
-      }
-      setActivityRefreshKey(k => k + 1);
-    } catch (e) {
-      handleFetchError(e);
-    } finally {
-      setSubmissionUploading(false);
-    }
+    await proof.addChatFiles(fl);
+    setActivityRefreshKey(k => k + 1);
   };
-
-  const removeSubmissionAtt = async (attachmentId: string) => {
-    try {
-      await api.delete(`/api/orders/${order.id}/status-meta/Submission/attachments/${attachmentId}`);
-      setSubmissionAtts(prev => prev.filter(a => a.id !== attachmentId));
-      setActivityRefreshKey(k => k + 1);
-    } catch (e) {
-      handleFetchError(e);
-    }
+  const removeSubmissionAtt = async (att: ProofAttachment) => {
+    await proof.removeChatAtt(att);
+    setActivityRefreshKey(k => k + 1);
   };
 
   const removeDoneAtt = async (attachmentId: string) => {
@@ -875,35 +869,18 @@ export function OrderDetail({
           </div>
         </div>
 
-        <div className="ph-field">
+        <div className="ph-field ph-pay">
           <label>{t('payment')}</label>
-          <div className="seg" style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            <button
-              className={payment === 'company' ? 'active' : ''}
-              onClick={() => canEditOrder && setMeta({ payment: 'company' })}
-              disabled={!canEditOrder}
-            >{t('payCompany')}</button>
-            <button
-              className={payment === 'self' ? 'active' : ''}
-              onClick={() => canEditOrder && setMeta({ payment: 'self' })}
-              disabled={!canEditOrder}
-            >{t('paySelf')}</button>
-          </div>
-        </div>
-
-        <div className="ph-field">
-          <label>
-            {t('poPaypalTxn')}
-            {order.txnRequired === true && <span className="req">*</span>}
-          </label>
-          <input
-            className="input mono"
-            value={paypalTxnId}
-            onChange={e => canEditOrder && setMeta({ paypalTxnId: normalizePaypalTxnInput(e.target.value) })}
-            placeholder={canEditOrder ? t('shipPayTxnPh') : '—'}
+          <PaymentFields
+            paidBy={payment} onPaidBy={v => canEditOrder && setMeta({ payment: v })}
+            method={paymentMethod} onMethod={v => canEditOrder && setMeta({ paymentMethod: v })}
+            txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
+            txnRequired={order.txnRequired === true}
             disabled={!canEditOrder}
-            autoComplete="off"
-            spellCheck={false}
+            phone
+            proof={proof}
+            canEditProof={canAnnotate}
+            idPrefix="ph"
           />
         </div>
 
@@ -930,14 +907,14 @@ export function OrderDetail({
                 <AttachmentChip
                   key={a.id}
                   a={a}
-                  onRemove={canAnnotate ? () => removeSubmissionAtt(a.id) : undefined}
+                  onRemove={canAnnotate ? () => void removeSubmissionAtt(a) : undefined}
                 />
               ))}
               {canAnnotate && (
                 <AttachmentDropzone
                   boxHint={t('poSubmitAttachHint')}
-                  uploading={submissionUploading}
-                  onFiles={addSubmissionFiles}
+                  uploading={proof.chatUploading}
+                  onFiles={files => void addSubmissionFiles(files)}
                 />
               )}
             </div>
@@ -1278,6 +1255,7 @@ export function OrderDetail({
             order,
             warehouseId: warehouseId || (order.warehouse?.id ?? ''),
             payment,
+            paymentMethod,
             paypalTxnId,
             ...(isPurchaser ? {} : { ownerId: order.userId, commissionRate: order.commissionRate }),
             isManager: !isPurchaser,

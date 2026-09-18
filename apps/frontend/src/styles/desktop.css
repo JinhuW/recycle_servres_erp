@@ -3662,6 +3662,43 @@ html.desktop, body.desktop, .desktop #root {
 .ho-actions { margin-left: auto; display: flex; gap: 8px; }
 .ho-blockers { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--warn-strong); flex: 1 1 260px; }
 .ho-blockers div { display: flex; gap: 6px; align-items: flex-start; }
+
+/* PaymentFields — paid by, method, then the proof panel. The panel's left
+   rule is its only colour: quiet while a required proof is missing, accent
+   once the chosen path is satisfied. */
+.pay-fields { display: flex; flex-direction: column; gap: 12px; }
+.pay-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; }
+.pay-row .field { margin-bottom: 0; }
+/* In a grid cell sized to its content (the create page), each switch takes
+   the width its labels need instead of a share of a width that isn't there. */
+.pay-fields.compact .pay-row { grid-template-columns: max-content max-content; gap: 12px; }
+.pay-fields.compact .ho-seg { width: auto; }
+.pay-fields.compact .ho-seg button { flex: 0 0 auto; padding: 7px 14px; }
+.pay-proof {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px 12px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 12px;
+}
+.pay-proof.ok { border-left-color: var(--accent); }
+.pay-proof .field { margin-bottom: 0; }
+.pay-proof-title { font-size: 13px; font-weight: 600; }
+.pay-proof-title.muted { font-weight: 500; color: var(--fg-muted); }
+.pay-proof-hint { font-size: 12.5px; color: var(--fg-muted); line-height: 1.45; margin-top: -4px; }
+.pay-proof-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 500; color: var(--accent-strong);
+}
+.pay-reveal, .pay-proof { animation: pay-reveal 160ms ease-out; }
+@keyframes pay-reveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pay-reveal, .pay-proof { animation: none; }
+}
 .ho-blockers .icon { flex-shrink: 0; margin-top: 2px; }
 @media (max-width: 560px) {
   .ho-tiles, .ho-row, .ho-row-pay { grid-template-columns: 1fr; }
