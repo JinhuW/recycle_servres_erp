@@ -2,12 +2,12 @@
 id: RS-062
 title: Purchase orders page drops its KPI strip
 type: task
-status: in-review
+status: done
 priority: P3
 created: 2026-09-17
 reporter: jinhu
 branch: chore/orders-page-no-kpis
-pr:
+pr: 346
 version: 1.147.2
 related: [RS-059, RS-061]
 ---
