@@ -2,12 +2,12 @@
 id: RS-066
 title: Contribution cards state where their figure comes from
 type: task
-status: in-review
+status: done
 priority: P3
 created: 2026-09-17
 reporter: jinhu
 branch: chore/contrib-card-notes
-pr:
+pr: 350
 version: 1.149.2
 related: [RS-059, RS-061]
 ---
