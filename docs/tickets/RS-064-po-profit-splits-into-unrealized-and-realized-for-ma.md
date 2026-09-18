@@ -2,14 +2,14 @@
 id: RS-064
 title: PO profit splits into Unrealized and Realized for managers
 type: story
-status: in-progress
+status: in-review
 priority: P2
 created: 2026-09-17
 reporter: jinhu
 branch: feat/po-realized-profit
 pr:
 version:
-related: [RS-060, RS-051, RS-062, RS-063]
+related: [RS-060, RS-051, RS-062]
 ---
 
 ## Ask

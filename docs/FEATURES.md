@@ -50,6 +50,19 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   filters showed, with no reporting window, and the dashboard now states
   those figures properly. The card head's line count and the per-row
   unpriced badge stay.
+- **Two profits per PO for managers** (v1.149.0): **Unrealized** is the
+  projection the PO always had — margin on the priced lines at "Sell / Unit",
+  less other fees — and is what a purchaser still sees as plain "Profit".
+  **Realized** is what the units earned on Done sell orders, at the
+  sell-order price less the fee-amortized unit cost, net of the commission
+  actually paid to the purchaser (the projected commission on the PO as
+  bought, clamped at zero); null until something sells, so a partly sold PO
+  reads low until the rest goes and says so with a sold count. Desktop list:
+  the Profit column toggle shows the pair. PO edit page: a realized block on
+  the cost tape with a sold meter. Phone: the money card carries both and the
+  list row a Realized line. Purchasers and a manager previewing as purchaser
+  get none of it. Other fees amortize over the PO as bought (`qty_purchased`)
+  from the same release, so a partial sale no longer moves the fee share.
 - **Managers see each line's final sell price** (v1.147.0): the qty-weighted
   unit price over the Done sell orders that name the line, with the sold
   count after it when a partial sale left units on the PO. It sits beside
