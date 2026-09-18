@@ -1642,6 +1642,7 @@ const zh: Record<string, string> = {
   contribRemainingSupplier: '其余 {n} 家供应商', contribRemainingPurchaser: '其余 {n} 位采购员',
   contribRemainingCustomer: '其余 {n} 位客户', contribRemainingCategory: '其余 {n} 个类别',
   dimSupplier: '供应商', dimPurchaser: '采购员', dimCustomer: '客户', dimCategory: '类别',
+  dimSourcedBy: '采购来源', contribRemainingSourcedBy: '其余 {n} 位采购员',
   nPOs: '{n} 笔采购订单', nSellOrders: '{n} 笔销售订单',
   dashFilterItemTypeAriaLabel: '按品类筛选',
   dashNoDataYet: '暂无数据。',

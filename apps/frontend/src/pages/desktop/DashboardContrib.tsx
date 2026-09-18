@@ -15,11 +15,17 @@ const REMAINING: Record<ContribDim, string> = {
   customer: 'contribRemainingCustomer', category: 'contribRemainingCategory',
 };
 
-export function ContribCard({ title, caption, data, locale }: {
+// `purchaserAs` renames the purchaser dimension. On the sale-side cards the
+// grouping is the purchaser whose PO supplied the sold units — purchasers never
+// create sell orders — so "Purchaser" there reads as the wrong claim.
+export function ContribCard({ title, caption, data, locale, purchaserAs }: {
   title: string; caption: string; data: ContribMetricData; locale: string;
+  purchaserAs?: { dim: string; remaining: string };
 }) {
   const { t } = useT();
   const dims = Object.keys(data.byDim) as ContribDim[];
+  const dimLabel = (d: ContribDim) => t(d === 'purchaser' && purchaserAs ? purchaserAs.dim : DIM_LABEL[d]);
+  const remainingKey = (d: ContribDim) => d === 'purchaser' && purchaserAs ? purchaserAs.remaining : REMAINING[d];
   const [dim, setDim] = useState<ContribDim>(dims[0]);
   // The lens can change under the card (role preview); fall back to what exists.
   useEffect(() => { if (!dims.includes(dim) && dims[0]) setDim(dims[0]); }, [dims, dim]);
@@ -41,7 +47,7 @@ export function ContribCard({ title, caption, data, locale }: {
           <div className="seg" role="tablist" style={{ gridTemplateColumns: `repeat(${dims.length}, 1fr)` }}>
             {dims.map(d => (
               <button key={d} role="tab" aria-selected={dim === d} className={dim === d ? 'active' : ''} onClick={() => setDim(d)}>
-                {t(DIM_LABEL[d])}
+                {dimLabel(d)}
               </button>
             ))}
           </div>
@@ -54,7 +60,7 @@ export function ContribCard({ title, caption, data, locale }: {
           <table className="dash-contrib-table">
             <thead>
               <tr>
-                <th>{t(DIM_LABEL[dim])}</th>
+                <th>{dimLabel(dim)}</th>
                 <th>{t('contribPctOfTotal')}</th>
                 <th className="num">{t('contribAmount')}</th>
               </tr>
@@ -82,7 +88,7 @@ export function ContribCard({ title, caption, data, locale }: {
               })}
               {rows.others && (
                 <tr className="dash-contrib-others">
-                  <td className="dash-contrib-name">{t(REMAINING[dim], { n: rows.others.n })}</td>
+                  <td className="dash-contrib-name">{t(remainingKey(dim), { n: rows.others.n })}</td>
                   <td>
                     <div className="dash-contrib-bar">
                       <span className="dash-contrib-pct">{pctOf(rows.others.amount).toFixed(1)}%</span>

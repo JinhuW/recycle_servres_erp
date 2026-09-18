@@ -4,7 +4,7 @@ import { api } from './helpers/app';
 import { loginAs, MARCUS, PRIYA, ALEX } from './helpers/auth';
 
 // The contribution tables regroup the dashboard's own figures: cost is the PO
-// header total the leaderboard ranks by, sales and profit are the revenue and
+// header total over every PO past Draft, sales and profit are the revenue and
 // gross-profit tiles' rows. So a card's total must equal the tile, and every
 // dimension tab of a card must sum to the same total.
 
@@ -13,6 +13,7 @@ type Rows = { rows: Row[]; others: { n: number; amount: number } | null };
 type Metric = { total: number; count: number; byDim: Partial<Record<'supplier' | 'purchaser' | 'customer' | 'category', Rows>> };
 type Body = {
   kpis: { count: number; revenue: number; profit: number };
+  series: { cost: number }[];
   contrib: { cost: Metric; revenue: Metric; profit: Metric };
 };
 
@@ -40,14 +41,14 @@ async function customer(name: string): Promise<string> {
 
 async function insertPO(
   id: string, ownerEmail: string,
-  opts: { supplierId: string | null; category: string; totalCost?: number; otherFees?: number },
+  opts: { supplierId: string | null; category: string; totalCost?: number; otherFees?: number; lifecycle?: string },
   lines: { category: string; unitCost: number; sellPrice: number; qty: number }[],
 ): Promise<string[]> {
   const db = getTestDb();
   const owner = await userId(ownerEmail);
   await db`
     INSERT INTO orders (id, user_id, supplier_id, category, lifecycle, commission_rate, other_fees, total_cost, created_at)
-    VALUES (${id}, ${owner}, ${opts.supplierId}, ${opts.category}, 'done', 0.1,
+    VALUES (${id}, ${owner}, ${opts.supplierId}, ${opts.category}, ${opts.lifecycle ?? 'done'}, 0.1,
             ${opts.otherFees ?? 0}, ${opts.totalCost ?? null}, NOW())
   `;
   const ids: string[] = [];
@@ -77,8 +78,10 @@ async function insertDoneSale(id: string, customerId: string, lines: { inventory
   }
 }
 
-// Alpha: one RAM PO with a negotiated header of 950 (lines say 100).
-// Beta:  one mixed PO, header NULL → line goods 300.
+// Alpha: one RAM PO with a negotiated header of 950 (lines say 100), and one
+//        HDD PO still in review, 200 — spend, but not yet a projection.
+// Beta:  one mixed PO, header NULL → line goods 300, and a Draft PO of 999
+//        that counts for nothing.
 // Nobody: one HDD PO with no supplier, 50.
 // Sales: Cust A bought Alpha's RAM line at 150 (profit 50); Cust B bought
 // Beta's HDD line at 260 (profit 60) plus a line with no inventory link at
@@ -95,6 +98,10 @@ async function fixture() {
   ]);
   await insertPO('PO-CT-3', MARCUS, { supplierId: null, category: 'HDD' },
     [{ category: 'HDD', unitCost: 50, sellPrice: 80, qty: 1 }]);
+  await insertPO('PO-CT-4', MARCUS, { supplierId: alpha, category: 'HDD', lifecycle: 'reviewing' },
+    [{ category: 'HDD', unitCost: 200, sellPrice: 260, qty: 1 }]);
+  await insertPO('PO-CT-5', MARCUS, { supplierId: beta, category: 'RAM', lifecycle: 'draft' },
+    [{ category: 'RAM', unitCost: 999, sellPrice: 1200, qty: 1 }]);
   const custA = await customer('Cust A');
   const custB = await customer('Cust B');
   await insertDoneSale('SO-CT-A', custA, [{ inventoryId: ramLine, category: 'RAM', unitPrice: 150 }]);
@@ -107,24 +114,27 @@ async function fixture() {
 describe('GET /api/dashboard — contributions', () => {
   beforeEach(async () => { await resetDb(); });
 
-  it('cost tabs share one header-grain total, with a Mixed row and a no-supplier row', async () => {
+  it('cost counts every PO past Draft, at header grain, with a Mixed row and a no-supplier row', async () => {
     await fixture();
     const { token } = await loginAs(ALEX);
     const r = await api<Body>('GET', '/api/dashboard?range=7d', { token });
     expect(r.status).toBe(200);
     const cost = r.body.contrib.cost;
-    expect(cost.total).toBeCloseTo(1300, 2);
-    expect(cost.count).toBe(3);
+    // 950 + 300 + 50 + the Reviewing 200; the Draft 999 is not spend.
+    expect(cost.total).toBeCloseTo(1500, 2);
+    expect(cost.count).toBe(4);
     const { supplier: s, purchaser: p, category: c } = cost.byDim;
-    for (const dim of [s!, p!, c!]) expect(sum(dim)).toBeCloseTo(1300, 2);
-    expect(byName(s!, 'Alpha Corp')).toMatchObject({ amount: 950, count: 1 });
+    for (const dim of [s!, p!, c!]) expect(sum(dim)).toBeCloseTo(1500, 2);
+    expect(byName(s!, 'Alpha Corp')).toMatchObject({ amount: 1150, count: 2 });
     expect(byName(s!, 'Beta Ltd')).toMatchObject({ amount: 300, count: 1 });
     expect(byName(s!, null)).toMatchObject({ id: null, amount: 50, count: 1 });
     expect(s!.rows[0].name).toBe('Alpha Corp');
-    expect(byName(p!, 'Marcus Chen') ?? p!.rows.find(x => x.amount === 1000)).toMatchObject({ amount: 1000, count: 2 });
+    expect(p!.rows.find(x => x.count === 3)).toMatchObject({ amount: 1200, count: 3 });
     expect(byName(c!, 'RAM').amount).toBeCloseTo(950, 2);
     expect(byName(c!, 'Mixed').amount).toBeCloseTo(300, 2);
-    expect(byName(c!, 'HDD').amount).toBeCloseTo(50, 2);
+    expect(byName(c!, 'HDD').amount).toBeCloseTo(250, 2);
+    // The chart's down-bars are the same figure.
+    expect(r.body.series.reduce((acc, b) => acc + b.cost, 0)).toBeCloseTo(1500, 2);
   });
 
   it('sales and profit cards equal the tiles; a line with no inventory link is in neither', async () => {
@@ -171,12 +181,15 @@ describe('GET /api/dashboard — contributions', () => {
     for (const m of [cost, revenue, profit]) {
       expect(Object.keys(m.byDim).sort()).toEqual(['category', 'supplier']);
     }
-    // PO-CT-1 (950) and PO-CT-3 (50) are Marcus's; Priya's 300 is not.
-    expect(cost.total).toBeCloseTo(1000, 2);
-    expect(cost.count).toBe(2);
+    // PO-CT-1 (950), PO-CT-3 (50) and the Reviewing PO-CT-4 (200) are
+    // Marcus's spend; his Draft PO-CT-5 is not, and Priya's 300 is not his.
+    expect(cost.total).toBeCloseTo(1200, 2);
+    expect(cost.count).toBe(3);
     expect(byName(cost.byDim.supplier!, 'Beta Ltd')).toBeUndefined();
-    // Projected, from the lines: revenue 150 + 80, profit 50 + 30.
+    // Projected, from the reviewed lines only: revenue 150 + 80, profit
+    // 50 + 30 — the Reviewing PO's margin is not yet a projection.
     expect(revenue.total).toBeCloseTo(230, 2);
+    expect(revenue.count).toBe(2);
     expect(profit.total).toBeCloseTo(80, 2);
     expect(JSON.stringify(r.body)).not.toContain('Cust ');
   });

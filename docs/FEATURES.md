@@ -556,13 +556,19 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   weekly chart labelled by ISO week number).
 - **Three contribution cards** — Cost, Sell orders, Profit — say who drove
   each figure: cost by supplier, purchaser or category; sales and profit by
-  customer, purchaser or category. Each shows the top seven with their share
-  of the total and folds the rest into a "Remaining" row. Cost is the PO
-  header total the leaderboard ranks by, so a mixed PO shows as "Mixed"
-  under Category; the Sell orders total is the revenue tile and the Profit
-  total the gross-profit tile, so a sell line with no inventory link is in
-  neither. A purchaser sees their own POs by supplier and category only
-  (v1.146.0).
+  customer, "sourced by" or category. Each shows the top seven with their
+  share of the total and folds the rest into a "Remaining" row. Cost is the
+  PO header total — goods plus other fees — over **every PO past Draft** (In
+  Transit, Reviewing, Ready to Pay, Done), the same figure as the chart's
+  purchases-out bars; money is committed when a PO is submitted, so the card
+  is wider than the leaderboard's Total cost, which counts a PO only once
+  commission is owed (v1.147.1; v1.146.0 used the leaderboard's rule). A
+  mixed PO shows as "Mixed" under Category. The Sell orders total is the
+  revenue tile and the Profit total the gross-profit tile, so a sell line
+  with no inventory link is in neither; their "Sourced by" tab credits each
+  sold line to the purchaser whose PO supplied it — purchasers never create
+  sell orders, which is why the tab is not called Purchaser (v1.147.1). A
+  purchaser sees their own POs by supplier and category only (v1.146.0).
 - The contributor leaderboard ranks purchasers by the total cost of their POs
   in the selected range — goods total plus other fees, the figure the PO pages
   call "Total cost" — or, on a toggle, by the commission those POs earned

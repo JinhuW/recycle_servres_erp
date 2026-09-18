@@ -1,13 +1,16 @@
 // Who drove the dashboard's three money figures in the window: cost by
 // supplier / purchaser / category, sales and profit by customer / purchaser /
-// category. Every figure here is the same figure the tiles and the leaderboard
-// show, grouped one more way — spend is the PO header total the leaderboard
-// ranks by, sales and profit are the revenue and gross-profit tiles' rows —
-// so a card's total equals the tile above it and its tabs equal each other.
+// category. Every figure here is a figure the dashboard already shows, grouped
+// one more way, so a card's tabs equal each other: sales and profit are the
+// revenue and gross-profit tiles' rows; spend is the PO header total — goods
+// plus other fees — over every PO past Draft, the chart's down-bars. That is
+// wider than the leaderboard's Total cost, which counts a PO only from Ready
+// to Pay because that is when commission is owed; money is committed earlier.
 //
-// The purchaser lens groups the caller's own projected figures instead, by
-// supplier and category only: the peer-money mask (PRD §6.8) rules out a
-// purchaser dimension, and the sale side is not theirs to see.
+// The purchaser lens groups the caller's own figures instead, by supplier and
+// category only: the peer-money mask (PRD §6.8) rules out a purchaser
+// dimension, and the sale side is not theirs to see. Its revenue and profit
+// are projections from reviewed POs; its spend follows the same past-Draft rule.
 
 import type postgres from 'postgres';
 import type { Sql, TransactionSql } from 'postgres';
@@ -78,6 +81,8 @@ export async function contributions(
   const headerCost = sql`COALESCE(po.total_cost, fee.goods) + po.other_fees`;
   const reviewed = sql`po.lifecycle IN ('ready_to_pay', 'done')
                        AND po.created_at >= ${start} AND po.created_at < ${end}`;
+  const spend = sql`po.lifecycle <> 'draft'
+                    AND po.created_at >= ${start} AND po.created_at < ${end}`;
 
   if (opts.role === 'manager') {
     const saleWin = sql`so.status = 'Done' AND so.updated_at >= ${start} AND so.updated_at < ${end}`;
@@ -101,11 +106,11 @@ export async function contributions(
     const spendFrom = sql`orders po ${feeBasis}`;
     const poCount = sql`COUNT(DISTINCT po.id)`;
     const costDims: Record<'supplier' | 'purchaser' | 'category', Grouping> = {
-      supplier:  { key: sql`po.supplier_id`, name: sql`s.name`, amount: headerCost, count: poCount, where: reviewed,
+      supplier:  { key: sql`po.supplier_id`, name: sql`s.name`, amount: headerCost, count: poCount, where: spend,
                    from: sql`${spendFrom} LEFT JOIN suppliers s ON s.id = po.supplier_id` },
-      purchaser: { key: sql`po.user_id`, name: sql`u.name`, amount: headerCost, count: poCount, where: reviewed,
+      purchaser: { key: sql`po.user_id`, name: sql`u.name`, amount: headerCost, count: poCount, where: spend,
                    from: sql`${spendFrom} JOIN users u ON u.id = po.user_id` },
-      category:  { key: sql`po.category`, name: sql`po.category`, amount: headerCost, count: poCount, where: reviewed,
+      category:  { key: sql`po.category`, name: sql`po.category`, amount: headerCost, count: poCount, where: spend,
                    from: spendFrom },
     };
     const rev = saleDims(revenue);
@@ -114,7 +119,7 @@ export async function contributions(
       grouped(sql, costDims.supplier), grouped(sql, costDims.purchaser), grouped(sql, costDims.category),
       grouped(sql, rev.customer), grouped(sql, rev.purchaser), grouped(sql, rev.category),
       grouped(sql, prof.customer), grouped(sql, prof.purchaser), grouped(sql, prof.category),
-      sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM orders po WHERE ${reviewed}`,
+      sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM orders po WHERE ${spend}`,
       sql<{ n: number }[]>`SELECT COUNT(DISTINCT so.id)::int AS n FROM ${salesFrom} WHERE ${saleWin}`,
     ]);
     return {
@@ -124,10 +129,12 @@ export async function contributions(
     };
   }
 
-  // Purchaser lens — the caller's own reviewed POs. Revenue and profit are the
-  // projected line figures; cost is the header figure, so its category is the
-  // header's (a mixed PO is "Mixed") while the line figures split by line.
+  // Purchaser lens — the caller's own POs. Revenue and profit are the projected
+  // line figures over reviewed POs; cost is the header figure over every PO past
+  // Draft, so its category is the header's (a mixed PO is "Mixed") while the
+  // line figures split by line.
   const own = sql`${reviewed} AND po.user_id = ${opts.userId}`;
+  const ownSpend = sql`${spend} AND po.user_id = ${opts.userId}`;
   const poCount = sql`COUNT(DISTINCT po.id)`;
   const linesFrom = sql`order_lines ol JOIN orders po ON po.id = ol.order_id ${feeBasis}`;
   const spendFrom = sql`orders po ${feeBasis}`;
@@ -140,21 +147,22 @@ export async function contributions(
                 from: linesFrom },
   });
   const costDims: Record<'supplier' | 'category', Grouping> = {
-    supplier: { key: sql`po.supplier_id`, name: sql`s.name`, amount: headerCost, count: poCount, where: own,
+    supplier: { key: sql`po.supplier_id`, name: sql`s.name`, amount: headerCost, count: poCount, where: ownSpend,
                 from: sql`${spendFrom} LEFT JOIN suppliers s ON s.id = po.supplier_id` },
-    category: { key: sql`po.category`, name: sql`po.category`, amount: headerCost, count: poCount, where: own,
+    category: { key: sql`po.category`, name: sql`po.category`, amount: headerCost, count: poCount, where: ownSpend,
                 from: spendFrom },
   };
   const rev = lineDims(revenue);
   const prof = lineDims(profit);
-  const [cS, cC, rS, rC, pS, pC, poN] = await Promise.all([
+  const [cS, cC, rS, rC, pS, pC, poN, spendN] = await Promise.all([
     grouped(sql, costDims.supplier), grouped(sql, costDims.category),
     grouped(sql, rev.supplier), grouped(sql, rev.category),
     grouped(sql, prof.supplier), grouped(sql, prof.category),
     sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM orders po WHERE ${own}`,
+    sql<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM orders po WHERE ${ownSpend}`,
   ]);
   return {
-    cost:    shape(poN[0].n, { supplier: cS, category: cC }),
+    cost:    shape(spendN[0].n, { supplier: cS, category: cC }),
     revenue: shape(poN[0].n, { supplier: rS, category: rC }),
     profit:  shape(poN[0].n, { supplier: pS, category: pC }),
   };
