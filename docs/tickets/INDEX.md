@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-064](./RS-064-po-profit-splits-into-unrealized-and-realized-for-ma.md) | in-review | story | P2 | PO profit splits into Unrealized and Realized for managers | — |
+| [RS-064](./RS-064-po-profit-splits-into-unrealized-and-realized-for-ma.md) | done | story | P2 | PO profit splits into Unrealized and Realized for managers | 1.149.0 |
 | [RS-063](./RS-063-po-cannot-be-submitted-without-a-cost.md) | done | story | P2 | PO cannot be submitted without a cost | 1.148.0 |
 | [RS-062](./RS-062-purchase-orders-page-drops-its-kpi-strip.md) | done | task | P3 | Purchase orders page drops its KPI strip | 1.147.2 |
 | [RS-061](./RS-061-dashboard-cost-counts-every-po-past-draft.md) | done | bug | P2 | Dashboard cost counts every PO past Draft | 1.147.1 |
