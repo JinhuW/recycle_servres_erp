@@ -2,13 +2,13 @@
 id: RS-074
 title: Split the phone PO page into general info and products; list rows open instead of expanding
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: jinhu
 branch: session/20260918-163518
-pr:
-version:
+pr: 358
+version: 1.154.0
 related: []
 ---
 

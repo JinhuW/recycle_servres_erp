@@ -5,7 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-074](./RS-074-split-the-phone-po-page-into-general-info-and-produc.md) | in-progress | story | P2 | Split the phone PO page into general info and products; list rows open instead of expanding | — |
+| [RS-074](./RS-074-split-the-phone-po-page-into-general-info-and-produc.md) | done | story | P2 | Split the phone PO page into general info and products; list rows open instead of expanding | — |
 | [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | backlog | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | — |
 | [RS-072](./RS-072-unit-cost-is-required-when-a-product-line-is-saved.md) | done | story | P2 | Unit cost is required when a product line is saved | 1.152.0 |
 | [RS-071](./RS-071-company-pay-asks-paypal-or-cash-cash-needs-a-screens.md) | done | story | P2 | Company pay asks PayPal or Cash; cash needs a screenshot of the amount paid | 1.153.0 |
