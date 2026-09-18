@@ -2,13 +2,13 @@
 id: RS-072
 title: Unit cost is required when a product line is saved
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: jinhu
 branch: session/20260918-064949
-pr:
-version:
+pr: 356
+version: 1.152.0
 related: [RS-063, RS-068]
 ---
 
