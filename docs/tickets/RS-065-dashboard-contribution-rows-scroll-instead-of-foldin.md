@@ -7,7 +7,7 @@ priority: P3
 created: 2026-09-17
 reporter: jinhu
 branch: feat/contrib-scroll
-pr:
+pr: 349
 version:
 related: [RS-059, RS-061]
 ---
