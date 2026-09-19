@@ -2,13 +2,13 @@
 id: RS-077
 title: In Transit shows the package journey, ETA and tracking number; the PO list gets a Total cost column
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-19
 reporter: jinhu
 branch: feat/po-tracking-and-cost
-pr:
-version:
+pr: 362
+version: 1.156.0
 related: [RS-050, RS-071, RS-075]
 ---
 
