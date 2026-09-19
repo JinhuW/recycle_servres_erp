@@ -15,14 +15,25 @@ export type HandoffRules = {
   trackingValid: boolean;
   carrier: Carrier | null;
   paidBy: 'company' | 'self';
-  method: HandoffMethod;
+  /** Null is a company order that was never asked — the dialog asks. */
+  method: HandoffMethod | null;
   txnId: string;
   chatAttachmentCount: number;
-  /** What the server said about the *saved* order. The dialog may have moved
-   *  Paid-by since, so an explicit `false` only exempts the case it was
-   *  computed for (a pre-cutoff order keeps its exemption); anything else
-   *  blocks and lets the server be the judge. */
-  saved: { payment: 'company' | 'self'; txnRequired?: boolean; chatShotRequired?: boolean };
+  /** Payment-bucket attachments: the cash screenshot(s). */
+  proofAttachmentCount: number;
+  /** What the server said about the *saved* order. Each verdict was computed
+   *  for the saved paid-by and method — `txnRequired` on the company /
+   *  not-cash branch (a never-asked null method included), `cashShotRequired`
+   *  on company / cash — so an explicit `false` only exempts while the dialog
+   *  is still on that branch (a pre-cutoff order keeps its exemption). A flip
+   *  of either, or anything else, blocks and lets the server be the judge. */
+  saved: {
+    payment: 'company' | 'self';
+    paymentMethod?: HandoffMethod | null;
+    txnRequired?: boolean;
+    chatShotRequired?: boolean;
+    cashShotRequired?: boolean;
+  };
 };
 
 /** i18n keys of everything still blocking the hand-off, in display order. */
@@ -34,9 +45,16 @@ export function handoffBlockerKeys(r: HandoffRules): string[] {
     if (!r.trackingValid) out.push('hoNeedTracking');
     else if (!r.carrier) out.push('hoNeedCarrier');
   }
+  if (r.paidBy === 'company' && r.method === null) out.push('hoNeedMethod');
   if (r.paidBy === 'company' && r.method === 'paypal' && !r.txnId.trim()) {
-    const exempt = r.saved.payment === 'company' && r.saved.txnRequired === false;
+    const exempt = r.saved.payment === 'company' && r.saved.paymentMethod !== 'cash'
+      && r.saved.txnRequired === false;
     if (!exempt) out.push('poTxnRequired');
+  }
+  if (r.paidBy === 'company' && r.method === 'cash' && r.proofAttachmentCount === 0) {
+    const exempt = r.saved.payment === 'company' && r.saved.paymentMethod === 'cash'
+      && r.saved.cashShotRequired === false;
+    if (!exempt) out.push('hoNeedCashShot');
   }
   if (r.paidBy === 'self' && r.chatAttachmentCount === 0) {
     const exempt = r.saved.payment === 'self' && r.saved.chatShotRequired === false;
@@ -68,7 +86,8 @@ export type HandoffDraft = {
   trackingNumber: string;
   carrier: Carrier | null;
   paidBy: 'company' | 'self';
-  method: HandoffMethod;
+  /** Non-null for a company order by the time submit is allowed (blocker). */
+  method: HandoffMethod | null;
   txnId: string;
   screenshot: { key: string; url: string } | null;
   /** Manager-only; undefined leaves the owner / rate untouched. */
@@ -87,7 +106,7 @@ export function buildHandoffBody(d: HandoffDraft): HandoffBody {
       : { method: 'label', trackingNumber: d.trackingNumber, carrier: d.carrier as Carrier },
     payment: d.paidBy,
   };
-  if (d.paidBy === 'company') {
+  if (d.paidBy === 'company' && d.method) {
     body.paymentMethod = d.method;
     if (d.method === 'paypal') {
       if (d.txnId.trim()) body.paypalTxnId = d.txnId.trim();

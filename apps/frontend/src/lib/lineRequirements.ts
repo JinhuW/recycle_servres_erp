@@ -13,6 +13,7 @@ export type RequirementLine = RamRequiredLine & {
   description?: string | null;
   itemType?: string | null;
   qty?: number | string | null;
+  unitCost?: number | string | null;
 };
 
 // Small SSDs move as anonymous bulk lots, so brand isn't worth blocking on.
@@ -53,15 +54,22 @@ function missingIdentityFields(line: RequirementLine): string[] {
 
 /**
  * The required fields still blank, in form order, and whether the line is
- * complete. Unit cost is absent on purpose: a blank one reads as 0, which is a
- * legitimate cost for a line thrown in with a lot.
+ * complete. A unit cost above zero is part of that: a blank one reads as 0,
+ * and a $0 line used to sail through every form only to have the whole order
+ * refused at hand-off. `requireCost: false` is for the editor's untouched
+ * legacy lines — hundreds sit at $0 in production, and a line the user never
+ * opened is not being re-submitted.
  */
-export function lineRequirements(line: RequirementLine): {
+export function lineRequirements(
+  line: RequirementLine,
+  { requireCost = true }: { requireCost?: boolean } = {},
+): {
   ready: boolean;
   missingKeys: string[];
 } {
   const missingKeys = missingIdentityFields(line);
   if (!(Number(line.qty) > 0)) missingKeys.push('qty');
+  if (requireCost && !(Number(line.unitCost) > 0)) missingKeys.push('unitCost');
   return { ready: missingKeys.length === 0, missingKeys };
 }
 

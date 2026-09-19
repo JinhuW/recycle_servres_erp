@@ -44,6 +44,22 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
 
 - **One PO can hold several categories** (v1.54.0), with its lines grouped by
   category and a per-category cost breakdown (v1.55.0).
+- **On the phone a PO is two screens** (v1.154.0). The Orders list no longer
+  unfolds a row in place: tapping the card, or the pencil on its right (an
+  eye once the PO is Ready to Pay, Done or archived), opens
+  `/purchase-orders/:id` — the order itself: the id as the title with the
+  stage under it, the stepper, on a Draft a *Before you submit* list of what
+  still blocks the hand-off (products and their cost, then whichever of
+  paid-by / method / transaction ID / cash or chat screenshot the hand-off
+  sheet would ask for, from the same rule, each row a link), a *Products · n*
+  row, shipping, the cost card, warehouse, the **payment fields folded behind
+  a header that reads back the answer**, notes, attachments and the activity
+  log. The *Products* row opens `/purchase-orders/:id/products`: the line
+  cards, the add-category dock and the goods total; the line form opens from
+  there and returns there. A line removed on one screen is already gone on
+  the other, unsaved fields survive the round trip, and the "back to Draft"
+  warning is asked once per visit. Desktop keeps its single edit page; a
+  products link opened there lands on the PO.
 - **The desktop list opens on the orders card** (v1.147.2). The four KPI
   tiles and the subtitle that sat above it since the first release are gone:
   they were computed in the browser over whatever the stage and category
@@ -98,7 +114,19 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   refused without it for every actor, a manager stage-jump and carrier movement
   included. Self-pay POs are unaffected. The rule governs only orders created
   after it reached the environment, so POs already on file stay exempt. Mobile
-  gained the field as an input; it used to be read-only there.
+  gained the field as an input; it used to be read-only there. **The ID must
+  also be a payment our PayPal account made** (v1.150.0): at the same door,
+  it is checked against the PayPal transactions the Payments sync holds, and
+  an ID none of them carries is refused with the ID named — a typo or an
+  invented ID used to be accepted and left the PO unable to reconcile. An
+  unknown ID in PayPal's own 17-character shape first pulls PayPal once, so a
+  payment PayPal already reports does not wait for the six-hourly sync; a
+  placeholder such as `CASH` is refused at once, without the round-trip
+  (v1.155.1). PayPal itself reports a payment up to three hours late, and
+  the refusal says so. The check is live only once a
+  PayPal account has synced into the environment, so a dev box without keys
+  is unaffected; a linked, ignored, pending or reversed row still counts as
+  existing, and Mercury legs do not.
 - **Leaving Draft is a hand-off, asked in one dialog** (v1.142.0). Clicking
   In Transit on a Draft — the desktop stepper or the phone's advance button —
   opens *Mark as In Transit*: the receiving warehouse, the order's **source**
@@ -107,11 +135,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   picker) or **Shipping label** (paste the tracking number; the carrier is
   recognised from its shape, as on Add-package). Then who paid. **Company
   card** names a method, PayPal or Cash: PayPal keeps the transaction-ID rule
-  and offers the optional screenshot that reads the ID; Cash lifts the rule.
-  **Self-paid** asks for no method and no ID — it is reimbursed from
-  commission, not matched against the bank — but **requires the chat with the
-  seller** as a Submission attachment (any Submission file on the order
-  counts). Managers also see the purchaser and commission rate in the dialog.
+  and offers the optional screenshot that reads the ID; Cash lifts that rule
+  but needs its own proof (v1.153.0, below). **Self-paid** asks for no method
+  and no ID — it is reimbursed from commission, not matched against the bank
+  — but **requires the chat with the seller** as a Submission attachment (any
+  Submission file on the order counts). Managers also see the purchaser and
+  commission rate in the dialog.
   Confirming writes everything, creates the tracked package for a label
   (linked to the PO, carrying its source), and advances, in one transaction —
   a refusal leaves nothing behind. The hand-off is the owner's or a manager's;
@@ -121,6 +150,33 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
   exactly like the transaction-ID rule.
+- **The desktop list's In Transit chip says how the goods are coming**
+  (v1.155.0). A PO in transit by carrier reads `In Transit | UPS` (FedEx,
+  USPS) and the chip links the carrier's tracking page for the hand-off's
+  package, in a new tab; a local pickup reads `In Transit | Local`; a PO that
+  left Draft before the hand-off existed keeps the plain chip. The phone list
+  still shows the plain chip.
+- **One payment picker on every surface, and a cash payment needs a
+  screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
+  the phone's Review and Detail screens, and the hand-off dialog and sheet
+  all share one component: *Paid by* (Company card / Self-paid), then, under
+  Company card, *Method* (PayPal / Cash), then a proof panel whose heading
+  states what the chosen path needs before anything is typed — the
+  transaction ID plus the optional screenshot that reads it; a **screenshot
+  of the total amount handed over** for cash (the receipt, the counted cash,
+  or the chat where the amount was agreed); the chat with the seller for a
+  self-paid order. A company PO whose method was never asked is asked in the
+  hand-off rather than assumed to be PayPal. The cash screenshot is the third
+  proof-of-payment rule: a company-cash PO created after the release refuses
+  to leave Draft — hand-off, manager stage-jump, carrier poll — until one is
+  attached, with a 409 that names the fix; earlier POs are exempt by the same
+  cutoff mechanism as the other two rules. Cash proof lives in a **`Payment`
+  attachment bucket** of its own (the activity log calls it *Payment proof*),
+  apart from Submission receipts and manifests, so a lot manifest cannot
+  stand in for it. The method is saved from the create and edit pages
+  (`paymentMethod` on POST / PATCH), logged, and cleared when the PO flips to
+  Self-paid; `GET /api/orders/:id` reports `cashShotRequired` beside
+  `txnRequired` and `chatShotRequired`.
 - **A PO cannot be submitted without a cost** (v1.148.0). Leaving Draft is
   refused while the order's goods cost is zero, through every door — the
   hand-off, a manager stage-jump, the carrier poll. The rule is per order,
@@ -133,6 +189,16 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   Transit on a $0 Draft with no submission history, on the desktop stepper
   or the phone's advance button, raises a *Can't submit yet* dialog naming
   the fix instead of opening the hand-off.
+- **Unit cost is required when a product line is saved** (v1.152.0). The
+  shared line rule (`lib/lineRequirements.ts`) names Unit cost alongside the
+  identity fields and quantity, so a blank or $0 cost is refused where the
+  line is entered: the desktop drawer's Confirm (and the auto-confirm when
+  the next line is added), the Submit Order blocker dialog, the phone's
+  add-item form and draft sync, and the edit page's Confirm and Save. The
+  edit page asks only of a line that is new or that the user touched — an
+  untouched legacy $0 line does not block Save or a stage change. The
+  per-order leave-Draft check above stays as the backstop, and the backend
+  still accepts `unit_cost >= 0`.
 - **The list's Payment cell says what the bank paid and opens it** (v1.138.0).
   On the desktop PO list a manager reads `Company | $1,279` or `Self | $2,829`
   on every PO with linked payments — the ledger's net, refunds subtracted,
@@ -410,7 +476,9 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
 - Since v1.115.0 a company-paid PO cannot be submitted without its transaction
   ID — which is the key auto-link matches on — so those POs arrive already able
   to reconcile themselves, instead of landing in the unlinked queue for a
-  manager to match by amount and date.
+  manager to match by amount and date. Since v1.150.0 the ID must also be one
+  of the synced PayPal transactions, so a PO cannot leave Draft naming a
+  payment this table has never seen.
 - **The link is made when a human makes it, in either direction** (v1.118.0).
   Saving a transaction ID on a PO — on edit, on create, or on the draft PO
   minted from a delivered package — claims the matching transaction on the
@@ -466,6 +534,14 @@ Manager-only. Links **Mercury and PayPal transactions to purchase orders**.
   someone to explain it. Linking that payment to a PO clears the owner, since
   the PO is the answer the tag stood in for; a row filed under an internal
   transaction refuses the link instead, because a note is attached to it.
+- **An assigned payment's suggestions are the owner's POs** (v1.151.0). The
+  owner gates the amount-and-date pool, so the expanded row's suggestion
+  block, the `possible PO` badge, the `Has match` filter and the Suggested tile
+  all agree; an unassigned payment still sees every PO. A PO carrying the
+  payment's PayPal transaction id is offered whoever owns it — an identifier
+  on a PO outranks a guess about who paid — and the picker's typed search is
+  never gated. Assigning or unassigning an expanded row refreshes its
+  suggestions in place.
 - **A payment can carry a note** (v1.136.0). The expanded row has a note box
   with Save and Clear; the collapsed row shows the note under the payee, and
   a caption names who wrote it and when. Search matches note text. A note is

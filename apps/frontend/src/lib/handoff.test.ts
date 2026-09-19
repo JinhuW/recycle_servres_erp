@@ -10,7 +10,8 @@ const base: HandoffRules = {
   method: 'cash',
   txnId: '',
   chatAttachmentCount: 0,
-  saved: { payment: 'company', txnRequired: true, chatShotRequired: false },
+  proofAttachmentCount: 1,
+  saved: { payment: 'company', paymentMethod: 'cash', txnRequired: true, chatShotRequired: false, cashShotRequired: true },
 };
 
 describe('handoffBlockerKeys', () => {
@@ -35,12 +36,50 @@ describe('handoffBlockerKeys', () => {
     expect(handoffBlockerKeys({ ...base, method: 'cash' })).toEqual([]);
   });
 
+  it('company card must say how it paid', () => {
+    expect(handoffBlockerKeys({ ...base, method: null })).toEqual(['hoNeedMethod']);
+    // Not a company question: a self-paid order carries no method.
+    expect(handoffBlockerKeys({ ...base, paidBy: 'self', method: null, chatAttachmentCount: 1, saved: { payment: 'self' } }))
+      .toEqual([]);
+  });
+
+  it('company + cash needs the amount screenshot, and an older backend blocks too', () => {
+    expect(handoffBlockerKeys({ ...base, proofAttachmentCount: 0 })).toEqual(['hoNeedCashShot']);
+    expect(handoffBlockerKeys({ ...base, proofAttachmentCount: 2 })).toEqual([]);
+    expect(handoffBlockerKeys({ ...base, proofAttachmentCount: 0, saved: { payment: 'company', paymentMethod: 'cash', cashShotRequired: false } }))
+      .toEqual([]);
+    expect(handoffBlockerKeys({ ...base, proofAttachmentCount: 0, saved: { payment: 'self', cashShotRequired: false } }))
+      .toEqual(['hoNeedCashShot']);
+    // PayPal never asks for it.
+    expect(handoffBlockerKeys({ ...base, method: 'paypal', txnId: '8XY12345AB678901C', proofAttachmentCount: 0 }))
+      .toEqual([]);
+  });
+
   it('keeps a pre-cutoff company order exempt, but only while it is still company-paid', () => {
     const exempt = { ...base, method: 'paypal' as const, saved: { payment: 'company' as const, txnRequired: false } };
     expect(handoffBlockerKeys(exempt)).toEqual([]);
     // The exemption was computed for a self-paid order; switching to company
     // in the dialog must not inherit it.
     expect(handoffBlockerKeys({ ...exempt, saved: { payment: 'self', txnRequired: false } })).toEqual(['poTxnRequired']);
+  });
+
+  it('a saved verdict covers its own method only', () => {
+    // The server said "no id needed" about a cash order; the dialog moved to
+    // PayPal, so that answer is about a different rule.
+    expect(handoffBlockerKeys({
+      ...base, method: 'paypal', proofAttachmentCount: 0,
+      saved: { payment: 'company', paymentMethod: 'cash', txnRequired: false, cashShotRequired: true },
+    })).toEqual(['poTxnRequired']);
+    // And "no screenshot needed" about a PayPal order says nothing about cash.
+    expect(handoffBlockerKeys({
+      ...base, method: 'cash', proofAttachmentCount: 0,
+      saved: { payment: 'company', paymentMethod: 'paypal', txnRequired: true, cashShotRequired: false },
+    })).toEqual(['hoNeedCashShot']);
+    // A company order that was never asked its method was judged on the
+    // PayPal branch, so a pre-cutoff exemption there still holds.
+    expect(handoffBlockerKeys({
+      ...base, method: 'paypal', saved: { payment: 'company', paymentMethod: null, txnRequired: false },
+    })).toEqual([]);
   });
 
   it('self-paid needs the chat screenshot, and an older backend blocks too', () => {

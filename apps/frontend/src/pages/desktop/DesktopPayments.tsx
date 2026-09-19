@@ -1039,7 +1039,7 @@ function ExpandedDetail({ row, locale, act, onToast, onLink, onGroup, members, r
         <DisputeDetail key={d.disputeId} dispute={d} locale={locale} />
       ))}
       {row.match && !row.orderId && !row.ignored && !dead && (
-        <MatchList txnId={row.id} locale={locale} onLink={onLink} />
+        <MatchList txnId={row.id} ownerId={row.assignee?.id ?? null} locale={locale} onLink={onLink} />
       )}
       <div style={{ display: 'grid', gap: 4 }}>
         {row.legs.map(leg => (
@@ -1353,8 +1353,9 @@ function DisputeDetail({ dispute: d, locale }: { dispute: Dispute; locale: strin
   );
 }
 
-function MatchList({ txnId, locale, onLink }: {
+function MatchList({ txnId, ownerId, locale, onLink }: {
   txnId: string;
+  ownerId: string | null;
   locale: string;
   onLink: (orderId: string) => void;
 }) {
@@ -1362,13 +1363,16 @@ function MatchList({ txnId, locale, onLink }: {
   const [rows, setRows] = useState<Suggestion[] | null>(null);
   const [total, setTotal] = useState(0);
 
+  // The owner gates the pool server-side, and Assign / Unassign reload the
+  // rows without collapsing this one — so it refetches on the owner too, or
+  // it keeps showing the other members' POs the badge just stopped counting.
   useEffect(() => {
     let live = true;
     api.get<{ suggestions: Suggestion[]; total: number }>(`/api/bank-transactions/${txnId}/suggestions`)
       .then(r => { if (live) { setRows(r.suggestions); setTotal(r.total); } })
       .catch(e => { if (live) setRows([]); handleFetchError(e); });
     return () => { live = false; };
-  }, [txnId]);
+  }, [txnId, ownerId]);
 
   if (rows === null) return <div className="muted">{t('payMoreLoading')}</div>;
   if (rows.length === 0) return null;

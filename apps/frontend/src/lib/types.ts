@@ -182,6 +182,9 @@ export type OrderSummary = {
   // The self-paid twin of `txnRequired`: whether the chat with the seller
   // (a Submission attachment) must be on file before the PO leaves Draft.
   chatShotRequired?: boolean;
+  // The cash twin: whether a screenshot of the amount paid (a Payment
+  // attachment) must be on file before a company-cash PO leaves Draft.
+  cashShotRequired?: boolean;
   // The hand-off, written when the PO leaves Draft through the In Transit
   // dialog. All optional for the deploy-skew reason above; null on orders that
   // predate it.
@@ -189,6 +192,9 @@ export type OrderSummary = {
   paymentMethod?: 'paypal' | 'cash' | null;
   handoffMethod?: 'pickup' | 'label' | null;
   handoffBy?: { id: string; name: string } | null;
+  // The hand-off's package — what the In Transit chip links. Only the list
+  // endpoint reports it; null on a pickup or a pre-hand-off order.
+  tracking?: { carrier: string; trackingNumber: string; trackingUrl: string | null } | null;
   // Net of the bank payments linked to this PO on the Payments page (refunds
   // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
   // nothing is linked or the caller is not a manager; either way there is no

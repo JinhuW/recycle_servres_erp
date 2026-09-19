@@ -94,6 +94,16 @@ async function pairLegs(a: string, b: string): Promise<void> {
   await sql`UPDATE bank_transactions SET pair_id = ${pid} WHERE id IN (${a}, ${b})`;
 }
 
+// Written directly, like pairLegs: the endpoint's own rules are covered in
+// bank-transactions-api.test.ts, and this suite only needs the column set.
+async function assignTo(txnId: string, email: string): Promise<void> {
+  const sql = getTestDb();
+  const [user] = await sql`SELECT id FROM users WHERE email = ${email}`;
+  await sql`
+    UPDATE bank_transactions SET assignee_id = ${user.id}, assigned_at = NOW()
+    WHERE id = ${txnId}`;
+}
+
 async function linkTo(txnId: string, orderId: string): Promise<void> {
   const { token } = await loginAs(ALEX);
   const r = await api('POST', `/api/bank-transactions/${txnId}/link`, { token, body: { orderId } });
@@ -143,7 +153,7 @@ describe('bank transaction → PO matching', () => {
   describe('rankCandidates', () => {
     const leg: MatchLeg = {
       id: 'leg', amount: -1000, posted_at: new Date(NOW),
-      counterparty: null, paypal_txn_id: null,
+      counterparty: null, paypal_txn_id: null, assignee_id: null,
     };
     const row = (over: Partial<CandidateRow>): CandidateRow => ({
       id: 'PO-1', total_cost: 1000, created_at: new Date(NOW), lifecycle: 'draft',
@@ -449,6 +459,34 @@ describe('bank transaction → PO matching', () => {
       expect((await suggestionsFor(m))[0]).toMatchObject({ id: po, reason: 'txn' });
       expect((await suggestionsFor(pp))[0]).toMatchObject({ id: po, reason: 'txn' });
     });
+
+    it('an assigned payment offers only the owner\'s POs', async () => {
+      await makePO({ cost: 500, daysFromNow: -3, owner: MARCUS });
+      const priyas = await makePO({ cost: 500, daysFromNow: -5, owner: PRIYA });
+      const txn = await seedTxn({ externalId: 'm-owned', amount: -500 });
+      expect((await suggestionBody(txn)).total).toBe(2);
+
+      await assignTo(txn, PRIYA);
+      const { suggestions, total } = await suggestionBody(txn);
+      expect(suggestions.map((x) => x.id)).toEqual([priyas]);
+      expect(total).toBe(1);
+      // Alone in the pool now, so it is also the confident match.
+      expect(suggestions[0].confidence).toBe('high');
+    });
+
+    it('a txn-id hit on another member\'s PO survives the owner gate', async () => {
+      // On a package, not the PO header: a header id auto-links at sync, and
+      // a linked payment cannot be assigned.
+      const po = await makePO({ cost: 900, daysFromNow: -40, owner: MARCUS });
+      await getTestDb()`
+        INSERT INTO packages (tracking_number, carrier, paypal_txn_id, order_id)
+        VALUES ('1Z777', 'UPS', '5XY98765ZZ111222A', ${po})`;
+      const txn = await seedTxn({
+        externalId: 'p-owned-txn', amount: -500, paypalTxnId: '5XY98765ZZ111222A',
+      }, 'paypal');
+      await assignTo(txn, PRIYA);
+      expect((await suggestionsFor(txn))[0]).toMatchObject({ id: po, reason: 'txn' });
+    });
   });
 
   describe('list + stats', () => {
@@ -506,6 +544,26 @@ describe('bank transaction → PO matching', () => {
       const filtered = await api<{ rows: { match: MatchSummary | null }[] }>(
         'GET', '/api/bank-transactions?status=linked&hasMatch=1', { token });
       expect(filtered.body.rows).toEqual([]);
+    });
+
+    it('the owner gate reaches the badge, the hasMatch filter and the tile', async () => {
+      await makePO({ cost: 1240, daysFromNow: -3, owner: MARCUS });
+      const txn = await seedTxn({ externalId: 'm-owned-list', amount: -1240 });
+      await assignTo(txn, PRIYA);
+      const { token } = await loginAs(ALEX);
+
+      const all = await api<{ rows: { id: string; match: MatchSummary | null }[] }>(
+        'GET', '/api/bank-transactions?status=unlinked', { token });
+      expect(all.body.rows).toHaveLength(1);
+      expect(all.body.rows[0].match).toBeNull();
+
+      const filtered = await api<{ rows: unknown[] }>(
+        'GET', '/api/bank-transactions?status=unlinked&hasMatch=1', { token });
+      expect(filtered.body.rows).toEqual([]);
+
+      const stats = await api<{ suggested: { count: number } }>(
+        'GET', '/api/bank-transactions/stats', { token });
+      expect(stats.body.suggested.count).toBe(0);
     });
 
     it('a linked row drops out of the suggested count', async () => {

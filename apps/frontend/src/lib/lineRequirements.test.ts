@@ -11,7 +11,7 @@ const ram = (over: Partial<RequirementLine> = {}): RequirementLine => ({
   category: 'RAM',
   brand: 'Samsung', capacity: '32GB', generation: 'DDR4', type: 'RDIMM',
   classification: 'ECC', rank: '2Rx4', speed: '3200', partNumber: 'M393A4K40DB3-CWE',
-  qty: 10,
+  qty: 10, unitCost: 12.5,
   ...over,
 });
 
@@ -35,33 +35,33 @@ describe('lineRequirements', () => {
   });
 
   it('wants only a brand from an HDD', () => {
-    expect(lineRequirements({ category: 'HDD', qty: 4 }).missingKeys).toEqual(['brand']);
-    expect(lineRequirements({ category: 'HDD', brand: 'Seagate', qty: 4 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'HDD', qty: 4, unitCost: 5 }).missingKeys).toEqual(['brand']);
+    expect(lineRequirements({ category: 'HDD', brand: 'Seagate', qty: 4, unitCost: 5 }).ready).toBe(true);
   });
 
   // Small SSDs move as anonymous bulk lots; above 800GB the brand is part of
   // the line's identity and the form blocks until it's filled.
   it('asks an SSD for its brand only above 800GB', () => {
-    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', qty: 4 }).missingKeys)
+    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', qty: 4, unitCost: 5 }).missingKeys)
       .toEqual(['brand']);
-    expect(lineRequirements({ category: 'SSD', capacity: '960GB', qty: 4 }).missingKeys)
+    expect(lineRequirements({ category: 'SSD', capacity: '960GB', qty: 4, unitCost: 5 }).missingKeys)
       .toEqual(['brand']);
-    expect(lineRequirements({ category: 'SSD', capacity: '800GB', qty: 4 }).ready).toBe(true);
-    expect(lineRequirements({ category: 'SSD', capacity: '480GB', qty: 4 }).ready).toBe(true);
-    expect(lineRequirements({ category: 'SSD', qty: 4 }).ready).toBe(true);
-    expect(lineRequirements({ category: 'SSD', capacity: '960GB', brand: 'Intel', qty: 4 }).ready)
+    expect(lineRequirements({ category: 'SSD', capacity: '800GB', qty: 4, unitCost: 5 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', capacity: '480GB', qty: 4, unitCost: 5 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', qty: 4, unitCost: 5 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', capacity: '960GB', brand: 'Intel', qty: 4, unitCost: 5 }).ready)
       .toBe(true);
   });
 
   it('wants a type and a part number from an Other line', () => {
-    expect(lineRequirements({ category: 'Other', qty: 1 }).missingKeys)
+    expect(lineRequirements({ category: 'Other', qty: 1, unitCost: 5 }).missingKeys)
       .toEqual(['lfItemType', 'lfPartSku']);
-    expect(lineRequirements({ category: 'Other', itemType: 'Cable', partNumber: 'SFF-8087', qty: 1 }).ready)
+    expect(lineRequirements({ category: 'Other', itemType: 'Cable', partNumber: 'SFF-8087', qty: 1, unitCost: 5 }).ready)
       .toBe(true);
   });
 
   it('lets an Other line through without a description', () => {
-    const line: RequirementLine = { category: 'Other', itemType: 'CPU', partNumber: 'i5-7500', qty: 21 };
+    const line: RequirementLine = { category: 'Other', itemType: 'CPU', partNumber: 'i5-7500', qty: 21, unitCost: 5 };
     expect(lineRequirements({ ...line, description: '' }).ready).toBe(true);
     expect(lineRequirements({ ...line, description: null }).ready).toBe(true);
   });
@@ -69,25 +69,53 @@ describe('lineRequirements', () => {
   // Blanks arrive as '' from the desktop form and null from the API, and a
   // field holding nothing but spaces is blank however it got there.
   it('treats whitespace, null and undefined alike', () => {
-    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', brand: '   ', qty: 1 }).missingKeys).toEqual(['brand']);
-    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', brand: null, qty: 1 }).missingKeys).toEqual(['brand']);
-    expect(lineRequirements({ category: 'Other', itemType: ' ', partNumber: ' ', qty: 1 }).missingKeys)
+    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', brand: '   ', qty: 1, unitCost: 5 }).missingKeys).toEqual(['brand']);
+    expect(lineRequirements({ category: 'SSD', capacity: '1.92TB', brand: null, qty: 1, unitCost: 5 }).missingKeys).toEqual(['brand']);
+    expect(lineRequirements({ category: 'Other', itemType: ' ', partNumber: ' ', qty: 1, unitCost: 5 }).missingKeys)
       .toEqual(['lfItemType', 'lfPartSku']);
   });
 
   // The forms hold qty as a string while it is being typed, and an emptied
   // field is neither 0 nor a number.
   it('reads a typed qty, and rejects blank or zero', () => {
-    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: '12' }).ready).toBe(true);
-    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: '' }).missingKeys).toEqual(['qty']);
-    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: 0 }).missingKeys).toEqual(['qty']);
+    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: '12', unitCost: 5 }).ready).toBe(true);
+    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: '', unitCost: 5 }).missingKeys).toEqual(['qty']);
+    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: 0, unitCost: 5 }).missingKeys).toEqual(['qty']);
   });
 
   // One name per field, everywhere: "Qty" on capture and "Quantity" in the
   // editor were the same blank field described two ways.
   it('names the missing quantity with the label the drawer prints', () => {
-    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: 0 }).missingKeys)
+    expect(lineRequirements({ category: 'SSD', brand: 'Intel', qty: 0, unitCost: 5 }).missingKeys)
       .toEqual(['qty']);
+  });
+
+  // The drawers hold the cost as a string while it is typed; the phone form
+  // and the API hand over a number, and a blank arrives as '' or 0.
+  it('wants a unit cost above zero, however the form spells it', () => {
+    const ssd = { category: 'SSD', brand: 'Intel', qty: 4 };
+    expect(lineRequirements({ ...ssd, unitCost: '12.5' }).ready).toBe(true);
+    expect(lineRequirements({ ...ssd, unitCost: 3 }).ready).toBe(true);
+    expect(lineRequirements({ ...ssd }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements({ ...ssd, unitCost: '' }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements({ ...ssd, unitCost: null }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements({ ...ssd, unitCost: 0 }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements({ ...ssd, unitCost: '0' }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements({ ...ssd, unitCost: -1 }).missingKeys).toEqual(['unitCost']);
+  });
+
+  it('lists the cost after the quantity, in form order', () => {
+    expect(lineRequirements({ category: 'HDD', qty: 0, unitCost: 0 }).missingKeys)
+      .toEqual(['brand', 'qty', 'unitCost']);
+  });
+
+  // The editor holds hundreds of legacy $0 lines; one the user never touched
+  // is not being re-submitted, so the page can ask the rule to skip the cost.
+  it('skips the cost only when asked', () => {
+    const free = { category: 'HDD', brand: 'Seagate', qty: 4, unitCost: 0 };
+    expect(lineRequirements(free, { requireCost: false }).ready).toBe(true);
+    expect(lineRequirements(free, { requireCost: true }).missingKeys).toEqual(['unitCost']);
+    expect(lineRequirements(free, {}).missingKeys).toEqual(['unitCost']);
   });
 });
 

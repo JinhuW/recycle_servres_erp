@@ -258,6 +258,7 @@ export const createDraftOrder = (
 export const createOrder = (body: {
   warehouseId?: string;
   payment?: OrderSummary['payment'];
+  paymentMethod?: 'paypal' | 'cash' | null;
   notes?: string | null;
   // Manager-only: the purchaser who owns the order. PATCH accepts the same
   // key to reassign ownership later, up until the order is Done.

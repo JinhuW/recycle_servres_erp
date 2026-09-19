@@ -4,36 +4,32 @@ import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
-import { StatusChangeDialog, type StatusAttachment } from '../components/StatusChangeDialog';
+import { StatusChangeDialog } from '../components/StatusChangeDialog';
 import { PhHandoffSheet } from '../components/PhHandoffSheet';
 import { AttachmentChip } from '../components/AttachmentChip';
 import { AttachmentDropzone } from '../components/AttachmentDropzone';
-import { LineSpecChips, lineHasSpecChips } from '../components/LineSpecChips';
-import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { useEffectiveUser } from '../lib/tweaks';
-import { linePhotos } from '../lib/linePhotos';
 import { api, deleteOrder, archiveOrder, unarchiveOrder } from '../lib/api';
 import { readArchiveConflict, type ArchiveConflict } from '../lib/archiveConflict';
 import { ArchiveConflictList } from '../components/ArchiveConflictList';
-import { navigate } from '../lib/route';
+import { navigate, poProductsPath, type PoScreen } from '../lib/route';
+import { OrderProductsBody, itemLabel } from './OrderProductsBody';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
 import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { profitTone } from '../lib/orderPresentation';
 import { isPricedSellPrice } from '@recycle-erp/shared';
 import { poEffectiveCost, parseFeeInput } from '../lib/poTotals';
-import { normalizePaypalTxnInput } from '../lib/paypalTxn';
+import { handoffBlockerKeys, type HandoffMethod } from '../lib/handoff';
+import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
+import { PaymentFields } from '../components/PaymentFields';
 import {
   ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
 } from '../lib/status';
 import { addableCategories, categoryTone } from '../lib/lookups';
-import type { Category, Order, OrderLine, Warehouse } from '../lib/types';
+import type { Category, Order, Warehouse } from '../lib/types';
 import { loadWarehouses } from '../lib/warehouses';
-
-// How many of a line's photos the row shows before it offers the rest. Four
-// 44px tiles is what fits next to the line's controls on a small phone.
-const PHOTOS_COLLAPSED = 4;
 
 /**
  * The order-level edits in flight on this screen. They live in the shell, not
@@ -45,6 +41,7 @@ export type OrderMetaDraft = {
   version: string;
   warehouseId: string;
   payment: 'company' | 'self';
+  paymentMethod: HandoffMethod | null;
   paypalTxnId: string;
   notes: string;
   fees: { amount: string; note: string };
@@ -52,6 +49,13 @@ export type OrderMetaDraft = {
 
 type Props = {
   order: Order;
+  /**
+   * Which of the PO's two phone screens to show. One instance renders both
+   * — the shell keeps the element in place across the switch — so the order
+   * copy, the unsaved fields and the once-per-visit revert warning carry
+   * over instead of each screen starting from a stale prop.
+   */
+  section: PoScreen;
   /** Unsaved order-level edits carried across trips into the line form. */
   meta: OrderMetaDraft | null;
   onMetaChange: (meta: OrderMetaDraft) => void;
@@ -64,7 +68,7 @@ type Props = {
 };
 
 export function OrderDetail({
-  order: initialOrder, meta: metaDraft, onMetaChange,
+  order: initialOrder, section, meta: metaDraft, onMetaChange,
   onCancel, onSaved, onDeleted, onEditLine, onAddLine,
 }: Props) {
   const { t, lang } = useT();
@@ -110,11 +114,13 @@ export function OrderDetail({
     order.id,
     order.warehouse?.id ?? '',
     order.payment,
+    order.paymentMethod ?? '',
     order.paypalTxnId ?? '',
     order.notes ?? '',
     order.otherFees,
     order.otherFeesNote ?? '',
     ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
+    ...(order.statusMeta?.['Payment']?.attachments ?? []).map(a => a.id),
   ]);
   // Edits made against an older server state are stale: the order moved on, so
   // the fields show what it now holds.
@@ -122,6 +128,7 @@ export function OrderDetail({
     version: serverVersion,
     warehouseId: order.warehouse?.id ?? '',
     payment: order.payment,
+    paymentMethod: order.paymentMethod ?? null,
     paypalTxnId: order.paypalTxnId ?? '',
     notes: order.notes ?? '',
     fees: {
@@ -129,7 +136,7 @@ export function OrderDetail({
       note: order.otherFeesNote ?? '',
     },
   };
-  const { warehouseId, payment, paypalTxnId, notes, fees } = meta;
+  const { warehouseId, payment, paymentMethod, paypalTxnId, notes, fees } = meta;
   const setMeta = (patch: Partial<OrderMetaDraft>) => onMetaChange({ ...meta, ...patch });
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Which lines have their whole photo row open. Collapsed, a line shows the
@@ -157,10 +164,15 @@ export function OrderDetail({
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const [submissionAtts, setSubmissionAtts] = useState<StatusAttachment[]>(
-    order.statusMeta?.['Submission']?.attachments ?? [],
-  );
-  const [submissionUploading, setSubmissionUploading] = useState(false);
+  // The payment proof — chat (Submission) and cash screenshot (Payment)
+  // attachments plus the PayPal scan — shared with the hand-off sheet.
+  const proof = usePaymentProof({
+    orderId: order.id,
+    chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
+    proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
+    setTxnId: v => setMeta({ paypalTxnId: v }),
+  });
+  const submissionAtts = proof.chatAtts;
 
   // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
   // archive is reversible so we keep the gesture short, matching the
@@ -179,7 +191,10 @@ export function OrderDetail({
   // Re-read the evidence list when the server's own version of it moves —
   // never on a mere refetch that returned the same thing.
   useEffect(() => {
-    setSubmissionAtts(order.statusMeta?.['Submission']?.attachments ?? []);
+    proof.sync(
+      order.statusMeta?.['Submission']?.attachments ?? [],
+      order.statusMeta?.['Payment']?.attachments ?? [],
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverVersion]);
 
@@ -213,11 +228,14 @@ export function OrderDetail({
   const notesDirty = (notes || '') !== (order.notes || '');
   const warehouseDirty = (warehouseId || '') !== (order.warehouse?.id ?? '');
   const paymentDirty = payment !== order.payment;
+  // Only a company order carries a method; the server clears it on a flip to
+  // self, so the local value is not a change until the order is company again.
+  const methodDirty = payment === 'company' && paymentMethod !== (order.paymentMethod ?? null);
   const paypalDirty = paypalTxnId !== (order.paypalTxnId ?? '');
   const feesDirty =
     feesValue !== (order.otherFees ?? 0) ||
     (fees.note.trim() || null) !== (order.otherFeesNote || null);
-  const dirty = notesDirty || warehouseDirty || paymentDirty || paypalDirty || feesDirty;
+  const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty;
 
   const refetchOrder = async () => {
     try {
@@ -259,7 +277,7 @@ export function OrderDetail({
   const save = async () => {
     if (!canAnnotate) return;
     // A note is not a change to the order itself and leaves the stage alone.
-    const material = warehouseDirty || paymentDirty || paypalDirty || feesDirty;
+    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty;
     if (material && !(await askRevert())) return;
     setSaving(true);
     try {
@@ -272,6 +290,7 @@ export function OrderDetail({
         notes:         notesDirty     ? notes                       : undefined,
         warehouseId:   warehouseDirty ? (warehouseId || null)       : undefined,
         payment:       paymentDirty   ? payment                     : undefined,
+        paymentMethod: methodDirty    ? paymentMethod               : undefined,
         paypalTxnId:   paypalDirty    ? (paypalTxnId || null)       : undefined,
         otherFees:     feesDirty      ? feesValue                   : undefined,
         otherFeesNote: feesDirty      ? (fees.note.trim() || null)  : undefined,
@@ -354,39 +373,15 @@ export function OrderDetail({
     await doAdvance();
   };
 
+  // Uploads through the proof hook; the activity log is nudged here because
+  // the hook does not know this page has one.
   const addSubmissionFiles = async (fl: FileList | null) => {
-    const files = Array.from(fl || []);
-    if (!files.length) return;
-    setSubmissionUploading(true);
-    try {
-      for (const f of files) {
-        // 50 MiB server hard cap; oversized images are shrunk server-side.
-        if (f.size > 50 * 1024 * 1024) {
-          showErrorDialog(t('fileTooLarge', { name: f.name }));
-          continue;
-        }
-        const form = new FormData();
-        form.append('file', f);
-        const r = await api.upload<{ attachment: StatusAttachment }>(
-          `/api/orders/${order.id}/status-meta/Submission/attachments`, form);
-        setSubmissionAtts(prev => [...prev, r.attachment]);
-      }
-      setActivityRefreshKey(k => k + 1);
-    } catch (e) {
-      handleFetchError(e);
-    } finally {
-      setSubmissionUploading(false);
-    }
+    await proof.addChatFiles(fl);
+    setActivityRefreshKey(k => k + 1);
   };
-
-  const removeSubmissionAtt = async (attachmentId: string) => {
-    try {
-      await api.delete(`/api/orders/${order.id}/status-meta/Submission/attachments/${attachmentId}`);
-      setSubmissionAtts(prev => prev.filter(a => a.id !== attachmentId));
-      setActivityRefreshKey(k => k + 1);
-    } catch (e) {
-      handleFetchError(e);
-    }
+  const removeSubmissionAtt = async (att: ProofAttachment) => {
+    await proof.removeChatAtt(att);
+    setActivityRefreshKey(k => k + 1);
   };
 
   const removeDoneAtt = async (attachmentId: string) => {
@@ -399,16 +394,72 @@ export function OrderDetail({
     }
   };
 
-  const itemLabel = (l: OrderLine) =>
-      l.category === 'RAM' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.generation ?? ''}`.trim()
-    : l.category === 'SSD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.interface ?? ''}`.trim()
-    : l.category === 'HDD' ? `${l.brand ?? ''} ${l.capacity ?? ''} ${l.rpm ? l.rpm + 'rpm' : ''}`.trim()
-    : (l.description ?? '—');
-
   const doneMeta = order.statusMeta?.['Done'];
 
-  const headerTitle = orderLocked ? t('viewOrder') : t('editOrderId', { id: order.id });
-  const headerSub = `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
+  const itemsUnits = `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`;
+  // The id is the title on both screens: it is what the purchaser searched
+  // for and what they will say out loud. The stage sits under it, with
+  // "locked" spelled out where the page used to hide the id behind "View
+  // order (locked)".
+  const headerTitle = section === 'products' ? `${t('products')} · ${order.lines.length}` : order.id;
+  const headerSub = section === 'products'
+    ? `${order.id} · ${totals.qty} ${totals.qty === 1 ? t('unit') : t('units2')}`
+    : orderLocked ? `${effectiveStatus} · ${t('poLockedShort')}` : `${effectiveStatus} · ${itemsUnits}`;
+  const unpricedCount = order.lines.filter(l => !isPricedSellPrice(l.sellPrice)).length;
+
+  // What still stands between a Draft and Submit, from the same rule the
+  // hand-off sheet runs so the two can never disagree. The sheet's own
+  // questions (how the goods arrive) are stubbed as answered: only the
+  // payment keys can fire here. Reads the fields as typed, not as saved.
+  const readiness: { key: string; met: boolean; label: string; target: 'products' | 'payment' }[] =
+    effectiveStatus === 'Draft' && !isArchived ? (() => {
+      const blockers = new Set(handoffBlockerKeys({
+        source: 'other', delivery: 'pickup', trackingValid: true, carrier: null,
+        paidBy: payment, method: paymentMethod, txnId: paypalTxnId,
+        chatAttachmentCount: proof.chatAtts.length,
+        proofAttachmentCount: proof.proofAtts.length,
+        saved: order,
+      }));
+      const noLines = order.lines.length === 0;
+      const noCost = !noLines && !(cost.goods > 0) && !order.everSubmitted;
+      const rows: typeof readiness = [{
+        key: 'products', met: !noLines && !noCost, target: 'products',
+        label: noLines ? t('poReadyNoProducts')
+          : noCost ? t('poReadyNoCost')
+          : `${order.lines.length} ${order.lines.length === 1 ? t('item') : t('items')} · ${fmtUSD(cost.goods, locale)}`,
+      }];
+      // A rule the saved order is exempt from (pre-cutoff) with nothing on
+      // file is neither met nor missing — it has no row.
+      const paymentRow = (key: string, metLabel: string | null) => {
+        if (blockers.has(key)) rows.push({ key, met: false, target: 'payment', label: t(key) });
+        else if (metLabel) rows.push({ key, met: true, target: 'payment', label: metLabel });
+      };
+      const files = (n: number) => n > 0 ? t('poReadyFiles', { n }) : null;
+      if (payment === 'company') {
+        paymentRow('hoNeedMethod', paymentMethod === 'cash' ? t('hoMethodCash') : t('hoMethodPaypal'));
+        if (paymentMethod === 'paypal') paymentRow('poTxnRequired', paypalTxnId.trim() || null);
+        if (paymentMethod === 'cash') paymentRow('hoNeedCashShot', files(proof.proofAtts.length));
+      } else {
+        paymentRow('hoNeedChatShot', files(proof.chatAtts.length));
+      }
+      return rows;
+    })() : [];
+  // The payment fields fold away by default: they were answered when the PO
+  // was raised and the row above them states the answer. A readiness row
+  // opens them — the fold has to be open before the scroll can land on it.
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const scrollToPayment = () => {
+    setPaymentOpen(true);
+    // PaymentFields labels its Paid-by row with the page's id prefix.
+    requestAnimationFrame(() => {
+      const el = document.getElementById('ph-paidby') ?? document.getElementById('ph-txn');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+  const paymentSummary = payment === 'self'
+    ? t('paySelfShort')
+    : [t('payCompanyShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null, paypalTxnId.trim() || null]
+        .filter(Boolean).join(' · ');
 
   // The enabled set, not the fixed four: a fifth category has to reach the
   // dock too, and a single docked row cannot wrap to hold it.
@@ -426,9 +477,66 @@ export function OrderDetail({
       <PhHeader
         title={headerTitle}
         sub={headerSub}
-        leading={<button className="ph-icon-btn" onClick={onCancel}><Icon name="chevronLeft" size={16} /></button>}
+        leading={<button className="ph-icon-btn" onClick={onCancel} aria-label={t('back')}><Icon name="chevronLeft" size={16} /></button>}
       />
-      <div className="ph-scroll" style={{ paddingBottom: canEditOrder ? 168 : 110 }}>
+      {section === 'products' && (
+        <>
+          <div className="ph-scroll" style={{ paddingTop: 12, paddingBottom: canEditOrder ? 168 : 110 }}>
+            <OrderProductsBody
+              order={order}
+              canEditOrder={canEditOrder}
+              showFinalSell={showFinalSell}
+              locale={locale}
+              expandedPhotos={expandedPhotos}
+              onExpandPhotos={id => setExpandedPhotos(prev => new Set(prev).add(id))}
+              onOpenPhoto={setLightboxUrl}
+              onEditLine={i => { void editLine(i); }}
+              onRemoveLine={setRemovingLineId}
+            />
+          </div>
+          <div className="ph-action-bar stacked">
+            {/* One target per category, matching the capture screen. A single
+                "Add another" button would put the old category lock back in the
+                user's head — the PO is not in a mode. Docked rather than in flow:
+                the list it appends to grows every time it is used, and the screen
+                reopens at the top after each line, so in flow it only ever got
+                further away. */}
+            {canEditOrder && (
+              <div className="ph-add-dock" style={{ gridTemplateColumns: `repeat(${cats.length}, 1fr)` }}>
+                {cats.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => { void addLine(cat as Category); }}
+                    aria-label={t('subAddCatLine', { cat })}
+                    style={{
+                      height: 44, borderRadius: 12, minWidth: 0,
+                      border: '1.5px dashed ' + categoryTone(cat).tone,
+                      background: 'var(--bg-elev)', color: categoryTone(cat).strong,
+                      fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
+                      padding: '0 6px', cursor: 'pointer',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    + {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* The goods figure moves as lines are added, so it sits with the
+                dock that changes it; fees and the full total stay on the
+                order screen where they are typed. */}
+            <div className="ph-action-row" style={{ justifyContent: 'space-between', padding: '0 4px' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--fg-subtle)' }}>{t('goodsTotal')} · {itemsUnits}</span>
+              <span className="mono" style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                {fmtUSD(cost.goods, locale)}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+      {section === 'info' && (
+      <>
+      <div className="ph-scroll" style={{ paddingBottom: 110 }}>
         {isArchived && (
           <div className="ph-card" style={{
             margin: '10px 12px 0', padding: '10px 12px',
@@ -449,9 +557,6 @@ export function OrderDetail({
         )}
         <div className="ph-section-h" style={{ paddingTop: 10 }}>
           <span>{t('orderStatus')}</span>
-          <span style={{ fontSize: 11, color: 'var(--fg-subtle)', textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
-            {order.id}
-          </span>
         </div>
 
         <div className="ph-card" style={{ padding: '14px 16px' }}>
@@ -497,6 +602,25 @@ export function OrderDetail({
             })}
           </div>
 
+          {readiness.length > 0 && (
+            <div style={{ marginTop: 14, borderTop: '1px dashed var(--border)', paddingTop: 10 }}>
+              <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+                {t('poReadyTitle')}
+              </div>
+              {readiness.map(r => (
+                <button
+                  key={r.key}
+                  type="button"
+                  className={'ph-check-row' + (r.met ? ' met' : '')}
+                  onClick={() => r.target === 'products' ? navigate(poProductsPath(order.id)) : scrollToPayment()}
+                >
+                  <span className="ph-check-dot" aria-hidden>{r.met && <Icon name="check" size={10} stroke={3} />}</span>
+                  <span>{r.label}</span>
+                  <Icon name="chevronRight" size={13} className="arrow" />
+                </button>
+              ))}
+            </div>
+          )}
           {nextStatus && (
             <button
               className="ph-btn dark"
@@ -578,6 +702,30 @@ export function OrderDetail({
           )}
         </div>
 
+        {/* The lines live on their own screen: an 18-line PO is longer than a
+            phone, and the order's stage, cost and fields were being scrolled
+            past to reach them. The row states what that screen holds. */}
+        <button
+          className="ph-row"
+          onClick={() => navigate(poProductsPath(order.id))}
+          style={{ width: '100%', marginTop: 12, fontFamily: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+        >
+          <div className="ph-inv-thumb" style={{ width: 34, height: 34 }}>
+            <Icon name="box" size={15} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>
+              {t('products')} <span className="mono" style={{ color: 'var(--fg-subtle)' }}>· {order.lines.length}</span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2 }}>
+              {order.lines.length === 0
+                ? t('poProductsRowEmpty')
+                : <>{totals.qty} {totals.qty === 1 ? t('unit') : t('units2')} · {fmtUSD(cost.goods, locale)}{unpricedCount > 0 && <span style={{ color: 'var(--warn)' }}> · {t('grpUnpriced', { n: unpricedCount })}</span>}</>}
+            </div>
+          </div>
+          <Icon name="chevronRight" size={15} className="arrow" />
+        </button>
+
         {shipmentCount > 0 && (
           <button
             className="ph-row"
@@ -594,133 +742,10 @@ export function OrderDetail({
           </button>
         )}
 
-        <div className="ph-section-h">
-          <span>{t('products')} · {order.lines.length}</span>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {order.lines.map((l, i) => {
-            const shots = linePhotos(l);
-            const shown = expandedPhotos.has(l.id) ? shots : shots.slice(0, PHOTOS_COLLAPSED);
-            const hidden = shots.length - shown.length;
-            return (
-            <div
-              key={l.id}
-              className="ph-line"
-              onClick={canEditOrder ? () => { void editLine(i); } : undefined}
-              style={canEditOrder ? { cursor: 'pointer' } : undefined}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span className="lb-rank" style={{ width: 22, height: 22, fontSize: 11 }}>{i + 1}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {l.category === 'Other' && !!(l.itemType ?? '').trim() && (
-                      <span className="chip">{l.itemType}</span>
-                    )}
-                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemLabel(l) || '—'}</span>
-                  </div>
-                  {lineHasSpecChips(l)
-                    ? <LineSpecChips line={l} />
-                    : l.partNumber && (
-                      <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {l.partNumber}
-                      </div>
-                    )}
-                  {l.serialNumber && (
-                    <div style={{ marginTop: 5 }}>
-                      <SerialNumbers raw={l.serialNumber} max={4} size={10.5} />
-                    </div>
-                  )}
-                </div>
-                {canEditOrder && (
-                  <>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); void editLine(i); }}
-                      className="ph-icon-btn"
-                      style={{ width: 28, height: 28, color: 'var(--fg-subtle)' }}
-                      aria-label={t('edit')}
-                    >
-                      <Icon name="edit" size={13} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setRemovingLineId(l.id); }}
-                      className="ph-icon-btn"
-                      style={{ width: 28, height: 28, color: 'var(--fg-subtle)' }}
-                      aria-label={t('delete')}
-                    >
-                      <Icon name="trash" size={13} />
-                    </button>
-                  </>
-                )}
-              </div>
-              {/* Every picture the line carries, not just the first — the
-                  phone is where they are taken, so it is where they are
-                  checked. Taps stop here: the card itself opens the editor. */}
-              {shots.length > 0 && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  {shown.map(p => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={e => { e.stopPropagation(); setLightboxUrl(p.url); }}
-                      title={p.filename ?? t('linePhotos')}
-                      style={{
-                        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
-                        border: '1px solid var(--border)', overflow: 'hidden',
-                        padding: 0, background: 'var(--bg-soft)', cursor: 'pointer',
-                      }}
-                    >
-                      <img
-                        src={p.url}
-                        alt={t('linePhotos')}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                      />
-                    </button>
-                  ))}
-                  {hidden > 0 && (
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        setExpandedPhotos(prev => new Set(prev).add(l.id));
-                      }}
-                      aria-label={t('linePhotosShowAll', { n: hidden })}
-                      style={{
-                        width: 44, height: 44, borderRadius: 8, flexShrink: 0,
-                        border: '1px dashed var(--border-strong)', background: 'var(--bg-soft)',
-                        color: 'var(--fg-muted)', fontFamily: 'inherit',
-                        fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0,
-                      }}
-                    >
-                      +{hidden}
-                    </button>
-                  )}
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                <span>{t('qty')} <span style={{ color: 'var(--accent-strong)', fontWeight: 700, background: 'var(--accent-soft)', padding: '0 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>{l.qty}</span> · {fmtUSD(l.unitCost, locale)}</span>
-                <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD0(l.qty * l.unitCost, locale)}</span>
-              </div>
-              {showFinalSell && l.finalSellPrice != null && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-                  <span>{t('finalSellPrice')}</span>
-                  <span className="mono" style={{ fontWeight: 600 }}>
-                    {fmtUSD(l.finalSellPrice, locale)}
-                    {l.finalSoldQty != null && l.finalSoldQty !== l.qty && (
-                      <span style={{ marginLeft: 4, fontWeight: 400 }}>×{l.finalSoldQty}</span>
-                    )}
-                  </span>
-                </div>
-              )}
-            </div>
-            );
-          })}
-        </div>
-
-        {/* The money sits directly under the lines it comes from: on a phone
-            this is what the screen is for, and the order's warehouse and
-            payment type were answered once and are rarely revisited. */}
-        <div className="ph-card" style={{ marginTop: 16, padding: '12px 14px' }}>
+        {/* The money comes right after the products row it is computed from;
+            the order's warehouse and payment type were answered once and are
+            rarely revisited, so they follow. */}
+        <div className="ph-card" style={{ marginTop: 12, padding: '12px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               {t('costBreakdown')}
@@ -875,36 +900,28 @@ export function OrderDetail({
           </div>
         </div>
 
-        <div className="ph-field">
-          <label>{t('payment')}</label>
-          <div className="seg" style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            <button
-              className={payment === 'company' ? 'active' : ''}
-              onClick={() => canEditOrder && setMeta({ payment: 'company' })}
-              disabled={!canEditOrder}
-            >{t('payCompany')}</button>
-            <button
-              className={payment === 'self' ? 'active' : ''}
-              onClick={() => canEditOrder && setMeta({ payment: 'self' })}
-              disabled={!canEditOrder}
-            >{t('paySelf')}</button>
-          </div>
-        </div>
-
-        <div className="ph-field">
-          <label>
-            {t('poPaypalTxn')}
-            {order.txnRequired === true && <span className="req">*</span>}
-          </label>
-          <input
-            className="input mono"
-            value={paypalTxnId}
-            onChange={e => canEditOrder && setMeta({ paypalTxnId: normalizePaypalTxnInput(e.target.value) })}
-            placeholder={canEditOrder ? t('shipPayTxnPh') : '—'}
+        <div className="ph-field ph-pay">
+          <button
+            type="button"
+            className="ph-fold-h"
+            aria-expanded={paymentOpen}
+            onClick={() => setPaymentOpen(o => !o)}
+          >
+            <span>{t('payment')}</span>
+            <span className="ph-fold-sum">{paymentSummary}</span>
+            <Icon name="chevronDown" size={14} className="arrow" />
+          </button>
+          {paymentOpen && <PaymentFields
+            paidBy={payment} onPaidBy={v => canEditOrder && setMeta({ payment: v })}
+            method={paymentMethod} onMethod={v => canEditOrder && setMeta({ paymentMethod: v })}
+            txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
+            txnRequired={order.txnRequired === true}
             disabled={!canEditOrder}
-            autoComplete="off"
-            spellCheck={false}
-          />
+            phone
+            proof={proof}
+            canEditProof={canAnnotate}
+            idPrefix="ph"
+          />}
         </div>
 
         <div className="ph-field">
@@ -930,14 +947,14 @@ export function OrderDetail({
                 <AttachmentChip
                   key={a.id}
                   a={a}
-                  onRemove={canAnnotate ? () => removeSubmissionAtt(a.id) : undefined}
+                  onRemove={canAnnotate ? () => void removeSubmissionAtt(a) : undefined}
                 />
               ))}
               {canAnnotate && (
                 <AttachmentDropzone
                   boxHint={t('poSubmitAttachHint')}
-                  uploading={submissionUploading}
-                  onFiles={addSubmissionFiles}
+                  uploading={proof.chatUploading}
+                  onFiles={files => void addSubmissionFiles(files)}
                 />
               )}
             </div>
@@ -952,34 +969,7 @@ export function OrderDetail({
 
       </div>
 
-      <div className={'ph-action-bar' + (canEditOrder ? ' stacked' : '')}>
-        {/* One target per category, matching the capture screen. A single
-            "Add another" button would put the old category lock back in the
-            user's head — the PO is not in a mode. Docked rather than in flow:
-            the list it appends to grows every time it is used, and the screen
-            reopens at the top after each line, so in flow it only ever got
-            further away. */}
-        {canEditOrder && (
-          <div className="ph-add-dock" style={{ gridTemplateColumns: `repeat(${cats.length}, 1fr)` }}>
-            {cats.map(cat => (
-              <button
-                key={cat}
-                onClick={() => { void addLine(cat as Category); }}
-                aria-label={t('subAddCatLine', { cat })}
-                style={{
-                  height: 44, borderRadius: 12, minWidth: 0,
-                  border: '1.5px dashed ' + categoryTone(cat).tone,
-                  background: 'var(--bg-elev)', color: categoryTone(cat).strong,
-                  fontFamily: 'inherit', fontSize: 12.5, fontWeight: 650,
-                  padding: '0 6px', cursor: 'pointer',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}
-              >
-                + {cat}
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="ph-action-bar">
         <div className="ph-action-row">
           {/* The total belongs where the decision is made, not 2,000px up the
               scroll. It states the figure; it is never typed. */}
@@ -1065,6 +1055,8 @@ export function OrderDetail({
           )}
         </div>
       </div>
+      </>
+      )}
 
       {revertConfirm && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) revertConfirm(false); }}>
@@ -1278,7 +1270,9 @@ export function OrderDetail({
             order,
             warehouseId: warehouseId || (order.warehouse?.id ?? ''),
             payment,
+            paymentMethod,
             paypalTxnId,
+            proof,
             ...(isPurchaser ? {} : { ownerId: order.userId, commissionRate: order.commissionRate }),
             isManager: !isPurchaser,
             currentUser: { id: user.id, name: user.name },
@@ -1286,6 +1280,9 @@ export function OrderDetail({
           onClose={() => setHandoffOpen(false)}
           onDone={async () => {
             setHandoffOpen(false);
+            // The scan preview belongs to the hand-off that just consumed it;
+            // this page stays mounted, so it would linger in the PayPal panel.
+            proof.removeScreenshot();
             await refetchOrder();
             setActivityRefreshKey(k => k + 1);
           }}

@@ -8,7 +8,7 @@ import { useAuth } from './lib/auth';
 import { useT } from './lib/i18n';
 import { useEffectiveUser } from './lib/tweaks';
 import {
-  useRoute, match, navigate, parseShippingRoute,
+  useRoute, match, matchPurchaseOrder, navigate, parseShippingRoute,
   pathToDesktopView, isAuthorizePath, readSafeNext, hrefFor, onLinkClick,
 } from './lib/route';
 import { api, ApiError } from './lib/api';
@@ -69,7 +69,7 @@ export function DesktopApp() {
   // `#/purchase-orders/<id>` opens that order's edit page; clearing the hash
   // closes it.
   useEffect(() => {
-    const m = match('/purchase-orders/:id', path);
+    const m = matchPurchaseOrder(path);
     if (!m) {
       // No id in URL → ensure no order is open.
       if (editingOrder) setEditingOrder(null);

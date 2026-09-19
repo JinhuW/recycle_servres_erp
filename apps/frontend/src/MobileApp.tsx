@@ -33,7 +33,7 @@ import { useT, translateIn } from './lib/i18n';
 import { api, ApiError, createDraftOrder, deleteOrder } from './lib/api';
 import { handleFetchError, showErrorDialog } from './lib/errorToast';
 import {
-  navigate, navigateBack, useRoute, match, parseShippingRoute,
+  navigate, navigateBack, useRoute, match, matchPurchaseOrder, poProductsPath, parseShippingRoute,
   MOBILE_VIEW_TO_PATH, pathToMobileView, readSafeNext,
 } from './lib/route';
 import type { Category, DraftLine, Notification, Order, OrderLine, OrderSummary, ScanResponse } from './lib/types';
@@ -61,7 +61,7 @@ type CaptureState =
 
 type Toast = { msg: string; kind: 'success' | 'error' | 'warn' };
 
-type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; notes: string };
+type ReviewMeta = { warehouseId: string; payment: 'company' | 'self'; paymentMethod: 'paypal' | 'cash' | null; notes: string };
 
 // An order's line as the capture form wants it. Shared by the draft-resume
 // path and the detail screen's line edits so the two can't drift.
@@ -164,7 +164,7 @@ function Shell() {
   // because opening a line form unmounts that screen — typing a fee and then
   // adding the line it is for used to blank the fee.
   const [detailMeta, setDetailMeta] = useState<OrderMetaDraft | null>(null);
-  const orderDetailMatch = match('/purchase-orders/:id', path);
+  const orderDetailMatch = matchPurchaseOrder(path);
 
   // Load notifications when the user is signed in.
   useEffect(() => {
@@ -383,6 +383,7 @@ function Shell() {
       setReviewMeta({
         warehouseId: order.warehouse?.id ?? '',
         payment: order.payment,
+        paymentMethod: order.paymentMethod ?? null,
         notes: order.notes ?? '',
       });
       setCapture({
@@ -439,19 +440,14 @@ function Shell() {
     scanConfidence: l.scanConfidence ?? null,
   });
 
-  // Returns the reason a line can't be auto-saved to the server yet, or null
-  // when it's ready (identity — brand, or description for Other — a positive
-  // qty, and a non-negative unit cost). Surfaced to the user so a line never
-  // fails to sync silently.
   // The backstop before a line is written to the server. The form gates on the
   // same shared rule first, so reaching this with something missing means the
   // line arrived from somewhere else — a resumed draft, or a category switch
-  // that emptied the fields the new category needs.
+  // that emptied the fields the new category needs. Surfaced to the user so a
+  // line never fails to sync silently.
   const lineSyncBlock = (l: DraftLine): string | null => {
     const fields = missingFieldNames(lineRequirements(l).missingKeys, t, lang);
-    if (fields) return t('drawerStillNeeded', { fields });
-    if (!(Number(l.unitCost) >= 0)) return t('syncNeedCost');
-    return null;
+    return fields ? t('drawerStillNeeded', { fields }) : null;
   };
 
   const onSaveLine = async (line: DraftLine) => {
@@ -471,9 +467,10 @@ function Shell() {
     // refetch ahead of the write, and so a failure leaves the user somewhere
     // they can retry from rather than back on a screen with no save button.
     const backToDetail = returnTo === 'detail' && !!editingId;
+    // Back to the products screen, the only place the form opens from.
     const doneToDetail = () => {
       setCapture({ phase: 'idle' });
-      navigate('/purchase-orders/' + editingId);
+      if (editingId) navigate(poProductsPath(editingId));
       showToast(t('savedShort'));
     };
 
@@ -650,7 +647,7 @@ function Shell() {
     ) {
       const id = capture.editingId;
       setCapture({ phase: 'idle' });
-      navigate('/purchase-orders/' + id);
+      navigate(poProductsPath(id));
       return;
     }
     setCapture(c => {
@@ -682,6 +679,13 @@ function Shell() {
 
   const submitOrder = async (meta: SubmitMeta) => {
     if (capture.phase !== 'review') return;
+
+    // A line whose sync was refused stays on the list unconfirmed and would
+    // ship from here without ever passing the rule — the phone's last door.
+    for (const l of capture.lines) {
+      const blocked = l.id ? null : lineSyncBlock(l);
+      if (blocked) { showToast(blocked, 'error'); return; }
+    }
 
     // A draft that exists is PATCHed; a session whose lines never synced (so
     // no order was ever created) POSTs the whole thing at once — atomic, so an
@@ -828,9 +832,14 @@ function Shell() {
       {orderDetailOpen && (
         <OrderDetail
           order={detailOrder}
+          section={orderDetailMatch.screen}
           meta={detailMeta}
           onMetaChange={setDetailMeta}
-          onCancel={() => navigateBack('/purchase-orders')}
+          // The products screen backs out to the order, the order to the
+          // list — the fallback only matters when the screen was deep-linked.
+          onCancel={() => navigateBack(orderDetailMatch.screen === 'products'
+            ? '/purchase-orders/' + orderDetailMatch.id
+            : '/purchase-orders')}
           onSaved={(msg) => showToast(msg)}
           onDeleted={() => navigate('/purchase-orders')}
           onEditLine={startEditLine}
@@ -838,7 +847,7 @@ function Shell() {
         />
       )}
       {view === 'history' && (!orderDetailMatch || !detailOrder) && (
-        <Orders onEdit={(o) => navigate('/purchase-orders/' + o.id)} onToast={showToast} />
+        <Orders onToast={showToast} />
       )}
       {view === 'shipping' && shippingRoute && (
         <MobileShipping

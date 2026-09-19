@@ -17,6 +17,159 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.155.1] - 2026-09-19
+
+### Fixed
+
+- **The payment release, reviewed before it reaches prod.**  A `high` review
+  of everything `main` was about to receive (v1.150.0 – v1.155.0) found three
+  things, all in the hand-off and its transaction-id rule.  The hand-off
+  dialog and the phone sheet kept their own copy of the payment proof, seeded
+  from the order as the page first loaded it — so a cash or chat screenshot
+  uploaded on the PO page, exactly where the new readiness list sends a
+  purchaser, was "missing" once the sheet opened, and the file had to be
+  uploaded twice.  Both surfaces now read the page's one list; a scan made
+  in the dialog fills the page's transaction-id field too.  The client-side
+  exemptions (`txnRequired`, `cashShotRequired`) are the server's answers
+  about the *saved* payment method, and the dialog let a flip borrow them: a
+  saved cash order moved to PayPal with no id said ready, then the server
+  refused.  Each verdict now exempts its own method only, in the dialog and
+  in the desktop Save blockers alike.  And Submit pulled PayPal — a live
+  Transaction Search plus the dispute list — for any Draft with an unknown
+  id, archived ones and the fourteen `CASH` / `WAIT` placeholders included,
+  which can never match; the pull now waits for a live Draft with an id in
+  PayPal's shape.  [RS-076]
+
+## [1.155.0] - 2026-09-18
+
+### Features
+
+- **The In Transit chip says how the goods are coming** (RS-075). On the
+  desktop PO list a PO in transit by carrier now reads `In Transit | UPS`
+  (or FedEx, USPS) and the whole chip is a link to the carrier's tracking page
+  for that number, in a new tab, in the same shape as the payment column's
+  `Company | $760`; a local pickup reads `In Transit | Local`, not linked; a
+  PO that left Draft before the hand-off existed keeps the plain chip. The
+  link stops at the chip, so clicking it no longer unfolds the row. Behind it
+  `GET /api/orders` gains `handoffMethod` and `tracking { carrier,
+  trackingNumber, trackingUrl }` from the hand-off's linked package, both
+  additive so a Worker deployed ahead of Railway still renders the plain
+  chip. Prepaid labels bought from the wizard are not consulted: buying one
+  never moves a PO, and every carrier hand-off inserts a package anyway.
+
+## [1.154.0] - 2026-09-18
+
+### Features
+
+- **The phone PO is two screens, and the list opens them** (RS-074). A row
+  on the phone's Orders list used to unfold in place, lazily fetching its
+  lines, with the only way in — a small *Edit* — at the foot of that body;
+  on an 18-line PO that sat more than a screen below the row. Rows no longer
+  expand: the whole card opens the PO, and the chevron is now a pencil (still
+  the purchaser's to change) or an eye (Ready to Pay, Done or archived). The
+  PO page itself is split. `/purchase-orders/:id` is the **order**: the id as
+  its title with the stage under it, the stepper, a **Before you submit**
+  list on a Draft naming what still blocks the hand-off — products and their
+  cost, then whichever of paid-by / method / transaction ID / cash or chat
+  screenshot the hand-off sheet would ask for, derived from the same rule so
+  the two cannot disagree, each row a link to the thing it names — a
+  *Products · n* row, shipping, the cost card, the fields and the activity
+  log. `/purchase-orders/:id/products` is the **products** screen: the line
+  cards, the add-category dock and the goods total; the line form opens from
+  here and returns here. One component renders both, so a line removed on one
+  screen is already gone on the other, a fee typed on the order survives a
+  trip to the products, and the "this sends the PO back to Draft" warning is
+  asked once per visit. The **payment fields fold by default** behind a
+  header that reads back the answer (`Company · PayPal · 8XY…`, `Self-paid`);
+  a readiness row that names a payment gap opens them. The phone shell is
+  sized in `dvh`, so the docked action bar is no longer hidden under a
+  mobile browser's toolbar. Desktop is unchanged, except that a products
+  link opened on a laptop lands on that PO rather than the dashboard.
+
+## [1.153.0] - 2026-09-18
+
+### Features
+
+- **One payment picker everywhere, and cash pays with a screenshot** (RS-071).
+  A PO's payment was chosen in five places and each asked a different
+  question: the create pages offered Company / Self-paid and nothing more,
+  the PO pages added a PayPal-ID box that was always there, and only the
+  In-Transit dialog knew about PayPal versus Cash — where Cash needed
+  "nothing more", so a cash deal left no record of what was handed over. All
+  six surfaces (desktop Submit and Edit, the phone's Review and Detail, the
+  hand-off dialog and sheet) now share one component: *Paid by*, then, under
+  Company card, *Method* (PayPal / Cash), then a proof panel whose heading
+  names exactly what the chosen path needs — the transaction ID with the
+  optional screenshot that reads it, a **screenshot of the total amount paid
+  in cash**, or the chat with the seller. A company PO whose method was never
+  asked is asked instead of being treated as PayPal. The cash screenshot is
+  required to leave Draft through every door — hand-off, manager stage-jump,
+  carrier poll — with a 409 that names the fix, and is grandfathered by a
+  cutoff stamped when the release reaches the environment, like the two
+  rules before it. Cash proof lives in its own `Payment` attachment bucket,
+  apart from Submission receipts and manifests, so only a file offered as
+  proof of payment satisfies the rule; `paymentMethod` is saved from the
+  create and edit pages, logged on the activity log, and cleared when a PO
+  flips to Self-paid; `GET /api/orders/:id` reports `cashShotRequired`
+  beside the two flags it already had.
+
+## [1.152.0] - 2026-09-18
+
+### Features
+
+- **Unit cost is required when a product line is saved** (RS-072). The cost
+  rule from 1.148.0 ran when a PO left Draft, so a purchaser could fill in a
+  whole order at $0 and only hear about it at the hand-off. Both line forms
+  already marked Unit cost with an asterisk; now the shared line rule
+  enforces it, and every door that writes a line refuses a blank or $0 cost
+  with "Still needed: Unit cost" — the desktop drawer's Confirm and the
+  auto-confirm when the next line is added, the Submit Order blocker list,
+  the phone's add-item form and its draft sync, and the edit page's Confirm
+  and Save. The edit page asks only of a line that is new or that the user
+  touched: hundreds of production lines sit at $0 (some under a negotiated lot
+  price), and a Save that checks every line would otherwise lock those orders
+  against any edit. The per-order leave-Draft check stays as the backstop, and
+  the backend still accepts `unit_cost >= 0` so legacy lines remain editable.
+  The phone's "will be sent when you submit" message for a cost-less line is
+  gone, since that is no longer true.
+
+## [1.151.0] - 2026-09-18
+
+### Features
+
+- **PO suggestions honour the payment's owner** (RS-070). A payment assigned
+  to a member offered every same-amount PO regardless of whose it was — a
+  payment marked as Harrison's still suggested Stefen's already-paid PO. The
+  matcher now takes the owner as a gate on the amount-and-date pool: an
+  assigned payment's suggestions, its `possible PO` badge, the `Has match`
+  filter and the Suggested tile all read only the owner's POs, and an
+  unassigned payment is unchanged. Two things deliberately stay outside the
+  gate: a PO carrying the payment's PayPal transaction id, because an
+  identifier written on a PO outranks a guess about who paid (and if it lands
+  on another member's PO it is the assignment that is probably wrong), and
+  the picker's typed search, because a manager who types knows something the
+  ranking doesn't. Assigning or unassigning an expanded row refreshes its
+  suggestion block in place.
+
+## [1.150.0] - 2026-09-18
+
+### Features
+
+- **A company-paid PO's PayPal transaction ID must be a payment our PayPal
+  account actually made** (RS-069). Since v1.115.0 the ID was required before
+  a PO left Draft, but only its presence was checked: a typo or an invented ID
+  passed, linked nothing, and the PO never reconciled. The advance — through
+  the hand-off dialog, a manager stage-jump and the carrier poll alike — now
+  also looks the ID up among the PayPal transactions the Payments sync holds
+  and refuses with the ID named when none carries it. An unknown ID pulls
+  PayPal once before the transaction is judged, so a payment PayPal already
+  reports does not wait out the six-hourly sync; the refusal explains that
+  PayPal reports a new payment up to three hours late. The rule is live only
+  once a PayPal account has synced into the environment — a dev box without
+  keys and the test suite are untouched — and any synced PayPal row counts,
+  linked or ignored or pending, because the question is whether the payment
+  exists, not whether it is free.
+
 ## [1.149.4] - 2026-09-18
 
 ### Fixes

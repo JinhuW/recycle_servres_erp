@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
+import { PaymentFields } from '../components/PaymentFields';
+import type { HandoffMethod } from '../lib/handoff';
 import { PhHeader } from '../components/PhHeader';
 import { LineSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
@@ -17,7 +19,9 @@ import { loadWarehouses } from '../lib/warehouses';
 type Props = {
   lines: DraftLine[];
   /** A resumed draft's saved meta. Null for an order being started here. */
-  initialMeta?: { warehouseId: string; payment: 'company' | 'self'; notes: string } | null;
+  initialMeta?: {
+    warehouseId: string; payment: 'company' | 'self'; paymentMethod: HandoffMethod | null; notes: string;
+  } | null;
   /** Called with the kind of line to add — the add row always names one. */
   onAddItem: (cat: Category) => void;
   // Fees live in the session, not this component: it unmounts every time the
@@ -28,7 +32,7 @@ type Props = {
   onEditLine: (idx: number) => void;
   onRemoveLine: (idx: number) => void;
   onSubmit: (payload: {
-    warehouseId: string; payment: 'company' | 'self'; notes: string;
+    warehouseId: string; payment: 'company' | 'self'; paymentMethod: HandoffMethod | null; notes: string;
     otherFees: number; otherFeesNote: string | null;
   }) => Promise<void>;
   onCancel: () => void;
@@ -46,6 +50,7 @@ export function OrderReview({
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [warehouseId, setWarehouseId] = useState(initialMeta?.warehouseId ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(initialMeta?.payment ?? 'company');
+  const [paymentMethod, setPaymentMethod] = useState<HandoffMethod | null>(initialMeta?.paymentMethod ?? null);
   const [notes, setNotes] = useState(initialMeta?.notes ?? '');
   const [submitting, setSubmitting] = useState(false);
 
@@ -75,7 +80,7 @@ export function OrderReview({
     setSubmitting(true);
     try {
       await onSubmit({
-        warehouseId, payment, notes,
+        warehouseId, payment, paymentMethod, notes,
         otherFees: feesValue,
         otherFeesNote: fees.note.trim() || null,
       });
@@ -239,12 +244,15 @@ export function OrderReview({
           </div>
         </div>
 
-        <div className="ph-field">
+        <div className="ph-field ph-pay">
           <label>{t('payment')}</label>
-          <div className="seg" style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-            <button className={payment === 'company' ? 'active' : ''} onClick={() => setPayment('company')}>{t('payCompany')}</button>
-            <button className={payment === 'self'    ? 'active' : ''} onClick={() => setPayment('self')}>{t('paySelf')}</button>
-          </div>
+          <PaymentFields
+            paidBy={payment} onPaidBy={setPayment}
+            method={paymentMethod} onMethod={setPaymentMethod}
+            txnId="" onTxnId={() => {}}
+            phone
+            idPrefix="rv"
+          />
         </div>
 
         <div className="ph-field">

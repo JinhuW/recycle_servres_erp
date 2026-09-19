@@ -19,15 +19,16 @@ import {
   advanceOrderTx, revertOrderToDraftTx, archiveOrderLinesTx, unarchiveOrderLinesTx,
   LINE_STATUS_FOR_LIFECYCLE, LIFECYCLE_LABEL, isClosedBook, type ArchiveSellOrderConflict,
 } from '../services/orderAdvance';
-import { txnRequiredFor, chatShotRequiredFor } from '../services/orderTxnRule';
+import { txnRequiredFor, chatShotRequiredFor, cashShotRequiredFor, companyPayTxnUnknown } from '../services/orderTxnRule';
 import { syncOrderCategory, deriveCategory, sortCategories } from '../services/orderCategory';
 import { insertDraftOrderTx } from '../services/orderDraft';
 import {
   handoffOrderTx, activeMember, HandoffRefused, type HandoffInput,
 } from '../services/orderHandoff';
-import { pickTrackingClient } from '../shipping';
+import { pickTrackingClient, carrierTrackingUrl } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
-import { linkPaypalTxnToOrder } from '../banktx/sync';
+import { pickBankProviders } from '../banktx';
+import { linkPaypalTxnToOrder, syncBankTransactions } from '../banktx/sync';
 import { goodsTotalIsMirror, syncOrderGoodsTotal } from '../services/orderGoodsTotal';
 import { poRealizedLateral } from '../lib/po-cost';
 import { realizedFromRow } from '../services/poRealized';
@@ -38,6 +39,7 @@ import {
   type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
+import { PAYPAL_TXN_STRICT } from '../ai/paypal';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
@@ -234,6 +236,11 @@ function normFeeNote(v: string | null | undefined): string | null {
   return v == null ? null : (v.trim() || null);
 }
 
+// Absent and null both mean "not said"; only a third value is a bad request.
+function isPaymentMethod(v: unknown): v is 'paypal' | 'cash' | null | undefined {
+  return v === undefined || v === null || v === 'paypal' || v === 'cash';
+}
+
 // A `reverted` event stays pending until a `revert_ack` names its id. A
 // timestamp watermark loses any revert whose PATCH commits after the ack:
 // order_events.created_at is transaction-START time, and the ack cannot see
@@ -385,6 +392,14 @@ orders.get('/', async (c) => {
       o.other_fees_note,
       o.paypal_txn_id,
       ${linkedPaidFrag}::float AS linked_paid,
+      o.handoff_method,
+      -- The box the hand-off's label path inserted, for the list's In Transit
+      -- chip. Newest wins when a manager re-added one; the id tiebreaker keeps
+      -- both columns on the same row.
+      (SELECT p.carrier FROM packages p WHERE p.order_id = o.id
+         ORDER BY p.created_at DESC, p.id DESC LIMIT 1)                             AS trk_carrier,
+      (SELECT p.tracking_number FROM packages p WHERE p.order_id = o.id
+         ORDER BY p.created_at DESC, p.id DESC LIMIT 1)                             AS trk_number,
       o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
@@ -457,6 +472,14 @@ orders.get('/', async (c) => {
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
       linkedPaid: r.linked_paid,
+      handoffMethod: r.handoff_method,
+      // Optional and additive, like handoffMethod: a stale SPA renders the
+      // plain status chip.
+      tracking: r.trk_number ? {
+        carrier: r.trk_carrier,
+        trackingNumber: r.trk_number,
+        trackingUrl: carrierTrackingUrl(r.trk_carrier, r.trk_number),
+      } : null,
       // Optional and additive: a stale SPA that never reads it is unaffected.
       // Keyed on the JOINED name, not the raw column: the join is scoped to the
       // caller's book, so a PO carrying someone else's client reads as unset
@@ -586,6 +609,8 @@ orders.get('/:id', async (c) => {
     sql, order as { payment: string; payment_method: string | null; created_at: Date });
   const chatShotRequired = await chatShotRequiredFor(
     sql, order as { payment: string; created_at: Date });
+  const cashShotRequired = await cashShotRequiredFor(
+    sql, order as { payment: string; payment_method: string | null; created_at: Date });
 
   // Changes a purchaser made after submitting, that no manager has looked at
   // yet — the edit page opens a review dialog on them. Managers only: the
@@ -648,6 +673,7 @@ orders.get('/:id', async (c) => {
       paypalTxnId: order.paypal_txn_id,
       txnRequired,
       chatShotRequired,
+      cashShotRequired,
       source: order.source,
       paymentMethod: order.payment_method,
       handoffMethod: order.handoff_method,
@@ -951,6 +977,9 @@ orders.post('/', async (c) => {
         category?: LineCategory;
         warehouseId?: string;
         payment?: 'company' | 'self';
+        /** How the company card paid. Meaningless — and dropped — for a
+         *  self-paid PO. */
+        paymentMethod?: 'paypal' | 'cash' | null;
         notes?: string;
         totalCost?: number;
         otherFees?: number;
@@ -980,6 +1009,10 @@ orders.post('/', async (c) => {
   const newPaypalTxnId = typeof body.paypalTxnId === 'string'
     ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
     : null;
+  if (!isPaymentMethod(body.paymentMethod)) {
+    return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+  }
+  const newPaymentMethod = (body.payment ?? 'company') === 'company' ? (body.paymentMethod ?? null) : null;
   const supErr = await supplierErr(sql, u, body.supplierId ?? null);
   if (supErr) return c.json({ error: supErr }, 400);
   // No warehouse named → the owner's home warehouse (FK-valid by construction).
@@ -1021,12 +1054,12 @@ orders.post('/', async (c) => {
     newId = await nextHumanId(tx, 'PO', 'PO');
     await tx`
       INSERT INTO orders (
-        id, user_id, category, warehouse_id, payment, notes, total_cost,
+        id, user_id, category, warehouse_id, payment, payment_method, notes, total_cost,
         other_fees, other_fees_note, lifecycle, supplier_id, paypal_txn_id
       )
       VALUES (
         ${newId}, ${owner.ownerId}, ${deriveCategory(lineCats) ?? lineCats[0]},
-        ${warehouseId}, ${body.payment ?? 'company'}, ${body.notes ?? null},
+        ${warehouseId}, ${body.payment ?? 'company'}, ${newPaymentMethod}, ${body.notes ?? null},
         ${body.totalCost ?? null},
         ${body.otherFees ?? 0}, ${normFeeNote(body.otherFeesNote)}, 'draft',
         ${body.supplierId ?? null}, ${newPaypalTxnId}
@@ -1166,7 +1199,8 @@ function changesMaterialField(
   body: {
     lines?: LinePatch[]; addLines?: unknown[]; removeLineIds?: string[];
     totalCost?: number | null; otherFees?: number | null; otherFeesNote?: string | null;
-    warehouseId?: string | null; payment?: string; paypalTxnId?: string | null;
+    warehouseId?: string | null; payment?: string; paymentMethod?: string | null;
+    paypalTxnId?: string | null;
   },
   before: Record<string, unknown>,
   linesBefore: Map<string, Record<string, unknown>>,
@@ -1200,6 +1234,8 @@ function changesMaterialField(
   if (body.warehouseId !== undefined
       && !sameStoredValue(before.warehouse_id, body.warehouseId)) return true;
   if (body.payment !== undefined && body.payment !== before.payment) return true;
+  if (body.paymentMethod !== undefined
+      && !sameStoredValue(before.payment_method, body.paymentMethod)) return true;
   if (body.paypalTxnId !== undefined) {
     const norm = typeof body.paypalTxnId === 'string'
       ? body.paypalTxnId.replace(/\s+/g, '').toUpperCase() || null
@@ -1245,12 +1281,16 @@ orders.patch('/:id', async (c) => {
         notes?: string | null;
         warehouseId?: string | null;
         payment?: 'company' | 'self';
+        paymentMethod?: 'paypal' | 'cash' | null;
         commissionRate?: number | null;
         paypalTxnId?: string | null;
         onBehalfOfUserId?: string | null;
       }
     | null;
   if (!body) return c.json({ error: 'invalid body' }, 400);
+  if (!isPaymentMethod(body.paymentMethod)) {
+    return c.json({ error: 'paymentMethod must be paypal or cash' }, 400);
+  }
 
   const existing = (await sql`SELECT user_id, category, lifecycle FROM orders WHERE id = ${id} LIMIT 1`)[0];
   if (!existing) return c.json({ error: 'Not found' }, 404);
@@ -1266,7 +1306,8 @@ orders.patch('/:id', async (c) => {
     !!body.lines?.length || !!body.addLines?.length || !!body.removeLineIds?.length ||
     body.totalCost !== undefined || body.otherFees !== undefined ||
     body.otherFeesNote !== undefined || body.warehouseId !== undefined ||
-    body.payment !== undefined || body.paypalTxnId !== undefined;
+    body.payment !== undefined || body.paymentMethod !== undefined ||
+    body.paypalTxnId !== undefined;
   if (u.role !== 'manager' && existing.lifecycle !== 'draft') {
     // Past review the PO is a closed book to the purchaser, note included.
     if (isClosedBook(existing.lifecycle)) {
@@ -1462,7 +1503,7 @@ orders.patch('/:id', async (c) => {
       // a concurrent advance from changing lifecycle between our pre/post
       // snapshots, so the diff describes one settled state transition.
       const orderBefore = (await tx`
-        SELECT id, user_id, lifecycle, notes, warehouse_id, payment,
+        SELECT id, user_id, lifecycle, notes, warehouse_id, payment, payment_method,
                total_cost::float AS total_cost,
                commission_rate::float AS commission_rate,
                other_fees::float AS other_fees,
@@ -1474,7 +1515,8 @@ orders.patch('/:id', async (c) => {
       `)[0] as
         | { id: string; user_id: string; lifecycle: string; notes: string | null;
             warehouse_id: string | null;
-            payment: string; total_cost: number | null; commission_rate: number | null;
+            payment: string; payment_method: string | null;
+            total_cost: number | null; commission_rate: number | null;
             other_fees: number; other_fees_note: string | null; paypal_txn_id: string | null;
             supplier_id: string | null; archived_at: Date | null }
         | undefined;
@@ -1502,6 +1544,7 @@ orders.patch('/:id', async (c) => {
           body.commissionRate !== undefined ||
           // The payment reference is part of the closed book too.
           body.paypalTxnId !== undefined ||
+          body.paymentMethod !== undefined ||
           // Ownership decides whose closed book this is — commission and
           // "my orders" both key off it, so it freezes with the rest.
           body.onBehalfOfUserId !== undefined;
@@ -1585,6 +1628,7 @@ orders.patch('/:id', async (c) => {
         body.notes !== undefined ||
         body.warehouseId !== undefined ||
         body.payment !== undefined ||
+        body.paymentMethod !== undefined ||
         body.commissionRate !== undefined ||
         body.paypalTxnId !== undefined ||
         body.supplierId !== undefined;
@@ -1601,6 +1645,11 @@ orders.patch('/:id', async (c) => {
         const setFeesNote  = body.otherFeesNote !== undefined ? 1 : 0;
         const setPaypal    = body.paypalTxnId   !== undefined ? 1 : 0;
         const setSupplier  = body.supplierId    !== undefined ? 1 : 0;
+        // A self-paid order has no method: flipping to self clears it whether
+        // or not the request said so, and a method sent alongside is dropped.
+        const paymentAfter = body.payment ?? orderBefore.payment;
+        const setMethod    = paymentAfter === 'self' || body.paymentMethod !== undefined ? 1 : 0;
+        const newMethod    = paymentAfter === 'self' ? null : (body.paymentMethod ?? null);
         // Same canon as the add-package boundary — a pasted id with spaces or
         // lowercase must diff clean against the AI-extracted value.
         const normPaypal = typeof body.paypalTxnId === 'string'
@@ -1620,7 +1669,8 @@ orders.patch('/:id', async (c) => {
             -- same clear-with-null contract as notes/warehouse_id.
             other_fees      = CASE WHEN ${setOtherFees}::int = 1 THEN ${Number(body.otherFees ?? 0)}    ELSE other_fees      END,
             other_fees_note = CASE WHEN ${setFeesNote}::int  = 1 THEN ${normFeeNote(body.otherFeesNote)} ELSE other_fees_note END,
-            payment      = COALESCE(${body.payment ?? null}, payment)
+            payment      = COALESCE(${body.payment ?? null}, payment),
+            payment_method = CASE WHEN ${setMethod}::int = 1 THEN ${newMethod} ELSE payment_method END
           WHERE id = ${id}
         `;
         // The id names a payment that has very likely already synced, so link
@@ -1878,7 +1928,7 @@ orders.patch('/:id', async (c) => {
 
       if (touchesOrder || touchesLines) {
         const orderAfter = (await tx`
-          SELECT notes, warehouse_id, payment, total_cost::float AS total_cost,
+          SELECT notes, warehouse_id, payment, payment_method, total_cost::float AS total_cost,
                  commission_rate::float AS commission_rate,
                  other_fees::float AS other_fees, other_fees_note, paypal_txn_id,
                  supplier_id
@@ -2252,7 +2302,7 @@ orders.post('/:id/unarchive', c => setArchived(c, false));
 // directly here, so files survive a cancelled status change. Statuses are a
 // hardcoded map (no needs_meta table like sell orders), so the valid set is
 // a constant.
-const PO_META_STATUSES = new Set(['Submission', 'Done']);
+const PO_META_STATUSES = new Set(['Submission', 'Done', 'Payment']);
 
 // Submission evidence (receipts attached at submit time) is owner-editable: the
 // purchaser who owns the order may add/remove files while it is still a Draft.
@@ -2263,7 +2313,10 @@ function canWriteMeta(u: User, status: string, order: { user_id: string; lifecyc
   // theirs until the review closes — a receipt or a photo of the goods
   // routinely shows up after the order has already moved to In Transit or
   // Reviewing.
-  return status === 'Submission' && order.user_id === u.id && !isClosedBook(order.lifecycle);
+  // Payment proof — the cash screenshot — is the purchaser's on the same
+  // terms: it is what lets their own order leave Draft.
+  return (status === 'Submission' || status === 'Payment')
+    && order.user_id === u.id && !isClosedBook(order.lifecycle);
 }
 
 // Upsert the text note for a single (order, status).
@@ -2583,11 +2636,50 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
   return c.json({ ok: true });
 });
 
+// The transaction-id rule's second half — the id must be a payment our
+// PayPal account made — is judged inside the advance tx against the synced
+// rows. A miss there may just be the six-hourly sync running behind PayPal,
+// and purchasers cannot press Sync-now (the Payments page is a manager's), so
+// an unknown id pulls PayPal once *before* the tx. The tx guard stays the
+// verdict; this only makes sure it reads a fresh table. Two things to know:
+// the sync is single-flighted per process, so a miss during the six-hourly
+// run joins that run — which may have queried PayPal before the payment
+// landed, in which case the guard refuses and the next attempt pulls again;
+// and a miss costs one Transaction Search plus the dispute list, with no
+// throttle beyond that single flight. PayPal itself reports a payment up to
+// three hours late, which no pull can shorten. Only an id in PayPal's own
+// 17-character shape is worth the trip: a placeholder (`CASH`, `WAIT`) can
+// never match, so the guard's refusal stands without asking PayPal, and a
+// real id in some other shape waits for the scheduled sync — the refusal
+// already says to try again later.
+async function pullPaypalIfUnknown(
+  env: Env,
+  sql: ReturnType<typeof getDb>,
+  order: Parameters<typeof companyPayTxnUnknown>[1],
+): Promise<void> {
+  const paypal = pickBankProviders(env).providers.find((p) => p.source === 'paypal');
+  if (!paypal) return;
+  if (!PAYPAL_TXN_STRICT.test((order.paypal_txn_id ?? '').trim())) return;
+  if (!await companyPayTxnUnknown(sql, order)) return;
+  await syncBankTransactions(env, [paypal]);
+}
+
+type TxnRuleRow = {
+  payment: string; payment_method: string | null; paypal_txn_id: string | null; created_at: Date;
+};
+
 orders.post('/:id/advance', async (c) => {
   const u = c.var.user;
   const id = c.req.param('id');
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
+
+  // Only a live Draft meets the guard, so only one is worth a pull — the tx
+  // refuses an archived order before it reads the id.
+  const [rule] = await sql<(TxnRuleRow & { lifecycle: string; archived_at: Date | null })[]>`
+    SELECT lifecycle, archived_at, payment, payment_method, paypal_txn_id, created_at
+    FROM orders WHERE id = ${id}`;
+  if (rule?.lifecycle === 'draft' && !rule.archived_at) await pullPaypalIfUnknown(c.env, sql, rule);
 
   // The lifecycle read, all stage guards and the writes run inside one tx
   // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —
@@ -2628,9 +2720,19 @@ function advanceRefusedResponse(
       return c.json({
         error: 'This PO was paid by the company — add the payment transaction ID before submitting it.',
       }, 409);
+    case 'unknownTxnId':
+      return c.json({
+        error: `PayPal transaction ${outcome.paypalTxnId} isn't in our PayPal account — check the ID. `
+          + 'PayPal reports a new payment up to 3 hours late; if it was just sent, try again later.',
+        paypalTxnId: outcome.paypalTxnId,
+      }, 409);
     case 'missingChatShot':
       return c.json({
         error: 'This order was self-paid — attach the chat history with the seller before submitting it.',
+      }, 409);
+    case 'missingCashShot':
+      return c.json({
+        error: 'This order was paid in cash — attach a screenshot showing the total amount paid before submitting it.',
       }, 409);
     case 'noCost':
       return c.json({
@@ -2748,6 +2850,17 @@ orders.post('/:id/handoff', async (c) => {
     newOwner,
     commissionRate,
   };
+  // What the hand-off is about to write is what the advance inside it judges,
+  // so the pull reads the request, not the row — only the cutoff is the row's.
+  const [rule] = await sql<Pick<TxnRuleRow, 'created_at'>[]>`
+    SELECT created_at FROM orders WHERE id = ${id}`;
+  if (rule) {
+    await pullPaypalIfUnknown(c.env, sql, {
+      payment: body.payment, payment_method: paymentMethod, paypal_txn_id: paypalTxnId,
+      created_at: rule.created_at,
+    });
+  }
+
   let result: Awaited<ReturnType<typeof handoffOrderTx>>;
   try {
     result = await sql.begin(async (tx) =>

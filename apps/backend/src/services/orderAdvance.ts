@@ -9,7 +9,7 @@
 import { writeOrderEvent, wasEverSubmitted } from './orderAudit';
 import { writeSellOrderEvent } from './sellOrderAudit';
 import { notify, notifyManagers } from '../lib/notify';
-import { companyPayTxnMissing, selfPayChatMissing } from './orderTxnRule';
+import { companyCashShotMissing, companyPayTxnMissing, companyPayTxnUnknown, selfPayChatMissing } from './orderTxnRule';
 import type { SqlLike } from './orderAudit';
 import type { SOLineSnap } from './sellOrderLineMatch';
 import { committedSellStatuses, isSellableLineStatus, openSellStatuses } from '../lib/sellCommitment';
@@ -84,7 +84,9 @@ export type AdvanceOutcome =
   | { kind: 'committedLines'; offendingLineIds: string[]; sellOrderIds: string[] }
   | { kind: 'transferClaimed'; offendingLineIds: string[] }
   | { kind: 'missingTxnId' }
+  | { kind: 'unknownTxnId'; paypalTxnId: string }
   | { kind: 'missingChatShot' }
+  | { kind: 'missingCashShot' }
   | { kind: 'noCost' }
   | { kind: 'ok'; nextStageId: string };
 
@@ -468,11 +470,25 @@ export async function advanceOrderTx(
       && await companyPayTxnMissing(tx, cur)) {
     return { kind: 'missingTxnId' };
   }
+  // And the id has to be a payment our PayPal account actually made: a typo
+  // or an invented id links nothing and the PO never reconciles. The routes
+  // pull PayPal once before this tx when the id is unknown, so a payment
+  // PayPal already reports does not wait for the six-hourly sync.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
+      && await companyPayTxnUnknown(tx, cur)) {
+    return { kind: 'unknownTxnId', paypalTxnId: cur.paypal_txn_id!.trim() };
+  }
   // Its self-paid twin: the chat with the seller is what the reimbursement is
   // checked against, so a self-paid PO leaves Draft only once it is attached.
   if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
       && await selfPayChatMissing(tx, cur)) {
     return { kind: 'missingChatShot' };
+  }
+  // And the cash twin: cash lifts the transaction-id rule, so the screenshot
+  // of the amount handed over is the only record of what the company paid.
+  if (cur.lifecycle === 'draft' && nextStageId !== 'draft'
+      && await companyCashShotMissing(tx, cur)) {
+    return { kind: 'missingCashShot' };
   }
 
   // Guard: a cascade that moves lines off a sellable status breaks any sell
