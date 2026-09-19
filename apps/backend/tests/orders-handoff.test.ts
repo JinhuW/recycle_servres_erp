@@ -44,6 +44,11 @@ type OrderRead = {
     handoffMethod: string | null; handoffBy: { id: string; name: string } | null;
     payment: string; paypalTxnId: string | null; warehouse: { id: string } | null;
     commissionRate: number | null;
+    package: {
+      id: string; carrier: string; trackingNumber: string; trackingUrl: string | null;
+      status: string; trackingStatus: string | null; trackingEta: string | null;
+      lastTrackedAt: string | null;
+    } | null;
   };
 };
 async function readOrder(token: string, id: string) {
@@ -53,8 +58,11 @@ async function readOrder(token: string, id: string) {
 }
 
 type ListRow = {
-  id: string; handoffMethod: string | null;
-  tracking: { carrier: string; trackingNumber: string; trackingUrl: string | null } | null;
+  id: string; handoffMethod: string | null; goodsTotal: number;
+  tracking: {
+    carrier: string; trackingNumber: string; trackingUrl: string | null;
+    status: string; trackingEta: string | null;
+  } | null;
 };
 /** The same PO as the list reports it — the In Transit chip reads these. */
 async function listRow(token: string, id: string): Promise<ListRow> {
@@ -105,6 +113,7 @@ describe('hand-off — local pickup', () => {
     expect(o.handoffMethod).toBe('pickup');
     expect(o.handoffBy?.id).toBe(user.id);
     expect(o.paymentMethod).toBeNull();
+    expect(o.package).toBeNull();
     // Nothing to track: the list says "Local" from the method alone.
     expect(await listRow(token, id)).toMatchObject({ handoffMethod: 'pickup', tracking: null });
   });
@@ -233,8 +242,59 @@ describe('hand-off — shipping label', () => {
       tracking: {
         carrier: 'UPS', trackingNumber: '1Z999AA10123456784',
         trackingUrl: 'https://www.ups.com/track?tracknum=1Z999AA10123456784',
+        status: 'purchased', trackingEta: null,
       },
     });
+    // Before any carrier scan the PO page has the box but no ETA or headline.
+    expect(o.package).toMatchObject({
+      id: r.body.packageId, carrier: 'UPS', trackingNumber: '1Z999AA10123456784',
+      trackingUrl: 'https://www.ups.com/track?tracknum=1Z999AA10123456784',
+      status: 'purchased', trackingStatus: null, trackingEta: null, lastTrackedAt: null,
+    });
+  });
+
+  it('the carrier\'s updates reach the list chip and the PO page', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await attachPaymentShot(token, id);
+    const r = await api<{ packageId: string | null }>('POST', `/api/orders/${id}/handoff`, {
+      token, body: {
+        warehouseId: 'WH-LA1', source: 'facebook', handoff: label,
+        payment: 'company', paymentMethod: 'cash',
+      },
+    });
+    expect(r.status).toBe(200);
+    // What the Shippo webhook writes (shipping/track.ts applyPackageTracking).
+    const sql = getTestDb();
+    await sql`
+      UPDATE packages
+         SET status = 'in_transit', tracking_status = 'Out for delivery',
+             tracking_eta = '2026-09-22T00:00:00Z', last_tracked_at = '2026-09-19T14:00:00Z'
+       WHERE id = ${r.body.packageId!}
+    `;
+    const row = await listRow(token, id);
+    expect(row.tracking).toMatchObject({ status: 'in_transit' });
+    expect(row.tracking?.trackingEta).toMatch(/^2026-09-22T00:00:00/);
+    const o = await readOrder(token, id);
+    expect(o.package).toMatchObject({ status: 'in_transit', trackingStatus: 'Out for delivery' });
+    expect(o.package?.trackingEta).toMatch(/^2026-09-22T00:00:00/);
+    expect(o.package?.lastTrackedAt).toMatch(/^2026-09-19T14:00:00/);
+  });
+
+  it('the list\'s goods total follows the stored figure, else the lines as bought', async () => {
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    // 2 × $60, mirrored into total_cost at creation.
+    expect((await listRow(token, id)).goodsTotal).toBe(120);
+    const sql = getTestDb();
+    // A legacy row never written since the mirror existed: the line sum, on
+    // what was bought — a partial sale parks the original in qty_purchased.
+    await sql`UPDATE orders SET total_cost = NULL WHERE id = ${id}`;
+    await sql`UPDATE order_lines SET qty = 1, qty_purchased = 2 WHERE order_id = ${id}`;
+    expect((await listRow(token, id)).goodsTotal).toBe(120);
+    // A negotiated lot price stands apart from the lines.
+    await sql`UPDATE orders SET total_cost = 100 WHERE id = ${id}`;
+    expect((await listRow(token, id)).goodsTotal).toBe(100);
   });
 
   it('a tracking number already on file refuses and leaves the PO in Draft', async () => {

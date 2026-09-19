@@ -17,6 +17,34 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.156.0] - 2026-09-19
+
+### Features
+
+- **The In Transit chip shows the box's own state, and the PO page shows its
+  journey** (RS-077). Under the desktop list's `In Transit | UPS` chip the
+  tracking number now sits as a link to the same carrier page, with
+  `Est. Tue, Sep 22` once the carrier has given a date — *Delivered* or
+  *Delivery exception* instead once it says so, because a package reaching
+  the door does not move the PO; a person does. On the desktop PO page, while
+  the order is In Transit and came by label, a *Shipment* block between the
+  stepper and the order details reads the hand-off's package: status chip,
+  carrier and number, a Tracking added → In transit → Delivered timeline, the
+  arrival date, the carrier link, and when the carrier last reported. Behind
+  it `GET /api/orders` rows gain `tracking.status` / `tracking.trackingEta`
+  and `GET /api/orders/:id` gains `package`, both additive. No Refresh on the
+  block — the Shipping page keeps that.
+- **The desktop PO list has a Total cost column** (RS-077), after QTY: the
+  dashboard's goods figure (the stored total, else the line sum on what was
+  bought) plus other fees, with `incl. $12 fees` under it when fees exist;
+  sortable and in the Columns picker. `GET /api/orders` rows gain
+  `goodsTotal` for it. It is on by default, but the saved column set lists
+  what is shown, so a user who had pinned the picker before this release
+  ticks it on once.
+- Also asked in the same request: the PayPal transaction field under a
+  Self-paid order. That has been gone since v1.153.0 — the screenshots came
+  from a tab that had not reloaded since the morning's release.
+
 ## [1.155.1] - 2026-09-19
 
 ### Fixed

@@ -393,13 +393,8 @@ orders.get('/', async (c) => {
       o.paypal_txn_id,
       ${linkedPaidFrag}::float AS linked_paid,
       o.handoff_method,
-      -- The box the hand-off's label path inserted, for the list's In Transit
-      -- chip. Newest wins when a manager re-added one; the id tiebreaker keeps
-      -- both columns on the same row.
-      (SELECT p.carrier FROM packages p WHERE p.order_id = o.id
-         ORDER BY p.created_at DESC, p.id DESC LIMIT 1)                             AS trk_carrier,
-      (SELECT p.tracking_number FROM packages p WHERE p.order_id = o.id
-         ORDER BY p.created_at DESC, p.id DESC LIMIT 1)                             AS trk_number,
+      pk.carrier AS trk_carrier, pk.tracking_number AS trk_number,
+      pk.status AS trk_status, pk.tracking_eta AS trk_eta,
       o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
@@ -407,6 +402,11 @@ orders.get('/', async (c) => {
       rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
       rz.projected_profit,
       COALESCE(SUM(l.qty), 0)::int                                                  AS qty,
+      -- The goods figure the dashboard uses: the stored total (a mirror of the
+      -- lines, or a negotiated lot price) and, for a row never written since
+      -- the mirror existed, the line sum on the same qty_purchased basis.
+      COALESCE(o.total_cost,
+               SUM(COALESCE(l.qty_purchased, l.qty) * l.unit_cost), 0)::float        AS goods_total,
       -- A line with no sell price contributes nothing: NULL drops out of SUM.
       -- It used to fall back to unit_cost, which invented revenue equal to the
       -- cost — so a PO nobody had priced yet reported its full cost as
@@ -434,10 +434,18 @@ orders.get('/', async (c) => {
     LEFT JOIN suppliers sup ON sup.id = o.supplier_id
                           AND (${isManager} OR sup.owner_id IS NULL OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
+    -- The box the hand-off's label path inserted, for the list's In Transit
+    -- chip. Newest wins when a manager re-added one.
+    LEFT JOIN LATERAL (
+      SELECT p.carrier, p.tracking_number, p.status, p.tracking_eta
+      FROM packages p WHERE p.order_id = o.id
+      ORDER BY p.created_at DESC, p.id DESC LIMIT 1
+    ) pk ON TRUE
     LEFT JOIN order_lines l ON l.order_id = o.id
     WHERE ${scopeFrag} AND ${categoryFrag} AND ${statusFrag} AND ${excludeFrag} AND ${archivedFrag} ${cursorFrag}
     GROUP BY o.id, u.name, u.initials, w.id, w.short, w.region, sup.name,
-             rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit
+             rz.sold_qty, rz.bought_qty, rz.revenue, rz.cost, rz.projected_profit,
+             pk.carrier, pk.tracking_number, pk.status, pk.tracking_eta
     ORDER BY ${sortExpr} ${dirSql}, o.id ${dirSql}
     LIMIT ${limit + 1}
   `;
@@ -479,7 +487,10 @@ orders.get('/', async (c) => {
         carrier: r.trk_carrier,
         trackingNumber: r.trk_number,
         trackingUrl: carrierTrackingUrl(r.trk_carrier, r.trk_number),
+        status: r.trk_status,
+        trackingEta: r.trk_eta,
       } : null,
+      goodsTotal: r.goods_total,
       // Optional and additive: a stale SPA that never reads it is unaffected.
       // Keyed on the JOINED name, not the raw column: the join is scoped to the
       // caller's book, so a PO carrying someone else's client reads as unset
@@ -527,6 +538,9 @@ orders.get('/:id', async (c) => {
            u.name AS user_name, u.initials AS user_initials,
            w.id AS warehouse_id, w.short AS warehouse_short, w.region AS warehouse_region,
            (SELECT COUNT(*) FROM shipments s WHERE s.order_id = o.id)::int AS shipment_count,
+           pk.id AS pk_id, pk.carrier AS pk_carrier, pk.tracking_number AS pk_number,
+           pk.status AS pk_status, pk.tracking_status AS pk_tracking_status,
+           pk.tracking_eta AS pk_eta, pk.last_tracked_at AS pk_tracked_at,
            rz.sold_qty, rz.bought_qty, rz.revenue AS rz_revenue, rz.cost AS rz_cost,
            rz.projected_profit
     FROM orders o
@@ -537,6 +551,14 @@ orders.get('/:id', async (c) => {
                           AND (${isManager} OR sup.owner_id IS NULL
                                OR sup.owner_id = ${u.id})
     ${poRealizedLateral(sql, isManager)}
+    -- The box the hand-off's label path inserted; newest wins, the same rule
+    -- as the list's In Transit chip.
+    LEFT JOIN LATERAL (
+      SELECT p.id, p.carrier, p.tracking_number, p.status, p.tracking_status,
+             p.tracking_eta, p.last_tracked_at
+      FROM packages p WHERE p.order_id = o.id
+      ORDER BY p.created_at DESC, p.id DESC LIMIT 1
+    ) pk ON TRUE
     WHERE o.id = ${id}
     LIMIT 1
   `)[0];
@@ -695,6 +717,17 @@ orders.get('/:id', async (c) => {
       // Count only — the mobile detail page renders a nav badge and shouldn't
       // have to download the labels themselves (those live on /shipping).
       shipmentCount: order.shipment_count,
+      // Optional and additive: a stale SPA that never reads it is unaffected.
+      package: order.pk_id ? {
+        id: order.pk_id,
+        carrier: order.pk_carrier,
+        trackingNumber: order.pk_number,
+        trackingUrl: carrierTrackingUrl(order.pk_carrier, order.pk_number),
+        status: order.pk_status,
+        trackingStatus: order.pk_tracking_status,
+        trackingEta: order.pk_eta,
+        lastTrackedAt: order.pk_tracked_at,
+      } : null,
       lines: lines.map(l => ({
         id: l.id,
         category: l.category,
