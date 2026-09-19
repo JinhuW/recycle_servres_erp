@@ -25,7 +25,7 @@ import { insertDraftOrderTx } from '../services/orderDraft';
 import {
   handoffOrderTx, activeMember, HandoffRefused, type HandoffInput,
 } from '../services/orderHandoff';
-import { pickTrackingClient } from '../shipping';
+import { pickTrackingClient, carrierTrackingUrl } from '../shipping';
 import { registerPackageTracking } from '../shipping/track';
 import { pickBankProviders } from '../banktx';
 import { linkPaypalTxnToOrder, syncBankTransactions } from '../banktx/sync';
@@ -391,6 +391,14 @@ orders.get('/', async (c) => {
       o.other_fees_note,
       o.paypal_txn_id,
       ${linkedPaidFrag}::float AS linked_paid,
+      o.handoff_method,
+      -- The box the hand-off's label path inserted, for the list's In Transit
+      -- chip. Newest wins when a manager re-added one; the id tiebreaker keeps
+      -- both columns on the same row.
+      (SELECT p.carrier FROM packages p WHERE p.order_id = o.id
+         ORDER BY p.created_at DESC, p.id DESC LIMIT 1)                             AS trk_carrier,
+      (SELECT p.tracking_number FROM packages p WHERE p.order_id = o.id
+         ORDER BY p.created_at DESC, p.id DESC LIMIT 1)                             AS trk_number,
       o.supplier_id, sup.name AS supplier_name,
       u.name AS user_name, u.initials AS user_initials,
       o.commission_rate::float AS commission_rate,
@@ -463,6 +471,14 @@ orders.get('/', async (c) => {
       otherFeesNote: r.other_fees_note,
       paypalTxnId: r.paypal_txn_id,
       linkedPaid: r.linked_paid,
+      handoffMethod: r.handoff_method,
+      // Optional and additive, like handoffMethod: a stale SPA renders the
+      // plain status chip.
+      tracking: r.trk_number ? {
+        carrier: r.trk_carrier,
+        trackingNumber: r.trk_number,
+        trackingUrl: carrierTrackingUrl(r.trk_carrier, r.trk_number),
+      } : null,
       // Optional and additive: a stale SPA that never reads it is unaffected.
       // Keyed on the JOINED name, not the raw column: the join is scoped to the
       // caller's book, so a PO carrying someone else's client reads as unset

@@ -17,6 +17,23 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.155.0] - 2026-09-18
+
+### Features
+
+- **The In Transit chip says how the goods are coming** (RS-075). On the
+  desktop PO list a PO in transit by carrier now reads `In Transit | UPS`
+  (or FedEx, USPS) and the whole chip is a link to the carrier's tracking page
+  for that number, in a new tab, in the same shape as the payment column's
+  `Company | $760`; a local pickup reads `In Transit | Local`, not linked; a
+  PO that left Draft before the hand-off existed keeps the plain chip. The
+  link stops at the chip, so clicking it no longer unfolds the row. Behind it
+  `GET /api/orders` gains `handoffMethod` and `tracking { carrier,
+  trackingNumber, trackingUrl }` from the hand-off's linked package, both
+  additive so a Worker deployed ahead of Railway still renders the plain
+  chip. Prepaid labels bought from the wizard are not consulted: buying one
+  never moves a PO, and every carrier hand-off inserts a package anyway.
+
 ## [1.154.0] - 2026-09-18
 
 ### Features

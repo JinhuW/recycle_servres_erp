@@ -2245,6 +2245,7 @@ const zh: Record<string, string> = {
   payLedgerOpen: '打开付款对账',
   payLedgerNet: '实付净额',
   payLinkOpen: '打开此采购单的付款记录',
+  inboundLocal: '本地取货',
   payFocusOrder: '{id} 的付款记录',
   payFocusClear: '显示全部付款',
   payFocusNet: '净付款 {amt}',

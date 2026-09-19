@@ -473,6 +473,8 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLedgerOpen: 'Open Payments',
     payLedgerNet: 'Net paid',
     payLinkOpen: "Open this PO's payments",
+    // After the stage on the In Transit chip when the goods were collected, not shipped.
+    inboundLocal: 'Local',
     payFocusOrder: 'Payments for {id}',
     payFocusClear: 'Show all payments',
     payFocusNet: 'Net paid {amt}',

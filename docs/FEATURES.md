@@ -148,6 +148,12 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   so a manager stage-jump and the carrier poll hold to it too, and it is
   grandfathered by a cutoff stamped when the release reached the environment,
   exactly like the transaction-ID rule.
+- **The desktop list's In Transit chip says how the goods are coming**
+  (v1.155.0). A PO in transit by carrier reads `In Transit | UPS` (FedEx,
+  USPS) and the chip links the carrier's tracking page for the hand-off's
+  package, in a new tab; a local pickup reads `In Transit | Local`; a PO that
+  left Draft before the hand-off existed keeps the plain chip. The phone list
+  still shows the plain chip.
 - **One payment picker on every surface, and a cash payment needs a
   screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet

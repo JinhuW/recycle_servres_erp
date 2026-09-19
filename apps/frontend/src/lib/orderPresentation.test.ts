@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { I18N } from './i18n';
 import zh from './i18n.zh';
 import {
-  createdEventParts, linePhotoEventDetail, ownerChangedLine, profitTone, signedUSD0,
+  createdEventParts, inTransitDetail, linePhotoEventDetail, ownerChangedLine, profitTone,
+  signedUSD0,
 } from './orderPresentation';
 
 // Stands in for useT: names the key it was asked for and the count it was
@@ -100,5 +101,37 @@ describe('linePhotoEventDetail', () => {
   it('carries only the filename a removal records', () => {
     expect(linePhotoEventDetail({ lineId: 'l1', photoId: 'p1', filename: 'label.jpg' }))
       .toBe('label.jpg');
+  });
+});
+
+describe('inTransitDetail', () => {
+  const ups = {
+    carrier: 'UPS', trackingNumber: '1Z999AA10123456784',
+    trackingUrl: 'https://www.ups.com/track?tracknum=1Z999AA10123456784',
+  };
+
+  it('names the carrier and links its tracking page', () => {
+    expect(inTransitDetail({ lifecycle: 'in_transit', handoffMethod: 'label', tracking: ups }, t))
+      .toEqual({ text: 'UPS', href: ups.trackingUrl });
+  });
+
+  it('says Local for a pickup, with nowhere to go', () => {
+    expect(inTransitDetail({ lifecycle: 'in_transit', handoffMethod: 'pickup', tracking: null }, t))
+      .toEqual({ text: 'inboundLocal', href: null });
+  });
+
+  it('prefers a box on file over the recorded method', () => {
+    expect(inTransitDetail({ lifecycle: 'in_transit', handoffMethod: 'pickup', tracking: ups }, t)?.text)
+      .toBe('UPS');
+  });
+
+  it('adds nothing to a PO that left Draft before the hand-off existed', () => {
+    expect(inTransitDetail({ lifecycle: 'in_transit' }, t)).toBeNull();
+    expect(inTransitDetail({ lifecycle: 'in_transit', handoffMethod: null, tracking: null }, t)).toBeNull();
+  });
+
+  it('adds nothing on any other stage', () => {
+    expect(inTransitDetail({ lifecycle: 'reviewing', handoffMethod: 'label', tracking: ups }, t)).toBeNull();
+    expect(inTransitDetail({ lifecycle: 'draft', handoffMethod: 'pickup', tracking: null }, t)).toBeNull();
   });
 });

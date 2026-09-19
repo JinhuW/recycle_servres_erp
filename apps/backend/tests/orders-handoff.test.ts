@@ -52,6 +52,19 @@ async function readOrder(token: string, id: string) {
   return got.body.order;
 }
 
+type ListRow = {
+  id: string; handoffMethod: string | null;
+  tracking: { carrier: string; trackingNumber: string; trackingUrl: string | null } | null;
+};
+/** The same PO as the list reports it — the In Transit chip reads these. */
+async function listRow(token: string, id: string): Promise<ListRow> {
+  const got = await api<{ orders: ListRow[] }>('GET', '/api/orders', { token });
+  expect(got.status).toBe(200);
+  const row = got.body.orders.find(r => r.id === id);
+  expect(row).toBeDefined();
+  return row!;
+}
+
 async function events(id: string): Promise<{ kind: string; detail: Record<string, unknown> }[]> {
   const sql = getTestDb();
   return (await sql`
@@ -92,6 +105,8 @@ describe('hand-off — local pickup', () => {
     expect(o.handoffMethod).toBe('pickup');
     expect(o.handoffBy?.id).toBe(user.id);
     expect(o.paymentMethod).toBeNull();
+    // Nothing to track: the list says "Local" from the method alone.
+    expect(await listRow(token, id)).toMatchObject({ handoffMethod: 'pickup', tracking: null });
   });
 
   it('logs every field it changed and the hand-off itself', async () => {
@@ -211,6 +226,15 @@ describe('hand-off — shipping label', () => {
     expect(o.handoffMethod).toBe('label');
     const handoff = (await events(id)).find(e => e.kind === 'handoff');
     expect(handoff?.detail).toMatchObject({ method: 'label', trackingNumber: '1Z999AA10123456784', carrier: 'UPS' });
+    // The list carries the box with its carrier deep link, so the In Transit
+    // chip can name UPS and go straight to the tracking page.
+    expect(await listRow(token, id)).toMatchObject({
+      handoffMethod: 'label',
+      tracking: {
+        carrier: 'UPS', trackingNumber: '1Z999AA10123456784',
+        trackingUrl: 'https://www.ups.com/track?tracknum=1Z999AA10123456784',
+      },
+    });
   });
 
   it('a tracking number already on file refuses and leaves the PO in Draft', async () => {
