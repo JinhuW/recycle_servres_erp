@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-075](./RS-075-in-transit-chip-names-the-carrier-and-links-its-trac.md) | done | story | P2 | In Transit chip names the carrier and links its tracking page | — |
+| [RS-076](./RS-076-dev-to-main-review-findings-before-the-prod-cut.md) | in-progress | bug | P2 | Dev-to-main review findings before the prod cut | — |
+| [RS-075](./RS-075-in-transit-chip-names-the-carrier-and-links-its-trac.md) | done | story | P2 | In Transit chip names the carrier and links its tracking page | 1.155.0 |
 | [RS-074](./RS-074-split-the-phone-po-page-into-general-info-and-produc.md) | done | story | P2 | Split the phone PO page into general info and products; list rows open instead of expanding | 1.154.0 |
 | [RS-073](./RS-073-paypal-screenshot-from-the-hand-off-dialog-is-kept-o.md) | backlog | bug | P3 | PayPal screenshot from the hand-off dialog is kept on the order | — |
 | [RS-072](./RS-072-unit-cost-is-required-when-a-product-line-is-saved.md) | done | story | P2 | Unit cost is required when a product line is saved | 1.152.0 |

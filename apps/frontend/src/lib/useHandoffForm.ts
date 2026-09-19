@@ -6,14 +6,16 @@ import { buildHandoffBody, handoffBlockerKeys, type HandoffDelivery, type Handof
 import type { PackageSource } from './packageSource';
 import { normalizePaypalTxnInput } from './paypalTxn';
 import type { Order, Warehouse } from './types';
-import { usePaymentProof } from './usePaymentProof';
+import type { PaymentProof } from './usePaymentProof';
 import { loadWarehouses } from './warehouses';
 
 // The hand-off dialog's whole non-JSX state, shared by the desktop dialog and
 // the phone sheet so the two shells can't drift on what a complete hand-off is.
 // Each shell keeps only its markup. Tracking detection follows
-// useAddPackageForm exactly; the payment proof is usePaymentProof, the same
-// hook the PO pages use.
+// useAddPackageForm exactly; the payment proof is the page's own
+// usePaymentProof instance, handed in — a second copy seeded from the `order`
+// prop went stale the moment the page uploaded a file, and the dialog then
+// asked for a screenshot that was already on file.
 
 export type HandoffInit = {
   order: Order;
@@ -23,6 +25,8 @@ export type HandoffInit = {
   payment: 'company' | 'self';
   paymentMethod: HandoffMethod | null;
   paypalTxnId: string;
+  /** The page's proof hook, shared so both surfaces see one attachment list. */
+  proof: PaymentProof;
   /** Manager-only seeds; a purchaser's shell passes neither. */
   ownerId?: string;
   commissionRate?: number | null;
@@ -44,12 +48,11 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   // defaulting to PayPal here is how a cash deal ended up chasing an id.
   const [method, setMethod] = useState<HandoffMethod | null>(init.paymentMethod);
   const [txnId, setTxnIdState] = useState(init.paypalTxnId);
-  const proof = usePaymentProof({
-    orderId: order.id,
-    chatAtts: order.statusMeta?.['Submission']?.attachments ?? [],
-    proofAtts: order.statusMeta?.['Payment']?.attachments ?? [],
-    setTxnId: setTxnIdState,
-  });
+  const { proof } = init;
+  // A PayPal screenshot scanned here lands in the page's id field (the shared
+  // hook's setter is the page's); follow it into the dialog's own field. Only
+  // the page's value moving fires this, so typing here is never overwritten.
+  useEffect(() => { setTxnIdState(init.paypalTxnId); }, [init.paypalTxnId]);
   const [ownerId, setOwnerId] = useState(init.ownerId ?? order.userId);
   const [commissionPct, setCommissionPct] = useState(
     init.commissionRate != null ? String(+(init.commissionRate * 100).toFixed(2)) : '',
@@ -90,7 +93,7 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     chatAttachmentCount: proof.chatAtts.length,
     proofAttachmentCount: proof.proofAtts.length,
     saved: {
-      payment: order.payment, txnRequired: order.txnRequired,
+      payment: order.payment, paymentMethod: order.paymentMethod, txnRequired: order.txnRequired,
       chatShotRequired: order.chatShotRequired, cashShotRequired: order.cashShotRequired,
     },
   });

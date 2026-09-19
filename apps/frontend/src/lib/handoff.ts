@@ -21,12 +21,15 @@ export type HandoffRules = {
   chatAttachmentCount: number;
   /** Payment-bucket attachments: the cash screenshot(s). */
   proofAttachmentCount: number;
-  /** What the server said about the *saved* order. The dialog may have moved
-   *  Paid-by since, so an explicit `false` only exempts the case it was
-   *  computed for (a pre-cutoff order keeps its exemption); anything else
-   *  blocks and lets the server be the judge. */
+  /** What the server said about the *saved* order. Each verdict was computed
+   *  for the saved paid-by and method — `txnRequired` on the company /
+   *  not-cash branch (a never-asked null method included), `cashShotRequired`
+   *  on company / cash — so an explicit `false` only exempts while the dialog
+   *  is still on that branch (a pre-cutoff order keeps its exemption). A flip
+   *  of either, or anything else, blocks and lets the server be the judge. */
   saved: {
     payment: 'company' | 'self';
+    paymentMethod?: HandoffMethod | null;
     txnRequired?: boolean;
     chatShotRequired?: boolean;
     cashShotRequired?: boolean;
@@ -44,11 +47,13 @@ export function handoffBlockerKeys(r: HandoffRules): string[] {
   }
   if (r.paidBy === 'company' && r.method === null) out.push('hoNeedMethod');
   if (r.paidBy === 'company' && r.method === 'paypal' && !r.txnId.trim()) {
-    const exempt = r.saved.payment === 'company' && r.saved.txnRequired === false;
+    const exempt = r.saved.payment === 'company' && r.saved.paymentMethod !== 'cash'
+      && r.saved.txnRequired === false;
     if (!exempt) out.push('poTxnRequired');
   }
   if (r.paidBy === 'company' && r.method === 'cash' && r.proofAttachmentCount === 0) {
-    const exempt = r.saved.payment === 'company' && r.saved.cashShotRequired === false;
+    const exempt = r.saved.payment === 'company' && r.saved.paymentMethod === 'cash'
+      && r.saved.cashShotRequired === false;
     if (!exempt) out.push('hoNeedCashShot');
   }
   if (r.paidBy === 'self' && r.chatAttachmentCount === 0) {

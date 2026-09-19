@@ -119,9 +119,11 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   it is checked against the PayPal transactions the Payments sync holds, and
   an ID none of them carries is refused with the ID named — a typo or an
   invented ID used to be accepted and left the PO unable to reconcile. An
-  unknown ID first pulls PayPal once, so a payment PayPal already reports
-  does not wait for the six-hourly sync; PayPal itself reports a payment up
-  to three hours late, and the refusal says so. The check is live only once a
+  unknown ID in PayPal's own 17-character shape first pulls PayPal once, so a
+  payment PayPal already reports does not wait for the six-hourly sync; a
+  placeholder such as `CASH` is refused at once, without the round-trip
+  (v1.155.1). PayPal itself reports a payment up to three hours late, and
+  the refusal says so. The check is live only once a
   PayPal account has synced into the environment, so a dev box without keys
   is unaffected; a linked, ignored, pending or reversed row still counts as
   existing, and Mercury legs do not.
