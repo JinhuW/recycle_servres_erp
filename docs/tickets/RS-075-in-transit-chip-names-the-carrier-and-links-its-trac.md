@@ -2,13 +2,13 @@
 id: RS-075
 title: In Transit chip names the carrier and links its tracking page
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: Jinhu Wang
 branch: session/20260918-202813
-pr:
-version:
+pr: 359
+version: 1.155.0
 related: []
 ---
 
