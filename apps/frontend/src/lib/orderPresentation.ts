@@ -4,8 +4,9 @@
 // inside one of them the other drifts and the same PO reads two ways.
 
 import { fmtUSD, fmtUSD0 } from './format';
+import { fmtEta } from './shippingList';
 import { LIFECYCLE_STATUS } from './status';
-import type { OrderEventChange, OrderSummary } from './types';
+import type { OrderEventChange, OrderSummary, PackageTracking } from './types';
 
 /** `t` from useT(), passed down so these stay pure functions. */
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
@@ -30,6 +31,21 @@ export function inTransitDetail(
   if (o.tracking) return { text: o.tracking.carrier, href: o.tracking.trackingUrl };
   if (o.handoffMethod === 'pickup') return { text: t('inboundLocal'), href: null };
   return null;
+}
+
+/**
+ * The line under the In Transit chip: where the box stands, in one phrase.
+ * A package the carrier has delivered or failed says so — the PO itself stays
+ * In Transit until a person receives it, so the chip alone would be stale —
+ * otherwise the ETA, and nothing at all before the carrier's first scan.
+ */
+export function trackingNote(
+  trk: Pick<PackageTracking, 'status' | 'trackingEta'>, t: Translate, locale: string,
+): string | null {
+  if (trk.status === 'delivered') return t('shipStatusDelivered');
+  if (trk.status === 'exception') return t('shipStatusException');
+  const eta = fmtEta(trk.trackingEta ?? null, locale);
+  return eta ? t('shipEstDelivery', { eta }) : null;
 }
 
 /** Signed money, in the ±$x form the per-category subtotals already use. */

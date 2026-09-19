@@ -155,7 +155,26 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   USPS) and the chip links the carrier's tracking page for the hand-off's
   package, in a new tab; a local pickup reads `In Transit | Local`; a PO that
   left Draft before the hand-off existed keeps the plain chip. The phone list
-  still shows the plain chip.
+  still shows the plain chip. **Under the chip, the box's own state**
+  (v1.156.0): the tracking number, linked to the same carrier page, and
+  `Est. Tue, Sep 22` once the carrier has given a date — *Delivered* or
+  *Delivery exception* instead once it says so, because the PO itself stays
+  In Transit until a person receives it.
+- **The PO page shows the box's journey while the order is In Transit**
+  (v1.156.0). Between the stepper and the order details a *Shipment* block
+  reads the hand-off's package: its status chip, `UPS · 1Z…`, a
+  Tracking added → In transit → Delivered timeline (a delivery exception
+  stops the bar with the carrier's words under it), the arrival date, the
+  carrier link, and when the carrier last reported. It comes from Shippo's
+  webhook and the 45-minute poll; there is no Refresh here — the Shipping
+  page keeps that. A local pickup, or a PO that left Draft before the
+  hand-off existed, shows no block.
+- **The desktop list has a Total cost column** (v1.156.0), after QTY: the
+  goods figure the dashboard uses (the stored total, else the line sum on
+  what was bought) plus other fees, with `incl. $12 fees` under it when fees
+  exist; sortable, in the Columns picker, on by default. A user who had
+  pinned the picker before this release ticks it on once — the saved set
+  lists what is shown, and a new column is not in it.
 - **One payment picker on every surface, and a cash payment needs a
   screenshot of the amount** (v1.153.0). The desktop Submit and Edit pages,
   the phone's Review and Detail screens, and the hand-off dialog and sheet

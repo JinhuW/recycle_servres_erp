@@ -13,7 +13,7 @@ import { shareOrCopy } from '../../lib/shareOrCopy';
 import { paymentsForOrderPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
-import { inTransitDetail, profitTone } from '../../lib/orderPresentation';
+import { inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
@@ -33,6 +33,10 @@ const TONE_VAR: Record<string, string> = {
 // Commission = order profit × the manager-set per-order rate (null = not yet set = $0).
 const commissionFor = (o: OrderSummary) => +(o.profit * (o.commissionRate ?? 0)).toFixed(2);
 
+// What the PO cost: the goods (the server's figure; the stored total alone on
+// a row from an older backend) plus the fees charged on top of them.
+const totalCostFor = (o: OrderSummary) => (o.goodsTotal ?? o.totalCost ?? 0) + o.otherFees;
+
 // Toggleable columns (matches design's TOGGLEABLE_COLS). Order chevron,
 // Submitter, and Actions are always shown — the rest can be hidden. The
 // `tKey` is looked up against the dictionary in i18n.tsx so the picker
@@ -44,6 +48,7 @@ const TOGGLEABLE_COLS = [
   { id: 'warehouse',  tKey: 'warehouse' },
   { id: 'lines',      tKey: 'lines' },
   { id: 'qty',        tKey: 'qty' },
+  { id: 'cost',       tKey: 'totalCost' },
   { id: 'revenue',    tKey: 'revenue' },
   { id: 'profit',     tKey: 'profit' },
   { id: 'commission', tKey: 'commission' },
@@ -61,6 +66,7 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   warehouse:  o => o.warehouse?.short ?? '',
   lines:      o => o.lineCount,
   qty:        o => o.qty,
+  cost:       o => totalCostFor(o),
   revenue:    o => o.revenue,
   profit:     o => o.profit,
   // Unsold POs sort below every realized figure, loss or gain.
@@ -475,6 +481,7 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('warehouse') && <SortTh col="warehouse" sort={sort} onSort={cycleSort}>{t('warehouse')}</SortTh>}
                 {isVis('lines') && <SortTh col="lines" sort={sort} onSort={cycleSort} align="right">{t('lines')}</SortTh>}
                 {isVis('qty') && <SortTh col="qty" sort={sort} onSort={cycleSort} align="right">{t('qty')}</SortTh>}
+                {isVis('cost') && <SortTh col="cost" sort={sort} onSort={cycleSort} align="right">{t('totalCost')}</SortTh>}
                 {isVis('revenue') && <SortTh col="revenue" sort={sort} onSort={cycleSort} align="right">{t('revenue')}</SortTh>}
                 {/* One toggle, two columns for a manager: the projection and
                     what the units actually earned. A purchaser has only the
@@ -567,6 +574,16 @@ export function DesktopOrders({ onToast }: Props) {
                       </td>
                       <td className="num mono" style={{ display: isVis('lines') ? undefined : 'none' }}>{o.lineCount}</td>
                       <td className="num mono" style={{ display: isVis('qty') ? undefined : 'none' }}>{o.qty}</td>
+                      <td className="num mono" style={{ display: isVis('cost') ? undefined : 'none' }}>
+                        {fmtUSD0(totalCostFor(o), locale)}
+                        {/* The fees are inside the figure, never a bare number
+                            — the same stack the PO page shows. */}
+                        {o.otherFees > 0 && (
+                          <div className="muted" style={{ fontSize: 10.5, fontWeight: 500 }}>
+                            {t('inclFees', { fees: fmtUSD0(o.otherFees, locale) })}
+                          </div>
+                        )}
+                      </td>
                       <td className="num mono" style={{ display: isVis('revenue') ? undefined : 'none' }}>
                         {fmtUSD0(o.revenue, locale)}
                         {/* Revenue counts priced lines only, so a PO nobody has
@@ -613,20 +630,39 @@ export function DesktopOrders({ onToast }: Props) {
                           const d = inTransitDetail(o, t);
                           const cls = 'chip dot ' + statusTone(o.status);
                           if (!d) return <span className={cls}>{o.status}</span>;
-                          if (!d.href) return <span className={cls}>{o.status} | {d.text}</span>;
+                          const trk = o.tracking;
+                          if (!d.href || !trk) return <span className={cls}>{o.status} | {d.text}</span>;
                           // The row's own click toggles the line drawer, hence
                           // the stop — same as the payment chip-link beside it.
+                          const note = trackingNote(trk, t, locale);
                           return (
-                            <a
-                              className={cls + ' chip-link'}
-                              href={d.href}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title={t('shipTrackOnCarrier', { carrier: d.text })}
-                              onClick={e => e.stopPropagation()}
-                            >
-                              {o.status} | {d.text}
-                            </a>
+                            <>
+                              <a
+                                className={cls + ' chip-link'}
+                                href={d.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={t('shipTrackOnCarrier', { carrier: d.text })}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                {o.status} | {d.text}
+                              </a>
+                              {/* The number itself, and where the box stands:
+                                  the ETA, or delivered / failed once the
+                                  carrier says so. */}
+                              <div className="muted" style={{ fontSize: 10.5, fontWeight: 500, marginTop: 3, whiteSpace: 'nowrap' }}>
+                                <a
+                                  className="mono"
+                                  href={d.href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  {trk.trackingNumber}
+                                </a>
+                                {note && <> · {note}</>}
+                              </div>
+                            </>
                           );
                         })()}
                       </td>

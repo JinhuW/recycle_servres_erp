@@ -34,6 +34,7 @@ import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
 import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
+import { PackageJourney } from './PackageJourney';
 import type { HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
 import { navigate, paymentsForOrderPath } from '../../lib/route';
@@ -1475,6 +1476,21 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             </div>
           )}
         </div>
+
+        {/* The hand-off's box, while it is the reason the PO is In Transit. */}
+        {order.lifecycle === 'in_transit' && order.package && (
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+              marginBottom: 10,
+            }}>
+              <Icon name="truck" size={12} /> {t('orderShipment')}
+            </div>
+            <PackageJourney pkg={order.package} />
+          </div>
+        )}
 
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{

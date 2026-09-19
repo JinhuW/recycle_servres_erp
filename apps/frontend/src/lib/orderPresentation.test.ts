@@ -3,7 +3,7 @@ import { I18N } from './i18n';
 import zh from './i18n.zh';
 import {
   createdEventParts, inTransitDetail, linePhotoEventDetail, ownerChangedLine, profitTone,
-  signedUSD0,
+  signedUSD0, trackingNote,
 } from './orderPresentation';
 
 // Stands in for useT: names the key it was asked for and the count it was
@@ -133,5 +133,30 @@ describe('inTransitDetail', () => {
   it('adds nothing on any other stage', () => {
     expect(inTransitDetail({ lifecycle: 'reviewing', handoffMethod: 'label', tracking: ups }, t)).toBeNull();
     expect(inTransitDetail({ lifecycle: 'draft', handoffMethod: 'pickup', tracking: null }, t)).toBeNull();
+  });
+});
+
+describe('trackingNote', () => {
+  // Names the key and the ETA it was handed, which is what these are about.
+  const tt = (key: string, vars?: Record<string, string | number>) =>
+    vars && 'eta' in vars ? `${key}(${vars.eta})` : key;
+
+  it('gives the expected delivery date once the carrier has one', () => {
+    // A carrier ETA is a calendar date; its UTC-midnight round trip must not
+    // slip to the previous day in a western timezone.
+    expect(trackingNote({ status: 'in_transit', trackingEta: '2026-09-22T00:00:00.000Z' }, tt, 'en-US'))
+      .toBe('shipEstDelivery(Tue, Sep 22)');
+  });
+
+  it('says delivered or exception over any ETA — the chip alone would be stale', () => {
+    expect(trackingNote({ status: 'delivered', trackingEta: '2026-09-22T00:00:00.000Z' }, tt, 'en-US'))
+      .toBe('shipStatusDelivered');
+    expect(trackingNote({ status: 'exception', trackingEta: null }, tt, 'en-US'))
+      .toBe('shipStatusException');
+  });
+
+  it('says nothing before the first scan, and on a row from an older backend', () => {
+    expect(trackingNote({ status: 'purchased', trackingEta: null }, tt, 'en-US')).toBeNull();
+    expect(trackingNote({}, tt, 'en-US')).toBeNull();
   });
 });
