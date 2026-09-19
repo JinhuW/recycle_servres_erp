@@ -2,13 +2,13 @@
 id: RS-076
 title: Dev-to-main review findings before the prod cut
 type: bug
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-18
 reporter: jinhu
 branch: session/20260918-202813
-pr:
-version:
+pr: 360
+version: 1.155.1
 related: [RS-069, RS-071, RS-074]
 ---
 
@@ -33,20 +33,20 @@ to fix them.
 
 ## Acceptance criteria
 
-- [ ] The hand-off dialog and the phone sheet read the same `usePaymentProof`
+- [x] The hand-off dialog and the phone sheet read the same `usePaymentProof`
       instance as the page: a cash or chat screenshot uploaded on the PO page
       counts in the dialog without a reload, and one uploaded in the dialog
       shows on the page after Cancel.
-- [ ] `handoffBlockerKeys` exempts a PayPal order only when the saved order
+- [x] `handoffBlockerKeys` exempts a PayPal order only when the saved order
       was company-paid and not cash, and a cash order only when the saved
       order was company-paid cash; flipping the method in the dialog with the
       proof missing shows the blocker.  Unit-tested.
-- [ ] The desktop edit page's Save blockers apply the same rule, including a
+- [x] The desktop edit page's Save blockers apply the same rule, including a
       saved self-paid order flipped to company in a manager stage jump.
-- [ ] `POST /api/orders/:id/advance` pulls PayPal only for a non-archived
+- [x] `POST /api/orders/:id/advance` pulls PayPal only for a non-archived
       Draft whose id has the canonical 17-character shape; a placeholder id
       is refused without a pull.  Integration-tested with the stub provider.
-- [ ] Backend and frontend suites, typecheck green; `dev` then `main` carry
+- [x] Backend and frontend suites, typecheck green; `dev` then `main` carry
       the release.
 
 ## Out of scope
