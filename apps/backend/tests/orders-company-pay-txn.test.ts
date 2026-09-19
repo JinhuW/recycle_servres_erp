@@ -256,6 +256,24 @@ describe('company-pay POs need a transaction ID we synced from PayPal', () => {
       SELECT 1 FROM bank_transactions WHERE source = 'paypal' AND paypal_txn_id = ${KNOWN}`;
     expect(rows.length).toBe(1);
   });
+
+  it('does not pull for an id that cannot be a PayPal transaction', async () => {
+    await seedAccountOnly();
+    const { token } = await loginAs(MARCUS);
+    const id = await createOrder(token, 'company');
+    await setTxn(token, id, 'CASH');
+
+    const r = await api<{ error: string }>('POST', `/api/orders/${id}/advance`, {
+      token, env: { BANKTX_STUB: '1' },
+    });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/PayPal account/i);
+    expect(await lifecycleOf(token, id)).toBe('draft');
+    // The stub provider would have written its rows had the pull run.
+    const sql = getTestDb();
+    const rows = await sql`SELECT 1 FROM bank_transactions WHERE source = 'paypal'`;
+    expect(rows.length).toBe(0);
+  });
 });
 
 describe('self-pay POs need the chat with the seller to leave Draft', () => {

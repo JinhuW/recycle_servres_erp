@@ -39,6 +39,7 @@ import {
   type SerialIssue, type Carrier, type PackageSource,
 } from '@recycle-erp/shared';
 import type { Env, LineCategory, User } from '../types';
+import { PAYPAL_TXN_STRICT } from '../ai/paypal';
 import { maybeRenameReceipt } from '../ai/receipt';
 import { shrinkImageToFit } from '../lib/image-shrink';
 import { log } from '../lib/log';
@@ -2646,7 +2647,11 @@ orders.delete('/:id/lines/:lineId/photos/:photoId', async (c) => {
 // landed, in which case the guard refuses and the next attempt pulls again;
 // and a miss costs one Transaction Search plus the dispute list, with no
 // throttle beyond that single flight. PayPal itself reports a payment up to
-// three hours late, which no pull can shorten.
+// three hours late, which no pull can shorten. Only an id in PayPal's own
+// 17-character shape is worth the trip: a placeholder (`CASH`, `WAIT`) can
+// never match, so the guard's refusal stands without asking PayPal, and a
+// real id in some other shape waits for the scheduled sync — the refusal
+// already says to try again later.
 async function pullPaypalIfUnknown(
   env: Env,
   sql: ReturnType<typeof getDb>,
@@ -2654,6 +2659,7 @@ async function pullPaypalIfUnknown(
 ): Promise<void> {
   const paypal = pickBankProviders(env).providers.find((p) => p.source === 'paypal');
   if (!paypal) return;
+  if (!PAYPAL_TXN_STRICT.test((order.paypal_txn_id ?? '').trim())) return;
   if (!await companyPayTxnUnknown(sql, order)) return;
   await syncBankTransactions(env, [paypal]);
 }
@@ -2668,11 +2674,12 @@ orders.post('/:id/advance', async (c) => {
   const sql = getDb(c.env);
   const body = (await c.req.json().catch(() => null)) as { toStage?: string } | null;
 
-  // Only a Draft meets the guard, so only a Draft is worth a pull.
-  const [rule] = await sql<(TxnRuleRow & { lifecycle: string })[]>`
-    SELECT lifecycle, payment, payment_method, paypal_txn_id, created_at
+  // Only a live Draft meets the guard, so only one is worth a pull — the tx
+  // refuses an archived order before it reads the id.
+  const [rule] = await sql<(TxnRuleRow & { lifecycle: string; archived_at: Date | null })[]>`
+    SELECT lifecycle, archived_at, payment, payment_method, paypal_txn_id, created_at
     FROM orders WHERE id = ${id}`;
-  if (rule?.lifecycle === 'draft') await pullPaypalIfUnknown(c.env, sql, rule);
+  if (rule?.lifecycle === 'draft' && !rule.archived_at) await pullPaypalIfUnknown(c.env, sql, rule);
 
   // The lifecycle read, all stage guards and the writes run inside one tx
   // with the orders row locked FOR UPDATE (see services/orderAdvance.ts —

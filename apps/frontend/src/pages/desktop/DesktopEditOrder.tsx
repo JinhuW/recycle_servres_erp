@@ -605,14 +605,18 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // round-trip. `=== true` deliberately: an older backend omits the field.
   // The local method decides, not only the saved one: a manager who picks
   // Cash and stage-jumps in one Save must not be held for an id the server
-  // will not ask for once the PATCH lands.
+  // will not ask for once the PATCH lands. The saved verdicts were computed
+  // for the saved paid-by and method, though — one about the other path says
+  // nothing, so a flip blocks and the server judges.
   const leavingDraft = statusDirty && status !== 'Draft';
+  const verdictPaypal = order.payment === 'company' && order.paymentMethod !== 'cash';
+  const verdictCash = order.payment === 'company' && order.paymentMethod === 'cash';
   const txnBlocked =
-    order.txnRequired === true && leavingDraft
-    && payment === 'company' && paymentMethod !== 'cash' && !paypalTxn.trim();
+    leavingDraft && payment === 'company' && paymentMethod !== 'cash' && !paypalTxn.trim()
+    && (verdictPaypal ? order.txnRequired === true : order.txnRequired !== undefined);
   const cashShotBlocked =
-    order.cashShotRequired !== false && leavingDraft
-    && payment === 'company' && paymentMethod === 'cash' && proof.proofAtts.length === 0;
+    leavingDraft && payment === 'company' && paymentMethod === 'cash' && proof.proofAtts.length === 0
+    && (verdictCash ? order.cashShotRequired !== false : order.cashShotRequired !== undefined);
 
   // A cost is asked of a line that is new or that the user touched. Hundreds
   // of legacy lines sit at $0 (and lot-priced POs keep theirs there on
@@ -1920,6 +1924,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             payment,
             paymentMethod,
             paypalTxnId: paypalTxn,
+            proof,
             // The saved rate, not the input's display value: the page shows
             // 0% for an unset rate, and sending that would log null → 0.
             ...(isPurchaser ? {} : { ownerId, commissionRate: order.commissionRate }),

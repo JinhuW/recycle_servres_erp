@@ -17,6 +17,29 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.155.1] - 2026-09-19
+
+### Fixed
+
+- **The payment release, reviewed before it reaches prod.**  A `high` review
+  of everything `main` was about to receive (v1.150.0 – v1.155.0) found three
+  things, all in the hand-off and its transaction-id rule.  The hand-off
+  dialog and the phone sheet kept their own copy of the payment proof, seeded
+  from the order as the page first loaded it — so a cash or chat screenshot
+  uploaded on the PO page, exactly where the new readiness list sends a
+  purchaser, was "missing" once the sheet opened, and the file had to be
+  uploaded twice.  Both surfaces now read the page's one list; a scan made
+  in the dialog fills the page's transaction-id field too.  The client-side
+  exemptions (`txnRequired`, `cashShotRequired`) are the server's answers
+  about the *saved* payment method, and the dialog let a flip borrow them: a
+  saved cash order moved to PayPal with no id said ready, then the server
+  refused.  Each verdict now exempts its own method only, in the dialog and
+  in the desktop Save blockers alike.  And Submit pulled PayPal — a live
+  Transaction Search plus the dispute list — for any Draft with an unknown
+  id, archived ones and the fourteen `CASH` / `WAIT` placeholders included,
+  which can never match; the pull now waits for a live Draft with an id in
+  PayPal's shape.  [RS-076]
+
 ## [1.155.0] - 2026-09-18
 
 ### Features

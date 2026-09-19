@@ -1272,6 +1272,7 @@ export function OrderDetail({
             payment,
             paymentMethod,
             paypalTxnId,
+            proof,
             ...(isPurchaser ? {} : { ownerId: order.userId, commissionRate: order.commissionRate }),
             isManager: !isPurchaser,
             currentUser: { id: user.id, name: user.name },
@@ -1279,6 +1280,9 @@ export function OrderDetail({
           onClose={() => setHandoffOpen(false)}
           onDone={async () => {
             setHandoffOpen(false);
+            // The scan preview belongs to the hand-off that just consumed it;
+            // this page stays mounted, so it would linger in the PayPal panel.
+            proof.removeScreenshot();
             await refetchOrder();
             setActivityRefreshKey(k => k + 1);
           }}
