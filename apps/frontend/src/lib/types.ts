@@ -192,6 +192,9 @@ export type OrderSummary = {
   paymentMethod?: 'paypal' | 'cash' | null;
   handoffMethod?: 'pickup' | 'label' | null;
   handoffBy?: { id: string; name: string } | null;
+  // The hand-off's package — what the In Transit chip links. Only the list
+  // endpoint reports it; null on a pickup or a pre-hand-off order.
+  tracking?: { carrier: string; trackingNumber: string; trackingUrl: string | null } | null;
   // Net of the bank payments linked to this PO on the Payments page (refunds
   // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
   // nothing is linked or the caller is not a manager; either way there is no

@@ -13,7 +13,7 @@ import { shareOrCopy } from '../../lib/shareOrCopy';
 import { paymentsForOrderPath } from '../../lib/route';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
-import { profitTone } from '../../lib/orderPresentation';
+import { inTransitDetail, profitTone } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import type { OrderSummary, Order } from '../../lib/types';
@@ -607,7 +607,28 @@ export function DesktopOrders({ onToast }: Props) {
                         )}
                       </td>
                       <td style={{ display: isVis('status') ? undefined : 'none' }}>
-                        <span className={'chip dot ' + statusTone(o.status)}>{o.status}</span>
+                        {(() => {
+                          // In Transit says how the goods are coming: the
+                          // carrier, as a link to its tracking page, or Local.
+                          const d = inTransitDetail(o, t);
+                          const cls = 'chip dot ' + statusTone(o.status);
+                          if (!d) return <span className={cls}>{o.status}</span>;
+                          if (!d.href) return <span className={cls}>{o.status} | {d.text}</span>;
+                          // The row's own click toggles the line drawer, hence
+                          // the stop — same as the payment chip-link beside it.
+                          return (
+                            <a
+                              className={cls + ' chip-link'}
+                              href={d.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={t('shipTrackOnCarrier', { carrier: d.text })}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {o.status} | {d.text}
+                            </a>
+                          );
+                        })()}
                       </td>
                       <td>
                         <div style={{ display: 'inline-flex', gap: 4 }}>

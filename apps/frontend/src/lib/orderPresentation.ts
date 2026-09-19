@@ -5,7 +5,7 @@
 
 import { fmtUSD, fmtUSD0 } from './format';
 import { LIFECYCLE_STATUS } from './status';
-import type { OrderEventChange } from './types';
+import type { OrderEventChange, OrderSummary } from './types';
 
 /** `t` from useT(), passed down so these stay pure functions. */
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
@@ -16,6 +16,21 @@ export type Translate = (key: string, vars?: Record<string, string | number>) =>
  * lines nobody has priced yet is a genuine loss and must not read green.
  */
 export const profitTone = (n: number): 'pos' | 'neg' => (n < 0 ? 'neg' : 'pos');
+
+/**
+ * What the In Transit chip appends after the stage: the carrier, linked to
+ * its tracking page, or "Local" for a pickup. Null on every other stage and
+ * on a PO that left Draft before the hand-off existed. Tracking wins over the
+ * method — a box on file is the better answer whatever the dialog recorded.
+ */
+export function inTransitDetail(
+  o: Pick<OrderSummary, 'lifecycle' | 'handoffMethod' | 'tracking'>, t: Translate,
+): { text: string; href: string | null } | null {
+  if (o.lifecycle !== 'in_transit') return null;
+  if (o.tracking) return { text: o.tracking.carrier, href: o.tracking.trackingUrl };
+  if (o.handoffMethod === 'pickup') return { text: t('inboundLocal'), href: null };
+  return null;
+}
 
 /** Signed money, in the ±$x form the per-category subtotals already use. */
 export const signedUSD0 = (n: number, locale = 'en-US'): string =>
