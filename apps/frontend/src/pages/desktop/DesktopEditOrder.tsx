@@ -35,11 +35,23 @@ import { OrderActivityLog } from '../../components/OrderActivityLog';
 import { RevertNoticeDialog } from '../../components/RevertNoticeDialog';
 import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
-import { PackageJourney } from './PackageJourney';
-import type { HandoffMethod } from '../../lib/handoff';
+import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
-import { navigate, paymentsForOrderPath } from '../../lib/route';
-import { RouteLink } from '../../components/RouteLink';
+import { navigate, readHashQuery, replaceHashQuery } from '../../lib/route';
+import { poReadiness, type ReadinessTab } from '../../lib/poReadiness';
+import { useOrderEvents } from '../../lib/useOrderEvents';
+import type { StageId } from '../../lib/orderLookback';
+import { useTrackingInput } from '../../lib/useTrackingInput';
+import { packageSourceLabelKey, type PackageSource } from '../../lib/packageSource';
+import { refreshPackage } from '../../lib/packages';
+import { ApiError } from '../../lib/api';
+import { OrderTabs, type TabId } from './order/OrderTabs';
+import { DeliveryTab } from './order/DeliveryTab';
+import { CommissionTab } from './order/CommissionTab';
+import { StagePanel, type RefreshState } from './order/StagePanel';
+import { StageLookback } from './order/StageLookback';
+import { OrderFooter } from './order/OrderFooter';
+import { PoPaymentsLedger } from './order/PoPaymentsLedger';
 import { StatusChangeDialog, type StatusAttachment } from '../../components/StatusChangeDialog';
 import { AttachmentChip } from '../../components/AttachmentChip';
 import { AttachmentDropzone } from '../../components/AttachmentDropzone';
@@ -71,6 +83,10 @@ type Props = {
   order: Order;
   onCancel: () => void;
   onSaved: (msg: string) => void;
+  /** Re-reads the order and remounts the page on it — after a stage move,
+   *  so the user lands on the new stage's panel instead of back on the list.
+   *  Optional so an older shell that still navigates away keeps working. */
+  onReload?: () => Promise<void>;
 };
 
 // Internal line state — the shared `Line` plus the original DB id (when the
@@ -88,7 +104,7 @@ type EditLine = Line & { _id?: string; _status?: string; _dirty?: boolean };
 // order off to the manager at Reviewing (where pricing happens). Managers may
 // move it through any stage and edit prices/qty. Once an order reaches "Done"
 // the whole page becomes read-only.
-export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
+export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const { user } = useAuth();
@@ -261,6 +277,61 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const [notes, setNotes] = useState<string>(order.notes ?? '');
   const [payment, setPayment] = useState<'company' | 'self'>(order.payment);
   const [paymentMethod, setPaymentMethod] = useState<HandoffMethod | null>(order.paymentMethod ?? null);
+  // The hand-off's facts, now the Delivery tab's to edit: where the goods came
+  // from, how they travel, who collected them, which box carries them. The
+  // box is read from the order's newest package and kept locally so a Refresh
+  // can replace it without a refetch.
+  const [source, setSource] = useState<PackageSource | null>(order.source ?? null);
+  const [delivery, setDelivery] = useState<HandoffDelivery | null>(order.handoffMethod ?? null);
+  const [byUserId, setByUserId] = useState<string>(order.handoffBy?.id ?? '');
+  const tracking = useTrackingInput(
+    order.handoffMethod === 'label' ? order.package?.trackingNumber ?? '' : '',
+    order.handoffMethod === 'label' ? order.package?.carrier ?? null : null,
+  );
+  const [pkg, setPkg] = useState(order.package ?? null);
+  const [refreshState, setRefreshState] = useState<RefreshState>('idle');
+  const refreshPkg = async () => {
+    if (!pkg) return;
+    setRefreshState('busy');
+    try {
+      const r = await refreshPackage(pkg.id);
+      setPkg({ ...pkg, ...r.package, trackingStatus: r.package.trackingStatus ?? pkg.trackingStatus });
+      setRefreshState('idle');
+    } catch (e) {
+      // 501 is "tracking is not switched on" and reaches the page verbatim;
+      // anything else is the provider's or the network's fault, said briefly.
+      setRefreshState({ error: e instanceof ApiError && e.status === 501 ? e.message : t('poPkgRefreshFailed') });
+    }
+  };
+  // Every role may pick a collector: the names list is what the hand-off
+  // uses, and it is not the manager-only member list below.
+  const [memberNames, setMemberNames] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    api.get<{ items: { id: string; name: string }[] }>('/api/members/names')
+      .then(r => { if (alive) setMemberNames(r.items); })
+      .catch(handleFetchError);
+    return () => { alive = false; };
+  }, []);
+  // Which stage the status section is showing. Null follows the order; a
+  // reached step sets it to look back at what that stage recorded. Any
+  // stage change snaps it back — a staged or committed move is the news.
+  const [view, setView] = useState<string | null>(null);
+  // The open tab, kept in the route's query so a readiness row, a reload and
+  // a copied link all land on the same section.
+  const [tab, setTabState] = useState<TabId>(() => {
+    const q = readHashQuery().get('tab');
+    return (['delivery', 'payment', 'commission', 'notes', 'activity'] as TabId[]).includes(q as TabId)
+      ? (q as TabId) : 'delivery';
+  });
+  const setTab = (next: TabId) => {
+    setTabState(next);
+    const q = readHashQuery();
+    if (next === 'delivery') q.delete('tab'); else q.set('tab', next);
+    replaceHashQuery(q);
+  };
+  const events = useOrderEvents(order.id, activityKey);
+  useEffect(() => { setView(null); }, [status]);
   // Default to 0% when no rate has been set on the order yet, so the field
   // and the side commission summary show a concrete value out of the gate
   // instead of a blank input. Saving 0 against a still-null DB rate is
@@ -507,6 +578,14 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const otherFeesDirty = !feeEq(parsedOtherFees, order.otherFees);
   const otherFeesNoteDirty = otherFeesNote.trim() !== (order.otherFeesNote ?? '');
   const paypalDirty = paypalTxn !== (order.paypalTxnId ?? '');
+  const sourceDirty = (source ?? '') !== (order.source ?? '');
+  const deliveryDirty = (delivery ?? '') !== (order.handoffMethod ?? '');
+  // The collector only counts on a pickup, the box only on a label — the
+  // server NULLs and unlinks the other side on a flip, which deliveryDirty
+  // already covers.
+  const byUserDirty = delivery === 'pickup' && byUserId !== (order.handoffBy?.id ?? '');
+  const trackingDirty = delivery === 'label' && tracking.tn !== ''
+    && (tracking.tn !== (pkg?.trackingNumber ?? '') || (tracking.carrier ?? '') !== (pkg?.carrier ?? ''));
 
   // The goods total is no longer editable here: it is the sum of the lines, and
   // anything paid on top of the goods is the fee — so line costs + fee is what
@@ -552,14 +631,38 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   const purchaserEarn =
     (payment === 'self' ? effectiveTotalCost : 0) + commissionOnProfit;
 
-  const dirty =
-    statusDirty || linesDirty || notesDirty || warehouseDirty || paymentDirty || methodDirty
-    || commissionDirty || otherFeesDirty || otherFeesNoteDirty || paypalDirty || ownerDirty;
+  // Unsaved edits by section — the tabs' blue dots and the footer's count.
+  // "products" is the items card above the tabs: no tab, but it counts.
+  const dirtyBy = {
+    products: linesDirty || otherFeesDirty || otherFeesNoteDirty,
+    delivery: warehouseDirty || sourceDirty || deliveryDirty || byUserDirty || trackingDirty,
+    payment: paymentDirty || methodDirty || paypalDirty,
+    commission: commissionDirty || ownerDirty,
+    notes: notesDirty,
+  };
+  const dirty = statusDirty || Object.values(dirtyBy).some(Boolean);
   // What the backend reads as a change to the order itself — the set that
   // sends a purchaser's submitted order back to Draft. A note is not one.
   const materialDirty =
     linesDirty || warehouseDirty || paymentDirty || methodDirty || otherFeesDirty
-    || otherFeesNoteDirty || paypalDirty;
+    || otherFeesNoteDirty || paypalDirty || sourceDirty || deliveryDirty || byUserDirty || trackingDirty;
+
+  // What still stands between this Draft and In Transit — the one rule every
+  // surface shares (lib/poReadiness.ts), the form's values overlaid on the
+  // server's list for the sections the user has touched.
+  const readiness = poReadiness({
+    rules: {
+      source, delivery, trackingValid: tracking.valid, carrier: tracking.carrier,
+      paidBy: payment, method: paymentMethod, txnId: paypalTxn,
+      chatAttachmentCount: proof.chatAtts.length,
+      proofAttachmentCount: proof.proofAtts.length,
+      saved: order,
+    },
+    lines: { count: lines.length, goods: cost.goods, everSubmitted: order.everSubmitted === true },
+    commission: isPurchaser ? null : { rate: commissionRateValue },
+    serverBlockers: savedStatus === 'Draft' ? order.blockers : null,
+    dirty: dirtyBy,
+  });
 
   // A company-paid PO names the payment that funded it before it leaves Draft.
   // The server decides whether the rule governs this order (its cutoff lives in
@@ -570,15 +673,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   // will not ask for once the PATCH lands. The saved verdicts were computed
   // for the saved paid-by and method, though — one about the other path says
   // nothing, so a flip blocks and the server judges.
+  // Only the proof rules: the facts (source, delivery, tracking, method)
+  // are the checkpoint's to collect, and a manager's stage-jump through Save
+  // is not held to them — exactly what the server enforces on /advance.
   const leavingDraft = statusDirty && status !== 'Draft';
-  const verdictPaypal = order.payment === 'company' && order.paymentMethod !== 'cash';
-  const verdictCash = order.payment === 'company' && order.paymentMethod === 'cash';
-  const txnBlocked =
-    leavingDraft && payment === 'company' && paymentMethod !== 'cash' && !paypalTxn.trim()
-    && (verdictPaypal ? order.txnRequired === true : order.txnRequired !== undefined);
-  const cashShotBlocked =
-    leavingDraft && payment === 'company' && paymentMethod === 'cash' && proof.proofAtts.length === 0
-    && (verdictCash ? order.cashShotRequired !== false : order.cashShotRequired !== undefined);
+  const PROOF_KEYS = new Set(['poTxnRequired', 'hoNeedCashShot', 'hoNeedChatShot']);
+  const proofBlockedKey = leavingDraft
+    ? readiness.find(r => r.tab === 'payment')?.needKeys.find(k => PROOF_KEYS.has(k)) ?? null
+    : null;
+  const txnBlocked = proofBlockedKey === 'poTxnRequired';
+  const cashShotBlocked = proofBlockedKey === 'hoNeedCashShot' || proofBlockedKey === 'hoNeedChatShot';
 
   // A cost is asked of a line that is new or that the user touched. Hundreds
   // of legacy lines sit at $0 (and lot-priced POs keep theirs there on
@@ -632,8 +736,7 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
   : isArchived         ? [t('saveBlockedArchived')]
   : orderLocked        ? [t('saveBlockedLocked')]
   : !dirty             ? [t('saveBlockedNoChanges')]
-  : txnBlocked         ? [t('poTxnRequired')]
-  : cashShotBlocked    ? [t('poCashShotRequired')]
+  : proofBlockedKey    ? [t(proofBlockedKey)]
   : lines.flatMap((l, i) => {
       if (brandConfirmPending(l)) {
         return [lines.length === 1
@@ -672,6 +775,11 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
           const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
           await api.post(`/api/orders/${order.id}/advance`, { toStage });
           setSavedStatus(status);
+          if (onReload) {
+            window.__showToast?.('Saved ' + order.id, 'success');
+            await onReload();
+            return;
+          }
         }
         onSaved('Saved ' + order.id);
         return;
@@ -689,6 +797,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         commissionRate: commissionDirty ? commissionRateValue : undefined,
         paypalTxnId:   paypalDirty     ? (paypalTxn || null)   : undefined,
         onBehalfOfUserId: ownerDirty ? ownerId : undefined,
+        source:        sourceDirty   ? source                 : undefined,
+        handoffMethod: deliveryDirty ? delivery               : undefined,
+        handoffBy:     byUserDirty || (deliveryDirty && delivery === 'pickup') ? (byUserId || null) : undefined,
+        ...(trackingDirty && tracking.carrier
+          ? { trackingNumber: tracking.tn, carrier: tracking.carrier }
+          : {}),
         otherFees:     otherFeesDirty ? parsedOtherFees : undefined,
         otherFeesNote: otherFeesNoteDirty ? (otherFeesNote.trim() || null) : undefined,
         lines: lines
@@ -724,10 +838,12 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       // back on reload. Managers may jump straight to the target stage;
       // purchasers can only step forward and the backend rejects `toStage` for
       // them, so send an empty body to advance one stage.
+      let movedStage = false;
       if (statusDirty) {
         const toStage = Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === status);
         await api.post(`/api/orders/${order.id}/advance`, isPurchaser ? {} : { toStage });
         setSavedStatus(status);
+        movedStage = true;
       } else {
         applyLifecycle(r.lifecycle);
       }
@@ -742,7 +858,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
       // Saving a transaction id reconciles the payment on the way past, and the
       // page is about to navigate away — so the toast is where the manager
       // finds out it happened.
-      onSaved(r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : 'Saved ' + order.id);
+      const msg = r.paymentsLinked ? t('eoPaymentLinkedToast', { id: order.id }) : 'Saved ' + order.id;
+      // A stage move is the news the status section exists to show: stay on
+      // the page, on the new stage's panel. A plain save returns to the list
+      // as it always has.
+      if (movedStage && onReload) {
+        window.__showToast?.(msg, 'success');
+        await onReload();
+        return;
+      }
+      onSaved(msg);
     } catch (e) {
       // Keep the editor open and the user's edits intact on failure — calling
       // onSaved here would navigate away and discard unsaved work.
@@ -846,6 +971,85 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
     : l.category === 'SSD' ? [l.formFactor, l.health != null && (l.health + '%'), l.condition].filter(Boolean).join(' · ')
     : l.category === 'HDD' ? [l.interface, l.formFactor, l.health != null && (l.health + '%'), l.condition].filter(Boolean).join(' · ')
     : (l.condition ?? '');
+
+  // ── The status section's model ──────────────────────────────────────────
+  const currentIdx = ORDER_STATUSES.indexOf(status as typeof ORDER_STATUSES[number]);
+  const viewStageId = view === null ? null
+    : (Object.keys(LIFECYCLE_STATUS).find(k => LIFECYCLE_STATUS[k] === view) as StageId | undefined) ?? null;
+  // On a closed order every move is off except the manager's ways out of it
+  // (REOPEN_TARGETS); the warehouse gate holds the two review stages.
+  const stepDisabled = (s: string) =>
+    !allowedStatuses.includes(s)
+    || (orderLocked && !(canReopen && REOPEN_TARGETS[savedStatus]?.includes(s)));
+  // The move to a stage — the panel's button and the stepper's next step call
+  // the same thing. Done gets the evidence dialog first; leaving Draft is the
+  // checkpoint's job; everything else is staged and Save commits it.
+  const advanceTo = (s: string) => {
+    if (stepDisabled(s)) return;
+    if (s === 'Done') { setDoneDialogOpen(true); return; }
+    if (s === 'In Transit' && savedStatus === 'Draft') {
+      // The checkpoint writes its own fields and advances in one call, so
+      // unsaved page edits would be left behind — ask for the save first.
+      if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
+      // The cost is fixed on this page, not in the dialog, so it is asked for
+      // here — and the server refuses it too. First submission only: a PO an
+      // edit sent back to Draft re-submits as it was accepted.
+      if (!(cost.goods > 0) && !order.everSubmitted) {
+        showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
+        return;
+      }
+      setHandoffOpen(true);
+      return;
+    }
+    setStatus(s);
+  };
+  const nextStage = ORDER_STATUSES[currentIdx + 1] ?? null;
+  const nextStep = nextStage ? {
+    label: t('eoMarkAs', { s: nextStage }),
+    onClick: () => advanceTo(nextStage),
+    disabled: stepDisabled(nextStage),
+    hint: stepDisabled(nextStage)
+      ? (isPurchaser ? t('eoStepLockedTooltip')
+        : gateLocked.includes(nextStage as typeof gateLocked[number])
+          ? t('eoStepWarehouseMgrTooltip', { name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: nextStage })
+          : null)
+      : nextStage === 'In Transit' ? t('eoNextInTransitHint') : null,
+  } : null;
+  // What each met readiness row reads back — the page's live values, so a
+  // just-typed answer shows before it is saved.
+  const collectorName = memberNames.find(m => m.id === byUserId)?.name ?? order.handoffBy?.name ?? null;
+  const readySummaries: Partial<Record<ReadinessTab, string>> = {
+    products: t('subUnitsCost', { n: totals.qty, cost: fmtUSD(cost.goods, locale) }),
+    delivery: [
+      source ? t(packageSourceLabelKey(source)) : null,
+      gateWarehouse?.short ?? order.warehouse?.short ?? null,
+      delivery === 'pickup' ? [t('hoPickup'), collectorName].filter(Boolean).join(' · ')
+        : delivery === 'label' ? [tracking.carrier, tracking.tn].filter(Boolean).join(' ') : null,
+    ].filter(Boolean).join(' · '),
+    payment: [
+      payment === 'self' ? t('paySelfShort') : t('payCompanyShort'),
+      payment === 'company' ? (paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null) : null,
+      payment === 'company' && paymentMethod === 'paypal' ? paypalTxn.trim() || null : null,
+    ].filter(Boolean).join(' · '),
+    commission: [ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName, `${commissionPct || '0'}%`].join(' · '),
+  };
+  // A readiness row is a link to what fixes it: the items card for products,
+  // the tab (and its first field) for everything else.
+  const goTo = (target: ReadinessTab) => {
+    if (target === 'products') {
+      tableScrollRef.current?.closest('.oe-items-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    setTab(target);
+    const focusId = target === 'delivery' ? (source ? (delivery === 'label' ? 'oe-tracking' : 'oe-by') : 'oe-source')
+      : target === 'payment' ? (paymentMethod === 'paypal' ? 'eo-txn' : 'eo-paidby')
+      : 'eo-rate';
+    requestAnimationFrame(() => {
+      const el = document.getElementById(focusId) ?? document.getElementById('oe-tab-' + target);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) el.focus({ preventScroll: true });
+    });
+  };
 
   return (
     <>
@@ -1143,192 +1347,54 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
         </div>
       </div>
 
-      <aside className="oe-side">
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('eoPaymentDetail')}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', marginTop: 2 }}>
-            {t('eoWhatEarnsOnPO', { name: order.userName.split(' ')[0] })}
-          </div>
-
-          <div style={{ marginTop: 10 }}>
-            <span
-              className={'chip ' + (payment === 'self' ? 'info' : 'pos')}
-              style={{ fontSize: 11 }}
-            >
-              {payment === 'self' ? t('eoSelfPay') : t('eoCompanyPay')}
-            </span>
-          </div>
-
-          <div style={{
-            marginTop: 14, fontSize: 10.5, color: 'var(--fg-subtle)',
-            textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600,
-          }}>
-            {t('eoPurchaserEarns')}
-          </div>
-          <div
-            className="mono"
-            style={{
-              fontSize: 26, fontWeight: 600, marginTop: 4, lineHeight: 1.1,
-              color: purchaserEarn >= 0 ? 'var(--pos)' : 'var(--neg)',
-            }}
-          >
-            {fmtUSD(purchaserEarn, locale)}
-          </div>
-
-          {/* Formula — symbolic then numeric, so the breakdown explains the
-              number above. The self-pay term only appears when the purchaser
-              fronted the cost themselves. */}
-          <div style={{
-            marginTop: 12, padding: '10px 12px',
-            background: 'var(--bg-soft)', border: '1px solid var(--border)',
-            borderRadius: 6, fontSize: 11.5, lineHeight: 1.55,
-          }}>
-            <div style={{ color: 'var(--fg-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, fontSize: 10 }}>
-              {t('eoFormula')}
-            </div>
-            <div style={{ marginTop: 4 }}>
-              {payment === 'self' ? t('eoFormulaSelf') : t('eoFormulaCompany')}
-            </div>
-            <div className="mono" style={{ marginTop: 4, color: 'var(--fg)' }}>
-              {payment === 'self' ? `${fmtUSD(effectiveTotalCost, locale)} + ` : ''}
-              ({fmtUSD(totals.revenue, locale)} − {fmtUSD(effectiveTotalCost, locale)}) × {(commissionRateApplied * 100).toFixed(2)}%
-            </div>
-            <div className="mono" style={{ marginTop: 2, color: 'var(--fg-subtle)' }}>
-              = {payment === 'self' ? `${fmtUSD(effectiveTotalCost, locale)} + ` : ''}{fmtUSD(commissionOnProfit, locale)} = <span style={{ color: 'var(--fg)', fontWeight: 600 }}>{fmtUSD(purchaserEarn, locale)}</span>
-            </div>
-          </div>
-
-          <div style={{
-            marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)',
-            display: 'grid', gap: 8, fontSize: 12.5,
-          }}>
-            {payment === 'self' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--fg-subtle)' }}>{t('eoSelfPay')}</span>
-                <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
-              </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('revenue')}</span>
-              <span className="mono">{fmtUSD(totals.revenue, locale)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoCost')}</span>
-              <span className="mono">{fmtUSD(effectiveTotalCost, locale)}</span>
-            </div>
-            {/* Cost above is all-in. Break the fee out beneath it so the number
-                is never an unexplained jump — indented, so it reads as part of
-                the row above rather than a fourth peer figure. */}
-            {cost.fees > 0 && (
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                marginTop: -3, paddingLeft: 10, fontSize: 11.5, color: 'var(--fg-subtle)',
-              }}>
-                <span>{t('otherFees')}{otherFeesNote.trim() ? ` · ${otherFeesNote.trim()}` : ''}</span>
-                <span className="mono">{fmtUSD(cost.fees, locale)}</span>
-              </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoProfitAllLines', { n: lines.length })}</span>
-              <span className="mono">{fmtUSD(effectiveProfit, locale)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoRate')}</span>
-              <span className="mono">{(commissionRateApplied * 100).toFixed(2)}%</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('eoCommissionOnProfit')}</span>
-              <span className="mono">{fmtUSD(commissionOnProfit, locale)}</span>
-            </div>
-            <div style={{
-              display: 'flex', justifyContent: 'space-between',
-              paddingTop: 6, borderTop: '1px dashed var(--border)',
-              fontWeight: 600,
-            }}>
-              <span>{t('eoTotal')}</span>
-              <span className="mono">{fmtUSD(purchaserEarn, locale)}</span>
-            </div>
-          </div>
-
-          {totals.pricedCount < lines.length && (
-            <div style={{ marginTop: 12, fontSize: 11.5, color: 'var(--fg-subtle)' }}>
-              {t('eoUnpricedLinesHint', { n: lines.length - totals.pricedCount })}
-            </div>
-          )}
-        </div>
-
-        {/* Bank payments linked to this PO on the Payments page. Manager-only
-            (the API 403s everyone else) and invisible until something links. */}
-        {user?.role === 'manager' && <PoPaymentsLedger orderId={order.id} locale={locale} />}
-
-        {/* PO audit log — lives under Payment detail in the side column, fully
-            foldable. The component hides its own card chrome before load and
-            handles the empty-state copy for drafts. */}
-        <OrderActivityLog orderId={order.id} refreshKey={activityKey} className="oe-side-activity" />
-      </aside>
-
-      <div className="card oe-action-card" style={{ zIndex: 5, boxShadow: '0 -8px 24px rgba(15,23,42,0.06)' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+      {/* ── Order status: the stepper and, under it, what the current stage is
+          about — or what a finished stage recorded, when a reached step is
+          clicked. The one section that is always visible. ── */}
+      <div className="card oe-status-card">
+        <div className="oe-status-head">
           <SectionHead icon="flag">
             {t('orderStatus')}
             <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--fg-subtle)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
-              {t('advanceAsProgresses')}
+              {view !== null
+                ? t('eoLookingBack', { s: view })
+                : t('eoStepperHint')}
             </span>
           </SectionHead>
           <div className="so-stepper">
             {ORDER_STATUSES.map((s, i) => {
               const active = s === status;
-              const currentIdx = ORDER_STATUSES.indexOf(status as typeof ORDER_STATUSES[number]);
-              const reached = currentIdx >= 0 && i <= currentIdx;
-              const locked = !allowedStatuses.includes(s);
-              // On a closed order the whole stepper freezes except the
-              // manager's moves out of it (REOPEN_TARGETS).
-              const stepDisabled = locked
-                || (orderLocked && !(canReopen && REOPEN_TARGETS[savedStatus]?.includes(s)));
+              const reached = currentIdx >= 0 && i < currentIdx;
+              const isNext = i === currentIdx + 1;
+              const movable = !stepDisabled(s);
+              // Reached steps are always a look-back; the next step is the
+              // move; anything further is locked — including the manager's
+              // two-stage jump, which the panel's button never offered.
+              const locked = !reached && !active && !(isNext && movable);
+              const viewingThis = view === s;
               return (
                 <Fragment key={s}>
                   <button
                     type="button"
-                    className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '') + (locked ? ' locked' : '')}
+                    className={'so-step' + (active ? ' active' : '') + (reached ? ' reached' : '')
+                      + (locked ? ' locked' : '') + (viewingThis ? ' viewing' : '')}
                     onClick={() => {
-                      if (stepDisabled) return;
-                      // Done gets the evidence dialog first; confirming stages
-                      // the status, Save commits it. Re-open it even when already
-                      // at Done so the user can add more notes / attachments.
-                      // Purchasers never reach here for Done (allowedStatuses
-                      // keeps it locked).
-                      if (s === 'Done') { setDoneDialogOpen(true); return; }
-                      // Leaving Draft is the hand-off dialog's job: it writes
-                      // its own fields and advances in one call, so unsaved
-                      // page edits would be left behind by the navigation
-                      // that follows — ask for the save first.
-                      if (s === 'In Transit' && savedStatus === 'Draft') {
-                        if (dirty) { showErrorDialog(t('hoSaveFirst')); return; }
-                        // The cost is fixed on this page, not in the dialog,
-                        // so it is asked for here — as a dialog, like an
-                        // unsaved edit — and the server refuses it too. Only
-                        // on the first submission: a PO an edit sent back to
-                        // Draft re-submits as it was accepted.
-                        if (!(cost.goods > 0) && !order.everSubmitted) {
-                          showErrorDialog(t('poCostRequired'), undefined, t('errCantSubmitTitle'));
-                          return;
-                        }
-                        setHandoffOpen(true);
-                        return;
-                      }
-                      setStatus(s);
+                      if (reached) { setView(s); return; }
+                      if (active) { setView(null); return; }
+                      if (isNext && movable) advanceTo(s);
                     }}
-                    disabled={stepDisabled}
-                    title={locked
-                      ? (isPurchaser
-                        ? t('eoStepLockedTooltip')
-                        : t('eoStepWarehouseMgrTooltip', {
-                          name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0] ?? s,
-                        }))
-                      : t('eoSetStatusTo', { s })}
+                    disabled={locked}
+                    title={reached ? t('eoLookbackTip', { s })
+                      : active ? t('eoCurrentStage')
+                      : !movable
+                        ? (isPurchaser
+                          ? t('eoStepLockedTooltip')
+                          : t('eoStepWarehouseMgrTooltip', {
+                            name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0] ?? s,
+                          }))
+                        : isNext ? t('eoSetStatusTo', { s }) : t('eoStepLater')}
                   >
                     <span className="so-step-dot">
-                      {locked ? <Icon name="lock" size={10} /> : (i + 1)}
+                      {reached ? <Icon name="check" size={10} stroke={3} /> : locked && !movable && isNext ? <Icon name="lock" size={10} /> : (i + 1)}
                     </span>
                     <span className="so-step-label">{s}</span>
                   </button>
@@ -1339,170 +1405,118 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
               );
             })}
           </div>
-          {isPurchaser && !purchaserCanEdit && (
-            <div style={{
-              marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
-              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-              border: '1px solid var(--border)',
-            }}>
-              <Icon name="lock" size={13} />
-              {effectiveStatus === 'Ready to Pay' ? t('eoReadyToPayNote') : t('eoReviewedByMgr')}
-            </div>
-          )}
-          {!isPurchaser && gateLocked.length > 0 && (
-            <div style={{
-              marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--bg-soft)', color: 'var(--fg-subtle)',
-              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-              border: '1px solid var(--border)',
-            }}>
-              <Icon name="lock" size={13} />
-              {t('eoWarehouseMgrOnly', {
-                name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0],
-              })}
-            </div>
-          )}
-          {isPurchaser && purchaserCanEdit && effectiveStatus === 'Draft' && (
-            <div style={{
-              marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--accent-soft)', color: 'var(--accent-strong)',
-              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <Icon name="info" size={13} />
-              {t('oeHintDraftPre')}<strong>In Transit</strong>{t('oeHintDraftPost')}
-            </div>
-          )}
-          {revertOnSave && (
-            <div style={{
-              marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--warn-soft, #fef3c7)', color: 'var(--warn-strong, #92400e)',
-              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <Icon name="rotate" size={13} />
-              {t('revertHint')}
-            </div>
-          )}
-          {statusDirty && !isPurchaser && (
-            <div style={{
-              marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--accent-soft)', color: 'var(--accent-strong)',
-              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <Icon name="info" size={13} />
-              {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {t('eoStatusChangePost')}
-            </div>
-          )}
-          {statusDirty && isPurchaser && (
-            <div style={{
-              marginTop: 10, padding: '8px 12px', borderRadius: 8,
-              background: 'var(--accent-soft)', color: 'var(--accent-strong)',
-              fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <Icon name="info" size={13} />
-              {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {t('eoStatusChangePurchPost')}
-            </div>
-          )}
-          {(doneNote || doneAttachments.length > 0) && (
-            <div style={{
-              marginTop: 10, padding: '10px 12px', borderRadius: 8,
-              background: 'var(--bg-soft)', border: '1px solid var(--border)',
-              display: 'grid', gap: 8,
-            }}>
-              <div style={{
-                fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                <Icon name="paperclip" size={11} /> {t('poDoneEvidenceTitle')}
-              </div>
-              {doneNote && (
-                <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{doneNote}</div>
-              )}
-              {doneAttachments.map(a => (
-                <AttachmentChip
-                  key={a.id}
-                  a={a}
-                  onRemove={!isPurchaser ? () => removeDoneAtt(a) : undefined}
-                />
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* The hand-off's box, while it is the reason the PO is In Transit. */}
-        {order.lifecycle === 'in_transit' && order.package && (
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-            <SectionHead icon="truck">{t('orderShipment')}</SectionHead>
-            <PackageJourney pkg={order.package} />
-          </div>
-        )}
-
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-          <SectionHead icon="warehouse">{t('orderDetails')}</SectionHead>
-          <div className="oe-fields">
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('warehouse')}</label>
-              <div style={{ position: 'relative' }}>
-                <Icon name="warehouse" size={13} style={{
-                  position: 'absolute', left: 10, top: '50%',
-                  transform: 'translateY(-50%)', color: 'var(--fg-subtle)',
-                  pointerEvents: 'none',
-                }} />
-                <select
-                  className="select"
-                  value={warehouseId}
-                  onChange={e => setWarehouseId(e.target.value)}
-                  disabled={!canEditOrder}
-                  style={{ paddingLeft: 30, width: '100%' }}
-                >
-                  {warehouses.length === 0 && (
-                    <option value={warehouseId}>{order.warehouse?.name ?? order.warehouse?.short ?? '—'}</option>
-                  )}
-                  {warehouses.map(w => (
-                    <option key={w.id} value={w.id}>{w.name ?? w.short}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="label">{t('commissionRate')}</label>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                max={100}
-                step="0.1"
-                disabled={isPurchaser}
-                value={commissionPct}
-                placeholder={isPurchaser ? '—' : t('eoSetRate')}
-                onChange={e => setCommissionPct(e.target.value)}
-              />
-            </div>
-            {!isPurchaser && (
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="label" htmlFor="eo-owner">{t('poOnBehalfLabel')}</label>
-                <select
-                  id="eo-owner"
-                  className="select"
-                  value={ownerId}
-                  onChange={e => setOwnerId(e.target.value)}
-                  // A Done PO is a closed book — ownership (commission,
-                  // "my orders") is part of the record and stays put.
-                  disabled={orderLocked}
-                  title={isArchived ? t('saveBlockedArchived') : orderLocked ? t('eoOwnerLockedDone') : undefined}
-                  style={{ width: '100%' }}
-                >
-                  {ownerOptions.map(o => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-                </select>
+        {view !== null && viewStageId ? (
+          <StageLookback
+            stage={view}
+            stageId={viewStageId}
+            currentStage={status}
+            events={events.events}
+            eventsLoaded={events.loaded}
+            pkg={pkg}
+            onBack={() => setView(null)}
+            moveBack={!stepDisabled(view) && view !== status ? () => { setStatus(view); setView(null); } : null}
+            locale={locale}
+          />
+        ) : (
+          <StagePanel
+            status={status}
+            order={order}
+            readiness={savedStatus === 'Draft' ? readiness : []}
+            summaries={readySummaries}
+            onGoTo={goTo}
+            next={nextStep}
+            pkg={pkg}
+            onRefreshPkg={() => void refreshPkg()}
+            refreshState={refreshState}
+            doneEvidence={(doneNote || doneAttachments.length > 0) && (
+              <div style={{
+                marginTop: 4, padding: '10px 12px', borderRadius: 8,
+                background: 'var(--bg-elev)', border: '1px solid var(--border)',
+                display: 'grid', gap: 8,
+              }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 600, color: 'var(--fg-subtle)',
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <Icon name="paperclip" size={11} /> {t('poDoneEvidenceTitle')}
+                </div>
+                {doneNote && (
+                  <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{doneNote}</div>
+                )}
+                {doneAttachments.map(a => (
+                  <AttachmentChip
+                    key={a.id}
+                    a={a}
+                    onRemove={!isPurchaser ? () => removeDoneAtt(a) : undefined}
+                  />
+                ))}
               </div>
             )}
-            {/* Payment spans the grid: paid by, method, and the proof the
-                chosen path needs, in one panel. */}
-            <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
-              <label className="label">{t('payment')}</label>
+            locale={locale}
+          >
+            {isPurchaser && !purchaserCanEdit && (
+              <div className="oe-banner">
+                <Icon name="lock" size={13} />
+                {effectiveStatus === 'Ready to Pay' ? t('eoReadyToPayNote') : t('eoReviewedByMgr')}
+              </div>
+            )}
+            {!isPurchaser && gateLocked.length > 0 && (
+              <div className="oe-banner">
+                <Icon name="lock" size={13} />
+                {t('eoWarehouseMgrOnly', {
+                  name: gateWarehouse?.manager ?? '', wh: gateWarehouse?.short ?? '', stage: gateLocked[0],
+                })}
+              </div>
+            )}
+            {revertOnSave && (
+              <div className="oe-banner warn">
+                <Icon name="rotate" size={13} />
+                {t('revertHint')}
+              </div>
+            )}
+            {statusDirty && (
+              <div className="oe-banner accent">
+                <Icon name="info" size={13} />
+                {t('eoStatusChangeMgrPre')} <strong>{effectiveStatus}</strong> {t('eoStatusChangeMid')} <strong>{status}</strong> {isPurchaser ? t('eoStatusChangePurchPost') : t('eoStatusChangePost')}
+              </div>
+            )}
+          </StagePanel>
+        )}
+      </div>
+
+      {/* ── Five tabs, one fact each. ── */}
+      <OrderTabs
+        tab={tab}
+        onTab={setTab}
+        counts={{ notes: submissionAtts.length || undefined, activity: events.loaded ? events.events.length : undefined }}
+        need={savedStatus === 'Draft' ? {
+          delivery: readiness.some(r => r.tab === 'delivery' && !r.ok),
+          payment: readiness.some(r => r.tab === 'payment' && !r.ok),
+          commission: readiness.some(r => r.tab === 'commission' && !r.ok),
+        } : {}}
+        dirty={{ delivery: dirtyBy.delivery, payment: dirtyBy.payment, commission: dirtyBy.commission, notes: dirtyBy.notes }}
+      >
+        {{
+          delivery: (
+            <DeliveryTab
+              source={source} onSource={setSource}
+              warehouseId={warehouseId} onWarehouse={setWarehouseId}
+              warehouses={warehouses}
+              warehouseFallback={order.warehouse?.name ?? order.warehouse?.short ?? '—'}
+              delivery={delivery} onDelivery={setDelivery}
+              byUserId={byUserId} onByUser={setByUserId}
+              members={memberNames}
+              tracking={tracking}
+              pkg={pkg}
+              disabled={!canEditOrder}
+              locale={locale}
+            />
+          ),
+          payment: (
+            <div className="oe-tabpad">
               <PaymentFields
                 paidBy={payment} onPaidBy={setPayment}
                 method={paymentMethod} onMethod={setPaymentMethod}
@@ -1513,95 +1527,102 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
                 canEditProof={canEditSubmission}
                 idPrefix="eo"
               />
+              {/* Bank payments linked to this PO on the Payments page. Manager-only
+                  (the API 403s everyone else) and invisible until something links. */}
+              {user?.role === 'manager' && <PoPaymentsLedger orderId={order.id} locale={locale} />}
             </div>
-            {/* Notes gets its own row and spans the full grid so there's
-                room to write more than a single short phrase. */}
-            <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
-              <label className="label">{t('orderNotes')}</label>
-              <textarea
-                className="input"
-                rows={3}
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder={t('orderNotesPh')}
-                disabled={!canAnnotate}
-                style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
-              />
-            </div>
-            {(submissionAtts.length > 0 || canEditSubmission) && (
-              <div className="field" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
-                <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
-                </label>
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {submissionAtts.map(a => (
-                    <AttachmentChip
-                      key={a.id}
-                      a={a}
-                      onRemove={canEditSubmission ? () => void proof.removeChatAtt(a) : undefined}
-                    />
-                  ))}
-                  {canEditSubmission && (
-                    <AttachmentDropzone
-                      boxHint={t('poSubmitAttachHint')}
-                      uploading={proof.chatUploading}
-                      onFiles={files => void proof.addChatFiles(files)}
-                    />
-                  )}
-                </div>
+          ),
+          commission: (
+            <CommissionTab
+              ownerId={ownerId} onOwner={setOwnerId} ownerOptions={ownerOptions}
+              commissionPct={commissionPct} onCommissionPct={setCommissionPct}
+              isPurchaser={isPurchaser} orderLocked={orderLocked} isArchived={isArchived}
+              payment={payment}
+              purchaserEarn={purchaserEarn}
+              effectiveTotalCost={effectiveTotalCost}
+              revenue={totals.revenue}
+              fees={cost.fees}
+              otherFeesNote={otherFeesNote}
+              effectiveProfit={effectiveProfit}
+              commissionRateApplied={commissionRateApplied}
+              commissionOnProfit={commissionOnProfit}
+              lineCount={lines.length}
+              pricedCount={totals.pricedCount}
+              firstName={order.userName.split(' ')[0]}
+              locale={locale}
+            />
+          ),
+          notes: (
+            <div className="oe-tabpad" style={{ display: 'grid', gap: 14 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label" htmlFor="eo-notes">{t('orderNotes')}</label>
+                <textarea
+                  id="eo-notes"
+                  className="input"
+                  rows={3}
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder={t('orderNotesPh')}
+                  disabled={!canAnnotate}
+                  style={{ width: '100%', resize: 'vertical', minHeight: 64, fontFamily: 'inherit', lineHeight: 1.5 }}
+                />
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className="oe-foot">
-          <div className="oe-foot-stat">
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('lines')}</div>
-            <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{lines.length}</div>
-          </div>
-          <div className="oe-foot-stat">
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>{t('subTotalUnits')}</div>
-            <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>{totals.qty}</div>
-          </div>
-          <div className="oe-foot-stat">
-            <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-              {t('totalCost')} {goodsOverridden && (
-                <span style={{ color: 'var(--accent-strong)', fontWeight: 500 }}> · {t('subOverride')}</span>
+              {(submissionAtts.length > 0 || canEditSubmission) && (
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
+                    <span style={{ fontWeight: 400, color: 'var(--fg-subtle)' }}>· {t('eoFilesNotProof')}</span>
+                  </label>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {submissionAtts.map(a => (
+                      <AttachmentChip
+                        key={a.id}
+                        a={a}
+                        onRemove={canEditSubmission ? () => void proof.removeChatAtt(a) : undefined}
+                      />
+                    ))}
+                    {canEditSubmission && (
+                      <AttachmentDropzone
+                        boxHint={t('poSubmitAttachHint')}
+                        uploading={proof.chatUploading}
+                        onFiles={files => void proof.addChatFiles(files)}
+                      />
+                    )}
+                  </div>
+                </div>
               )}
             </div>
-            <div className="mono" style={{ fontWeight: 600, fontSize: 17 }}>
-              {fmtUSD(cost.total, locale)}
-            </div>
-            {cost.fees > 0 && (
-              <div style={{ fontSize: 11, color: 'var(--accent-strong)', marginTop: 1 }}>
-                {t('inclFees', { fees: fmtUSD(cost.fees, locale) })}
-              </div>
-            )}
-          </div>
-          <div className="oe-foot-actions">
-            <button className="btn" onClick={onCancel}>{t('cancel')}</button>
-            {/* Only ever shown for photos whose upload failed: a queued photo
-                on a line that has no id yet is waiting for Save, not for this. */}
-            {retryablePhotos > 0 && (
-              <button
-                className="btn"
-                disabled={saving || photos.busy}
-                onClick={() => void retryQueuedPhotos()}
-              >
-                <Icon name="refresh" size={14} /> {t('linePhotoRetryAction', { n: retryablePhotos })}
-              </button>
-            )}
-            <button
-              className="btn primary"
-              disabled={saving}
-              title={saveBlockers[0]}
-              onClick={attemptSave}
-            >
-              <Icon name="check2" size={14} /> {saving ? '…' : t('save')}
-            </button>
-          </div>
-        </div>
-      </div>
+          ),
+          activity: (
+            <OrderActivityLog orderId={order.id} refreshKey={activityKey} events={events} className="oe-activity-tab" />
+          ),
+        }}
+      </OrderTabs>
+
+      <OrderFooter
+        total={cost.total}
+        fees={cost.fees}
+        goodsOverridden={goodsOverridden}
+        earnName={order.userName.split(' ')[0]}
+        earn={purchaserEarn}
+        dirtySections={[
+          dirtyBy.products ? t('poReadyProducts') : null,
+          dirtyBy.delivery ? t('eoTabDelivery') : null,
+          dirtyBy.payment ? t('eoTabPayment') : null,
+          dirtyBy.commission ? t('eoTabCommission') : null,
+          dirtyBy.notes ? t('eoTabNotes') : null,
+        ].filter((x): x is string => !!x)}
+        stagePending={statusDirty ? status : null}
+        onUndoStage={statusDirty ? () => setStatus(savedStatus) : null}
+        retryablePhotos={retryablePhotos}
+        onRetryPhotos={() => void retryQueuedPhotos()}
+        retryDisabled={saving || photos.busy}
+        onCancel={onCancel}
+        onSave={attemptSave}
+        saving={saving}
+        saveTitle={saveBlockers[0]}
+        locale={locale}
+      />
       </div>
 
       {activeIdx !== null && lines[activeIdx] && (
@@ -1886,6 +1907,13 @@ export function DesktopEditOrder({ order, onCancel, onSaved }: Props) {
             setStatus('In Transit');
             applyLifecycle('in_transit');
             setActivityKey(k => k + 1);
+            // Land on the In Transit panel — the box's journey — rather than
+            // back on the list.
+            if (onReload) {
+              window.__showToast?.(t('hoDone', { id: order.id }), 'success');
+              void onReload();
+              return;
+            }
             onSaved(t('hoDone', { id: order.id }));
           }}
         />
@@ -2011,78 +2039,4 @@ function editLineToInsert(l: EditLine, status: string) {
     scanImageId:    l.scanImageId ?? null,
     scanConfidence: l.scanConfidence ?? null,
   };
-}
-
-// Read-only ledger of bank transactions linked to this PO on the Payments
-// page. Renders nothing until a payment is linked, so most POs pay no cost.
-function PoPaymentsLedger({ orderId, locale }: { orderId: string; locale: string }) {
-  const { t } = useT();
-  const [ledger, setLedger] = useState<{
-    payments: {
-      id: string; source: string; postedAt: string; amount: number;
-      counterparty: string | null; linkKind: 'payment' | 'refund' | null; linkAuto: boolean;
-      // Added in v1.127.0; optional because the SPA and the API deploy on
-      // independent pipelines. Absent means settled — nothing else used to be
-      // ingested at all.
-      settleStatus?: 'settled' | 'pending' | 'failed' | 'reversed';
-    }[];
-    net: number;
-  } | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    api.get<NonNullable<typeof ledger>>(`/api/bank-transactions/by-order/${encodeURIComponent(orderId)}`)
-      .then(r => { if (alive) setLedger(r); })
-      // Silent: the ledger is a side panel, not the page — a fetch hiccup
-      // must not throw a dialog over an otherwise working order edit.
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [orderId]);
-
-  if (!ledger || ledger.payments.length === 0) return null;
-  return (
-    <div className="card" style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{t('payLedgerTitle')}</div>
-        <RouteLink to={paymentsForOrderPath(orderId)} className="btn sm ghost" style={{ marginLeft: 'auto' }}>
-          {t('payLedgerOpen')}
-        </RouteLink>
-      </div>
-      <div style={{ marginTop: 10, display: 'grid', gap: 6, fontSize: 12.5 }}>
-        {ledger.payments.map(p => (
-          <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-            <span className={'chip dot ' + (p.linkKind === 'refund' ? 'cool' : 'pos')} style={{ fontSize: 10.5 }}>
-              {t(p.linkKind === 'refund' ? 'payKindRefund' : 'payKindPayment')}
-            </span>
-            {/* Without this the PO reads as paid by money that is still in
-                flight, or that came back — the net below already excludes the
-                second kind, and the chip is what explains the difference. */}
-            {p.settleStatus && p.settleStatus !== 'settled' && (
-              <span
-                className={'chip dot ' + (p.settleStatus === 'pending' ? 'warn' : p.settleStatus === 'reversed' ? 'neg' : 'muted')}
-                style={{ fontSize: 10.5 }}
-              >
-                {t(p.settleStatus === 'pending' ? 'paySettlePending'
-                  : p.settleStatus === 'reversed' ? 'paySettleReversed' : 'paySettleFailed')}
-              </span>
-            )}
-            <span className="muted">{fmtDateShort(p.postedAt, locale)}</span>
-            <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {p.counterparty ?? (p.source === 'paired' ? 'PayPal + Mercury' : p.source)}
-            </span>
-            <span className="mono" style={{ marginLeft: 'auto', color: p.amount > 0 ? 'var(--pos)' : undefined }}>
-              {(p.amount < 0 ? '−' : '+') + fmtUSD(Math.abs(p.amount), locale)}
-            </span>
-          </div>
-        ))}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between',
-          paddingTop: 6, borderTop: '1px dashed var(--border)', fontWeight: 600,
-        }}>
-          <span>{t('payLedgerNet')}</span>
-          <span className="mono">{(ledger.net < 0 ? '−' : '+') + fmtUSD(Math.abs(ledger.net), locale)}</span>
-        </div>
-      </div>
-    </div>
-  );
 }

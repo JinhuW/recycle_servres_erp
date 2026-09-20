@@ -56,6 +56,10 @@ export function DesktopApp() {
   const { current: errorDialog, push: pushErrorDialog, dismiss: dismissErrorDialog } = useErrorDialogQueue();
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
+  // Bumped when the edit page asks to be re-read in place (after a stage
+  // move). It keys the page, so the fresh order reseeds every field instead
+  // of the page reconciling itself against props it never watched.
+  const [orderReloads, setOrderReloads] = useState(0);
 
   const { path } = useRoute();
   const view: DesktopView = pathToDesktopView(path);
@@ -178,9 +182,15 @@ export function DesktopApp() {
   // it. Cancel / save returns to the list.
   const ordersOrEdit = editingOrder
     ? <DesktopEditOrder
+        key={editingOrder.id + ':' + orderReloads}
         order={editingOrder}
         onCancel={() => { navigate('/purchase-orders'); setEditingOrder(null); }}
         onSaved={(msg) => { navigate('/purchase-orders'); setEditingOrder(null); showToast(msg); }}
+        onReload={async () => {
+          const r = await api.get<{ order: Order }>(`/api/orders/${editingOrder.id}`);
+          setEditingOrder(r.order);
+          setOrderReloads(n => n + 1);
+        }}
       />
     : loadingOrderId
       ? <FormSkeleton fields={8} />

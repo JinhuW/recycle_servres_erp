@@ -347,71 +347,19 @@ html.desktop, body.desktop, .desktop #root {
 .page.page-order-edit::-webkit-scrollbar { display: none; }
 
 .page.page-order-edit > .oe-body {
-  display: grid;
-  grid-template-columns: 1fr 280px;
-  /* Row 1 sizes to the items-card, row 2 takes whatever a taller side column
-     forces on the grid — so the surplus is trailing space under the action-card
-     instead of a gap above it. */
-  grid-template-rows: auto 1fr;
-  grid-template-areas:
-    "items  side"
-    "action side";
-  gap: 14px 18px;
-  align-items: stretch;
+  /* One column: the items card, the status section, the tabs, the footer.
+     The aside that used to sit at the right dissolved into the tabs. */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 .page.page-order-edit > .oe-body > .oe-items-card {
-  grid-area: items;
   min-width: 0;
   min-height: 0;
-  /* Hug content so the card can never grow a dead gap below its totals footer,
-     even if the grid row is stretched by a taller side column. */
-  align-self: start;
   display: flex;
   flex-direction: column;
 }
-.page.page-order-edit > .oe-body > .oe-action-card {
-  grid-area: action;
-  min-width: 0;
-  /* Sit right under the items-card: without this the stretch default paints the
-     bar's background down the whole flexible row. */
-  align-self: start;
-}
-.page.page-order-edit > .oe-body > .oe-side {
-  grid-area: side;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
-/* Everything that isn't the activity log (payment detail, payments ledger)
-   keeps its natural height at the top of the column; the log fills what is
-   left and scrolls internally if the history is longer than that. */
-.page.page-order-edit > .oe-body > .oe-side > :not(.oe-side-activity) {
-  flex-shrink: 0;
-}
-.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity {
-  flex: 1;
-  min-height: 0;
-  /* Track the item table's height: header + current row count, floored at the
-     table's own min-height and capped at 10 rows (--oe-rows is clamped to 10).
-     A long history then scrolls internally instead of stretching the side. */
-  max-height: max(180px, calc(40px + var(--oe-row-h) * var(--oe-rows)));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* OrderActivityLog: header (button) stays pinned, the timeline body (the
-   inner div that renders when open) is the one that scrolls. */
-.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity > button {
-  flex-shrink: 0;
-}
-.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity > div {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-.page.page-order-edit > .oe-body > .oe-side > .oe-side-activity > div::-webkit-scrollbar { display: none; }
 .page.page-order-edit .oe-items-card > .card-head,
 .page.page-order-edit .oe-items-card > .oe-items-foot {
   flex-shrink: 0;
@@ -442,15 +390,121 @@ html.desktop, body.desktop, .desktop #root {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
-.oe-foot {
-  padding: 16px;
+.oe-fields-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* ── Order status: stepper + stage panel ── */
+.oe-status-card { min-width: 0; }
+.oe-status-head { padding: 14px 16px 4px; }
+.oe-stage { padding: 12px 16px 16px; display: grid; gap: 12px; }
+.oe-stage-cols {
   display: grid;
-  grid-template-columns: auto repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.oe-box {
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+  background: var(--bg-soft); display: flex; flex-direction: column; gap: 8px; min-width: 0;
+}
+.oe-box.plain { background: transparent; }
+.oe-box-h {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-subtle);
+}
+.oe-box-h > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.oe-box-h .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; display: inline-flex; gap: 8px; align-items: center; }
+.oe-box-lead { font-size: 13.5px; color: var(--fg); line-height: 1.45; }
+.oe-box-err { font-size: 12px; color: var(--warn-strong); }
+.oe-stage-next .oe-stage-act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
+.oe-lookback { border-style: dashed; }
+.oe-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.oe-facts li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* The readiness list: one row per section, a link to what fixes it. Ported
+   from the phone's .ph-check-row so the two read as one list. */
+.oe-ready { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.oe-ready-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 6px 8px; margin: 0 -8px; width: calc(100% + 16px); border-radius: 6px;
+  border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer;
+}
+.oe-ready-row:hover { background: var(--bg-elev); }
+.oe-ready-dot {
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+  display: inline-grid; place-items: center; font-size: 11px; font-weight: 700;
+}
+.oe-ready-dot.ok { background: var(--pos-soft); color: var(--accent-strong); }
+.oe-ready-dot.miss { background: var(--warn-soft); color: var(--warn-strong); }
+.oe-ready-dot.soft { background: var(--bg-elev); color: var(--fg-subtle); border: 1px dashed var(--border-strong); }
+.oe-ready-label { font-size: 13px; white-space: nowrap; }
+.oe-ready-sub { flex: 1; min-width: 0; font-size: 12px; color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oe-ready-sub.miss { color: var(--warn-strong); white-space: normal; }
+.oe-ready-arrow { color: var(--fg-subtle); flex-shrink: 0; }
+.oe-banner {
+  padding: 8px 12px; border-radius: 8px; font-size: 12.5px;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-soft); color: var(--fg-subtle); border: 1px solid var(--border);
+}
+.oe-banner.accent { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
+.oe-banner.warn { background: var(--warn-soft); color: var(--warn-strong); border-color: transparent; }
+/* A reached step being looked back at. Only this modifier is new; .locked is
+   shared with the sell-order stepper and unchanged. */
+.so-step.viewing:not(.active) { border-style: dashed; border-color: var(--fg-muted); color: var(--fg); }
+.so-step.reached:not([disabled]) { cursor: pointer; }
+
+/* ── Tabs ── */
+.oe-tabs {
+  display: flex; gap: 2px; padding: 0 4px; border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: none;
+}
+.oe-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 7px;
+  padding: 10px 14px; margin-bottom: -1px; border: 0; background: transparent;
+  border-bottom: 2px solid transparent; font: inherit; font-size: 13px; color: var(--fg-muted);
+  cursor: pointer; white-space: nowrap; transition: color .12s, border-color .12s;
+}
+.oe-tab:hover { color: var(--fg); }
+.oe-tab.active { color: var(--fg); border-color: var(--fg); font-weight: 600; }
+.oe-tab-count { font-size: 11px; color: var(--fg-subtle); font-weight: 400; }
+.oe-tab-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.oe-tab-dot.amber { background: var(--warn); }
+.oe-tab-dot.blue { background: var(--info); }
+.oe-tabbody { min-width: 0; }
+.oe-tabpanel[hidden] { display: none; }
+.oe-tabpad { padding: 16px; }
+.oe-tab-note { margin-top: 14px; font-size: 12px; color: var(--fg-subtle); line-height: 1.5; }
+.oe-pkg-line {
+  margin-top: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-soft); display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap;
+}
+.oe-ledger { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.oe-activity-tab { border: 0 !important; }
+.oe-activity-tab > button { border-bottom: 1px solid var(--border) !important; }
+
+/* ── Footer: sticky inside the page's own scroll box, never fixed — fixed
+   would overlay the sidebar. ── */
+.oe-foot {
+  position: sticky; bottom: 0; z-index: 5;
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
 }
 .oe-foot-stat { white-space: nowrap; }
-.oe-foot-actions { display: flex; gap: 8px; }
+.oe-foot-state { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; font-size: 12px; }
+.oe-foot-pill { gap: 6px; }
+.oe-foot-undo {
+  border: 0; background: transparent; font: inherit; font-size: 11px; text-decoration: underline;
+  color: inherit; cursor: pointer; padding: 0 0 0 4px;
+}
+.oe-foot-dirty { display: inline-flex; align-items: center; gap: 6px; color: var(--info); }
+.oe-foot-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* The Tweaks gear floats at the page's bottom-right corner; keep Save clear of it. */
+.oe-foot { padding-right: 64px; }
 
 /* Narrow window: one column — items, then status/details/Save, then what the
    side held (payment detail, ledger, activity). The stepper keeps every stage
@@ -458,17 +512,10 @@ html.desktop, body.desktop, .desktop #root {
    carries its name. */
 @media (max-width: 1100px) {
   .page.page-order-edit { padding: 10px 16px 16px; }
-  .page.page-order-edit > .oe-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto;
-    grid-template-areas:
-      "items"
-      "action"
-      "side";
-  }
   .page.page-order-edit .so-step { padding: 6px 8px; }
-  .page.page-order-edit .so-step:not(.active) .so-step-label { display: none; }
-  .oe-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page.page-order-edit .so-step:not(.active):not(.viewing) .so-step-label { display: none; }
+  .oe-fields, .oe-fields-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .oe-stage-cols { grid-template-columns: minmax(0, 1fr); }
   .oe-foot { display: flex; flex-wrap: wrap; gap: 12px 18px; }
   .oe-foot-actions { margin-left: auto; }
 }

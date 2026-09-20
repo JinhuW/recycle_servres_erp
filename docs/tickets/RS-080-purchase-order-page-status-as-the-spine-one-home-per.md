@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/po-page-spine
-pr: 369, 370
+pr: 369, 370, 371
 version:
 related: [RS-050, RS-071, RS-077, RS-078]
 ---
@@ -93,22 +93,22 @@ Frontend, shared (PR-B1)
       advances in one transaction.
 
 Desktop (PR-B2)
-- [ ] The page head and the items card with its cost-breakdown tape are
+- [x] The page head and the items card with its cost-breakdown tape are
       unchanged.
-- [ ] Below them, *Order status* is its own card: the stepper plus a stage
+- [x] Below them, *Order status* is its own card: the stepper plus a stage
       panel — Draft shows the readiness list with links to the section that
       fixes each item; In Transit shows the package's Shippo state with a
       **Refresh** button (or who collected a local pickup); later stages show
       the next step. Every reached step is clickable and shows what that stage
       recorded, read-only, with a way back.
-- [ ] Five tabs follow: Delivery (source, warehouse, label/pickup, tracking or
+- [x] Five tabs follow: Delivery (source, warehouse, label/pickup, tracking or
       collector), Payment (paid by, method, proof, bank-payments ledger),
       Commission (purchaser, rate, what the purchaser earns), Notes & files,
       Activity. No fact has an input in more than one tab. Tabs carry an amber
       dot for "needed before hand-off" and a blue dot for unsaved edits.
-- [ ] Delivery and Payment facts are editable until Ready to Pay; a
+- [x] Delivery and Payment facts are editable until Ready to Pay; a
       purchaser's change sends the order back to Draft for change-review.
-- [ ] A sticky footer shows total cost, what the purchaser earns, the unsaved
+- [x] A sticky footer shows total cost, what the purchaser earns, the unsaved
       count, Discard and Save. A stage move stays on the page.
 
 Phone (PR-C)

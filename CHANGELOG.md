@@ -17,6 +17,64 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.160.0] - 2026-09-20
+
+The desktop half of RS-080: the purchase-order page rebuilt around its status,
+with one home per fact. The page head and the items card with its cost
+breakdown are exactly as they were; everything under them changed.
+
+### Features
+
+- **Order status is its own card, with a stage panel under the stepper.** A
+  Draft shows the *Before you submit* list — each unmet row links to the
+  section that fixes it and names what is missing in a few words, each met
+  row reads back its answer — beside the one next step. In Transit shows the
+  linked package's Shippo state with a **Refresh** that asks the carrier now
+  (the "tracking is not switched on" message appears inline), or who collected
+  a local pickup. Reviewing, Ready to Pay and Done say what the stage is
+  about and offer the next move. The existing lock, gate, revert and pending
+  banners sit between the stepper and the panel.
+- **Look back at a finished stage.** Every reached step is clickable and shows
+  what that stage recorded, from the activity log: who submitted and how it
+  was handed off, the final journey, who moved it on and when, the Done note
+  and files. Read-only, with *Back to ‹current›*; a manager also gets *Move
+  back to ‹stage›* where the order allows it. The next step is the only
+  forward click — a manager now stages one move at a time (the two-stage jump
+  is gone), and Save commits it: the footer's button reads *Save · Mark as
+  ‹stage›* while a move is pending, with Undo beside it.
+- **Stage moves stay on the page.** After the hand-off or a Save that moved
+  the stage, the page re-reads the order and lands on the new stage's panel
+  instead of returning to the list. A plain save returns to the list as
+  before.
+- **Five tabs, one fact each** — Delivery, Payment, Commission, Notes &
+  files, Activity. The aside is gone: its "Payment detail" card (which was
+  commission maths) is the Commission tab, the bank-payments ledger sits under
+  Payment, the activity log is a tab. Warehouse, purchaser, rate and paid-by
+  each have one input now. Tabs carry an amber dot while a Draft still needs
+  something under them and a blue dot for unsaved edits; the open tab rides
+  in the URL (`?tab=payment`). All panels stay mounted, so typing never loses
+  focus when the readiness list recomputes.
+- **Delivery is editable on the page until Ready to Pay.** Source, shipping
+  label or local pickup, the collector, and the tracking number (carrier
+  recognised from its shape, as in the checkpoint) save through the order.
+  A purchaser's change past Draft is material — back to Draft for the
+  manager's change-review; a new number moves the linked package rather than
+  minting a second one. A one-line live tracking state sits under the fields.
+- **A sticky footer** holds the total cost, what the purchaser earns,
+  *Unsaved edits: Products, Payment…*, Discard and Save. The line and unit
+  counts that sat there are the items card's head.
+
+### Internal
+
+- `DesktopEditOrder` keeps every guard, dirty flag, the save path and the
+  modals; the new pieces are render-only under `pages/desktop/order/`
+  (`StagePanel`, `StageLookback`, `OrderTabs`, `DeliveryTab`, `CommissionTab`,
+  `OrderFooter`, `PoPaymentsLedger`). Its private `txnBlocked` /
+  `cashShotBlocked` copies are gone; `lib/poReadiness.ts` is the one rule.
+- `DesktopApp` mounts the page with an `onReload` that refetches the order and
+  remounts on it. `.oe-body` is a column; the `oe-side*` rules and six
+  now-unused i18n keys are removed.
+
 ## [1.159.0] - 2026-09-20
 
 The shared frontend half of RS-080: one readiness rule for every surface, and
