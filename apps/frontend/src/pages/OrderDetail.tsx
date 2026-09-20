@@ -38,6 +38,8 @@ import { useOrderEvents } from '../lib/useOrderEvents';
 import { ApiError } from '../lib/api';
 import { usePaymentProof, type ProofAttachment } from '../lib/usePaymentProof';
 import { PaymentFields } from '../components/PaymentFields';
+import { useCommissionPayment } from '../lib/useCommissionPayment';
+import { CommissionPaymentFields } from '../components/CommissionPaymentFields';
 import {
   ORDER_STATUSES, LIFECYCLE_STATUS, statusTone, isClosedBook, warehouseGateLockedStatuses,
 } from '../lib/status';
@@ -150,8 +152,11 @@ export function OrderDetail({
     order.package?.trackingNumber ?? '',
     order.userId,
     order.commissionRate ?? '',
+    order.commissionMethod ?? '',
+    order.commissionTxnId ?? '',
     ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
     ...(order.statusMeta?.['Payment']?.attachments ?? []).map(a => a.id),
+    ...(order.statusMeta?.['Commission']?.attachments ?? []).map(a => a.id),
   ]);
   // Edits made against an older server state are stale: the order moved on, so
   // the fields show what it now holds.
@@ -221,6 +226,15 @@ export function OrderDetail({
     setTxnId: v => setMeta({ paypalTxnId: v }),
   });
   const submissionAtts = proof.chatAtts;
+  // How the purchaser was paid their commission — live-saved, so it sits
+  // outside the meta draft and its dirty flags.
+  const commissionPayment = useCommissionPayment({
+    orderId: order.id,
+    method: order.commissionMethod ?? null,
+    txnId: order.commissionTxnId ?? '',
+    atts: order.statusMeta?.['Commission']?.attachments ?? [],
+    onMutated: () => setActivityRefreshKey(k => k + 1),
+  });
 
   // Archive (mobile): owner-or-manager, non-Draft. No type-to-confirm —
   // archive is reversible so we keep the gesture short, matching the
@@ -242,6 +256,11 @@ export function OrderDetail({
     proof.sync(
       order.statusMeta?.['Submission']?.attachments ?? [],
       order.statusMeta?.['Payment']?.attachments ?? [],
+    );
+    commissionPayment.sync(
+      order.commissionMethod ?? null,
+      order.commissionTxnId ?? '',
+      order.statusMeta?.['Commission']?.attachments ?? [],
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverVersion]);
@@ -622,6 +641,8 @@ export function OrderDetail({
   const commissionSummary = [
     ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName,
     commissionPct.trim() === '' ? null : `${commissionPct}%`,
+    // Once the payment is on record, how it was made.
+    commissionPayment.onFile ? t(commissionPayment.method === 'cash' ? 'hoMethodCash' : 'hoMethodPaypal') : null,
   ].filter(Boolean).join(' · ');
   const notesSummary = [
     notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes'),
@@ -1277,6 +1298,13 @@ export function OrderDetail({
             locale={locale}
             note={isPurchaser ? t('phCommissionByManager') : canEditOrder ? t('phCommissionEditableUntil') : t('phCommissionFixed')}
           />
+          {/* The payment itself, under the maths. Its own .ph-pay wrapper:
+              the phone rules for the picker and labels hang off that class,
+              and the fold body is shared with the fields above. */}
+          <div className="ph-pay">
+            <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--fg-muted)', marginBottom: 6 }}>{t('cpTitle')}</div>
+            <CommissionPaymentFields cp={commissionPayment} editable={!isPurchaser} phone idPrefix="ph-cp" />
+          </div>
         </PhFold>
 
         <PhFold

@@ -155,8 +155,11 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
       return { title: t('acOwnerChanged'), lines: [ownerChangedLine(d)] };
     }
     case 'status_meta_changed': {
-      // The Payment bucket is not a stage the way Submission and Done are.
-      const status = d.status === 'Payment' ? 'Payment proof' : String(d.status ?? '');
+      // The Payment and Commission buckets are not stages the way Submission
+      // and Done are.
+      const status = d.status === 'Payment' ? 'Payment proof'
+        : d.status === 'Commission' ? 'Commission payment proof'
+        : String(d.status ?? '');
       const field = String(d.field);
       if (field === 'note') {
         return { title: `Note on ${status}`, lines: [renderValue('note', d.to, locale)] };

@@ -37,6 +37,7 @@ import { HandoffDialog } from '../../components/HandoffDialog';
 import { PaymentFields } from '../../components/PaymentFields';
 import type { HandoffDelivery, HandoffMethod } from '../../lib/handoff';
 import { usePaymentProof } from '../../lib/usePaymentProof';
+import { useCommissionPayment } from '../../lib/useCommissionPayment';
 import { navigate, readHashQuery, replaceHashQuery } from '../../lib/route';
 import { poReadiness, type ReadinessTab } from '../../lib/poReadiness';
 import { useOrderEvents } from '../../lib/useOrderEvents';
@@ -207,6 +208,16 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
     setTxnId: setPaypalTxn,
   });
   const submissionAtts = proof.chatAtts;
+  // How the purchaser was paid their commission. Live-saved — it is recorded
+  // once the PO is a closed book, where Save is off — so it is not in the
+  // page's draft or its dirty count.
+  const commissionPayment = useCommissionPayment({
+    orderId: order.id,
+    method: order.commissionMethod ?? null,
+    txnId: order.commissionTxnId ?? '',
+    atts: order.statusMeta?.['Commission']?.attachments ?? [],
+    onMutated: () => setActivityKey(k => k + 1),
+  });
 
   // Done evidence stays editable after the transition — the dialog only opens
   // on the way into Done, so without this a wrong photo was stuck forever.
@@ -1571,6 +1582,8 @@ export function DesktopEditOrder({ order, onCancel, onSaved, onReload }: Props) 
               pricedCount={totals.pricedCount}
               firstName={order.userName.split(' ')[0]}
               locale={locale}
+              commissionPayment={commissionPayment}
+              canEditCommissionPayment={!isPurchaser}
             />
           ),
           notes: (

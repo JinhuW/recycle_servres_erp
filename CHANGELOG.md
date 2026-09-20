@@ -17,6 +17,31 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.163.0] - 2026-09-20
+
+### Features
+
+- **The Commission tab records how the commission was paid, and the Payment
+  tab is now *Cost Payment*** (RS-084). A PO carries two payments — what the
+  supplier was paid for the goods, and what the purchaser was paid on it —
+  and until now only the first had a home, under a tab that just said
+  *Payment*. That tab (and the phone fold, the Review step and the checkpoint
+  section that share its name) is now *Cost Payment*, and the Commission tab
+  on desktop and the Commission fold on the phone gain a **Commission
+  payment** block beneath the maths: PayPal or Cash, PayPal preselected, a
+  PayPal transaction ID, and a screenshot drop box. A dropped PayPal
+  screenshot is stored under the order and read for its transaction ID the
+  way the cost payment's screenshot already is; an empty ID is filled from
+  it, an ID already typed is kept and the reader says so. Managers record it
+  at any stage — the commission is paid once the PO is a closed book, so the
+  block saves as it is used rather than through the page's Save, and
+  purchasers see it read-only ("was I paid"). Every change lands on the
+  Activity log. Nothing here gates Ready to Pay → Done; the record is
+  optional. New: `orders.commission_method` / `commission_txn_id`, the
+  `Commission` status-meta bucket (manager-only), `PUT
+  /api/orders/:id/commission-payment`, and a `scan` field on Commission
+  uploads (migration 0129).
+
 ## [1.162.0] - 2026-09-20
 
 ### Features
