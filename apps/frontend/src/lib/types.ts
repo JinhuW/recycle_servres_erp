@@ -4,6 +4,7 @@
 // here because OrderLine carries one.
 import type { LinePhoto } from './linePhotos';
 import type { PackageSource } from './packageSource';
+import type { PackageStatus } from './packages';
 export type { LinePhoto };
 
 export type Role = 'manager' | 'purchaser';
@@ -194,7 +195,10 @@ export type OrderSummary = {
   handoffBy?: { id: string; name: string } | null;
   // The hand-off's package — what the In Transit chip links. Only the list
   // endpoint reports it; null on a pickup or a pre-hand-off order.
-  tracking?: { carrier: string; trackingNumber: string; trackingUrl: string | null } | null;
+  tracking?: PackageTracking | null;
+  // The dashboard's goods figure: the stored total, else the line sum. Optional
+  // for the deploy-skew reason above.
+  goodsTotal?: number;
   // Net of the bank payments linked to this PO on the Payments page (refunds
   // subtract, failed/reversed excluded) — the ledger's "Net paid". Null when
   // nothing is linked or the caller is not a manager; either way there is no
@@ -223,6 +227,26 @@ export type OrderStatusMeta = Record<string, {
   }[];
 }>;
 
+// A PO's package as the list reports it. `status` and `trackingEta` arrived
+// later than the first three and are optional for the deploy-skew reason.
+export type PackageTracking = {
+  carrier: string;
+  trackingNumber: string;
+  trackingUrl: string | null;
+  status?: PackageStatus;
+  trackingEta?: string | null;
+};
+
+// The same package as the PO page reads it: the carrier's own words for the
+// last scan, and when that was. Null until Shippo's first update.
+export type OrderPackage = PackageTracking & {
+  id: string;
+  status: PackageStatus;
+  trackingStatus: string | null;
+  trackingEta: string | null;
+  lastTrackedAt: string | null;
+};
+
 // The per-order aggregates are computed by the list query's GROUP BY; reading
 // one order on its own returns the lines themselves and none of the rollups,
 // so they are dropped here rather than left declared and absent at runtime.
@@ -230,6 +254,8 @@ export type Order =
   Omit<OrderSummary, 'lineCount' | 'qty' | 'revenue' | 'profit'>
   & {
     lines: OrderLine[]; statusMeta?: OrderStatusMeta; shipmentCount: number;
+    // The newest package linked to the PO; optional for the deploy-skew reason.
+    package?: OrderPackage | null;
     // Managers only, and null for everyone else: the purchaser's changes since
     // the last time a manager acknowledged them.
     pendingRevert?: PendingRevert[] | null;

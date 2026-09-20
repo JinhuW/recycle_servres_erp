@@ -612,7 +612,7 @@ html.desktop, body.desktop, .desktop #root {
 
 /* ===== Tables ===== */
 .table-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; }
-.table-scroll .table { min-width: 1080px; }
+.table-scroll .table { min-width: 1160px; }
 
 /* A long table inside a card (the FX rate history) — cap its height so it
    scrolls in place instead of stretching the page. Header stays pinned. */
