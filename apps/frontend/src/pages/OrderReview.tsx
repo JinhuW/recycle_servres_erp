@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { PaymentFields } from '../components/PaymentFields';
+import { PhFold } from '../components/PhFold';
 import type { HandoffMethod } from '../lib/handoff';
 import { PhHeader } from '../components/PhHeader';
 import { LineSpecChips } from '../components/LineSpecChips';
 import { SerialNumbers } from '../components/SerialNumbers';
 import { useT } from '../lib/i18n';
 import { handleFetchError, showErrorDialog } from '../lib/errorToast';
-import { fmt, fmtUSD, fmtUSD0 } from '../lib/format';
+import { fmtUSD, fmtUSD0 } from '../lib/format';
 import { parseFeeInput, poEffectiveCost } from '../lib/poTotals';
 import type { Category, DraftLine, Warehouse } from '../lib/types';
 import { addableCategories, categoryTone } from '../lib/lookups';
@@ -53,6 +54,10 @@ export function OrderReview({
   const [paymentMethod, setPaymentMethod] = useState<HandoffMethod | null>(initialMeta?.paymentMethod ?? null);
   const [notes, setNotes] = useState(initialMeta?.notes ?? '');
   const [submitting, setSubmitting] = useState(false);
+  // The same folds as the PO page. Delivery and Payment start open — they are
+  // what this step exists to ask — and Notes closed; each toggles on its own.
+  const [open, setOpen] = useState({ delivery: true, payment: true, notes: false });
+  const toggle = (k: keyof typeof open) => setOpen(o => ({ ...o, [k]: !o[k] }));
 
   useEffect(() => {
     let alive = true;
@@ -75,6 +80,12 @@ export function OrderReview({
   const totalQty = lines.reduce((a, l) => a + l.qty, 0);
   const feesValue = parseFeeInput(fees.amount);
   const allIn = poEffectiveCost({ lineSubtotal: computedCost, otherFees: feesValue }).total;
+  const wh = warehouses.find(w => w.id === warehouseId);
+  const warehouseLabel = wh ? `${wh.short} — ${wh.region}` : t('reviewPickWarehouseHint');
+  const paymentSummary = payment === 'self'
+    ? t('paySelfShort')
+    : [t('payCompanyShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null]
+        .filter(Boolean).join(' · ');
 
   const submit = async () => {
     setSubmitting(true);
@@ -212,40 +223,96 @@ export function OrderReview({
           </div>
         </div>
 
-        <div className="ph-section-h"><span>{t('orderDetails')}</span></div>
-        <div className="ph-field" style={{ marginTop: 0 }}>
-          <label>{t('warehouse')}</label>
-          <div style={{ position: 'relative' }}>
-            <select
-              value={warehouseId}
-              onChange={e => setWarehouseId(e.target.value)}
-              style={{
-                width: '100%',
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                MozAppearance: 'none',
-                border: '1px solid var(--border)',
-                background: 'var(--bg-elev)',
-                color: 'var(--fg)',
-                padding: '11px 36px 11px 12px',
-                borderRadius: 10,
-                fontFamily: 'inherit',
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              {warehouses.map(w => <option key={w.id} value={w.id}>{w.short} — {w.region}</option>)}
-            </select>
-            <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--fg-subtle)', display: 'flex' }}>
-              <Icon name="chevronDown" size={14} />
+        {/* The card adds up downward: goods (the line sum), then whatever the
+            supplier charged on top, then the total they make. The only money
+            typed here is the fee — the total is stated, never entered. Same
+            card as the PO page's, so the number looks the same before and
+            after the order exists. */}
+        <div className="ph-card" style={{ marginTop: 16, padding: '12px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              {t('costBreakdown')}
             </div>
+            <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontVariantNumeric: 'tabular-nums' }}>
+              {totalQty} {totalQty === 1 ? t('unit') : t('units2')} · {lines.length} {lines.length === 1 ? t('item') : t('items')}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 10 }}>
+            <span style={{ color: 'var(--fg-subtle)' }}>{t('goodsTotal')}</span>
+            <span className="mono">{fmtUSD(computedCost, locale)}</span>
+          </div>
+
+          <div className="ph-field-row" style={{ gridTemplateColumns: '110px 1fr', marginTop: 8 }}>
+            <div className="ph-field" style={{ marginTop: 0 }}>
+              <label>{t('otherFees')}</label>
+              <input
+                className="input mono"
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={fees.amount}
+                placeholder="0.00"
+                onChange={e => onFeesChange({ ...fees, amount: e.target.value })}
+              />
+            </div>
+            <div className="ph-field" style={{ marginTop: 0 }}>
+              <label>{t('otherFeesNote')}</label>
+              <input
+                className="input"
+                maxLength={280}
+                value={fees.note}
+                placeholder={t('otherFeesPh')}
+                onChange={e => onFeesChange({ ...fees, note: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+            <span>{t('totalCost')}</span>
+            <span className="mono" style={{ fontWeight: 600 }}>{fmtUSD(allIn, locale)}</span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--fg-subtle)', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <Icon name="info" size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+            <span>{t('feesHint')}</span>
           </div>
         </div>
 
-        <div className="ph-field ph-pay">
-          <label>{t('payment')}</label>
+        <div className="ph-section-h"><span>{t('orderDetails')}</span></div>
+
+        {/* The PO page's folds, the ones a new order can answer: where it is
+            going, who paid, and a note. Source, tracking and files come with
+            the hand-off, once the order exists. */}
+        <PhFold
+          id="delivery"
+          title={t('eoTabDelivery')}
+          summary={<span className={warehouseId ? '' : 'miss'}>{warehouseLabel}</span>}
+          open={open.delivery}
+          onToggle={() => toggle('delivery')}
+          mark={warehouseId ? null : 'need'}
+        >
+          <div className="ph-field">
+            <label htmlFor="rv-warehouse">{t('warehouse')}</label>
+            <select
+              id="rv-warehouse"
+              className="select"
+              value={warehouseId}
+              onChange={e => setWarehouseId(e.target.value)}
+            >
+              {warehouses.map(w => <option key={w.id} value={w.id}>{w.short} — {w.region}</option>)}
+            </select>
+          </div>
+        </PhFold>
+
+        <PhFold
+          id="payment"
+          title={t('eoTabPayment')}
+          summary={paymentSummary}
+          open={open.payment}
+          onToggle={() => toggle('payment')}
+          bodyClassName="ph-pay"
+        >
           <PaymentFields
             paidBy={payment} onPaidBy={setPayment}
             method={paymentMethod} onMethod={setPaymentMethod}
@@ -253,102 +320,28 @@ export function OrderReview({
             phone
             idPrefix="rv"
           />
-        </div>
+        </PhFold>
 
-        <div className="ph-field">
-          <label>{t('orderNotes')}</label>
-          <textarea
-            className="input"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder={t('orderNotesPh')}
-            rows={3}
-            style={{ width: '100%', resize: 'vertical', minHeight: 70, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, padding: '10px 12px' }}
-          />
-        </div>
-
-        {/* The card adds up downward: goods (the line sum), then whatever the
-            supplier charged on top, then the total they make. The only money
-            typed here is the fee — the total is stated, never entered. */}
-        <div className="ph-card" style={{ marginTop: 16, background: 'var(--accent-soft)', borderColor: 'color-mix(in oklch, var(--accent) 30%, transparent)', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 14px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ fontSize: 10.5, color: 'var(--accent-strong)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {t('costBreakdown')}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--accent-strong)', opacity: 0.75, fontVariantNumeric: 'tabular-nums' }}>
-                {totalQty} {totalQty === 1 ? t('unit') : t('units2')} · {lines.length} {lines.length === 1 ? t('item') : t('items')}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 12.5, color: 'var(--accent-strong)' }}>
-              <span style={{ opacity: 0.75 }}>{t('goodsTotal')}</span>
-              <span className="mono" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(computedCost, locale)}</span>
-            </div>
-
-            <div className="ph-field-row" style={{ gridTemplateColumns: '110px 1fr', marginTop: 10 }}>
-              <div className="ph-field" style={{ marginTop: 0 }}>
-                <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFees')}</label>
-                <input
-                  className="input mono"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  inputMode="decimal"
-                  value={fees.amount}
-                  placeholder="0.00"
-                  onChange={e => onFeesChange({ ...fees, amount: e.target.value })}
-                />
-              </div>
-              <div className="ph-field" style={{ marginTop: 0 }}>
-                <label style={{ color: 'var(--accent-strong)', opacity: 0.85 }}>{t('otherFeesNote')}</label>
-                <input
-                  className="input"
-                  maxLength={280}
-                  value={fees.note}
-                  placeholder={t('otherFeesPh')}
-                  onChange={e => onFeesChange({ ...fees, note: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div style={{
-              marginTop: 12, paddingTop: 12,
-              borderTop: '1.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
-            }}>
-              <div style={{ fontSize: 10.5, color: 'var(--accent-strong)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {t('totalCost')}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4 }}>
-                {/* The sigil is its own glyph so it can sit smaller than the
-                    figure; the figure itself formats like every other amount
-                    on the card — grouped, and in the reader's locale. */}
-                <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--accent-strong)', opacity: 0.7 }}>$</span>
-                <span
-                  className="mono"
-                  style={{
-                    flex: 1, minWidth: 0,
-                    fontSize: 32, fontWeight: 700, color: 'var(--accent-strong)',
-                    letterSpacing: '-0.01em', lineHeight: 1.1,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {fmt(allIn, locale)}
-                </span>
-              </div>
-            </div>
+        <PhFold
+          id="notes"
+          title={t('orderNotes')}
+          summary={notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes')}
+          open={open.notes}
+          onToggle={() => toggle('notes')}
+        >
+          <div className="ph-field">
+            <label htmlFor="rv-notes">{t('orderNotes')}</label>
+            <textarea
+              id="rv-notes"
+              className="input"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder={t('orderNotesPh')}
+              rows={3}
+              style={{ width: '100%', resize: 'vertical', minHeight: 70, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, padding: '10px 12px' }}
+            />
           </div>
-          <div style={{
-            padding: '10px 14px',
-            background: 'color-mix(in oklch, var(--accent) 8%, white)',
-            borderTop: '1px solid color-mix(in oklch, var(--accent) 18%, transparent)',
-            fontSize: 11, color: 'var(--accent-strong)', opacity: 0.85,
-            display: 'flex', alignItems: 'flex-start', gap: 8,
-          }}>
-            <Icon name="info" size={12} style={{ marginTop: 1, flexShrink: 0 }} />
-            <span>{t('feesHint')}</span>
-          </div>
-        </div>
+        </PhFold>
       </div>
 
       <div className="ph-action-bar">

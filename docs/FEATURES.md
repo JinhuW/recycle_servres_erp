@@ -106,12 +106,23 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   under the dots, In Transit shows the linked package's Shippo journey with
   **Refresh** (or who collected a local pickup), and a finished dot, tapped,
   swaps the card body for what that stage recorded, with a way back. The
-  *Before you submit* list gains a *How the goods get here* row. Under *Order
-  details* a folded **Delivery** card sits above the folded Payment card, its
-  header reading back *source · label or pickup · tracking or collector*; its
-  fields are the checkpoint's (the carrier recognised from the number's
-  shape) and save through the order with the rest of the page, material for
-  a purchaser past Draft.
+  *Before you submit* list gains a *How the goods get here* row.
+- **The phone's *Order details* are the desktop's five tabs, as folds**
+  (v1.162.0): Delivery (source, warehouse, label or pickup, tracking),
+  Payment, **Commission**, Notes & files, Activity — same order, same names.
+  Each is one card (`PhFold`): closed, the title with its answer read back;
+  open, a tinted header ruled off from the fields in the same card. An amber
+  mark means the next step is waiting on the section, a blue one that it has
+  unsaved edits. Commission is a manager's to edit until Ready to Pay and
+  read-only for everyone else, with the projected earnings under it; the
+  Cost card no longer repeats the rate or the PayPal id. The stage opens its
+  fold (Draft → the first amber one, In Transit → Delivery, Ready to Pay →
+  Commission) and any fold can be opened by hand. The **Review order** step
+  of the capture flow uses the same folds (Delivery = warehouse, Payment,
+  Notes) and the same white Cost card. On the phone, a manager's Reviewing →
+  Ready to Pay opens a **Commission sheet** — Delivery and Payment read back
+  as ✓ rows, purchaser and rate to confirm — that saves and advances in one
+  tap.
 - **The desktop list opens on the orders card** (v1.147.2). The four KPI
   tiles and the subtitle that sat above it since the first release are gone:
   they were computed in the browser over whatever the stage and category
@@ -198,8 +209,9 @@ moves Draft → Submitted → In Transit → Reviewing → Ready to Pay → Done
   but needs its own proof (v1.153.0, below). **Self-paid** asks for no method
   and no ID — it is reimbursed from commission, not matched against the bank
   — but **requires the chat with the seller** as a Submission attachment (any
-  Submission file on the order counts). Managers also see the purchaser and
-  commission rate in the dialog.
+  Submission file on the order counts). The dialog asks for nothing else —
+  the purchaser and commission rate left it in v1.162.0 for the Commission
+  tab / fold and the phone's Ready-to-Pay sheet.
   Confirming writes everything, creates the tracked package for a label
   (linked to the PO, carrying its source), and advances, in one transaction —
   a refusal leaves nothing behind. The hand-off is the owner's or a manager's;

@@ -33,10 +33,6 @@ export type HandoffInit = {
   paypalTxnId: string;
   /** The page's proof hook, shared so both surfaces see one attachment list. */
   proof: PaymentProof;
-  /** Manager-only seeds; a purchaser's shell passes neither. */
-  ownerId?: string;
-  commissionRate?: number | null;
-  isManager: boolean;
   currentUser: { id: string; name: string };
 };
 
@@ -61,10 +57,6 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
   // hook's setter is the page's); follow it into the dialog's own field. Only
   // the page's value moving fires this, so typing here is never overwritten.
   useEffect(() => { setTxnIdState(init.paypalTxnId); }, [init.paypalTxnId]);
-  const [ownerId, setOwnerId] = useState(init.ownerId ?? order.userId);
-  const [commissionPct, setCommissionPct] = useState(
-    init.commissionRate != null ? String(+(init.commissionRate * 100).toFixed(2)) : '',
-  );
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [members, setMembers] = useState<{ id: string; name: string }[]>([]);
   const [busy, setBusy] = useState(false);
@@ -100,7 +92,6 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
       },
     },
     lines: { count: order.lines.length, goods, everSubmitted: order.everSubmitted === true },
-    commission: init.isManager ? { rate: commissionPct.trim() === '' ? null : Number(commissionPct) } : null,
   });
   const blockerKeys = readinessBlockerKeys(readiness);
   const canSubmit = blockerKeys.length === 0 && !busy && !proof.busy;
@@ -111,15 +102,10 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     submitting.current = true;
     setBusy(true);
     try {
-      const pct = commissionPct.trim() === '' ? null : Number(commissionPct);
       const body = buildHandoffBody({
         warehouseId, source: source!, delivery: delivery!, byUserId, trackingNumber: tn, carrier,
         paidBy, method, txnId,
         screenshot: proof.screenshot ? { key: proof.screenshot.key, url: proof.screenshot.url } : null,
-        ...(init.isManager ? {
-          ownerId: ownerId !== order.userId ? ownerId : undefined,
-          commissionRate: pct === null || !Number.isFinite(pct) ? undefined : pct / 100,
-        } : {}),
       });
       const r = await api.post<{ ok: true; packageId: string | null }>(`/api/orders/${order.id}/handoff`, body);
       onDone({ packageId: r.packageId });
@@ -140,7 +126,6 @@ export function useHandoffForm(init: HandoffInit, onDone: (r: { packageId: strin
     raw, setRaw, pick, setPick, tn, detected, carrier, hintKey,
     paidBy, setPaidBy, method, setMethod,
     txnId, setTxnId, proof,
-    ownerId, setOwnerId, commissionPct, setCommissionPct,
     readiness, blockerKeys, canSubmit, busy, submit,
   };
 }

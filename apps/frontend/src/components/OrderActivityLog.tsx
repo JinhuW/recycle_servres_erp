@@ -21,6 +21,9 @@ type Props = {
   // fetch lands, and it has a conditional sibling above it, so no positional
   // selector can name it reliably.
   className?: string;
+  // The timeline alone, no card and no header: the phone puts it inside a
+  // fold that already has both.
+  bare?: boolean;
   // The host's copy of the log, when it already fetched one (the desktop page
   // shares a single fetch between this tab and the status look-back).
   events?: OrderEvents;
@@ -191,7 +194,7 @@ function summary(ev: OrderEvent, locale: string, t: Translate): { title: string;
   }
 }
 
-export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, className, events: given }: Props) {
+export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, className, bare = false, events: given }: Props) {
   const { t, lang } = useT();
   const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   // A host that already holds the events (the desktop page shares one fetch
@@ -208,6 +211,84 @@ export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, 
   // Hide the section entirely until we've heard back. After that, render even
   // when empty so the user knows the panel exists (drafts will show empty).
   if (!loaded) return null;
+
+  const timeline = (
+    <div style={{ position: 'relative', padding: '6px 0' }}>
+      {/* Timeline rail — a hairline running through the column of bubbles.
+          Bubbles render with a 2px solid card-bg border so they "punch
+          through" the rail and read as discrete waypoints. */}
+      {ordered.length > 1 && (
+        <div aria-hidden style={{
+          position: 'absolute',
+          left: 28, // 16 (row pad) + 12 (half of 24 bubble) = 28
+          top: 28, bottom: 28,
+          width: 1, background: 'var(--border)',
+          pointerEvents: 'none',
+        }} />
+      )}
+
+      {ordered.length === 0 && (
+        <div style={{ padding: '16px', fontSize: 12.5, color: 'var(--fg-subtle)' }}>
+          {t('activityEmpty')}
+        </div>
+      )}
+
+      {ordered.map(ev => {
+        const s = summary(ev, locale, t);
+        // Same reason `summary` has a default branch: a kind this build
+        // has never heard of otherwise lands in an untinted, empty bubble.
+        const tone = KIND_TONE[ev.kind] ?? 'muted';
+        return (
+          <div key={ev.id} style={{
+            display: 'grid', gridTemplateColumns: '24px 1fr auto',
+            gap: 14, padding: '10px 16px',
+            alignItems: 'flex-start',
+            position: 'relative',
+          }}>
+            <span
+              title={ev.kind}
+              style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: TONE_BG[tone],
+                border: '2px solid var(--bg-elev)',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+                color: TONE_FG[tone],
+              }}
+            >
+              <Icon name={KIND_ICON[ev.kind] ?? 'file'} size={11} />
+            </span>
+            <div style={{ minWidth: 0, paddingTop: 1 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.35 }}>
+                {s.title}
+              </div>
+              {s.lines.length > 0 && (
+                <ul style={{ margin: '4px 0 0', padding: 0, listStyle: 'none' }}>
+                  {s.lines.map((ln, i) => (
+                    <li key={i} className="mono" style={{
+                      fontSize: 11.5, color: 'var(--fg-subtle)', lineHeight: 1.5,
+                    }}>{ln}</li>
+                  ))}
+                </ul>
+              )}
+              {ev.actor && (
+                <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
+                  {ev.actor.name}
+                </div>
+              )}
+            </div>
+            <div title={fmtDate(ev.createdAt, locale)} style={{
+              fontSize: 11, color: 'var(--fg-subtle)', whiteSpace: 'nowrap',
+              paddingTop: 4,
+            }}>
+              {relTime(ev.createdAt, locale)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+  if (bare) return timeline;
 
   return (
     <div className={'card' + (className ? ' ' + className : '')} style={{ padding: 0 }}>
@@ -233,83 +314,7 @@ export function OrderActivityLog({ orderId, refreshKey = 0, defaultOpen = true, 
           <Icon name={open ? 'chevronUp' : 'chevronDown'} size={13} />
         </span>
       </button>
-
-      {open && (
-        <div style={{ position: 'relative', padding: '6px 0' }}>
-          {/* Timeline rail — a hairline running through the column of bubbles.
-              Bubbles render with a 2px solid card-bg border so they "punch
-              through" the rail and read as discrete waypoints. */}
-          {ordered.length > 1 && (
-            <div aria-hidden style={{
-              position: 'absolute',
-              left: 28, // 16 (row pad) + 12 (half of 24 bubble) = 28
-              top: 28, bottom: 28,
-              width: 1, background: 'var(--border)',
-              pointerEvents: 'none',
-            }} />
-          )}
-
-          {ordered.length === 0 && (
-            <div style={{ padding: '16px', fontSize: 12.5, color: 'var(--fg-subtle)' }}>
-              {t('activityEmpty')}
-            </div>
-          )}
-
-          {ordered.map(ev => {
-            const s = summary(ev, locale, t);
-            // Same reason `summary` has a default branch: a kind this build
-            // has never heard of otherwise lands in an untinted, empty bubble.
-            const tone = KIND_TONE[ev.kind] ?? 'muted';
-            return (
-              <div key={ev.id} style={{
-                display: 'grid', gridTemplateColumns: '24px 1fr auto',
-                gap: 14, padding: '10px 16px',
-                alignItems: 'flex-start',
-                position: 'relative',
-              }}>
-                <span
-                  title={ev.kind}
-                  style={{
-                    width: 24, height: 24, borderRadius: '50%',
-                    background: TONE_BG[tone],
-                    border: '2px solid var(--bg-elev)',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                    color: TONE_FG[tone],
-                  }}
-                >
-                  <Icon name={KIND_ICON[ev.kind] ?? 'file'} size={11} />
-                </span>
-                <div style={{ minWidth: 0, paddingTop: 1 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.35 }}>
-                    {s.title}
-                  </div>
-                  {s.lines.length > 0 && (
-                    <ul style={{ margin: '4px 0 0', padding: 0, listStyle: 'none' }}>
-                      {s.lines.map((ln, i) => (
-                        <li key={i} className="mono" style={{
-                          fontSize: 11.5, color: 'var(--fg-subtle)', lineHeight: 1.5,
-                        }}>{ln}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {ev.actor && (
-                    <div style={{ fontSize: 11, color: 'var(--fg-subtle)', marginTop: 4 }}>
-                      {ev.actor.name}
-                    </div>
-                  )}
-                </div>
-                <div title={fmtDate(ev.createdAt, locale)} style={{
-                  fontSize: 11, color: 'var(--fg-subtle)', whiteSpace: 'nowrap',
-                  paddingTop: 4,
-                }}>
-                  {relTime(ev.createdAt, locale)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {open && timeline}
     </div>
   );
 }

@@ -17,6 +17,35 @@ at the last commit that carried each version.
 
 ## [Unreleased]
 
+## [1.162.0] - 2026-09-20
+
+### Features
+
+- **The phone PO page's sections are the desktop's tabs, as folds** (RS-083).
+  Delivery, Payment, Commission, Notes & files and Activity — the same five,
+  in the same order — are each one card (`PhFold`): closed, a white row with
+  the title and the answer read back; open, a tinted header ruled off from
+  the fields inside the same card, so it is never unclear whether a section
+  is open or which fields belong to it. An amber mark says the next step is
+  waiting on that section, a blue one that it holds unsaved edits — the
+  desktop tabs' two dots. Warehouse moves into Delivery; the Cost card drops
+  the commission-rate and PayPal rows, which now appear once, in their folds.
+  **Commission is new on the phone**: a manager edits the purchaser and rate
+  there until Ready to Pay, everyone else reads them with the projected
+  earnings. The stage opens its fold — Draft the first section the hand-off
+  is missing, In Transit Delivery, Ready to Pay Commission — and any fold can
+  still be opened by hand.
+- **One sheet per stage, asking only that stage's data.** Draft → In Transit
+  asks Products, Delivery and Payment; the Commission section is gone from
+  that checkpoint on both shells. Reviewing → Ready to Pay now opens a
+  **Commission sheet** for the manager on the phone — Delivery and Payment
+  read back as ✓ rows, the purchaser and rate to confirm, *Confirm & mark
+  Ready to Pay* saves them and advances. Done keeps its evidence dialog.
+- **The phone's *Review order* step uses the same folds** — Delivery
+  (warehouse), Payment and Notes, the first two open — and the PO page's white
+  Cost card instead of its own green one, so a new order and an existing one
+  read the same way.
+
 ## [1.161.2] - 2026-09-20
 
 ### Fixes

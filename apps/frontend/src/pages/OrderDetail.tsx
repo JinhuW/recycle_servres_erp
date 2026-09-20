@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Icon } from '../components/Icon';
 import { PhHeader } from '../components/PhHeader';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { OrderActivityLog } from '../components/OrderActivityLog';
+import { PhFold, type PhFoldMark } from '../components/PhFold';
+import { PhCommissionFields, PhCommissionSheet } from '../components/PhCommissionSheet';
 import { RevertNoticeDialog } from '../components/RevertNoticeDialog';
 import { StatusChangeDialog } from '../components/StatusChangeDialog';
 import { PhHandoffSheet } from '../components/PhHandoffSheet';
@@ -64,7 +66,15 @@ export type OrderMetaDraft = {
   delivery: HandoffDelivery | null;
   byUserId: string;
   tracking: { raw: string; pick: Carrier | null };
+  // The Commission fold's, a manager's to edit until Ready to Pay. The rate
+  // is kept as the typed percentage; '' is "no rate", saved as null.
+  ownerId: string;
+  commissionPct: string;
 };
+
+type FoldId = 'delivery' | 'payment' | 'commission' | 'notes' | 'activity';
+// The fold a stage is about; the others start closed.
+const STAGE_FOLD: Record<string, FoldId> = { 'In Transit': 'delivery', 'Ready to Pay': 'commission' };
 
 type Props = {
   order: Order;
@@ -138,6 +148,8 @@ export function OrderDetail({
     order.handoffMethod ?? '',
     order.handoffBy?.id ?? '',
     order.package?.trackingNumber ?? '',
+    order.userId,
+    order.commissionRate ?? '',
     ...(order.statusMeta?.['Submission']?.attachments ?? []).map(a => a.id),
     ...(order.statusMeta?.['Payment']?.attachments ?? []).map(a => a.id),
   ]);
@@ -162,9 +174,11 @@ export function OrderDetail({
         raw: order.handoffMethod === 'label' ? order.package?.trackingNumber ?? '' : '',
         pick: order.handoffMethod === 'label' ? (order.package?.carrier as Carrier | undefined) ?? null : null,
       },
+      ownerId: order.userId,
+      commissionPct: order.commissionRate != null ? String(+(order.commissionRate * 100).toFixed(2)) : '',
     };
   const meta = currentMeta(metaDraft);
-  const { warehouseId, payment, paymentMethod, paypalTxnId, notes, fees, source, delivery, byUserId } = meta;
+  const { warehouseId, payment, paymentMethod, paypalTxnId, notes, fees, source, delivery, byUserId, ownerId, commissionPct } = meta;
   const tracking = resolveTracking(meta.tracking.raw, meta.tracking.pick);
   // Merged into the draft as it stands, not the one this render saw: the
   // PayPal screenshot scan writes its id seconds later, and notes typed in
@@ -193,6 +207,7 @@ export function OrderDetail({
   const [advancing, setAdvancing] = useState(false);
   const [doneDialogOpen, setDoneDialogOpen] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [commissionOpen, setCommissionOpen] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
   const [typedId, setTypedId] = useState('');
@@ -249,14 +264,18 @@ export function OrderDetail({
   }, []);
 
   const totals = useMemo(() => {
-    let qty = 0, cost = 0, margin = 0;
+    let qty = 0, cost = 0, margin = 0, revenue = 0, priced = 0;
     for (const l of order.lines) {
       qty += l.qty;
       cost += l.qty * l.unitCost;
       // Priced lines only, the way the PO list's Profit column counts it.
-      if (isPricedSellPrice(l.sellPrice)) margin += l.qty * (Number(l.sellPrice) - l.unitCost);
+      if (isPricedSellPrice(l.sellPrice)) {
+        priced += 1;
+        revenue += l.qty * Number(l.sellPrice);
+        margin += l.qty * (Number(l.sellPrice) - l.unitCost);
+      }
     }
-    return { qty, cost, margin };
+    return { qty, cost, margin, revenue, priced };
   }, [order.lines]);
 
   // Reads the fee being typed, not the saved one, so the total tracks the box.
@@ -283,7 +302,15 @@ export function OrderDetail({
   const trackingDirty = delivery === 'label' && tracking.tn !== ''
     && (tracking.tn !== (order.package?.trackingNumber ?? '') || (tracking.carrier ?? '') !== (order.package?.carrier ?? ''));
   const facts = sourceDirty || deliveryDirty || byUserDirty || trackingDirty;
-  const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
+  // Manager-only fields; a purchaser's copy never counts as a change. A
+  // blank rate and a saved null are the same thing, as on the desktop page.
+  const ownerDirty = !isPurchaser && ownerId !== order.userId;
+  const parsedPct = commissionPct.trim() === '' ? null : Number(commissionPct);
+  const commissionRateValue = parsedPct === null || !Number.isFinite(parsedPct) ? null : parsedPct / 100;
+  const commissionDirty = !isPurchaser && (parsedPct === null || Number.isFinite(parsedPct))
+    && (commissionRateValue ?? 0) !== (order.commissionRate ?? 0);
+  const commission = ownerDirty || commissionDirty;
+  const dirty = notesDirty || warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
 
   const refetchOrder = async () => {
     try {
@@ -325,7 +352,7 @@ export function OrderDetail({
   const save = async () => {
     if (!canAnnotate) return;
     // A note is not a change to the order itself and leaves the stage alone.
-    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts;
+    const material = warehouseDirty || paymentDirty || methodDirty || paypalDirty || feesDirty || facts || commission;
     if (material && !(await askRevert())) return;
     setSaving(true);
     try {
@@ -348,6 +375,8 @@ export function OrderDetail({
         ...(trackingDirty && tracking.carrier
           ? { trackingNumber: tracking.tn, carrier: tracking.carrier }
           : {}),
+        onBehalfOfUserId: ownerDirty ? ownerId : undefined,
+        commissionRate: commissionDirty ? commissionRateValue : undefined,
       } : { notes });
       await refetchOrder();
       setActivityRefreshKey(k => k + 1);
@@ -421,10 +450,35 @@ export function OrderDetail({
       setHandoffOpen(true);
       return;
     }
+    // Ready to Pay fixes the commission, so the manager confirms it on the
+    // way in — the sheet saves the fields and then advances.
+    if (nextStatus === 'Ready to Pay') { setCommissionOpen(true); return; }
     // Moving to Done first offers the optional evidence dialog (note +
     // attachments); confirming there fires the actual advance.
     if (nextStatus === 'Done') { setDoneDialogOpen(true); return; }
     await doAdvance();
+  };
+
+  // The commission sheet's Confirm: write the fields if they changed, then
+  // move the stage. A failed write leaves the sheet up with the error.
+  const confirmCommission = async () => {
+    setAdvancing(true);
+    try {
+      if (commission) {
+        await api.patch(`/api/orders/${order.id}`, {
+          onBehalfOfUserId: ownerDirty ? ownerId : undefined,
+          commissionRate: commissionDirty ? commissionRateValue : undefined,
+        });
+      }
+      await api.post(`/api/orders/${order.id}/advance`, {});
+      setCommissionOpen(false);
+      await refetchOrder();
+      setActivityRefreshKey(k => k + 1);
+    } catch (e) {
+      showErrorDialog(e instanceof Error ? e.message : t('advanceFailed'));
+    } finally {
+      setAdvancing(false);
+    }
   };
 
   // Uploads through the proof hook; the activity log is nudged here because
@@ -464,8 +518,10 @@ export function OrderDetail({
   // What the Delivery fold reads back when closed, and what the readiness
   // row says when it is met.
   const collectorName = memberNames.find(m => m.id === byUserId)?.name ?? order.handoffBy?.name ?? null;
+  const whShort = warehouses.find(w => w.id === warehouseId)?.short ?? order.warehouse?.short ?? null;
   const deliverySummary = [
     source ? t(packageSourceLabelKey(source)) : null,
+    whShort,
     delivery === 'pickup' ? [t('hoPickup'), collectorName].filter(Boolean).join(' · ')
       : delivery === 'label' ? [tracking.carrier, tracking.tn].filter(Boolean).join(' ') : null,
   ].filter(Boolean).join(' · ') || t('poDeliveryUnset');
@@ -520,29 +576,66 @@ export function OrderDetail({
       }
       return rows;
     })() : [];
-  // The payment fields fold away by default: they were answered when the PO
-  // was raised and the row above them states the answer. A readiness row
-  // opens them — the fold has to be open before the scroll can land on it.
-  const [paymentOpen, setPaymentOpen] = useState(false);
-  const scrollToPayment = () => {
-    setPaymentOpen(true);
-    // PaymentFields labels its Paid-by row with the page's id prefix.
-    requestAnimationFrame(() => {
-      const el = document.getElementById('ph-paidby') ?? document.getElementById('ph-txn');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+  // Which fold is open. The stage picks one to start with — the twin of the
+  // desktop's tab suggestion: Draft opens the first section the hand-off is
+  // waiting on, In Transit the shipment's, Ready to Pay the commission it
+  // fixed — and picks again when the stage moves. Any fold can still be
+  // opened by hand; the suggestion never overrides a toggle already made.
+  const stageFold = (): FoldId | null => {
+    if (effectiveStatus === 'Draft') {
+      const first = readiness.find(r => !r.met && r.target !== 'products')?.target;
+      return first === 'delivery' || first === 'payment' ? first : null;
+    }
+    return STAGE_FOLD[effectiveStatus] ?? null;
   };
-  const [deliveryOpen, setDeliveryOpen] = useState(false);
-  const scrollToDelivery = () => {
-    setDeliveryOpen(true);
+  const [openFold, setOpenFold] = useState<FoldId | null>(stageFold);
+  const seenStatus = useRef(effectiveStatus);
+  useEffect(() => {
+    if (seenStatus.current === effectiveStatus) return;
+    seenStatus.current = effectiveStatus;
+    setOpenFold(stageFold());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveStatus]);
+  const toggleFold = (id: FoldId) => setOpenFold(o => o === id ? null : id);
+  // A readiness row opens the fold and lands on its first field; the fold
+  // has to be open before the scroll can find anything.
+  const showFold = (id: FoldId) => {
+    setOpenFold(id);
     requestAnimationFrame(() => {
-      document.getElementById('ph-source')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const el = id === 'payment'
+        ? document.getElementById('ph-paidby') ?? document.getElementById('ph-txn')
+        : document.getElementById(`ph-fold-${id}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: id === 'payment' ? 'center' : 'start' });
     });
   };
   const paymentSummary = payment === 'self'
     ? t('paySelfShort')
     : [t('payCompanyShort'), paymentMethod === 'cash' ? t('hoMethodCash') : paymentMethod === 'paypal' ? t('hoMethodPaypal') : null, paypalTxnId.trim() || null]
         .filter(Boolean).join(' · ');
+  // The owner select must be able to show the order as-is even when its
+  // owner has left the member list, as the desktop's does.
+  const ownerOptions = useMemo(() => {
+    const opts = [...memberNames];
+    if (!opts.some(m => m.id === order.userId)) opts.unshift({ id: order.userId, name: order.userName ?? order.userId });
+    return opts;
+  }, [memberNames, order.userId, order.userName]);
+  const commissionSummary = [
+    ownerOptions.find(o => o.id === ownerId)?.name ?? order.userName,
+    commissionPct.trim() === '' ? null : `${commissionPct}%`,
+  ].filter(Boolean).join(' · ');
+  const notesSummary = [
+    notes.trim() ? notes.trim().split('\n')[0] : t('phNoNotes'),
+    submissionAtts.length > 0 ? t('poReadyFiles', { n: submissionAtts.length }) : null,
+  ].filter(Boolean).join(' · ');
+  const commissionMath = {
+    payment, revenue: totals.revenue, totalCost: cost.total,
+    pricedCount: totals.priced, lineCount: order.lines.length,
+  };
+  const canEditCommission = !isPurchaser && canEditOrder;
+  // The fold marks: amber where the hand-off is still waiting, blue where an
+  // edit is unsaved — the desktop tabs' two dots.
+  const needs = (id: FoldId) => readiness.some(r => r.target === id && !r.met);
+  const markFor = (id: FoldId, isDirty: boolean): PhFoldMark => needs(id) ? 'need' : isDirty ? 'dirty' : null;
 
   // The enabled set, not the fixed four: a fifth category has to reach the
   // dock too, and a single docked row cannot wrap to hold it.
@@ -798,7 +891,7 @@ export function OrderDetail({
                   type="button"
                   className={'ph-check-row' + (r.met ? ' met' : '')}
                   onClick={() => r.target === 'products' ? navigate(poProductsPath(order.id))
-                    : r.target === 'delivery' ? scrollToDelivery() : scrollToPayment()}
+                    : showFold(r.target)}
                 >
                   <span className="ph-check-dot" aria-hidden>{r.met && <Icon name="check" size={10} stroke={3} />}</span>
                   <span>{r.label}</span>
@@ -925,23 +1018,10 @@ export function OrderDetail({
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 10 }}>
-            <span style={{ color: 'var(--fg-subtle)' }}>{t('commissionRate')}</span>
-            <span className="mono" style={{ fontWeight: 600 }}>
-              {order.commissionRate != null ? (order.commissionRate * 100).toFixed(2) + '%' : '—'}
-            </span>
-          </div>
-
-          {order.paypalTxnId && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8 }}>
-              <span style={{ color: 'var(--fg-subtle)' }}>{t('poPaypalTxn')}</span>
-              <span className="mono" style={{ fontWeight: 600 }}>{order.paypalTxnId}</span>
-            </div>
-          )}
-
           {/* Goods, then fees, then the total they add up to — the same stack
-              the desktop edit page shows, so the number is never a surprise. */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+              the desktop edit page shows, so the number is never a surprise.
+              The commission rate and the PayPal id live in their folds. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginTop: 10 }}>
             <span style={{ color: 'var(--fg-subtle)' }}>{t('goodsTotal')}</span>
             <span className="mono">{fmtUSD(cost.goods, locale)}</span>
           </div>
@@ -1030,167 +1110,144 @@ export function OrderDetail({
           })()}
         </div>
 
-        <div className="ph-section-h"><span>{t('orderDetails')}</span></div>
+        <div className="ph-section-h">
+          <span>{t('orderDetails')}</span>
+          <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>
+            {canEditOrder ? t('phDetailsEditable') : t('phDetailsClosed')}
+          </span>
+        </div>
 
-        <div className="ph-field" style={{ marginTop: 0 }}>
-          <label>{t('warehouse')}</label>
-          <div style={{ position: 'relative' }}>
-            <select
-              value={warehouseId}
-              onChange={e => setMeta({ warehouseId: e.target.value })}
-              disabled={!canEditOrder}
-              style={{
-                width: '100%',
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                MozAppearance: 'none',
-                border: '1px solid var(--border)',
-                background: 'var(--bg-elev)',
-                color: 'var(--fg)',
-                padding: '11px 36px 11px 12px',
-                borderRadius: 10,
-                fontFamily: 'inherit',
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: canEditOrder ? 'pointer' : 'not-allowed',
-                outline: 'none',
-                opacity: canEditOrder ? 1 : 0.6,
-              }}
-            >
-              {warehouses.length === 0 && (
-                <option value={warehouseId}>{order.warehouse?.name ?? order.warehouse?.short ?? '—'}</option>
-              )}
-              {warehouses.map(w => (
-                <option key={w.id} value={w.id}>{w.short} — {w.region}</option>
-              ))}
-            </select>
-            <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--fg-subtle)', display: 'flex' }}>
-              <Icon name="chevronDown" size={14} />
+        {/* The desktop's tabs, as folds: same five, same order, same names,
+            so the two shells never disagree about where a fact lives. */}
+        <PhFold
+          id="delivery"
+          title={t('eoTabDelivery')}
+          summary={<span className={needs('delivery') ? 'miss' : ''}>{deliverySummary}</span>}
+          open={openFold === 'delivery'}
+          onToggle={() => toggleFold('delivery')}
+          mark={markFor('delivery', warehouseDirty || facts)}
+        >
+          <div className="ph-fold-ro">
+            <div className="ph-field">
+              <label htmlFor="ph-source">{t('hoSource')}</label>
+              <select
+                id="ph-source"
+                className="select"
+                value={source ?? ''}
+                onChange={e => setMeta({ source: (e.target.value || null) as PackageSource | null })}
+                disabled={!canEditOrder}
+              >
+                <option value="">{t('hoSourcePick')}</option>
+                {PACKAGE_SOURCES.map(o => <option key={o} value={o}>{t(packageSourceLabelKey(o))}</option>)}
+              </select>
+            </div>
+            <div className="ph-field">
+              <label htmlFor="ph-warehouse">{t('warehouse')}</label>
+              <select
+                id="ph-warehouse"
+                className="select"
+                value={warehouseId}
+                onChange={e => setMeta({ warehouseId: e.target.value })}
+                disabled={!canEditOrder}
+              >
+                {/* An unset warehouse must not borrow the first option's name. */}
+                {(warehouses.length === 0 || !warehouseId) && (
+                  <option value={warehouseId}>{order.warehouse?.name ?? order.warehouse?.short ?? '—'}</option>
+                )}
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.id}>{w.short} — {w.region}</option>
+                ))}
+              </select>
             </div>
           </div>
-        </div>
-
-        {/* How the goods get here — folded like Payment, its header reading
-            back the answer. The same fields as the checkpoint's; editable
-            until Ready to Pay, material for a purchaser. */}
-        <div className="ph-field ph-pay">
-          <button
-            type="button"
-            className="ph-fold-h"
-            aria-expanded={deliveryOpen}
-            onClick={() => setDeliveryOpen(o => !o)}
-          >
-            <span>{t('eoTabDelivery')}</span>
-            <span className="ph-fold-sum">{deliverySummary}</span>
-            <Icon name="chevronDown" size={14} className="arrow" />
-          </button>
-          {deliveryOpen && (
-            <div style={{ display: 'grid', gap: 12, paddingTop: 10 }}>
-              <div className="ph-field" style={{ marginTop: 0 }}>
-                <label htmlFor="ph-source">{t('hoSource')}</label>
-                <select
-                  id="ph-source"
-                  className="select"
-                  value={source ?? ''}
-                  onChange={e => setMeta({ source: (e.target.value || null) as PackageSource | null })}
+          <div className="ph-field">
+            <label>{t('poDeliveryHow')}</label>
+            <div className="seg ho-seg" role="radiogroup" aria-label={t('poDeliveryHow')}>
+              {(['label', 'pickup'] as const).map(d => (
+                <button
+                  key={d}
+                  type="button"
+                  role="radio"
+                  aria-checked={delivery === d}
+                  className={delivery === d ? 'active' : ''}
+                  onClick={() => canEditOrder && setMeta({ delivery: d })}
                   disabled={!canEditOrder}
                 >
-                  <option value="">{t('hoSourcePick')}</option>
-                  {PACKAGE_SOURCES.map(o => <option key={o} value={o}>{t(packageSourceLabelKey(o))}</option>)}
-                </select>
-              </div>
-              <div className="ph-field" style={{ marginTop: 0 }}>
-                <label>{t('poDeliveryHow')}</label>
-                <div className="seg ho-seg" role="radiogroup" aria-label={t('poDeliveryHow')}>
-                  {(['label', 'pickup'] as const).map(d => (
-                    <button
-                      key={d}
-                      type="button"
-                      role="radio"
-                      aria-checked={delivery === d}
-                      className={delivery === d ? 'active' : ''}
-                      onClick={() => canEditOrder && setMeta({ delivery: d })}
-                      disabled={!canEditOrder}
-                    >
-                      {t(d === 'pickup' ? 'hoPickup' : 'hoLabel')}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {delivery === 'pickup' && (
-                <div className="ph-field" style={{ marginTop: 0 }}>
-                  <label htmlFor="ph-by">{t('hoPickedBy')}</label>
-                  <select
-                    id="ph-by"
-                    className="select"
-                    value={byUserId}
-                    onChange={e => setMeta({ byUserId: e.target.value })}
-                    disabled={!canEditOrder}
-                  >
-                    <option value="">{t('poCollectorPick')}</option>
-                    {memberNames.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                  </select>
-                </div>
-              )}
-              {delivery === 'label' && (
-                <>
-                  <div className="ph-field" style={{ marginTop: 0 }}>
-                    <label htmlFor="ph-tracking">{t('shipAddTrackingLabel')}</label>
-                    <input
-                      id="ph-tracking"
-                      className="input mono"
-                      value={meta.tracking.raw}
-                      onChange={e => setMeta({ tracking: { raw: e.target.value, pick: null } })}
-                      placeholder={t('shipAddTrackingPh')}
-                      autoComplete="off"
-                      spellCheck={false}
-                      disabled={!canEditOrder}
-                    />
-                  </div>
-                  <div className="ho-carriers" role="radiogroup" aria-label={t('shipAddCarrierTitle')}>
-                    {CARRIERS.map(c => {
-                      const lit = tracking.detected.includes(c);
-                      const selected = tracking.carrier === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          className={'ho-carrier' + (lit ? ' lit' : '') + (selected ? ' selected' : '')}
-                          data-carrier={c}
-                          onClick={() => canEditOrder && setMeta({ tracking: { ...meta.tracking, pick: c } })}
-                          disabled={!canEditOrder}
-                        >
-                          <span className="ho-carrier-name">{c}</span>
-                          <span className="ho-carrier-fmt mono">{t(FMT_HINT_KEY[c])}</span>
-                          {selected && <Icon name="check" size={13} />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="ship-add-hint" aria-live="polite">{tracking.hintKey ? t(tracking.hintKey) : ' '}</div>
-                </>
-              )}
-              <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', lineHeight: 1.45 }}>
-                {canEditOrder ? t('eoDeliveryEditableUntil') : t('eoDeliveryFrozen')}
-              </div>
+                  {t(d === 'pickup' ? 'hoPickup' : 'hoLabel')}
+                </button>
+              ))}
+            </div>
+          </div>
+          {delivery === 'pickup' && (
+            <div className="ph-field">
+              <label htmlFor="ph-by">{t('hoPickedBy')}</label>
+              <select
+                id="ph-by"
+                className="select"
+                value={byUserId}
+                onChange={e => setMeta({ byUserId: e.target.value })}
+                disabled={!canEditOrder}
+              >
+                <option value="">{t('poCollectorPick')}</option>
+                {memberNames.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
             </div>
           )}
-        </div>
+          {delivery === 'label' && (
+            <>
+              <div className="ph-field">
+                <label htmlFor="ph-tracking">{t('shipAddTrackingLabel')}</label>
+                <input
+                  id="ph-tracking"
+                  className="input mono"
+                  value={meta.tracking.raw}
+                  onChange={e => setMeta({ tracking: { raw: e.target.value, pick: null } })}
+                  placeholder={t('shipAddTrackingPh')}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!canEditOrder}
+                />
+              </div>
+              <div className="ho-carriers" role="radiogroup" aria-label={t('shipAddCarrierTitle')}>
+                {CARRIERS.map(c => {
+                  const lit = tracking.detected.includes(c);
+                  const selected = tracking.carrier === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={'ho-carrier' + (lit ? ' lit' : '') + (selected ? ' selected' : '')}
+                      data-carrier={c}
+                      onClick={() => canEditOrder && setMeta({ tracking: { ...meta.tracking, pick: c } })}
+                      disabled={!canEditOrder}
+                    >
+                      <span className="ho-carrier-name">{c}</span>
+                      <span className="ho-carrier-fmt mono">{t(FMT_HINT_KEY[c])}</span>
+                      {selected && <Icon name="check" size={13} />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="ship-add-hint" aria-live="polite">{tracking.hintKey ? t(tracking.hintKey) : ' '}</div>
+            </>
+          )}
+          <div style={{ fontSize: 11.5, color: 'var(--fg-subtle)', lineHeight: 1.45 }}>
+            {canEditOrder ? t('eoDeliveryEditableUntil') : t('eoDeliveryFrozen')}
+          </div>
+        </PhFold>
 
-        <div className="ph-field ph-pay">
-          <button
-            type="button"
-            className="ph-fold-h"
-            aria-expanded={paymentOpen}
-            onClick={() => setPaymentOpen(o => !o)}
-          >
-            <span>{t('payment')}</span>
-            <span className="ph-fold-sum">{paymentSummary}</span>
-            <Icon name="chevronDown" size={14} className="arrow" />
-          </button>
-          {paymentOpen && <PaymentFields
+        <PhFold
+          id="payment"
+          title={t('eoTabPayment')}
+          summary={<span className={needs('payment') ? 'miss' : ''}>{paymentSummary}</span>}
+          open={openFold === 'payment'}
+          onToggle={() => toggleFold('payment')}
+          mark={markFor('payment', paymentDirty || methodDirty || paypalDirty)}
+          bodyClassName="ph-pay"
+        >
+          <PaymentFields
             paidBy={payment} onPaidBy={v => canEditOrder && setMeta({ payment: v })}
             method={paymentMethod} onMethod={v => canEditOrder && setMeta({ paymentMethod: v })}
             txnId={paypalTxnId} onTxnId={v => canEditOrder && setMeta({ paypalTxnId: v })}
@@ -1200,54 +1257,87 @@ export function OrderDetail({
             proof={proof}
             canEditProof={canAnnotate}
             idPrefix="ph"
-          />}
-        </div>
-
-        <div className="ph-field">
-          <label>{t('orderNotes')}</label>
-          <textarea
-            className="input"
-            value={notes}
-            onChange={e => setMeta({ notes: e.target.value })}
-            placeholder={t('orderNotesPh')}
-            rows={3}
-            disabled={!canAnnotate}
-            style={{ width: '100%', resize: 'vertical', minHeight: 70, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, padding: '10px 12px' }}
           />
-        </div>
+        </PhFold>
 
-        {(submissionAtts.length > 0 || canAnnotate) && (
+        <PhFold
+          id="commission"
+          title={t('eoTabCommission')}
+          summary={commissionSummary}
+          open={openFold === 'commission'}
+          onToggle={() => toggleFold('commission')}
+          mark={markFor('commission', commission)}
+        >
+          <PhCommissionFields
+            ownerId={ownerId} onOwner={id => setMeta({ ownerId: id })}
+            ownerOptions={ownerOptions}
+            commissionPct={commissionPct} onCommissionPct={v => setMeta({ commissionPct: v })}
+            editable={canEditCommission}
+            math={commissionMath}
+            locale={locale}
+            note={isPurchaser ? t('phCommissionByManager') : canEditOrder ? t('phCommissionEditableUntil') : t('phCommissionFixed')}
+          />
+        </PhFold>
+
+        <PhFold
+          id="notes"
+          title={t('eoTabNotes')}
+          summary={notesSummary}
+          open={openFold === 'notes'}
+          onToggle={() => toggleFold('notes')}
+          mark={markFor('notes', notesDirty)}
+        >
           <div className="ph-field">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
-            </label>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {submissionAtts.map(a => (
-                <AttachmentChip
-                  key={a.id}
-                  a={a}
-                  onRemove={canAnnotate ? () => void removeSubmissionAtt(a) : undefined}
-                />
-              ))}
-              {canAnnotate && (
-                <AttachmentDropzone
-                  boxHint={t('poSubmitAttachHint')}
-                  uploading={proof.chatUploading}
-                  onFiles={files => void addSubmissionFiles(files)}
-                />
-              )}
-            </div>
+            <label htmlFor="ph-notes">{t('orderNotes')}</label>
+            <textarea
+              id="ph-notes"
+              className="input"
+              value={notes}
+              onChange={e => setMeta({ notes: e.target.value })}
+              placeholder={t('orderNotesPh')}
+              rows={3}
+              disabled={!canAnnotate}
+              style={{ width: '100%', resize: 'vertical', minHeight: 70, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.45, padding: '10px 12px' }}
+            />
           </div>
-        )}
+          {(submissionAtts.length > 0 || canAnnotate) && (
+            <div className="ph-field">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name="paperclip" size={12} /> {t('poSubmissionEvidenceTitle')}
+              </label>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {submissionAtts.map(a => (
+                  <AttachmentChip
+                    key={a.id}
+                    a={a}
+                    onRemove={canAnnotate ? () => void removeSubmissionAtt(a) : undefined}
+                  />
+                ))}
+                {canAnnotate && (
+                  <AttachmentDropzone
+                    boxHint={t('poSubmitAttachHint')}
+                    uploading={proof.chatUploading}
+                    onFiles={files => void addSubmissionFiles(files)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </PhFold>
 
-        {/* Collapsed: it is the longest block on the page and the least often
-            read. The header still states the count, so it costs one tap. */}
-        <div style={{ marginTop: 14 }}>
-          <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} defaultOpen={false} events={events} />
-        </div>
+        <PhFold
+          id="activity"
+          title={t('eoTabActivity')}
+          summary={events.loaded ? t('phEventsN', { n: events.events.length }) : ''}
+          open={openFold === 'activity'}
+          onToggle={() => toggleFold('activity')}
+        >
+          <div style={{ margin: '-12px -14px -14px' }}>
+            <OrderActivityLog orderId={order.id} refreshKey={activityRefreshKey} bare events={events} />
+          </div>
+        </PhFold>
 
       </div>
-
       <div className="ph-action-bar">
         <div className="ph-action-row">
           {/* The total belongs where the decision is made, not 2,000px up the
@@ -1552,8 +1642,6 @@ export function OrderDetail({
             paymentMethod,
             paypalTxnId,
             proof,
-            ...(isPurchaser ? {} : { ownerId: order.userId, commissionRate: order.commissionRate }),
-            isManager: !isPurchaser,
             currentUser: { id: user.id, name: user.name },
           }}
           onClose={() => setHandoffOpen(false)}
@@ -1565,6 +1653,21 @@ export function OrderDetail({
             await refetchOrder();
             setActivityRefreshKey(k => k + 1);
           }}
+        />
+      )}
+      {commissionOpen && (
+        <PhCommissionSheet
+          ownerId={ownerId} onOwner={id => setMeta({ ownerId: id })}
+          ownerOptions={ownerOptions}
+          commissionPct={commissionPct} onCommissionPct={v => setMeta({ commissionPct: v })}
+          editable
+          math={commissionMath}
+          locale={locale}
+          deliverySummary={deliverySummary}
+          paymentSummary={paymentSummary}
+          busy={advancing}
+          onClose={() => setCommissionOpen(false)}
+          onConfirm={() => void confirmCommission()}
         />
       )}
       {doneDialogOpen && (

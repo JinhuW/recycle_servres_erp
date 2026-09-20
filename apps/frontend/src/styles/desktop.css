@@ -3359,7 +3359,6 @@ html.desktop, body.desktop, .desktop #root {
 .ho-check.miss { background: var(--warn-soft); color: var(--warn-strong); }
 .ho-check.soft { background: var(--bg-soft); color: var(--fg-subtle); border: 1px dashed var(--border-strong); }
 .ho-sec-met { gap: 0; }
-.ho-body-manager { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px; }
 .ho-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .ho-row-pay { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 .ho-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
