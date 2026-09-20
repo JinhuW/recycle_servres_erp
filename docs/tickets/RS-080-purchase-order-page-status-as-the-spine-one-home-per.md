@@ -7,7 +7,7 @@ priority: P2
 created: 2026-09-20
 reporter: jinhu
 branch: feat/po-page-spine
-pr:
+pr: 369
 version:
 related: [RS-050, RS-071, RS-077, RS-078]
 ---
@@ -69,20 +69,20 @@ at https://claude.ai/artifact/8wQKpHsXEmeGusnm3tvca1.
 ## Acceptance criteria
 
 Backend (PR-A)
-- [ ] `PATCH /api/orders/:id` accepts `source`, `handoffMethod`, `handoffBy`,
+- [x] `PATCH /api/orders/:id` accepts `source`, `handoffMethod`, `handoffBy`,
       and `trackingNumber` + `carrier`; they are audited under `meta_changed`
       (names, not ids) and count as material edits for a purchaser.
-- [ ] A tracking change updates the linked package in place (tracking status
+- [x] A tracking change updates the linked package in place (tracking status
       reset, re-registered with Shippo); a number already tracked on another
       PO is refused with a 409 naming it; a standalone package with that
       number is adopted; switching to pickup unlinks (never deletes) the
       package.
-- [ ] `GET /api/orders/:id` returns `blockers: string[]` for a Draft, computed
+- [x] `GET /api/orders/:id` returns `blockers: string[]` for a Draft, computed
       by the same function the advance uses; `package.source` is included.
-- [ ] `POST /api/orders/:id/handoff` accepts a partial body and fills the rest
+- [x] `POST /api/orders/:id/handoff` accepts a partial body and fills the rest
       from the order; it refuses on every blocker, while `/advance` and manager
       stage-jumps keep refusing only on the proof-of-payment and cost rules.
-- [ ] The PO's owner can call `POST /api/packages/:id/refresh` on the linked
+- [x] The PO's owner can call `POST /api/packages/:id/refresh` on the linked
       package.
 
 Frontend, shared (PR-B1)
