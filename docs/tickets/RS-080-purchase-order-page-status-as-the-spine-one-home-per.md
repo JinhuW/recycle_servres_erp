@@ -2,7 +2,7 @@
 id: RS-080
 title: Purchase-order page: status as the spine, one home per fact
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-20
 reporter: jinhu
