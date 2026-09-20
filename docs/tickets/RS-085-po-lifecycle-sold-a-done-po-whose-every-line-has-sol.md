@@ -2,13 +2,13 @@
 id: RS-085
 title: PO lifecycle Sold: a Done PO whose every line has sold
 type: story
-status: in-progress
+status: done
 priority: P2
 created: 2026-09-20
 reporter: Jinhu
 branch: feat/po-sold-lifecycle
-pr:
-version:
+pr: 379
+version: 1.164.0
 related: [RS-060, RS-064, RS-080]
 ---
 
