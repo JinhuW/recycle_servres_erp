@@ -71,14 +71,14 @@ export function DeliveryTab(p: Props) {
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="label">{t('poDeliveryHow')}</label>
-          <div className="seg oe-seg" role="radiogroup" aria-label={t('poDeliveryHow')}>
+          <div className="seg ho-seg" role="radiogroup" aria-label={t('poDeliveryHow')}>
             {(['label', 'pickup'] as const).map(d => (
               <button
                 key={d}
                 type="button"
                 role="radio"
                 aria-checked={p.delivery === d}
-                className={p.delivery === d ? 'on' : ''}
+                className={p.delivery === d ? 'active' : ''}
                 onClick={() => p.onDelivery(d)}
                 disabled={p.disabled}
               >

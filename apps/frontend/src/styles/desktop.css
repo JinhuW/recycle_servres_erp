@@ -476,14 +476,6 @@ html.desktop, body.desktop, .desktop #root {
   margin-top: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg-soft); display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap;
 }
-.oe-seg { display: flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: var(--bg-elev); }
-.oe-seg button {
-  flex: 1; border: 0; background: transparent; padding: 8px 10px; font: inherit; font-size: 13px;
-  color: var(--fg-muted); cursor: pointer; border-right: 1px solid var(--border);
-}
-.oe-seg button:last-child { border-right: 0; }
-.oe-seg button.on { background: var(--fg); color: var(--bg-elev); font-weight: 600; }
-.oe-seg button:disabled { cursor: not-allowed; opacity: .6; }
 .oe-ledger { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .oe-activity-tab { border: 0 !important; }
 .oe-activity-tab > button { border-bottom: 1px solid var(--border) !important; }
